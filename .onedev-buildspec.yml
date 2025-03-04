@@ -3,9 +3,6 @@ jobs:
 - name: build_image
   jobExecutor: docker
   steps:
-  - !PruneBuilderCacheStep
-    name: 清除缓存
-    condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
   - !CheckoutStep
     name: 拉取最新代码
     cloneCredential: !DefaultCredential {}

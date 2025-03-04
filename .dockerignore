@@ -28,7 +28,7 @@ test/
 tests/
 
 # 排除环境配置文件
-src/settings/.env
+settings/.env
 .env.*
 
 # 排除构建目录
@@ -39,3 +39,6 @@ dist/
 *.pid
 *.seed
 *.sublime-workspace
+
+logs/
+.onedev-buildspec.yml

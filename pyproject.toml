@@ -26,4 +26,4 @@ dotenv = "^0.9.9"
 [tool.aerich]
 tortoise_orm = "settings.TORTOISE"
 location = "./migrations"
-src_folder = "./src"
+src_folder = "./app"

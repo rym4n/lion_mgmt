@@ -14,6 +14,8 @@ COPY pyproject.toml poetry.lock ./
 
 RUN poetry install --without dev --no-root && rm -rf $POETRY_CACHE_DIR
 
-COPY src ./
+COPY migrations ./migrations
+
+COPY . ./
 
 ENTRYPOINT ["poetry", "run", "python", "server.py"]

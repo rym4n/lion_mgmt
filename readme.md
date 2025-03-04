@@ -9,7 +9,7 @@
 # 文件组织结构
 
 ```
-.src
+.
 ├── services                  # 接口业务逻辑
 │   ├── __init__.py
 │   ├── demo                  # demo模块
@@ -86,12 +86,13 @@ RY_DB_NAME=lion_mgmt
 - 自定义错误码统一定义在 `core/error_code.py`
 
 示例：
+
 ```python
 @demo.route("/error", methods=["GET"])
 async def error(request: Request) -> HTTPResponse:
     """演示错误码异常"""
     from core.error_code import ErrorCode
-    from libs.error_code.exception import CustomError
+    from libs.error_code import CustomError
     raise CustomError(ErrorCode.Forbidden)
 ```
 
