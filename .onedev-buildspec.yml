@@ -18,12 +18,12 @@ jobs:
     buildPath: '@project_path@'
     dockerfile: '@project_path@/Dockerfile'
     output: !RegistryOutput
-      tags: dev.xy14qg.top/sanic-demo/sanic-demo:latest
+      tags: lion_mgmt:latest
     condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
   triggers:
   - !BranchUpdateTrigger
-    branches: main
-    projects: sanic-demo
+    branches: master
+    projects: lion_mgmt
   retryCondition: never
   maxRetries: 3
   retryDelay: 30
