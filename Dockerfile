@@ -16,6 +16,4 @@ RUN poetry install --without dev --no-root && rm -rf $POETRY_CACHE_DIR
 
 COPY src ./lion
 
-RUN poetry install --without dev
-
 ENTRYPOINT ["poetry", "run", "python", "-m", "lion.server"]
