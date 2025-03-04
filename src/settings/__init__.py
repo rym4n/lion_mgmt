@@ -14,7 +14,7 @@ if not os.path.exists(LOG_PATH):
 if os.environ.get("LION_ENV") != 'PROD':
     from dotenv import load_dotenv
 
-    load_dotenv('.env')
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 
 # 随机秘钥
 SECRET_KEY = os.environ.get("RY_SECRET_KEY", '5tdPY^zTX6I$akvNtLXey3y#gFEG@^46f!iLUdSy$Y')
@@ -91,7 +91,7 @@ TORTOISE = {
     },
     "apps": {
         "models": {
-            "models": ["aerich.models", "app.models"],
+            "models": ["aerich.models", "models"],
             "default_connection": "default",
         }
     },

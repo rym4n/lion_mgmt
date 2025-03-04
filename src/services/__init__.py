@@ -1,4 +1,5 @@
 # coding=utf-8
+
 import importlib
 import os
 
@@ -41,7 +42,7 @@ def create_app() -> Sanic:
 
 def register_blueprints(app: Sanic) -> None:
     """注册蓝图"""
-    for root, _, files in os.walk('app'):
+    for root, _, files in os.walk('services'):
         for filename in files:
             if filename.endswith(".py") and filename != "__init__.py":
                 module_path = os.path.join(root, filename)

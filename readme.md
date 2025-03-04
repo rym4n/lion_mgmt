@@ -9,19 +9,21 @@
 # 文件组织结构
 
 ```
-.sanic-demo
-├── app                       # app
+.src
+├── services                  # 接口业务逻辑
 │   ├── __init__.py
-│   ├── blue.py               # 总蓝图
-│   ├── demo                 # demo模块
-│   │   ├── __init__.py     # demo蓝图
-│   │   └── views.py        # demo视图
-│   ├── models.py           # tortiose-orm模型
+│   ├── demo                  # demo模块
+│   │   ├── __init__.py
+│   │   └── views.py          # demo蓝图
 │   └── user                  # 用户模块
-│       ├── __init__.py    # 用户蓝图
-│       └── views.py          # 用户视图
+│       ├── __init__.py
+│       └── views.py          # 用户蓝图
+├── models                    # 统一存放tortiose-orm模型
+│   ├── __init__.py           # 配置统一导入，便于aerich引用
+│   ├── user.py               # 定义具体模型
 ├── settings
 │   ├── __init__.py           # 配置
+│   └── .env                  # 本地开发环境的环境变量配置
 ├── core
 │   ├── error_code.py         # 错误码
 │   ├── exception_handlers    # 异常处理器
@@ -46,14 +48,12 @@
 │   │   ├── __init__.py
 │   │   ├── enum.py           # 错误码枚举
 │   │   └── exception.py      # 错误码异常
-│   ├── __init__.py
+│   └── __init__.py
 ├── logs                      # 日志文件存储路径
-├── manage.py                 # 启动文件
-├── .env                  # 配置文件模板，打包为docker镜像运行时作为环境变量导入
-└── requirements.txt
+└── server.py                 # 启动文件
 ```
 
-本地配置开发环境的时候，自行在根目录下创建 `.env` 文件，配置内容如下：
+本地配置开发环境的时候，自行在 `src/settings` 目录下创建 `.env` 文件，配置内容如下：
 ```.env
 RY_DB_HOST=xxxxx
 RY_DB_PORT=5432

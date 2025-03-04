@@ -28,7 +28,7 @@ test/
 tests/
 
 # 排除环境配置文件
-.env
+src/settings/.env
 .env.*
 
 # 排除构建目录

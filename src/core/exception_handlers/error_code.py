@@ -1,6 +1,5 @@
 # coding=utf-8
 
-
 from sanic import HTTPResponse
 from sanic.request import Request
 

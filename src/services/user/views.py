@@ -4,7 +4,7 @@
 from sanic import Request, HTTPResponse, Blueprint
 from tortoise.queryset import QuerySet
 
-from app.models import User
+from models import User
 from core.response import response_ok
 from sanic.log import logger
 
