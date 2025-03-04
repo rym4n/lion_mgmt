@@ -11,10 +11,9 @@ ENV POETRY_NO_INTERACTION=1 \
 WORKDIR /app
 
 COPY pyproject.toml poetry.lock ./
-RUN touch README.md
 
 RUN poetry install --without dev --no-root && rm -rf $POETRY_CACHE_DIR
 
-COPY src ./lion
+COPY src ./
 
-ENTRYPOINT ["poetry", "run", "python", "-m", "lion.server"]
+ENTRYPOINT ["poetry", "run", "python", "server.py"]
