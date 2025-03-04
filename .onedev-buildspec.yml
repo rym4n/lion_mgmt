@@ -1,0 +1,30 @@
+version: 37
+jobs:
+- name: build_image
+  jobExecutor: docker
+  steps:
+  - !PruneBuilderCacheStep
+    name: 清除缓存
+    condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
+  - !CheckoutStep
+    name: 拉取最新代码
+    cloneCredential: !DefaultCredential {}
+    withLfs: false
+    withSubmodules: false
+    checkoutPath: '@project_path@'
+    condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
+  - !BuildImageStep
+    name: 构建镜像
+    buildPath: '@project_path@'
+    dockerfile: '@project_path@/Dockerfile'
+    output: !RegistryOutput
+      tags: dev.xy14qg.top/sanic-demo/sanic-demo:latest
+    condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
+  triggers:
+  - !BranchUpdateTrigger
+    branches: main
+    projects: sanic-demo
+  retryCondition: never
+  maxRetries: 3
+  retryDelay: 30
+  timeout: 14400

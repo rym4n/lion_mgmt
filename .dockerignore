@@ -1,0 +1,41 @@
+# 排除 Git 仓库中的文件
+.git
+.gitignore
+
+# 排除 Dockerfile 和其他敏感文件
+Dockerfile*
+.dockerignore
+readme.md
+
+# 排除 Node.js 或其他语言的依赖缓存
+node_modules/
+bower_components/
+
+# 排除编译产物和临时文件
+*.log
+*.tmp
+*.swp
+*.bak
+*.idea/
+*.vscode/
+
+# 排除操作系统产生的文件
+.DS_Store
+Thumbs.db
+
+# 排除测试文件
+test/
+tests/
+
+# 排除环境配置文件
+.env
+.env.*
+
+# 排除构建目录
+build/
+dist/
+
+# 排除操作系统产生的其他隐藏文件
+*.pid
+*.seed
+*.sublime-workspace
