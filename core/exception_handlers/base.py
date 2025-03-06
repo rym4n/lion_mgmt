@@ -4,7 +4,7 @@
 import abc
 
 from sanic.request import Request
-from sanic.response import HTTPResponse
+from sanic import HTTPResponse
 
 
 class BaseExcHandler(metaclass=abc.ABCMeta):

@@ -11,13 +11,29 @@ LOG_PATH = os.path.join(BASE_DIR, 'logs')
 if not os.path.exists(LOG_PATH):
     os.makedirs(LOG_PATH)
 
-if os.environ.get("LION_ENV") != 'PROD':
+if os.environ.get("RY_ENV") != 'PROD':
     from dotenv import load_dotenv
 
-    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+    load_dotenv(os.path.join(BASE_DIR, 'settings/.env'))
 
-# 随机秘钥
-SECRET_KEY = os.environ.get("RY_SECRET_KEY", '5tdPY^zTX6I$akvNtLXey3y#gFEG@^46f!iLUdSy$Y')
+# 安全相关
+SECRET = os.environ.get("RY_SECRET_KEY", '5tdPY^zTX6I$akvNtLXey3y#gFEG@^46f!iLUdSy$Y')
+
+OAUTH_CLIENT: str = ''
+OAUTH_SECRET: str = ''
+OAUTH_REDIRECT: str = ''
+SESSION_SAMESITE = None
+SESSION_SECURE = True
+SESSION_HTTPONLY = True
+SESSION_DOMAIN = None
+SESSION_ENCODING_ALGORITHM = 'HS256'
+MAX_CHALLENGE_ATTEMPTS = 3
+TWO_STEP_SESSION_EXPIRATION = 300
+AUTHENTICATION_SESSION_EXPIRATION = 60 * 30
+AUTHENTICATION_REFRESH_EXPIRATION = 60 * 60 * 8
+
+INITIAL_ADMIN_EMAIL = os.environ.get("RY_ADMIN_EMAIL", 'admin@hongcloud.net')
+INITIAL_ADMIN_PASSWORD = os.environ.get("RY_ADMIN_PASSWORD", 'AIOE666!')
 
 # 跨域相关
 ENABLE_CORS: bool = os.environ.get("RY_CORS", True)

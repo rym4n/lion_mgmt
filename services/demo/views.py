@@ -1,9 +1,10 @@
 # coding=utf-8
 from typing import Any
 
+from sanic import HTTPResponse
 from sanic import Request, Blueprint
-from sanic.response import HTTPResponse
 from sanic.log import logger
+
 from core.response import response_ok
 
 demo = Blueprint('demo', url_prefix='demo/v1')

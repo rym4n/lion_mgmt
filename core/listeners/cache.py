@@ -13,6 +13,7 @@ from .base import BaseListener
 class CacheListener(BaseListener):
     """缓存服务监听"""
 
+
     async def after_server_start(self, app: Sanic, loop: BaseEventLoop) -> None:
         """app绑定内存/Redis"""
         caches.set_config(CACHE)

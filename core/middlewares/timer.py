@@ -19,4 +19,4 @@ class TimerMiddleware(BaseMiddleware):
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
         diff = time.time() - request.ctx.start_time
         if diff > self.threshold:
-            logger.warning('%s, response timeout: %.3fs' % (request.name, diff))
+            logger.warning('【注意】 %s 响应时间较长: %.3fs' % (request.name, diff))

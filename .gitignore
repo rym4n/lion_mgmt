@@ -129,7 +129,7 @@ dmypy.json
 .pyre/
 
 # pycharm
-.idea/
+*.idea/
 
 # log
 logs/

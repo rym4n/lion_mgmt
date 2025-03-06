@@ -8,7 +8,7 @@ from json import JSONEncoder, dumps
 from typing import Any, Optional
 
 from sanic import json
-from sanic.response import HTTPResponse
+from sanic import HTTPResponse
 
 from .error_code import ErrorCode
 
