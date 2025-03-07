@@ -35,3 +35,6 @@ class ErrorCode(BaseErrorCode):
     GetIdEmailError = ErrorData(500, "获取id和email失败")
     RevokeTokenError = ErrorData(500, "撤销token失败")
     RefreshTokenError = ErrorData(500, "刷新token失败")
+
+    RoleAlreadyExists = ErrorData(409, "角色已存在")
+    RoleNotFound = ErrorData(404, "角色不存在")
