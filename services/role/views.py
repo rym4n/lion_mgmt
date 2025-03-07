@@ -1,14 +1,14 @@
 # coding=utf-8
 
+from core.error_code import ErrorCode
+from core.response import response_ok
+from libs.error_code.exception import CustomError
+from libs.security.utils import get_ip
+from models import Role
 from sanic import Blueprint
 from sanic.log import logger
-from core.response import response_ok
-from core.error_code import ErrorCode
-from models import Role
 from tortoise.exceptions import ValidationError, IntegrityError
-from libs.error_code.exception import CustomError
 from tortoise.transactions import in_transaction
-from libs.security.utils import get_ip
 
 role_bp = Blueprint('role', url_prefix='role')
 _all__ = ["role_bp"]
@@ -67,10 +67,11 @@ async def find_role(request, role_id):
         raise CustomError(ErrorCode.ServerError)
 
 
-@role_bp.route("/<role_id>", methods=["DELETE"])
-async def delete_role(request, role_id):
+@role_bp.route("/delete", methods=["POST"])
+async def delete_role(request):
     """删除指定角色"""
     try:
+        role_id = request.json.get("role_id")
         role = await Role.filter(id=role_id, deleted=False).first()
         if not role:
             raise CustomError(ErrorCode.RoleNotFound)
@@ -81,10 +82,11 @@ async def delete_role(request, role_id):
         raise CustomError(ErrorCode.ServerError)
 
 
-@role_bp.route("/<role_id>", methods=["PUT"])
-async def update_role(request, role_id):
+@role_bp.route("/update", methods=["POST"])
+async def update_role(request):
     """修改角色内容"""
     try:
+        role_id = request.json.get("role_id")
         name = request.json.get("name")
         description = request.json.get("description", "")
         permissions = request.json.get("permissions", [])
@@ -103,4 +105,3 @@ async def update_role(request, role_id):
         raise CustomError(ErrorCode.ServerError)
     except ValidationError as e:
         raise CustomError(ErrorCode.ParameterError)
-

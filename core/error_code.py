@@ -41,3 +41,5 @@ class ErrorCode(BaseErrorCode):
 
     RoleAlreadyExists = ErrorData(409, "角色已存在")
     RoleNotFound = ErrorData(404, "角色不存在")
+
+    SystemDataNotFound = ErrorData(404, "暂无系统配置信息")
