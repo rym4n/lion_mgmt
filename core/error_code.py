@@ -12,6 +12,8 @@ class ErrorCode(BaseErrorCode):
     Unauthorized = ErrorData(401, "未授权")
     Forbidden = ErrorData(403, "禁止访问")
 
+    ValidationError = ErrorData(400, "参数校验失败")
+
     WeakPassword = ErrorData(400, "密码强度过低")
 
     CredentialsError = ErrorData(400, "用户名或密码错误")
@@ -29,7 +31,7 @@ class ErrorCode(BaseErrorCode):
 
     SessionDeleted = ErrorData(404, "会话已删除")
     SessionExpired = ErrorData(401, "会话已过期")
-    SessionDeactivated = ErrorData(401, "会话已禁用")
+    SessionDeactivated = ErrorData(401, "会话已注销")
 
     GetAccessTokenError = ErrorData(500, "获取token失败")
     GetIdEmailError = ErrorData(500, "获取id和email失败")
