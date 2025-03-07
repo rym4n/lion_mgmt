@@ -3,61 +3,11 @@
 import functools
 import re
 
-from argon2.exceptions import VerificationError, InvalidHashError
-from sanic.log import logger
 from sanic.request import Request
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from libs.security.utils import get_ip, password_hasher
-from models import Account, AuthenticationSession, TwoStepSession
-
-
-async def login(request: Request, account: Account = None, require_second_factor: bool = False, password: str = None, ) -> AuthenticationSession:
-    if not account:
-        account, password = await Account.get_via_header(request)
-    elif not password:
-        raise CustomError(ErrorCode.CredentialsError)
-    try:
-        password_hasher.verify(account.password, password)
-        if password_hasher.check_needs_rehash(account.password):
-            account.password = password_hasher.hash(password)
-            await account.save(update_fields=["password"])
-        account.validate()
-        authentication_session = await AuthenticationSession.new(request, account, requires_second_factor=require_second_factor)
-        logger.info(f"Client {get_ip(request)} has logged in with authentication session {authentication_session.id}.")
-        return authentication_session
-    except (VerificationError, InvalidHashError):
-        logger.warning(f"Client {get_ip(request)} has failed to log into account {account.id}.")
-        raise CustomError(ErrorCode.CredentialsError)
-
-
-async def logout(request: Request) -> AuthenticationSession:
-    authentication_session = await AuthenticationSession.decode(request)
-    if not authentication_session.active:
-        raise CustomError(ErrorCode.SessionDeactivated)
-    authentication_session.active = False
-    await authentication_session.save(update_fields=["active"])
-    logger.info(
-        f"Client {get_ip(request)} has logged out with authentication session {authentication_session.id}."
-    )
-    return authentication_session
-
-
-async def fulfill_second_factor(request: Request) -> AuthenticationSession:
-    """
-    完成客户端身份验证会话的二次验证
-    """
-    authentication_session = await AuthenticationSession.decode(request)
-    if not authentication_session.requires_second_factor:
-        raise CustomError(ErrorCode.MFAError)
-    two_step_session = await TwoStepSession.decode(request)
-    two_step_session.validate()
-    await two_step_session.check_code(request.json.get("code"))
-    authentication_session.requires_second_factor = False
-    await authentication_session.save(update_fields=["requires_second_factor"])
-    logger.info(f"Client {get_ip(request)} has fulfilled authentication session {authentication_session.id} second factor.")
-    return authentication_session
+from models import AuthenticationSession
 
 
 async def authenticate(request: Request) -> AuthenticationSession:
@@ -91,6 +41,6 @@ def requires_authentication(arg=None):
 
 
 def validate_password(password: str) -> str:
-    if not re.search(r"^(?=.*[A-Z])(?=.*\d)(?=.*[@#$%^&+=!]).*$", password):
+    if not re.search(r"^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[@#$%^&+=!]).{8,}$", password):
         raise CustomError(ErrorCode.WeakPassword)
     return password

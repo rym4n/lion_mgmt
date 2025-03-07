@@ -75,7 +75,7 @@ RY_DB_NAME=lion_mgmt
 
 ## 路由设计
 
-- 每个路由都应该明确指定请求方法（`GET`, `POST`, `PUT`, `DELETE`）。
+- 所有接口都统一用POST请求方法。
 - app下目录按按功能划分，避免单个文件过于庞大。
 - 所有接口按照统一格式返回，使用 response_ok、response_fail 方法，错误码要明确定义。
 - 避免在URL路径中包含参数，只有GET请求可以通过query param传参，其他请求只能通过body传参，且一般为json格式。

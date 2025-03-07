@@ -25,6 +25,7 @@ class ErrorCode(BaseErrorCode):
     JWTDecodeError = ErrorData(401, "会话token无效")
 
     MFAError = ErrorData(403, "MFA验证失败")
+    NONEEDMFA = ErrorData(403, "无需MFA验证")
     SecondFactorRequired = ErrorData(403, "需要二次验证")
 
     MaxChallenge = ErrorData(429, "请求次数过多")

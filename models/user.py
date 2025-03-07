@@ -12,9 +12,9 @@ from tortoise.validators import RegexValidator
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from libs.security.utils import is_expired, get_ip, get_expiration_date, get_code
+from libs.security.utils import is_expired, get_ip, get_expiration_date
 from models.base import BaseModel
-from settings import SECRET, SESSION_ENCODING_ALGORITHM, SESSION_DOMAIN, MAX_CHALLENGE_ATTEMPTS, TWO_STEP_SESSION_EXPIRATION, AUTHENTICATION_SESSION_EXPIRATION, AUTHENTICATION_REFRESH_EXPIRATION, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE
+from settings import SECRET, SESSION_ENCODING_ALGORITHM, SESSION_DOMAIN, AUTHENTICATION_SESSION_EXPIRATION, AUTHENTICATION_REFRESH_EXPIRATION, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE
 
 
 class Account(BaseModel):
@@ -22,16 +22,14 @@ class Account(BaseModel):
     账号模型，包含以下属性：用户名、邮箱、手机号、密码、OAuth ID、是否禁用、角色
     """
 
-    username: str = fields.CharField(
-        unique=True,
-        max_length=32,
-    )
+    username: str = fields.CharField(unique=True, max_length=32)
     email: str = fields.CharField(
         unique=True,
-        max_length=255,
+        max_length=150,
+        null=True,
         validators=[
             RegexValidator(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", re.I)
-        ],
+        ]
     )
     phone: str = fields.CharField(
         unique=True,
@@ -39,9 +37,11 @@ class Account(BaseModel):
         null=True,
         validators=[
             RegexValidator(r"^(\+\d{1,2}\s)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$", re.I)
-        ],
+        ]
     )
     password: str = fields.CharField(max_length=255)
+    mfa_enable: bool = fields.BooleanField(default=False)
+    mfa_key: str = fields.CharField(max_length=50, null=True)
     oauth_id: str = fields.CharField(unique=True, null=True, max_length=255)
     disabled: bool = fields.BooleanField(default=False)
     roles: fields.ManyToManyRelation["Role"] = fields.ManyToManyField("models.Role", through="account_role")
@@ -79,7 +79,7 @@ class Account(BaseModel):
         try:
             return await Account.filter(username=username, deleted=False).get()
         except:
-            raise CustomError(ErrorCode.AccountNotFound)
+            raise CustomError(ErrorCode.CredentialsError)
 
     @staticmethod
     async def get_via_header(request: Request):
@@ -214,55 +214,6 @@ class Session(BaseModel):
         abstract = True
 
 
-class VerificationSession(Session):
-    """
-    用于客户端验证挑战，需要某种形式的代码或密钥。
-    """
-
-    attempts: int = fields.IntField(default=0)
-    code: str = fields.CharField(max_length=6, null=True)
-
-    async def check_code(self, code: str) -> None:
-        if not code or self.code != code.upper():
-            self.attempts += 1
-            if self.attempts < MAX_CHALLENGE_ATTEMPTS:
-                await self.save(update_fields=["attempts"])
-                raise CustomError(ErrorCode.MFAError)
-            else:
-                raise CustomError(ErrorCode.MaxChallenge)
-        else:
-            await self.deactivate()
-
-    @classmethod
-    async def new(cls, request: Request, account: Account, **kwargs: Union[int, str, bool, float, list, dict]):
-        raise NotImplementedError
-
-    class Meta:
-        abstract = True
-
-
-class TwoStepSession(VerificationSession):
-    """二次认证会话信息"""
-
-    @classmethod
-    async def new(
-            cls,
-            request: Request,
-            account: Account,
-            **kwargs: Union[int, str, bool, float, list, dict],
-    ):
-        return await cls.create(
-            **kwargs,
-            ip=get_ip(request),
-            bearer=account,
-            expiration_date=get_expiration_date(TWO_STEP_SESSION_EXPIRATION),
-            code=get_code(True),
-        )
-
-    class Meta:
-        table = "two_step_session"
-
-
 class AuthenticationSession(Session):
     """
     认证会话信息
@@ -279,7 +230,7 @@ class AuthenticationSession(Session):
 
     async def refresh(self, request: Request):
         """
-        Refreshes session if within refresh date.
+        注销原本的会话，生成新会话
         """
         if self.active and not is_expired(self.refresh_expiration_date):
             await self.deactivate()
@@ -288,12 +239,7 @@ class AuthenticationSession(Session):
             raise CustomError(ErrorCode.SessionExpired)
 
     @classmethod
-    async def new(
-            cls,
-            request: Request,
-            account: Account = None,
-            **kwargs: Union[int, str, bool, float, list, dict],
-    ):
+    async def new(cls, request: Request, account: Account = None, **kwargs: Union[int, str, bool, float, list, dict]):
         authentication_session = await cls.create(
             **kwargs,
             bearer=account,

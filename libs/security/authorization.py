@@ -13,14 +13,10 @@ from libs.security.utils import get_ip
 from models import Role, Account, AuthenticationSession
 
 
-async def check_permissions(
-        request: Request, *required_permissions: str
-) -> AuthenticationSession:
+async def check_permissions(request: Request, *required_permissions: str) -> AuthenticationSession:
     authentication_session = await authenticate(request)
     if authentication_session.anonymous:
-        logger.warning(
-            f"Client {get_ip(request)} attempted an unauthorized action anonymously."
-        )
+        logger.warning(f"Client {get_ip(request)} attempted an unauthorized action anonymously.")
         raise CustomError(ErrorCode.Unauthorized)
     roles = await authentication_session.bearer.roles.filter(deleted=False).all()
     for role in roles:
@@ -76,23 +72,14 @@ async def check_roles(request: Request, *required_roles: str) -> AuthenticationS
     raise CustomError(ErrorCode.Unauthorized)
 
 
-async def assign_role(
-        name: str,
-        account: Account,
-        description: str = None,
-        *permissions: str,
-) -> Role:
+async def assign_role(name: str, account: Account, description: str = None, *permissions: str) -> Role:
     """
     给账号分配角色
     """
     try:
         role = await Role.filter(name=name).get()
     except DoesNotExist:
-        role = await Role.create(
-            name=name,
-            description=description,
-            permissions=permissions,
-        )
+        role = await Role.create(name=name, description=description, permissions=permissions)
     await account.roles.add(role)
     return role
 
