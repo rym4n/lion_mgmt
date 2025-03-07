@@ -71,7 +71,9 @@ async def login(request):
         password = request.json.get("password")
         if not username or not password:
             raise CustomError(ErrorCode.CredentialsError)
-        account = await Account.get_via_username(username)
+        account = await Account.filter(username=username, deleted=False).get()
+        if not account:
+            raise CustomError(ErrorCode.CredentialsError)
         # 防止暴力破解
         key = f"{account.id}_login_attempts"
         attempts = await request.ctx.cache_client.get(key)
@@ -138,25 +140,39 @@ async def mfa_auth(request):
 async def edit_user(request):
     """
     修改用户信息
+
+    请求参数：
+        userid: 用户ID
     """
-    authentication_session = await AuthenticationSession.decode(request)
-    logger.info(authentication_session.account.username)
-    return response_ok()
+    try:
+        user = await Account.filter(id=request.json.get("userid"), deleted=False).first()
+        if not user:
+            raise CustomError(ErrorCode.AccountNotFound)
+
+        params = request.json
+        for p in params:
+            if p == 'password':
+                user.password = password_hasher.hash(validate_password(request.json.get("password") or ''))
+            else:
+                if hasattr(user, p):
+                    setattr(user, p, params[p])
+        await user.save()
+        return response_ok(user.json)
+    except (ValidationError, IntegrityError):
+        raise CustomError(ErrorCode.ParameterError)
 
 
 @user_bp.post("/del")
 async def delelte_user(request):
     """
     删除用户
-    :param userid: 用户名
-    :return:
+
+    请求参数：
+        userid: 用户ID
     """
-    try:
-        user = await Account.filter(id=request.json.get("userid"), deleted=False).first()
-        if not user:
-            raise CustomError(ErrorCode.AccountNotFound)
-        user.deleted = True
-        await user.save()
-        return response_ok("用户删除成功")
-    except IntegrityError as e:
-        raise CustomError(ErrorCode.ServerError)
+    user = await Account.filter(id=request.json.get("userid"), deleted=False).first()
+    if not user:
+        raise CustomError(ErrorCode.AccountNotFound)
+    user.deleted = True
+    await user.save()
+    return response_ok("用户删除成功")

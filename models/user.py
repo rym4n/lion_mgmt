@@ -1,5 +1,4 @@
 # coding=utf-8
-import base64
 import datetime
 import re
 from typing import Union
@@ -28,7 +27,7 @@ class Account(BaseModel):
         max_length=150,
         null=True,
         validators=[
-            RegexValidator(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", re.I)
+            RegexValidator(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", re.I)
         ]
     )
     phone: str = fields.CharField(
@@ -36,7 +35,7 @@ class Account(BaseModel):
         max_length=15,
         null=True,
         validators=[
-            RegexValidator(r"^(\+\d{1,2}\s)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$", re.I)
+            RegexValidator(r"^1[3-9]\d{9}$", re.I)  # 中国
         ]
     )
     password: str = fields.CharField(max_length=255)
@@ -70,29 +69,6 @@ class Account(BaseModel):
             "phone": self.phone,
             "disabled": self.disabled
         }
-
-    @staticmethod
-    async def get_via_username(username: str):
-        """
-        根据用户名获取用户信息
-        """
-        try:
-            return await Account.filter(username=username, deleted=False).get()
-        except:
-            raise CustomError(ErrorCode.CredentialsError)
-
-    @staticmethod
-    async def get_via_header(request: Request):
-        if request.headers.get("Authorization"):
-            authorization_type, credentials = request.headers.get("Authorization").split()
-            if authorization_type == "Basic":
-                username, password = base64.b64decode(credentials).decode().split(":")
-                account = await Account.get_via_username(username)
-                return account, password
-            else:
-                raise CustomError(ErrorCode.CredentialsError)
-        else:
-            raise CustomError(ErrorCode.CredentialsError)
 
 
 class Session(BaseModel):

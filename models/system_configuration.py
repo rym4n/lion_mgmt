@@ -1,6 +1,7 @@
 # coding=utf-8
 
 from tortoise import fields
+
 from models import BaseModel
 
 
@@ -32,6 +33,6 @@ class System_custom_configuration(BaseModel):
             "webico": self.webico,
             "logo": self.logo,
         }
-    
+
     class Meta:
         table = "system_custom_configuration"
