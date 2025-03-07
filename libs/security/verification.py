@@ -14,7 +14,7 @@ from models import Account, TwoStepSession
 
 async def request_two_step_verification(request: Request, account: Account = None) -> TwoStepSession:
     """
-    刷新二次验证的会话信息
+    维护需要二次验证的会话
     """
     with suppress(CustomError(ErrorCode.NotFound), CustomError(ErrorCode.JWTDecodeError)):
         two_step_session = await TwoStepSession.decode(request)

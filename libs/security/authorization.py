@@ -83,13 +83,7 @@ async def assign_role(
         *permissions: str,
 ) -> Role:
     """
-    Easy account role assignment, role being assigned to an account will be created if it doesn't exist.
-
-    Args:
-        name (str):  The name of the role associated with the account.
-        account (Account): The account associated with the created role.
-        description (str):  The description of the role associated with the account.
-        *permissions (Tuple[str, ...]): The permissions of the role associated with the account, must be in wildcard format.
+    给账号分配角色
     """
     try:
         role = await Role.filter(name=name).get()

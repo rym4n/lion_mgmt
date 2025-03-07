@@ -25,12 +25,7 @@ from models import Account, AuthenticationSession
 from settings import SESSION_ENCODING_ALGORITHM, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE, SESSION_DOMAIN, AUTHENTICATION_REFRESH_EXPIRATION, SECRET, OAUTH_REDIRECT
 
 
-async def oauth_callback(
-        request: Request,
-        client: BaseOAuth2,
-        redirect_uri: str = OAUTH_REDIRECT,
-        code_verifier: str = None,
-) -> tuple[dict, AuthenticationSession]:
+async def oauth_callback(request: Request, client: BaseOAuth2, redirect_uri: str = OAUTH_REDIRECT, code_verifier: str = None, ) -> tuple[dict, AuthenticationSession]:
     """
     Requests an access token using the authorization code obtained after the user has authorized the application.
     An account is retrieved if it already exists, created if it doesn't, and the user is logged in.
@@ -40,10 +35,6 @@ async def oauth_callback(
         client (BaseOAuth2): OAuth provider.
         redirect_uri (str): The URL where the user was redirected after authorization.
         code_verifier (str): Optional code verifier used in the [PKCE](https://datatracker.ietf.org/doc/html/rfc7636)) flow.
-
-    Raises:
-        CredentialsError
-        OAuthError
 
     Returns:
         token_info, authentication_session

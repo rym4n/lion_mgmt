@@ -109,14 +109,6 @@ class Session(BaseModel):
         super().__init__(**kwargs)
 
     def validate(self) -> None:
-        """
-        Raises an error with respect to session state.
-
-        Raises:
-            DeletedError
-            ExpiredError
-            DeactivatedError
-        """
         if self.deleted:
             raise CustomError(ErrorCode.SessionDeleted)
         elif not self.active:
@@ -125,12 +117,6 @@ class Session(BaseModel):
             raise CustomError(ErrorCode.SessionExpired)
 
     async def deactivate(self) -> None:
-        """
-        Renders session deactivated and therefor unusable.
-
-        Raises:
-            DeactivatedError
-        """
         if self.active:
             self.active = False
             await self.save(update_fields=["active"])
@@ -181,12 +167,7 @@ class Session(BaseModel):
         return self.bearer is None
 
     @classmethod
-    async def new(
-            cls,
-            request: Request,
-            account: Account,
-            **kwargs: dict[str, Union[int, str, bool, float, list, dict]],
-    ):
+    async def new(cls, request: Request, account: Account, **kwargs: dict[str, Union[int, str, bool, float, list, dict]]):
         """
         新建会话
         """
@@ -223,9 +204,7 @@ class Session(BaseModel):
         """
         try:
             decoded_raw = cls.decode_raw(request)
-            decoded_session = (
-                await cls.filter(id=decoded_raw["id"]).prefetch_related("bearer").get()
-            )
+            decoded_session = await cls.filter(id=decoded_raw["id"]).prefetch_related("bearer").get()
             request.ctx.session = decoded_session
         except DoesNotExist:
             raise CustomError(ErrorCode.NotFound)
@@ -255,12 +234,7 @@ class VerificationSession(Session):
             await self.deactivate()
 
     @classmethod
-    async def new(
-            cls,
-            request: Request,
-            account: Account,
-            **kwargs: Union[int, str, bool, float, list, dict],
-    ):
+    async def new(cls, request: Request, account: Account, **kwargs: Union[int, str, bool, float, list, dict]):
         raise NotImplementedError
 
     class Meta:

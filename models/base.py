@@ -8,13 +8,13 @@ from tortoise import Model, fields
 
 class BaseModel(Model):
     """
-    Base Sanic Security model that all other models derive from.
+    基础模型，维护所有模型的公共字段
 
-    Attributes:
-        id (str): Primary key of model.
-        ctime (datetime): Time this model was created in the database.
-        utime (datetime): Time this model was updated in the database.
-        deleted (bool): Renders the model filterable without removing from the database.
+    公共字段:
+        id (str): 主键
+        ctime (datetime): 创建时间
+        utime (datetime): 更新时间
+        deleted (bool): 删除标识
     """
     id: str = fields.CharField(pk=True, max_length=36, default=lambda: str(uuid.uuid4()))
     ctime = fields.DatetimeField(null=False, auto_now_add=True, description="创建时间")

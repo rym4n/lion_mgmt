@@ -1,23 +1,37 @@
 # coding=utf-8
 
 from sanic import Blueprint
+from sanic.log import logger
+from tortoise.exceptions import ValidationError, IntegrityError
 
+from core.error_code import ErrorCode
 from core.response import response_ok
-from libs.security.authentication import login, logout, register, fulfill_second_factor
-from libs.security.verification import request_two_step_verification
+from libs.error_code.exception import CustomError
+from libs.security.authentication import login, logout, fulfill_second_factor, validate_password
+from libs.security.utils import password_hasher, get_ip
+from models import Account
 
-user_bp = Blueprint('user', url_prefix='user')
+user_bp = Blueprint('user', url_prefix='user/v1')
 _all__ = ["user_bp"]
 
 
 @user_bp.route("/add", methods=["POST"])
 async def add_user(request):
     """新建用户"""
-    account = await register(request)
-    two_step_session = await request_two_step_verification(request, account)
-    response = response_ok(account.json)
-    two_step_session.encode(response)
-    return response
+    try:
+        account = await Account.create(
+            email=request.json.get("email", '').lower(),
+            username=request.json.get("username", ''),
+            password=password_hasher.hash(validate_password(request.json.get("password", ''))),
+            phone=request.json.get("phone", ''),
+            disabled=request.json.get("disabled") or False,
+        )
+        logger.info(f"Client {get_ip(request)} has registered account {account.id}.")
+        return response_ok(account.json)
+    except ValidationError:
+        raise CustomError(ErrorCode.ValidationError)
+    except IntegrityError:
+        raise CustomError(ErrorCode.AccountExists)
 
 
 @user_bp.route("/login", methods=["POST"])

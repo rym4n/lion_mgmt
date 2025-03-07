@@ -6,32 +6,11 @@ import re
 from argon2.exceptions import VerificationError, InvalidHashError
 from sanic.log import logger
 from sanic.request import Request
-from tortoise.exceptions import ValidationError, IntegrityError
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.security.utils import get_ip, password_hasher
 from models import Account, AuthenticationSession, TwoStepSession
-
-
-async def register(request: Request, disabled: bool = False) -> Account:
-    """
-    新建账号
-    """
-    try:
-        account = await Account.create(
-            email=request.json.get("email").lower(),
-            username=request.json.get("username"),
-            password=password_hasher.hash(validate_password(request.json.get("password"))),
-            phone=request.json.get("phone"),
-            disabled=disabled,
-        )
-        logger.info(f"Client {get_ip(request)} has registered account {account.id}.")
-        return account
-    except ValidationError as e:
-        raise CustomError(ErrorCode.CredentialsError)
-    except IntegrityError as e:
-        raise CustomError(ErrorCode.AccountExists)
 
 
 async def login(request: Request, account: Account = None, require_second_factor: bool = False, password: str = None, ) -> AuthenticationSession:
@@ -82,7 +61,7 @@ async def fulfill_second_factor(request: Request) -> AuthenticationSession:
 
 
 async def authenticate(request: Request) -> AuthenticationSession:
-    """客户端身份验证会话和账户验证。 如果客户端身份验证会话在身份验证过程中过期，新/刷新的会话将自动返回。"""
+    """客户端身份验证会话和账户验证。 如果客户端身份验证会话在身份验证过程中过期，新刷新的会话将自动返回。"""
     authentication_session = await AuthenticationSession.decode(request)
     try:
         authentication_session.validate()
