@@ -55,7 +55,7 @@ async def check_roles(request: Request, *required_roles: str) -> bool:
     roles = await account.roles.filter(deleted=False).all()
     if set(required_roles) & {role.name for role in roles}:
         return True
-    logger.warning(f"{get_ip(request)} {payload['sub']} 尝试了一个未授权操作")
+    logger.warning(f"{request.client_ip} {payload['sub']} 尝试了一个未授权操作")
     raise CustomError(ErrorCode.Unauthorized)
 
 
