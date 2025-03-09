@@ -9,10 +9,8 @@ class ErrorCode(BaseErrorCode):
     ParameterError = ErrorData(400, "参数错误")
     NotFound = ErrorData(404, "请求资源不存在")
     MethodNotAllowed = ErrorData(405, "请求方法不允许")
-    Unauthorized = ErrorData(401, "未授权")
+    Unauthorized = ErrorData(401, "权限不足")
     Forbidden = ErrorData(403, "禁止访问")
-
-    ValidationError = ErrorData(400, "参数校验失败")
 
     WeakPassword = ErrorData(400, "密码强度过低")
 
@@ -22,14 +20,13 @@ class ErrorCode(BaseErrorCode):
     AccountExists = ErrorData(409, "账号已存在")
     AccountUnverified = ErrorData(403, "账号未验证")
 
-    JWTDecodeError = ErrorData(401, "会话token无效")
-
     MFAError = ErrorData(403, "MFA验证失败")
     NONEEDMFA = ErrorData(403, "无需MFA验证")
     SecondFactorRequired = ErrorData(403, "需要二次验证")
 
     MaxChallenge = ErrorData(429, "请求次数过多")
 
+    SessionInvalid = ErrorData(401, "会话无效")
     SessionDeleted = ErrorData(404, "会话已删除")
     SessionExpired = ErrorData(401, "会话已过期")
     SessionDeactivated = ErrorData(401, "会话已注销")

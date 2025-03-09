@@ -2,31 +2,39 @@
 
 import functools
 import re
+import time
 
-from sanic.request import Request
+import jwt
+from sanic import Request
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from models import AuthenticationSession
+from models import Account
+from settings import SECRET, SESSION_ENCODING_ALGORITHM, AUTHENTICATION_SESSION_EXPIRATION
 
 
-async def authenticate(request: Request) -> AuthenticationSession:
-    """客户端身份验证会话和账户验证。 如果客户端身份验证会话在身份验证过程中过期，新刷新的会话将自动返回。"""
-    authentication_session = await AuthenticationSession.decode(request)
-    try:
-        authentication_session.validate()
-        if not authentication_session.anonymous:
-            authentication_session.bearer.validate()
-    except CustomError(ErrorCode.SessionExpired):
-        authentication_session = await authentication_session.refresh(request)
-        authentication_session.is_refresh = True
-        request.ctx.session = authentication_session
-    return authentication_session
+async def authenticate(request: Request):
+    """
+    客户端身份验证会话和账户验证。 如果客户端身份验证会话在身份验证过程中过期，自动续期token。
+    """
+    payload = token_decode(request)
+
+    if payload.get('exp', 0) < int(time.time()):
+        raise CustomError(ErrorCode.SessionExpired)
+
+    if payload.get('mfa_enable') is True and payload.get('mfa_auth') is not True:
+        raise CustomError(ErrorCode.SecondFactorRequired)
+
+    if payload.get('ip') != request.ip:
+        # 防止会话劫持
+        raise CustomError(ErrorCode.SessionInvalid)
+
+    request.ctx.session = payload
 
 
 def requires_authentication(arg=None):
     """
-    认证装饰器
+    认证装饰器，一般不需要，已经通过中间件统一认证
     """
 
     def decorator(func):
@@ -40,7 +48,54 @@ def requires_authentication(arg=None):
     return decorator(arg) if callable(arg) else decorator
 
 
+def token_encode(account: Account, token_id: str, **kwargs) -> str:
+    """
+    根据账号信息生成token
+    """
+    current = int(time.time())
+    data = {
+        "id": token_id,
+        "sub": account.id,
+        "iat": current,
+        "exp": current + AUTHENTICATION_SESSION_EXPIRATION,
+        "mfa_enable": account.mfa_enable
+    }
+    for key, value in kwargs.items():
+        data[key] = value
+    encoded_session = jwt.encode(data, SECRET, SESSION_ENCODING_ALGORITHM)
+    return encoded_session
+
+
+def refresh_token(old_data: dict, **kwargs) -> str:
+    """
+    刷新token
+    """
+    data = old_data.copy()
+    for key, value in kwargs.items():
+        data[key] = value
+    token = jwt.encode(data, SECRET, SESSION_ENCODING_ALGORITHM)
+    return token
+
+
+def token_decode(request: Request) -> dict:
+    """
+    将token解码成数据字典
+    """
+    token = request.cookies.get("aioe_auth")
+    if not token:
+        raise CustomError(ErrorCode.SessionInvalid)
+
+    try:
+        payload = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
+        return payload
+    except:
+        raise CustomError(ErrorCode.SessionInvalid)
+
+
 def validate_password(password: str) -> str:
+    """
+    密码强度校验，必须包含大小写字母、数字、特殊字符、长度不小于8
+    """
     if not re.search(r"^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[@#$%^&+=!]).{8,}$", password):
         raise CustomError(ErrorCode.WeakPassword)
     return password

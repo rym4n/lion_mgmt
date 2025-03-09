@@ -8,38 +8,35 @@ from tortoise.exceptions import DoesNotExist
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from libs.security.authentication import authenticate
-from libs.security.utils import get_ip
-from models import Role, Account, AuthenticationSession
+from libs.security.authentication import token_decode
+from models import Role, Account
 
 
-async def check_permissions(request: Request, *required_permissions: str) -> AuthenticationSession:
-    authentication_session = await authenticate(request)
-    if authentication_session.anonymous:
-        logger.warning(f"Client {get_ip(request)} attempted an unauthorized action anonymously.")
-        raise CustomError(ErrorCode.Unauthorized)
-    roles = await authentication_session.bearer.roles.filter(deleted=False).all()
+async def check_permissions(request: Request, *required_permissions: str) -> bool:
+    payload = token_decode(request)
+    account = await Account.filter(id=payload["sub"]).first()
+    roles = await account.roles.filter(deleted=False).all()
     for role in roles:
         for role_permission in role.permissions:
             for required_permission in required_permissions:
                 if check_wildcard(role_permission, required_permission):
-                    return authentication_session
-    logger.warning(
-        f"Client {get_ip(request)} with account {authentication_session.bearer.id} attempted an unauthorized action."
-    )
+                    return True
+    logger.warning(f"{request.client_ip} {payload['sub']} 尝试了一个未授权操作")
     raise CustomError(ErrorCode.Unauthorized)
 
 
 def check_wildcard(wildcard: str, pattern: str):
     """
-    权限校验匹配规则
+    权限校验匹配规则，wildcard 代表允许的权限，pattern 代表需要校验的权限
 
-    Args:
-        wildcard (str): A wildcard string (e.g., "a:b:c").
-        pattern (str): A wildcard pattern optional (`*`) or comma-separated values to match against (e.g., "a:b,c:*").
+    例如：
+        wildcard: role:* 代表允许执行role模块的所有操作
+        pattern: role:create 代表需要执行role模块的create操作的权限
+        True 代表满足权限要求
 
-    Returns:
-        is_match
+        wildcard: role:read
+        pattern: role:create
+        False
     """
     wildcard_parts = [set(part.split(",")) for part in wildcard.split(":")]
     pattern_parts = [set(part.split(",")) for part in pattern.split(":")]
@@ -52,23 +49,13 @@ def check_wildcard(wildcard: str, pattern: str):
     return all("*" in part for part in wildcard_parts[len(pattern_parts):])
 
 
-async def check_roles(request: Request, *required_roles: str) -> AuthenticationSession:
-    authentication_session = await authenticate(request)
-    if authentication_session.anonymous:
-        logger.warning(
-            f"Client {get_ip(request)} attempted an unauthorized action anonymously."
-        )
-        raise CustomError(ErrorCode.Unauthorized)
-    if set(required_roles) & {
-        role.name
-        for role in await authentication_session.bearer.roles.filter(
-            deleted=False
-        ).all()
-    }:
-        return authentication_session
-    logger.warning(
-        f"Client {get_ip(request)} with account {authentication_session.bearer.id} attempted an unauthorized action"
-    )
+async def check_roles(request: Request, *required_roles: str) -> bool:
+    payload = token_decode(request)
+    account = await Account.filter(id=payload["sub"]).first()
+    roles = await account.roles.filter(deleted=False).all()
+    if set(required_roles) & {role.name for role in roles}:
+        return True
+    logger.warning(f"{get_ip(request)} {payload['sub']} 尝试了一个未授权操作")
     raise CustomError(ErrorCode.Unauthorized)
 
 
@@ -86,7 +73,13 @@ async def assign_role(name: str, account: Account, description: str = None, *per
 
 def requires_permission(*required_permissions: str):
     """
-    权限校验装饰器
+    权限校验装饰器，定义权限需要明确，不能使用通配符。标识统一为：
+        增 - c
+        删 - d
+        改 - u
+        查 - r
+        管理 - a
+    请注意此装饰器只能判断垂直权限，不能判断横向权限
     """
 
     def decorator(func):

@@ -15,17 +15,16 @@ from httpx_oauth.oauth2 import (
 )
 from jwt import DecodeError
 from sanic import Request, HTTPResponse, Sanic
-from sanic.log import logger
 from tortoise.exceptions import IntegrityError, DoesNotExist
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from libs.security.utils import get_ip
-from models import Account, AuthenticationSession
+from libs.security.authentication import token_encode
+from models import Account
 from settings import SESSION_ENCODING_ALGORITHM, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE, SESSION_DOMAIN, AUTHENTICATION_REFRESH_EXPIRATION, SECRET, OAUTH_REDIRECT
 
 
-async def oauth_callback(request: Request, client: BaseOAuth2, redirect_uri: str = OAUTH_REDIRECT, code_verifier: str = None, ) -> tuple[dict, AuthenticationSession]:
+async def oauth_callback(request: Request, client: BaseOAuth2, redirect_uri: str = OAUTH_REDIRECT, code_verifier: str = None, ) -> tuple[dict, str]:
     """
     Requests an access token using the authorization code obtained after the user has authorized the application.
     An account is retrieved if it already exists, created if it doesn't, and the user is logged in.
@@ -34,7 +33,7 @@ async def oauth_callback(request: Request, client: BaseOAuth2, redirect_uri: str
         request (Request): Sanic request parameter.
         client (BaseOAuth2): OAuth provider.
         redirect_uri (str): The URL where the user was redirected after authorization.
-        code_verifier (str): Optional code verifier used in the [PKCE](https://datatracker.ietf.org/doc/html/rfc7636)) flow.
+        code_verifier (str): Optional code verifier used in the [PKCE](https://datatracker.ietf.org/doc/html/rfc7636) flow.
 
     Returns:
         token_info, authentication_session
@@ -51,6 +50,7 @@ async def oauth_callback(request: Request, client: BaseOAuth2, redirect_uri: str
         try:
             account = await Account.get(oauth_id=oauth_id)
         except DoesNotExist:
+            # 不存在自动新建
             account = await Account.create(
                 email=email,
                 username=email.split("@")[0],
@@ -58,14 +58,8 @@ async def oauth_callback(request: Request, client: BaseOAuth2, redirect_uri: str
                 oauth_id=oauth_id,
                 verified=True,
             )
-        authentication_session = await AuthenticationSession.new(
-            request,
-            account,
-        )
-        logger.info(
-            f"Client {get_ip(request)} has logged in via {client.__class__.__name__} with authentication session {authentication_session.id}."
-        )
-        return token_info, authentication_session
+        aioe_token = token_encode(account, oauth_id)
+        return token_info, aioe_token
     except IntegrityError:
         raise CustomError(ErrorCode.CredentialsError)
     except GetAccessTokenError:
@@ -150,7 +144,7 @@ async def oauth_decode(request: Request, client: BaseOAuth2, refresh=True) -> di
     except RefreshTokenError as e:
         raise CustomError(ErrorCode.RefreshTokenError)
     except DecodeError:
-        raise CustomError(ErrorCode.JWTDecodeError)
+        raise CustomError(ErrorCode.SessionInvalid)
 
 
 def requires_oauth(client: BaseOAuth2):
