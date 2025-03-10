@@ -7,8 +7,8 @@ from decimal import Decimal
 from json import JSONEncoder, dumps
 from typing import Any, Optional
 
-from sanic import json
 from sanic import HTTPResponse
+from sanic import json
 
 from .error_code import ErrorCode
 
@@ -37,7 +37,7 @@ def response_ok(data: Any = None) -> HTTPResponse:
     return json(content, dumps=dumps, cls=ExtJsonEncoder)
 
 
-def response_fail(enum: Optional[ErrorCode] = None) -> HTTPResponse:
+def response_fail(enum: Optional[ErrorCode] = None):
     """失败返回
 
     :param enum: 错误码枚举类

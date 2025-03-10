@@ -1,19 +1,12 @@
 # coding=utf-8
-import datetime
 import re
-from typing import Union
 
-import jwt
-from sanic import Request, HTTPResponse
 from tortoise import fields
-from tortoise.exceptions import DoesNotExist
 from tortoise.validators import RegexValidator
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from libs.security.utils import is_expired, get_ip, get_expiration_date
 from models.base import BaseModel
-from settings import SECRET, SESSION_ENCODING_ALGORITHM, SESSION_DOMAIN, AUTHENTICATION_SESSION_EXPIRATION, AUTHENTICATION_REFRESH_EXPIRATION, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE
 
 
 class Account(BaseModel):
@@ -67,166 +60,168 @@ class Account(BaseModel):
             "email": self.email,
             "username": self.username,
             "phone": self.phone,
-            "disabled": self.disabled
+            "disabled": self.disabled,
+            "oauth_id": self.oauth_id,
+            "mfa_enable": self.mfa_enable
         }
 
 
-class Session(BaseModel):
-    """
-    记录会话信息
-    """
-
-    expiration_date = fields.DatetimeField(null=True)
-    active: bool = fields.BooleanField(default=True)
-    ip: str = fields.CharField(max_length=16)
-    bearer: fields.ForeignKeyRelation["Account"] = fields.ForeignKeyField("models.Account", null=True)
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    def validate(self) -> None:
-        if self.deleted:
-            raise CustomError(ErrorCode.SessionDeleted)
-        elif not self.active:
-            raise CustomError(ErrorCode.SessionDeactivated)
-        elif is_expired(self.expiration_date):
-            raise CustomError(ErrorCode.SessionExpired)
-
-    async def deactivate(self) -> None:
-        if self.active:
-            self.active = False
-            await self.save(update_fields=["active"])
-        else:
-            raise CustomError(ErrorCode.SessionDeactivated)
-
-    def encode(self, response: HTTPResponse) -> None:
-        """
-        生成会话token
-        """
-        encoded_session = jwt.encode(
-            {
-                "id": self.id,
-                "ctime": str(self.ctime),
-                "expiration_date": str(self.expiration_date),
-                "bearer": self.bearer.id if isinstance(self.bearer, Account) else None,
-                "ip": self.ip,
-            },
-            SECRET,
-            SESSION_ENCODING_ALGORITHM,
-        )
-        response.cookies.add_cookie(
-            f"aioe_{self.__class__.__name__[:7].lower()}",
-            str(encoded_session),
-            httponly=SESSION_HTTPONLY,
-            samesite=SESSION_SAMESITE,
-            secure=SESSION_SECURE,
-            domain=SESSION_DOMAIN,
-            expires=getattr(self, "refresh_expiration_date", None) or self.expiration_date,
-        )
-
-    @property
-    def json(self) -> dict:
-        return {
-            "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
-            "expiration_date": str(self.expiration_date),
-            "bearer": self.bearer.id if isinstance(self.bearer, Account) else None,
-            "active": self.active,
-        }
-
-    @property
-    def anonymous(self) -> bool:
-        """
-        判断是否是匿名会话
-        """
-        return self.bearer is None
-
-    @classmethod
-    async def new(cls, request: Request, account: Account, **kwargs: dict[str, Union[int, str, bool, float, list, dict]]):
-        """
-        新建会话
-        """
-        raise NotImplementedError
-
-    @classmethod
-    async def get_associated(cls, account: Account):
-        """
-        获取账号所关联的会话信息
-        """
-        sessions = await cls.filter(bearer=account, deleted=False).all()
-        if not sessions:
-            raise CustomError(ErrorCode.NotFound)
-        return sessions
-
-    @classmethod
-    def decode_raw(cls, request: Request) -> dict:
-        """
-        JWT 解码为 dict
-        """
-        cookie = request.cookies.get(f"aioe_{cls.__name__[:7].lower()}")
-        try:
-            if not cookie:
-                raise CustomError(ErrorCode.CredentialsError)
-            else:
-                return jwt.decode(cookie, SECRET, SESSION_ENCODING_ALGORITHM)
-        except:
-            raise CustomError(ErrorCode.JWTDecodeError)
-
-    @classmethod
-    async def decode(cls, request: Request):
-        """
-        JWT 解码为 session
-        """
-        try:
-            decoded_raw = cls.decode_raw(request)
-            decoded_session = await cls.filter(id=decoded_raw["id"]).prefetch_related("bearer").get()
-            request.ctx.session = decoded_session
-        except DoesNotExist:
-            raise CustomError(ErrorCode.NotFound)
-        return decoded_session
-
-    class Meta:
-        abstract = True
-
-
-class AuthenticationSession(Session):
-    """
-    认证会话信息
-    """
-
-    refresh_expiration_date: datetime.datetime = fields.DatetimeField(null=True)
-    requires_second_factor: bool = fields.BooleanField(default=False)
-    is_refresh: bool = False
-
-    def validate(self) -> None:
-        super().validate()
-        if self.requires_second_factor:
-            raise CustomError(ErrorCode.SecondFactorRequired)
-
-    async def refresh(self, request: Request):
-        """
-        注销原本的会话，生成新会话
-        """
-        if self.active and not is_expired(self.refresh_expiration_date):
-            await self.deactivate()
-            return await self.new(request, self.bearer)
-        else:
-            raise CustomError(ErrorCode.SessionExpired)
-
-    @classmethod
-    async def new(cls, request: Request, account: Account = None, **kwargs: Union[int, str, bool, float, list, dict]):
-        authentication_session = await cls.create(
-            **kwargs,
-            bearer=account,
-            ip=get_ip(request),
-            expiration_date=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
-            refresh_expiration_date=get_expiration_date(AUTHENTICATION_REFRESH_EXPIRATION),
-        )
-        return authentication_session
-
-    class Meta:
-        table = "authentication_session"
+# class Session(BaseModel):
+#     """
+#     记录会话信息
+#     """
+#
+#     expiration_date = fields.DatetimeField(null=True)
+#     active: bool = fields.BooleanField(default=True)
+#     ip: str = fields.CharField(max_length=16)
+#     bearer: fields.ForeignKeyRelation["Account"] = fields.ForeignKeyField("models.Account", null=True)
+#
+#     def __init__(self, **kwargs):
+#         super().__init__(**kwargs)
+#
+#     def validate(self) -> None:
+#         if self.deleted:
+#             raise CustomError(ErrorCode.SessionDeleted)
+#         elif not self.active:
+#             raise CustomError(ErrorCode.SessionDeactivated)
+#         elif is_expired(self.expiration_date):
+#             raise CustomError(ErrorCode.SessionExpired)
+#
+#     async def deactivate(self) -> None:
+#         if self.active:
+#             self.active = False
+#             await self.save(update_fields=["active"])
+#         else:
+#             raise CustomError(ErrorCode.SessionDeactivated)
+#
+#     def encode(self, response: HTTPResponse) -> None:
+#         """
+#         生成会话token
+#         """
+#         encoded_session = jwt.encode(
+#             {
+#                 "id": self.id,
+#                 "ctime": str(self.ctime),
+#                 "expiration_date": str(self.expiration_date),
+#                 "bearer": self.bearer.id if isinstance(self.bearer, Account) else None,
+#                 "ip": self.ip,
+#             },
+#             SECRET,
+#             SESSION_ENCODING_ALGORITHM,
+#         )
+#         response.cookies.add_cookie(
+#             f"aioe_{self.__class__.__name__[:7].lower()}",
+#             str(encoded_session),
+#             httponly=SESSION_HTTPONLY,
+#             samesite=SESSION_SAMESITE,
+#             secure=SESSION_SECURE,
+#             domain=SESSION_DOMAIN,
+#             expires=getattr(self, "refresh_expiration_date", None) or self.expiration_date,
+#         )
+#
+#     @property
+#     def json(self) -> dict:
+#         return {
+#             "id": self.id,
+#             "ctime": str(self.ctime),
+#             "utime": str(self.utime),
+#             "expiration_date": str(self.expiration_date),
+#             "bearer": self.bearer.id if isinstance(self.bearer, Account) else None,
+#             "active": self.active,
+#         }
+#
+#     @property
+#     def anonymous(self) -> bool:
+#         """
+#         判断是否是匿名会话
+#         """
+#         return self.bearer is None
+#
+#     @classmethod
+#     async def new(cls, request: Request, account: Account, **kwargs: dict[str, Union[int, str, bool, float, list, dict]]):
+#         """
+#         新建会话
+#         """
+#         raise NotImplementedError
+#
+#     @classmethod
+#     async def get_associated(cls, account: Account):
+#         """
+#         获取账号所关联的会话信息
+#         """
+#         sessions = await cls.filter(bearer=account, deleted=False).all()
+#         if not sessions:
+#             raise CustomError(ErrorCode.NotFound)
+#         return sessions
+#
+#     @classmethod
+#     def decode_raw(cls, request: Request) -> dict:
+#         """
+#         JWT 解码为 dict
+#         """
+#         cookie = request.cookies.get(f"aioe_{cls.__name__[:7].lower()}")
+#         try:
+#             if not cookie:
+#                 raise CustomError(ErrorCode.CredentialsError)
+#             else:
+#                 return jwt.decode(cookie, SECRET, SESSION_ENCODING_ALGORITHM)
+#         except:
+#             raise CustomError(ErrorCode.JWTDecodeError)
+#
+#     @classmethod
+#     async def decode(cls, request: Request):
+#         """
+#         JWT 解码为 session
+#         """
+#         try:
+#             decoded_raw = cls.decode_raw(request)
+#             decoded_session = await cls.filter(id=decoded_raw["id"]).prefetch_related("bearer").get()
+#             request.ctx.session = decoded_session
+#         except DoesNotExist:
+#             raise CustomError(ErrorCode.NotFound)
+#         return decoded_session
+#
+#     class Meta:
+#         abstract = True
+#
+#
+# class AuthenticationSession(Session):
+#     """
+#     认证会话信息
+#     """
+#
+#     refresh_expiration_date: datetime.datetime = fields.DatetimeField(null=True)
+#     requires_second_factor: bool = fields.BooleanField(default=False)
+#     is_refresh: bool = False
+#
+#     def validate(self) -> None:
+#         super().validate()
+#         if self.requires_second_factor:
+#             raise CustomError(ErrorCode.SecondFactorRequired)
+#
+#     async def refresh(self, request: Request):
+#         """
+#         注销原本的会话，生成新会话
+#         """
+#         if self.active and not is_expired(self.refresh_expiration_date):
+#             await self.deactivate()
+#             return await self.new(request, self.bearer)
+#         else:
+#             raise CustomError(ErrorCode.SessionExpired)
+#
+#     @classmethod
+#     async def new(cls, request: Request, account: Account = None, **kwargs: Union[int, str, bool, float, list, dict]):
+#         authentication_session = await cls.create(
+#             **kwargs,
+#             bearer=account,
+#             ip=get_ip(request),
+#             expiration_date=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
+#             refresh_expiration_date=get_expiration_date(AUTHENTICATION_REFRESH_EXPIRATION),
+#         )
+#         return authentication_session
+#
+#     class Meta:
+#         table = "authentication_session"
 
 
 class Role(BaseModel):

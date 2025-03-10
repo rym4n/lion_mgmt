@@ -8,6 +8,6 @@ from .timer import TimerMiddleware
 
 MIDDLEWARE_TUPLE: tuple[type[BaseMiddleware], ...] = (
     CacheMiddleware,
-    SessionMiddleware,
     TimerMiddleware,
+    SessionMiddleware,
 )

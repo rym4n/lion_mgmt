@@ -1,16 +1,17 @@
 # coding=utf-8
+import traceback
+
+from sanic import Blueprint
+from sanic.log import logger
+from tortoise.exceptions import ValidationError, IntegrityError, FieldError
+from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.utils import get_ip
 from models import Role
-from sanic import Blueprint
-from sanic.log import logger
-from tortoise.exceptions import ValidationError, IntegrityError
-from tortoise.transactions import in_transaction
 
-role_bp = Blueprint('role', url_prefix='role')
+role_bp = Blueprint('role', url_prefix='v1/role')
 _all__ = ["role_bp"]
 
 
@@ -23,9 +24,9 @@ async def add_role(request):
         permissions = request.json.get("permissions", [])
         async with in_transaction():
             role = await Role.create(name=name, description=description, permissions=permissions)
-        logger.info(f"Client {get_ip(request)} has added a new role {role.id}.")
+        logger.info(f"Client {request.client_ip} has added a new role {role.id}.")
         return response_ok(role.json)
-    except ValidationError as e:
+    except (ValidationError, FieldError) as e:
         logger.error(f"Validation error: {e}")
         raise CustomError(ErrorCode.ParameterError)
     except IntegrityError as e:
@@ -103,5 +104,7 @@ async def update_role(request):
         return response_ok(role.json)
     except IntegrityError as e:
         raise CustomError(ErrorCode.ServerError)
-    except ValidationError as e:
+    except (ValidationError, FieldError) as e:
+        logger.error(f"Param error: {e} | {traceback.format_exc()}")
         raise CustomError(ErrorCode.ParameterError)
+

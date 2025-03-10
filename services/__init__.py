@@ -69,7 +69,7 @@ def register_listener(app: Sanic) -> None:
     return None
 
 
-def register_middleware(app: Sanic) -> None:
+def register_middleware(app: Sanic):
     """注册中间件"""
     for middle_cls in MIDDLEWARE_TUPLE:
         middle: BaseMiddleware = middle_cls()
@@ -77,12 +77,10 @@ def register_middleware(app: Sanic) -> None:
             app.register_middleware(middle.before_request, attach_to='request')
         if hasattr(middle, 'before_response'):
             app.register_middleware(middle.before_response, attach_to='response')
-    return None
 
 
-def register_exception_handler(app: Sanic) -> None:
+def register_exception_handler(app: Sanic):
     """注册异常处理"""
     for exc_hdl_cls in EXC_HDL_TUPLE:
         exc_hdl: BaseExcHandler = exc_hdl_cls()
         app.error_handler.add(exc_hdl.get_exception(), exc_hdl.handle)
-    return None
