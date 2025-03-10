@@ -13,8 +13,9 @@ class SessionMiddleware(BaseMiddleware):
     async def before_request(self, request: Request) -> None:
         # 判断请求URI是否需要身份验证
         logger.info(request.path)
-        for path in ["/v1/user/login", "/v1/user//mfa-auth"]:
-            if request.path.startswith(path):
+        # todo: 上生产的时候需要删掉 /docs
+        for path in ["/v1/user/login", "/v1/user/mfa-auth", "/docs", "/docs/openapi.json"]:
+            if request.path == path:
                 return
 
         await authenticate(request)
