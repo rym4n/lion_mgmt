@@ -104,7 +104,7 @@ async def oauth_revoke(request: Request, client: BaseOAuth2) -> dict:
     Raises:
         OAuthError
     """
-    if request.cookies.get(f"aioe_oauth"):
+    if request.headers.get(f"aioe-oauth"):
         try:
             token_info = await oauth_decode(request, client, False)
             request.ctx.oauth["revoked"] = True
@@ -133,7 +133,7 @@ async def oauth_decode(request: Request, client: BaseOAuth2, refresh=True) -> di
         token_info
     """
     try:
-        token_info = jwt.decode(request.cookies.get(f"aioe_oauth", ), SECRET, SESSION_ENCODING_ALGORITHM)
+        token_info = jwt.decode(request.headers.get(f"aioe-oauth", ), SECRET, SESSION_ENCODING_ALGORITHM)
         if refresh and time.time() > token_info["expires_at"]:
             token_info = await client.refresh_token(token_info.get("refresh_token"))
             token_info["is_refresh"] = True

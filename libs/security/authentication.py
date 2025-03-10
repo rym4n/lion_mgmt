@@ -81,7 +81,7 @@ def token_decode(request: Request) -> dict:
     """
     将token解码成数据字典
     """
-    token = request.cookies.get("aioe_auth")
+    token = request.headers.get("aioe-auth")
     if not token:
         raise CustomError(ErrorCode.SessionInvalid)
 
