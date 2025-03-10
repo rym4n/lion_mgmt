@@ -64,7 +64,7 @@ async def new_user(request):
 @requires_permission("user:r")
 async def query_user(request):
     """
-    删除用户
+    搜索用户
 
     请求参数：
         username: 用户名
@@ -123,23 +123,23 @@ async def login(request):
         account.validate()
         resp = account.json
         resp['roles'] = [role.name for role in account.roles]
-        response = response_ok(resp)
         token_id = str(uuid.uuid4())
         token = token_encode(account, token_id, ip=request.client_ip)
-        response.cookies.add_cookie(
-            f"aioe_auth",
-            token,
-            httponly=SESSION_HTTPONLY,
-            samesite=SESSION_SAMESITE,
-            secure=SESSION_SECURE,
-            domain=SESSION_DOMAIN,
-            expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
-        )
+        resp['aioe-auth'] = token
+        # response.cookies.add_cookie(
+        #     f"aioe_auth",
+        #     token,
+        #     httponly=SESSION_HTTPONLY,
+        #     samesite=SESSION_SAMESITE,
+        #     secure=SESSION_SECURE,
+        #     domain=SESSION_DOMAIN,
+        #     expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
+        # )
         # 如果开启了MFA，记录MFA密钥
         if account.mfa_enable:
             await request.ctx.cache_client.set(f'mfa_key_{id}', account.mfa_key, AUTHENTICATION_SESSION_EXPIRATION)
 
-        return response
+        return response_ok(resp)
     except DoesNotExist:
         raise CustomError(ErrorCode.CredentialsError)
     except (VerificationError, InvalidHashError):
@@ -179,16 +179,16 @@ async def mfa_auth(request):
 
     # 彻底刷新token，用新的token id
     new_token = refresh_token(request.ctx.session, id=str(uuid.uuid4()), mfa_auth=True)
-    response = response_ok('success')
-    response.cookies.add_cookie(
-        f"aioe_auth",
-        new_token,
-        httponly=SESSION_HTTPONLY,
-        samesite=SESSION_SAMESITE,
-        secure=SESSION_SECURE,
-        domain=SESSION_DOMAIN,
-        expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
-    )
+    response = response_ok({'aioe-token': new_token})
+    # response.cookies.add_cookie(
+    #     f"aioe_auth",
+    #     new_token,
+    #     httponly=SESSION_HTTPONLY,
+    #     samesite=SESSION_SAMESITE,
+    #     secure=SESSION_SECURE,
+    #     domain=SESSION_DOMAIN,
+    #     expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
+    # )
     await request.ctx.cache_client.delete(f'mfa_key_{old_token_id}')
     return response
 
@@ -204,7 +204,7 @@ async def update_user(request):
         password: 密码
     """
     userid = request.ctx.session.get('sub')
-    account = await Account.filter(id=userid, deleted=False).get()
+    account = await Account.get(id=userid, deleted=False)
     if not account:
         raise CustomError(ErrorCode.AccountNotFound)
 
@@ -225,7 +225,7 @@ async def edit_user(request):
     修改任意用户信息（管理员）
 
     请求参数：
-        userid: 用户ID，必须
+        username: 用户名，必须
         email: 邮箱，可选
         phone: 手机号，可选
         password: 密码，可选
@@ -234,7 +234,7 @@ async def edit_user(request):
         roles: 角色id列表，可选
     """
     try:
-        user = await Account.filter(id=request.json.get("userid"), deleted=False).first()
+        user = await Account.get(username=request.json.get("username"), deleted=False)
         if not user:
             raise CustomError(ErrorCode.AccountNotFound)
 
@@ -263,9 +263,9 @@ async def delelte_user(request):
     删除用户
 
     请求参数：
-        userid: 用户ID
+        username: 用户名
     """
-    user = await Account.filter(id=request.json.get("userid"), deleted=False).first()
+    user = await Account.get(username=request.json.get("username"), deleted=False)
     if not user:
         raise CustomError(ErrorCode.AccountNotFound)
     user.deleted = True
@@ -280,10 +280,9 @@ async def refresh_mfa_key(request):
     重置MFA密钥
 
     请求参数：
-        userid: 用户ID
+        username: 用户名
     """
-    userid = request.json.get('userid')
-    account = await Account.filter(id=userid, deleted=False).first()
+    account = await Account.get(username=request.json.get('username'), deleted=False)
     if not account:
         raise CustomError(ErrorCode.AccountNotFound)
     account.mfa_key = pyotp.random_base32(32)
@@ -300,11 +299,11 @@ async def assign_role_to_user(request):
     给账号分配角色
 
     请求参数：
-        userid: 用户ID
+        username: 用户名
         role_names: 角色ID，多个用英文逗号隔开
     """
-    userid = request.json.get('userid')
-    account = await Account.filter(id=userid, deleted=False).first()
+    username = request.json.get('username')
+    account = await Account.filter(username=username, deleted=False).first()
     if not account:
         raise CustomError(ErrorCode.AccountNotFound)
 
