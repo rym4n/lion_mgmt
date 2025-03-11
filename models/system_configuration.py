@@ -5,7 +5,7 @@ from tortoise import fields
 from models import BaseModel
 
 
-class System_custom_configuration(BaseModel):
+class SystemCustomConfiguration(BaseModel):
     """
     系统自定义配置
     """

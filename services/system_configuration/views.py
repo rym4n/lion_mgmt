@@ -7,8 +7,7 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.utils import get_ip
-from models import System_custom_configuration
+from models import SystemCustomConfiguration
 
 system_bp = Blueprint('system', url_prefix='system')
 _all__ = ["system_bp"]
@@ -17,9 +16,19 @@ UPLOAD_FOLDER = "uploads"  # 本地存储目录
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # 确保目录存在
 
 
-@system_bp.route("/upload", methods=["POST"])
+@system_bp.post("/upload")
 async def upload_image(request):
-    """保存系统定制配置（如果 system_version 存在则更新，否则创建）"""
+    """
+    保存系统定制配置（如果 system_version 存在则更新，否则创建）
+
+    请求参数：
+        copyright: 版权,
+        system_name: 系统名,
+        system_version: 系统版本,
+        background: 背景图
+        webico: 网页ico
+        logo: logo
+    """
     try:
         copyright_text = request.form.get("copyright")
         system_name = request.form.get("system_name")
@@ -45,7 +54,7 @@ async def upload_image(request):
 
         async with in_transaction():
             # 先查询是否已存在相同 system_version 的记录
-            existing_config = await System_custom_configuration.filter(system_version=system_version).first()
+            existing_config = await SystemCustomConfiguration.filter(system_version=system_version).first()
 
             if existing_config:
                 # 存在则更新
@@ -57,14 +66,14 @@ async def upload_image(request):
                     if file_paths[field]:  # 只更新上传了的文件
                         update_fields[field] = file_paths[field]
 
-                await System_custom_configuration.filter(system_version=system_version).update(**update_fields)
+                await SystemCustomConfiguration.filter(system_version=system_version).update(**update_fields)
 
-                logger.info(f"Client {get_ip(request)} updated system configuration {existing_config.id}.")
+                logger.info(f"Client {request.client_ip} updated system configuration {existing_config.id}.")
                 return response_ok({"message": "Configuration updated successfully", "id": existing_config.id})
 
             else:
                 # 不存在则创建
-                system_config = await System_custom_configuration.create(
+                system_config = await SystemCustomConfiguration.create(
                     background=file_paths["background"],
                     webico=file_paths["webico"],
                     logo=file_paths["logo"],
@@ -73,7 +82,7 @@ async def upload_image(request):
                     system_version=system_version
                 )
 
-                logger.info(f"Client {get_ip(request)} created new system configuration {system_config.id}.")
+                logger.info(f"Client {request.client_ip} created new system configuration {system_config.id}.")
                 return response_ok({"message": "Configuration created successfully", "id": system_config.id})
 
     except KeyError as e:
@@ -85,11 +94,15 @@ async def upload_image(request):
         raise CustomError(ErrorCode.ServerError)
 
 
-@system_bp.route("/latest", methods=["GET"])
+@system_bp.post("/latest")
 async def get_latest_config(request):
-    """获取最新的系统定制配置"""
+    """
+    获取最新的系统定制配置
+
+    无请求参数，直接调用，返回最新的系统定制配置
+    """
     try:
-        latest_config = await System_custom_configuration.all().order_by("-utime").first()
+        latest_config = await SystemCustomConfiguration.all().order_by("-utime").first()
 
         if latest_config:
             return response_ok(latest_config.json)
@@ -99,5 +112,3 @@ async def get_latest_config(request):
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         return CustomError(ErrorCode.ServerError)
-
-

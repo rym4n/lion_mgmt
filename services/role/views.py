@@ -4,20 +4,28 @@ import traceback
 from sanic import Blueprint
 from sanic.log import logger
 from tortoise.exceptions import ValidationError, IntegrityError, FieldError
+from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from models import Role
+from models import Role, Account
 
 role_bp = Blueprint('role', url_prefix='v1/role')
 _all__ = ["role_bp"]
 
 
-@role_bp.route("/add", methods=["POST"])
+@role_bp.post("/add")
 async def add_role(request):
-    """新建角色"""
+    """
+    新建角色
+
+    请求参数：
+        name:角色名
+        description:描述
+        permissions:权限  ["a:1"]
+    """
     try:
         name = request.json.get("name")
         description = request.json.get("description", "")
@@ -35,12 +43,18 @@ async def add_role(request):
         raise CustomError(ErrorCode.ServerError)
 
 
-@role_bp.route("/all", methods=["GET"])
+@role_bp.post("/all")
 async def find_all(request):
-    """查找全部角色"""
+    """
+    查找全部角色
+
+    请求参数：
+        page:页码
+        page_size:页容量
+    """
     try:
-        page = int(request.args.get('page', 1))
-        page_size = int(request.args.get('page_size', 10))
+        page = int(request.json.get('page', 1))
+        page_size = int(request.json.get('page_size', 10))
         offset = (page - 1) * page_size
         limit = page_size
         roles = await Role.filter(deleted=False).offset(offset).limit(limit).values()
@@ -56,10 +70,16 @@ async def find_all(request):
         raise CustomError(ErrorCode.ServerError)
 
 
-@role_bp.route("/<role_id>", methods=["GET"])
-async def find_role(request, role_id):
-    """查找具体角色信息"""
+@role_bp.post("/details")
+async def find_role(request):
+    """
+    查找具体角色信息
+
+    请求参数：
+        role_id：角色id
+    """
     try:
+        role_id = request.json.get("role_id")
         role = await Role.filter(id=role_id, deleted=False).first()
         if not role:
             raise CustomError(ErrorCode.RoleNotFound)
@@ -68,11 +88,19 @@ async def find_role(request, role_id):
         raise CustomError(ErrorCode.ServerError)
 
 
-@role_bp.route("/delete", methods=["POST"])
+@role_bp.post("/delete")
 async def delete_role(request):
-    """删除指定角色"""
+    """
+    删除指定角色
+
+    请求参数：
+        role_id：角色id
+    """
     try:
         role_id = request.json.get("role_id")
+        exists = await Account.filter(roles__id=role_id).exists()
+        if exists:
+            return response_ok("角色已分配")
         role = await Role.filter(id=role_id, deleted=False).first()
         if not role:
             raise CustomError(ErrorCode.RoleNotFound)
@@ -83,9 +111,17 @@ async def delete_role(request):
         raise CustomError(ErrorCode.ServerError)
 
 
-@role_bp.route("/update", methods=["POST"])
+@role_bp.post("/update")
 async def update_role(request):
-    """修改角色内容"""
+    """
+    修改角色内容
+
+    请求参数：
+        role_id：角色id
+        name：新的角色名
+        description：新的描述
+        permissions：新的权限
+    """
     try:
         role_id = request.json.get("role_id")
         name = request.json.get("name")
