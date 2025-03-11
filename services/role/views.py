@@ -4,7 +4,6 @@ import traceback
 from sanic import Blueprint
 from sanic.log import logger
 from tortoise.exceptions import ValidationError, IntegrityError, FieldError
-from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
