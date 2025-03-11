@@ -13,9 +13,9 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authentication import validate_password, token_encode, refresh_token
 from libs.security.authorization import requires_permission
-from libs.security.utils import password_hasher, get_expiration_date
+from libs.security.utils import password_hasher
 from models import Account, Role
-from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE, SESSION_DOMAIN
+from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS
 
 user_bp = Blueprint('user', url_prefix='v1/user')
 _all__ = ["user_bp"]
@@ -210,7 +210,10 @@ async def update_user(request):
 
     for field in ["email", "phone", "password"]:
         if field in request.json:
-            setattr(account, field, request.json[field])
+            if field == "password":
+                account.password = password_hasher.hash(validate_password(request.json.get("password") or ''))
+            else:
+                setattr(account, field, request.json[field])
 
     await account.save()
 
@@ -222,7 +225,7 @@ async def update_user(request):
 @requires_permission("user:a")
 async def edit_user(request):
     """
-    修改任意用户信息（管理员）
+    修改任意用户信息（需要user:a权限）
 
     请求参数：
         username: 用户名，必须
@@ -260,7 +263,7 @@ async def edit_user(request):
 @requires_permission("user:a")
 async def delelte_user(request):
     """
-    删除用户
+    删除用户（需要user:a权限）
 
     请求参数：
         username: 用户名
@@ -277,7 +280,7 @@ async def delelte_user(request):
 @requires_permission("user:a")
 async def refresh_mfa_key(request):
     """
-    重置MFA密钥
+    重置MFA密钥（需要user:a权限）
 
     请求参数：
         username: 用户名
@@ -296,7 +299,7 @@ async def refresh_mfa_key(request):
 @requires_permission("user:a")
 async def assign_role_to_user(request):
     """
-    给账号分配角色
+    给账号分配角色（需要user:a权限）
 
     请求参数：
         username: 用户名
