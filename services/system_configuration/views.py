@@ -7,7 +7,7 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from models import SystemCustomConfiguration
+from models import SystemCustomConfiguration, SystemStatus
 
 system_bp = Blueprint('system', url_prefix='system')
 _all__ = ["system_bp"]
@@ -112,3 +112,91 @@ async def get_latest_config(request):
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         return CustomError(ErrorCode.ServerError)
+
+
+@system_bp.post("/status/all")
+async def get_system_status(request):
+    """
+    获取全部系统状况
+
+    无需参数直接请求则返回全部系统状况数据
+    """
+    data = await SystemStatus.all().values()
+    return response_ok(data)
+
+
+@system_bp.post("/status/add")
+async def add_system(request):
+    """
+    添加新的系统信息
+
+    请求参数：
+        systemname：系统名
+        instancename：实例名
+        uptime：启动时间
+        checkTime：检查时间
+        status：系统状态
+    """
+    systemname = request.json.get("systemname")
+    instancename = request.json.get("instancename")
+    uptime = request.json.get("uptime")
+    checkTime = request.json.get("checkTime")
+    status = request.json.get("status")
+    async with in_transaction():
+        systemstatus = await SystemStatus.create(systemname=systemname, instancename=instancename, uptime=uptime,
+                                                 checkTime=checkTime, status=status)
+    logger.info(f"Client {request.client_ip} has added a new role {systemstatus.id}.")
+    return response_ok(systemstatus.json)
+
+
+@system_bp.post("/status/update")
+async def up_system(request):
+    """
+    添加新的系统信息
+
+    请求参数：
+        system_id：系统id
+        systemname：系统名
+        instancename：实例名
+        uptime：启动时间
+        checkTime：检查时间
+        status：系统状态
+    """
+    system_id = request.json.get("system_id")
+    systemname = request.json.get("systemname")
+    instancename = request.json.get("instancename")
+    uptime = request.json.get("uptime")
+    checkTime = request.json.get("checkTime")
+    status = request.json.get("status")
+    system = await SystemStatus.filter(id=system_id, deleted=False).first()
+    if not system:
+        raise CustomError(ErrorCode.NotFound)
+    if systemname:
+        system.systemname = systemname
+    if instancename:
+        system.instancename = instancename
+    if uptime:
+        system.uptime = uptime
+    if checkTime:
+        system.checkTime = checkTime
+    if status:
+        system.status = status
+    await system.save()
+    return response_ok(system.json)
+
+
+@system_bp.post("/status/delete")
+async def del_system(request):
+    """
+    删除具体的系统
+
+    请求参数：
+        system_id：系统id
+    """
+    system_id = request.json.get("system_id")
+    system = await SystemStatus.filter(id=system_id, deleted=False).first()
+    if not system:
+        raise CustomError(ErrorCode.NotFound)
+    system.deleted = True
+    await system.save()
+    return response_ok("系统删除成功")
