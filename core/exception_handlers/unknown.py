@@ -3,6 +3,7 @@
 from sanic import HTTPResponse, exceptions
 from sanic.log import logger
 from sanic.request import Request
+from tortoise.exceptions import ValidationError, IntegrityError, FieldError
 
 from core.response import response_fail
 from .base import BaseExcHandler
@@ -18,6 +19,12 @@ class UnknownExcHandler(BaseExcHandler):
     def handle(self, request: Request, exception: Exception) -> HTTPResponse:
         if isinstance(exception, exceptions.NotFound):
             return response_fail(ErrorCode.NotFound)
+        elif isinstance(exception, ValidationError):
+            return response_fail(ErrorCode.ParameterError)
+        elif isinstance(exception, IntegrityError):
+            return response_fail(ErrorCode.ParameterError)
+        elif isinstance(exception, FieldError):
+            return response_fail(ErrorCode.ParameterError)
         else:
             logger.exception(exception)
             return response_fail(ErrorCode.ServerError)
