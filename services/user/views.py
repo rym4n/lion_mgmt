@@ -109,12 +109,16 @@ async def login(request):
     password = request.json.get("password")
     if not username or not password:
         raise CustomError(ErrorCode.CredentialsError)
+    # 防止暴力破解
+    user_attempts = await request.ctx.cache_client.get(f"{username}_login_attempts")
+    if user_attempts is not None and int(user_attempts) > MAX_CHALLENGE_ATTEMPTS:
+        raise CustomError(ErrorCode.MaxChallenge)
+    client_ip = request.client_ip
+    ip_attempts = await request.ctx.cache_client.get(f"{client_ip}_login_attempts")
+    if ip_attempts is not None and int(ip_attempts) > MAX_CHALLENGE_ATTEMPTS:
+        raise CustomError(ErrorCode.MaxChallenge)
     try:
         account = await Account.get(username=username, deleted=False).prefetch_related('roles')
-        # 防止暴力破解
-        attempts = await request.ctx.cache_client.get(f"{username}_login_attempts")
-        if attempts and int(attempts) > MAX_CHALLENGE_ATTEMPTS:
-            raise CustomError(ErrorCode.MaxChallenge)
         # 验证密码
         password_hasher.verify(account.password, password)
         if password_hasher.check_needs_rehash(account.password):
@@ -145,7 +149,9 @@ async def login(request):
     except (VerificationError, InvalidHashError):
         logger.warning(f"{request.client_ip} 使用 {username} 账号登录失败")
         await request.ctx.cache_client.increment(f"{username}_login_attempts", 1)
+        await request.ctx.cache_client.increment(f"{client_ip}_login_attempts", 1)
         await request.ctx.cache_client.expire(f"{username}_login_attempts", 60 * 5)
+        await request.ctx.cache_client.expire(f"{client_ip}_login_attempts", 60 * 5)
         raise CustomError(ErrorCode.CredentialsError)
 
 
@@ -244,7 +250,11 @@ async def edit_user(request):
         params = request.json
         need_update = False
         for p in params:
+            # 敏感属性不允许修改
             if p in ['id', 'ctime', 'utime', 'deleted', 'name', 'mfa_key']:
+                continue
+            # 不能禁用自己
+            if p == 'disabled' and request.ctx.session['sub'] == user.id:
                 continue
             need_update = True
             if p == 'password':

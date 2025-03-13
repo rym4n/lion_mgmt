@@ -125,7 +125,7 @@ CACHE = {
     'redis': {
         'cache': "aiocache.RedisCache",
         'serializer': {
-            'class': "aiocache.serializers.PickleSerializer"
+            'class': "aiocache.serializers.StringSerializer"
         },
         'namespace': 'lion',
         'timeout': 2,

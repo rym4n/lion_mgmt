@@ -51,4 +51,4 @@ def response_fail(enum: Optional[ErrorCode] = None):
     message: str = enum.message
     # 内容
     content: dict[int, Any] = dict(code=code, message=message)
-    return json(content, dumps=dumps, cls=ExtJsonEncoder)
+    return json(content, status=code, dumps=dumps, cls=ExtJsonEncoder)

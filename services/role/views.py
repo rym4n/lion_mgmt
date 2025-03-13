@@ -142,4 +142,3 @@ async def update_role(request):
     except (ValidationError, FieldError) as e:
         logger.error(f"Param error: {e} | {traceback.format_exc()}")
         raise CustomError(ErrorCode.ParameterError)
-
