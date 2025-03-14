@@ -19,6 +19,7 @@ class ErrorCode(BaseErrorCode):
     AccountDisabled = ErrorData(403, "账号已禁用")
     AccountNotFound = ErrorData(404, "账号不存在")
     AccountExists = ErrorData(409, "账号已存在")
+    DataAlreadyExists = ErrorData(409, "数据已存在")
     AccountUnverified = ErrorData(403, "账号未验证")
 
     MFAError = ErrorData(403, "MFA验证失败")

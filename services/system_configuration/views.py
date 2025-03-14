@@ -7,6 +7,7 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.security.authorization import requires_permission
 from models import SystemCustomConfiguration, SystemStatus, AuditLog
 
 system_bp = Blueprint('system', url_prefix='v1/system')
@@ -203,19 +204,19 @@ async def del_system(request):
 
 
 @system_bp.post("/audit")
+@requires_permission("audit:r")
 async def search_audit(request):
     """
-    查询审计日志，一次性把数据都返回到前端，但是最多一次只能查1000条
+    查询审计日志
 
     请求参数：
         username: 用户名
         start_time: 开始时间
         end_time: 结束时间
-        ip: ip
+        ip: ip,
+        page: 页码
+        page_size: 每页条数
     """
-    if request.json is None:
-        raise CustomError(ErrorCode.ParameterError)
-
     page = int(request.json.get('page', 1))
     page_size = int(request.json.get('page_size', 10))
     offset = (page - 1) * page_size
@@ -236,7 +237,7 @@ async def search_audit(request):
         filters["username"] = username
 
     total = await AuditLog.filter(**filters).count()
-    data = await AuditLog.filter(**filters).order_by("-ctime").offset(offset).limit(limit).values("id", "username", "ctime", "action", "module", "result", "client_ip", "client_ua", "uri")
+    data = await AuditLog.filter(**filters).offset(offset).limit(limit).values("id", "username", "ctime", "action", "module", "result", "client_ip", "client_ua", "uri")
 
     return response_ok({
         "total": total,

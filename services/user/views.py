@@ -54,9 +54,6 @@ async def new_user(request):
         if mfa_enable:
             res['mfa_uri'] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name='AIOE')
         return response_ok(res)
-    except (ValidationError, FieldError) as e:
-        logger.error(f"{e} | {traceback.format_exc()}")
-        raise CustomError(ErrorCode.ParameterError)
     except IntegrityError:
         raise CustomError(ErrorCode.AccountExists)
 

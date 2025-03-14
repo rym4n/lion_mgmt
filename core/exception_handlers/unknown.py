@@ -1,5 +1,5 @@
 # coding=utf-8
-
+from asyncpg.exceptions import UniqueViolationError
 from sanic import HTTPResponse, exceptions
 from sanic.log import logger
 from sanic.request import Request
@@ -26,5 +26,7 @@ class UnknownExcHandler(BaseExcHandler):
             return response_fail(ErrorCode.ParameterError)
         elif isinstance(exception, FieldError):
             return response_fail(ErrorCode.ParameterError)
+        elif isinstance(exception, UniqueViolationError):
+            return response_fail(ErrorCode.DataExists)
         else:
             return response_fail(ErrorCode.ServerError)

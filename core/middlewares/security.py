@@ -1,6 +1,7 @@
 # coding=utf-8
 
 from sanic import Request, HTTPResponse
+from sanic.log import logger
 
 from libs.error_code.exception import CustomError
 from libs.security.authentication import authenticate
@@ -27,12 +28,15 @@ class SecurityMiddleware(BaseMiddleware):
 
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
         """统一记录操作日志"""
-        if response.status == 200:
+        if response.status == 200 and hasattr(request.ctx, "session"):
             # 写入数据库
+            logger.info(f"{request.client_ip} 访问 {request.endpoint} 成功, URI: {request.path}")
+            logger.info(f"会话信息: {request.ctx.session}")
             await AuditLog.create(username=request.ctx.session['name'],
                                   action="访问",
                                   module=request.endpoint,
                                   result="成功",
                                   uri=request.path,
                                   client_ip=request.client_ip,
-                                  client_ua=request.headers.get('User-Agent', ''))
+                                  client_ua=request.headers.get('User-Agent', ''),
+                                  request_data=request.json)

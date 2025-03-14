@@ -17,6 +17,7 @@ class AuditLog(BaseModel):
     client_ip: str = fields.CharField(max_length=50, index=True, description="客户端IP")
     client_ua: str = fields.CharField(max_length=255, description="客户端UA")
     uri: str = fields.CharField(max_length=255, null=True, description="请求URL")
+    request_data: str = fields.JSONField(null=True, description="请求数据")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -32,8 +33,10 @@ class AuditLog(BaseModel):
             "result": self.result,
             "client_ip": self.client_ip,
             "client_ua": self.client_ua,
-            "uri": self.uri
+            "uri": self.uri,
+            "request_data": self.request_data
         }
 
     class Meta:
         table = "audit_log"
+        ordering = ["-ctime"]

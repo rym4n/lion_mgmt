@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS "audit_log" (
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted" BOOL NOT NULL DEFAULT False,
+    "username" VARCHAR(32) NOT NULL,
     "action" VARCHAR(50) NOT NULL,
     "module" VARCHAR(80) NOT NULL,
     "result" VARCHAR(20) NOT NULL,
@@ -39,11 +40,13 @@ CREATE TABLE IF NOT EXISTS "audit_log" (
     "client_ua" VARCHAR(255) NOT NULL,
     "uri" VARCHAR(255)
 );
+CREATE INDEX IF NOT EXISTS "idx_audit_log_usernam_b6341e" ON "audit_log" ("username");
 CREATE INDEX IF NOT EXISTS "idx_audit_log_module_a9ee07" ON "audit_log" ("module");
 CREATE INDEX IF NOT EXISTS "idx_audit_log_client__41928e" ON "audit_log" ("client_ip");
 COMMENT ON COLUMN "audit_log"."ctime" IS '创建时间';
 COMMENT ON COLUMN "audit_log"."utime" IS '更新时间';
 COMMENT ON COLUMN "audit_log"."deleted" IS '删除标识';
+COMMENT ON COLUMN "audit_log"."username" IS '用户名';
 COMMENT ON COLUMN "audit_log"."action" IS '操作';
 COMMENT ON COLUMN "audit_log"."module" IS '模块';
 COMMENT ON COLUMN "audit_log"."result" IS '结果';
@@ -132,6 +135,22 @@ COMMENT ON COLUMN "system_status"."uptime" IS '启动时间';
 COMMENT ON COLUMN "system_status"."checkTime" IS '检查时间';
 COMMENT ON COLUMN "system_status"."status" IS '状态';
 COMMENT ON TABLE "system_status" IS '系统状态表';
+CREATE TABLE IF NOT EXISTS "variables" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "name" VARCHAR(255) NOT NULL,
+    "type" VARCHAR(10) NOT NULL,
+    "value" VARCHAR(255) NOT NULL
+);
+COMMENT ON COLUMN "variables"."ctime" IS '创建时间';
+COMMENT ON COLUMN "variables"."utime" IS '更新时间';
+COMMENT ON COLUMN "variables"."deleted" IS '删除标识';
+COMMENT ON COLUMN "variables"."name" IS '变量名';
+COMMENT ON COLUMN "variables"."type" IS '变量类型';
+COMMENT ON COLUMN "variables"."value" IS '变量值';
+COMMENT ON TABLE "variables" IS '全局变量模型，包含以下属性：变量名、变量类型、变量值';
 CREATE TABLE IF NOT EXISTS "account_role" (
     "account_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
     "role_id" VARCHAR(36) NOT NULL REFERENCES "role" ("id") ON DELETE CASCADE

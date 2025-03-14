@@ -11,7 +11,7 @@ from .base import BaseMiddleware
 class TimerMiddleware(BaseMiddleware):
     """计时中间件，默认会把响应耗时超过1秒的打印出来"""
 
-    threshold: float = 1.0
+    threshold: float = 0.5
 
     async def before_request(self, request: Request) -> None:
         request.ctx.start_time = time.time()
