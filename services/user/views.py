@@ -7,6 +7,7 @@ from argon2.exceptions import VerificationError, InvalidHashError
 from sanic import Blueprint
 from sanic.log import logger
 from tortoise.exceptions import ValidationError, IntegrityError, FieldError, DoesNotExist
+from websockets.legacy.server import HTTPResponse
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -89,11 +90,19 @@ async def all_users(request):
     page_size = int(request.json.get("size", 10))
     offset = (page - 1) * page_size
     limit = page_size
+    # 分页查询Account，返回总数和数据
+    total = await Account.filter(deleted=False).count()
     users = await Account.filter(deleted=False).offset(offset).limit(limit).all()
     data = []
     for u in users:
         data.append(u.json)
-    return response_ok(data)
+    return response_ok({
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+        "data": data
+    })
 
 
 @user_bp.post("/login")
@@ -128,7 +137,7 @@ async def login(request):
         resp = account.json
         resp['roles'] = [role.name for role in account.roles]
         token_id = str(uuid.uuid4())
-        token = token_encode(account, token_id, ip=request.client_ip)
+        token = token_encode(account.id, account.mfa_enable, token_id, ip=request.client_ip)
         resp['aioe-auth'] = token
         # response.cookies.add_cookie(
         #     f"aioe_auth",
@@ -155,15 +164,26 @@ async def login(request):
         raise CustomError(ErrorCode.CredentialsError)
 
 
-# @user_bp.post("/logout")
-# 
-# async def logout(request):
-#     """
-#     用户登出
-#     """
-#     # todo: oauth凭据销毁
-#     token_info = await oauth_revoke(request, google_oauth)
-#     return response_ok(authentication_session.json)
+@user_bp.post("/refresh-token")
+async def refresh_token(request):
+    """
+    刷新token
+    """
+    token = token_encode(request.ctx.session['sub'], request.ctx.session['mfa_enable'], request.ctx.session['id'], ip=request.client_ip)
+    resp = {
+        "aioe-auth": token
+    }
+    return response_ok(resp)
+
+
+@user_bp.post("/logout")
+async def logout(request):
+    """
+    用户登出
+    """
+    # todo: oauth凭据销毁
+    # token_info = await oauth_revoke(request, google_oauth)
+    return HTTPResponse(status=302, headers={"Location": "/login"})
 
 
 @user_bp.post("/mfa-auth")

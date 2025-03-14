@@ -48,17 +48,17 @@ def requires_authentication(arg=None):
     return decorator(arg) if callable(arg) else decorator
 
 
-def token_encode(account: Account, token_id: str, **kwargs) -> str:
+def token_encode(account_id, mfa_enable, token_id: str, **kwargs) -> str:
     """
     根据账号信息生成token
     """
     current = int(time.time())
     data = {
         "id": token_id,
-        "sub": account.id,
+        "sub": account_id,
         "iat": current,
         "exp": current + AUTHENTICATION_SESSION_EXPIRATION,
-        "mfa_enable": account.mfa_enable
+        "mfa_enable": mfa_enable
     }
     for key, value in kwargs.items():
         data[key] = value
