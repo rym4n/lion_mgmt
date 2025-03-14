@@ -17,6 +17,7 @@ class UnknownExcHandler(BaseExcHandler):
         return Exception
 
     def handle(self, request: Request, exception: Exception) -> HTTPResponse:
+        logger.exception(exception)
         if isinstance(exception, exceptions.NotFound):
             return response_fail(ErrorCode.NotFound)
         elif isinstance(exception, ValidationError):
@@ -26,5 +27,4 @@ class UnknownExcHandler(BaseExcHandler):
         elif isinstance(exception, FieldError):
             return response_fail(ErrorCode.ParameterError)
         else:
-            logger.exception(exception)
             return response_fail(ErrorCode.ServerError)

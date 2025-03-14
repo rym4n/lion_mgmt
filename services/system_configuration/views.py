@@ -7,9 +7,9 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from models import SystemCustomConfiguration, SystemStatus
+from models import SystemCustomConfiguration, SystemStatus, AuditLog
 
-system_bp = Blueprint('system', url_prefix='system')
+system_bp = Blueprint('system', url_prefix='v1/system')
 _all__ = ["system_bp"]
 
 UPLOAD_FOLDER = "uploads"  # 本地存储目录
@@ -200,3 +200,48 @@ async def del_system(request):
     system.deleted = True
     await system.save()
     return response_ok("系统删除成功")
+
+
+@system_bp.post("/audit")
+async def search_audit(request):
+    """
+    查询审计日志，一次性把数据都返回到前端，但是最多一次只能查1000条
+
+    请求参数：
+        username: 用户名
+        start_time: 开始时间
+        end_time: 结束时间
+        ip: ip
+    """
+    if request.json is None:
+        raise CustomError(ErrorCode.ParameterError)
+
+    page = int(request.json.get('page', 1))
+    page_size = int(request.json.get('page_size', 10))
+    offset = (page - 1) * page_size
+    limit = page_size
+
+    username = request.json.get("username")
+    start_time = request.json.get("start_time")
+    end_time = request.json.get("end_time")
+    ip = request.json.get("ip")
+    filters = {}
+    if start_time:
+        filters["ctime__gte"] = start_time
+    if end_time:
+        filters["ctime__lte"] = end_time
+    if ip:
+        filters["client_ip"] = ip
+    if username:
+        filters["username"] = username
+
+    total = await AuditLog.filter(**filters).count()
+    data = await AuditLog.filter(**filters).order_by("-ctime").offset(offset).limit(limit).values("id", "username", "ctime", "action", "module", "result", "client_ip", "client_ua", "uri")
+
+    return response_ok({
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + page_size - 1) // page_size,
+        "data": data
+    })

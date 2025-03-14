@@ -9,7 +9,6 @@ from sanic import Request
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from models import Account
 from settings import SECRET, SESSION_ENCODING_ALGORITHM, AUTHENTICATION_SESSION_EXPIRATION
 
 
@@ -48,7 +47,7 @@ def requires_authentication(arg=None):
     return decorator(arg) if callable(arg) else decorator
 
 
-def token_encode(account_id, mfa_enable, token_id: str, **kwargs) -> str:
+def token_encode(account_id, username, mfa_enable, token_id: str, **kwargs) -> str:
     """
     根据账号信息生成token
     """
@@ -56,6 +55,7 @@ def token_encode(account_id, mfa_enable, token_id: str, **kwargs) -> str:
     data = {
         "id": token_id,
         "sub": account_id,
+        "name": username,
         "iat": current,
         "exp": current + AUTHENTICATION_SESSION_EXPIRATION,
         "mfa_enable": mfa_enable

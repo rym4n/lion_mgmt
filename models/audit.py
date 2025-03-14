@@ -6,16 +6,16 @@ from tortoise import fields
 from models import BaseModel
 
 
-class Audit(BaseModel):
+class AuditLog(BaseModel):
     """
     操作审计记录
     """
-    user = fields.ForeignKeyField("models.Account")
-    action: str = fields.CharField(max_length=50, null=True, description="操作")
-    module: str = fields.CharField(max_length=80, null=True, description="模块")
-    result: str = fields.CharField(max_length=20, null=True, description="结果")
-    client_ip: str = fields.CharField(max_length=50, null=True, description="客户端IP")
-    client_ua: str = fields.CharField(max_length=255, null=True, description="客户端UA")
+    username: str = fields.CharField(max_length=32, index=True, description="用户名")
+    action: str = fields.CharField(max_length=50, description="操作")
+    module: str = fields.CharField(max_length=80, index=True, description="模块")
+    result: str = fields.CharField(max_length=20, description="结果")
+    client_ip: str = fields.CharField(max_length=50, index=True, description="客户端IP")
+    client_ua: str = fields.CharField(max_length=255, description="客户端UA")
     uri: str = fields.CharField(max_length=255, null=True, description="请求URL")
 
     def validate(self) -> None:
@@ -25,9 +25,8 @@ class Audit(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
+            "username": self.username,
             "ctime": str(self.ctime),
-            "utime": str(self.utime),
-            "user": self.user,
             "action": self.action,
             "module": self.module,
             "result": self.result,
@@ -37,4 +36,4 @@ class Audit(BaseModel):
         }
 
     class Meta:
-        table = "audit"
+        table = "audit_log"

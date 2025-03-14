@@ -92,16 +92,14 @@ async def all_users(request):
     limit = page_size
     # 分页查询Account，返回总数和数据
     total = await Account.filter(deleted=False).count()
-    users = await Account.filter(deleted=False).offset(offset).limit(limit).all()
-    data = []
-    for u in users:
-        data.append(u.json)
+    users = await Account.filter(deleted=False).offset(offset).limit(limit).values("id", "ctime", "utime", "username", "email", "phone", "disabled", "mfa_enable")
+
     return response_ok({
         "total": total,
         "page": page,
         "page_size": page_size,
         "total_pages": (total + page_size - 1) // page_size,
-        "data": data
+        "data": users
     })
 
 
@@ -137,7 +135,7 @@ async def login(request):
         resp = account.json
         resp['roles'] = [role.name for role in account.roles]
         token_id = str(uuid.uuid4())
-        token = token_encode(account.id, account.mfa_enable, token_id, ip=request.client_ip)
+        token = token_encode(account.id, account.username, account.mfa_enable, token_id, ip=request.client_ip)
         resp['aioe-auth'] = token
         # response.cookies.add_cookie(
         #     f"aioe_auth",
@@ -169,7 +167,8 @@ async def refresh_token(request):
     """
     刷新token
     """
-    token = token_encode(request.ctx.session['sub'], request.ctx.session['mfa_enable'], request.ctx.session['id'], ip=request.client_ip)
+    token = token_encode(request.ctx.session['sub'], request.ctx.session['username'], request.ctx.session['mfa_enable'],
+                         request.ctx.session['id'], ip=request.client_ip)
     resp = {
         "aioe-auth": token
     }
