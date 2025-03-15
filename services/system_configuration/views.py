@@ -215,12 +215,12 @@ async def search_audit(request):
         end_time: 结束时间
         ip: ip,
         page: 页码
-        page_size: 每页条数
+        size: 每页条数
     """
     page = int(request.json.get('page', 1))
-    page_size = int(request.json.get('page_size', 10))
-    offset = (page - 1) * page_size
-    limit = page_size
+    size = int(request.json.get('size', 10))
+    offset = (page - 1) * size
+    limit = size
 
     username = request.json.get("username")
     start_time = request.json.get("start_time")
@@ -242,7 +242,7 @@ async def search_audit(request):
     return response_ok({
         "total": total,
         "page": page,
-        "page_size": page_size,
-        "total_pages": (total + page_size - 1) // page_size,
+        "size": size,
+        "total_pages": (total + size - 1) // size,
         "data": data
     })

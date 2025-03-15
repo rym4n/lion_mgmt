@@ -13,4 +13,4 @@ if __name__ == '__main__':
         app.run(workers=os.cpu_count() * 2 + 1, host='0.0.0.0', port=8000, access_log=False)
     else:
         # 本地开发
-        app.run(workers=1, host='0.0.0.0', port=8000, access_log=False)
+        app.run(workers=1, host='0.0.0.0', port=8000, debug=True)

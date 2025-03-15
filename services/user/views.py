@@ -84,9 +84,9 @@ async def all_users(request):
         size: 分页的大小
     """
     page = int(request.json.get("page", 1))
-    page_size = int(request.json.get("size", 10))
-    offset = (page - 1) * page_size
-    limit = page_size
+    size = int(request.json.get("size", 10))
+    offset = (page - 1) * size
+    limit = size
     # 分页查询Account，返回总数和数据
     total = await Account.filter(deleted=False).count()
     users = await Account.filter(deleted=False).offset(offset).limit(limit).values("id", "ctime", "utime", "username", "email", "phone", "disabled", "mfa_enable")
@@ -94,8 +94,8 @@ async def all_users(request):
     return response_ok({
         "total": total,
         "page": page,
-        "page_size": page_size,
-        "total_pages": (total + page_size - 1) // page_size,
+        "size": size,
+        "total_pages": (total + size - 1) // size,
         "data": users
     })
 

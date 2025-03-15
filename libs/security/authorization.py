@@ -4,12 +4,11 @@ import functools
 
 from sanic.log import logger
 from sanic.request import Request
-from tortoise.exceptions import DoesNotExist
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
-from models import Role, Account
+from models import Account
 
 
 async def check_permissions(request: Request, *required_permissions: str) -> bool:
@@ -57,18 +56,6 @@ async def check_roles(request: Request, *required_roles: str) -> bool:
         return True
     logger.warning(f"{request.client_ip} {payload['sub']} 尝试了一个未授权操作")
     raise CustomError(ErrorCode.Unauthorized)
-
-
-async def assign_role(name: str, account: Account, description: str = None, *permissions: str) -> Role:
-    """
-    给账号分配角色
-    """
-    try:
-        role = await Role.filter(name=name).get()
-    except DoesNotExist:
-        role = await Role.create(name=name, description=description, permissions=permissions)
-    await account.roles.add(role)
-    return role
 
 
 def requires_permission(*required_permissions: str):

@@ -49,21 +49,21 @@ async def find_all(request):
 
     请求参数：
         page:页码
-        page_size:页容量
+        size:页容量
     """
     try:
         page = int(request.json.get('page', 1))
-        page_size = int(request.json.get('page_size', 10))
-        offset = (page - 1) * page_size
-        limit = page_size
+        size = int(request.json.get('size', 10))
+        offset = (page - 1) * size
+        limit = size
         roles = await Role.filter(deleted=False).offset(offset).limit(limit).values()
         total = await Role.filter(deleted=False).count()
         return response_ok({
             'roles': roles,
             'total': total,
             'page': page,
-            'page_size': page_size,
-            'total_pages': (total + page_size - 1) // page_size
+            'size': size,
+            'total_pages': (total + size - 1) // size
         })
     except IntegrityError as e:
         raise CustomError(ErrorCode.ServerError)

@@ -37,9 +37,10 @@ def response_ok(data: Any = None) -> HTTPResponse:
     return json(content, dumps=dumps, cls=ExtJsonEncoder)
 
 
-def response_fail(enum: Optional[ErrorCode] = None):
+def response_fail(enum: Optional[ErrorCode] = None, status: int = 400):
     """失败返回
 
+    :param status: 指定状态码，默认400
     :param enum: 错误码枚举类
     :return:
     """
@@ -51,4 +52,4 @@ def response_fail(enum: Optional[ErrorCode] = None):
     message: str = enum.message
     # 内容
     content: dict[int, Any] = dict(code=code, message=message)
-    return json(content, status=code, dumps=dumps, cls=ExtJsonEncoder)
+    return json(content, status=status, dumps=dumps, cls=ExtJsonEncoder)

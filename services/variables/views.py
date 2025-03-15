@@ -2,11 +2,13 @@
 # coding=utf-8
 
 from sanic import Blueprint
+from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
+from models import Account
 from models.variables import Variables
 
 var_bp = Blueprint('var', url_prefix='v1/var')
@@ -15,59 +17,62 @@ _all__ = ["var_bp"]
 
 @var_bp.post("/new")
 @requires_permission("var:c")
-async def new_user(request):
+async def new_variable(request):
     """
     新建全局变量
 
     请求参数
-        name: 变量名
-        type: 变量类型，枚举型（string 或 list)
-        value: 变量值
+        name: 变量名（唯一）
+        value: 变量值，JSON格式对象，不是字符串
     """
     name = request.json.get("name")
-    type = request.json.get("type")
     value = request.json.get("value")
-    if not name or not type or not value:
+    if not name or not value:
         raise CustomError(ErrorCode.ParameterError)
 
-    # 如果type不是list，需要检查name是否已存在
-    if type != "list":
-        var = await Variables.filter(name=name).first()
-        if var:
-            raise CustomError(ErrorCode.DataAlreadyExists)
-
-    var = await Variables.create(name=request.json["name"], type=request.json["type"], value=request.json["value"])
+    account = await Account.filter(id=request.ctx.session['sub']).first()
+    var = await Variables.create(name=request.json["name"], value=json_var, updator=account)
     return response_ok(var.json)
 
 
 @var_bp.post("/search")
 @requires_permission("var:r")
-async def query_user(request):
+async def query_variable(request):
     """
-    搜索全局变量
+    搜索全局变量（需要var:r权限）
 
     请求参数：
-        name: 变量名
+        keyword: 变量名 或 变量值（元素要完全匹配）
     """
-    var = await Variables.filter(name=request.json.get("name")).first()
-    if not var:
-        raise CustomError(ErrorCode.AccountNotFound)
-    return response_ok(var.json)
+    keyword = request.json.get("keyword")
+    if not keyword:
+        raise CustomError(ErrorCode.ParameterError)
+    all_var = await Variables.filter(Q(name__icontains=keyword) | Q(value__contains=[keyword])).all().prefetch_related("updator")
+    return response_ok([v.json for v in all_var])
 
 
 @var_bp.post("/list")
 @requires_permission("var:r")
-async def all_users(request):
+async def all_variables(request):
     """
-    获取所有全局变量信息
+    获取所有全局变量信息（需要var:r权限）
+    
+    请求参数：
+        page: 页码
+        size: 每页数量
     """
-    vars = await Variables.group_by("name", "type").all()
-    return response_ok([var.json for var in vars])
+    page = int(request.json.get("page", 1))
+    size = int(request.json.get("size", 10))
+    offset = (page - 1) * size
+    limit = size
+    total = await Variables.all().count()
+    all_var = await Variables.all().prefetch_related("updator").offset(offset).limit(limit)
+    return response_ok({"total": total, "data": [v.json for v in all_var]})
 
 
 @var_bp.post("/del")
 @requires_permission("var:d")
-async def delelte_user(request):
+async def delelte_variable(request):
     """
     删除全局变量（需要var:d权限）
 
@@ -76,24 +81,32 @@ async def delelte_user(request):
     """
     var = await Variables.filter(name=request.json.get("name")).first()
     if not var:
-        raise CustomError(ErrorCode.AccountNotFound)
+        raise CustomError(ErrorCode.NotFound)
     await var.delete()
-    return response_ok("变量删除成功")
+    return response_ok("success")
 
 
 @var_bp.post("/update")
 @requires_permission("var:u")
-async def update_user(request):
+async def update_variable(request):
     """
     更新全局变量（需要var:u权限）
 
     请求参数:
         name: 变量名
-        value: 变量值
+        value: 变量值，JSON格式对象，不是字符串
     """
-    var = await Variables.filter(name=request.json.get("name")).first()
+    name = request.json.get("name")
+    value = request.json.get("value")
+    if not name or not value:
+        raise CustomError(ErrorCode.ParameterError)
+
+    var = await Variables.filter(name=name).first()
     if not var:
-        raise CustomError(ErrorCode.AccountNotFound)
-    var.value = request.json.get("value")
+        raise CustomError(ErrorCode.NotFound)
+
+    account = await Account.filter(id=request.ctx.session['sub']).first()
+    var.value = value
+    var.updator = account
     await var.save()
-    return response_ok("变量更新成功")
+    return response_ok("success")

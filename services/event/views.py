@@ -17,7 +17,7 @@ async def get_all_events(request):
 
     请求参数：
         page: int 页数
-        page_size: int 每页大小
+        size: int 每页大小
         event_name: str 事件名称（支持模糊搜索）
         event_process_status: str 事件处理状态（精确匹配）
         event_source: str 事件来源（精确匹配）
@@ -25,9 +25,9 @@ async def get_all_events(request):
     """
 
     page = int(request.json.get('page', 1))
-    page_size = int(request.json.get('page_size', 10))
-    offset = (page - 1) * page_size
-    limit = page_size
+    size = int(request.json.get('size', 10))
+    offset = (page - 1) * size
+    limit = size
 
     filters = {}
     if event_name := request.json.get("event_name"):
@@ -46,8 +46,8 @@ async def get_all_events(request):
         "events": events,
         "total": total,
         "page": page,
-        "page_size": page_size,
-        "total_pages": (total + page_size - 1) // page_size
+        "size": size,
+        "total_pages": (total + size - 1) // size
     })
 
 

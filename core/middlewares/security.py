@@ -1,11 +1,12 @@
 # coding=utf-8
-
-from sanic import Request, HTTPResponse
-from sanic.log import logger
+import os
 
 from libs.error_code.exception import CustomError
 from libs.security.authentication import authenticate
 from models import AuditLog
+from sanic import Request, HTTPResponse
+from sanic.log import logger
+
 from .base import BaseMiddleware
 from ..error_code import ErrorCode
 
@@ -14,17 +15,19 @@ class SecurityMiddleware(BaseMiddleware):
     """安全相关的控制"""
 
     async def before_request(self, request: Request) -> None:
-        # 判断请求URI是否需要身份验证
-        # todo: 上生产的时候需要删掉 /docs
-        for path in ["/v1/user/login", "/v1/user/mfa-auth", "/docs", "/docs/openapi.json"]:
-            if request.path == path:
-                return
-
-        await authenticate(request)
-
         # 简单判断参数合法性
         if 'multipart' not in request.content_type and request.json is None:
             raise CustomError(ErrorCode.InvalidJsonError)
+
+        # 判断请求URI是否需要身份验证
+        white_urls = ["/v1/user/login"]
+        if os.environ.get("RY_ENV") != 'PROD':
+            # 开发测试环境，放行docs文档页面路径
+            white_urls.extend(["/docs", "/docs/openapi.json"])
+        if request.path in white_urls:
+            return
+
+        await authenticate(request)
 
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
         """统一记录操作日志"""
