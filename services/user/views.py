@@ -1,12 +1,10 @@
 # coding=utf-8
-import traceback
 import uuid
 
 import pyotp
 from argon2.exceptions import VerificationError, InvalidHashError
 from sanic import Blueprint
-from sanic.log import logger
-from tortoise.exceptions import ValidationError, IntegrityError, FieldError, DoesNotExist
+from tortoise.exceptions import ValidationError, IntegrityError, DoesNotExist
 from websockets.legacy.server import HTTPResponse
 
 from core.error_code import ErrorCode
@@ -31,11 +29,12 @@ async def new_user(request):
     请求参数
         username: 账号名称
         password: 密码
-        phone: 电话号码
-        email: 邮箱
-        disabled: 是否禁用
-        mfa_enable: 是否启用MFA
-        mfa_key: MFA密钥
+        phone: 可选，电话号码
+        email: 可选，邮箱
+        disabled: 可选，是否禁用
+        mfa_enable: 可选，是否启用MFA
+        mfa_key: 可选，MFA密钥
+        role_names: 可选，角色名称列表，逗号分隔
     """
     try:
         mfa_enable = bool(request.json.get('mfa_enable', False)) or False
@@ -48,29 +47,16 @@ async def new_user(request):
             mfa_enable=mfa_enable,
             mfa_key=pyotp.random_base32(32) if mfa_enable else None
         )
-        logger.info(account.mfa_key)
-        logger.info(f"{request.client_ip} 添加账号 {account.username}.")
+        await account.fetch_related('roles')
+        if request.json.get("role_names"):
+            roles = await Role.filter(name__in=request.json.get("role_names")).all()
+            await account.roles.add(*roles)
         res = account.json
         if mfa_enable:
             res['mfa_uri'] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name='AIOE')
         return response_ok(res)
     except IntegrityError:
         raise CustomError(ErrorCode.AccountExists)
-
-
-@user_bp.post("/search")
-@requires_permission("user:r")
-async def query_user(request):
-    """
-    搜索用户
-
-    请求参数：
-        username: 用户名
-    """
-    user = await Account.filter(name=request.json.get("username"), deleted=False).first()
-    if not user:
-        raise CustomError(ErrorCode.AccountNotFound)
-    return response_ok(user.json)
 
 
 @user_bp.post("/list")
@@ -80,23 +66,29 @@ async def all_users(request):
     获取所有用户信息
 
     请求参数：
-        page: 分页的页码
-        size: 分页的大小
+        page: 可选，分页的页码，默认1
+        size: 可选，分页的大小，默认10
+        username: 可选，用户名，搜索时使用
     """
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 10))
     offset = (page - 1) * size
     limit = size
     # 分页查询Account，返回总数和数据
-    total = await Account.filter(deleted=False).count()
-    users = await Account.filter(deleted=False).offset(offset).limit(limit).values("id", "ctime", "utime", "username", "email", "phone", "disabled", "mfa_enable")
+    condition = {
+        "deleted": False
+    }
+    if request.json.get("username"):
+        condition["username"] = request.json.get("username")
+    total = await Account.filter(**condition).count()
+    users = await Account.filter(**condition).offset(offset).limit(limit).all().prefetch_related('roles')
 
     return response_ok({
         "total": total,
         "page": page,
         "size": size,
         "total_pages": (total + size - 1) // size,
-        "data": users
+        "data": [u.json for u in users]
     })
 
 
@@ -130,7 +122,6 @@ async def login(request):
             await account.save(update_fields=["password"])
         account.validate()
         resp = account.json
-        resp['roles'] = [role.name for role in account.roles]
         token_id = str(uuid.uuid4())
         token = token_encode(account.id, account.username, account.mfa_enable, token_id, ip=request.client_ip)
         resp['aioe-auth'] = token
@@ -151,7 +142,6 @@ async def login(request):
     except DoesNotExist:
         raise CustomError(ErrorCode.CredentialsError)
     except (VerificationError, InvalidHashError):
-        logger.warning(f"{request.client_ip} 使用 {username} 账号登录失败")
         await request.ctx.cache_client.increment(f"{username}_login_attempts", 1)
         await request.ctx.cache_client.increment(f"{client_ip}_login_attempts", 1)
         await request.ctx.cache_client.expire(f"{username}_login_attempts", 60 * 5)
@@ -218,12 +208,12 @@ async def mfa_auth(request):
 @user_bp.post("/update")
 async def update_user(request):
     """
-    修改用户个人信息（仅能修改自己）
+    在个人中心修改用户个人信息（仅能修改自己）
 
     请求参数：
-        email: 邮箱
-        phone: 电话
-        password: 密码
+        email: 可选，邮箱
+        phone: 可选，电话
+        password: 可选，密码
     """
     userid = request.ctx.session.get('sub')
     account = await Account.get(id=userid, deleted=False)
@@ -239,7 +229,6 @@ async def update_user(request):
 
     await account.save()
 
-    logger.info(f"{request.client_ip} 更新了账户信息 {account.id}.")
     return response_ok(account.json)
 
 
@@ -250,13 +239,12 @@ async def edit_user(request):
     修改任意用户信息（需要user:a权限）
 
     请求参数：
-        username: 用户名，必须
-        email: 邮箱，可选
-        phone: 手机号，可选
-        password: 密码，可选
-        mfa_enable: 是否启用二次认证，可选
-        disabled: 是否禁用，可选
-        roles: 角色id列表，可选
+        username: 必填，用户名
+        email: 可选，邮箱
+        phone: 可选，手机号
+        password: 可选，密码
+        mfa_enable: 可选，是否启用二次认证
+        disabled: 可选，是否禁用
     """
     try:
         user = await Account.get(username=request.json.get("username"), deleted=False)
@@ -267,7 +255,7 @@ async def edit_user(request):
         need_update = False
         for p in params:
             # 敏感属性不允许修改
-            if p in ['id', 'ctime', 'utime', 'deleted', 'name', 'mfa_key']:
+            if p in ['id', 'ctime', 'utime', 'deleted', 'name', 'mfa_key', 'roles']:
                 continue
             # 不能禁用自己
             if p == 'disabled' and request.ctx.session['sub'] == user.id:
@@ -329,7 +317,7 @@ async def assign_role_to_user(request):
 
     请求参数：
         username: 用户名
-        role_names: 角色ID，多个用英文逗号隔开
+        role_names: 角色名称，多个用英文逗号隔开
     """
     username = request.json.get('username')
     account = await Account.filter(username=username, deleted=False).first()

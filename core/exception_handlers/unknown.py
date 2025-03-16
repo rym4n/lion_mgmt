@@ -24,6 +24,8 @@ class UnknownExcHandler(BaseExcHandler):
             return response_fail(ErrorCode.NotFound)
         elif isinstance(exception, ValidationError):
             return response_fail(ErrorCode.ParameterError)
+        elif isinstance(exception, ValueError):
+            return response_fail(ErrorCode.ParameterError)
         elif isinstance(exception, IntegrityError):
             return response_fail(ErrorCode.DataAlreadyExists)
         elif isinstance(exception, FieldError):

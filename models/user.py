@@ -62,7 +62,8 @@ class Account(BaseModel):
             "phone": self.phone,
             "disabled": self.disabled,
             "oauth_id": self.oauth_id,
-            "mfa_enable": self.mfa_enable
+            "mfa_enable": self.mfa_enable,
+            "roles": [role.name for role in self.roles] if self.roles else []
         }
 
 

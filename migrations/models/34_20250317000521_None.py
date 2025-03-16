@@ -27,6 +27,29 @@ COMMENT ON COLUMN "account"."ctime" IS '创建时间';
 COMMENT ON COLUMN "account"."utime" IS '更新时间';
 COMMENT ON COLUMN "account"."deleted" IS '删除标识';
 COMMENT ON TABLE "account" IS '账号模型，包含以下属性：用户名、邮箱、手机号、密码、OAuth ID、是否禁用、角色';
+CREATE TABLE IF NOT EXISTS "approvement" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "title" VARCHAR(50) NOT NULL,
+    "content" TEXT NOT NULL,
+    "status" INT NOT NULL DEFAULT 0,
+    "expire_time" TIMESTAMPTZ,
+    "approvers" VARCHAR(255),
+    "processor_id" VARCHAR(36) REFERENCES "account" ("id") ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS "idx_approvement_title_2bd859" ON "approvement" ("title");
+COMMENT ON COLUMN "approvement"."ctime" IS '创建时间';
+COMMENT ON COLUMN "approvement"."utime" IS '更新时间';
+COMMENT ON COLUMN "approvement"."deleted" IS '删除标识';
+COMMENT ON COLUMN "approvement"."title" IS '审核标题';
+COMMENT ON COLUMN "approvement"."content" IS '审核描述内容';
+COMMENT ON COLUMN "approvement"."status" IS '审核状态，0代表待审核，1代表审核通过，2代表审核拒绝，3代表审核过期';
+COMMENT ON COLUMN "approvement"."expire_time" IS '审核过期时间';
+COMMENT ON COLUMN "approvement"."approvers" IS '审核人列表，多个用逗号分隔';
+COMMENT ON COLUMN "approvement"."processor_id" IS '实际审核处理人';
+COMMENT ON TABLE "approvement" IS '人工审核模型';
 CREATE TABLE IF NOT EXISTS "audit_log" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -38,7 +61,8 @@ CREATE TABLE IF NOT EXISTS "audit_log" (
     "result" VARCHAR(20) NOT NULL,
     "client_ip" VARCHAR(50) NOT NULL,
     "client_ua" VARCHAR(255) NOT NULL,
-    "uri" VARCHAR(255)
+    "uri" VARCHAR(255),
+    "request_data" JSONB
 );
 CREATE INDEX IF NOT EXISTS "idx_audit_log_usernam_b6341e" ON "audit_log" ("username");
 CREATE INDEX IF NOT EXISTS "idx_audit_log_module_a9ee07" ON "audit_log" ("module");
@@ -53,6 +77,7 @@ COMMENT ON COLUMN "audit_log"."result" IS '结果';
 COMMENT ON COLUMN "audit_log"."client_ip" IS '客户端IP';
 COMMENT ON COLUMN "audit_log"."client_ua" IS '客户端UA';
 COMMENT ON COLUMN "audit_log"."uri" IS '请求URL';
+COMMENT ON COLUMN "audit_log"."request_data" IS '请求数据';
 COMMENT ON TABLE "audit_log" IS '操作审计记录';
 CREATE TABLE IF NOT EXISTS "events" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
@@ -140,17 +165,18 @@ CREATE TABLE IF NOT EXISTS "variables" (
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted" BOOL NOT NULL DEFAULT False,
-    "name" VARCHAR(255) NOT NULL,
-    "type" VARCHAR(10) NOT NULL,
-    "value" VARCHAR(255) NOT NULL
+    "name" VARCHAR(255) NOT NULL UNIQUE,
+    "value" JSONB NOT NULL,
+    "updator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS "idx_variables_name_4779ca" ON "variables" ("name");
 COMMENT ON COLUMN "variables"."ctime" IS '创建时间';
 COMMENT ON COLUMN "variables"."utime" IS '更新时间';
 COMMENT ON COLUMN "variables"."deleted" IS '删除标识';
 COMMENT ON COLUMN "variables"."name" IS '变量名';
-COMMENT ON COLUMN "variables"."type" IS '变量类型';
 COMMENT ON COLUMN "variables"."value" IS '变量值';
-COMMENT ON TABLE "variables" IS '全局变量模型，包含以下属性：变量名、变量类型、变量值';
+COMMENT ON COLUMN "variables"."updator_id" IS '更新人';
+COMMENT ON TABLE "variables" IS '全局变量模型，包含以下属性：变量名、变量类型、变量值(必须是JSON格式）、更新人';
 CREATE TABLE IF NOT EXISTS "account_role" (
     "account_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
     "role_id" VARCHAR(36) NOT NULL REFERENCES "role" ("id") ON DELETE CASCADE

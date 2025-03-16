@@ -31,24 +31,8 @@ async def new_variable(request):
         raise CustomError(ErrorCode.ParameterError)
 
     account = await Account.filter(id=request.ctx.session['sub']).first()
-    var = await Variables.create(name=request.json["name"], value=json_var, updator=account)
+    var = await Variables.create(name=request.json["name"], value=value, updator=account)
     return response_ok(var.json)
-
-
-@var_bp.post("/search")
-@requires_permission("var:r")
-async def query_variable(request):
-    """
-    搜索全局变量（需要var:r权限）
-
-    请求参数：
-        keyword: 变量名 或 变量值（元素要完全匹配）
-    """
-    keyword = request.json.get("keyword")
-    if not keyword:
-        raise CustomError(ErrorCode.ParameterError)
-    all_var = await Variables.filter(Q(name__icontains=keyword) | Q(value__contains=[keyword])).all().prefetch_related("updator")
-    return response_ok([v.json for v in all_var])
 
 
 @var_bp.post("/list")
@@ -60,14 +44,21 @@ async def all_variables(request):
     请求参数：
         page: 页码
         size: 每页数量
+        keyword: 可选参数，变量名 或 变量值（元素要完全匹配）
     """
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 10))
     offset = (page - 1) * size
     limit = size
-    total = await Variables.all().count()
-    all_var = await Variables.all().prefetch_related("updator").offset(offset).limit(limit)
-    return response_ok({"total": total, "data": [v.json for v in all_var]})
+    condition = Q()
+    keyword = request.json.get("keyword")
+    if keyword:
+        condition = Q(name__icontains=keyword) | Q(value__contains=[keyword])
+    total = await Variables.filter(condition).count()
+    records = []
+    if total > 0:
+        records = await Variables.filter(condition).offset(offset).limit(limit).all().prefetch_related("updator")
+    return response_ok({"total": total, "data": [v.json for v in records]})
 
 
 @var_bp.post("/del")
