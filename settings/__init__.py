@@ -35,6 +35,8 @@ AUTHENTICATION_REFRESH_EXPIRATION = 60 * 60 * 8
 ENABLE_CORS: bool = os.environ.get("RY_CORS", True)
 CORS_SUPPORTS_CREDENTIALS: bool = os.environ.get("RY_CORS_CREDENTIAL", True)
 
+DEBUG = os.environ.get("RY_DEBUG", False)
+
 # 日志配置
 BASE_LOGGING = {
     'version': 1,
