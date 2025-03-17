@@ -21,7 +21,7 @@ class SecurityMiddleware(BaseMiddleware):
 
         # 判断请求URI是否需要身份验证
         white_urls = ["/v1/user/login"]
-        if os.environ.get("RY_ENV") != 'PROD':
+        if request.app.debug:
             # 开发测试环境，放行docs文档页面路径
             white_urls.extend(["/docs", "/docs/openapi.json"])
         if request.path in white_urls:
