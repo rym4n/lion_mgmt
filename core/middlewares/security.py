@@ -1,12 +1,12 @@
 # coding=utf-8
 import os
 
-from libs.error_code.exception import CustomError
-from libs.security.authentication import authenticate
-from models import AuditLog
 from sanic import Request, HTTPResponse
 from sanic.log import logger
 
+from libs.error_code.exception import CustomError
+from libs.security.authentication import authenticate
+from models import AuditLog
 from .base import BaseMiddleware
 from ..error_code import ErrorCode
 
@@ -16,7 +16,7 @@ class SecurityMiddleware(BaseMiddleware):
 
     async def before_request(self, request: Request) -> None:
         # 简单判断参数合法性
-        if 'multipart' not in request.content_type and request.json is None:
+        if 'multipart' not in request.content_type and request.method == 'POST' and request.json is None:
             raise CustomError(ErrorCode.InvalidJsonError)
 
         # 判断请求URI是否需要身份验证
