@@ -24,10 +24,9 @@ class SecurityMiddleware(BaseMiddleware):
         if os.environ.get("RY_ENV") == 'TEST':
             # 开发测试环境，放行docs文档页面路径
             white_urls.extend(["/docs", "/docs/openapi.json"])
-            logger.info(white_urls)
 
         if request.path not in white_urls:
-            logger.info(request.path)
+            logger.info(f"{request.path} 需要身份验证")
             await authenticate(request)
 
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
