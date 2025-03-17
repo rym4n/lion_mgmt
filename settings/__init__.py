@@ -11,7 +11,7 @@ LOG_PATH = os.path.join(BASE_DIR, 'logs')
 if not os.path.exists(LOG_PATH):
     os.makedirs(LOG_PATH)
 
-if os.environ.get("RY_ENV") != 'PROD':
+if os.environ.get("RY_ENV") == 'DEV':
     from dotenv import load_dotenv
 
     load_dotenv(os.path.join(BASE_DIR, 'settings/.env'))
@@ -34,8 +34,6 @@ AUTHENTICATION_REFRESH_EXPIRATION = 60 * 60 * 8
 # 跨域相关
 ENABLE_CORS: bool = os.environ.get("RY_CORS", True)
 CORS_SUPPORTS_CREDENTIALS: bool = os.environ.get("RY_CORS_CREDENTIAL", True)
-
-DEBUG = os.environ.get("RY_DEBUG", False)
 
 # 日志配置
 BASE_LOGGING = {
