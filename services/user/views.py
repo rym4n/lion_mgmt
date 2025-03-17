@@ -253,6 +253,7 @@ async def edit_user(request):
 
         params = request.json
         need_update = False
+        mfa_uri = None
         for p in params:
             # 敏感属性不允许修改
             if p in ['id', 'ctime', 'utime', 'deleted', 'name', 'mfa_key', 'roles']:
@@ -263,12 +264,16 @@ async def edit_user(request):
             need_update = True
             if p == 'password':
                 user.password = password_hasher.hash(validate_password(request.json.get("password") or ''))
+            elif p == 'mfa_enable':
+                mfa_uri = pyotp.totp.TOTP(user.mfa_key).provisioning_uri(name=user.username, issuer_name='AIOE')
             else:
                 if hasattr(user, p):
                     setattr(user, p, params[p])
         if need_update:
             await user.save()
-        return response_ok(user.json)
+        res = user.json
+        res['mfa_uri'] = mfa_uri
+        return response_ok(res)
     except (ValidationError, IntegrityError):
         raise CustomError(ErrorCode.ParameterError)
 

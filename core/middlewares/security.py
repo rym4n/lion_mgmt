@@ -1,12 +1,12 @@
 # coding=utf-8
 import os
 
-from libs.error_code.exception import CustomError
-from libs.security.authentication import authenticate
-from models import AuditLog
 from sanic import Request, HTTPResponse
 from sanic.log import logger
 
+from libs.error_code.exception import CustomError
+from libs.security.authentication import authenticate
+from models import AuditLog
 from .base import BaseMiddleware
 from ..error_code import ErrorCode
 
@@ -16,18 +16,18 @@ class SecurityMiddleware(BaseMiddleware):
 
     async def before_request(self, request: Request) -> None:
         # 简单判断参数合法性
-        if 'multipart' not in request.content_type and request.json is None:
+        if 'multipart' not in request.content_type and request.method == 'POST' and request.json is None:
             raise CustomError(ErrorCode.InvalidJsonError)
 
         # 判断请求URI是否需要身份验证
         white_urls = ["/v1/user/login"]
-        if os.environ.get("RY_ENV") != 'PROD':
+        if os.environ.get("RY_ENV") == 'TEST':
             # 开发测试环境，放行docs文档页面路径
             white_urls.extend(["/docs", "/docs/openapi.json"])
-        if request.path in white_urls:
-            return
 
-        await authenticate(request)
+        if request.path not in white_urls:
+            logger.info(f"{request.path} 需要身份验证")
+            await authenticate(request)
 
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
         """统一记录操作日志"""
