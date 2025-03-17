@@ -4,6 +4,7 @@ from sanic import Blueprint
 from tortoise.transactions import in_transaction
 
 from core.response import response_ok
+from libs.security.authorization import requires_permission
 from models import Events
 
 event_bp = Blueprint('event', url_prefix='v1/event')
@@ -11,9 +12,10 @@ _all__ = ["event_bp"]
 
 
 @event_bp.post('/list')
+@requires_permission('event:r')
 async def get_all_events(request):
     """
-    获取指定页数的事件（支持条件筛选）
+    获取指定页数的事件（支持条件筛选）(需要事件查询权限)
 
     请求参数：
         page: int 页数
@@ -52,9 +54,10 @@ async def get_all_events(request):
 
 
 @event_bp.post('/create')
+@requires_permission('event:c')
 async def create_event(request):
     """
-    创建事件
+    创建事件（需要事件创建权限）
 
     请求参数：
         event_name: str 事件名称

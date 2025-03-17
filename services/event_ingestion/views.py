@@ -2,7 +2,6 @@
 
 import aiofiles
 import yaml
-from confluent_kafka.admin import AdminClient, NewTopic
 from sanic import Blueprint
 from sanic.log import logger
 from tortoise.transactions import in_transaction
@@ -34,29 +33,6 @@ transforms_config = {
     "Grok": '''  parsed = parse_regex!(.message, r'({})')
     . = merge(., parsed)'''
 }
-
-
-async def generate_vector_config(output_path, bootstrap_servers, sources, topics, transforms_type, source_id, topic,
-                                 grok_patterns=None):
-    TOPIC_NAME = topics[0]
-    for KAFKA_BOOTSTRAP_SERVERS in bootstrap_servers:
-        admin_client = AdminClient({"bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS})
-
-        topics_all = admin_client.list_topics(timeout=5).topics.keys()
-        if TOPIC_NAME not in topics_all:
-            create_kafka_topic(TOPIC_NAME, admin_client=admin_client)
-
-    await build_kafka_file_configuration_file(output_path, bootstrap_servers, sources, transforms_type, grok_patterns,
-                                              source_id, topic)
-
-
-# 创建kafka主题
-def create_kafka_topic(topic_name, admin_client, num_partitions=1, replication_factor=1):
-    new_topic = NewTopic(topic_name, num_partitions, replication_factor)
-    future = admin_client.create_topics([new_topic])
-
-    for topic, f in future.items():
-        f.result()
 
 
 # 生成配置文件
@@ -165,11 +141,11 @@ async def event_ingestion(request):
             "bootstrap_servers": ",".join(event_source_address),
             "group_id": kafka_group_id,
             "topics": kafka_topic
-        }
-        }
-        await generate_vector_config(output_path=output_path, bootstrap_servers=bootstrap_servers, sources=sources,
-                                     topics=kafka_topic, transforms_type=transforms_type, source_id=event_name,
-                                     grok_patterns=transforms_config, topic=topic)
+        }}
+        await build_kafka_file_configuration_file(output_path=output_path, bootstrap_servers=bootstrap_servers,
+                                                  sources=sources,
+                                                  transforms_type=transforms_type, source_id=event_name,
+                                                  grok_patterns=transforms_config, topic=topic)
     else:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -325,4 +301,4 @@ async def get_event_ingestion_detail(request):
         content = await f.read()
         data = yaml.safe_load(content)
 
-    return response_ok({"config_data:": data, "event":event.json})
+    return response_ok({"config_data:": data, "event": event.json})

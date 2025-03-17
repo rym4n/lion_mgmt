@@ -9,6 +9,7 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.security.authorization import requires_permission
 from models import Role, Account
 
 role_bp = Blueprint('role', url_prefix='v1/role')
@@ -16,9 +17,10 @@ _all__ = ["role_bp"]
 
 
 @role_bp.post("/add")
+@requires_permission('event:c')
 async def add_role(request):
     """
-    新建角色
+    新建角色(需要角色创建权限)
 
     请求参数：
         name:角色名
@@ -43,9 +45,10 @@ async def add_role(request):
 
 
 @role_bp.post("/all")
+@requires_permission('event:r')
 async def find_all(request):
     """
-    查找全部角色
+    查找全部角色  (需要角色查看权限)
 
     请求参数：
         page:页码
@@ -70,9 +73,10 @@ async def find_all(request):
 
 
 @role_bp.post("/details")
+@requires_permission('event:r')
 async def find_role(request):
     """
-    查找具体角色信息
+    查找具体角色信息    (需要角色查看权限)
 
     请求参数：
         role_id：角色id
@@ -88,9 +92,10 @@ async def find_role(request):
 
 
 @role_bp.post("/delete")
+@requires_permission('event:d')
 async def delete_role(request):
     """
-    删除指定角色
+    删除指定角色    (需要角色删除权限)
 
     请求参数：
         role_id：角色id
@@ -111,9 +116,10 @@ async def delete_role(request):
 
 
 @role_bp.post("/update")
+@requires_permission('event:u')
 async def update_role(request):
     """
-    修改角色内容
+    修改角色内容    (需要角色修改权限)
 
     请求参数：
         role_id：角色id

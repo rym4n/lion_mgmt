@@ -18,9 +18,10 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # 确保目录存在
 
 
 @system_bp.post("/upload")
+@requires_permission("system:u,c")
 async def upload_image(request):
     """
-    保存系统定制配置（如果 system_version 存在则更新，否则创建）
+    保存系统定制配置（如果 system_version 存在则更新，否则创建）  需要系统配置新增和修改权限
 
     请求参数：
         copyright: 版权,
@@ -96,9 +97,10 @@ async def upload_image(request):
 
 
 @system_bp.post("/latest")
+@requires_permission("system:r")
 async def get_latest_config(request):
     """
-    获取最新的系统定制配置
+    获取最新的系统定制配置   需要系统配置查看权限
 
     无请求参数，直接调用，返回最新的系统定制配置
     """
@@ -116,9 +118,10 @@ async def get_latest_config(request):
 
 
 @system_bp.post("/status/all")
+@requires_permission("system:r")
 async def get_system_status(request):
     """
-    获取全部系统状况
+    获取全部系统状况    需要系统配置查看权限
 
     无需参数直接请求则返回全部系统状况数据
     """
@@ -127,9 +130,10 @@ async def get_system_status(request):
 
 
 @system_bp.post("/status/add")
+@requires_permission("system:c")
 async def add_system(request):
     """
-    添加新的系统信息
+    添加新的系统信息    需要系统配置新增权限
 
     请求参数：
         systemname：系统名
@@ -151,9 +155,10 @@ async def add_system(request):
 
 
 @system_bp.post("/status/update")
+@requires_permission("system:u")
 async def up_system(request):
     """
-    添加新的系统信息
+    添加新的系统信息    需要系统配置修改权限
 
     请求参数：
         system_id：系统id
@@ -187,9 +192,10 @@ async def up_system(request):
 
 
 @system_bp.post("/status/delete")
+@requires_permission("system:d")
 async def del_system(request):
     """
-    删除具体的系统
+    删除具体的系统    需要系统配置删除权限
 
     请求参数：
         system_id：系统id
