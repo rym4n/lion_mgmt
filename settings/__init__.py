@@ -133,3 +133,10 @@ CACHE = {
         'pool_max_size': 50
     }
 }
+
+# 事件接入项配置信息
+configuration_files_path = r"D:\work\vector\test_data\\"       # 事件接入项配置文件路径
+event_vector_sinks_bootstrap_servers = ["10.3.0.38:10092"]   # 事件接入中sinks的kafka地址
+event_vector_sinks_topic_name = "kafka_sinks_test"           # 事件接入中sinks的kafka topic名称
+
+
