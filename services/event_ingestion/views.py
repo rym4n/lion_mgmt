@@ -1,7 +1,9 @@
 # coding=utf-8
+import asyncio
 
 import aiofiles
 import yaml
+from aiokafka import AIOKafkaConsumer
 from sanic import Blueprint
 from sanic.log import logger
 from tortoise.transactions import in_transaction
@@ -302,3 +304,34 @@ async def get_event_ingestion_detail(request):
         data = yaml.safe_load(content)
 
     return response_ok({"config_data:": data, "event": event.json})
+
+
+@event_ingestion_bp.post('/kafka/sample')
+@requires_permission('event:c')
+async def get_event_ingestion_sample(request):
+    """
+    获取事件接入样例(需要事件创建权限)
+    请求参数:
+         topic_name: 主题名称 (str)
+         kafka_bootstrap_servers: kafka地址 (list)
+    """
+    topic_name = request.json.get('topic_name')
+    kafka_bootstrap_servers = request.json.get('kafka_bootstrap_servers')
+    consumer = AIOKafkaConsumer(
+        topic_name,
+        bootstrap_servers=kafka_bootstrap_servers,
+        auto_offset_reset="earliest"
+    )
+    await consumer.start()
+    try:
+        msg = await asyncio.wait_for(consume_message(consumer), timeout=2.0)
+        return response_ok(msg.value.decode("utf-8"))
+    except asyncio.TimeoutError:
+        return response_ok("Timeout: No message received within 2 seconds")
+    finally:
+        await consumer.stop()
+
+
+async def consume_message(consumer):
+    async for msg in consumer:
+        return msg
