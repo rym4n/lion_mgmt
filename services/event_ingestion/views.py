@@ -1,7 +1,11 @@
 # coding=utf-8
+import asyncio
+import socket
 
 import aiofiles
+import select
 import yaml
+from aiokafka import AIOKafkaConsumer
 from sanic import Blueprint
 from sanic.log import logger
 from tortoise.transactions import in_transaction
@@ -302,3 +306,98 @@ async def get_event_ingestion_detail(request):
         data = yaml.safe_load(content)
 
     return response_ok({"config_data:": data, "event": event.json})
+
+
+@event_ingestion_bp.post('/kafka/sample')
+@requires_permission('event:c')
+async def get_event_ingestion_kafka_sample(request):
+    """
+    获取事件接入kafka样例(需要事件创建权限)
+    请求参数:
+         topic_name: 主题名称 (str)
+         kafka_bootstrap_servers: kafka地址 (list)
+    """
+    topic_name = request.json.get('topic_name')
+    kafka_bootstrap_servers = request.json.get('kafka_bootstrap_servers')
+    consumer = AIOKafkaConsumer(
+        topic_name,
+        bootstrap_servers=kafka_bootstrap_servers,
+        auto_offset_reset="earliest"
+    )
+    await consumer.start()
+    try:
+        msg = await asyncio.wait_for(consume_message(consumer), timeout=2.0)
+        return response_ok(msg.value.decode("utf-8"))
+    except asyncio.TimeoutError:
+        return response_ok("Timeout: No message received within 2 seconds")
+    finally:
+        await consumer.stop()
+
+async def consume_message(consumer):
+    async for msg in consumer:
+        return msg
+
+
+@event_ingestion_bp.post('/syslog/sample')
+@requires_permission('event:c')
+async def get_event_ingestion_syslog_sample(request):
+    """
+    获取事件接入syslog样例(需要事件创建权限)
+    请求参数:
+         host: 地址 (str)
+         port: 端口 (int)
+         communication_type: 通信类型 (str)
+    """
+    logs = {}
+    communication_type = request.json.get('communication_type')
+    host = request.json.get('host')
+    port = request.json.get('port')
+    sample_size = 1
+    timeout = 2
+    if communication_type.lower() == "udp":
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((host, port))
+        sock.setblocking(False)
+    elif communication_type.lower() == "tcp":
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+        sock.listen(5)
+        sock.setblocking(False)
+        connections = []
+
+    try:
+        while len(logs) < sample_size:
+            if communication_type.lower() == "udp":
+                ready, _, _ = select.select([sock], [], [], timeout)
+                if not ready:
+                    break
+                data, addr = sock.recvfrom(1024)
+                log_message = data.decode("utf-8", errors="ignore")
+                logs["data"]=log_message
+            elif communication_type.lower() == "tcp":
+                readable, _, _ = select.select([sock] + connections, [], [], timeout)
+                if not readable:
+                    break
+
+                for s in readable:
+                    if s is sock:  # 有新的连接
+                        conn, addr = sock.accept()
+                        conn.setblocking(False)
+                        connections.append(conn)
+                    else:
+                        data = s.recv(1024)
+                        if not data:  # 连接关闭
+                            connections.remove(s)
+                            s.close()
+                        else:
+                            log_message = data.decode("utf-8", errors="ignore")
+                            logs["data"] = log_message
+    finally:
+        sock.close()
+        if communication_type.lower() == "tcp":
+            for conn in connections:
+                conn.close()
+    if logs == {}:
+        logs["data"]="No message received within 2 seconds"
+    return response_ok(logs)
