@@ -67,7 +67,8 @@ async def create_event(request):
         owner: list 负责人
         created_id: str 创建人ID
         event_summart: str 事件概要
-        log_data: str 日志数据
+        event_ingestion_id: str 事件接入id
+        log_data: dict 日志数据
     """
     event_name = request.json.get("event_name")
     event_process_status = request.json.get("event_process_status")
@@ -76,11 +77,12 @@ async def create_event(request):
     owner = request.json.get("owner")
     created_id = request.json.get("created_id")
     event_summary = request.json.get("event_summary")
+    event_ingestion_id = request.json.get("event_ingestion_id")
     log_data = request.json.get("log_data")
 
     async with in_transaction():
         role = await Events.create(event_name=event_name, event_process_status=event_process_status,
                                    event_source=event_source, event_level=event_level, owner=owner,
-                                   created_id=created_id, event_summary=event_summary, log_data=log_data)
+                                   created_id=created_id, event_summary=event_summary, event_ingestion_id=event_ingestion_id,log_data=log_data)
 
     return response_ok(role.json)

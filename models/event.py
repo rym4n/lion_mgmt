@@ -20,6 +20,7 @@ class Events(BaseModel):
     created_id: str = fields.CharField(max_length=36, description="创建人ID，关联用户表")
     event_summary: str = fields.TextField(null=True, description="事件概要")
     log_data: str = fields.TextField(default=dict, description="日志数据")
+    event_ingestion_id: str = fields.CharField(max_length=255, description="事件接入id，管理事件接入表")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -37,7 +38,8 @@ class Events(BaseModel):
             "owner": self.owner,
             "created_id": self.created_id,
             "event_summary": self.event_summary,
-            "log_data": self.log_data
+            "log_data": self.log_data,
+            "event_ingestion_id": self.event_ingestion_id
         }
 
     class Meta:
