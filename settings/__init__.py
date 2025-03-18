@@ -11,7 +11,7 @@ LOG_PATH = os.path.join(BASE_DIR, 'logs')
 if not os.path.exists(LOG_PATH):
     os.makedirs(LOG_PATH)
 
-if os.environ.get("RY_ENV") == 'DEV':
+if os.environ.get("RY_ENV") != 'PROD':
     from dotenv import load_dotenv
 
     load_dotenv(os.path.join(BASE_DIR, 'settings/.env'))
