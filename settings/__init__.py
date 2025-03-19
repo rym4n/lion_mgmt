@@ -7,9 +7,11 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 日志文件路径
 LOG_PATH = os.path.join(BASE_DIR, 'logs')
+os.makedirs(LOG_PATH, exist_ok=True)
 
-if not os.path.exists(LOG_PATH):
-    os.makedirs(LOG_PATH)
+# 文件上传的保存路径
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 if os.environ.get("RY_ENV") != 'PROD':
     from dotenv import load_dotenv
@@ -30,6 +32,11 @@ SESSION_ENCODING_ALGORITHM = 'HS256'
 MAX_CHALLENGE_ATTEMPTS = 3
 AUTHENTICATION_SESSION_EXPIRATION = 60 * 30
 AUTHENTICATION_REFRESH_EXPIRATION = 60 * 60 * 8
+
+# 健康检查相关
+HEALTH = True
+HEALTH_ENDPOINT = True
+HEALTH_URL_PREFIX = '/health'
 
 # 跨域相关
 ENABLE_CORS: bool = os.environ.get("RY_CORS", True)
@@ -135,8 +142,6 @@ CACHE = {
 }
 
 # 事件接入项配置信息
-configuration_files_path = os.environ.get('CONFIGURATION_FILES_PATH')     # 事件接入项配置文件路径
-event_vector_sinks_bootstrap_servers = os.environ.get('EVENT_VECTOR_SINKS_BOOTSTRAP_SERVERS')   # 事件接入中sinks的kafka地址
-event_vector_sinks_topic_name = os.environ.get('EVENT_VECTOR_SINKS_TOPIC_NAME')          # 事件接入中sinks的kafka topic名称
-
-
+configuration_files_path = os.environ.get('CONFIGURATION_FILES_PATH')  # 事件接入项配置文件路径
+event_vector_sinks_bootstrap_servers = os.environ.get('EVENT_VECTOR_SINKS_BOOTSTRAP_SERVERS')  # 事件接入中sinks的kafka地址
+event_vector_sinks_topic_name = os.environ.get('EVENT_VECTOR_SINKS_TOPIC_NAME')  # 事件接入中sinks的kafka topic名称

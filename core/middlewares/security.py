@@ -20,7 +20,7 @@ class SecurityMiddleware(BaseMiddleware):
             raise CustomError(ErrorCode.InvalidJsonError)
 
         # 判断请求URI是否需要身份验证
-        white_urls = ["/v1/user/login"]
+        white_urls = ["/v1/user/login", "/health"]
         if os.environ.get("RY_ENV") == 'TEST':
             # 开发测试环境，放行docs文档页面路径
             white_urls.extend(["/docs", "/docs/openapi.json"])
