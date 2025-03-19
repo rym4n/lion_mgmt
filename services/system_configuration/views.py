@@ -9,12 +9,10 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import SystemCustomConfiguration, SystemStatus, AuditLog
+from settings import UPLOAD_FOLDER
 
 system_bp = Blueprint('system', url_prefix='v1/system')
 _all__ = ["system_bp"]
-
-UPLOAD_FOLDER = "uploads"  # 本地存储目录
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # 确保目录存在
 
 
 @system_bp.post("/upload")

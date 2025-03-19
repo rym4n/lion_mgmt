@@ -133,3 +133,5 @@ dmypy.json
 
 # log
 logs/
+
+uploads/
