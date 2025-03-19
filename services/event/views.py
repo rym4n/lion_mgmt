@@ -66,9 +66,9 @@ async def create_event(request):
         event_level: str 事件级别
         owner: list 负责人
         created_id: str 创建人ID
-        event_summart: str 事件概要
+        event_summary: str 事件概要
         event_ingestion_id: str 事件接入id
-        log_data: dict 日志数据
+        log_data: s 日志数据
     """
     event_name = request.json.get("event_name")
     event_process_status = request.json.get("event_process_status")

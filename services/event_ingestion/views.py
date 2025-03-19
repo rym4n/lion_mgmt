@@ -1,7 +1,9 @@
 # coding=utf-8
 import asyncio
+import os
 import socket
 
+import aiofile
 import aiofiles
 import select
 import yaml
@@ -15,10 +17,13 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models.event import EventsIngestion
-from settings import configuration_files_path, event_vector_sinks_topic_name, event_vector_sinks_bootstrap_servers
+from settings import event_vector_sinks_bootstrap_servers
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='v1/event/ingestion')
 _all__ = ["event_ingestion_bp"]
+
+UPLOAD_FOLDER = "vector_config_files"  # 本地存储目录
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # 确保目录存在
 
 # transforms配置
 transforms_config = {
@@ -62,14 +67,14 @@ async def build_kafka_file_configuration_file(output_path, bootstrap_servers, so
                 "encoding": {
                     "codec": "json"
                 },
-                "bootstrap_servers": ",".join(bootstrap_servers),
+                "bootstrap_servers": bootstrap_servers,
                 "topic": topic
             }
         }
     }
     yaml_str = yaml.dump(config, default_flow_style=False, allow_unicode=True)
 
-    async with aiofiles.open(output_path, mode='w', encoding='utf-8') as file:
+    async with aiofile.AIOFile(output_path, mode='w', encoding='utf-8') as file:
         await file.write(yaml_str)
 
 
@@ -92,7 +97,7 @@ async def event_ingestion(request):
     """
     创建新的事件接入(需要事件创建权限)
     请求参数：
-        event_name: 事件名称 (str)
+        event_name: 事件名称 (str) 禁止填写中文
         event_describe: 事件描述 (str)
         event_source_type: 事件来源类型 (str) 目前支持syslog、kafka
         event_source_address: 事件来源地址 (list)
@@ -121,14 +126,14 @@ async def event_ingestion(request):
     client_ip = request.client_ip
 
     if enabled_status == 0:
-        output_path = configuration_files_path + event_name + ".yamlunenabled"  # 临时文件后缀名改为.yamlunenabled
+        output_path = os.path.join(UPLOAD_FOLDER, event_name + ".yamlunenabled")  # 临时文件后缀名改为.yamlunenabled
     elif enabled_status == 1:
-        output_path = configuration_files_path + event_name + ".yaml"  # 正式文件地址.yaml
+        output_path = os.path.join(UPLOAD_FOLDER, event_name + ".yaml")  # 正式文件地址.yaml
     else:
         raise CustomError(ErrorCode.ParameterError)
 
-    bootstrap_servers = event_vector_sinks_bootstrap_servers  # sinks的kafka地址从配置文件中读取
-    topic = event_vector_sinks_topic_name  # sinks的kafka主题从配置文件中读取
+    bootstrap_servers = "lion-kafka:9092"
+    topic = event_name
 
     if event_source_type == "syslog":
         sources = {event_name: {
@@ -248,7 +253,7 @@ async def update_event_ingestion(request):
     enabled_status = data.get('enabled_status')
     event = await EventsIngestion.get(id=event_id)
 
-    async with aiofiles.open(event.file_path, 'r', encoding='utf-8') as f:
+    async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
         content = await f.read()
         data = yaml.safe_load(content)
 
@@ -263,7 +268,7 @@ async def update_event_ingestion(request):
     else:
         data["transforms"][f"{event.event_ingestion_name}_transforms"]["source"] = transforms_config[transforms_type]
 
-    async with aiofiles.open(event.file_path, 'w', encoding='utf-8') as f:
+    async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
         await f.write(yaml_str)
 
@@ -301,7 +306,7 @@ async def get_event_ingestion_detail(request):
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
-    async with aiofiles.open(event.file_path, 'r', encoding='utf-8') as f:
+    async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
         content = await f.read()
         data = yaml.safe_load(content)
 

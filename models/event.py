@@ -51,7 +51,7 @@ class EventsIngestion(BaseModel):
     事件接入列表
     """
 
-    event_ingestion_name: str = fields.CharField(max_length=255, null=True, description="事件接入名称")
+    event_ingestion_name: str = fields.CharField(max_length=255, null=True, unique=True, description="事件接入名称")
     event_ingestion_describe: str = fields.CharField(max_length=255, null=True, description="事件接入描述")
     event_source_type: str = fields.CharField(max_length=255, null=True, description="事件来源类型")
     transforms_type: str = fields.CharField(max_length=255, null=True, description="转换类型")
