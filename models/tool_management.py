@@ -5,14 +5,14 @@ from tortoise import fields
 from models import BaseModel
 
 
-class ToolVersionNumber(BaseModel):
+class ToolAction(BaseModel):
     """
-    工具版本生成序列号管理表
+    工具动作管理表
     """
 
     tool_name: str = fields.CharField(max_length=255, null=True, description="工具名称")
-    upload_time: str = fields.CharField(max_length=50, null=True, description="上传时间")
-    number_of_uploads: int = fields.IntField(null=True, description="上传次数")
+    version_number: str = fields.CharField(max_length=50, null=True, description="版本号")
+    action: list[str] = fields.JSONField(null=True, description="动作")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -24,12 +24,12 @@ class ToolVersionNumber(BaseModel):
             "ctime": str(self.ctime),
             "utime": str(self.utime),
             "tool_name": self.tool_name,
-            "upload_time": self.upload_time,
-            "number_of_uploads": self.number_of_uploads
+            "version_number": self.version_number,
+            "action": self.action
         }
 
     class Meta:
-        table = "tool_version_number"
+        table = "tool_action"
 
 
 class Tool(BaseModel):
