@@ -18,7 +18,8 @@ jobs:
       commands: |
         apt update -y && apt install build-essential -y
         pip3 install -U nuitka
-        nuitka --follow-imports server.py
+        BASE_DIR=@project_path@
+        (cd "$BASE_DIR" && nuitka --follow-imports server.py)
     useTTY: true
     condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
   - !BuildImageStep
@@ -31,6 +32,7 @@ jobs:
   triggers:
   - !BranchUpdateTrigger
     branches: master
+    paths: .version
     projects: lion_mgmt
   retryCondition: never
   maxRetries: 3
