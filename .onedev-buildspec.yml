@@ -1,4 +1,4 @@
-version: 37
+version: 38
 jobs:
 - name: build_image
   jobExecutor: docker
@@ -15,7 +15,7 @@ jobs:
     buildPath: '@project_path@'
     dockerfile: '@project_path@/Dockerfile'
     output: !RegistryOutput
-      tags: dev.xy14qg.top/lion_mgmt/lion_mgmt:latest
+      tags: registry:5000/lion_mgmt:latest
     condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
   triggers:
   - !BranchUpdateTrigger
