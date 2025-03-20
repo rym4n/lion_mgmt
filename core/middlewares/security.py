@@ -42,4 +42,4 @@ class SecurityMiddleware(BaseMiddleware):
                                   uri=request.path,
                                   client_ip=request.client_ip,
                                   client_ua=request.headers.get('User-Agent', ''),
-                                  request_data=request.json)
+                                  request_data=request.json if 'multipart' not in request.content_type else None)

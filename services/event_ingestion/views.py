@@ -17,7 +17,6 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models.event import EventsIngestion
-from settings import event_vector_sinks_bootstrap_servers
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='v1/event/ingestion')
 _all__ = ["event_ingestion_bp"]
