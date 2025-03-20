@@ -16,6 +16,10 @@ jobs:
     dockerfile: '@project_path@/Dockerfile'
     output: !RegistryOutput
       tags: 127.0.0.1:40085/lion_mgmt/lion_mgmt:latest
+    registryLogins:
+    - registryUrl: 127.0.0.1:40085
+      userName: bdmin
+      passwordSecret: dh
     condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
   triggers:
   - !BranchUpdateTrigger
