@@ -13,7 +13,7 @@ os.makedirs(LOG_PATH, exist_ok=True)
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-if os.environ.get("RY_ENV") != 'PROD':
+if os.environ.get("RY_ENV") == 'DEV':
     from dotenv import load_dotenv
 
     load_dotenv(os.path.join(BASE_DIR, 'settings/.env'))
