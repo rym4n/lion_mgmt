@@ -15,11 +15,7 @@ jobs:
     buildPath: '@project_path@'
     dockerfile: '@project_path@/Dockerfile'
     output: !RegistryOutput
-      tags: xy14qg/lion_mgmt:latest
-    registryLogins:
-    - registryUrl: hub.docker.com
-      userName: xy14qg
-      passwordSecret: dh
+      tags: 127.0.0.1:40085/lion_mgmt/lion_mgmt:latest
     condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
   triggers:
   - !BranchUpdateTrigger
