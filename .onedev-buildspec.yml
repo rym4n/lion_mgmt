@@ -15,7 +15,10 @@ jobs:
     runInContainer: true
     image: python:3.11-slim
     interpreter: !DefaultInterpreter
-      commands: "apt update -y && apt install build-essential -y\npip3 install -U nuitka\nBASE_DIR=@project_path@\nfind \"$BASE_DIR\" -mindepth 2 -type f -name \"*.py\" | while read file; do\n    echo \"正在编译: $file\"    \n    dir=$(dirname \"$file\")\n    nuitka --module \"$file\" --output-dir=\"$dir\"    \n    if [ $? -eq 0 ]; then\n        echo \"编译成功，删除原始文件: $file\"\n        rm \"$file\"\n    else\n        echo \"编译失败，保留原始文件: $file\"\n    fi\ndone\n"
+      commands: |
+        apt update -y && apt install build-essential -y
+        pip3 install -U nuitka
+        nuitka --follow-imports server.py
     useTTY: true
     condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
   - !BuildImageStep
