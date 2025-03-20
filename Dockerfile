@@ -1,12 +1,12 @@
-FROM sanicframework/sanic:24.12-py3.11
+FROM python:3.11-slim
 
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y \
     gcc \
     libc-dev \
     python3-dev \
     make \
-    libaio \
-    libaio-dev
+    libaio-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN pip install poetry==2.1.1
 
