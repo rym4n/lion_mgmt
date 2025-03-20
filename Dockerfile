@@ -4,7 +4,8 @@ RUN apk add --no-cache \
     gcc \
     libc-dev \
     python3-dev \
-    make
+    make \
+    libaio-dev
 
 RUN pip install poetry==2.1.1
 
