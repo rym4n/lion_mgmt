@@ -1,11 +1,10 @@
 FROM sanicframework/sanic:24.12-py3.11
 
-RUN apt-get update && apt-get install -y \
+RUN apk add --no-cache \
     gcc \
     libc-dev \
     python3-dev \
-    make \
-    && rm -rf /var/lib/apt/lists/*
+    make
 
 RUN pip install poetry==2.1.1
 
