@@ -11,9 +11,8 @@ class Events(BaseModel):
     事件列表
     """
 
-    event_name: str = fields.CharField(max_length=255, null=True, description="事件名称")
-    event_process_status: str = fields.CharField(max_length=50, null=True,
-                                                 description="事件处理状态（如 ASSIGNED, RESOLVED）")
+    event_name: str = fields.CharField(max_length=255, unique=True, description="事件名称")
+    event_process_status: str = fields.CharField(max_length=50, description="事件处理状态（如 ASSIGNED, RESOLVED）")
     event_source: str = fields.CharField(max_length=255, null=True, description="事件来源")
     event_level: str = fields.CharField(max_length=50, description="事件等级")
     owner: List[Dict[str, Any]] = fields.JSONField(default=list, description="负责人（包括角色和用户）")
