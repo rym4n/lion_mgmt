@@ -243,13 +243,13 @@ async def update_event_ingestion(request):
     """
     data = request.json  # 只解析一次
     event_id = data.get('id')
-    event_describe = data.get('event_describe')
+    event_describe = data.get('event_describe', None)
     event_source_address = data.get('event_source_address', [])
     communication_type = data.get('communication_type', None)
     kafka_group_id = data.get('kafka_group_id', None)
-    transforms_type = data.get('transforms_type')
+    transforms_type = data.get('transforms_type', None)
     transformsconfig = data.get('transforms_config', None)
-    enabled_status = data.get('enabled_status')
+    enabled_status = data.get('enabled_status', None)
     event = await EventsIngestion.get(id=event_id)
 
     async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
@@ -271,20 +271,19 @@ async def update_event_ingestion(request):
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
         await f.write(yaml_str)
 
-    if enabled_status == 0:
-        await aiofiles.os.rename(event.file_path, event.file_path + "unenabled")
-        event.file_path = event.file_path + "unenabled"
-    elif enabled_status == 1:
-        await aiofiles.os.rename(event.file_path + "unenabled", event.file_path)
-        event.file_path = event.file_path.replace("unenabled", "")
-    else:
-        raise CustomError(ErrorCode.ParameterError)
-
     if event_describe:
         event.event_ingestion_describe = event_describe
     if transforms_type:
         event.transforms_type = transforms_type
     if enabled_status:
+        if enabled_status == 0:
+            await aiofiles.os.rename(event.file_path, event.file_path + "unenabled")
+            event.file_path = event.file_path + "unenabled"
+        elif enabled_status == 1:
+            await aiofiles.os.rename(event.file_path + "unenabled", event.file_path)
+            event.file_path = event.file_path.replace("unenabled", "")
+        else:
+            raise CustomError(ErrorCode.ParameterError)
         event.enabled_status = enabled_status
     await event.save()
 
