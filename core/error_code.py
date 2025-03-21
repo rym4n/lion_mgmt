@@ -42,3 +42,11 @@ class ErrorCode(BaseErrorCode):
     RoleNotFound = ErrorData(4026, "角色不存在")
 
     SystemDataNotFound = ErrorData(4027, "暂无系统配置信息")
+
+    ZipFileFormatError = ErrorData(4028, "zip文件格式错误")
+    MissingConfigFileError = ErrorData(4029, "缺失config文件")
+    MissingFiledirError = ErrorData(4030, "缺失相关文件夹")
+    MissingPyFileError = ErrorData(4031, "缺失py文件")
+    ToolNotFoundError = ErrorData(4032, "工具未找到")
+    ToolHasScriptError = ErrorData(4033, "工具已被脚本使用")
+    ToolAlreadyDeletedError = ErrorData(4034, "工具已删除")
