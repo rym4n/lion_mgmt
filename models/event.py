@@ -55,7 +55,6 @@ class EventsIngestion(BaseModel):
     event_source_type: str = fields.CharField(max_length=255, null=True, description="事件来源类型")
     transforms_type: str = fields.CharField(max_length=255, null=True, description="转换类型")
     enabled_status: int = fields.IntField(max_length=50, null=True, description="启用状态")
-    release_status: int = fields.IntField(max_length=50, null=True, description="发布状态")
     created_id: str = fields.CharField(max_length=36, description="创建人ID，关联用户表")
     file_path: str = fields.CharField(max_length=255, null=True, description="配置文件路径")
 
@@ -73,7 +72,6 @@ class EventsIngestion(BaseModel):
             "event_source_type": self.event_source_type,
             "transforms_type": self.transforms_type,
             "enabled_status": self.enabled_status,
-            "release_status": self.release_status,
             "created_id": self.created_id,
             "file_path": self.file_path
         }

@@ -42,6 +42,9 @@ class Tool(BaseModel):
     path: str = fields.CharField(max_length=255, null=True, description="文件地址")
     description: str = fields.CharField(max_length=255, null=True, description="工具描述")
     status: int = fields.IntField(default=0, description="是否有剧本使用它 1:有 0:无")
+    creator: str = fields.CharField(max_length=255, null=True, description="创建者")
+    updater: str = fields.CharField(max_length=255, null=True, description="更新者")
+
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -55,8 +58,75 @@ class Tool(BaseModel):
             "name": self.name,
             "version": self.version,
             "path": self.path,
-            "description": self.description
+            "description": self.description,
+            "status": self.status,
+            "creator": self.creator,
+            "updater": self.updater
         }
 
     class Meta:
         table = "tool"
+
+
+class ToolResourcesModel(BaseModel):
+    """
+    工具资源模板表
+    """
+
+    tool_id: str = fields.CharField(max_length=255, description="工具id")
+    resources: list[str] = fields.JSONField(description="资源模板")
+
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": str(self.ctime),
+            "utime": str(self.utime),
+            "tool_id": self.tool_id,
+            "resources": self.resources,
+        }
+
+    class Meta:
+        table = "tool_resources_model"
+
+
+class ToolResources(BaseModel):
+    """
+    工具资源表
+    """
+
+    tool_id: str = fields.CharField(max_length=255, description="工具id")
+    name: str = fields.CharField(max_length=255, unique=True,description="资源名称")
+    description: str = fields.CharField(max_length=255, description="资源描述")
+    product_supplier: str = fields.CharField(max_length=255, null=True, description="供应商")
+    product_name: str = fields.CharField(max_length=255, null=True, description="产品名称")
+    resources: list[str] = fields.JSONField(description="资源配置")
+    creator: str = fields.CharField(max_length=255, null=True, description="创建者")
+    updater: str = fields.CharField(max_length=255, null=True, description="更新者")
+
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": str(self.ctime),
+            "utime": str(self.utime),
+            "tool_id": self.tool_id,
+            "name": self.name,
+            "description": self.description,
+            "product_supplier": self.product_supplier,
+            "product_name": self.product_name,
+            "resources": self.resources,
+            "creator": self.creator,
+            "updater": self.updater
+        }
+
+    class Meta:
+        table = "tool_resources"
