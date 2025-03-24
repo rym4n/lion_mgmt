@@ -10,18 +10,6 @@ jobs:
     withSubmodules: false
     checkoutPath: '@project_path@'
     condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
-  - !CommandStep
-    name: 编译
-    runInContainer: true
-    image: python:3.11-slim
-    interpreter: !DefaultInterpreter
-      commands: |
-        apt update -y && apt install build-essential -y
-        pip3 install -U nuitka
-        BASE_DIR=@project_path@
-        (cd "$BASE_DIR" && nuitka --follow-imports server.py)
-    useTTY: true
-    condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
   - !BuildImageStep
     name: 构建镜像
     buildPath: '@project_path@'
