@@ -26,7 +26,6 @@ class SecurityMiddleware(BaseMiddleware):
             white_urls.extend(["/docs", "/docs/openapi.json"])
 
         if request.path not in white_urls:
-            logger.info(f"{request.path} 需要身份验证")
             await authenticate(request)
 
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
