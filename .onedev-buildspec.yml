@@ -27,12 +27,11 @@ jobs:
     buildPath: '@project_path@'
     dockerfile: '@project_path@/Dockerfile'
     output: !RegistryOutput
-      tags: dev.xy14qg.top/lion_mgmt/lion_mgmt:latest
+      tags: dev.xy14qg.top/lion_mgmt/lion_mgmt:@tag@
     condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
   triggers:
-  - !BranchUpdateTrigger
+  - !TagCreateTrigger
     branches: master
-    paths: .version
     projects: lion_mgmt
   retryCondition: never
   maxRetries: 3
