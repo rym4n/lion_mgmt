@@ -150,14 +150,12 @@ async def login(request):
 
 
 @user_bp.post("/refresh-token")
-async def refresh_token(request):
+async def refresh_session_token(request):
     """
     刷新token
     """
-    token = token_encode(request.ctx.session['sub'], request.ctx.session['username'], request.ctx.session['mfa_enable'],
-                         request.ctx.session['id'], ip=request.client_ip)
     resp = {
-        "aioe-auth": token
+        "aioe-auth": refresh_token(request.ctx.session)
     }
     return response_ok(resp)
 

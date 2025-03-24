@@ -73,6 +73,9 @@ def refresh_token(old_data: dict, **kwargs) -> str:
     data = old_data.copy()
     for key, value in kwargs.items():
         data[key] = value
+    current = int(time.time())
+    data['iat'] = current
+    data['exp'] = current + AUTHENTICATION_SESSION_EXPIRATION
     token = jwt.encode(data, SECRET, SESSION_ENCODING_ALGORITHM)
     return token
 
