@@ -15,7 +15,7 @@ class Events(BaseModel):
     event_process_status: str = fields.CharField(max_length=50, description="事件处理状态（如 ASSIGNED, RESOLVED）")
     event_source: str = fields.CharField(max_length=255, null=True, description="事件来源")
     event_level: str = fields.CharField(max_length=50, description="事件等级")
-    owner: List[Dict[str, Any]] = fields.JSONField(default=list, description="负责人（包括角色和用户）")
+    owner: List[Dict[str, Any]] = fields.JSONField(default=list, null=True,description="负责人（包括角色和用户）")
     created_id: str = fields.CharField(max_length=36, description="创建人ID，关联用户表")
     event_summary: str = fields.TextField(null=True, description="事件概要")
     log_data: str = fields.TextField(default=dict, description="日志数据")
@@ -57,6 +57,7 @@ class EventsIngestion(BaseModel):
     enabled_status: int = fields.IntField(max_length=50, null=True, description="启用状态")
     created_id: str = fields.CharField(max_length=36, description="创建人ID，关联用户表")
     file_path: str = fields.CharField(max_length=255, null=True, description="配置文件路径")
+    script_id: List[Dict[str, Any]] = fields.JSONField(default=list, null=True, description="剧本id，关联剧本表")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -73,7 +74,8 @@ class EventsIngestion(BaseModel):
             "transforms_type": self.transforms_type,
             "enabled_status": self.enabled_status,
             "created_id": self.created_id,
-            "file_path": self.file_path
+            "file_path": self.file_path,
+            "script_id": self.script_id
         }
 
     class Meta:

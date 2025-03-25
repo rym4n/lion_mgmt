@@ -50,3 +50,5 @@ class ErrorCode(BaseErrorCode):
     ToolNotFoundError = ErrorData(4032, "工具未找到")
     ToolHasScriptError = ErrorData(4033, "工具已被脚本使用")
     ToolAlreadyDeletedError = ErrorData(4034, "工具已删除")
+    ResourcesNotFoundError = ErrorData(4035, "工具资源模板未找到")
+    ResourcesNameExistsError = ErrorData(4036, "工具资源模板名称已存在")

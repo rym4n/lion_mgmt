@@ -24,7 +24,7 @@ tool_management_bp = Blueprint("tool_management", url_prefix="v1/tool_management
 __all__ = ["tool_management_bp"]
 
 # 存储上传文件的目录
-EXTRACT_DIR = "tool_extract"
+EXTRACT_DIR = "./data/tool_extract"
 os.makedirs(EXTRACT_DIR, exist_ok=True)
 
 # 预期的文件结构
@@ -107,7 +107,8 @@ async def unzip(zip_data, creator):
         config_parent_dir = os.path.dirname(config_path.filename)
         save_path = os.path.join(extra_path, config_parent_dir)
 
-        await Tool.create(name=name, version=version, path=save_path, description=config_data.get("description"),
+        await Tool.create(name=name, version=version, path=save_path.replace("\\", "/"),
+                          description=config_data.get("description"),
                           creator=creator, updater=creator)
 
         for in_file in files_info:
