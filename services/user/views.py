@@ -4,7 +4,7 @@ import uuid
 import pyotp
 from argon2.exceptions import VerificationError, InvalidHashError
 from sanic import Blueprint
-from tortoise.exceptions import ValidationError, IntegrityError, DoesNotExist
+from tortoise.exceptions import IntegrityError, DoesNotExist
 from websockets.legacy.server import HTTPResponse
 
 from core.error_code import ErrorCode
@@ -12,7 +12,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authentication import validate_password, token_encode, refresh_token
 from libs.security.authorization import requires_permission
-from libs.security.utils import password_hasher
+from libs.utils import password_hasher, ip_in_list
 from models import Account, Role
 from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS
 
@@ -109,12 +109,16 @@ async def login(request):
     user_attempts = await request.ctx.cache_client.get(f"{username}_login_attempts")
     if user_attempts is not None and int(user_attempts) > MAX_CHALLENGE_ATTEMPTS:
         raise CustomError(ErrorCode.MaxChallenge)
+    # 防止暴力破解/撞库
     client_ip = request.client_ip
     ip_attempts = await request.ctx.cache_client.get(f"{client_ip}_login_attempts")
     if ip_attempts is not None and int(ip_attempts) > MAX_CHALLENGE_ATTEMPTS:
         raise CustomError(ErrorCode.MaxChallenge)
+
     try:
         account = await Account.get(username=username, deleted=False).prefetch_related('roles')
+        if account.permit_ip and ip_in_list(request.client_ip, account.permit_ip.split(',')) is False:
+            raise CustomError(ErrorCode.IpForbidden)
         # 验证密码
         password_hasher.verify(account.password, password)
         if password_hasher.check_needs_rehash(account.password):
@@ -134,9 +138,12 @@ async def login(request):
         #     domain=SESSION_DOMAIN,
         #     expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
         # )
-        # 如果开启了MFA，记录MFA密钥
-        if account.mfa_enable:
-            await request.ctx.cache_client.set(f'mfa_key_{id}', account.mfa_key, AUTHENTICATION_SESSION_EXPIRATION)
+        # 如果开启了MFA，缓存记录MFA密钥，便于mfa认证
+        if account.mfa_enable and account.mfa_key:
+            await request.ctx.cache_client.set(f'mfa_key_{token_id}', account.mfa_key, AUTHENTICATION_SESSION_EXPIRATION)
+            # 如果是开启mfa之后的第一次登录，在mfa还没绑定的情况下，返回mfa_uri，供前端渲染二维码
+            if not account.mfa_bind:
+                resp['mfa_uri'] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name='AIOE')
 
         return response_ok(resp)
     except DoesNotExist:
@@ -212,6 +219,7 @@ async def update_user(request):
         email: 可选，邮箱
         phone: 可选，电话
         password: 可选，密码
+        permit_ip: 可选，允许登录的IP地址，支持多个IP或CIDR格式（逗号分隔），例如 192.168.1.1,10.0.2.0/24
     """
     userid = request.ctx.session.get('sub')
     account = await Account.get(id=userid, deleted=False)
@@ -243,38 +251,41 @@ async def edit_user(request):
         password: 可选，密码
         mfa_enable: 可选，是否启用二次认证
         disabled: 可选，是否禁用
+        permit_ip: 可选，允许登录的IP地址，支持多个IP或CIDR格式（逗号分隔），例如 192.168.1.1,10.0.2.0/24
     """
-    try:
-        user = await Account.get(username=request.json.get("username"), deleted=False).prefetch_related('roles')
-        if not user:
-            raise CustomError(ErrorCode.AccountNotFound)
+    user = await Account.get(username=request.json.get("username"), deleted=False).prefetch_related('roles')
+    if not user:
+        raise CustomError(ErrorCode.AccountNotFound)
 
-        params = request.json
-        need_update = False
-        mfa_uri = None
-        for p in params:
-            # 敏感属性不允许修改
-            if p in ['id', 'ctime', 'utime', 'deleted', 'name', 'mfa_key', 'roles']:
+    params = request.json
+    need_update = False
+    mfa_uri = None
+    for p in params:
+        # 敏感属性不允许修改
+        if p in ['id', 'ctime', 'utime', 'deleted', 'name', 'mfa_key', 'roles']:
+            continue
+        # 不能禁用自己
+        if p == 'disabled' and request.ctx.session['sub'] == user.id:
+            continue
+        need_update = True
+        if p == 'password':
+            user.password = password_hasher.hash(validate_password(request.json.get("password") or ''))
+        elif p == 'mfa_enable':
+            if user.mfa_enable == params[p]:
                 continue
-            # 不能禁用自己
-            if p == 'disabled' and request.ctx.session['sub'] == user.id:
-                continue
-            need_update = True
-            if p == 'password':
-                user.password = password_hasher.hash(validate_password(request.json.get("password") or ''))
-            elif p == 'mfa_enable':
+            user.mfa_enable = params[p]
+            user.mfa_key = pyotp.random_base32(32) if user.mfa_enable else None
+            if user.mfa_key:
                 mfa_uri = pyotp.totp.TOTP(user.mfa_key).provisioning_uri(name=user.username, issuer_name='AIOE')
-            else:
-                if hasattr(user, p):
-                    setattr(user, p, params[p])
-        if need_update:
-            await user.save()
-        res = user.json
-        if p == 'mfa_enable':
-            res['mfa_uri'] = mfa_uri
-        return response_ok(res)
-    except (ValidationError, IntegrityError):
-        raise CustomError(ErrorCode.ParameterError)
+        else:
+            if hasattr(user, p):
+                setattr(user, p, params[p])
+    if need_update:
+        await user.save()
+    res = user.json
+    if mfa_uri:
+        res['mfa_uri'] = mfa_uri
+    return response_ok(res)
 
 
 @user_bp.post("/del")

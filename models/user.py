@@ -34,9 +34,11 @@ class Account(BaseModel):
     password: str = fields.CharField(max_length=255)
     mfa_enable: bool = fields.BooleanField(default=False)
     mfa_key: str = fields.CharField(max_length=50, null=True)
+    mfa_bind: bool = fields.BooleanField(default=False)
     oauth_id: str = fields.CharField(unique=True, null=True, max_length=255)
     disabled: bool = fields.BooleanField(default=False)
     roles: fields.ManyToManyRelation["Role"] = fields.ManyToManyField("models.Role", through="account_role")
+    permit_ip: str = fields.CharField(null=True, max_length=255)
 
     def validate(self) -> None:
         if self.deleted:
@@ -44,16 +46,9 @@ class Account(BaseModel):
         elif self.disabled:
             raise CustomError(ErrorCode.AccountDisabled)
 
-    async def disable(self):
-        if self.disabled:
-            raise CustomError(ErrorCode.AccountDisabled)
-        else:
-            self.disabled = True
-            await self.save(update_fields=["disabled"])
-
     @property
     def json(self) -> dict:
-        return {
+        tmp = {
             "id": self.id,
             "ctime": str(self.ctime),
             "utime": str(self.utime),
@@ -63,8 +58,14 @@ class Account(BaseModel):
             "disabled": self.disabled,
             "oauth_id": self.oauth_id,
             "mfa_enable": self.mfa_enable,
-            "roles": [role.name for role in self.roles] if self.roles else []
+            "mfa_bind": self.mfa_bind,
+            "permit_ip": self.permit_ip,
+            "roles": [role.name for role in self.roles] if self.roles else [],
+            "permissions": []
         }
+        for role in self.roles:
+            tmp['permissions'].extend(role.permissions)
+        return tmp
 
 
 # class Session(BaseModel):
