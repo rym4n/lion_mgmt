@@ -9,10 +9,12 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import SystemCustomConfiguration, SystemStatus, AuditLog
-from settings import UPLOAD_FOLDER
 
 system_bp = Blueprint('system', url_prefix='v1/system')
 _all__ = ["system_bp"]
+
+UPLOAD_FOLDER = "./data/uploads"  # 样例日志输出目录
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
 @system_bp.post("/upload")
@@ -47,7 +49,7 @@ async def upload_image(request):
 
                 with open(file_path, "wb") as f:
                     f.write(file.body)
-
+                file_path = file_path.replace("\\", "/")
                 file_paths[field] = file_path
             else:
                 file_paths[field] = None  # 如果文件未上传，则存 None
@@ -241,7 +243,9 @@ async def search_audit(request):
         filters["username"] = username
 
     total = await AuditLog.filter(**filters).count()
-    data = await AuditLog.filter(**filters).offset(offset).limit(limit).values("id", "username", "ctime", "action", "module", "result", "client_ip", "client_ua", "uri")
+    data = await AuditLog.filter(**filters).offset(offset).limit(limit).values("id", "username", "ctime", "action",
+                                                                               "module", "result", "client_ip",
+                                                                               "client_ua", "uri")
 
     return response_ok({
         "total": total,
