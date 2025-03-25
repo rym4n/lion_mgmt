@@ -245,7 +245,7 @@ async def edit_user(request):
         disabled: 可选，是否禁用
     """
     try:
-        user = await Account.get(username=request.json.get("username"), deleted=False)
+        user = await Account.get(username=request.json.get("username"), deleted=False).prefetch_related('roles')
         if not user:
             raise CustomError(ErrorCode.AccountNotFound)
 
@@ -270,7 +270,8 @@ async def edit_user(request):
         if need_update:
             await user.save()
         res = user.json
-        res['mfa_uri'] = mfa_uri
+        if p == 'mfa_enable':
+            res['mfa_uri'] = mfa_uri
         return response_ok(res)
     except (ValidationError, IntegrityError):
         raise CustomError(ErrorCode.ParameterError)
