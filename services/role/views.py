@@ -1,9 +1,7 @@
 # coding=utf-8
-import traceback
 
 from sanic import Blueprint
 from sanic.log import logger
-from tortoise.exceptions import ValidationError, IntegrityError, FieldError
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
@@ -27,21 +25,13 @@ async def add_role(request):
         description:描述
         permissions:权限  ["a:1"]
     """
-    try:
-        name = request.json.get("name")
-        description = request.json.get("description", "")
-        permissions = request.json.get("permissions", [])
-        async with in_transaction():
-            role = await Role.create(name=name, description=description, permissions=permissions)
-        logger.info(f"Client {request.client_ip} has added a new role {role.id}.")
-        return response_ok(role.json)
-    except (ValidationError, FieldError) as e:
-        logger.error(f"Validation error: {e}")
-        raise CustomError(ErrorCode.ParameterError)
-    except IntegrityError as e:
-        if "UNIQUE constraint failed" in str(e):
-            raise CustomError(ErrorCode.RoleAlreadyExists)
-        raise CustomError(ErrorCode.ServerError)
+    name = request.json.get("name")
+    description = request.json.get("description", "")
+    permissions = request.json.get("permissions", [])
+    async with in_transaction():
+        role = await Role.create(name=name, description=description, permissions=permissions)
+    logger.info(f"Client {request.client_ip} has added a new role {role.id}.")
+    return response_ok(role.json)
 
 
 @role_bp.post("/all")
@@ -54,22 +44,19 @@ async def find_all(request):
         page:页码
         size:页容量
     """
-    try:
-        page = int(request.json.get('page', 1))
-        size = int(request.json.get('size', 10))
-        offset = (page - 1) * size
-        limit = size
-        roles = await Role.filter(deleted=False).offset(offset).limit(limit).values()
-        total = await Role.filter(deleted=False).count()
-        return response_ok({
-            'roles': roles,
-            'total': total,
-            'page': page,
-            'size': size,
-            'total_pages': (total + size - 1) // size
-        })
-    except IntegrityError as e:
-        raise CustomError(ErrorCode.ServerError)
+    page = int(request.json.get('page', 1))
+    size = int(request.json.get('size', 10))
+    offset = (page - 1) * size
+    limit = size
+    roles = await Role.filter(deleted=False).offset(offset).limit(limit).values()
+    total = await Role.filter(deleted=False).count()
+    return response_ok({
+        'roles': roles,
+        'total': total,
+        'page': page,
+        'size': size,
+        'total_pages': (total + size - 1) // size
+    })
 
 
 @role_bp.post("/details")
@@ -81,14 +68,11 @@ async def find_role(request):
     请求参数：
         role_id：角色id
     """
-    try:
-        role_id = request.json.get("role_id")
-        role = await Role.filter(id=role_id, deleted=False).first()
-        if not role:
-            raise CustomError(ErrorCode.RoleNotFound)
-        return response_ok(role.json)
-    except IntegrityError as e:
-        raise CustomError(ErrorCode.ServerError)
+    role_id = request.json.get("role_id")
+    role = await Role.filter(id=role_id, deleted=False).first()
+    if not role:
+        raise CustomError(ErrorCode.RoleNotFound)
+    return response_ok(role.json)
 
 
 @role_bp.post("/delete")
@@ -100,19 +84,16 @@ async def delete_role(request):
     请求参数：
         role_id：角色id
     """
-    try:
-        role_id = request.json.get("role_id")
-        exists = await Account.filter(roles__id=role_id).exists()
-        if exists:
-            return response_ok("角色已分配")
-        role = await Role.filter(id=role_id, deleted=False).first()
-        if not role:
-            raise CustomError(ErrorCode.RoleNotFound)
-        role.deleted = True
-        await role.save()
-        return response_ok("角色删除成功")
-    except IntegrityError as e:
-        raise CustomError(ErrorCode.ServerError)
+    role_id = request.json.get("role_id")
+    exists = await Account.filter(roles__id=role_id).exists()
+    if exists:
+        return response_ok("角色已分配")
+    role = await Role.filter(id=role_id, deleted=False).first()
+    if not role:
+        raise CustomError(ErrorCode.RoleNotFound)
+    role.deleted = True
+    await role.save()
+    return response_ok("角色删除成功")
 
 
 @role_bp.post("/update")
@@ -127,24 +108,18 @@ async def update_role(request):
         description：新的描述
         permissions：新的权限
     """
-    try:
-        role_id = request.json.get("role_id")
-        name = request.json.get("name")
-        description = request.json.get("description", "")
-        permissions = request.json.get("permissions", [])
-        role = await Role.filter(id=role_id, deleted=False).first()
-        if not role:
-            raise CustomError(ErrorCode.RoleNotFound)
-        if name:
-            role.name = name
-        if description:
-            role.description = description
-        if permissions:
-            role.permissions = permissions
-        await role.save()
-        return response_ok(role.json)
-    except IntegrityError as e:
-        raise CustomError(ErrorCode.ServerError)
-    except (ValidationError, FieldError) as e:
-        logger.error(f"Param error: {e} | {traceback.format_exc()}")
-        raise CustomError(ErrorCode.ParameterError)
+    role_id = request.json.get("role_id")
+    name = request.json.get("name")
+    description = request.json.get("description", "")
+    permissions = request.json.get("permissions", [])
+    role = await Role.filter(id=role_id, deleted=False).first()
+    if not role:
+        raise CustomError(ErrorCode.RoleNotFound)
+    if name:
+        role.name = name
+    if description:
+        role.description = description
+    if permissions:
+        role.permissions = permissions
+    await role.save()
+    return response_ok(role.json)
