@@ -194,6 +194,7 @@ async def mfa_auth(request):
     if not code or not mfa_key or not totp.verify(code):
         raise CustomError(ErrorCode.MFAError)
 
+    await Account.filter(id=request.ctx.session.get('sub')).update(mfa_bind=True)
     # 彻底刷新token，用新的token id
     new_token = refresh_token(request.ctx.session, id=str(uuid.uuid4()), mfa_auth=True)
     response = response_ok({'aioe-token': new_token})
@@ -275,7 +276,9 @@ async def edit_user(request):
                 continue
             user.mfa_enable = params[p]
             user.mfa_key = pyotp.random_base32(32) if user.mfa_enable else None
+            user.mfa_bind = False
             if user.mfa_key:
+                # 关 -> 开
                 mfa_uri = pyotp.totp.TOTP(user.mfa_key).provisioning_uri(name=user.username, issuer_name='AIOE')
         else:
             if hasattr(user, p):
