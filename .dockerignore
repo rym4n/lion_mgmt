@@ -44,3 +44,4 @@ logs/
 .onedev-buildspec.yml
 
 migrations/
+data/

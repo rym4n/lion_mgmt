@@ -18,9 +18,12 @@ ENV POETRY_NO_INTERACTION=1 \
 WORKDIR /app
 
 COPY pyproject.toml poetry.lock ./
+
 RUN touch README.md
 
 RUN --mount=type=cache,target=$POETRY_CACHE_DIR poetry install --without dev --no-root
+
+RUN python compile.py
 
 FROM python:3.11-slim as runtime
 
@@ -31,7 +34,7 @@ ENV VIRTUAL_ENV=/app/.venv \
 WORKDIR /app
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
-
-COPY . ./
+COPY --from=builder dist/ ./
+COPY server.py ./
 
 ENTRYPOINT ["python", "server.py"]

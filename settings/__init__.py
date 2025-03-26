@@ -10,7 +10,7 @@ LOG_PATH = os.path.join(BASE_DIR, 'logs')
 os.makedirs(LOG_PATH, exist_ok=True)
 
 # 文件上传的保存路径
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'data/uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 if os.environ.get("RY_ENV") == 'DEV':
