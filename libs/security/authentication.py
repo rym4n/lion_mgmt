@@ -21,7 +21,7 @@ async def authenticate(request: Request):
     if payload.get('exp', 0) < int(time.time()):
         raise CustomError(ErrorCode.SessionExpired)
 
-    if payload.get('mfa_enable') is True and payload.get('mfa_auth') is not True:
+    if not request.path.endswith('/user/mfa-auth') and payload.get('mfa_enable') is True and payload.get('mfa_auth') is not True:
         raise CustomError(ErrorCode.SecondFactorRequired)
 
     if payload.get('ip') != request.ip:
