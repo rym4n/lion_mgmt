@@ -3,7 +3,7 @@ import os
 
 from sanic import Sanic
 
-from dist.services import create_app
+from services import create_app
 
 app: Sanic = create_app()
 
