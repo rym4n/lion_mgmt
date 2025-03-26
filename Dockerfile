@@ -23,6 +23,8 @@ RUN touch README.md
 
 RUN --mount=type=cache,target=$POETRY_CACHE_DIR poetry install --without dev --no-root
 
+COPY . ./
+
 RUN poetry run python compile.py
 
 FROM python:3.11-slim as runtime
