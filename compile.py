@@ -1,17 +1,13 @@
-#!/usr/bin/env python
 # coding=utf-8
 
-import logging
 import os
 import shutil
+import traceback
 from distutils.command.clean import clean
 from distutils.extension import Extension
 
 from Cython.Distutils import build_ext
 from setuptools import setup
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(filename)s:%(lineno)d:%(funcName)s] [%(levelname)s] %(message)s')
 
 
 def load_all(root):
@@ -50,7 +46,7 @@ def get_packages(root):
 
 def get_extensions(root):
     py_files = load_files(root, exts=("py",))
-    py_files = filter(lambda x: not x.endswith('__init__.py'), py_files)
+    py_files = filter(lambda x: '__' not in x, py_files)
     ext_names = map(lambda x: x.replace(os.path.sep, '.')[:-3], py_files)
 
     def make_extension(ext_name):
@@ -84,7 +80,6 @@ class CleanCode(object):
         for bin_file in bin_files:
             old_pyd = bin_file.split(".")
             new_pyd = str(old_pyd[0]) + "." + str(old_pyd[2])
-            logger.info(f"rename {bin_file} to {new_pyd}")
             os.rename(bin_file, new_pyd)
 
     def clean_pro(self, root):
@@ -94,30 +89,37 @@ class CleanCode(object):
         self.delete(root, exts=("py", "c"))
 
 
-root = "dist"
+TARGET_DIR = "dist"
 
 
 class CustomBuildExt(build_ext, CleanCode):
 
     def run(self):
-        self.clean_pro(root)
+        self.clean_pro(TARGET_DIR)
         build_ext.run(self)
         self.clean_build(self.distribution)
-        self.rename(root, exts=("pyd", "so"))
-        self.delete_source_code(root)
+        self.rename(TARGET_DIR, exts=("pyd", "so"))
+        self.delete_source_code(TARGET_DIR)
 
 
 if __name__ == "__main__":
     try:
-        shutil.rmtree(root, ignore_errors=True)
-        targets = ["core", "libs", "models", "services", "settings"]
+        shutil.rmtree(TARGET_DIR, ignore_errors=True)
 
-        for d in targets:
-            shutil.copytree(d, os.path.join(root, d))
+        excludes = ["dist", "data", "logs", "migrations"]
+
+        targets = []
+        # 罗列当前目录下的所有目录，如果子目录名称在excludes中，则忽略，否则加入到targets，并且复制到TARGET_DIR目录下
+        subdirectories = [d for d in os.listdir('.') if os.path.isdir(d)]
+        for subdir in subdirectories:
+            if subdir not in excludes:
+                targets.append(subdir)
+                shutil.copytree(subdir, os.path.join(TARGET_DIR, subdir))
+
         setup(
             name="lion_mgmt",
-            packages=get_packages(root),
-            ext_modules=get_extensions(root),
+            packages=get_packages(TARGET_DIR),
+            ext_modules=get_extensions(TARGET_DIR),
             script_args=["build_ext", "--inplace"],
             cmdclass={'build_ext': CustomBuildExt}
         )
@@ -125,4 +127,4 @@ if __name__ == "__main__":
         for d in targets:
             c.delete(d, exts=("pyd", "pyc", "c", "so"))
     except Exception as e:
-        logger.error(e)
+        print(f"{e} | {traceback.format_exc()}")

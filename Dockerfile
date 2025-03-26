@@ -17,7 +17,7 @@ ENV POETRY_NO_INTERACTION=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml poetry.lock compile.py ./
+COPY pyproject.toml poetry.lock ./
 
 RUN touch README.md
 
