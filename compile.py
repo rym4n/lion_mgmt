@@ -106,7 +106,7 @@ if __name__ == "__main__":
     try:
         shutil.rmtree(TARGET_DIR, ignore_errors=True)
 
-        excludes = ["dist", "data", "logs", "migrations"]
+        excludes = ["dist", "data", "logs", "migrations", "venv"]
 
         targets = []
         # 罗列当前目录下的所有目录，如果子目录名称在excludes中，则忽略，否则加入到targets，并且复制到TARGET_DIR目录下
