@@ -15,15 +15,10 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models.event import EventsIngestion
+from settings import SAMPLE_SINK_PATH, VECTOR_CFG
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='v1/event/ingestion')
 _all__ = ["event_ingestion_bp"]
-
-UPLOAD_FOLDER = "./data/vector_config_files"  # 本地存储目录
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # 确保目录存在
-
-SAMPLE_SINK_PATH = "./data/sample_sinks"  # 样例日志输出目录
-os.makedirs(SAMPLE_SINK_PATH, exist_ok=True)
 
 # transforms配置
 transforms_config = {
@@ -114,7 +109,7 @@ async def event_ingestion(request):
     create_id = data.get('created_id')
     client_ip = request.client_ip
 
-    output_path = os.path.join(UPLOAD_FOLDER, event_name + ".yaml")
+    output_path = os.path.join(VECTOR_CFG, event_name + ".yaml")
 
     topic = event_name
 

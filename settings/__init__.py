@@ -13,6 +13,18 @@ os.makedirs(LOG_PATH, exist_ok=True)
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'data/uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# vector配置目录
+VECTOR_CFG = "./data/ship"
+os.makedirs(VECTOR_CFG, exist_ok=True)
+
+# 样例日志输出目录
+SAMPLE_SINK_PATH = "./data/sample_sinks"
+os.makedirs(SAMPLE_SINK_PATH, exist_ok=True)
+
+# 存储上传文件的目录
+TOOLS_DIR = "./data/tools"
+os.makedirs(TOOLS_DIR, exist_ok=True)
+
 if os.environ.get("RY_ENV") == 'DEV':
     from dotenv import load_dotenv
 

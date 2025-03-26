@@ -18,14 +18,11 @@ from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel
+from settings import TOOLS_DIR
 
 # 定义 Blueprint
 tool_management_bp = Blueprint("tool_management", url_prefix="v1/tool_management")
 __all__ = ["tool_management_bp"]
-
-# 存储上传文件的目录
-EXTRACT_DIR = "./data/tool_extract"
-os.makedirs(EXTRACT_DIR, exist_ok=True)
 
 # 预期的文件结构
 EXPECTED_STRUCTURE = {
@@ -102,7 +99,7 @@ async def unzip(zip_data, creator):
         else:
             version = datetime.datetime.today().strftime("%Y%m%d") + "001"
 
-        extra_path = os.path.join(EXTRACT_DIR, name, version)
+        extra_path = os.path.join(TOOLS_DIR, name, version)
         os.makedirs(extra_path, exist_ok=True)
         config_parent_dir = os.path.dirname(config_path.filename)
         save_path = os.path.join(extra_path, config_parent_dir)
