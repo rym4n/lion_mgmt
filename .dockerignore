@@ -34,6 +34,8 @@ settings/.env
 # 排除构建目录
 build/
 dist/
+__pycache__/
+*.py[cod]
 
 # 排除操作系统产生的其他隐藏文件
 *.pid
