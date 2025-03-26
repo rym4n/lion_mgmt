@@ -36,7 +36,7 @@ ENV VIRTUAL_ENV=/app/.venv \
 WORKDIR /app
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
-COPY --from=builder dist/ ./
+COPY --from=builder /app/dist/ ./
 COPY server.py ./
 
 ENTRYPOINT ["python", "server.py"]
