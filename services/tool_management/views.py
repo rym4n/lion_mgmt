@@ -55,6 +55,7 @@ async def upload_and_extract_zip(request):
     return response_ok({"message": "工具上传成功"})
 
 
+# noinspection PyTypeChecker
 async def unzip(zip_data, creator):
     """
     解压 ZIP 文件，直接从文件流读取，并进行文件结构校验

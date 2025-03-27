@@ -123,17 +123,17 @@ async def add_system(request):
         systemname：系统名
         instancename：实例名
         uptime：启动时间
-        checkTime：检查时间
+        check_time：检查时间
         status：系统状态
     """
     systemname = request.json.get("systemname")
     instancename = request.json.get("instancename")
     uptime = request.json.get("uptime")
-    checkTime = request.json.get("checkTime")
+    check_time = request.json.get("check_time")
     status = request.json.get("status")
     async with in_transaction():
         systemstatus = await SystemStatus.create(systemname=systemname, instancename=instancename, uptime=uptime,
-                                                 checkTime=checkTime, status=status)
+                                                 checkTime=check_time, status=status)
     logger.info(f"Client {request.client_ip} has added a new role {systemstatus.id}.")
     return response_ok(systemstatus.json)
 
@@ -149,14 +149,14 @@ async def up_system(request):
         systemname：系统名
         instancename：实例名
         uptime：启动时间
-        checkTime：检查时间
+        check_time：检查时间
         status：系统状态
     """
     system_id = request.json.get("system_id")
     systemname = request.json.get("systemname")
     instancename = request.json.get("instancename")
     uptime = request.json.get("uptime")
-    checkTime = request.json.get("checkTime")
+    check_time = request.json.get("check_time")
     status = request.json.get("status")
     system = await SystemStatus.filter(id=system_id, deleted=False).first()
     if not system:
@@ -167,8 +167,8 @@ async def up_system(request):
         system.instancename = instancename
     if uptime:
         system.uptime = uptime
-    if checkTime:
-        system.checkTime = checkTime
+    if check_time:
+        system.checkTime = check_time
     if status:
         system.status = status
     await system.save()

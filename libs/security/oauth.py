@@ -93,6 +93,7 @@ def oauth_encode(response: HTTPResponse, token_info: dict) -> None:
     )
 
 
+# noinspection PyTypeChecker
 async def oauth_revoke(request: Request, client: BaseOAuth2) -> dict:
     """
     Revokes the client's access token.

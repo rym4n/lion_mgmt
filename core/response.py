@@ -37,6 +37,7 @@ def response_ok(data: Any = None) -> HTTPResponse:
     return json(content, dumps=dumps, cls=ExtJsonEncoder)
 
 
+# noinspection PyTypeChecker
 def response_fail(enum: Optional[ErrorCode] = None, status: int = 400):
     """失败返回
 

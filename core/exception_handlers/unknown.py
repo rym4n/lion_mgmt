@@ -33,6 +33,6 @@ class UnknownExcHandler(BaseExcHandler):
         elif isinstance(exception, FieldError):
             return response_fail(ErrorCode.ParameterError)
         elif isinstance(exception, UniqueViolationError):
-            return response_fail(ErrorCode.DataExists)
+            return response_fail(ErrorCode.DataAlreadyExists)
         else:
             return response_fail(ErrorCode.ServerError, 500)

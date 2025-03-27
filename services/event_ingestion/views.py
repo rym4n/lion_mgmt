@@ -3,7 +3,6 @@ import asyncio
 import os
 
 import aiofile
-import aiofiles
 import yaml
 from aiokafka import AIOKafkaConsumer
 from sanic import Blueprint
@@ -40,6 +39,7 @@ transforms_config = {
 
 
 # 生成配置文件
+# noinspection PyTypeChecker
 async def build_kafka_file_configuration_file(output_path, sources,
                                               source_id, topic):
     log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../..", SAMPLE_SINK_PATH, f"{topic}.log")
@@ -166,8 +166,8 @@ async def get_all_events_ingestion(request):
     limit = size
 
     filters = {"deleted": False}
-    if name := request.json.get("name"):
-        filters["event_ingestion_name__icontains"] = name
+    if request.json.get("name"):
+        filters["event_ingestion_name__icontains"] = request.json.get("name")
 
     events = await EventsIngestion.filter(**filters).offset(offset).limit(limit).values()
     total = await EventsIngestion.filter(**filters).count()
@@ -198,9 +198,9 @@ async def delete_event_ingestion(request):
         return response_ok("事件已启用，禁止删除，请先禁用事件")
 
     async with in_transaction():
-        await aiofiles.os.rename(event.file_path, event.file_path + "deleted")
+        os.rename(event.file_path, event.file_path + "_deleted")
         event.deleted = True
-        event.file_path = event.file_path + "deleted"
+        event.file_path = event.file_path + "_deleted"
         await event.save()
 
     return response_ok("事件删除成功")
@@ -321,6 +321,7 @@ async def get_event_ingestion_detail(request):
     return response_ok({"config_data:": data, "event": event.json})
 
 
+# noinspection PyTypeChecker
 @event_ingestion_bp.post('/finished/sample')
 @requires_permission('event:r')
 async def get_event_ingestion_kafka_sample(request):
@@ -350,6 +351,7 @@ async def consume_message(consumer):
         return msg
 
 
+# noinspection PyTypeChecker
 @event_ingestion_bp.post('/original/sample')
 @requires_permission('event:r')
 async def get_event_ingestion_syslog_sample(request):

@@ -70,6 +70,7 @@ def register_listener(app: Sanic) -> None:
     return None
 
 
+# noinspection PyTypeChecker
 def register_middleware(app: Sanic):
     """注册中间件"""
     for middle_cls in MIDDLEWARE_TUPLE:
@@ -80,6 +81,7 @@ def register_middleware(app: Sanic):
             app.register_middleware(middle.before_response, attach_to='response')
 
 
+# noinspection PyTypeChecker
 def register_exception_handler(app: Sanic):
     """注册异常处理"""
     for exc_hdl_cls in EXC_HDL_TUPLE:

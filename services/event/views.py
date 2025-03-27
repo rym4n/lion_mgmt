@@ -32,14 +32,14 @@ async def get_all_events(request):
     limit = size
 
     filters = {}
-    if event_name := request.json.get("event_name"):
-        filters["event_name__icontains"] = event_name
-    if event_process_status := request.json.get("event_process_status"):
-        filters["event_process_status"] = event_process_status
-    if event_source := request.json.get("event_source"):
-        filters["event_source"] = event_source
-    if event_level := request.json.get("event_level"):
-        filters["event_level"] = event_level
+    if request.json.get("event_name"):
+        filters["event_name__icontains"] = request.json.get("event_name")
+    if request.json.get("event_process_status"):
+        filters["event_process_status"] = request.json.get("event_process_status")
+    if request.json.get("event_source"):
+        filters["event_source"] = request.json.get("event_source")
+    if request.json.get("event_level"):
+        filters["event_level"] = request.json.get("event_level")
 
     events = await Events.filter(**filters).offset(offset).limit(limit).values()
     total = await Events.filter(**filters).count()

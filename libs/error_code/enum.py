@@ -27,6 +27,7 @@ class ErrorData(NamedTuple):
 class _ErrorCodeMeta(EnumMeta):
     """错误码枚举元类"""
 
+    # noinspection PyTypeChecker
     def __new__(mcs, *args, **kwargs):
         enum_class = super(_ErrorCodeMeta, mcs).__new__(mcs, *args, **kwargs)
         # 唯一
