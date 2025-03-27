@@ -174,7 +174,7 @@ async def logout(request):
     """
     # todo: oauth凭据销毁
     # token_info = await oauth_revoke(request, google_oauth)
-    return HTTPResponse(status=302, headers={"Location": "/login"})
+    return response_ok("登出成功")
 
 
 @user_bp.post("/mfa-auth")
