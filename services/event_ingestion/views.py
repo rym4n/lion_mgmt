@@ -216,7 +216,7 @@ async def update_event_ingestion(request):
         id: 事件ID (str)  必填
         event_describe: 事件描述 (str)      非必填
         event_source_address: 事件来源地址 (list) 事件来源类型为kafka时才传     非必填
-        syslog_port: 日志端口 (int)  事件来源类型为syslog时才传，默认为None       非必填
+        syslog_port: 日志端口 (int) 端口范围500-2000  事件来源类型为syslog时才传，默认为None       非必填
         communication_type: 通信类型 (str)   事件来源类型为syslog时才传，默认为None       非必填
         kafka_group_id: kafka消费组ID (str)   事件来源类型为kafka时才传，默认为None      非必填
         transforms_type: 转换类型 (str) 目前就三种Grok、CEF、key-value         非必填
@@ -314,7 +314,11 @@ async def get_event_ingestion_detail(request):
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
-    async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
+    file_path = os.path.abspath(event.file_path)
+    if not os.path.exists(file_path):
+        raise CustomError(ErrorCode.NotFound)
+
+    async with aiofile.AIOFile(file_path, 'r', encoding='utf-8') as f:
         content = await f.read()
         data = yaml.safe_load(content)
 
