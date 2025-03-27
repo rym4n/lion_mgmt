@@ -21,6 +21,7 @@ dependencies = [
     "aiofile (>=3.9.0,<4.0.0)",
     "caio (==0.9.21)",
     "cython (>=3.0.12,<4.0.0)",
+    "ujson (>=5.10.0,<6.0.0)",
 ]
 
 [build-system]
@@ -34,6 +35,7 @@ package-mode = false
 
 [tool.poetry.group.dev.dependencies]
 dotenv = "^0.9.9"
+pyarmor = "^9.1.2"
 
 [tool.aerich]
 tortoise_orm = "settings.TORTOISE"

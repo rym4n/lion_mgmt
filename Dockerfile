@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     libaio-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install poetry==2.1.1
+RUN pip install poetry==2.1.1 pyarmor==9.1.2
 
 ENV POETRY_NO_INTERACTION=1 \
     POETRY_VIRTUALENVS_IN_PROJECT=1 \
@@ -26,7 +26,10 @@ RUN --mount=type=cache,target=$POETRY_CACHE_DIR poetry install --without dev --n
 
 COPY . ./
 
-RUN poetry run python compile.py
+RUN pyarmor gen -O dist -r -i ./core
+RUN pyarmor gen -O dist -r -i ./models
+RUN pyarmor gen -O dist -r -i ./services
+RUN pyarmor gen -O dist -r -i ./libs
 
 FROM python:3.11-slim as runtime
 
@@ -40,5 +43,6 @@ WORKDIR /app
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
 COPY server.py ./
+COPY settings ./
 
 ENTRYPOINT ["python", "server.py"]

@@ -17,6 +17,8 @@ class SecurityMiddleware(BaseMiddleware):
     async def before_request(self, request: Request) -> None:
         # 简单判断参数合法性
         if 'multipart' not in request.content_type and request.method == 'POST' and request.json is None:
+            # todo: 正式版本之前保留log便于调试
+            logger.info(f"请求 {request.path} 的参数不合法, body: {request.body}, headers: {request.headers}")
             raise CustomError(ErrorCode.InvalidJsonError)
 
         # 判断请求URI是否需要身份验证

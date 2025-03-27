@@ -52,7 +52,12 @@ def get_extensions(root):
     def make_extension(ext_name):
         ext_path = ext_name.replace('.', os.path.sep) + '.py'
         ext = Extension(ext_name, [ext_path], include_dirs=['.'])
-        ext.cython_directives = {'language_level': "3"}
+        ext.cython_directives = {
+            'language_level': "3",
+            "optimize.use_switch": False,
+            "optimize.unpack_method_calls": False,
+            "annotation_typing": True
+        }
         return ext
 
     extensions = map(lambda x: make_extension(x), ext_names)
@@ -106,13 +111,12 @@ if __name__ == "__main__":
     try:
         shutil.rmtree(TARGET_DIR, ignore_errors=True)
 
-        excludes = ["dist", "data", "logs", "migrations", ".venv"]
+        excludes = ["dist", "data", "logs", "migrations", ".venv", "core"]
 
         targets = []
-        # 罗列当前目录下的所有目录，如果子目录名称在excludes中，则忽略，否则加入到targets，并且复制到TARGET_DIR目录下
         subdirectories = [d for d in os.listdir('.') if os.path.isdir(d)]
         for subdir in subdirectories:
-            if subdir not in excludes:
+            if subdir not in excludes and not subdir.startswith("."):
                 targets.append(subdir)
                 shutil.copytree(subdir, os.path.join(TARGET_DIR, subdir))
 

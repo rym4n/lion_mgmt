@@ -26,9 +26,12 @@ TOOLS_DIR = "./data/tools"
 os.makedirs(TOOLS_DIR, exist_ok=True)
 
 if os.environ.get("RY_ENV") == 'DEV':
-    from dotenv import load_dotenv
+    try:
+        from dotenv import load_dotenv
 
-    load_dotenv(os.path.join(BASE_DIR, 'settings/.env'))
+        load_dotenv(os.path.join(BASE_DIR, 'settings/.env'))
+    except:
+        pass
 
 # 安全相关
 SECRET = os.environ.get("RY_SECRET_KEY", '5tdPY^zTX6I$akvNtLXey3y#gFEG@^46f!iLUdSy$Y')
