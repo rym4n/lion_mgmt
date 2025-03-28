@@ -42,4 +42,4 @@ COPY --from=builder /app/dist/ ./
 COPY settings ./settings
 COPY server.py ./
 
-ENTRYPOINT ["python", "server.py"]
+ENTRYPOINT ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8"]

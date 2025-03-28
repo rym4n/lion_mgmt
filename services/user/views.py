@@ -5,7 +5,6 @@ import pyotp
 from argon2.exceptions import VerificationError, InvalidHashError
 from sanic import Blueprint
 from tortoise.exceptions import IntegrityError, DoesNotExist
-from websockets.legacy.server import HTTPResponse
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -174,7 +173,7 @@ async def logout(request):
     """
     # todo: oauth凭据销毁
     # token_info = await oauth_revoke(request, google_oauth)
-    return HTTPResponse(status=302, headers={"Location": "/login"})
+    return response_ok("登出成功")
 
 
 @user_bp.post("/mfa-auth")
@@ -342,11 +341,11 @@ async def assign_role_to_user(request):
     if not account:
         raise CustomError(ErrorCode.AccountNotFound)
 
-    roles = request.json.get('role_names', '')
-    for r in roles.split(','):
-        role = await Role.filter(name=r, deleted=False).get()
-        if not role:
-            raise CustomError(ErrorCode.RoleNotFound)
+    role_names = request.json.get('role_names', '').split(',')
+    roles = await Role.filter(name__in=role_names, deleted=False).all()
+    if len(roles) != len(role_names):
+        raise CustomError(ErrorCode.RoleNotFound)
 
-        await account.roles.add(role)
+    await account.roles.clear()
+    await account.roles.add(*roles)
     return response_ok("success")

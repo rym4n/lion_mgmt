@@ -1,4 +1,6 @@
 # coding=utf-8
+import os
+
 from asyncpg.exceptions import UniqueViolationError
 from sanic import HTTPResponse, exceptions
 from sanic.log import logger
@@ -18,7 +20,7 @@ class UnknownExcHandler(BaseExcHandler):
 
     def handle(self, request: Request, exception: Exception) -> HTTPResponse:
         # todo: 开发环境打印异常，生产环境不打印
-        if request.app.debug:
+        if os.environ.get("RY_ENV") != 'PROD':
             logger.exception(exception)
         if isinstance(exception, exceptions.NotFound):
             return response_fail(ErrorCode.NotFound)
