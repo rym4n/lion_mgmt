@@ -1,19 +1,20 @@
 # coding=utf-8
+import asyncio
 import datetime
-import fnmatch
 import json
 import os
 import zipfile
 from io import BytesIO
-from pathlib import PurePath, Path
+from pathlib import Path
 
-from aiofile import async_open
-from sanic import Blueprint
+import aiofiles
+from sanic import Blueprint, response
 from tortoise.expressions import Q
 from tortoise.functions import Max
 
 from core.error_code import ErrorCode
 from core.response import response_ok
+from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
@@ -26,9 +27,7 @@ __all__ = ["tool_management_bp"]
 
 # 预期的文件结构
 EXPECTED_STRUCTURE = {
-    "required_files": ["config.json"],
-    "required_dirs": ["resources"],
-    "required_patterns": ["*.py"]
+    "required_files": ["config.json", "readme.md"]
 }
 
 
@@ -50,79 +49,70 @@ async def upload_and_extract_zip(request):
     config_data, version, tool_id = await unzip(zip_file.body, creator)
     await ToolAction.create(tool_name=config_data.get("name"), version_number=version,
                             action=config_data.get("actions"))
-    await ToolResourcesModel.create(tool_id=tool_id.get("id"), resources=config_data.get("configuration"))
+    await ToolResourcesModel.create(tool_id=tool_id, resources=config_data.get("configuration"))
 
     return response_ok({"message": "工具上传成功"})
 
 
-# noinspection PyTypeChecker
 async def unzip(zip_data, creator):
     """
     解压 ZIP 文件，直接从文件流读取，并进行文件结构校验
     """
     zip_buffer = BytesIO(zip_data)
 
-    if not zipfile.is_zipfile(zip_buffer):
-        raise CustomError(ErrorCode.ZipFileFormatError)
-
     with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
-        actual_files = set()
         files_info = zip_ref.infolist()
-        for f in files_info:
-            if not f.is_dir():
-                actual_files.add(os.path.basename(f.filename))
-            if os.path.basename(f.filename) == "config.json":
-                config_path = f
-        actual_dirs = {os.path.basename(f.filename.rstrip('/')) for f in files_info if f.is_dir()}
 
-        has_py_file = any(fnmatch.fnmatch(f.filename, "*.py") for f in files_info if not f.is_dir())
+        actual_files = {os.path.basename(f.filename) for f in files_info if not f.is_dir()}
+        py_files_dict = {os.path.basename(f.filename): f for f in files_info if f.filename.endswith(".py")}
+        config_path = next((f for f in files_info if os.path.basename(f.filename) == "config.json"), None)
 
-        # 结构校验
-        for required_file in EXPECTED_STRUCTURE["required_files"]:
-            if required_file not in actual_files:
-                raise CustomError(ErrorCode.MissingConfigFileError)
+        if not config_path:
+            raise CustomError(ErrorCode.MissingConfigFileError)
 
-        for required_dir in EXPECTED_STRUCTURE["required_dirs"]:
-            if required_dir not in actual_dirs:
-                raise CustomError(ErrorCode.MissingFiledirError)
-
-        if not has_py_file:
-            raise CustomError(ErrorCode.MissingPyFileError)
+        missing_files = set(EXPECTED_STRUCTURE["required_files"]) - actual_files
+        if missing_files:
+            raise CustomError(ErrorCode.MissingConfigFileError)
 
         with zip_ref.open(config_path) as config_file:
             config_data = json.loads(config_file.read().decode("utf-8"))
 
         name = config_data.get("name")
+        py_file_name = config_data.get("jar")
+        class_name_list = [action.get("class_name") for action in config_data.get("actions", [])]
+
+        if not py_file_name:
+            raise CustomError(ErrorCode.ConfigFileError)
+
+        if py_file_name not in py_files_dict:
+            raise CustomError(ErrorCode.MissingPyFileError)
+
+        with zip_ref.open(py_files_dict[py_file_name]) as py_file:
+            py_data = py_file.read().decode("utf-8")
+
+        if any(f"def {class_name}(" not in py_data for class_name in class_name_list):
+            raise CustomError(ErrorCode.PythonFileError)
 
         latest_tool = await Tool.filter(name=name).order_by("-ctime").first()
-        if latest_tool and datetime.datetime.today().strftime("%Y%m%d") == latest_tool.version[:-3]:
-            version = str(int(latest_tool.version) + 1)
-        else:
-            version = datetime.datetime.today().strftime("%Y%m%d") + "001"
+        today_version = datetime.datetime.today().strftime("%Y%m%d")
+        version = str(int(latest_tool.version) + 1) if latest_tool and latest_tool.version.startswith(
+            today_version) else f"{today_version}001"
 
         extra_path = os.path.join(TOOLS_DIR, name, version)
         os.makedirs(extra_path, exist_ok=True)
+
+        await utils.unzip(zip_data, extra_path)
+
         config_parent_dir = os.path.dirname(config_path.filename)
-        save_path = os.path.join(extra_path, config_parent_dir)
+        save_path = os.path.join(extra_path, config_parent_dir).replace("\\", "/")
 
-        await Tool.create(name=name, version=version, path=save_path.replace("\\", "/"),
-                          description=config_data.get("description"),
-                          creator=creator, updater=creator)
+        tool = await Tool.create(
+            name=name, version=version, path=save_path,
+            description=config_data.get("description"),
+            creator=creator, updater=creator
+        )
 
-        for in_file in files_info:
-            file_name = in_file.filename
-            unpack_filename_path = Path(str(PurePath(extra_path, file_name)))
-
-            if in_file.is_dir():
-                unpack_filename_path.mkdir(parents=True, exist_ok=True)
-            else:
-                unpack_filename_path.parent.mkdir(parents=True, exist_ok=True)
-                with zip_ref.open(file_name) as file_data:
-                    async with async_open(str(unpack_filename_path), 'wb+') as out:
-                        await out.write(file_data.read())
-        tool_id = await Tool.filter(name=name, version=version).first().values("id")
-
-    return config_data, version, tool_id
+        return config_data, version, tool.id
 
 
 @tool_management_bp.post("/all")
@@ -453,3 +443,30 @@ async def delete_tool_resource(request):
     await tool_resource.save()
 
     return response_ok({"message": "工具资源删除成功"})
+
+
+@tool_management_bp.post("/download")
+@requires_permission("tool:r")
+async def download_zip(request):
+    """
+    下载工具 ZIP 文件接口   （需要工具查看权限）
+
+    请求参数:
+        - tool_id: 工具ID
+    """
+    tool_id = request.json.get("tool_id")
+    if not tool_id:
+        raise CustomError(ErrorCode.ParameterError)
+    tool = await Tool.filter(id=tool_id, deleted=False).first()
+    if not tool:
+        raise CustomError(ErrorCode.ToolNotFoundError)
+
+    zip_path = os.path.abspath(os.path.join(tool.path, f"SourceFile.zip"))
+
+    tool_name = tool.name
+    version = tool.version
+
+    if not os.path.exists(zip_path):
+        return CustomError(ErrorCode.ToolNotFoundError)
+
+    return await response.file(zip_path, filename=f"{tool_name}_{version}.zip", mime_type="application/zip")
