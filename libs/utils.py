@@ -2,11 +2,20 @@
 
 import datetime
 import ipaddress
+import os.path
 import random
+import zipfile
+from io import BytesIO
+from pathlib import Path, PurePath
 from string import ascii_uppercase, digits
 
+import aiofile
+from aiofile import async_open
 from argon2 import PasswordHasher
 from sanic.utils import str_to_bool as sanic_str_to_bool
+
+from core.error_code import ErrorCode
+from libs.error_code.exception import CustomError
 
 password_hasher: PasswordHasher = PasswordHasher()
 
@@ -51,3 +60,32 @@ def ip_in_list(ip_str: str, ip_list: list) -> bool:
             # 如果IP格式不合法，继续下一项
             continue
     return False
+
+
+async def unzip(zip_data, extra_path):
+    """
+    解压 ZIP 文件，需要传入zip文件字节流数据已经存储路径
+    """
+    zip_buffer = BytesIO(zip_data)
+
+    if not zipfile.is_zipfile(zip_buffer):
+        raise CustomError(ErrorCode.ZipFileFormatError)
+
+    original_zip_path = os.path.join(str(extra_path), "SourceFile.zip")
+    async with aiofile.AIOFile(original_zip_path, 'wb') as zip_file:
+        await zip_file.write(zip_data)
+
+    with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
+        files_info = zip_ref.infolist()
+
+        for in_file in files_info:
+            file_name = in_file.filename
+            unpack_filename_path = Path(str(PurePath(extra_path, file_name)))
+
+            if in_file.is_dir():
+                unpack_filename_path.mkdir(parents=True, exist_ok=True)
+            else:
+                unpack_filename_path.parent.mkdir(parents=True, exist_ok=True)
+                with zip_ref.open(file_name) as file_data:
+                    async with async_open(str(unpack_filename_path), 'wb+') as out:
+                        await out.write(file_data.read())

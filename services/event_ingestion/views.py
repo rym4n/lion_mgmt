@@ -322,7 +322,7 @@ async def get_event_ingestion_detail(request):
         content = await f.read()
         data = yaml.safe_load(content)
 
-    return response_ok({"config_data:": data, "event": event.json})
+    return response_ok({"config_data": data, "event": event.json})
 
 
 # noinspection PyTypeChecker

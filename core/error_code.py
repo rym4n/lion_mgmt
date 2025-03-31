@@ -52,5 +52,7 @@ class ErrorCode(BaseErrorCode):
     ToolAlreadyDeletedError = ErrorData(4034, "工具已删除")
     ResourcesNotFoundError = ErrorData(4035, "工具资源模板未找到")
     ResourcesNameExistsError = ErrorData(4036, "工具资源模板名称已存在")
+    ConfigFileError = ErrorData(4037, "config文件内容错误")
+    PythonFileError = ErrorData(4038, "Python文件内容错误")
 
-    IpForbidden = ErrorData(4037, "IP禁止访问")
+    IpForbidden = ErrorData(4039, "IP禁止访问")
