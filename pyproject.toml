@@ -23,6 +23,7 @@ dependencies = [
     "websockets (==14.1)",
     "sanic (>=24.12.0,<25.0.0)",
     "pyyaml (>=6.0.2,<7.0.0)",
+    "sanic-ext (>=24.12.0,<25.0.0)",
 ]
 
 [build-system]
