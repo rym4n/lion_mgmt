@@ -64,11 +64,12 @@ async def build_kafka_file_configuration_file(output_path, sources,
 
 
 async def creat_event_ingestion_dbdata(event_ingestion_name, event_ingestion_describe, event_source_type,
-                                       enabled_status, create_id, file_path, client_ip):
+                                       enabled_status, create_id, file_path, client_ip, linked_execution,syslog_config):
     events_ingestion = await EventsIngestion.create(event_ingestion_name=event_ingestion_name,
                                                     event_ingestion_describe=event_ingestion_describe,
                                                     event_source_type=event_source_type, enabled_status=enabled_status,
-                                                    created_id=create_id, file_path=file_path)
+                                                    created_id=create_id, file_path=file_path, linked_execution=linked_execution,
+                                                    syslog_config=syslog_config)
     logger.info(f"Client {client_ip} has added a new role {events_ingestion.id}.")
     return events_ingestion.json
 
@@ -90,7 +91,8 @@ async def event_ingestion(request):
         sasl_mechanism: sasl机制 (str)   事件来源类型为kafka时才传，默认为None
         sasl_username: sasl用户名 (str)   事件来源类型为kafka时才传，默认为None
         sasl_password: sasl密码 (str)   事件来源类型为kafka时才传，默认为None
-        enabled_status: 启用状态(int) 启用为 1 ，禁用为 0
+        enabled_status: 上游接入(int) 启用为 1 ，禁用为 0 默认启用
+        linked_execution: 联动执行 (int) 启用为 1 ，禁用为 0 默认禁用
         created_id: str 创建人ID
     """
     data = request.json  # 只解析一次
@@ -105,9 +107,22 @@ async def event_ingestion(request):
     sasl_mechanism = data.get('sasl_mechanism', None)
     sasl_username = data.get('sasl_username', None)
     sasl_password = data.get('sasl_password', None)
-    enabled_status = data.get('enabled_status')
+    enabled_status = data.get('enabled_status', 1)
+    linked_execution = data.get('linked_execution', 0)
     create_id = data.get('created_id')
     client_ip = request.client_ip
+
+    syslog_config = None
+    if syslog_port and communication_type:
+        syslog_config = communication_type + str(syslog_port)
+        existing_ports = await EventsIngestion.filter(deleted=False).values("syslog_config")
+        if syslog_port in existing_ports:
+            raise CustomError(ErrorCode.DataAlreadyExists)
+
+    if event_name:
+        existing_names = await EventsIngestion.filter(deleted=False).values("event_ingestion_name")
+        if event_name in existing_names:
+            raise CustomError(ErrorCode.DataAlreadyExists)
 
     output_path = os.path.join(VECTOR_CFG, event_name + ".yaml")
 
@@ -144,7 +159,9 @@ async def event_ingestion(request):
                                                                 enabled_status=enabled_status,
                                                                 create_id=create_id,
                                                                 file_path=output_path.replace("\\", "/"),
-                                                                client_ip=client_ip)
+                                                                client_ip=client_ip,
+                                                                linked_execution=linked_execution,
+                                                                syslog_config=syslog_config)
 
     return response_ok(event_ingestion_dbdata)
 
@@ -224,7 +241,8 @@ async def update_event_ingestion(request):
         sasl_mechanism: sasl机制 (str)   事件来源类型为kafka时才传，默认为None       非必填
         sasl_username: sasl用户名 (str)   事件来源类型为kafka时才传，默认为None       非必填
         sasl_password: sasl密码 (str)   事件来源类型为kafka时才传，默认为None       非必填
-        enabled_status: 启用状态(int) 启用为 1 ，禁用为 0      非必填
+        enabled_status: 上游接入(int) 启用为 1 ，禁用为 0      非必填
+        linked_execution: 联动执行 (int) 启用为 1 ，禁用为 0      非必填
         script_id: 剧本id (list)  关联剧本，非必填
     """
     data = request.json  # 只解析一次
@@ -240,9 +258,11 @@ async def update_event_ingestion(request):
     sasl_username = data.get('sasl_username', None)
     sasl_password = data.get('sasl_password', None)
     enabled_status = data.get('enabled_status', None)
+    linked_execution = data.get('linked_execution', None)
     script_id = data.get('script_id', [])
     event = await EventsIngestion.get(id=event_id)
-
+    print(enabled_status)
+    print(linked_execution)
     async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
         content = await f.read()
         data = yaml.safe_load(content)
@@ -287,14 +307,24 @@ async def update_event_ingestion(request):
         event.event_ingestion_describe = event_describe
     if transforms_type:
         event.transforms_type = transforms_type
-    if enabled_status:
+    if enabled_status in [0,1]:
+        file_path = event.file_path
+        if enabled_status == 0:
+            os.rename(file_path, file_path + "_unenabled")
+            event.file_path = file_path + "_unenabled"
+        else:
+            os.rename(file_path, file_path.replace("_unenabled", ""))
+            event.file_path = file_path.replace("_unenabled", "")
         event.enabled_status = enabled_status
+    if linked_execution in [0,1]:
+        event.linked_execution = linked_execution
     if script_id:
         if event.script_id:
             for script in script_id:
                 event.script_id.append(script)
         else:
             event.script_id = script_id
+
     await event.save()
 
     return response_ok("事件更新成功")

@@ -54,8 +54,10 @@ class EventsIngestion(BaseModel):
     event_ingestion_describe: str = fields.CharField(max_length=255, null=True, description="事件接入描述")
     event_source_type: str = fields.CharField(max_length=255, null=True, description="事件来源类型")
     transforms_type: str = fields.CharField(max_length=255, null=True, description="转换类型")
-    enabled_status: int = fields.IntField(max_length=50, null=True, description="启用状态")
+    enabled_status: int = fields.IntField(max_length=50, null=True, description="是否开启上游接入")
+    linked_execution: int = fields.IntField(max_length=50, null=True, description="是否开启联动执行")
     created_id: str = fields.CharField(max_length=36, description="创建人ID，关联用户表")
+    syslog_config: str = fields.CharField(max_length=36, description="syslog端口")
     file_path: str = fields.CharField(max_length=255, null=True, description="配置文件路径")
     script_id: List[Dict[str, Any]] = fields.JSONField(default=list, null=True, description="剧本id，关联剧本表")
 
@@ -75,7 +77,9 @@ class EventsIngestion(BaseModel):
             "enabled_status": self.enabled_status,
             "created_id": self.created_id,
             "file_path": self.file_path,
-            "script_id": self.script_id
+            "script_id": self.script_id,
+            "linked_execution": self.linked_execution,
+            "syslog_config": self.syslog_config
         }
 
     class Meta:
