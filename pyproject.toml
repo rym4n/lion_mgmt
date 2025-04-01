@@ -8,7 +8,6 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.11,<4"
 dependencies = [
-    "sanic[ext] (>=24.12.0,<25.0.0)",
     "aiocache[redis] (>=0.12.3,<0.13.0)",
     "tortoise-orm[asyncpg] (>=0.24.2,<0.25.0)",
     "aerich[toml] (>=0.8.2,<0.9.0)",
@@ -16,12 +15,15 @@ dependencies = [
     "argon2-cffi (>=23.1.0,<24.0.0)",
     "httpx-oauth (>=0.16.1,<0.17.0)",
     "pyotp (>=2.9.0,<3.0.0)",
-    "confluent-kafka (>=2.8.2,<3.0.0)",
     "aiokafka (>=0.12.0,<0.13.0)",
     "aiofile (>=3.9.0,<4.0.0)",
     "caio (==0.9.21)",
     "ujson (>=5.10.0,<6.0.0)",
     "uvicorn (>=0.34.0,<0.35.0)",
+    "websockets (==14.1)",
+    "sanic (>=24.12.0,<25.0.0)",
+    "pyyaml (>=6.0.2,<7.0.0)",
+    "sanic-ext (>=24.12.0,<25.0.0)",
 ]
 
 [build-system]

@@ -222,7 +222,7 @@ async def update_user(request):
         permit_ip: 可选，允许登录的IP地址，支持多个IP或CIDR格式（逗号分隔），例如 192.168.1.1,10.0.2.0/24
     """
     userid = request.ctx.session.get('sub')
-    account = await Account.get(id=userid, deleted=False)
+    account = await Account.get(id=userid, deleted=False).prefetch_related('roles')
     if not account:
         raise CustomError(ErrorCode.AccountNotFound)
 
