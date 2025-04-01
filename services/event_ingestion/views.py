@@ -116,12 +116,12 @@ async def event_ingestion(request):
     if syslog_port and communication_type:
         syslog_config = communication_type + str(syslog_port)
         existing_ports = await EventsIngestion.filter(deleted=False).values("syslog_config")
-        if syslog_port in existing_ports:
+        if {"syslog_config": syslog_config} in existing_ports:
             raise CustomError(ErrorCode.DataAlreadyExists)
 
     if event_name:
         existing_names = await EventsIngestion.filter(deleted=False).values("event_ingestion_name")
-        if event_name in existing_names:
+        if {"event_ingestion_name": event_name} in existing_names:
             raise CustomError(ErrorCode.DataAlreadyExists)
 
     output_path = os.path.join(VECTOR_CFG, event_name + ".yaml")
@@ -261,8 +261,7 @@ async def update_event_ingestion(request):
     linked_execution = data.get('linked_execution', None)
     script_id = data.get('script_id', [])
     event = await EventsIngestion.get(id=event_id)
-    print(enabled_status)
-    print(linked_execution)
+
     async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
         content = await f.read()
         data = yaml.safe_load(content)
