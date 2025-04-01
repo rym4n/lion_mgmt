@@ -42,8 +42,8 @@ transforms_config = {
 # noinspection PyTypeChecker
 async def build_kafka_file_configuration_file(output_path, sources,
                                               source_id, topic):
-    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../..", SAMPLE_SINK_PATH, f"{topic}.log")
-    log_path = os.path.abspath(log_path)
+    log_path = os.path.join("/data", f"{topic}.log")
+    log_path = log_path.replace("\\", "/")
     config = {
         "sources": sources,
         "sinks": {
@@ -272,7 +272,7 @@ async def update_event_ingestion(request):
         data["sources"][event.event_ingestion_name]["sasl"]["password"] = sasl_password
 
     data["sinks"][f"{event.event_ingestion_name}_sinks"] = {
-        "inputs": [f"{event.event_ingestion_name}_transforms"],
+        "inputs": [f"{event.event_ingestion_name}_transforms"] if transforms_type else [event.event_ingestion_name],
         "type": "kafka",
         "bootstrap_servers": "lion-kafka:9092",
         "topic": event.event_ingestion_name,
@@ -330,7 +330,7 @@ async def get_event_ingestion_detail(request):
 @requires_permission('event:r')
 async def get_event_ingestion_kafka_sample(request):
     """
-    获取事件接入kafka样例(需要事件查看权限)
+    获取事件接入处理后的日志样例(需要事件查看权限)
     请求参数:
          event_name: 主题名称 (str)
     """
@@ -365,8 +365,8 @@ async def get_event_ingestion_syslog_sample(request):
          event_name: 事件名称 (str)
     """
     event_name = request.json.get('event_name')
-    log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../..", SAMPLE_SINK_PATH, f"{event_name}.log")
-    log_path = os.path.abspath(log_path)
+    log_path = os.path.join(os.path.dirname(SAMPLE_SINK_PATH, f"{event_name}.log"))
+    log_path = log_path.replace("\\", "/")
     async with aiofile.AIOFile(log_path, 'r', encoding='utf-8') as f:
         content = await f.read()
         logs = content.strip().split("\n")
