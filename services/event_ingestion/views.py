@@ -394,7 +394,7 @@ async def get_event_ingestion_syslog_sample(request):
          event_name: 事件名称 (str)
     """
     event_name = request.json.get('event_name')
-    log_path = os.path.join(os.path.dirname(SAMPLE_SINK_PATH, f"{event_name}.log"))
+    log_path = os.path.join(SAMPLE_SINK_PATH, f"{event_name}.log")
     log_path = log_path.replace("\\", "/")
     async with aiofile.AIOFile(log_path, 'r', encoding='utf-8') as f:
         content = await f.read()
