@@ -396,6 +396,8 @@ async def get_event_ingestion_syslog_sample(request):
     event_name = request.json.get('event_name')
     log_path = os.path.join(SAMPLE_SINK_PATH, f"{event_name}.log")
     log_path = log_path.replace("\\", "/")
+    if not os.path.exists(log_path):
+        raise CustomError(ErrorCode.NotFound)
     async with aiofile.AIOFile(log_path, 'r', encoding='utf-8') as f:
         content = await f.read()
         logs = content.strip().split("\n")
