@@ -1,10 +1,9 @@
 # coding=utf-8
-import asyncio
 import os
+import time
 
 import aiofile
 import yaml
-from aiokafka import AIOKafkaConsumer
 from sanic import Blueprint
 from sanic.log import logger
 from tortoise.transactions import in_transaction
@@ -13,7 +12,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models.event import EventsIngestion
+from models.event import EventsIngestion, EventRelatedScript
 from settings import SAMPLE_SINK_PATH, VECTOR_CFG
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='v1/event/ingestion')
@@ -64,11 +63,13 @@ async def build_kafka_file_configuration_file(output_path, sources,
 
 
 async def creat_event_ingestion_dbdata(event_ingestion_name, event_ingestion_describe, event_source_type,
-                                       enabled_status, create_id, file_path, client_ip, linked_execution,syslog_config):
+                                       enabled_status, create_id, file_path, client_ip, linked_execution,
+                                       syslog_config):
     events_ingestion = await EventsIngestion.create(event_ingestion_name=event_ingestion_name,
                                                     event_ingestion_describe=event_ingestion_describe,
                                                     event_source_type=event_source_type, enabled_status=enabled_status,
-                                                    created_id=create_id, file_path=file_path, linked_execution=linked_execution,
+                                                    created_id=create_id, file_path=file_path,
+                                                    linked_execution=linked_execution,
                                                     syslog_config=syslog_config)
     logger.info(f"Client {client_ip} has added a new role {events_ingestion.id}.")
     return events_ingestion.json
@@ -290,14 +291,6 @@ async def update_event_ingestion(request):
     if sasl_password:
         data["sources"][event.event_ingestion_name]["sasl"]["password"] = sasl_password
 
-    data["sinks"][f"{event.event_ingestion_name}_sinks"] = {
-        "inputs": [f"{event.event_ingestion_name}_transforms"] if transforms_type else [event.event_ingestion_name],
-        "type": "kafka",
-        "bootstrap_servers": "lion-kafka:9092",
-        "topic": event.event_ingestion_name,
-        "encoding": {
-            "codec": "json"
-        }}
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
         await f.write(yaml_str)
@@ -306,7 +299,7 @@ async def update_event_ingestion(request):
         event.event_ingestion_describe = event_describe
     if transforms_type:
         event.transforms_type = transforms_type
-    if enabled_status in [0,1]:
+    if enabled_status in [0, 1]:
         file_path = event.file_path
         if enabled_status == 0:
             os.rename(file_path, file_path + "_unenabled")
@@ -315,7 +308,7 @@ async def update_event_ingestion(request):
             os.rename(file_path, file_path.replace("_unenabled", ""))
             event.file_path = file_path.replace("_unenabled", "")
         event.enabled_status = enabled_status
-    if linked_execution in [0,1]:
+    if linked_execution in [0, 1]:
         event.linked_execution = linked_execution
     if script_id:
         if event.script_id:
@@ -363,25 +356,15 @@ async def get_event_ingestion_kafka_sample(request):
     请求参数:
          event_name: 主题名称 (str)
     """
-    topic_name = request.json.get('event_name')
-    consumer = AIOKafkaConsumer(
-        topic_name,
-        bootstrap_servers=["lion-kafka:9092"],
-        auto_offset_reset="earliest"
-    )
-    await consumer.start()
-    try:
-        msg = await asyncio.wait_for(consume_message(consumer), timeout=2.0)
-        return response_ok(msg.value.decode("utf-8"))
-    except asyncio.TimeoutError:
-        return response_ok("Timeout: No message received within 2 seconds")
-    finally:
-        await consumer.stop()
-
-
-async def consume_message(consumer):
-    async for msg in consumer:
-        return msg
+    event_name = request.json.get('event_name')
+    log_path = os.path.join(SAMPLE_SINK_PATH, f"{event_name}.log")
+    log_path = log_path.replace("\\", "/")
+    if not os.path.exists(log_path):
+        raise CustomError(ErrorCode.NotFound)
+    async with aiofile.AIOFile(log_path, 'r', encoding='utf-8') as f:
+        content = await f.read()
+        logs = content.strip().split("\n")
+        return response_ok(logs[-1])
 
 
 # noinspection PyTypeChecker
@@ -402,3 +385,51 @@ async def get_event_ingestion_syslog_sample(request):
         content = await f.read()
         logs = content.strip().split("\n")
         return response_ok(logs[0])
+
+
+@event_ingestion_bp.post('/binding')
+@requires_permission('event:c')
+async def binding_event_ingestion_script(request):
+    """
+    绑定事件接入和剧本(需要事件创建权限)
+    请求参数:
+        condition: 判断条件 (str)
+        event_ingestion_id: 事件接入ID (str)
+        script_id: 剧本ID (list)
+    """
+    condition = request.json.get('condition')
+    event_ingestion_id = request.json.get('event_ingestion_id')
+    script_id = request.json.get('script_id')
+    event = await EventsIngestion.get(id=event_ingestion_id)
+    if not event:
+        raise CustomError(ErrorCode.NotFound)
+    # 目前没有剧本列表后续在加列表判断
+    # script = await Script.get(id=script_id)
+    # if not script:
+    #     raise CustomError(ErrorCode.NotFound)
+
+    timestamp_int = str(int(time.time()))
+    topic = f"{event.event_ingestion_name}_{timestamp_int}"
+
+    async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
+        content = await f.read()
+        data = yaml.safe_load(content)
+
+    data["sinks"][f"{event.event_ingestion_name}_sinks"] = {
+        "inputs": [f"{event.event_ingestion_name}_transforms"] if event.transforms_type else [
+            event.event_ingestion_name],
+        "type": "kafka",
+        "bootstrap_servers": "lion-kafka:9092",
+        "topic": topic,
+        "encoding": {
+            "codec": "json"
+        }}
+
+    async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
+        yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+        await f.write(yaml_str)
+
+    events_ingestion = await EventRelatedScript.create(condition=condition, event_ingestion_id=event_ingestion_id,
+                                                       script_id=script_id, topic=topic)
+
+    return response_ok(events_ingestion.json)

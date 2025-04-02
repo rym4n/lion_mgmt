@@ -59,7 +59,6 @@ class EventsIngestion(BaseModel):
     created_id: str = fields.CharField(max_length=36, description="创建人ID，关联用户表")
     syslog_config: str = fields.CharField(max_length=36, null=True, description="syslog端口")
     file_path: str = fields.CharField(max_length=255, null=True, description="配置文件路径")
-    script_id: List[Dict[str, Any]] = fields.JSONField(default=list, null=True, description="剧本id，关联剧本表")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -77,10 +76,38 @@ class EventsIngestion(BaseModel):
             "enabled_status": self.enabled_status,
             "created_id": self.created_id,
             "file_path": self.file_path,
-            "script_id": self.script_id,
             "linked_execution": self.linked_execution,
             "syslog_config": self.syslog_config
         }
 
     class Meta:
         table = "events_ingestion"
+
+
+class EventRelatedScript(BaseModel):
+    """
+    事件关联剧本表
+    """
+
+    condition: str = fields.CharField(max_length=255, null=True, description="执行条件")
+    event_ingestion_id: str = fields.CharField(max_length=255, null=True, description="事件接入id")
+    topic: str = fields.CharField(max_length=255, null=True, description="主题名")
+    script_id: list[str] = fields.JSONField(null=True, description="剧本id")
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": str(self.ctime),
+            "utime": str(self.utime),
+            "condition": self.condition,
+            "event_ingestion_id": self.event_ingestion_id,
+            "topic": self.topic,
+            "script_id": self.script_id
+        }
+
+    class Meta:
+        table = "event_related_script"
