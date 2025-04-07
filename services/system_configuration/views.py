@@ -9,7 +9,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import SystemCustomConfiguration, SystemStatus, AuditLog
-from settings import UPLOAD_FOLDER
+from settings import UPLOAD_FOLDER,BG_NAME
 
 system_bp = Blueprint('system', url_prefix='v1/system')
 _all__ = ["system_bp"]
@@ -40,8 +40,13 @@ async def upload_image(request):
     file_paths = {}
     for field in ["background", "webico", "logo"]:
         file = request.files.get(field)
+        if field == "background":
+            filename = f"{BG_NAME}.{file.name.split('.')[-1]}"
+        elif field == "webico":
+            filename = f"favicon.{file.name.split('.')[-1]}"
+        elif field == "logo":
+            filename = f"logo.{file.name.split('.')[-1]}"
         if file:
-            filename = f"{system_version}_{file.name}"
             file_path = os.path.join(UPLOAD_FOLDER, filename)
 
             with open(file_path, "wb") as f:

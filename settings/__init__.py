@@ -10,7 +10,7 @@ LOG_PATH = os.path.join(BASE_DIR, 'logs')
 os.makedirs(LOG_PATH, exist_ok=True)
 
 # 文件上传的保存路径
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'data/uploads')
+UPLOAD_FOLDER = './data/uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # vector配置目录
@@ -32,6 +32,9 @@ if os.environ.get("RY_ENV") == 'DEV':
         load_dotenv(os.path.join(BASE_DIR, 'settings/.env'))
     except:
         pass
+
+# 系统背景图片名称配置
+BG_NAME = "bg-oEDCYcDF"
 
 # 安全相关
 SECRET = os.environ.get("RY_SECRET_KEY", '5tdPY^zTX6I$akvNtLXey3y#gFEG@^46f!iLUdSy$Y')

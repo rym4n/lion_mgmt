@@ -1,5 +1,6 @@
 # coding=utf-8
 import os
+import re
 import time
 
 import aiofile
@@ -142,7 +143,7 @@ async def event_ingestion(request):
             "type": "kafka",
             "bootstrap_servers": ",".join(event_source_address),
             "group_id": kafka_group_id,
-            "topics": [kafka_topic],
+            "topics": kafka_topic,
             "sasl": {
                 "enabled": True,
                 "mechanism": sasl_mechanism,
@@ -274,6 +275,7 @@ async def update_event_ingestion(request):
     if kafka_group_id:
         data["sources"][event.event_ingestion_name]["group_id"] = kafka_group_id
     if transforms_type:
+        data["sinks"]["sample_sinks"]["inputs"] = [f"{event.event_ingestion_name}_transforms"]
         data.setdefault("transforms", {}).setdefault(f"{event.event_ingestion_name}_transforms", {})["type"] = "remap"
         data["transforms"][f"{event.event_ingestion_name}_transforms"]["inputs"] = [event.event_ingestion_name]
         if transforms_type == "Grok":
@@ -393,16 +395,40 @@ async def binding_event_ingestion_script(request):
     """
     绑定事件接入和剧本(需要事件创建权限)
     请求参数:
-        condition: 判断条件 (str)
+        judge: 判断条件 (json)  ，
+            {
+                type: "&&" or "||" or None,         (&&为and，||为or)
+                conditions: [
+                    {
+                        type: "type",
+                        name: "name",
+                        value: "value"
+                    },
+                    {
+                        type: "type",
+                        name: "name",
+                        value: "value"
+                    }
+                ]
+            }
+        目前支持的判断条件类型有：
+            等于 == ，不等于!= ，大于 > ，小于 < ，大于等于 >= ，小于等于 <=
+            字段中存在字符串 contains ，字段中不包含字符串 !contains
+            字段中存在集合 includes ，字段中不存在集合 !includes     value为集合，如"[\"abc\",\"lmd\"]"
+            字段存在 exists ，字段不存在 !exists        value为空
+            字段为空 is_empty ，字段不为空 !is_empty    value为空
+            正则表达式 match  字段匹配正则表达式       value为正则表达式，如"^abc.*$"
+    # judge = request.json.get('judge')
         event_ingestion_id: 事件接入ID (str)
         script_id: 剧本ID (list)
     """
-    condition = request.json.get('condition')
+    conditions = request.json.get('judge')
     event_ingestion_id = request.json.get('event_ingestion_id')
     script_id = request.json.get('script_id')
-    event = await EventsIngestion.get(id=event_ingestion_id)
+    event = await EventsIngestion.filter(id=event_ingestion_id).first()
     if not event:
         raise CustomError(ErrorCode.NotFound)
+
     # 目前没有剧本列表后续在加列表判断
     # script = await Script.get(id=script_id)
     # if not script:
@@ -411,13 +437,40 @@ async def binding_event_ingestion_script(request):
     timestamp_int = str(int(time.time()))
     topic = f"{event.event_ingestion_name}_{timestamp_int}"
 
+    conditional_statements = ""
+
+    if conditions:
+        connect_type = conditions["type"] if conditions["type"] in ["&&", "||"] else None
+        for index, condition in enumerate(conditions["conditions"]):
+            is_last_condition = index == len(conditions["conditions"]) - 1
+            if bool(re.fullmatch(r"[^\w\s]+", condition["type"])):
+                conditional_statements += f".{condition["name"]} {condition['type']} \"{condition['value']}\" "
+            elif condition["type"] == "contains":
+                conditional_statements += f"{condition['type']}(string!(.{condition['name']}), \"{condition['value']}\")"
+            elif condition["type"] in ["includes", "!includes"]:
+                conditional_statements += f"{condition['type']}({condition['value']}, string!(.{condition['name']}))"
+            elif condition["type"] in ["exists", "is_empty", "!exists", "!is_empty"]:
+                conditional_statements += f"{condition['type']}(string!(.{condition['name']}))"
+            elif condition["type"] == "match":
+                conditional_statements += f"match(string!(.{condition['name']}), \"{condition['value']}\")"
+            else:
+                raise CustomError(ErrorCode.ParameterError)
+            if connect_type and not is_last_condition:
+                conditional_statements += f" {connect_type} "
+
     async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
         content = await f.read()
         data = yaml.safe_load(content)
 
-    data["sinks"][f"{event.event_ingestion_name}_sinks"] = {
+    data["transforms"][f"{topic}_transforms"] = {
+        "type": "filter",
         "inputs": [f"{event.event_ingestion_name}_transforms"] if event.transforms_type else [
             event.event_ingestion_name],
+        "condition": conditional_statements
+    }
+
+    data["sinks"][f"{topic}_sinks"] = {
+        "inputs": [f"{topic}_transforms"],
         "type": "kafka",
         "bootstrap_servers": "lion-kafka:9092",
         "topic": topic,
@@ -429,7 +482,7 @@ async def binding_event_ingestion_script(request):
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
         await f.write(yaml_str)
 
-    events_ingestion = await EventRelatedScript.create(condition=condition, event_ingestion_id=event_ingestion_id,
+    events_ingestion = await EventRelatedScript.create(condition=conditions, event_ingestion_id=event_ingestion_id,
                                                        script_id=script_id, topic=topic)
 
     return response_ok(events_ingestion.json)

@@ -54,5 +54,7 @@ class ErrorCode(BaseErrorCode):
     ResourcesNameExistsError = ErrorData(4036, "工具资源模板名称已存在")
     ConfigFileError = ErrorData(4037, "config文件内容错误")
     PythonFileError = ErrorData(4038, "Python文件内容错误")
+    ResourceError = ErrorData(4039, "工具资源不一致，请新建工具或删除原工具后再次上传")
+    ToolAlreadyExists = ErrorData(4040, "工具已存在")
 
-    IpForbidden = ErrorData(4039, "IP禁止访问")
+    IpForbidden = ErrorData(4041, "IP禁止访问")

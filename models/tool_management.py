@@ -44,7 +44,7 @@ class Tool(BaseModel):
     status: int = fields.IntField(default=0, description="是否有剧本使用它 1:有 0:无")
     creator: str = fields.CharField(max_length=255, null=True, description="创建者")
     updater: str = fields.CharField(max_length=255, null=True, description="更新者")
-
+    hash_value: str = fields.CharField(max_length=255, null=True, description="文件hash值")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -61,7 +61,8 @@ class Tool(BaseModel):
             "description": self.description,
             "status": self.status,
             "creator": self.creator,
-            "updater": self.updater
+            "updater": self.updater,
+            "hash_value": self.hash_value
         }
 
     class Meta:
@@ -73,7 +74,7 @@ class ToolResourcesModel(BaseModel):
     工具资源模板表
     """
 
-    tool_id: str = fields.CharField(max_length=255, description="工具id")
+    tool_name: str = fields.CharField(max_length=255, description="工具名称")
     resources: list[str] = fields.JSONField(description="资源模板")
 
 
@@ -86,7 +87,7 @@ class ToolResourcesModel(BaseModel):
             "id": self.id,
             "ctime": str(self.ctime),
             "utime": str(self.utime),
-            "tool_id": self.tool_id,
+            "tool_name": self.tool_name,
             "resources": self.resources,
         }
 
@@ -99,7 +100,7 @@ class ToolResources(BaseModel):
     工具资源表
     """
 
-    tool_id: str = fields.CharField(max_length=255, description="工具id")
+    tool_name: str = fields.CharField(max_length=255, description="工具名称")
     name: str = fields.CharField(max_length=255, unique=True,description="资源名称")
     description: str = fields.CharField(max_length=255, description="资源描述")
     product_supplier: str = fields.CharField(max_length=255, null=True, description="供应商")
@@ -118,7 +119,7 @@ class ToolResources(BaseModel):
             "id": self.id,
             "ctime": str(self.ctime),
             "utime": str(self.utime),
-            "tool_id": self.tool_id,
+            "tool_name": self.tool_name,
             "name": self.name,
             "description": self.description,
             "product_supplier": self.product_supplier,

@@ -1,13 +1,11 @@
 # coding=utf-8
-import asyncio
 import datetime
+import hashlib
 import json
 import os
 import zipfile
 from io import BytesIO
-from pathlib import Path
 
-import aiofiles
 from sanic import Blueprint, response
 from tortoise.expressions import Q
 from tortoise.functions import Max
@@ -46,10 +44,12 @@ async def upload_and_extract_zip(request):
     # 获取 ZIP 文件
     zip_file = request.files["file"][0]
 
-    config_data, version, tool_id = await unzip(zip_file.body, creator)
+    config_data, version, tool_name = await unzip(zip_file.body, creator)
     await ToolAction.create(tool_name=config_data.get("name"), version_number=version,
                             action=config_data.get("actions"))
-    await ToolResourcesModel.create(tool_id=tool_id, resources=config_data.get("configuration"))
+    configuration = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values("resources")
+    if not configuration or configuration["resources"] != config_data.get("configuration"):
+        await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("configuration"))
 
     return response_ok({"message": "工具上传成功"})
 
@@ -59,6 +59,15 @@ async def unzip(zip_data, creator):
     解压 ZIP 文件，直接从文件流读取，并进行文件结构校验
     """
     zip_buffer = BytesIO(zip_data)
+
+    hash_func = getattr(hashlib, "md5", None)
+    if hash_func is None:
+        raise ValueError("Unsupported hash type. Use 'md5', 'sha1', 'sha256', or 'sha512'.")
+
+    hasher = hash_func()
+    zip_buffer.seek(0)  # 确保从头开始读取数据
+    for chunk in iter(lambda: zip_buffer.read(4096), b""):
+        hasher.update(chunk)
 
     with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
         files_info = zip_ref.infolist()
@@ -93,6 +102,15 @@ async def unzip(zip_data, creator):
         if any(f"def {class_name}(" not in py_data for class_name in class_name_list):
             raise CustomError(ErrorCode.PythonFileError)
 
+        configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False).first().values("resources")
+        if configuration and configuration["resources"] != config_data.get("configuration"):
+            raise CustomError(ErrorCode.ResourceError)
+
+        hash_values = await Tool.filter(name=name, deleted=False).all().values("hash_value")
+        hash_set = {entry["hash_value"] for entry in hash_values}
+        if hash_values and hasher.hexdigest() in hash_set:
+            raise CustomError(ErrorCode.ToolAlreadyExists)
+
         latest_tool = await Tool.filter(name=name).order_by("-ctime").first()
         today_version = datetime.datetime.today().strftime("%Y%m%d")
         version = str(int(latest_tool.version) + 1) if latest_tool and latest_tool.version.startswith(
@@ -109,10 +127,11 @@ async def unzip(zip_data, creator):
         tool = await Tool.create(
             name=name, version=version, path=save_path,
             description=config_data.get("description"),
-            creator=creator, updater=creator
+            creator=creator, updater=creator,
+            hash_value=hasher.hexdigest()
         )
 
-        return config_data, version, tool.id
+        return config_data, version, tool.name
 
 
 @tool_management_bp.post("/all")
@@ -235,11 +254,11 @@ async def update_tool_status(request):
     return response_ok({"message": "工具状态更新成功"})
 
 
-@tool_management_bp.post("/delete")
+@tool_management_bp.post("/delete/version")
 @requires_permission("tool:d")
 async def delete_tool(request):
     """
-    删除工具（需要工具删除权限）
+    删除指定版本工具（需要工具删除权限）
 
     query参数:
         - name: 工具名称
@@ -261,7 +280,59 @@ async def delete_tool(request):
     tool.updater = token_decode(request).get("name")
     await tool.save()
 
+    tool_actions = await ToolAction.filter(tool_name=name, version_number=version, deleted=False).all()
+    if tool_actions:
+        for action in tool_actions:
+            action.deleted = True
+            await action.save()
+
     return response_ok({"message": "工具删除成功"})
+
+
+@tool_management_bp.post("/delete/all")
+@requires_permission("tool:d")
+async def delete_tool_all(request):
+    """
+    删除工具全部版本（需要工具删除权限）
+
+    query参数:
+        - name: 工具名称
+    """
+    name = request.json.get("name")
+    if not name:
+        raise CustomError(ErrorCode.ParameterError)
+
+    tools = await Tool.filter(name=name, deleted=False).all()
+    if not tools:
+        raise CustomError(ErrorCode.ToolAlreadyDeletedError)
+
+    for tool in tools:
+        if tool.status == 1:
+            raise CustomError(ErrorCode.ToolHasScriptError)
+
+        tool.deleted = True
+        tool.updater = token_decode(request).get("name")
+        await tool.save()
+
+    tool_actions = await ToolAction.filter(tool_name=name, deleted=False).all()
+    if tool_actions:
+        for action in tool_actions:
+            action.deleted = True
+            await action.save()
+
+    tool_resource_models = await ToolResourcesModel.filter(tool_name=name, deleted=False).all()
+    if tool_resource_models:
+        for resource_model in tool_resource_models:
+            resource_model.deleted = True
+            await resource_model.save()
+
+    tool_resources = await ToolResources.filter(tool_name=name, deleted=False).all()
+    if tool_resources:
+        for resource in tool_resources:
+            resource.deleted = True
+            await resource.save()
+
+    return response_ok({"message": "全部工具删除成功"})
 
 
 @tool_management_bp.post("/resource/model")
@@ -271,13 +342,13 @@ async def tool_resource_model(request):
     获取工具的资源模型（需要工具查看权限）
 
     query参数:
-        - id: 工具ID    str
+        - name: 工具name    str
     """
-    tool_id = request.json.get("id")
-    if not tool_id:
+    tool_name = request.json.get("name")
+    if not tool_name:
         raise CustomError(ErrorCode.ParameterError)
 
-    resources = await ToolResourcesModel.filter(tool_id=tool_id).first().values()
+    resources = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values()
     if not resources:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
 
@@ -291,7 +362,7 @@ async def add_tool_resource(request):
     新增工具资源（需要工具创建权限）
 
     query参数:
-        - id: 工具ID    str
+        - tool_name: 工具名称    str
         - name: 资源名称    str
         - description: 资源描述    str
         - product_supplier: 供应商    str    可选
@@ -307,42 +378,25 @@ async def add_tool_resource(request):
                         "value":"test"      这个是新增的值
                 }}
     """
-    tool_id = request.json.get("id")
+    tool_name = request.json.get("tool_name")
     name = request.json.get("name")
     description = request.json.get("description")
     product_supplier = request.json.get("product_supplier", None)
     product_name = request.json.get("product_name", None)
     resources = request.json.get("resources")
-    if not tool_id or not resources or not name or not description:
+    if not tool_name or not resources or not name or not description:
         raise CustomError(ErrorCode.ParameterError)
 
     existing_resource = await ToolResources.get_or_none(name=name)
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
 
-    await ToolResources.create(tool_id=tool_id, name=name, description=description, product_supplier=product_supplier,
+    await ToolResources.create(tool_name=tool_name, name=name, description=description,
+                               product_supplier=product_supplier,
                                product_name=product_name, resources=resources, creator=token_decode(request).get("name")
                                , updater=token_decode(request).get("name"))
 
     return response_ok({"message": "工具资源新增成功"})
-
-
-@tool_management_bp.post("/resource/all")
-@requires_permission("tool:r")
-async def all_tool_resources(request):
-    """
-    获取工具的所有资源列表（需要工具查看权限）
-
-    query参数:
-        - id: 工具ID    str
-    """
-    tool_id = request.json.get("id")
-    if not tool_id:
-        raise CustomError(ErrorCode.ParameterError)
-
-    resources = await ToolResources.filter(tool_id=tool_id, deleted=False).values()
-
-    return response_ok(resources)
 
 
 @tool_management_bp.post("/resource/detailed")
@@ -352,15 +406,13 @@ async def tool_resources_detailed(request):
     获取工具的资源详情（需要工具查看权限）
 
     query参数:
-        - id: 工具ID    str
-        - name: 资源名称    str
+        - name: 工具名称    str
     """
-    tool_id = request.json.get("id")
-    name = request.json.get("name")
-    if not tool_id or not name:
+    tool_name = request.json.get("id")
+    if not tool_name:
         raise CustomError(ErrorCode.ParameterError)
 
-    resources = await ToolResources.filter(tool_id=tool_id, name=name, deleted=False).values()
+    resources = await ToolResources.filter(tool_name=tool_name, deleted=False).values()
     if not resources:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
 
@@ -374,7 +426,7 @@ async def update_tool_resource(request):
     更新工具资源（需要工具更新权限）
 
     query参数:
-        - id: 工具ID    str\
+        - tool_name: 工具名称    str\
         - name: 资源名称    str  不可修改，修改其他值的凭证
         - description: 资源描述    str    可选
         - product_supplier: 供应商    str    可选
@@ -390,16 +442,16 @@ async def update_tool_resource(request):
                         "value":"test"      这个是新增的值
                 }}
     """
-    tool_id = request.json.get("id")
+    tool_name = request.json.get("tool_name")
     name = request.json.get("name")
     description = request.json.get("description", None)
     product_supplier = request.json.get("product_supplier", None)
     product_name = request.json.get("product_name", None)
     resources = request.json.get("resources", None)
-    if not tool_id or not name:
+    if not tool_name or not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool_resource = await ToolResources.filter(tool_id=tool_id, name=name).first()
+    tool_resource = await ToolResources.filter(tool_name=tool_name, name=name, deleted=False).first()
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
@@ -425,15 +477,15 @@ async def delete_tool_resource(request):
     删除工具资源（需要工具删除权限）
 
     query参数:
-        - id: 工具ID    str
+        - tool_name: 工具名称    str
         - name: 资源名称    str
     """
-    tool_id = request.json.get("id")
+    tool_name = request.json.get("tool_name")
     name = request.json.get("name")
-    if not tool_id or not name:
+    if not tool_name or not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool_resource = await ToolResources.filter(tool_id=tool_id, name=name, deleted=False).first()
+    tool_resource = await ToolResources.filter(tool_name=tool_name, name=name, deleted=False).first()
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
