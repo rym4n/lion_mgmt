@@ -45,8 +45,9 @@ async def upload_and_extract_zip(request):
     zip_file = request.files["file"][0]
 
     config_data, version, tool_name = await unzip(zip_file.body, creator)
-    await ToolAction.create(tool_name=config_data.get("name"), version_number=version,
-                            action=config_data.get("actions"))
+    for action in config_data.get("actions"):
+        await ToolAction.create(tool_name=config_data.get("name"), version_number=version,
+                                action=action)
     configuration = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values("resources")
     if not configuration or configuration["resources"] != config_data.get("configuration"):
         await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("configuration"))
