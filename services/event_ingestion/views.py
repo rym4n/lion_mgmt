@@ -470,7 +470,13 @@ async def binding_event_ingestion_script(request):
         content = await f.read()
         data = yaml.safe_load(content)
 
-    if conditional_statements in str(data.values()):
+    condition_list = [
+        transform.get("condition")
+        for transform in data.get("transforms", {}).values()
+        if "condition" in transform
+    ]
+
+    if conditional_statements in condition_list:
         raise CustomError(ErrorCode.ConditionalExistsError)
 
     data["transforms"][f"{topic}_transforms"] = {

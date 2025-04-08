@@ -56,5 +56,8 @@ class ErrorCode(BaseErrorCode):
     PythonFileError = ErrorData(4038, "Python文件内容错误")
     ResourceError = ErrorData(4039, "工具资源不一致，请新建工具或删除原工具后再次上传")
     ToolAlreadyExists = ErrorData(4040, "工具已存在")
+    ActionNotFoundError = ErrorData(4041, "工具动作不存在")
 
-    IpForbidden = ErrorData(4041, "IP禁止访问")
+    IpForbidden = ErrorData(4042, "IP禁止访问")
+
+    ConditionalExistsError = ErrorData(4043, "判断条件已存在")
