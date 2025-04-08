@@ -139,17 +139,25 @@ async def event_ingestion(request):
         await build_kafka_file_configuration_file(output_path=output_path, sources=sources, source_id=event_name,
                                                   topic=topic)
     elif event_source_type == "kafka":
-        sources = {event_name: {
-            "type": "kafka",
-            "bootstrap_servers": ",".join(event_source_address),
-            "group_id": kafka_group_id,
-            "topics": kafka_topic,
-            "sasl": {
-                "enabled": True,
-                "mechanism": sasl_mechanism,
-                "username": sasl_username,
-                "password": sasl_password
-            }}}
+        if sasl_mechanism:
+            sources = {event_name: {
+                "type": "kafka",
+                "bootstrap_servers": ",".join(event_source_address),
+                "group_id": kafka_group_id,
+                "topics": kafka_topic,
+                "sasl": {
+                    "enabled": True,
+                    "mechanism": sasl_mechanism,
+                    "username": sasl_username,
+                    "password": sasl_password
+                }}}
+        else:
+            sources = {event_name: {
+                "type": "kafka",
+                "bootstrap_servers": ",".join(event_source_address),
+                "group_id": kafka_group_id,
+                "topics": kafka_topic,
+            }}
         await build_kafka_file_configuration_file(output_path=output_path, sources=sources, source_id=event_name,
                                                   topic=topic)
     else:
@@ -444,15 +452,15 @@ async def binding_event_ingestion_script(request):
         for index, condition in enumerate(conditions["conditions"]):
             is_last_condition = index == len(conditions["conditions"]) - 1
             if bool(re.fullmatch(r"[^\w\s]+", condition["type"])):
-                conditional_statements += f".{condition["name"]} {condition['type']} \"{condition['value']}\" "
+                conditional_statements += f""".{condition["name"]} {condition['type']} "{condition['value']}" """
             elif condition["type"] == "contains":
-                conditional_statements += f"{condition['type']}(string!(.{condition['name']}), \"{condition['value']}\")"
+                conditional_statements += f"""{condition['type']}(string!(.{condition['name']}), "{condition['value']}")"""
             elif condition["type"] in ["includes", "!includes"]:
-                conditional_statements += f"{condition['type']}({condition['value']}, string!(.{condition['name']}))"
+                conditional_statements += f"""{condition['type']}({condition['value']}, string!(.{condition['name']}))"""
             elif condition["type"] in ["exists", "is_empty", "!exists", "!is_empty"]:
-                conditional_statements += f"{condition['type']}(string!(.{condition['name']}))"
+                conditional_statements += f"""{condition['type']}(string!(.{condition['name']}))"""
             elif condition["type"] == "match":
-                conditional_statements += f"match(string!(.{condition['name']}), \"{condition['value']}\")"
+                conditional_statements += f"""match(string!(.{condition['name']}), "{condition['value']}")"""
             else:
                 raise CustomError(ErrorCode.ParameterError)
             if connect_type and not is_last_condition:
@@ -461,6 +469,9 @@ async def binding_event_ingestion_script(request):
     async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
         content = await f.read()
         data = yaml.safe_load(content)
+
+    if conditional_statements in str(data.values()):
+        raise CustomError(ErrorCode.ConditionalExistsError)
 
     data["transforms"][f"{topic}_transforms"] = {
         "type": "filter",
