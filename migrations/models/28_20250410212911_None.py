@@ -20,8 +20,10 @@ CREATE TABLE IF NOT EXISTS "account" (
     "password" VARCHAR(255) NOT NULL,
     "mfa_enable" BOOL NOT NULL DEFAULT False,
     "mfa_key" VARCHAR(50),
+    "mfa_bind" BOOL NOT NULL DEFAULT False,
     "oauth_id" VARCHAR(255) UNIQUE,
-    "disabled" BOOL NOT NULL DEFAULT False
+    "disabled" BOOL NOT NULL DEFAULT False,
+    "permit_ip" VARCHAR(255)
 );
 COMMENT ON COLUMN "account"."ctime" IS '创建时间';
 COMMENT ON COLUMN "account"."utime" IS '更新时间';
@@ -79,19 +81,38 @@ COMMENT ON COLUMN "audit_log"."client_ua" IS '客户端UA';
 COMMENT ON COLUMN "audit_log"."uri" IS '请求URL';
 COMMENT ON COLUMN "audit_log"."request_data" IS '请求数据';
 COMMENT ON TABLE "audit_log" IS '操作审计记录';
+CREATE TABLE IF NOT EXISTS "event_related_script" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "condition" VARCHAR(255),
+    "event_ingestion_id" VARCHAR(255),
+    "topic" VARCHAR(255),
+    "script_id" JSONB
+);
+COMMENT ON COLUMN "event_related_script"."ctime" IS '创建时间';
+COMMENT ON COLUMN "event_related_script"."utime" IS '更新时间';
+COMMENT ON COLUMN "event_related_script"."deleted" IS '删除标识';
+COMMENT ON COLUMN "event_related_script"."condition" IS '执行条件';
+COMMENT ON COLUMN "event_related_script"."event_ingestion_id" IS '事件接入id';
+COMMENT ON COLUMN "event_related_script"."topic" IS '主题名';
+COMMENT ON COLUMN "event_related_script"."script_id" IS '剧本id';
+COMMENT ON TABLE "event_related_script" IS '事件关联剧本表';
 CREATE TABLE IF NOT EXISTS "events" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted" BOOL NOT NULL DEFAULT False,
-    "event_name" VARCHAR(255),
-    "event_process_status" VARCHAR(50),
+    "event_name" VARCHAR(255) NOT NULL UNIQUE,
+    "event_process_status" VARCHAR(50) NOT NULL,
     "event_source" VARCHAR(255),
     "event_level" VARCHAR(50) NOT NULL,
-    "owner" JSONB NOT NULL,
+    "owner" JSONB,
     "created_id" VARCHAR(36) NOT NULL,
     "event_summary" TEXT,
-    "log_data" TEXT NOT NULL
+    "log_data" TEXT NOT NULL,
+    "event_ingestion_id" VARCHAR(255) NOT NULL
 );
 COMMENT ON COLUMN "events"."ctime" IS '创建时间';
 COMMENT ON COLUMN "events"."utime" IS '更新时间';
@@ -104,19 +125,21 @@ COMMENT ON COLUMN "events"."owner" IS '负责人（包括角色和用户）';
 COMMENT ON COLUMN "events"."created_id" IS '创建人ID，关联用户表';
 COMMENT ON COLUMN "events"."event_summary" IS '事件概要';
 COMMENT ON COLUMN "events"."log_data" IS '日志数据';
+COMMENT ON COLUMN "events"."event_ingestion_id" IS '事件接入id，管理事件接入表';
 COMMENT ON TABLE "events" IS '事件列表';
 CREATE TABLE IF NOT EXISTS "events_ingestion" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted" BOOL NOT NULL DEFAULT False,
-    "event_ingestion_name" VARCHAR(255),
+    "event_ingestion_name" VARCHAR(255) UNIQUE,
     "event_ingestion_describe" VARCHAR(255),
     "event_source_type" VARCHAR(255),
     "transforms_type" VARCHAR(255),
     "enabled_status" INT,
-    "release_status" INT,
+    "linked_execution" INT,
     "created_id" VARCHAR(36) NOT NULL,
+    "syslog_config" VARCHAR(36),
     "file_path" VARCHAR(255)
 );
 COMMENT ON COLUMN "events_ingestion"."ctime" IS '创建时间';
@@ -126,9 +149,10 @@ COMMENT ON COLUMN "events_ingestion"."event_ingestion_name" IS '事件接入名�
 COMMENT ON COLUMN "events_ingestion"."event_ingestion_describe" IS '事件接入描述';
 COMMENT ON COLUMN "events_ingestion"."event_source_type" IS '事件来源类型';
 COMMENT ON COLUMN "events_ingestion"."transforms_type" IS '转换类型';
-COMMENT ON COLUMN "events_ingestion"."enabled_status" IS '启用状态';
-COMMENT ON COLUMN "events_ingestion"."release_status" IS '发布状态';
+COMMENT ON COLUMN "events_ingestion"."enabled_status" IS '是否开启上游接入';
+COMMENT ON COLUMN "events_ingestion"."linked_execution" IS '是否开启联动执行';
 COMMENT ON COLUMN "events_ingestion"."created_id" IS '创建人ID，关联用户表';
+COMMENT ON COLUMN "events_ingestion"."syslog_config" IS 'syslog端口';
 COMMENT ON COLUMN "events_ingestion"."file_path" IS '配置文件路径';
 COMMENT ON TABLE "events_ingestion" IS '事件接入列表';
 CREATE TABLE IF NOT EXISTS "role" (
@@ -186,6 +210,92 @@ COMMENT ON COLUMN "system_status"."uptime" IS '启动时间';
 COMMENT ON COLUMN "system_status"."checkTime" IS '检查时间';
 COMMENT ON COLUMN "system_status"."status" IS '状态';
 COMMENT ON TABLE "system_status" IS '系统状态表';
+CREATE TABLE IF NOT EXISTS "tool" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "name" VARCHAR(255),
+    "version" VARCHAR(50),
+    "path" VARCHAR(255),
+    "description" VARCHAR(255),
+    "status" INT NOT NULL DEFAULT 0,
+    "creator" VARCHAR(255),
+    "updater" VARCHAR(255),
+    "hash_value" VARCHAR(255)
+);
+COMMENT ON COLUMN "tool"."ctime" IS '创建时间';
+COMMENT ON COLUMN "tool"."utime" IS '更新时间';
+COMMENT ON COLUMN "tool"."deleted" IS '删除标识';
+COMMENT ON COLUMN "tool"."name" IS '工具名称';
+COMMENT ON COLUMN "tool"."version" IS '工具版本号';
+COMMENT ON COLUMN "tool"."path" IS '文件地址';
+COMMENT ON COLUMN "tool"."description" IS '工具描述';
+COMMENT ON COLUMN "tool"."status" IS '是否有剧本使用它 1:有 0:无';
+COMMENT ON COLUMN "tool"."creator" IS '创建者';
+COMMENT ON COLUMN "tool"."updater" IS '更新者';
+COMMENT ON COLUMN "tool"."hash_value" IS '文件hash值';
+COMMENT ON TABLE "tool" IS '工具管理表';
+CREATE TABLE IF NOT EXISTS "tool_action" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "tool_name" VARCHAR(255),
+    "version_number" VARCHAR(50),
+    "action" JSONB,
+    "roles_id" JSONB,
+    "users_id" JSONB
+);
+COMMENT ON COLUMN "tool_action"."ctime" IS '创建时间';
+COMMENT ON COLUMN "tool_action"."utime" IS '更新时间';
+COMMENT ON COLUMN "tool_action"."deleted" IS '删除标识';
+COMMENT ON COLUMN "tool_action"."tool_name" IS '工具名称';
+COMMENT ON COLUMN "tool_action"."version_number" IS '版本号';
+COMMENT ON COLUMN "tool_action"."action" IS '动作';
+COMMENT ON COLUMN "tool_action"."roles_id" IS '有权限执行的角色';
+COMMENT ON COLUMN "tool_action"."users_id" IS '有权限执行的用户';
+COMMENT ON TABLE "tool_action" IS '工具动作管理表';
+CREATE TABLE IF NOT EXISTS "tool_resources" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "tool_name" VARCHAR(255) NOT NULL,
+    "name" VARCHAR(255) NOT NULL UNIQUE,
+    "description" VARCHAR(255) NOT NULL,
+    "product_supplier" VARCHAR(255),
+    "product_name" VARCHAR(255),
+    "resources" JSONB NOT NULL,
+    "creator" VARCHAR(255),
+    "updater" VARCHAR(255)
+);
+COMMENT ON COLUMN "tool_resources"."ctime" IS '创建时间';
+COMMENT ON COLUMN "tool_resources"."utime" IS '更新时间';
+COMMENT ON COLUMN "tool_resources"."deleted" IS '删除标识';
+COMMENT ON COLUMN "tool_resources"."tool_name" IS '工具名称';
+COMMENT ON COLUMN "tool_resources"."name" IS '资源名称';
+COMMENT ON COLUMN "tool_resources"."description" IS '资源描述';
+COMMENT ON COLUMN "tool_resources"."product_supplier" IS '供应商';
+COMMENT ON COLUMN "tool_resources"."product_name" IS '产品名称';
+COMMENT ON COLUMN "tool_resources"."resources" IS '资源配置';
+COMMENT ON COLUMN "tool_resources"."creator" IS '创建者';
+COMMENT ON COLUMN "tool_resources"."updater" IS '更新者';
+COMMENT ON TABLE "tool_resources" IS '工具资源表';
+CREATE TABLE IF NOT EXISTS "tool_resources_model" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "tool_name" VARCHAR(255) NOT NULL,
+    "resources" JSONB NOT NULL
+);
+COMMENT ON COLUMN "tool_resources_model"."ctime" IS '创建时间';
+COMMENT ON COLUMN "tool_resources_model"."utime" IS '更新时间';
+COMMENT ON COLUMN "tool_resources_model"."deleted" IS '删除标识';
+COMMENT ON COLUMN "tool_resources_model"."tool_name" IS '工具名称';
+COMMENT ON COLUMN "tool_resources_model"."resources" IS '资源模板';
+COMMENT ON TABLE "tool_resources_model" IS '工具资源模板表';
 CREATE TABLE IF NOT EXISTS "variables" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
