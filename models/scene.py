@@ -1,0 +1,38 @@
+# coding=utf-8
+
+from tortoise import fields
+
+from models.base import BaseModel
+
+
+class Scene(BaseModel):
+    """
+    运行场景模型
+    """
+
+    name = fields.CharField(description="场景名称", max_length=255)
+    remark = fields.CharField(description="描述", max_length=255)
+    status = fields.IntField(max_length=1, description="是否启用，2启用且为当前场景，1启用，0禁用")
+    creator = fields.ForeignKeyField("models.Account", description="创建人")
+    updator = fields.ForeignKeyField("models.Account", description="更新人")
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": str(self.ctime),
+            "utime": str(self.utime),
+            "name": self.name,
+            "remark": self.remark,
+            "status": self.status,
+            "creator": self.updator.username if self.updator else "",
+            "updator": self.updator.username if self.updator else ""
+        }
+
+    # 指定name+type作为唯一性约束
+    class Meta:
+        table = "scene"
+        ordering = ["-utime"]

@@ -13,8 +13,8 @@ class ToolAction(BaseModel):
     tool_name: str = fields.CharField(max_length=255, null=True, description="工具名称")
     version_number: str = fields.CharField(max_length=50, null=True, description="版本号")
     action: list[str] = fields.JSONField(null=True, description="动作")
-    roles_id: list[str] = fields.JSONField(default=[], description="有权限执行的角色")
-    users_id: list[str] = fields.JSONField(default=[], description="有权限执行的用户")
+    roles_id: list[str] = fields.JSONField(null=True, description="有权限执行的角色")
+    users_id: list[str] = fields.JSONField(null=True, description="有权限执行的用户")
 
     def validate(self) -> None:
         raise NotImplementedError
