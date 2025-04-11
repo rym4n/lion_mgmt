@@ -13,8 +13,6 @@ class ToolAction(BaseModel):
     tool_name: str = fields.CharField(max_length=255, null=True, description="工具名称")
     version_number: str = fields.CharField(max_length=50, null=True, description="版本号")
     action: list[str] = fields.JSONField(null=True, description="动作")
-    roles_id: list[str] = fields.JSONField(null=True, description="有权限执行的角色")
-    users_id: list[str] = fields.JSONField(null=True, description="有权限执行的用户")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -27,9 +25,7 @@ class ToolAction(BaseModel):
             "utime": str(self.utime),
             "tool_name": self.tool_name,
             "version_number": self.version_number,
-            "action": self.action,
-            "roles_id": self.roles_id,
-            "users_id": self.users_id
+            "action": self.action
         }
 
     class Meta:
@@ -81,7 +77,6 @@ class ToolResourcesModel(BaseModel):
     tool_name: str = fields.CharField(max_length=255, description="工具名称")
     resources: list[str] = fields.JSONField(description="资源模板")
 
-
     def validate(self) -> None:
         raise NotImplementedError
 
@@ -105,14 +100,13 @@ class ToolResources(BaseModel):
     """
 
     tool_name: str = fields.CharField(max_length=255, description="工具名称")
-    name: str = fields.CharField(max_length=255, unique=True,description="资源名称")
+    name: str = fields.CharField(max_length=255, unique=True, description="资源名称")
     description: str = fields.CharField(max_length=255, description="资源描述")
     product_supplier: str = fields.CharField(max_length=255, null=True, description="供应商")
     product_name: str = fields.CharField(max_length=255, null=True, description="产品名称")
     resources: list[str] = fields.JSONField(description="资源配置")
     creator: str = fields.CharField(max_length=255, null=True, description="创建者")
     updater: str = fields.CharField(max_length=255, null=True, description="更新者")
-
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -135,3 +129,34 @@ class ToolResources(BaseModel):
 
     class Meta:
         table = "tool_resources"
+
+
+class ActionPermissions(BaseModel):
+    """
+    动作权限表
+    """
+
+    action_name: str = fields.CharField(max_length=255, description="动作名称")
+    action_description: str = fields.CharField(max_length=255, description="动作描述")
+    tool_name: str = fields.CharField(max_length=255, description="工具名称")
+    roles_id: list[str] = fields.JSONField(default=[], description="有权限执行的角色")
+    users_id: list[str] = fields.JSONField(default=[], description="有权限执行的用户")
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": str(self.ctime),
+            "utime": str(self.utime),
+            "action_name": self.action_name,
+            "action_description": self.action_description,
+            "tool_name": self.tool_name,
+            "users_id": self.users_id,
+            "roles_id": self.roles_id,
+        }
+
+    class Meta:
+        table = "action_permissions"
