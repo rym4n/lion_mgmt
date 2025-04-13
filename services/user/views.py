@@ -104,10 +104,12 @@ async def login(request):
     password = request.json.get("password")
     if not username or not password:
         raise CustomError(ErrorCode.CredentialsError)
+
     # 防止暴力破解
     user_attempts = await request.ctx.cache_client.get(f"{username}_login_attempts")
     if user_attempts is not None and int(user_attempts) > MAX_CHALLENGE_ATTEMPTS:
         raise CustomError(ErrorCode.MaxChallenge)
+
     # 防止暴力破解/撞库
     client_ip = request.client_ip
     ip_attempts = await request.ctx.cache_client.get(f"{client_ip}_login_attempts")
@@ -127,6 +129,7 @@ async def login(request):
         resp = account.json
         token_id = str(uuid.uuid4())
         token = token_encode(account.id, account.username, account.mfa_enable, token_id, ip=request.client_ip)
+        await request.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
         resp['aioe-auth'] = token
         # response.cookies.add_cookie(
         #     f"aioe_auth",
@@ -163,6 +166,10 @@ async def refresh_session_token(request):
     resp = {
         "aioe-auth": refresh_token(request.ctx.session)
     }
+    account = await request.ctx.cache_client.get(f"account_{request.ctx.session['sub']}")
+    if not account:
+        account = await Account.filter(id=request.ctx.session["sub"]).first()
+    await request.ctx.cache_client.set(f"account_{request.ctx.session['sub']}", account, AUTHENTICATION_SESSION_EXPIRATION)
     return response_ok(resp)
 
 
@@ -173,6 +180,7 @@ async def logout(request):
     """
     # todo: oauth凭据销毁
     # token_info = await oauth_revoke(request, google_oauth)
+    await request.ctx.cache_client.delete(f"account_{request.ctx.session['sub']}")
     return response_ok("登出成功")
 
 
@@ -221,10 +229,7 @@ async def update_user(request):
         password: 可选，密码
         permit_ip: 可选，允许登录的IP地址，支持多个IP或CIDR格式（逗号分隔），例如 192.168.1.1,10.0.2.0/24
     """
-    userid = request.ctx.session.get('sub')
-    account = await Account.get(id=userid, deleted=False).prefetch_related('roles')
-    if not account:
-        raise CustomError(ErrorCode.AccountNotFound)
+    account = request.ctx.session['account_info']
 
     for field in ["email", "phone", "password"]:
         if field in request.json:
@@ -234,7 +239,6 @@ async def update_user(request):
                 setattr(account, field, request.json[field])
 
     await account.save()
-
     return response_ok(account.json)
 
 

@@ -13,9 +13,13 @@ from models import Account
 
 async def check_permissions(request: Request, *required_permissions: str) -> bool:
     payload = token_decode(request)
-    account = await Account.filter(id=payload["sub"]).first()
-    roles = await account.roles.filter(deleted=False).all()
-    for role in roles:
+    account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
+    if not account:
+        logger.info("从数据库读取account信息")
+        account = await Account.filter(id=payload["sub"]).first()
+    request.ctx.session['account_info'] = account
+    # roles = await account.roles.filter(deleted=False).all()
+    for role in account.roles:
         for role_permission in role.permissions:
             for required_permission in required_permissions:
                 if check_wildcard(role_permission, required_permission):

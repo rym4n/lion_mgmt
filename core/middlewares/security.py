@@ -34,8 +34,8 @@ class SecurityMiddleware(BaseMiddleware):
         """统一记录操作日志"""
         if response.status == 200 and hasattr(request.ctx, "session"):
             # 写入数据库
-            logger.info(f"{request.client_ip} 访问 {request.endpoint} 成功, URI: {request.path}")
-            logger.info(f"会话信息: {request.ctx.session}")
+            # logger.info(f"{request.client_ip} 访问 {request.endpoint} 成功, URI: {request.path}")
+            # logger.info(f"会话信息: {request.ctx.session}")
             await AuditLog.create(username=request.ctx.session['name'],
                                   action="访问",
                                   module=request.endpoint,

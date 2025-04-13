@@ -13,7 +13,7 @@ class Variables(BaseModel):
 
     name: str = fields.CharField(max_length=255, unique=True, index=True, description="变量名")
     value: str = fields.JSONField(default=[], description="变量值")
-    updator: ForeignKeyFieldInstance["Account"] = fields.ForeignKeyField("models.Account", description="更新人")
+    updator: ForeignKeyFieldInstance["Account"] = fields.ForeignKeyField("models.Account", to_field='id', description="更新人")
 
     def validate(self) -> None:
         raise NotImplementedError

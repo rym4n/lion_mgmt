@@ -30,8 +30,7 @@ async def new_variable(request):
     if not name or not value:
         raise CustomError(ErrorCode.ParameterError)
 
-    account = await Account.filter(id=request.ctx.session['sub']).first()
-    var = await Variables.create(name=request.json["name"], value=value, updator=account)
+    var = await Variables.create(name=request.json["name"], value=value, updator=request.ctx.session['account_info'])
     return response_ok(var.json)
 
 
@@ -80,13 +79,7 @@ async def delelte_variable(request):
 @var_bp.post("/update")
 @requires_permission("var:u")
 async def update_variable(request):
-    """
-    更新全局变量（需要var:u权限）
-
-    请求参数:
-        name: 变量名
-        value: 变量值，JSON格式对象，不是字符串
-    """
+    """更新全局变量（需要var:u权限）"""
     name = request.json.get("name")
     value = request.json.get("value")
     if not name or not value:
@@ -96,8 +89,7 @@ async def update_variable(request):
     if not var:
         raise CustomError(ErrorCode.NotFound)
 
-    account = await Account.filter(id=request.ctx.session['sub']).first()
     var.value = value
-    var.updator = account
+    var.updator = request.ctx.session['account_info']
     await var.save()
     return response_ok("success")
