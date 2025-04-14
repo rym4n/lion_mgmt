@@ -8,15 +8,14 @@ from sanic.request import Request
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
-from models import Account
 
 
 async def check_permissions(request: Request, *required_permissions: str) -> bool:
     payload = token_decode(request)
     account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
     if not account:
-        logger.info("从数据库读取account信息")
-        account = await Account.filter(id=payload["sub"]).first()
+        logger.warning("redis里已经没有account信息了")
+        raise CustomError(ErrorCode.SessionInvalid)
     request.ctx.session['account_info'] = account
     # roles = await account.roles.filter(deleted=False).all()
     for role in account.roles:
@@ -54,9 +53,12 @@ def check_wildcard(wildcard: str, pattern: str):
 
 async def check_roles(request: Request, *required_roles: str) -> bool:
     payload = token_decode(request)
-    account = await Account.filter(id=payload["sub"]).first()
-    roles = await account.roles.filter(deleted=False).all()
-    if set(required_roles) & {role.name for role in roles}:
+    account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
+    if not account:
+        logger.warning("redis里已经没有account信息了")
+        raise CustomError(ErrorCode.SessionInvalid)
+    request.ctx.session['account_info'] = account
+    if set(required_roles) & {role.name for role in account.roles}:
         return True
     logger.warning(f"{request.client_ip} {payload['sub']} 尝试了一个未授权操作")
     raise CustomError(ErrorCode.Unauthorized)

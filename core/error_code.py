@@ -63,3 +63,5 @@ class ErrorCode(BaseErrorCode):
     IpForbidden = ErrorData(4044, "IP禁止访问")
 
     ConditionalExistsError = ErrorData(4045, "判断条件已存在")
+    InvalidUsername = ErrorData(4046, "无效的用户名")
+    PlaybookNotFound = ErrorData(4047, "剧本不存在")

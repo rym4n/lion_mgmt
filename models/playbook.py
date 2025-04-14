@@ -12,7 +12,7 @@ class Playbook(BaseModel):
 
     name = fields.CharField(unique=True, max_length=255, description="剧本名称")
     remark = fields.TextField(description="描述")
-    status = fields.IntField(max_length=1, description="剧本状态")
+    status = fields.IntField(max_length=1, default=0, description="剧本状态,0草稿,1已发布")
     start_app = fields.CharField(max_length=36, description="开始节点")
     end_app = fields.CharField(max_length=36, description="结束节点")
     if_list = fields.TextField(description="判断节点")

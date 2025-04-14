@@ -9,7 +9,7 @@ from tortoise.exceptions import IntegrityError, DoesNotExist
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authentication import validate_password, token_encode, refresh_token
+from libs.security.authentication import validate_password, token_encode, refresh_token, validate_username
 from libs.security.authorization import requires_permission
 from libs.utils import password_hasher, ip_in_list
 from models import Account, Role
@@ -38,7 +38,7 @@ async def new_user(request):
     try:
         mfa_enable = bool(request.json.get('mfa_enable', False)) or False
         account = await Account.create(
-            username=request.json.get("username") or '',
+            username=validate_username(request.json.get("username", '')),
             password=password_hasher.hash(validate_password(request.json.get("password") or '')),
             email=request.json.get("email"),
             phone=request.json.get("phone"),
@@ -46,7 +46,7 @@ async def new_user(request):
             mfa_enable=mfa_enable,
             mfa_key=pyotp.random_base32(32) if mfa_enable else None
         )
-        await account.fetch_related('roles')
+        # 添加角色
         if request.json.get("role_names"):
             roles = await Role.filter(name__in=request.json.get("role_names")).all()
             await account.roles.add(*roles)
@@ -303,11 +303,7 @@ async def delelte_user(request):
     请求参数：
         username: 用户名
     """
-    user = await Account.get(username=request.json.get("username"), deleted=False)
-    if not user:
-        raise CustomError(ErrorCode.AccountNotFound)
-    user.deleted = True
-    await user.save()
+    await Account.filter(username=request.json.get("username")).update(deleted=True)
     return response_ok("用户删除成功")
 
 

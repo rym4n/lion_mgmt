@@ -95,6 +95,15 @@ def token_decode(request: Request) -> dict:
         raise CustomError(ErrorCode.SessionInvalid)
 
 
+def validate_username(username: str) -> str:
+    """
+    用户名校验，只允许英文字母、数字和中文字符、长度不小于2
+    """
+    if not re.search(r"^[a-zA-Z0-9\u4e00-\u9fa5\.·]{2,}$", username):
+        raise CustomError(ErrorCode.InvalidUsername)
+    return username
+
+
 def validate_password(password: str) -> str:
     """
     密码强度校验，必须包含大小写字母、数字、特殊字符、长度不小于8

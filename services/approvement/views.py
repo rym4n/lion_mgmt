@@ -87,8 +87,7 @@ async def update_approvement(request):
     if not record:
         raise CustomError(ErrorCode.NotFound)
 
-    account = await Account.filter(id=request.ctx.session['sub']).first()
     record.status = 1 if agree else 2
-    record.processor = account
+    record.processor = request.ctx.session['account_info']
     await record.save()
     return response_ok(record.json)

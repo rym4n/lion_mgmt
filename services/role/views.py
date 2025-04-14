@@ -5,7 +5,7 @@ from sanic.log import logger
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
-from core.response import response_ok
+from core.response import response_ok, response_fail
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import Role, Account
@@ -87,7 +87,7 @@ async def delete_role(request):
     role_id = request.json.get("role_id")
     exists = await Account.filter(roles__id=role_id).exists()
     if exists:
-        return response_ok("角色已分配")
+        return response_fail("角色已分配，无法删除，请先取消分配")
     role = await Role.filter(id=role_id, deleted=False).first()
     if not role:
         raise CustomError(ErrorCode.RoleNotFound)
