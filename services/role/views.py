@@ -87,7 +87,7 @@ async def delete_role(request):
     role_id = request.json.get("role_id")
     exists = await Account.filter(roles__id=role_id).exists()
     if exists:
-        return response_fail("角色已分配，无法删除，请先取消分配")
+        return response_fail(ErrorCode.RoleAlreadyUsed)
     role = await Role.filter(id=role_id, deleted=False).first()
     if not role:
         raise CustomError(ErrorCode.RoleNotFound)
