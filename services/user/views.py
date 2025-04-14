@@ -346,6 +346,9 @@ async def assign_role_to_user(request):
         raise CustomError(ErrorCode.AccountNotFound)
 
     role_names = request.json.get('role_names', '').split(',')
+    if role_names in [[""], None]:
+        await account.roles.clear()
+        return response_ok("success")
     roles = await Role.filter(name__in=role_names, deleted=False).all()
     if len(roles) != len(role_names):
         raise CustomError(ErrorCode.RoleNotFound)

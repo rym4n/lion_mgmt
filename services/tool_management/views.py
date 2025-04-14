@@ -1,8 +1,8 @@
 # coding=utf-8
-import datetime
 import hashlib
 import json
 import os
+import time
 import zipfile
 from io import BytesIO
 
@@ -16,7 +16,8 @@ from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
-from models import Tool, ToolAction, ToolResources, ToolResourcesModel
+from libs.utils import del_dirs
+from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Account
 from settings import TOOLS_DIR
 
 # 定义 Blueprint
@@ -48,6 +49,11 @@ async def upload_and_extract_zip(request):
     for action in config_data.get("actions"):
         await ToolAction.create(tool_name=config_data.get("name"), version_number=version,
                                 action=action)
+        actions = await ActionPermissions.filter(tool_name=tool_name, deleted=False).values("action_name")
+        action_names = {action["action_name"] for action in actions}
+        if action["action"] not in action_names:
+            await ActionPermissions.create(tool_name=tool_name, action_name=action["action"],
+                                           action_description=action["description"], roles_id=[], users_id=[])
     configuration = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values("resources")
     if not configuration or configuration["resources"] != config_data.get("configuration"):
         await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("configuration"))
@@ -89,6 +95,7 @@ async def unzip(zip_data, creator):
 
         name = config_data.get("name")
         py_file_name = config_data.get("jar")
+        logo_name = config_data.get("logo").split("/")[1]
         class_name_list = [action.get("class_name") for action in config_data.get("actions", [])]
 
         if not py_file_name:
@@ -96,6 +103,9 @@ async def unzip(zip_data, creator):
 
         if py_file_name not in py_files_dict:
             raise CustomError(ErrorCode.MissingPyFileError)
+
+        if logo_name not in actual_files:
+            raise CustomError(ErrorCode.MissingLogoError)
 
         with zip_ref.open(py_files_dict[py_file_name]) as py_file:
             py_data = py_file.read().decode("utf-8")
@@ -112,10 +122,7 @@ async def unzip(zip_data, creator):
         if hash_values and hasher.hexdigest() in hash_set:
             raise CustomError(ErrorCode.ToolAlreadyExists)
 
-        latest_tool = await Tool.filter(name=name).order_by("-ctime").first()
-        today_version = datetime.datetime.today().strftime("%Y%m%d")
-        version = str(int(latest_tool.version) + 1) if latest_tool and latest_tool.version.startswith(
-            today_version) else f"{today_version}001"
+        version = str(int(time.time() * 1000))
 
         extra_path = os.path.join(TOOLS_DIR, name, version)
         os.makedirs(extra_path, exist_ok=True)
@@ -208,7 +215,7 @@ async def all_versions(request):
 @requires_permission("tool:r")
 async def tool_actions(request):
     """
-    获取工具的所有动作列表（需要工具查看权限）
+    获取工具当前版本的所有动作列表（需要工具查看权限）
 
     query参数:
         - name: 工具名称    str
@@ -277,6 +284,12 @@ async def delete_tool(request):
     if tool.status == 1:
         raise CustomError(ErrorCode.ToolHasScriptError)
 
+    tool_path = os.path.join(TOOLS_DIR, name, version)
+    if not os.path.exists(tool_path):
+        raise CustomError(ErrorCode.ToolAlreadyDeletedError)
+
+    await del_dirs(tool_path)
+
     tool.deleted = True
     tool.updater = token_decode(request).get("name")
     await tool.save()
@@ -315,6 +328,13 @@ async def delete_tool_all(request):
         tool.updater = token_decode(request).get("name")
         await tool.save()
 
+    tool_path = os.path.join(TOOLS_DIR, name)
+
+    if not os.path.exists(tool_path):
+        raise CustomError(ErrorCode.ToolAlreadyDeletedError)
+
+    await del_dirs(tool_path)
+
     tool_actions = await ToolAction.filter(tool_name=name, deleted=False).all()
     if tool_actions:
         for action in tool_actions:
@@ -332,6 +352,12 @@ async def delete_tool_all(request):
         for resource in tool_resources:
             resource.deleted = True
             await resource.save()
+
+    action_permissions = await ActionPermissions.filter(tool_name=name, deleted=False).all()
+    if action_permissions:
+        for permission in action_permissions:
+            permission.deleted = True
+            await permission.save()
 
     return response_ok({"message": "全部工具删除成功"})
 
@@ -351,7 +377,7 @@ async def tool_resource_model(request):
 
     resources = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values()
     if not resources:
-        raise CustomError(ErrorCode.ResourcesNotFoundError)
+        raise CustomError(ErrorCode.ResourcesModelNotFoundError)
 
     return response_ok(resources)
 
@@ -388,7 +414,7 @@ async def add_tool_resource(request):
     if not tool_name or not resources or not name or not description:
         raise CustomError(ErrorCode.ParameterError)
 
-    existing_resource = await ToolResources.get_or_none(name=name)
+    existing_resource = await ToolResources.get_or_none(name=name, deleted=False)
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
 
@@ -409,7 +435,7 @@ async def tool_resources_detailed(request):
     query参数:
         - name: 工具名称    str
     """
-    tool_name = request.json.get("id")
+    tool_name = request.json.get("name")
     if not tool_name:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -523,3 +549,172 @@ async def download_zip(request):
         return CustomError(ErrorCode.ToolNotFoundError)
 
     return await response.file(zip_path, filename=f"{tool_name}_{version}.zip", mime_type="application/zip")
+
+
+@tool_management_bp.post("/action/permissions/add")
+@requires_permission("tool:u")
+async def add_permission(request):
+    """
+    新增工具动作权限（需要工具更新权限）
+
+    query参数:
+        - name: 工具名称    str
+        - actions: 动作名称    list    可选，默认all
+        - users_id: 用户ID列表    list
+        - roles_id: 角色ID列表    list
+    """
+    name = request.json.get("name")
+    actions = request.json.get("actions", ["all"])
+    users_id = request.json.get("users_id", [])
+    roles_id = request.json.get("roles_id", [])
+    if not name:
+        raise CustomError(ErrorCode.ParameterError)
+    if not isinstance(users_id, list) or not isinstance(roles_id, list) or not isinstance(actions, list):
+        raise CustomError(ErrorCode.ParameterError)
+
+    if "all" in actions:
+        permissions = await ActionPermissions.filter(tool_name=name, deleted=False).all()
+    else:
+        permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False).all()
+
+    if not permissions:
+        raise CustomError(ErrorCode.ActionNotFoundError)
+
+    for permission in permissions:
+        permission.users_id = list(set(permission.users_id or []) | set(users_id))
+        permission.roles_id = list(set(permission.roles_id or []) | set(roles_id))
+
+    await ActionPermissions.bulk_update(permissions, fields=["users_id", "roles_id"])
+
+    return response_ok({"message": "工具动作权限新增成功"})
+
+
+@tool_management_bp.post("/action/permissions/delete")
+@requires_permission("tool:u")
+async def delete_permission(request):
+    """
+    删除工具动作权限（需要工具更新权限）
+
+    query参数:
+        - name: 工具名称    str
+        - actions: 动作名称    list    可选，默认all
+        - users_id: 用户ID列表    list
+        - roles_id: 角色ID列表    list
+    """
+    name = request.json.get("name")
+    actions = request.json.get("actions", ["all"])
+    users_id = request.json.get("users_id", [])
+    roles_id = request.json.get("roles_id", [])
+    if not name:
+        raise CustomError(ErrorCode.ParameterError)
+    if not isinstance(users_id, list) or not isinstance(roles_id, list) or not isinstance(actions, list):
+        raise CustomError(ErrorCode.ParameterError)
+
+    permissions = await ActionPermissions.filter(
+        tool_name=name,
+        deleted=False,
+        **({"action_name__in": actions} if "all" not in actions else {})
+    ).all()
+
+    if not permissions:
+        raise CustomError(ErrorCode.ActionNotFoundError)
+
+    # 删除 users_id 和 roles_id
+    for permission in permissions:
+        permission.users_id = list(set(permission.users_id or []) - set(users_id))
+        permission.roles_id = list(set(permission.roles_id or []) - set(roles_id))
+
+    await ActionPermissions.bulk_update(permissions, fields=["users_id", "roles_id"])
+
+    return response_ok({"message": "工具动作权限删除成功"})
+
+
+@tool_management_bp.post("/action/permissions/select")
+@requires_permission("tool:r")
+async def select_permission_all(request):
+    """
+    获取工具全部动作权限（需要工具查看权限）
+
+    query参数:
+        - name: 工具名称    str
+        - actions: 动作名称    list    可选，默认all
+    """
+    name = request.json.get("name")
+    actions = request.json.get("actions", ["all"])
+    if not name:
+        raise CustomError(ErrorCode.ParameterError)
+
+    if "all" in actions:
+        permissions = await ActionPermissions.filter(tool_name=name, deleted=False).all()
+    else:
+        permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False).all()
+
+    if not permissions:
+        raise CustomError(ErrorCode.ActionNotFoundError)
+    permission_list = []
+    for permission in permissions:
+        permission_list.append(permission.json)
+    return response_ok(permission_list)
+
+
+@tool_management_bp.post("/action/permissions/judge")
+@requires_permission("tool:r")
+async def judge_permission(request):
+    """
+    判断用户是否有工具动作权限（需要工具查看权限）
+
+    query参数:
+        - actions: list    工具下的动作名称列表
+            [
+                {
+                    "name": ["action1", "action2"],
+                }
+            ]
+    """
+
+    actions = request.json.get("actions", [])
+    if not actions or not isinstance(actions, list):
+        raise CustomError(ErrorCode.ParameterError)
+
+    user = request.ctx.session['account_info']
+    user_id = user.id
+
+    if not user:
+        raise CustomError(ErrorCode.AccountNotFound)
+
+    role_ids = {role.id for role in user.roles}
+
+    tool_action_map = {}
+    for action in actions:
+        for tool_name, action_list in action.items():
+            if not isinstance(action_list, list):
+                raise CustomError(ErrorCode.ParameterError)
+            tool_action_map.setdefault(tool_name, []).extend(action_list)
+
+    all_permissions = await ActionPermissions.filter(
+        tool_name__in=tool_action_map.keys(),
+        action_name__in=[a for actions in tool_action_map.values() for a in actions],
+        deleted=False
+    ).all()
+
+    permission_lookup = {f"{p.tool_name}_{p.action_name}": p for p in all_permissions}
+
+    permission_dict = {}
+    for tool_name, action_list in tool_action_map.items():
+        for action_name in action_list:
+            key = f"{tool_name}_{action_name}"
+            permission = permission_lookup.get(key)
+
+            if not permission:
+                permission_dict[key] = "false"
+                continue
+
+            users_id = set(permission.users_id or [])
+            roles_id = set(permission.roles_id or [])
+
+            if user_id in users_id or (role_ids and roles_id & role_ids):
+                permission_dict[key] = "true"
+            else:
+                permission_dict[key] = "false"
+
+    return response_ok(permission_dict)

@@ -1,15 +1,17 @@
 # coding=utf-8
-
+import asyncio
 import datetime
 import ipaddress
 import os.path
 import random
+import time
 import zipfile
 from io import BytesIO
 from pathlib import Path, PurePath
 from string import ascii_uppercase, digits
 
 import aiofile
+import aiofiles
 from aiofile import async_open
 from argon2 import PasswordHasher
 from sanic.utils import str_to_bool as sanic_str_to_bool
@@ -89,3 +91,19 @@ async def unzip(zip_data, extra_path):
                 with zip_ref.open(file_name) as file_data:
                     async with async_open(str(unpack_filename_path), 'wb+') as out:
                         await out.write(file_data.read())
+
+
+async def del_dirs(dirs_path):
+    """
+    删除文件夹,传入文件夹路径
+    """
+    for root, dirs, files in os.walk(dirs_path, topdown=False):
+        for name in files:
+            file_path = os.path.join(root, name)
+            await aiofiles.os.remove(file_path)
+
+        for name in dirs:
+            dir_path = os.path.join(root, name)
+            await aiofiles.os.rmdir(dir_path)
+
+    await aiofiles.os.rmdir(dirs_path)

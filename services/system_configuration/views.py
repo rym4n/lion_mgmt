@@ -1,5 +1,7 @@
+import json
 import os
 
+import aiofile
 from sanic import Blueprint
 from sanic.log import logger
 from tortoise.transactions import in_transaction
@@ -9,7 +11,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import SystemCustomConfiguration, SystemStatus, AuditLog
-from settings import UPLOAD_FOLDER,BG_NAME
+from settings import UPLOAD_FOLDER, BG_NAME
 
 system_bp = Blueprint('system', url_prefix='v1/system')
 _all__ = ["system_bp"]
@@ -35,6 +37,18 @@ async def upload_image(request):
 
     if not system_version:
         raise CustomError(ErrorCode.ParameterError)
+
+    config_path = os.path.join(UPLOAD_FOLDER, "platform-config.json")
+
+    async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
+        content = await f.read()
+    content = json.loads(content)
+    content["Version"] = "system_version"
+    content["Content"] = "copyright_text"
+    content["Title"] = "system_name"
+
+    async with aiofile.AIOFile(config_path, 'w', encoding='utf-8') as f:
+        await f.write(str(content))
 
     # 处理文件上传
     file_paths = {}

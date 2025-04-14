@@ -47,7 +47,7 @@ async def build_kafka_file_configuration_file(output_path, sources,
     config = {
         "sources": sources,
         "sinks": {
-            "sample_sinks": {
+            f"{topic}_sample_sinks": {
                 "type": "file",
                 "inputs": [source_id],
                 "path": log_path,
@@ -283,7 +283,8 @@ async def update_event_ingestion(request):
     if kafka_group_id:
         data["sources"][event.event_ingestion_name]["group_id"] = kafka_group_id
     if transforms_type:
-        data["sinks"]["sample_sinks"]["inputs"] = [f"{event.event_ingestion_name}_transforms"]
+        data["sinks"][f"{event.event_ingestion_name}_sample_sinks"]["inputs"] = [
+            f"{event.event_ingestion_name}_transforms"]
         data.setdefault("transforms", {}).setdefault(f"{event.event_ingestion_name}_transforms", {})["type"] = "remap"
         data["transforms"][f"{event.event_ingestion_name}_transforms"]["inputs"] = [event.event_ingestion_name]
         if transforms_type == "Grok":
