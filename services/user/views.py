@@ -125,7 +125,10 @@ async def login(request):
         if password_hasher.check_needs_rehash(account.password):
             account.password = password_hasher.hash(password)
             await account.save(update_fields=["password"])
-        account.validate()
+        if account.deleted:
+            raise CustomError(ErrorCode.AccountNotFound)
+        elif account.disabled:
+            raise CustomError(ErrorCode.AccountDisabled)
         resp = account.json
         token_id = str(uuid.uuid4())
         token = token_encode(account.id, account.username, account.mfa_enable, token_id, ip=request.client_ip)

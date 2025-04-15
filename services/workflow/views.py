@@ -39,9 +39,9 @@ async def create_workflow(request):
         remark=request.json.get("remark", ""),
         start_app=request.json.get("start_app"),
         end_app=request.json.get("end_app"),
-        if_list=request.json.get("if_list"),
-        audit_list=request.json.get("audit_list"),
-        tags=request.json.get("tags"),
+        if_list=request.json.get("if_list") or [],
+        audit_list=request.json.get("audit_list") or [],
+        tags=request.json.get("tags") or [],
         flow_json=request.json.get("flow_json") or {},
         flow_data=request.json.get("flow_data") or {},
         creator=request.ctx.session['account_info'],
@@ -132,7 +132,7 @@ async def delete_workflow(request):
     """
     删除剧本
 
-    请求参数）
+    请求参数：
         id: 剧本ID
     """
     await Playbook.filter(id=request.json.get("id")).update(deleted=True)
@@ -141,6 +141,12 @@ async def delete_workflow(request):
 
 @workflow_bp.websocket('/run')
 async def execute_action(request: Request, ws: Websocket):
+    """
+        执行剧本，websocket通信
+
+        请求参数：
+            id: 剧本ID
+        """
     async for msg in ws:
         try:
             data = ujson.loads(msg)

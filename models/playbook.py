@@ -41,7 +41,7 @@ class Playbook(BaseModel):
             "if_list": self.if_list,
             "audit_list": self.audit_list,
             "tags": self.tags,
-            "scenes": [scene.name for scene in self.scenes],
+            "scenes": [scene.name for scene in self.scenes] if self.scenes else [],
             "flow_json": self.flow_json,
             "flow_data": self.flow_data,
             "creator": self.updator.username if self.updator else "",

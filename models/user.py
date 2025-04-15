@@ -40,12 +40,6 @@ class Account(BaseModel):
     roles: fields.ManyToManyRelation["Role"] = fields.ManyToManyField("models.Role", through="account_role")
     permit_ip: str = fields.CharField(null=True, max_length=255)
 
-    def validate(self) -> None:
-        if self.deleted:
-            raise CustomError(ErrorCode.AccountNotFound)
-        elif self.disabled:
-            raise CustomError(ErrorCode.AccountDisabled)
-
     @property
     def json(self) -> dict:
         tmp = {
