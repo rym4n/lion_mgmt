@@ -57,7 +57,7 @@ class EventsIngestion(BaseModel):
     enabled_status: int = fields.IntField(max_length=50, null=True, description="是否开启上游接入")
     linked_execution: int = fields.IntField(max_length=50, null=True, description="是否开启联动执行")
     created_id: str = fields.CharField(max_length=36, description="创建人ID，关联用户表")
-    syslog_config: str = fields.CharField(max_length=36, null=True, description="syslog端口")
+    syslog_config: str = fields.CharField(max_length=255, null=True, description="syslog端口")
     file_path: str = fields.CharField(max_length=255, null=True, description="配置文件路径")
 
     def validate(self) -> None:
