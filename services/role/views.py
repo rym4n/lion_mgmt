@@ -8,14 +8,14 @@ from core.error_code import ErrorCode
 from core.response import response_ok, response_fail
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Role, Account
+from models import Role, Account, PermissionsMenu
 
 role_bp = Blueprint('role', url_prefix='v1/role')
 _all__ = ["role_bp"]
 
 
 @role_bp.post("/add")
-@requires_permission('event:c')
+@requires_permission('role:c')
 async def add_role(request):
     """
     新建角色(需要角色创建权限)
@@ -35,7 +35,7 @@ async def add_role(request):
 
 
 @role_bp.post("/all")
-@requires_permission('event:r')
+@requires_permission('role:r')
 async def find_all(request):
     """
     查找全部角色  (需要角色查看权限)
@@ -60,7 +60,7 @@ async def find_all(request):
 
 
 @role_bp.post("/details")
-@requires_permission('event:r')
+@requires_permission('role:r')
 async def find_role(request):
     """
     查找具体角色信息    (需要角色查看权限)
@@ -76,7 +76,7 @@ async def find_role(request):
 
 
 @role_bp.post("/delete")
-@requires_permission('event:d')
+@requires_permission('role:d')
 async def delete_role(request):
     """
     删除指定角色    (需要角色删除权限)
@@ -97,7 +97,7 @@ async def delete_role(request):
 
 
 @role_bp.post("/update")
-@requires_permission('event:u')
+@requires_permission('role:u')
 async def update_role(request):
     """
     修改角色内容    (需要角色修改权限)
@@ -123,3 +123,17 @@ async def update_role(request):
         role.permissions = permissions
     await role.save()
     return response_ok(role.json)
+
+
+@role_bp.post("/permission/all")
+@requires_permission('role:r')
+async def all_permission(request):
+    """
+    查找全部权限    (需要角色查看权限)
+
+    请求参数：
+    """
+    permissions = await PermissionsMenu.all().values()
+    return response_ok({
+        'permissions': permissions,
+    })
