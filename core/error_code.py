@@ -66,3 +66,4 @@ class ErrorCode(BaseErrorCode):
     InvalidUsername = ErrorData(4046, "无效的用户名")
     PlaybookNotFound = ErrorData(4047, "剧本不存在")
     RoleAlreadyUsed = ErrorData(4048, "角色已分配，请先取消分配")
+    PlaybookNameExists = ErrorData(4049, "剧本名称重复，请重新命名")

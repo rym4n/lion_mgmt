@@ -9,8 +9,7 @@ class Playbook(BaseModel):
     """
     剧本模型
     """
-
-    name = fields.CharField(unique=True, max_length=255, description="剧本名称")
+    name = fields.CharField(max_length=255, description="剧本名称")
     remark = fields.TextField(description="描述")
     status = fields.IntField(max_length=1, default=0, description="剧本状态,0草稿,1已发布")
     start_app = fields.CharField(max_length=36, description="开始节点")
@@ -21,8 +20,9 @@ class Playbook(BaseModel):
     scenes: fields.ManyToManyRelation["Scene"] = fields.ManyToManyField("models.Scene", through="playbook_scene")
     flow_json = fields.JSONField(default={}, description="流程图布局信息")
     flow_data = fields.JSONField(default={}, description="各节点详细信息")
-    creator = fields.ForeignKeyField("models.Account",related_name="created_playbooks", description="创建人")
-    updator = fields.ForeignKeyField("models.Account",related_name="updated_playbooks", description="更新人")
+    version = fields.IntField(default=0, description="版本号，每次publish都会生成新纪录，用于版本回溯")
+    creator = fields.ForeignKeyField("models.Account", related_name="created_playbooks", description="创建人")
+    updator = fields.ForeignKeyField("models.Account", related_name="updated_playbooks", description="更新人")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -48,7 +48,8 @@ class Playbook(BaseModel):
             "updator": self.updator.username if self.updator else ""
         }
 
-    # 指定name+type作为唯一性约束
     class Meta:
         table = "playbook"
         ordering = ["-utime"]
+
+        unique_together = [("name", "version")]

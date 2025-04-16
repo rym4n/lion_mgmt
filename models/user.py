@@ -4,8 +4,6 @@ import re
 from tortoise import fields
 from tortoise.validators import RegexValidator
 
-from core.error_code import ErrorCode
-from libs.error_code.exception import CustomError
 from models.base import BaseModel
 
 

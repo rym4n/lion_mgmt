@@ -1,5 +1,4 @@
 # coding=utf-8
-import asyncio
 import datetime
 import ipaddress
 import os.path
@@ -22,10 +21,10 @@ from libs.error_code.exception import CustomError
 password_hasher: PasswordHasher = PasswordHasher()
 
 
-def get_code(digits_only: bool = False) -> str:
+def gen_random_code(digits_only: bool = True, length=6) -> str:
     return "".join(
         random.choice(("" if digits_only else ascii_uppercase) + digits)
-        for _ in range(6)
+        for _ in range(length)
     )
 
 
@@ -107,3 +106,12 @@ async def del_dirs(dirs_path):
             await aiofiles.os.rmdir(dir_path)
 
     await aiofiles.os.rmdir(dirs_path)
+
+
+def gen_order_version(length=5):
+    """
+    生成版本号，按时间顺序
+    """
+    number = gen_random_code(True, length)
+    times = time.strftime("%Y%m%d%H%M%S", time.localtime(time.time()))
+    return str(times) + '' + str(number)
