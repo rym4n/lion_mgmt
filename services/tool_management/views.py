@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import time
+import uuid
 import zipfile
 from io import BytesIO
 
@@ -17,8 +18,9 @@ from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from libs.utils import del_dirs
-from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Account
+from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions
 from settings import TOOLS_DIR
+from sanic.exceptions import WebsocketClosed
 
 # 定义 Blueprint
 tool_management_bp = Blueprint("tool_management", url_prefix="v1/tool_management")
@@ -26,72 +28,141 @@ __all__ = ["tool_management_bp"]
 
 # 预期的文件结构
 EXPECTED_STRUCTURE = {
-    "required_files": ["config.json", "readme.md"]
+    "required_files": ["config.json"]
 }
 
+connected_clients = {}
 
-@tool_management_bp.post("/upload")
+
+async def safe_ws_send(ws, message):
+    try:
+        await ws.send(message)
+    except WebsocketClosed:
+        print("⚠️ WebSocket 已关闭，发送失败：", message)
+
+
+@tool_management_bp.websocket('/ws/unzip')
+async def unzip_progress_ws(request, ws):
+    client_id = str(uuid.uuid4())
+    connected_clients[client_id] = ws
+
+    try:
+        await ws.send(f"UUID:{client_id}")
+        print(f"🟢 客户端已连接：{client_id}")
+
+        while True:
+            _ = await ws.recv()
+    except Exception as e:
+        print(f"⚠️ WebSocket 错误：{e}")
+    finally:
+        print(f"🔴 客户端断开：{client_id}")
+        connected_clients.pop(client_id, None)
+
+
+@tool_management_bp.post("/ws/upload")
 @requires_permission("tool:c")
 async def upload_and_extract_zip(request):
     """
     上传工具接口（需要工具创建权限）
     请求参数:
         - file: ZIP 文件 (multipart/form-data)
+        - ws_uuid: websocket的uuid   str
     """
+    ws_uuid = request.form.get("ws_uuid")
+    ws = connected_clients.get(ws_uuid)
     creator = token_decode(request).get("name")
     if "file" not in request.files:
         return response_ok({"error": "No file provided"})
 
+    results = []
     # 获取 ZIP 文件
-    zip_file = request.files["file"][0]
+    zip_files = request.files["file"]
+    single_progress = 100/len(zip_files)
+    success_progress = 0
+    data = 0
+    for zip_file in zip_files:
+        config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, ws, success_progress)
+        if msg != "success":
+            results.append({"tool": tool_name, "msg": msg})
+            data += 1
+            percent = int((data * single_progress))
+            success_progress = percent
+            await safe_ws_send(ws, f"解压进度：{percent}%")
+            continue
 
-    config_data, version, tool_name = await unzip(zip_file.body, creator)
-    for action in config_data.get("actions"):
-        await ToolAction.create(tool_name=config_data.get("name"), version_number=version,
-                                action=action)
-        actions = await ActionPermissions.filter(tool_name=tool_name, deleted=False).values("action_name")
-        action_names = {action["action_name"] for action in actions}
-        if action["action"] not in action_names:
-            await ActionPermissions.create(tool_name=tool_name, action_name=action["action"],
-                                           action_description=action["description"], roles_id=[], users_id=[])
-    configuration = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values("resources")
-    if not configuration or configuration["resources"] != config_data.get("configuration"):
-        await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("configuration"))
+        for action in config_data.get("actions"):
+            await ToolAction.create(tool_name=config_data.get("name"), version_number=version,
+                                    action=action)
+            actions = await ActionPermissions.filter(tool_name=tool_name, deleted=False).values("action_name")
+            action_names = {action["action_name"] for action in actions}
+            if action["action"] not in action_names:
+                await ActionPermissions.create(tool_name=tool_name, action_name=action["action"],
+                                               action_description=action["description"], roles_id=[], users_id=[])
+        configuration = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values("resources")
+        if not configuration or configuration["resources"] != config_data.get("configuration"):
+            await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("configuration"))
 
-    return response_ok({"message": "工具上传成功"})
+        results.append({"tool": tool_name, "msg": msg})
+
+        data += 1
+        percent = int((data * single_progress))
+        success_progress = percent
+        await safe_ws_send(ws, f"解压进度：{percent}%")
+
+    if ws:
+        await ws.close()
+
+    return response_ok({"message": results})
 
 
-async def unzip(zip_data, creator):
+async def unzip(zip_data, creator, single_progress, ws, success_progress):
     """
     解压 ZIP 文件，直接从文件流读取，并进行文件结构校验
     """
+    data = 0
     zip_buffer = BytesIO(zip_data)
 
-    hash_func = getattr(hashlib, "md5", None)
-    if hash_func is None:
-        raise ValueError("Unsupported hash type. Use 'md5', 'sha1', 'sha256', or 'sha512'.")
-
-    hasher = hash_func()
-    zip_buffer.seek(0)  # 确保从头开始读取数据
-    for chunk in iter(lambda: zip_buffer.read(4096), b""):
-        hasher.update(chunk)
-
     with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
+        version = None
+
         files_info = zip_ref.infolist()
 
         actual_files = {os.path.basename(f.filename) for f in files_info if not f.is_dir()}
         py_files_dict = {os.path.basename(f.filename): f for f in files_info if f.filename.endswith(".py")}
         config_path = next((f for f in files_info if os.path.basename(f.filename) == "config.json"), None)
 
-        if not config_path:
-            raise CustomError(ErrorCode.MissingConfigFileError)
-
-        missing_files = set(EXPECTED_STRUCTURE["required_files"]) - actual_files
-        if missing_files:
-            raise CustomError(ErrorCode.MissingConfigFileError)
+        single_progress = single_progress / 10
 
         with zip_ref.open(config_path) as config_file:
             config_data = json.loads(config_file.read().decode("utf-8"))
+
+        tool_name = config_data.get("name")
+
+        hash_func = getattr(hashlib, "md5", None)
+        if hash_func is None:
+            return config_data, version, tool_name, "Unsupported hash type. Use 'md5', 'sha1', 'sha256', or 'sha512'."
+        data += 1
+        percent = int(data * single_progress) + success_progress
+        await safe_ws_send(ws, f"解压进度：{percent}%")
+
+        hasher = hash_func()
+        zip_buffer.seek(0)  # 确保从头开始读取数据
+        for chunk in iter(lambda: zip_buffer.read(4096), b""):
+            hasher.update(chunk)
+
+        if not config_path:
+            return config_data, version, tool_name, "缺失config文件"
+        data += 1
+        percent = int(data * single_progress) + success_progress
+        await safe_ws_send(ws, f"解压进度：{percent}%")
+
+
+        missing_files = set(EXPECTED_STRUCTURE["required_files"]) - actual_files
+        if missing_files:
+            return config_data, version, tool_name, "缺失config文件"
+        data += 1
+        percent = int(data * single_progress) + success_progress
+        await safe_ws_send(ws, f"解压进度：{percent}%")
 
         name = config_data.get("name")
         py_file_name = config_data.get("jar")
@@ -99,28 +170,46 @@ async def unzip(zip_data, creator):
         class_name_list = [action.get("class_name") for action in config_data.get("actions", [])]
 
         if not py_file_name:
-            raise CustomError(ErrorCode.ConfigFileError)
+            return config_data, version, tool_name, "config文件内容错误"
+        data += 1
+        percent = int(data * single_progress) + success_progress
+        await safe_ws_send(ws, f"解压进度：{percent}%")
 
         if py_file_name not in py_files_dict:
-            raise CustomError(ErrorCode.MissingPyFileError)
+            return config_data, version, tool_name, "缺失py文件"
+        data += 1
+        percent = int(data * single_progress) + success_progress
+        await safe_ws_send(ws, f"解压进度：{percent}%")
 
         if logo_name not in actual_files:
-            raise CustomError(ErrorCode.MissingLogoError)
+            return config_data, version, tool_name, "logo文件不存在"
+        data += 1
+        percent = int(data * single_progress) + success_progress
+        await safe_ws_send(ws, f"解压进度：{percent}%")
 
         with zip_ref.open(py_files_dict[py_file_name]) as py_file:
             py_data = py_file.read().decode("utf-8")
 
         if any(f"def {class_name}(" not in py_data for class_name in class_name_list):
-            raise CustomError(ErrorCode.PythonFileError)
+            return config_data, version, tool_name, "Python文件内容错误"
+        data += 1
+        percent = int(data * single_progress) + success_progress
+        await safe_ws_send(ws, f"解压进度：{percent}%")
 
         configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False).first().values("resources")
         if configuration and configuration["resources"] != config_data.get("configuration"):
-            raise CustomError(ErrorCode.ResourceError)
+            return config_data, version, tool_name, "工具资源不一致，请新建工具或删除原工具后再次上传"
+        data += 1
+        percent = int(data * single_progress) + success_progress
+        await safe_ws_send(ws, f"解压进度：{percent}%")
 
         hash_values = await Tool.filter(name=name, deleted=False).all().values("hash_value")
         hash_set = {entry["hash_value"] for entry in hash_values}
         if hash_values and hasher.hexdigest() in hash_set:
-            raise CustomError(ErrorCode.ToolAlreadyExists)
+            return config_data, version, tool_name, "工具已存在"
+        data += 1
+        percent = int(data * single_progress) + success_progress
+        await safe_ws_send(ws, f"解压进度：{percent}%")
 
         version = str(int(time.time() * 1000))
 
@@ -139,7 +228,7 @@ async def unzip(zip_data, creator):
             hash_value=hasher.hexdigest()
         )
 
-        return config_data, version, tool.name
+        return config_data, version, tool.name, "success"
 
 
 @tool_management_bp.post("/all")

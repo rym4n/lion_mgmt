@@ -41,11 +41,11 @@ async def get_all_events(request):
     if request.json.get("event_level"):
         filters["event_level"] = request.json.get("event_level")
 
-    events = await Events.filter(**filters).offset(offset).limit(limit).values()
+    events = await Events.filter(**filters).offset(offset).limit(limit).all()
     total = await Events.filter(**filters).count()
 
     return response_ok({
-        "events": events,
+        "events": [event.json for event in events],
         "total": total,
         "page": page,
         "size": size,
@@ -61,28 +61,27 @@ async def create_event(request):
 
     请求参数：
         event_name: str 事件名称
-        event_process_status: str 事件处理状态
-        event_source: str 事件来源
+        event_source: str 事件来源   (人工创建时默认传人工)
         event_level: str 事件级别
         owner: list 负责人
-        created_id: str 创建人ID
-        event_summary: str 事件概要
-        event_ingestion_id: str 事件接入id
-        log_data: s 日志数据
+        event_summary: str 事件概要 (非必填)
+        event_ingestion_id: str 事件接入id   (人工创建时不传此参数)
+        log_data: str 日志数据 (非必填)
     """
     event_name = request.json.get("event_name")
-    event_process_status = request.json.get("event_process_status")
+    event_process_status = "待处理"
     event_source = request.json.get("event_source")
     event_level = request.json.get("event_level")
-    owner = request.json.get("owner")
-    created_id = request.json.get("created_id")
-    event_summary = request.json.get("event_summary")
-    event_ingestion_id = request.json.get("event_ingestion_id")
-    log_data = request.json.get("log_data")
+    owner = (request.json.get("owner") or [])
+    user = request.ctx.session['account_info']
+    created_id = user.id
+    event_summary = (request.json.get("event_summary") or "")
+    event_ingestion_id = (request.json.get("event_ingestion_id") or "")
+    log_data = (request.json.get("log_data") or "")
 
     async with in_transaction():
         role = await Events.create(event_name=event_name, event_process_status=event_process_status,
                                    event_source=event_source, event_level=event_level, owner=owner,
-                                   created_id=created_id, event_summary=event_summary, event_ingestion_id=event_ingestion_id,log_data=log_data)
+                                   created_id=created_id, event_summary=event_summary, event_ingestion_id=event_ingestion_id, log_data=log_data)
 
     return response_ok(role.json)

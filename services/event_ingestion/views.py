@@ -2,6 +2,8 @@
 import os
 import re
 import time
+import random
+import string
 
 import aiofile
 import yaml
@@ -64,14 +66,14 @@ async def build_kafka_file_configuration_file(output_path, sources,
 
 
 async def creat_event_ingestion_dbdata(event_ingestion_name, event_ingestion_describe, event_source_type,
-                                       enabled_status, create_id, file_path, client_ip, linked_execution,
-                                       syslog_config):
+                                       enabled_status, create, updator, file_path, client_ip, linked_execution,
+                                       syslog_config, vector_name):
     events_ingestion = await EventsIngestion.create(event_ingestion_name=event_ingestion_name,
                                                     event_ingestion_describe=event_ingestion_describe,
                                                     event_source_type=event_source_type, enabled_status=enabled_status,
-                                                    created_id=create_id, file_path=file_path,
+                                                    creator=create, updator=updator, file_path=file_path,
                                                     linked_execution=linked_execution,
-                                                    syslog_config=syslog_config)
+                                                    syslog_config=syslog_config,vector_name=vector_name)
     logger.info(f"Client {client_ip} has added a new role {events_ingestion.id}.")
     return events_ingestion.json
 
@@ -82,9 +84,9 @@ async def event_ingestion(request):
     """
     创建新的事件接入(需要事件创建权限)
     请求参数：
-        event_name: 事件名称 (str) 禁止填写中文
+        event_name: 事件名称 (str)
         event_describe: 事件描述 (str)
-        event_source_type: 事件来源类型 (str) 目前支持syslog、kafka
+        event_source_type: 事件来源类型 (str) 目前支持syslog、kafka、socket(socket传的参数与syslog一致，但是接收的内容没有syslog严格，无需固定日志格式)
         syslog_port: 日志端口 (int) 事件来源类型为syslog时才传，默认为None
         event_source_address: 事件来源地址 (list)  事件来源类型为kafka时才传  默认为None
         communication_type: 通信类型 (str)   事件来源类型为syslog时才传，默认为None tcp/udp
@@ -121,26 +123,29 @@ async def event_ingestion(request):
         if {"syslog_config": syslog_config} in existing_ports:
             raise CustomError(ErrorCode.DataAlreadyExists)
 
-    if event_name:
-        existing_names = await EventsIngestion.filter(deleted=False).values("event_ingestion_name")
-        if {"event_ingestion_name": event_name} in existing_names:
+    letters = string.ascii_letters  # 包含 a-zA-Z
+    vector_name = ''.join(random.choices(letters, k=12))
+
+    if vector_name:
+        vector_names = await EventsIngestion.filter(deleted=False).values("vector_name")
+        if {"vector_name": vector_name} in vector_names:
             raise CustomError(ErrorCode.DataAlreadyExists)
 
-    output_path = os.path.join(VECTOR_CFG, event_name + ".yaml")
+    output_path = os.path.join(VECTOR_CFG, vector_name + ".yaml")
 
-    topic = event_name
+    topic = vector_name
 
-    if event_source_type == "syslog":
-        sources = {event_name: {
-            "type": "syslog",
+    if event_source_type in ["syslog","socket"]:
+        sources = {vector_name: {
+            "type": event_source_type,
             "address": f"0.0.0.0:{syslog_port}",
             "mode": communication_type
         }}
-        await build_kafka_file_configuration_file(output_path=output_path, sources=sources, source_id=event_name,
+        await build_kafka_file_configuration_file(output_path=output_path, sources=sources, source_id=vector_name,
                                                   topic=topic)
     elif event_source_type == "kafka":
         if sasl_mechanism:
-            sources = {event_name: {
+            sources = {vector_name: {
                 "type": "kafka",
                 "bootstrap_servers": ",".join(event_source_address),
                 "group_id": kafka_group_id,
@@ -152,13 +157,13 @@ async def event_ingestion(request):
                     "password": sasl_password
                 }}}
         else:
-            sources = {event_name: {
+            sources = {vector_name: {
                 "type": "kafka",
                 "bootstrap_servers": ",".join(event_source_address),
                 "group_id": kafka_group_id,
                 "topics": kafka_topic,
             }}
-        await build_kafka_file_configuration_file(output_path=output_path, sources=sources, source_id=event_name,
+        await build_kafka_file_configuration_file(output_path=output_path, sources=sources, source_id=vector_name,
                                                   topic=topic)
     else:
         raise CustomError(ErrorCode.ParameterError)
@@ -167,11 +172,13 @@ async def event_ingestion(request):
                                                                 event_ingestion_describe=event_describe,
                                                                 event_source_type=event_source_type,
                                                                 enabled_status=enabled_status,
-                                                                create_id=create_id,
+                                                                create=request.ctx.session['account_info'],
                                                                 file_path=output_path.replace("\\", "/"),
                                                                 client_ip=client_ip,
+                                                                updator=request.ctx.session['account_info'],
                                                                 linked_execution=linked_execution,
-                                                                syslog_config=syslog_config)
+                                                                syslog_config=syslog_config,
+                                                                vector_name=vector_name)
 
     return response_ok(event_ingestion_dbdata)
 
@@ -196,11 +203,11 @@ async def get_all_events_ingestion(request):
     if request.json.get("name"):
         filters["event_ingestion_name__icontains"] = request.json.get("name")
 
-    events = await EventsIngestion.filter(**filters).offset(offset).limit(limit).values()
+    events = await EventsIngestion.filter(**filters).offset(offset).select_related("creator", "updator").limit(limit).all()
     total = await EventsIngestion.filter(**filters).count()
 
     return response_ok({
-        "events": events,
+        "events": [event.json for event in events],
         "total": total,
         "page": page,
         "size": size,
@@ -228,6 +235,7 @@ async def delete_event_ingestion(request):
         os.rename(event.file_path, event.file_path + "_deleted")
         event.deleted = True
         event.file_path = event.file_path + "_deleted"
+        event.updator = request.ctx.session["account_info"]
         await event.save()
 
     return response_ok("事件删除成功")
@@ -277,30 +285,30 @@ async def update_event_ingestion(request):
         data = yaml.safe_load(content)
 
     if event_source_address:
-        data["sources"][event.event_ingestion_name]["bootstrap_servers"] = ",".join(event_source_address)
+        data["sources"][event.vector_name]["bootstrap_servers"] = ",".join(event_source_address)
     if communication_type:
-        data["sources"][event.event_ingestion_name]["mode"] = communication_type
+        data["sources"][event.vector_name]["mode"] = communication_type
     if kafka_group_id:
-        data["sources"][event.event_ingestion_name]["group_id"] = kafka_group_id
+        data["sources"][event.vector_name]["group_id"] = kafka_group_id
     if transforms_type:
-        data["sinks"][f"{event.event_ingestion_name}_sample_sinks"]["inputs"] = [
-            f"{event.event_ingestion_name}_transforms"]
-        data.setdefault("transforms", {}).setdefault(f"{event.event_ingestion_name}_transforms", {})["type"] = "remap"
-        data["transforms"][f"{event.event_ingestion_name}_transforms"]["inputs"] = [event.event_ingestion_name]
+        data["sinks"][f"{event.vector_name}_sample_sinks"]["inputs"] = [
+            f"{event.vector_name}_transforms"]
+        data.setdefault("transforms", {}).setdefault(f"{event.vector_name}_transforms", {})["type"] = "remap"
+        data["transforms"][f"{event.vector_name}_transforms"]["inputs"] = [event.vector_name]
         if transforms_type == "Grok":
-            data["transforms"][f"{event.event_ingestion_name}_transforms"]["source"] = transformsconfig
+            data["transforms"][f"{event.vector_name}_transforms"]["source"] = transformsconfig
         else:
-            data["transforms"][f"{event.event_ingestion_name}_transforms"]["source"] = transforms_config[
+            data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[
                 transforms_type]
     if syslog_port:
-        data["sources"][event.event_ingestion_name]["address"] = f"0.0.0.0:{syslog_port}"
+        data["sources"][event.vector_name]["address"] = f"0.0.0.0:{syslog_port}"
     if sasl_mechanism:
-        data["sources"][event.event_ingestion_name].setdefault("sasl", {})["enabled"] = True
-        data["sources"][event.event_ingestion_name]["sasl"]["mechanism"] = sasl_mechanism
+        data["sources"][event.vector_name].setdefault("sasl", {})["enabled"] = True
+        data["sources"][event.vector_name]["sasl"]["mechanism"] = sasl_mechanism
     if sasl_username:
-        data["sources"][event.event_ingestion_name]["sasl"]["username"] = sasl_username
+        data["sources"][event.vector_name]["sasl"]["username"] = sasl_username
     if sasl_password:
-        data["sources"][event.event_ingestion_name]["sasl"]["password"] = sasl_password
+        data["sources"][event.vector_name]["sasl"]["password"] = sasl_password
 
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
@@ -328,6 +336,8 @@ async def update_event_ingestion(request):
         else:
             event.script_id = script_id
 
+    event.updator = request.ctx.session["account_info"]
+
     await event.save()
 
     return response_ok("事件更新成功")
@@ -343,7 +353,7 @@ async def get_event_ingestion_detail(request):
         id: 事件ID (str)
     """
     event_id = request.json.get('id')
-    event = await EventsIngestion.get(id=event_id)
+    event = await EventsIngestion.filter(id=event_id).select_related("creator", "updator").first()
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
@@ -444,7 +454,7 @@ async def binding_event_ingestion_script(request):
     #     raise CustomError(ErrorCode.NotFound)
 
     timestamp_int = str(int(time.time()))
-    topic = f"{event.event_ingestion_name}_{timestamp_int}"
+    topic = f"{event.vector_name}_{timestamp_int}"
 
     conditional_statements = ""
 
@@ -482,8 +492,8 @@ async def binding_event_ingestion_script(request):
 
     data["transforms"][f"{topic}_transforms"] = {
         "type": "filter",
-        "inputs": [f"{event.event_ingestion_name}_transforms"] if event.transforms_type else [
-            event.event_ingestion_name],
+        "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [
+            event.vector_name],
         "condition": conditional_statements
     }
 
