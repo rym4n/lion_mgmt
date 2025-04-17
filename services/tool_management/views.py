@@ -48,18 +48,14 @@ async def unzip_progress_ws(request, ws):
 
     try:
         await ws.send(f"UUID:{client_id}")
-        print(f"🟢 客户端已连接：{client_id}")
-
         while True:
             _ = await ws.recv()
-    except Exception as e:
-        print(f"⚠️ WebSocket 错误：{e}")
     finally:
-        print(f"🔴 客户端断开：{client_id}")
         connected_clients.pop(client_id, None)
+        await ws.close()
 
 
-@tool_management_bp.post("/ws/upload")
+@tool_management_bp.post("/upload")
 @requires_permission("tool:c")
 async def upload_and_extract_zip(request):
     """
@@ -111,6 +107,7 @@ async def upload_and_extract_zip(request):
 
     if ws:
         await ws.close()
+        connected_clients.pop(ws_uuid, None)
 
     return response_ok({"message": results})
 
