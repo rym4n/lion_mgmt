@@ -3,7 +3,7 @@ from typing import List, Dict, Any
 
 from tortoise import fields
 
-from models import BaseModel
+from models.base import BaseModel
 
 
 class Events(BaseModel):
@@ -15,7 +15,7 @@ class Events(BaseModel):
     event_process_status: str = fields.CharField(max_length=50, description="事件处理状态（如 ASSIGNED, RESOLVED）")
     event_source: str = fields.CharField(max_length=255, null=True, description="事件来源")
     event_level: str = fields.CharField(max_length=50, description="事件等级")
-    owner: List[Dict[str, Any]] = fields.JSONField(default=list, null=True,description="负责人（包括角色和用户）")
+    owner: List[Dict[str, Any]] = fields.JSONField(default=list, null=True, description="负责人（包括角色和用户）")
     created_id: str = fields.CharField(max_length=36, description="创建人ID，关联用户表")
     event_summary: str = fields.TextField(null=True, description="事件概要")
     log_data: str = fields.TextField(default=dict, description="日志数据")
@@ -56,9 +56,11 @@ class EventsIngestion(BaseModel):
     transforms_type: str = fields.CharField(max_length=255, null=True, description="转换类型")
     enabled_status: int = fields.IntField(max_length=50, null=True, description="是否开启上游接入")
     linked_execution: int = fields.IntField(max_length=50, null=True, description="是否开启联动执行")
-    created_id: str = fields.CharField(max_length=36, description="创建人ID，关联用户表")
+    creator = fields.ForeignKeyField("models.Account", related_name="created_events_ingestion", description="创建人")
+    updator = fields.ForeignKeyField("models.Account", related_name="updated_events_ingestion", description="更新人")
     syslog_config: str = fields.CharField(max_length=255, null=True, description="syslog端口")
     file_path: str = fields.CharField(max_length=255, null=True, description="配置文件路径")
+    vector_name: str = fields.CharField(max_length=255, null=True, description="vector名称")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -74,10 +76,12 @@ class EventsIngestion(BaseModel):
             "event_source_type": self.event_source_type,
             "transforms_type": self.transforms_type,
             "enabled_status": self.enabled_status,
-            "created_id": self.created_id,
+            "creator": self.creator.username if self.creator else "",
+            "updator": self.updator.username if self.updator else "",
             "file_path": self.file_path,
             "linked_execution": self.linked_execution,
-            "syslog_config": self.syslog_config
+            "syslog_config": self.syslog_config,
+            "vector_name": self.vector_name
         }
 
     class Meta:
