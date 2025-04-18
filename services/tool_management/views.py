@@ -95,8 +95,8 @@ async def upload_and_extract_zip(request):
                 await ActionPermissions.create(tool_name=tool_name, action_name=action["action"],
                                                action_description=action["description"], roles_id=[], users_id=[])
         configuration = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values("resources")
-        if not configuration or configuration["resources"] != config_data.get("configuration"):
-            await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("configuration"))
+        if not configuration or configuration["resources"] != config_data.get("resource"):
+            await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource"))
 
         results.append({"tool": tool_name, "msg": msg})
 
@@ -162,7 +162,7 @@ async def unzip(zip_data, creator, single_progress, ws, success_progress):
         await safe_ws_send(ws, f"解压进度：{percent}%")
 
         name = config_data.get("name")
-        py_file_name = config_data.get("jar")
+        py_file_name = config_data.get("main")
         logo_name = config_data.get("logo").split("/")[1]
         class_name_list = [action.get("class_name") for action in config_data.get("actions", [])]
 
@@ -194,7 +194,7 @@ async def unzip(zip_data, creator, single_progress, ws, success_progress):
         await safe_ws_send(ws, f"解压进度：{percent}%")
 
         configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False).first().values("resources")
-        if configuration and configuration["resources"] != config_data.get("configuration"):
+        if configuration and configuration["resources"] != config_data.get("resource"):
             return config_data, version, tool_name, "工具资源不一致，请新建工具或删除原工具后再次上传"
         data += 1
         percent = int(data * single_progress) + success_progress
@@ -222,7 +222,8 @@ async def unzip(zip_data, creator, single_progress, ws, success_progress):
             name=name, version=version, path=save_path,
             description=config_data.get("description"),
             creator=creator, updater=creator,
-            hash_value=hasher.hexdigest()
+            hash_value=hasher.hexdigest(),
+            internal=config_data.get("internal", False)
         )
 
         return config_data, version, tool.name, "success"
@@ -625,6 +626,9 @@ async def download_zip(request):
     tool = await Tool.filter(id=tool_id, deleted=False).first()
     if not tool:
         raise CustomError(ErrorCode.ToolNotFoundError)
+
+    if tool.internal:
+        raise CustomError(ErrorCode.InternalToolError)
 
     zip_path = os.path.abspath(os.path.join(tool.path, f"SourceFile.zip"))
 
