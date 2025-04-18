@@ -1,6 +1,6 @@
 version: 38
 jobs:
-- name: build_image
+- name: ci
   jobExecutor: docker
   steps:
   - !CheckoutStep
@@ -21,6 +21,23 @@ jobs:
   - !TagCreateTrigger
     branches: master
     projects: lion_mgmt
+  retryCondition: never
+  maxRetries: 3
+  retryDelay: 30
+  timeout: 14400
+- name: cd
+  jobExecutor: tgy-deploy
+  steps:
+  - !CommandStep
+    name: 更新docker-compose配置
+    runInContainer: false
+    interpreter: !DefaultInterpreter
+      commands: |
+        NEW_VER=@tag@
+        sed -i -E "s#(dev\.xy14qg\.top/lion_mgmt/lion_mgmt:)v[0-9]+\.[0-9]+\.[0-9]+#\1${NEW_VER}#" /opt/lion/docker-compose.yml
+        docker-compose up -d -f /opt/lion/docker-compose.yml
+    useTTY: true
+    condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
   retryCondition: never
   maxRetries: 3
   retryDelay: 30
