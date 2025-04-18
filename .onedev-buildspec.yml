@@ -38,6 +38,13 @@ jobs:
         docker-compose up -d -f /opt/lion/docker-compose.yml
     useTTY: true
     condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
+  triggers:
+  - !DependencyFinishedTrigger
+    projects: lion_mgmt
+  jobDependencies:
+  - jobName: ci
+    requireSuccessful: true
+    artifacts: '**'
   retryCondition: never
   maxRetries: 3
   retryDelay: 30
