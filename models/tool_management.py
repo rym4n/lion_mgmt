@@ -45,6 +45,8 @@ class Tool(BaseModel):
     creator: str = fields.CharField(max_length=255, null=True, description="创建者")
     updater: str = fields.CharField(max_length=255, null=True, description="更新者")
     hash_value: str = fields.CharField(max_length=255, null=True, description="文件hash值")
+    internal: str = fields.CharField(max_length=255, description="是否内部工具")
+    tag: str = fields.CharField(max_length=255, null=True, description="工具标签")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -62,7 +64,9 @@ class Tool(BaseModel):
             "status": self.status,
             "creator": self.creator,
             "updater": self.updater,
-            "hash_value": self.hash_value
+            "hash_value": self.hash_value,
+            "internal": self.internal,
+            "tag": self.tag
         }
 
     class Meta:
