@@ -2,13 +2,13 @@
 
 import os
 import time
+# try:
+from xmlrpc.client import ServerProxy, Fault  # Python 3
 
 from settings import SUPERVISOR_PATH
 
-try:
-    from xmlrpc.client import ServerProxy, Fault  # Python 3
-except ImportError:
-    from xmlrpclib import ServerProxy, Fault  # Python 2
+# except ImportError:
+#     from xmlrpclib import ServerProxy, Fault  # Python 2
 
 SUPERVISOR_SERVER = ServerProxy("http://10.3.0.38:9001/RPC2")
 SUPERVISOR_CONFIG_DIR = SUPERVISOR_PATH
@@ -88,6 +88,22 @@ def remove_process(process_name):
             print("进程 {} 不存在，无法删除".format(process_name))
         else:
             print("删除进程时发生错误: {}".format(e.faultString))
+
+
+def process_status(process_name):
+    """获取进程状态"""
+    try:
+        process_info = SUPERVISOR_SERVER.supervisor.getProcessInfo(process_name)
+        if process_info['statename'] == 'RUNNING':
+            return "healthy"
+        else:
+            return "unhealthy"
+    except Fault as e:
+        if "BAD_NAME" in e.faultString:
+            print("进程 {} 不存在".format(process_name))
+        else:
+            print("获取进程状态时发生错误: {}".format(e.faultString))
+        return "unknown"
 
 # if __name__ == '__main__':
 #     process_name = "30b21cb1-3c44-4251-93c9-40141bba647b"

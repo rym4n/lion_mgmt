@@ -331,13 +331,13 @@ async def update_event_ingestion(request):
         event.enabled_status = enabled_status
     if linked_execution in [0, 1]:
         if linked_execution == 0:
-            event_related_scripts = EventRelatedScript.filter(event_ingestion_id=event_id).all()
+            event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_id).all()
             for event_related_script in event_related_scripts:
                 for script_id in event_related_script.script_id:
                     process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
                     supervisor.stop_process(process_name)
         else:
-            event_related_scripts = EventRelatedScript.filter(event_ingestion_id=event_id).all()
+            event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_id).all()
             for event_related_script in event_related_scripts:
                 for script_id in event_related_script.script_id:
                     process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
@@ -541,7 +541,7 @@ async def binding_event_ingestion_script(request):
 
 
 @event_ingestion_bp.post('/unbundled')
-@requires_permission('event:c')
+@requires_permission('event:u')
 async def unbundled_event_ingestion_script(request):
     """
     解绑事件接入和剧本(需要事件创建权限)
@@ -593,3 +593,27 @@ async def unbundled_event_ingestion_script(request):
     return response_ok("剧本解绑成功")
 
 
+@event_ingestion_bp.post('/healthy')
+@requires_permission('event:r')
+async def healthy_check(request):
+    """
+    健康检查(需要事件查看权限)
+    请求参数:
+        id: 事件接入ID (str)
+    """
+    event_id = request.json.get('id')
+    if not event_id:
+        raise CustomError(ErrorCode.ParameterError)
+    event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_id).all()
+    if not event_related_scripts:
+        raise CustomError(ErrorCode.NotFound)
+
+    healthy_list = []
+    for event_related_script in event_related_scripts:
+        for script_id in event_related_script.script_id:
+            process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
+            status = supervisor.process_status(process_name)
+            healthy_list.append({"script_id": script_id, "status": status})
+
+    overall_status = "healthy" if all(h["status"] == "healthy" for h in healthy_list) else "unhealthy"
+    return response_ok({"status": overall_status, "data": healthy_list})
