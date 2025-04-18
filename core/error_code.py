@@ -67,3 +67,4 @@ class ErrorCode(BaseErrorCode):
     PlaybookNotFound = ErrorData(4047, "剧本不存在")
     RoleAlreadyUsed = ErrorData(4048, "角色已分配，请先取消分配")
     PlaybookNameExists = ErrorData(4049, "剧本名称重复，请重新命名")
+    ScriptExistsError = ErrorData(4050, "绑定剧本已存在其他判断条件，请删除后再次进行绑定")

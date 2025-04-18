@@ -47,7 +47,7 @@ async def unzip_progress_ws(request, ws):
     connected_clients[client_id] = ws
 
     try:
-        await ws.send(f"UUID:{client_id}")
+        await ws.send(client_id)
         while True:
             _ = await ws.recv()
     finally:

@@ -1,9 +1,10 @@
 # coding=utf-8
+import hashlib
 import os
-import re
-import time
 import random
+import re
 import string
+import time
 
 import aiofile
 import yaml
@@ -16,6 +17,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models.event import EventsIngestion, EventRelatedScript
+from services.event_ingestion import supervisor
 from settings import SAMPLE_SINK_PATH, VECTOR_CFG
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='v1/event/ingestion')
@@ -73,7 +75,7 @@ async def creat_event_ingestion_dbdata(event_ingestion_name, event_ingestion_des
                                                     event_source_type=event_source_type, enabled_status=enabled_status,
                                                     creator=create, updator=updator, file_path=file_path,
                                                     linked_execution=linked_execution,
-                                                    syslog_config=syslog_config,vector_name=vector_name)
+                                                    syslog_config=syslog_config, vector_name=vector_name)
     logger.info(f"Client {client_ip} has added a new role {events_ingestion.id}.")
     return events_ingestion.json
 
@@ -135,7 +137,7 @@ async def event_ingestion(request):
 
     topic = vector_name
 
-    if event_source_type in ["syslog","socket"]:
+    if event_source_type in ["syslog", "socket"]:
         sources = {vector_name: {
             "type": event_source_type,
             "address": f"0.0.0.0:{syslog_port}",
@@ -203,7 +205,8 @@ async def get_all_events_ingestion(request):
     if request.json.get("name"):
         filters["event_ingestion_name__icontains"] = request.json.get("name")
 
-    events = await EventsIngestion.filter(**filters).offset(offset).select_related("creator", "updator").limit(limit).all()
+    events = await EventsIngestion.filter(**filters).offset(offset).select_related("creator", "updator").limit(
+        limit).all()
     total = await EventsIngestion.filter(**filters).count()
 
     return response_ok({
@@ -261,7 +264,6 @@ async def update_event_ingestion(request):
         sasl_password: sasl密码 (str)   事件来源类型为kafka时才传，默认为None       非必填
         enabled_status: 上游接入(int) 启用为 1 ，禁用为 0      非必填
         linked_execution: 联动执行 (int) 启用为 1 ，禁用为 0      非必填
-        script_id: 剧本id (list)  关联剧本，非必填
     """
     data = request.json  # 只解析一次
     event_id = data.get('id')
@@ -277,7 +279,6 @@ async def update_event_ingestion(request):
     sasl_password = data.get('sasl_password', None)
     enabled_status = data.get('enabled_status', None)
     linked_execution = data.get('linked_execution', None)
-    script_id = data.get('script_id', [])
     event = await EventsIngestion.get(id=event_id)
 
     async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
@@ -295,6 +296,7 @@ async def update_event_ingestion(request):
             f"{event.vector_name}_transforms"]
         data.setdefault("transforms", {}).setdefault(f"{event.vector_name}_transforms", {})["type"] = "remap"
         data["transforms"][f"{event.vector_name}_transforms"]["inputs"] = [event.vector_name]
+        data["transforms"][f"{event.vector_name}_transforms"]["drop_on_error"] = False
         if transforms_type == "Grok":
             data["transforms"][f"{event.vector_name}_transforms"]["source"] = transformsconfig
         else:
@@ -328,13 +330,20 @@ async def update_event_ingestion(request):
             event.file_path = file_path.replace("_unenabled", "")
         event.enabled_status = enabled_status
     if linked_execution in [0, 1]:
-        event.linked_execution = linked_execution
-    if script_id:
-        if event.script_id:
-            for script in script_id:
-                event.script_id.append(script)
+        if linked_execution == 0:
+            event_related_scripts = EventRelatedScript.filter(event_ingestion_id=event_id).all()
+            for event_related_script in event_related_scripts:
+                for script_id in event_related_script.script_id:
+                    process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
+                    supervisor.stop_process(process_name)
         else:
-            event.script_id = script_id
+            event_related_scripts = EventRelatedScript.filter(event_ingestion_id=event_id).all()
+            for event_related_script in event_related_scripts:
+                for script_id in event_related_script.script_id:
+                    process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
+                    supervisor.start_process(process_name)
+
+        event.linked_execution = linked_execution
 
     event.updator = request.ctx.session["account_info"]
 
@@ -375,10 +384,11 @@ async def get_event_ingestion_kafka_sample(request):
     """
     获取事件接入处理后的日志样例(需要事件查看权限)
     请求参数:
-         event_name: 主题名称 (str)
+         id: 事件id (str)
     """
-    event_name = request.json.get('event_name')
-    log_path = os.path.join(SAMPLE_SINK_PATH, f"{event_name}.log")
+    event_id = request.json.get('id')
+    event = await EventsIngestion.filter(id=event_id).first()
+    log_path = os.path.join(SAMPLE_SINK_PATH, f"{event.vector_name}.log")
     log_path = log_path.replace("\\", "/")
     if not os.path.exists(log_path):
         raise CustomError(ErrorCode.NotFound)
@@ -395,10 +405,11 @@ async def get_event_ingestion_syslog_sample(request):
     """
     获取事件接入原始日志样例(需要事件查看权限)
     请求参数:
-         event_name: 事件名称 (str)
+         id: 事件id (str)
     """
-    event_name = request.json.get('event_name')
-    log_path = os.path.join(SAMPLE_SINK_PATH, f"{event_name}.log")
+    event_id = request.json.get('id')
+    event = await EventsIngestion.filter(id=event_id).first()
+    log_path = os.path.join(SAMPLE_SINK_PATH, f"{event.vector_name}.log")
     log_path = log_path.replace("\\", "/")
     if not os.path.exists(log_path):
         raise CustomError(ErrorCode.NotFound)
@@ -439,14 +450,22 @@ async def binding_event_ingestion_script(request):
             正则表达式 match  字段匹配正则表达式       value为正则表达式，如"^abc.*$"
     # judge = request.json.get('judge')
         event_ingestion_id: 事件接入ID (str)
-        script_id: 剧本ID (list)
+        script_ids: 剧本ID (list)
     """
     conditions = request.json.get('judge')
     event_ingestion_id = request.json.get('event_ingestion_id')
-    script_id = request.json.get('script_id')
+    script_ids = request.json.get('script_ids')
     event = await EventsIngestion.filter(id=event_ingestion_id).first()
     if not event:
         raise CustomError(ErrorCode.NotFound)
+
+    event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id).all()
+    if not event_related_scripts:
+        event_related_scripts = []
+    for event_related_script in event_related_scripts:
+        has_common = bool(set(script_ids) & set(event_related_script.script_id))
+        if has_common:
+            raise CustomError(ErrorCode.ScriptExistsError)
 
     # 目前没有剧本列表后续在加列表判断
     # script = await Script.get(id=script_id)
@@ -490,7 +509,7 @@ async def binding_event_ingestion_script(request):
     if conditional_statements in condition_list:
         raise CustomError(ErrorCode.ConditionalExistsError)
 
-    data["transforms"][f"{topic}_transforms"] = {
+    data.setdefault("transforms", {})[f"{topic}_transforms"] = {
         "type": "filter",
         "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [
             event.vector_name],
@@ -510,7 +529,67 @@ async def binding_event_ingestion_script(request):
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
         await f.write(yaml_str)
 
+    for script_id in script_ids:
+        process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
+        command = f"python start.py -m auto -f {script_id} -t {topic}"
+        supervisor.add_process(process_name, command)
+
     events_ingestion = await EventRelatedScript.create(condition=conditions, event_ingestion_id=event_ingestion_id,
-                                                       script_id=script_id, topic=topic)
+                                                       script_id=script_ids, topic=topic)
 
     return response_ok(events_ingestion.json)
+
+
+@event_ingestion_bp.post('/unbundled')
+@requires_permission('event:c')
+async def unbundled_event_ingestion_script(request):
+    """
+    解绑事件接入和剧本(需要事件创建权限)
+    请求参数:
+        event_ingestion_id: 事件接入ID (str)
+        script_ids: 剧本ID (list)
+    """
+    event_ingestion_id = request.json.get('event_ingestion_id')
+    script_ids = request.json.get('script_ids')
+
+    event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False).all()
+
+    for script_id in script_ids:
+        for ers in event_related_scripts:
+            if script_id in ers.script_id:  # ers.script_id 是列表
+                if len(ers.script_id) > 1:  # 剧本id大于1代表多个剧本绑定到同一个判断条件，只需删除数据库数据即可
+                    ers.script_id.remove(script_id)
+                    await ers.save()
+                    break
+                else:  # 剧本id小于等于1代表单个剧本绑定到同一个判断条件，需删除数据库数据和vector配置文件
+                    event = await EventsIngestion.filter(id=event_ingestion_id).first()
+                    if not event:
+                        raise CustomError(ErrorCode.NotFound)
+
+                    async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
+                        content = await f.read()
+                        data = yaml.safe_load(content)
+
+                    key_to_delete_transforms = f"{ers.topic}_transforms"
+                    key_to_delete_sinks = f"{ers.topic}_sinks"
+
+                    if key_to_delete_transforms in data["transforms"]:
+                        del data["transforms"][key_to_delete_transforms]
+
+                    if key_to_delete_sinks in data["sinks"]:
+                        del data["sinks"][key_to_delete_sinks]
+
+                    async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
+                        yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+                        await f.write(yaml_str)
+
+                    ers.deleted = True
+                    await ers.save()
+                    break
+        process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
+        supervisor.stop_process(process_name)
+        supervisor.remove_process(process_name)
+
+    return response_ok("剧本解绑成功")
+
+
