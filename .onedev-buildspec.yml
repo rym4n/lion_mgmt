@@ -1,7 +1,7 @@
 version: 38
 jobs:
 - name: ci
-  jobExecutor: docker
+  jobExecutor: local
   steps:
   - !CheckoutStep
     name: 拉取最新代码
