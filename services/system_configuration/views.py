@@ -48,7 +48,7 @@ async def upload_image(request):
     content["Title"] = system_name
 
     async with aiofile.AIOFile(config_path, 'w', encoding='utf-8') as f:
-        await f.write(str(content))
+        await f.write(json.dumps(content, ensure_ascii=False, indent=2))
 
     # 处理文件上传
     file_paths = {}
