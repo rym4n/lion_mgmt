@@ -43,9 +43,9 @@ async def upload_image(request):
     async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
         content = await f.read()
     content = json.loads(content)
-    content["Version"] = "system_version"
-    content["Content"] = "copyright_text"
-    content["Title"] = "system_name"
+    content["Version"] = system_version
+    content["Content"] = copyright_text
+    content["Title"] = system_name
 
     async with aiofile.AIOFile(config_path, 'w', encoding='utf-8') as f:
         await f.write(str(content))
