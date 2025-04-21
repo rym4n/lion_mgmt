@@ -46,7 +46,7 @@ class Tool(BaseModel):
     updater: str = fields.CharField(max_length=255, null=True, description="更新者")
     hash_value: str = fields.CharField(max_length=255, null=True, description="文件hash值")
     internal: str = fields.CharField(max_length=255, description="是否内部工具")
-    tag: str = fields.CharField(max_length=255, null=True, description="工具标签")
+    tag: list[str] = fields.JSONField(null=True,description="工具标签")
 
     def validate(self) -> None:
         raise NotImplementedError
