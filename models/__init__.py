@@ -1,5 +1,6 @@
 # coding=utf-8
 
+from .license import *
 from .approvement import *
 from .audit import *
 from .event import *
