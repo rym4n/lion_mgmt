@@ -298,7 +298,7 @@ async def update_event_ingestion(request):
         data["transforms"][f"{event.vector_name}_transforms"]["inputs"] = [event.vector_name]
         data["transforms"][f"{event.vector_name}_transforms"]["drop_on_error"] = False
         if transforms_type == "Grok":
-            data["transforms"][f"{event.vector_name}_transforms"]["source"] = transformsconfig
+            data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[transforms_type].format(transformsconfig)
         else:
             data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[
                 transforms_type]

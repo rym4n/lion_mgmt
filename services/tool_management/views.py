@@ -208,7 +208,7 @@ async def unzip(zip_data, creator, single_progress, ws, success_progress):
         percent = int(data * single_progress) + success_progress
         await safe_ws_send(ws, f"解压进度：{percent}%")
 
-        version = str(int(time.time() * 1000))
+        version = "v" + str(int(time.time() * 1000))
 
         extra_path = os.path.join(TOOLS_DIR, name, version)
         os.makedirs(extra_path, exist_ok=True)
