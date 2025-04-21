@@ -808,3 +808,58 @@ async def judge_permission(request):
                 permission_dict[key] = "false"
 
     return response_ok(permission_dict)
+
+
+@tool_management_bp.post("/tag/add")
+@requires_permission("tool:u")
+async def add_tag(request):
+    """
+    新增工具标签（需要工具更新权限）
+
+    query参数:
+        - name: 工具名称    str
+        - tags: 标签名称    list
+    """
+    name = request.json.get("name")
+    tags = request.json.get("tags", [])
+    if not name or not tags:
+        raise CustomError(ErrorCode.ParameterError)
+
+    tools = await Tool.filter(name=name, deleted=False).all()
+
+    if not tools:
+        raise CustomError(ErrorCode.ToolNotFoundError)
+
+    for tool in tools:
+        tool.tag = list(set(tool.tag or []) | set(tags))
+        tool.updater = token_decode(request).get("name")
+        await tool.save()
+
+    return response_ok({"message": "工具标签新增成功"})
+
+@tool_management_bp.post("/tag/delete")
+@requires_permission("tool:u")
+async def delete_tag(request):
+    """
+    删除工具标签（需要工具更新权限）
+
+    query参数:
+        - name: 工具名称    str
+        - tags: 标签名称    list
+    """
+    name = request.json.get("name")
+    tags = request.json.get("tags", [])
+    if not name or not tags:
+        raise CustomError(ErrorCode.ParameterError)
+
+    tools = await Tool.filter(name=name, deleted=False).all()
+
+    if not tools:
+        raise CustomError(ErrorCode.ToolNotFoundError)
+
+    for tool in tools:
+        tool.tag = list(set(tool.tags or []) - set(tags))
+        tool.updater = token_decode(request).get("name")
+        await tool.save()
+
+    return response_ok({"message": "工具标签删除成功"})
