@@ -1,7 +1,8 @@
 # coding=utf-8
 
-from models.base import BaseModel
 from tortoise import fields
+
+from models.base import BaseModel
 
 
 class Room(BaseModel):
@@ -10,8 +11,7 @@ class Room(BaseModel):
     """
     name: str = fields.CharField(null=False, max_length=50, unique=True, description="作战室名称")
     creator = fields.ForeignKeyField(model_name="models.Account", related_name="created_room", description="房主")
-    users: fields.ManyToManyRelation["Account"] = fields.ManyToManyField(model_name="models.Account",
-                                                                         through="room_accounts")
+    users = fields.ManyToManyField(model_name="models.Account", through="room_accounts")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -37,17 +37,11 @@ class Message(BaseModel):
     作战室消息模型
     """
     content: str = fields.TextField(null=False, description="消息内容")
-    type = fields.CharField(null=False, max_length=10,
-                            description="消息类型，public群聊private私聊/system系统/announcement公告")
+    type = fields.CharField(null=False, max_length=10, description="消息类型，public群聊private私聊/system系统/announcement公告")
     content_type = fields.CharField(default='text', max_length=10, description="消息内容类型，text文本/image图片")
     sender = fields.ForeignKeyField(model_name="models.Account", related_name="msg_sender", description="消息发送方")
-    receiver = fields.ForeignKeyField(model_name="models.Account", related_name="msg_receiver",
-                                      description="消息接收方")
-    room = fields.ForeignKeyField(
-        model_name="models.Room",
-        related_name="msg_room",
-        description="消息所在房间（若为群聊）",
-    )
+    receiver = fields.ForeignKeyField(model_name="models.Account", related_name="msg_receiver", description="消息接收方")
+    room = fields.ForeignKeyField(model_name="models.Room", related_name="msg_room", description="消息所在房间（若为群聊）")
     is_recalled: bool = fields.BooleanField(default=False, description="是否撤回")
     is_pinned: bool = fields.BooleanField(default=False, description="是否置顶（用于群公告）")
 

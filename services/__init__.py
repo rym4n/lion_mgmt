@@ -3,7 +3,7 @@
 import importlib
 import os
 
-import ujson
+import orjson
 from sanic import Sanic, Blueprint
 from sanic.log import logger
 from tortoise.contrib.sanic import register_tortoise
@@ -18,7 +18,7 @@ def create_app() -> Sanic:
     """创建app"""
 
     # app创建
-    app: Sanic = Sanic(__name__, dumps=ujson.dumps, loads=ujson.loads, log_config=BASE_LOGGING)
+    app: Sanic = Sanic(__name__, dumps=orjson.dumps, loads=orjson.loads, log_config=BASE_LOGGING)
 
     # sanic应用配置
     app.config.update_config("settings/__init__.py")

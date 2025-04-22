@@ -17,7 +17,7 @@ class Playbook(BaseModel):
     if_list = fields.TextField(description="判断节点")
     audit_list = fields.TextField(description="审批节点")
     tags = fields.JSONField(default=[], description="标签")
-    scenes: fields.ManyToManyRelation["Scene"] = fields.ManyToManyField("models.Scene", through="playbook_scene")
+    scenes = fields.ManyToManyField("models.Scene", through="playbook_scene")
     flow_json = fields.JSONField(default={}, description="流程图布局信息")
     flow_data = fields.JSONField(default={}, description="各节点详细信息")
     version = fields.IntField(default=0, description="版本号，每次publish都会生成新纪录，用于版本回溯")

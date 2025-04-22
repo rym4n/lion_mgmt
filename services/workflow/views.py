@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
-import ujson
+import orjson
 from sanic import Blueprint, Request, Websocket
 from sanic.log import logger
 from tortoise.expressions import Q
@@ -177,7 +177,7 @@ async def execute_action(request: Request, ws: Websocket):
         """
     async for msg in ws:
         try:
-            data = ujson.loads(msg)
+            data = orjson.loads(msg)
             await ws.send(data.get('action', ''))
         except ConnectionClosed:
             logger.info("ws closed.")
