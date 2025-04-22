@@ -16,6 +16,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
+from models import Playbook
 from models.event import EventsIngestion, EventRelatedScript
 from services.event_ingestion import supervisor
 from settings import SAMPLE_SINK_PATH, VECTOR_CFG
@@ -304,6 +305,7 @@ async def update_event_ingestion(request):
                 transforms_type]
     if syslog_port:
         data["sources"][event.vector_name]["address"] = f"0.0.0.0:{syslog_port}"
+        event.syslog_config = event.syslog_config[:3]+str(syslog_port)
     if sasl_mechanism:
         data["sources"][event.vector_name].setdefault("sasl", {})["enabled"] = True
         data["sources"][event.vector_name]["sasl"]["mechanism"] = sasl_mechanism
@@ -514,10 +516,10 @@ async def binding_event_ingestion_script(request):
         if has_common:
             raise CustomError(ErrorCode.ScriptExistsError)
 
-    # 目前没有剧本列表后续在加列表判断
-    # script = await Script.get(id=script_id)
-    # if not script:
-    #     raise CustomError(ErrorCode.NotFound)
+    for script_id in script_ids:
+        script = await Playbook.get(id=script_id)
+        if not script:
+            raise CustomError(ErrorCode.NotFound)
 
     timestamp_int = str(int(time.time()))
     topic = f"{event.vector_name}_{timestamp_int}"
