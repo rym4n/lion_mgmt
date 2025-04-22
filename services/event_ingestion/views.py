@@ -458,10 +458,10 @@ async def get_event_ingestion_syslog_sample(request):
         logs = content.strip().split("\n")
         start = (page - 1) * size
         end = start + size
-        logs = logs[start:end]
+        alogs = logs[start:end]
 
         return response_ok({
-            "logs": logs,
+            "logs": alogs,
             "total": len(logs),
             "page": page,
             "size": size,
