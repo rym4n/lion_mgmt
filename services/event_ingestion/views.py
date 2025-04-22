@@ -417,10 +417,10 @@ async def get_event_ingestion_kafka_sample(request):
 
     start = (page - 1) * size
     end = start + size
-    logs = logs[start:end]
+    alogs = logs[start:end]
 
     return response_ok({
-        "logs": logs,
+        "logs": alogs,
         "total": len(logs),
         "page": page,
         "size": size,
