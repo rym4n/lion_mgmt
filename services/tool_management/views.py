@@ -858,7 +858,7 @@ async def delete_tag(request):
         raise CustomError(ErrorCode.ToolNotFoundError)
 
     for tool in tools:
-        tool.tag = list(set(tool.tags or []) - set(tags))
+        tool.tag = list(set(tool.tag or []) - set(tags))
         tool.updater = token_decode(request).get("name")
         await tool.save()
 

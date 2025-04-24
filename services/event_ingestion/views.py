@@ -16,6 +16,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
+from models import Playbook
 from models.event import EventsIngestion, EventRelatedScript
 from services.event_ingestion import supervisor
 from settings import SAMPLE_SINK_PATH, VECTOR_CFG
@@ -115,7 +116,6 @@ async def event_ingestion(request):
     sasl_password = data.get('sasl_password', None)
     enabled_status = data.get('enabled_status', 1)
     linked_execution = data.get('linked_execution', 0)
-    create_id = data.get('created_id')
     client_ip = request.client_ip
 
     syslog_config = None
@@ -298,12 +298,14 @@ async def update_event_ingestion(request):
         data["transforms"][f"{event.vector_name}_transforms"]["inputs"] = [event.vector_name]
         data["transforms"][f"{event.vector_name}_transforms"]["drop_on_error"] = False
         if transforms_type == "Grok":
-            data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[transforms_type].format(transformsconfig)
+            data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[transforms_type].format(
+                transformsconfig)
         else:
             data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[
                 transforms_type]
     if syslog_port:
         data["sources"][event.vector_name]["address"] = f"0.0.0.0:{syslog_port}"
+        event.syslog_config = event.syslog_config[:3]+str(syslog_port)
     if sasl_mechanism:
         data["sources"][event.vector_name].setdefault("sasl", {})["enabled"] = True
         data["sources"][event.vector_name]["sasl"]["mechanism"] = sasl_mechanism
@@ -385,17 +387,44 @@ async def get_event_ingestion_kafka_sample(request):
     获取事件接入处理后的日志样例(需要事件查看权限)
     请求参数:
          id: 事件id (str)
+         page: 页码 (int)，从1开始，默认1
+         size: 每页条数 (int)，默认10
+         keyword: 模糊搜索关键字 (str)，可选
     """
-    event_id = request.json.get('id')
+    data = request.json
+    event_id = data.get('id')
+    page = data.get('page', 1)
+    size = data.get('size', 10)
+    keyword = data.get('keyword', None)
+    if page < 1 or size < 1:
+        raise CustomError(ErrorCode.ParameterError)
+
     event = await EventsIngestion.filter(id=event_id).first()
+    if not event:
+        raise CustomError(ErrorCode.NotFound)
+
     log_path = os.path.join(SAMPLE_SINK_PATH, f"{event.vector_name}.log")
     log_path = log_path.replace("\\", "/")
     if not os.path.exists(log_path):
         raise CustomError(ErrorCode.NotFound)
+
     async with aiofile.AIOFile(log_path, 'r', encoding='utf-8') as f:
         content = await f.read()
         logs = content.strip().split("\n")
-        return response_ok(logs[-1])
+
+    if keyword:
+        logs = [log for log in logs if keyword.lower() in log.lower()]
+
+    start = (page - 1) * size
+    end = start + size
+    alogs = logs[start:end]
+
+    return response_ok({
+        "logs": alogs,
+        "total": len(logs),
+        "page": page,
+        "size": size,
+    })
 
 
 # noinspection PyTypeChecker
@@ -406,17 +435,37 @@ async def get_event_ingestion_syslog_sample(request):
     获取事件接入原始日志样例(需要事件查看权限)
     请求参数:
          id: 事件id (str)
+         page: 页码 (int)
+         size: 页面大小 (int)
     """
     event_id = request.json.get('id')
+    page = request.json.get('page', 1)
+    size = request.json.get('size', 10)
+    if page < 1 or size < 1:
+        raise CustomError(ErrorCode.ParameterError)
+
     event = await EventsIngestion.filter(id=event_id).first()
+    if not event:
+        raise CustomError(ErrorCode.NotFound)
+
     log_path = os.path.join(SAMPLE_SINK_PATH, f"{event.vector_name}.log")
     log_path = log_path.replace("\\", "/")
     if not os.path.exists(log_path):
         raise CustomError(ErrorCode.NotFound)
+
     async with aiofile.AIOFile(log_path, 'r', encoding='utf-8') as f:
         content = await f.read()
         logs = content.strip().split("\n")
-        return response_ok(logs[0])
+        start = (page - 1) * size
+        end = start + size
+        alogs = logs[start:end]
+
+        return response_ok({
+            "logs": alogs,
+            "total": len(logs),
+            "page": page,
+            "size": size,
+        })
 
 
 @event_ingestion_bp.post('/binding')
@@ -467,10 +516,10 @@ async def binding_event_ingestion_script(request):
         if has_common:
             raise CustomError(ErrorCode.ScriptExistsError)
 
-    # 目前没有剧本列表后续在加列表判断
-    # script = await Script.get(id=script_id)
-    # if not script:
-    #     raise CustomError(ErrorCode.NotFound)
+    for script_id in script_ids:
+        script = await Playbook.get(id=script_id)
+        if not script:
+            raise CustomError(ErrorCode.NotFound)
 
     timestamp_int = str(int(time.time()))
     topic = f"{event.vector_name}_{timestamp_int}"

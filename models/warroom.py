@@ -36,9 +36,9 @@ class Message(BaseModel):
     """
     作战室消息模型
     """
-    content: str = fields.TextField(null=False, description="消息内容")
+    content: str = fields.TextField(null=False, description="文本消息内容")
+    image_content: str = fields.TextField(default=None, description="图片消息内容")
     type = fields.CharField(null=False, max_length=10, description="消息类型，public群聊private私聊/system系统/announcement公告")
-    content_type = fields.CharField(default='text', max_length=10, description="消息内容类型，text文本/image图片")
     sender = fields.ForeignKeyField(model_name="models.Account", related_name="msg_sender", description="消息发送方")
     receiver = fields.ForeignKeyField(model_name="models.Account", related_name="msg_receiver", description="消息接收方")
     room = fields.ForeignKeyField(model_name="models.Room", related_name="msg_room", description="消息所在房间（若为群聊）")
@@ -55,8 +55,8 @@ class Message(BaseModel):
             "ctime": str(self.ctime),
             "utime": str(self.utime),
             "content": self.content,
+            "image_content": self.image_content,
             "type": self.type,
-            "content_type": self.content_type,
             "sender": self.sender.username if self.sender else "",
             "receiver": self.receiver.username if self.receiver else "",
             "room": self.room.name if self.room else "",
