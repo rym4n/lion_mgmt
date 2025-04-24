@@ -26,7 +26,7 @@ class ErrorCode(BaseErrorCode):
     NONEEDMFA = ErrorData(4014, "无需MFA验证")
     SecondFactorRequired = ErrorData(4015, "需要二次验证")
 
-    MaxChallenge = ErrorData(4016, "请求次数过多")
+    MaxChallenge = ErrorData(4016, "请求过于频繁，5分钟后再试")
 
     SessionInvalid = ErrorData(4017, "会话无效")
     SessionDeleted = ErrorData(4018, "会话已删除")
