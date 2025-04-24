@@ -38,14 +38,14 @@ def get_client_ip(request) -> str:
         return ip_str.strip().strip('"').strip("[]")
 
     # 1. 多级代理时的原始客户端 IP
-    xff = request.headers.get('X-Forwarded-For')
+    xff = request.headers.get('x-forwarded-for')
     if xff:
         # 可能形如 "203.0.113.5, 2001:db8::1"
         first = xff.split(',')[0]
         return clean_ip(first)
 
     # 2. 单级代理时 Nginx 设的真实 IP
-    xri = request.headers.get('X-Real-IP')
+    xri = request.headers.get('x-real-ip')
     if xri:
         return clean_ip(xri)
 
