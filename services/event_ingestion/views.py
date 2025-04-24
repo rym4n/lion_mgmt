@@ -16,6 +16,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
+from libs.utils import get_client_ip
 from models import Playbook
 from models.event import EventsIngestion, EventRelatedScript
 from services.event_ingestion import supervisor
@@ -116,7 +117,7 @@ async def event_ingestion(request):
     sasl_password = data.get('sasl_password', None)
     enabled_status = data.get('enabled_status', 1)
     linked_execution = data.get('linked_execution', 0)
-    client_ip = request.client_ip
+    client_ip = get_client_ip(request)
 
     syslog_config = None
     if syslog_port and communication_type:

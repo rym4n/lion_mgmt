@@ -30,7 +30,6 @@ async def add_role(request):
     permissions = request.json.get("permissions", [])
     async with in_transaction():
         role = await Role.create(name=name, description=description, permissions=permissions)
-    logger.info(f"Client {request.client_ip} has added a new role {role.id}.")
     return response_ok(role.json)
 
 

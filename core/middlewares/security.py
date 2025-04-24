@@ -6,6 +6,7 @@ from sanic.log import logger
 
 from libs.error_code.exception import CustomError
 from libs.security.authentication import authenticate
+from libs.utils import get_client_ip
 from models import AuditLog
 from .base import BaseMiddleware
 from ..error_code import ErrorCode
@@ -21,8 +22,6 @@ class SecurityMiddleware(BaseMiddleware):
             logger.info(f"请求 {request.path} 的参数不合法, body: {request.body}, headers: {request.headers}")
             raise CustomError(ErrorCode.InvalidJsonError)
 
-        logger.info(f'xff: {request.forwarded.get("for", "")}, remote: {request.remote_addr}, ip: {request.client_ip}')
-
         # 判断请求URI是否需要身份验证
         white_urls = ["/v1/user/login", "/health", "/v1/playbook/run", "/v1/tool_management/ws/unzip"]
         if os.environ.get("RY_ENV") == 'TEST':
@@ -36,5 +35,5 @@ class SecurityMiddleware(BaseMiddleware):
         """统一记录操作日志"""
         if response.status == 200 and hasattr(request.ctx, "session"):
             await AuditLog.create(username=request.ctx.session['name'], action="访问", module=request.endpoint, result="成功",
-                                  uri=request.path, client_ip=request.client_ip, client_ua=request.headers.get('User-Agent', ''),
+                                  uri=request.path, client_ip=get_client_ip(request), client_ua=request.headers.get('User-Agent', ''),
                                   request_data=request.json if 'multipart' not in request.content_type else None)

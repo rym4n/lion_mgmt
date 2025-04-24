@@ -3,7 +3,6 @@ import os
 
 import aiofile
 from sanic import Blueprint
-from sanic.log import logger
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
@@ -54,13 +53,14 @@ async def upload_image(request):
     file_paths = {}
     for field in ["background", "webico", "logo"]:
         file = request.files.get(field)
+        filename = ''
         if field == "background":
             filename = f"{BG_NAME}.{file.name.split('.')[-1]}"
         elif field == "webico":
             filename = f"favicon.{file.name.split('.')[-1]}"
         elif field == "logo":
             filename = f"logo.{file.name.split('.')[-1]}"
-        if file:
+        if file and filename:
             file_path = os.path.join(UPLOAD_FOLDER, filename)
 
             with open(file_path, "wb") as f:
@@ -86,7 +86,6 @@ async def upload_image(request):
 
             await SystemCustomConfiguration.filter(system_version=system_version).update(**update_fields)
 
-            logger.info(f"Client {request.client_ip} updated system configuration {existing_config.id}.")
             return response_ok({"message": "Configuration updated successfully", "id": existing_config.id})
 
         else:
@@ -100,7 +99,6 @@ async def upload_image(request):
                 system_version=system_version
             )
 
-            logger.info(f"Client {request.client_ip} created new system configuration {system_config.id}.")
             return response_ok({"message": "Configuration created successfully", "id": system_config.id})
 
 
@@ -153,7 +151,6 @@ async def add_system(request):
     async with in_transaction():
         systemstatus = await SystemStatus.create(systemname=systemname, instancename=instancename, uptime=uptime,
                                                  checkTime=check_time, status=status)
-    logger.info(f"Client {request.client_ip} has added a new role {systemstatus.id}.")
     return response_ok(systemstatus.json)
 
 

@@ -11,7 +11,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authentication import validate_password, token_encode, refresh_token, validate_username
 from libs.security.authorization import requires_permission
-from libs.utils import password_hasher, ip_in_list
+from libs.utils import password_hasher, ip_in_list, get_client_ip
 from models import Account, Role
 from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS
 
@@ -111,9 +111,11 @@ async def login(request):
         user_attempts = 0
     if user_attempts > MAX_CHALLENGE_ATTEMPTS:
         raise CustomError(ErrorCode.MaxChallenge)
+        
+    client_ip = get_client_ip(request)
 
     # 防止暴力破解/撞库
-    ip_attempts = await request.ctx.cache_client.get(f"{request.client_ip}_login_attempts")
+    ip_attempts = await request.ctx.cache_client.get(f"{client_ip}_login_attempts")
     if ip_attempts is None:
         ip_attempts = 0
     if ip_attempts > MAX_CHALLENGE_ATTEMPTS:
@@ -121,7 +123,7 @@ async def login(request):
 
     try:
         account = await Account.get(username=username, deleted=False).prefetch_related('roles')
-        if account.permit_ip and ip_in_list(request.client_ip, account.permit_ip.split(',')) is False:
+        if account.permit_ip and ip_in_list(client_ip, account.permit_ip.split(',')) is False:
             raise CustomError(ErrorCode.IpForbidden)
         # 验证密码
         password_hasher.verify(account.password, password)
@@ -134,7 +136,7 @@ async def login(request):
             raise CustomError(ErrorCode.AccountDisabled)
         resp = account.json
         token_id = str(uuid.uuid4())
-        token = token_encode(account.id, account.username, account.mfa_enable, token_id, ip=request.client_ip)
+        token = token_encode(account.id, account.username, account.mfa_enable, token_id, ip=client_ip)
         await request.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
         resp['aioe-auth'] = token
         # response.cookies.add_cookie(
@@ -158,7 +160,7 @@ async def login(request):
         raise CustomError(ErrorCode.CredentialsError)
     except (VerificationError, InvalidHashError):
         await request.ctx.cache_client.set(f"{username}_login_attempts", user_attempts + 1, 60 * 5)
-        await request.ctx.cache_client.set(f"{request.client_ip}_login_attempts", ip_attempts + 1, 60 * 5)
+        await request.ctx.cache_client.set(f"{client_ip}_login_attempts", ip_attempts + 1, 60 * 5)
         # await request.ctx.cache_client.expire(f"{username}_login_attempts", 60 * 5)
         # await request.ctx.cache_client.expire(f"{client_ip}_login_attempts", 60 * 5)
         raise CustomError(ErrorCode.CredentialsError)

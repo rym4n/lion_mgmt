@@ -23,7 +23,6 @@ async def check_permissions(request: Request, *required_permissions: str) -> boo
             for required_permission in required_permissions:
                 if check_wildcard(role_permission, required_permission):
                     return True
-    logger.warning(f"{request.client_ip} {payload['sub']} 尝试了一个未授权操作")
     raise CustomError(ErrorCode.Unauthorized)
 
 
@@ -60,7 +59,6 @@ async def check_roles(request: Request, *required_roles: str) -> bool:
     request.ctx.session['account_info'] = account
     if set(required_roles) & {role.name for role in account.roles}:
         return True
-    logger.warning(f"{request.client_ip} {payload['sub']} 尝试了一个未授权操作")
     raise CustomError(ErrorCode.Unauthorized)
 
 
