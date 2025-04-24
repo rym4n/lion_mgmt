@@ -21,7 +21,7 @@ class SecurityMiddleware(BaseMiddleware):
             logger.info(f"请求 {request.path} 的参数不合法, body: {request.body}, headers: {request.headers}")
             raise CustomError(ErrorCode.InvalidJsonError)
 
-        logger.info(f'xff: {request.forwarded.get("for", "")}, remote: {request._remote_addr}, ip: {request.client_ip}')
+        logger.info(f'xff: {request.forwarded.get("for", "")}, remote: {request.remote_addr}, ip: {request.client_ip}')
 
         # 判断请求URI是否需要身份验证
         white_urls = ["/v1/user/login", "/health", "/v1/playbook/run", "/v1/tool_management/ws/unzip"]
