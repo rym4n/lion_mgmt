@@ -89,7 +89,7 @@ async def list_workflow(request):
     if request.json.get("status"):
         condition = condition & Q(status=request.json.get("status"))
     total = await Playbook.filter(condition).count()
-    playbooks = await Playbook.filter(condition).offset(offset).limit(limit).all()
+    playbooks = await Playbook.filter(condition).offset(offset).limit(limit).all().prefetch_related("scenes", "creator", "updator")
     return response_ok({
         "total": total,
         "page": page,

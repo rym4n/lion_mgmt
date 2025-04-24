@@ -107,13 +107,17 @@ async def login(request):
 
     # 防止暴力破解
     user_attempts = await request.ctx.cache_client.get(f"{username}_login_attempts")
-    if user_attempts is not None and int(user_attempts) > MAX_CHALLENGE_ATTEMPTS:
+    if user_attempts is None:
+        user_attempts = 0
+    if user_attempts > MAX_CHALLENGE_ATTEMPTS:
         raise CustomError(ErrorCode.MaxChallenge)
 
     # 防止暴力破解/撞库
     client_ip = request.client_ip
     ip_attempts = await request.ctx.cache_client.get(f"{client_ip}_login_attempts")
-    if ip_attempts is not None and int(ip_attempts) > MAX_CHALLENGE_ATTEMPTS:
+    if ip_attempts is None:
+        ip_attempts = 0
+    if ip_attempts > MAX_CHALLENGE_ATTEMPTS:
         raise CustomError(ErrorCode.MaxChallenge)
 
     try:
@@ -154,10 +158,10 @@ async def login(request):
     except DoesNotExist:
         raise CustomError(ErrorCode.CredentialsError)
     except (VerificationError, InvalidHashError):
-        await request.ctx.cache_client.increment(f"{username}_login_attempts", 1)
-        await request.ctx.cache_client.increment(f"{client_ip}_login_attempts", 1)
-        await request.ctx.cache_client.expire(f"{username}_login_attempts", 60 * 5)
-        await request.ctx.cache_client.expire(f"{client_ip}_login_attempts", 60 * 5)
+        await request.ctx.cache_client.set(f"{username}_login_attempts", user_attempts + 1, 60 * 5)
+        await request.ctx.cache_client.set(f"{client_ip}_login_attempts", ip_attempts + 1, 60 * 5)
+        # await request.ctx.cache_client.expire(f"{username}_login_attempts", 60 * 5)
+        # await request.ctx.cache_client.expire(f"{client_ip}_login_attempts", 60 * 5)
         raise CustomError(ErrorCode.CredentialsError)
 
 
