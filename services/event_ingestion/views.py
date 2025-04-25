@@ -647,7 +647,7 @@ async def unbundled_event_ingestion_script(request):
 
 @event_ingestion_bp.post('/healthy/script')
 @requires_permission('event:r')
-async def healthy_check(request):
+async def healthy_check_script(request):
     """
     联动执行健康检查(需要事件查看权限)
     请求参数:
@@ -671,9 +671,9 @@ async def healthy_check(request):
     return response_ok({"status": overall_status, "data": healthy_list})
 
 
-@event_ingestion_bp.post('/healthy')
+@event_ingestion_bp.post('/healthy/enabled')
 @requires_permission('event:r')
-async def healthy_check(request):
+async def healthy_check_enabled(request):
     """
     上游接入健康检查(需要事件查看权限)
     请求参数:
