@@ -13,7 +13,8 @@ class Config(BaseModel):
     key: str = fields.CharField(max_length=255, unique=True, description="配置项")
     value: str = fields.TextField(description="配置值")
     config_type: str = fields.CharField(max_length=255, description="配置状态")
-    module: str = fields.CharField(max_length=255,description="所属模块")
+    module: str = fields.CharField(max_length=255, description="所属模块")
+    test: str = fields.CharField(max_length=255, description="所属模块")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -32,3 +33,4 @@ class Config(BaseModel):
 
     class Meta:
         table = "config"
+        ordering = ["-utime"]

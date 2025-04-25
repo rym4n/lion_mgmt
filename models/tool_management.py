@@ -30,6 +30,7 @@ class ToolAction(BaseModel):
 
     class Meta:
         table = "tool_action"
+        ordering = ["-utime"]
 
 
 class Tool(BaseModel):
@@ -71,6 +72,7 @@ class Tool(BaseModel):
 
     class Meta:
         table = "tool"
+        ordering = ["-utime"]
 
 
 class ToolResourcesModel(BaseModel):
@@ -96,6 +98,7 @@ class ToolResourcesModel(BaseModel):
 
     class Meta:
         table = "tool_resources_model"
+        ordering = ["-utime"]
 
 
 class ToolResources(BaseModel):
@@ -133,6 +136,7 @@ class ToolResources(BaseModel):
 
     class Meta:
         table = "tool_resources"
+        ordering = ["-utime"]
 
 
 class ActionPermissions(BaseModel):
@@ -164,3 +168,4 @@ class ActionPermissions(BaseModel):
 
     class Meta:
         table = "action_permissions"
+        ordering = ["-utime"]

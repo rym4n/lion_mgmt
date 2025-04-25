@@ -43,6 +43,7 @@ class Events(BaseModel):
 
     class Meta:
         table = "events"
+        ordering = ["-utime"]
 
 
 class EventsIngestion(BaseModel):
@@ -86,6 +87,7 @@ class EventsIngestion(BaseModel):
 
     class Meta:
         table = "events_ingestion"
+        ordering = ["-utime"]
 
 
 class EventRelatedScript(BaseModel):
@@ -115,3 +117,4 @@ class EventRelatedScript(BaseModel):
 
     class Meta:
         table = "event_related_script"
+        ordering = ["-utime"]

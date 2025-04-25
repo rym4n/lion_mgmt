@@ -117,5 +117,6 @@ class PermissionsMenu(BaseModel):
 
     class Meta:
         table = "permissions_menu"
+        ordering = ["-utime"]
 
 

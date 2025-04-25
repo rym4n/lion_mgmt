@@ -36,6 +36,7 @@ class SystemCustomConfiguration(BaseModel):
 
     class Meta:
         table = "system_custom_configuration"
+        ordering = ["-utime"]
 
 
 class SystemStatus(BaseModel):
@@ -67,3 +68,4 @@ class SystemStatus(BaseModel):
 
     class Meta:
         table = "system_status"
+        ordering = ["-utime"]

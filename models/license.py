@@ -25,3 +25,4 @@ class License(BaseModel):
 
     class Meta:
         table = "license"
+        ordering = ["-utime"]
