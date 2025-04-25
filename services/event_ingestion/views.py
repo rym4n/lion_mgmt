@@ -1,10 +1,12 @@
 # coding=utf-8
 import hashlib
+import json
 import os
 import random
 import re
 import string
 import time
+from datetime import datetime, timedelta, timezone
 
 import aiofile
 import yaml
@@ -17,7 +19,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import get_client_ip
-from models import Playbook
+from models.playbook import Playbook
 from models.event import EventsIngestion, EventRelatedScript
 from services.event_ingestion import supervisor
 from settings import SAMPLE_SINK_PATH, VECTOR_CFG
@@ -306,7 +308,7 @@ async def update_event_ingestion(request):
                 transforms_type]
     if syslog_port:
         data["sources"][event.vector_name]["address"] = f"0.0.0.0:{syslog_port}"
-        event.syslog_config = event.syslog_config[:3]+str(syslog_port)
+        event.syslog_config = event.syslog_config[:3] + str(syslog_port)
     if sasl_mechanism:
         data["sources"][event.vector_name].setdefault("sasl", {})["enabled"] = True
         data["sources"][event.vector_name]["sasl"]["mechanism"] = sasl_mechanism
@@ -518,7 +520,7 @@ async def binding_event_ingestion_script(request):
             raise CustomError(ErrorCode.ScriptExistsError)
 
     for script_id in script_ids:
-        script = await Playbook.get(id=script_id)
+        script = await Playbook.filter(id=script_id, deleted=False).first()
         if not script:
             raise CustomError(ErrorCode.NotFound)
 
@@ -643,11 +645,11 @@ async def unbundled_event_ingestion_script(request):
     return response_ok("剧本解绑成功")
 
 
-@event_ingestion_bp.post('/healthy')
+@event_ingestion_bp.post('/healthy/script')
 @requires_permission('event:r')
 async def healthy_check(request):
     """
-    健康检查(需要事件查看权限)
+    联动执行健康检查(需要事件查看权限)
     请求参数:
         id: 事件接入ID (str)
     """
@@ -667,3 +669,42 @@ async def healthy_check(request):
 
     overall_status = "healthy" if all(h["status"] == "healthy" for h in healthy_list) else "unhealthy"
     return response_ok({"status": overall_status, "data": healthy_list})
+
+
+@event_ingestion_bp.post('/healthy')
+@requires_permission('event:r')
+async def healthy_check(request):
+    """
+    上游接入健康检查(需要事件查看权限)
+    请求参数:
+        id: 事件接入ID (str)
+    """
+    event_id = request.json.get('id')
+    event = await EventsIngestion.filter(id=event_id, deleted=False).first()
+    if not event:
+        raise CustomError(ErrorCode.NotFound)
+
+    file_path = "./data/sample_sinks/" + event.vector_name + ".log"
+
+    if not os.path.exists(file_path):
+        return response_ok({"status": "unhealthy"})
+
+    async with aiofile.AIOFile(file_path, 'r', encoding='utf-8') as f:
+        content = await f.read()
+        logs = content.strip().split("\n")
+    if not logs:
+        return response_ok({"status": "unhealthy"})
+
+    last_log = logs[-1]
+
+    time_str = json.loads(last_log)["timestamp"]
+    timestamp = datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S.%fZ")
+
+    current_time = datetime.now(timezone.utc)
+
+    five_minutes_ago = current_time - timedelta(minutes=5)
+
+    if five_minutes_ago <= timestamp <= current_time:
+        return response_ok({"status": "healthy"})
+    else:
+        return response_ok({"status": "unhealthy"})

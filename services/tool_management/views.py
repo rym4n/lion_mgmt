@@ -8,6 +8,7 @@ import zipfile
 from io import BytesIO
 
 from sanic import Blueprint, response
+from sanic.exceptions import WebsocketClosed
 from tortoise.expressions import Q
 from tortoise.functions import Max
 
@@ -15,12 +16,10 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
-from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from libs.utils import del_dirs
-from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions
+from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config
 from settings import TOOLS_DIR
-from sanic.exceptions import WebsocketClosed
 
 # 定义 Blueprint
 tool_management_bp = Blueprint("tool_management", url_prefix="v1/tool_management")
@@ -66,18 +65,19 @@ async def upload_and_extract_zip(request):
     """
     ws_uuid = request.form.get("ws_uuid")
     ws = connected_clients.get(ws_uuid)
-    creator = token_decode(request).get("name")
+    creator = request.ctx.session['account_info'].username
     if "file" not in request.files:
         return response_ok({"error": "No file provided"})
 
     results = []
     # 获取 ZIP 文件
     zip_files = request.files["file"]
-    single_progress = 100/len(zip_files)
+    single_progress = 100 / len(zip_files)
     success_progress = 0
     data = 0
     for zip_file in zip_files:
-        config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, ws, success_progress)
+        config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, ws,
+                                                           success_progress)
         if msg != "success":
             results.append({"tool": tool_name, "msg": msg})
             data += 1
@@ -152,7 +152,6 @@ async def unzip(zip_data, creator, single_progress, ws, success_progress):
         data += 1
         percent = int(data * single_progress) + success_progress
         await safe_ws_send(ws, f"解压进度：{percent}%")
-
 
         missing_files = set(EXPECTED_STRUCTURE["required_files"]) - actual_files
         if missing_files:
@@ -378,7 +377,7 @@ async def delete_tool(request):
     await del_dirs(tool_path)
 
     tool.deleted = True
-    tool.updater = token_decode(request).get("name")
+    tool.updater = request.ctx.session['account_info'].username
     await tool.save()
 
     tool_actions = await ToolAction.filter(tool_name=name, version_number=version, deleted=False).all()
@@ -412,7 +411,7 @@ async def delete_tool_all(request):
             raise CustomError(ErrorCode.ToolHasScriptError)
 
         tool.deleted = True
-        tool.updater = token_decode(request).get("name")
+        tool.updater = request.ctx.session['account_info'].username
         await tool.save()
 
     tool_path = os.path.join(TOOLS_DIR, name)
@@ -507,8 +506,9 @@ async def add_tool_resource(request):
 
     await ToolResources.create(tool_name=tool_name, name=name, description=description,
                                product_supplier=product_supplier,
-                               product_name=product_name, resources=resources, creator=token_decode(request).get("name")
-                               , updater=token_decode(request).get("name"))
+                               product_name=product_name, resources=resources,
+                               creator=request.ctx.session['account_info'].username
+                               , updater=request.ctx.session['account_info'].username)
 
     return response_ok({"message": "工具资源新增成功"})
 
@@ -579,7 +579,7 @@ async def update_tool_resource(request):
     if resources:
         tool_resource.resources = resources
 
-    tool_resource.updater = token_decode(request).get("name")
+    tool_resource.updater = request.ctx.session['account_info'].username
     await tool_resource.save()
     return response_ok({"message": "工具资源更新成功"})
 
@@ -605,7 +605,7 @@ async def delete_tool_resource(request):
         raise CustomError(ErrorCode.ResourcesNotFoundError)
 
     tool_resource.deleted = True
-    tool_resource.updater = token_decode(request).get("name")
+    tool_resource.updater = request.ctx.session['account_info'].username
     await tool_resource.save()
 
     return response_ok({"message": "工具资源删除成功"})
@@ -832,10 +832,11 @@ async def add_tag(request):
 
     for tool in tools:
         tool.tag = list(set(tool.tag or []) | set(tags))
-        tool.updater = token_decode(request).get("name")
+        tool.updater = request.ctx.session['account_info'].username
         await tool.save()
 
     return response_ok({"message": "工具标签新增成功"})
+
 
 @tool_management_bp.post("/tag/delete")
 @requires_permission("tool:u")
@@ -859,7 +860,38 @@ async def delete_tag(request):
 
     for tool in tools:
         tool.tag = list(set(tool.tag or []) - set(tags))
-        tool.updater = token_decode(request).get("name")
+        tool.updater = request.ctx.session['account_info'].username
         await tool.save()
 
     return response_ok({"message": "工具标签删除成功"})
+
+
+@tool_management_bp.post("/health/check/config")
+@requires_permission("tool:u")
+async def health_check_config(request):
+    """
+    修改工具健康检查配置信息（需要工具更新权限）
+
+    query参数:
+        switch: 开关    str    on/off
+        cron: 定时任务    str    格式：分 时 日 月 周，如：0 48 14 ? * 1 表示每周一的14点48分执行一次(多个小时段表示用逗号分隔，周也是如此)
+    """
+    switch = request.json.get("switch")
+    cron = (request.json.get("cron") or None)
+
+    # 参数验证
+    if not switch:
+        raise CustomError(ErrorCode.ParameterError)
+
+    key = "health_check_config"
+    config = await Config.filter(key=key).first()
+
+    if not config:
+        config = await Config.create(key=key, value=json.dumps({"cron": cron}), module=["tool"])
+        config.deleted = (switch == "off")
+    else:
+        config.deleted = (switch == "off")
+        config.value = json.dumps({"cron": cron})
+    await config.save()
+
+    return response_ok({"message": "资源健康检查配置修改成功"})
