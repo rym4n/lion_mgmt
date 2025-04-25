@@ -9,6 +9,7 @@ from sanic import Request
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
+from libs.utils import get_client_ip
 from settings import SECRET, SESSION_ENCODING_ALGORITHM, AUTHENTICATION_SESSION_EXPIRATION
 
 
@@ -24,7 +25,7 @@ async def authenticate(request: Request):
     if not request.path.endswith('/user/mfa-auth') and payload.get('mfa_enable') is True and payload.get('mfa_auth') is not True:
         raise CustomError(ErrorCode.SecondFactorRequired)
 
-    if payload.get('ip') != request.ip:
+    if payload.get('ip') != get_client_ip(request):
         # 防止会话劫持
         raise CustomError(ErrorCode.SessionInvalid)
 
