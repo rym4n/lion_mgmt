@@ -28,7 +28,6 @@ class Variables(BaseModel):
             "updator": self.updator.username if self.updator else ""
         }
 
-    # 指定name+type作为唯一性约束
     class Meta:
         table = "variables"
         ordering = ["-utime"]
