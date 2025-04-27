@@ -62,6 +62,8 @@ class EventsIngestion(BaseModel):
     syslog_config: str = fields.CharField(max_length=255, null=True, description="syslog端口")
     file_path: str = fields.CharField(max_length=255, null=True, description="配置文件路径")
     vector_name: str = fields.CharField(max_length=255, null=True, description="vector名称")
+    enabled_health_status: str = fields.CharField(max_length=255, null=True, description="上游接入健康状态")
+    execution_health_status: str = fields.CharField(max_length=255, null=True, description="联动执行健康状态")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -82,7 +84,9 @@ class EventsIngestion(BaseModel):
             "file_path": self.file_path,
             "linked_execution": self.linked_execution,
             "syslog_config": self.syslog_config,
-            "vector_name": self.vector_name
+            "vector_name": self.vector_name,
+            "enabled_health_status": self.enabled_health_status,
+            "execution_health_status": self.execution_health_status,
         }
 
     class Meta:
