@@ -1,15 +1,12 @@
 # coding=utf-8
 import hashlib
-import json
 import os
 import random
 import re
 import string
 import time
-from datetime import datetime, timedelta, timezone
 
 import aiofile
-import orjson
 import yaml
 from sanic import Blueprint
 from sanic.log import logger
@@ -20,8 +17,8 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import get_client_ip
-from models.playbook import Playbook
 from models.event import EventsIngestion, EventRelatedScript
+from models.playbook import Playbook
 from services.event_ingestion import supervisor
 from settings import SAMPLE_SINK_PATH, VECTOR_CFG
 
@@ -53,6 +50,8 @@ async def build_kafka_file_configuration_file(output_path, sources,
                                               source_id, topic):
     log_path = os.path.join("/data", f"{topic}.log")
     log_path = log_path.replace("\\", "/")
+    check_path = os.path.join("/data", f"{topic}_check.log")
+    check_path = check_path.replace("\\", "/")
     config = {
         "sources": sources,
         "sinks": {
@@ -60,6 +59,14 @@ async def build_kafka_file_configuration_file(output_path, sources,
                 "type": "file",
                 "inputs": [source_id],
                 "path": log_path,
+                "encoding": {
+                    "codec": "json"
+                }
+            },
+            f"{topic}_check_sinks": {
+                "type": "file",
+                "inputs": [source_id],
+                "path": check_path,
                 "encoding": {
                     "codec": "json"
                 }
@@ -198,7 +205,7 @@ async def get_all_events_ingestion(request):
     请求参数:
         page: 页码 (int)
         size: 页面大小 (int)
-        name: 事件名称 (str)
+        name: 事件名称 (str) 非必填
     """
     page = request.json.get('page', 1)
     size = request.json.get('size', 10)
@@ -512,7 +519,7 @@ async def binding_event_ingestion_script(request):
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
-    event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id).all()
+    event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False).all()
     if not event_related_scripts:
         event_related_scripts = []
     for event_related_script in event_related_scripts:
@@ -645,67 +652,3 @@ async def unbundled_event_ingestion_script(request):
 
     return response_ok("剧本解绑成功")
 
-
-@event_ingestion_bp.post('/healthy/script')
-@requires_permission('event:r')
-async def healthy_check_script(request):
-    """
-    联动执行健康检查(需要事件查看权限)
-    请求参数:
-        id: 事件接入ID (str)
-    """
-    event_id = request.json.get('id')
-    if not event_id:
-        raise CustomError(ErrorCode.ParameterError)
-    event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_id).all()
-    if not event_related_scripts:
-        raise CustomError(ErrorCode.NotFound)
-
-    healthy_list = []
-    for event_related_script in event_related_scripts:
-        for script_id in event_related_script.script_id:
-            process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
-            status = supervisor.process_status(process_name)
-            healthy_list.append({"script_id": script_id, "status": status})
-
-    overall_status = "healthy" if all(h["status"] == "healthy" for h in healthy_list) else "unhealthy"
-    return response_ok({"status": overall_status, "data": healthy_list})
-
-
-@event_ingestion_bp.post('/healthy/enabled')
-@requires_permission('event:r')
-async def healthy_check_enabled(request):
-    """
-    上游接入健康检查(需要事件查看权限)
-    请求参数:
-        id: 事件接入ID (str)
-    """
-    event_id = request.json.get('id')
-    event = await EventsIngestion.filter(id=event_id, deleted=False).first()
-    if not event:
-        raise CustomError(ErrorCode.NotFound)
-
-    file_path = "./data/sample_sinks/" + event.vector_name + ".log"
-
-    if not os.path.exists(file_path):
-        return response_ok({"status": "unhealthy"})
-
-    async with aiofile.AIOFile(file_path, 'r', encoding='utf-8') as f:
-        content = await f.read()
-        logs = content.strip().split("\n")
-    if not logs:
-        return response_ok({"status": "unhealthy"})
-
-    last_log = logs[-1]
-
-    time_str = orjson.loads(last_log)["timestamp"]
-    timestamp = datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S.%fZ")
-
-    current_time = datetime.now(timezone.utc)
-
-    five_minutes_ago = current_time - timedelta(minutes=5)
-
-    if five_minutes_ago <= timestamp <= current_time:
-        return response_ok({"status": "healthy"})
-    else:
-        return response_ok({"status": "unhealthy"})
