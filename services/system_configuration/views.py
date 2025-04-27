@@ -55,11 +55,11 @@ async def upload_image(request):
         file = request.files.get(field)
         filename = ''
         if field == "background":
-            filename = f"{BG_NAME}.{file.name.split('.')[-1]}"
+            filename = f"{BG_NAME}.png"
         elif field == "webico":
-            filename = f"favicon.{file.name.split('.')[-1]}"
+            filename = f"favicon.ico"
         elif field == "logo":
-            filename = f"logo.{file.name.split('.')[-1]}"
+            filename = f"logo.svg"
         if file and filename:
             file_path = os.path.join(UPLOAD_FOLDER, filename)
 
