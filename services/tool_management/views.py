@@ -1,12 +1,12 @@
 # coding=utf-8
 import hashlib
-import json
 import os
 import time
 import uuid
 import zipfile
 from io import BytesIO
 
+import orjson
 from sanic import Blueprint, response
 from sanic.exceptions import WebsocketClosed
 from tortoise.expressions import Q
@@ -131,7 +131,7 @@ async def unzip(zip_data, creator, single_progress, ws, success_progress):
         single_progress = single_progress / 10
 
         with zip_ref.open(config_path) as config_file:
-            config_data = json.loads(config_file.read().decode("utf-8"))
+            config_data = orjson.loads(config_file.read().decode("utf-8"))
 
         tool_name = config_data.get("name")
 
@@ -222,7 +222,8 @@ async def unzip(zip_data, creator, single_progress, ws, success_progress):
             description=config_data.get("description"),
             creator=creator, updater=creator,
             hash_value=hasher.hexdigest(),
-            internal=config_data.get("internal", False)
+            internal=config_data.get("internal", False),
+            main=py_file_name,
         )
 
         return config_data, version, tool.name, "success"
@@ -264,6 +265,9 @@ async def all_tools(request):
         .limit(size) \
         .values()
 
+    for latest_tool in latest_tools:
+        latest_tool.pop("path")
+
     total_count = await Tool.filter(condition).count()
 
     return response_ok({
@@ -294,6 +298,9 @@ async def all_versions(request):
 
     tools = await Tool.filter(name=name, deleted=False).order_by("-ctime").values()
 
+    for tool in tools:
+        tool.pop("path")
+
     return response_ok(tools)
 
 
@@ -317,6 +324,10 @@ async def tool_actions(request):
         raise CustomError(ErrorCode.ToolNotFoundError)
 
     actions = await ToolAction.filter(tool_name=name, version_number=version).values("action")
+
+    for action in actions:
+        action_name = action.get("action").get("action")
+        action[action_name] = action.pop("action")
 
     return response_ok({"actions": actions})
 
@@ -887,11 +898,11 @@ async def health_check_config(request):
     config = await Config.filter(key=key).first()
 
     if not config:
-        config = await Config.create(key=key, value=json.dumps({"cron": cron}), module=["tool"])
+        config = await Config.create(key=key, value=orjson.dumps({"cron": cron}), module=["tool"])
         config.deleted = (switch == "off")
     else:
         config.deleted = (switch == "off")
-        config.value = json.dumps({"cron": cron})
+        config.value = orjson.dumps({"cron": cron})
     await config.save()
 
     return response_ok({"message": "资源健康检查配置修改成功"})
