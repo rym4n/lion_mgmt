@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import aiofile
+import orjson
 import yaml
 from sanic import Blueprint
 from sanic.log import logger
@@ -697,7 +698,7 @@ async def healthy_check_enabled(request):
 
     last_log = logs[-1]
 
-    time_str = json.loads(last_log)["timestamp"]
+    time_str = orjson.loads(last_log)["timestamp"]
     timestamp = datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S.%fZ")
 
     current_time = datetime.now(timezone.utc)
