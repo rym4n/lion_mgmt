@@ -26,13 +26,8 @@ async def create_workflow(request):
     请求参数：
         name: 剧本名，必须参数
         remark: 备注，可选
-        start_app: 开始节点，可选
-        end_app: 结束节点，可选
-        if_list: 判断节点，可选
-        audit_list: 审批节点，可选
         tags: 标签，可选
         flow_json: 流程图布局信息，可选
-        flow_data: 各节点详细信息，可选
         scenes: 场景，列表格式，可选
     """
     # 判断name是否已经存在，如果存在的话要抛出异常
@@ -42,13 +37,10 @@ async def create_workflow(request):
     playbook = await Playbook.create(
         name=request.json.get("name"),
         remark=request.json.get("remark", ""),
-        start_app=request.json.get("start_app"),
-        end_app=request.json.get("end_app"),
-        if_list=request.json.get("if_list") or [],
-        audit_list=request.json.get("audit_list") or [],
         tags=request.json.get("tags") or [],
         flow_json=request.json.get("flow_json") or {},
-        flow_data=request.json.get("flow_data") or {},
+        status=0,
+        version=gen_order_version(),
         creator=request.ctx.session['account_info'],
         updator=request.ctx.session['account_info']
     )
@@ -95,8 +87,23 @@ async def list_workflow(request):
         "page": page,
         "size": size,
         "total_pages": (total + size - 1) // size,
-        "data": [playbook.json for playbook in playbooks]
+        "data": [p.simple_json for p in playbooks]
     })
+
+
+@workflow_bp.post("/detail")
+@requires_permission("workflow:r")
+async def detail_workflow(request):
+    """
+    获取剧本详情
+
+    请求参数：
+        id: 必填，剧本ID
+    """
+    playbook = await Playbook.get(id=request.json.get("id"))
+    if not playbook:
+        raise CustomError(ErrorCode.PlaybookNotFound)
+    return response_ok(playbook.json)
 
 
 @workflow_bp.post("/edit")
@@ -135,7 +142,7 @@ async def edit_workflow(request):
         # 已发布的剧本是不允许修改的
         if playbook.status == 1:
             playbook.version = gen_order_version()
-            await playbook.save(force_create=True)
+            await playbook.create()
         else:
             await playbook.save()
     return response_ok(playbook.json)

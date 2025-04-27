@@ -38,6 +38,21 @@ class Playbook(BaseModel):
             "updator": self.updator.username if self.updator else ""
         }
 
+    @property
+    def simple_json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": str(self.ctime),
+            "utime": str(self.utime),
+            "name": self.name,
+            "remark": self.remark,
+            "status": self.status,
+            "tags": self.tags,
+            "scenes": [scene.name for scene in self.scenes] if self.scenes else [],
+            "creator": self.updator.username if self.updator else "",
+            "updator": self.updator.username if self.updator else ""
+        }
+
     class Meta:
         table = "playbook"
         ordering = ["-utime"]
