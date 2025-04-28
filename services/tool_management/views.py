@@ -372,10 +372,8 @@ async def delete_tool(request):
         raise CustomError(ErrorCode.ToolHasScriptError)
 
     tool_path = os.path.join(TOOLS_DIR, name, version)
-    if not os.path.exists(tool_path):
-        raise CustomError(ErrorCode.ToolAlreadyDeletedError)
-
-    await del_dirs(tool_path)
+    if os.path.exists(tool_path):
+        await del_dirs(tool_path)
 
     tool.deleted = True
     tool.updater = request.ctx.session['account_info'].username
@@ -417,10 +415,8 @@ async def delete_tool_all(request):
 
     tool_path = os.path.join(TOOLS_DIR, name)
 
-    if not os.path.exists(tool_path):
-        raise CustomError(ErrorCode.ToolAlreadyDeletedError)
-
-    await del_dirs(tool_path)
+    if os.path.exists(tool_path):
+        await del_dirs(tool_path)
 
     tool_actions = await ToolAction.filter(tool_name=name, deleted=False).all()
     if tool_actions:
