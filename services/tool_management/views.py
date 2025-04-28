@@ -1,15 +1,12 @@
 # coding=utf-8
 import hashlib
-import logging
 import os
 import time
-import uuid
 import zipfile
 from io import BytesIO
 
 import orjson
 from sanic import Blueprint, response
-from sanic.exceptions import WebsocketClosed
 from tortoise.expressions import Q
 from tortoise.functions import Max
 
@@ -34,27 +31,6 @@ EXPECTED_STRUCTURE = {
 connected_clients = {}
 
 
-async def safe_ws_send(ws, message):
-    try:
-        await ws.send(message)
-    except WebsocketClosed:
-        logging.info(f"WebSocket 已关闭，发送失败：{message}")
-
-
-@tool_management_bp.websocket('/ws/unzip')
-async def unzip_progress_ws(request, ws):
-    client_id = str(uuid.uuid4())
-    connected_clients[client_id] = ws
-
-    try:
-        await ws.send(client_id)
-        while True:
-            _ = await ws.recv()
-    finally:
-        connected_clients.pop(client_id, None)
-        await ws.close()
-
-
 @tool_management_bp.post("/upload")
 @requires_permission("tool:c")
 async def upload_and_extract_zip(request):
@@ -62,10 +38,15 @@ async def upload_and_extract_zip(request):
     上传工具接口（需要工具创建权限）
     请求参数:
         - file: ZIP 文件 (multipart/form-data)
-        - ws_uuid: websocket的uuid   str
     """
-    ws_uuid = request.form.get("ws_uuid")
-    ws = connected_clients.get(ws_uuid)
+    resp = await request.respond(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+
     creator = request.ctx.session['account_info'].username
     if "file" not in request.files:
         return response_ok({"error": "No file provided"})
@@ -88,15 +69,14 @@ async def upload_and_extract_zip(request):
         if total_count >= total_up_value:
             return response_ok({"error": "应用数量已达到上限"})
 
-
-        config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, ws,
+        config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, resp,
                                                            success_progress)
         if msg != "success":
             results.append({"tool": tool_name, "msg": msg})
             data += 1
             percent = int((data * single_progress))
             success_progress = percent
-            await safe_ws_send(ws, f"解压进度：{percent}%")
+            await resp.send(f"data: 解压进度：{percent}%\n\n")
             continue
 
         for action in config_data.get("actions"):
@@ -116,16 +96,16 @@ async def upload_and_extract_zip(request):
         data += 1
         percent = int((data * single_progress))
         success_progress = percent
-        await safe_ws_send(ws, f"解压进度：{percent}%")
+        await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-    if ws:
-        await ws.close()
-        connected_clients.pop(ws_uuid, None)
+    if resp:
+        await resp.send(f"data: {results}\n\n")
+        await resp.eof()
 
-    return response_ok({"message": results})
+    return resp
 
 
-async def unzip(zip_data, creator, single_progress, ws, success_progress):
+async def unzip(zip_data, creator, single_progress, resp, success_progress):
     """
     解压 ZIP 文件，直接从文件流读取，并进行文件结构校验
     """
@@ -153,7 +133,7 @@ async def unzip(zip_data, creator, single_progress, ws, success_progress):
             return config_data, version, tool_name, "Unsupported hash type. Use 'md5', 'sha1', 'sha256', or 'sha512'."
         data += 1
         percent = int(data * single_progress) + success_progress
-        await safe_ws_send(ws, f"解压进度：{percent}%")
+        await resp.send(f"data: 解压进度：{percent}%\n\n")
 
         hasher = hash_func()
         zip_buffer.seek(0)  # 确保从头开始读取数据
@@ -164,14 +144,14 @@ async def unzip(zip_data, creator, single_progress, ws, success_progress):
             return config_data, version, tool_name, "缺失config文件"
         data += 1
         percent = int(data * single_progress) + success_progress
-        await safe_ws_send(ws, f"解压进度：{percent}%")
+        await resp.send(f"data: 解压进度：{percent}%\n\n")
 
         missing_files = set(EXPECTED_STRUCTURE["required_files"]) - actual_files
         if missing_files:
             return config_data, version, tool_name, "缺失config文件"
         data += 1
         percent = int(data * single_progress) + success_progress
-        await safe_ws_send(ws, f"解压进度：{percent}%")
+        await resp.send(f"data: 解压进度：{percent}%\n\n")
 
         name = config_data.get("name")
         py_file_name = config_data.get("main")
@@ -182,19 +162,19 @@ async def unzip(zip_data, creator, single_progress, ws, success_progress):
             return config_data, version, tool_name, "config文件内容错误"
         data += 1
         percent = int(data * single_progress) + success_progress
-        await safe_ws_send(ws, f"解压进度：{percent}%")
+        await resp.send(f"data: 解压进度：{percent}%\n\n")
 
         if py_file_name not in py_files_dict:
             return config_data, version, tool_name, "缺失py文件"
         data += 1
         percent = int(data * single_progress) + success_progress
-        await safe_ws_send(ws, f"解压进度：{percent}%")
+        await resp.send(f"data: 解压进度：{percent}%\n\n")
 
         if logo_name not in actual_files:
             return config_data, version, tool_name, "logo文件不存在"
         data += 1
         percent = int(data * single_progress) + success_progress
-        await safe_ws_send(ws, f"解压进度：{percent}%")
+        await resp.send(f"data: 解压进度：{percent}%\n\n")
 
         with zip_ref.open(py_files_dict[py_file_name]) as py_file:
             py_data = py_file.read().decode("utf-8")
@@ -203,14 +183,14 @@ async def unzip(zip_data, creator, single_progress, ws, success_progress):
             return config_data, version, tool_name, "Python文件内容错误"
         data += 1
         percent = int(data * single_progress) + success_progress
-        await safe_ws_send(ws, f"解压进度：{percent}%")
+        await resp.send(f"data: 解压进度：{percent}%\n\n")
 
         configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False).first().values("resources")
         if configuration and configuration["resources"] != config_data.get("resource"):
             return config_data, version, tool_name, "工具资源不一致，请新建工具或删除原工具后再次上传"
         data += 1
         percent = int(data * single_progress) + success_progress
-        await safe_ws_send(ws, f"解压进度：{percent}%")
+        await resp.send(f"data: 解压进度：{percent}%\n\n")
 
         hash_values = await Tool.filter(name=name, deleted=False).all().values("hash_value")
         hash_set = {entry["hash_value"] for entry in hash_values}
@@ -218,7 +198,7 @@ async def unzip(zip_data, creator, single_progress, ws, success_progress):
             return config_data, version, tool_name, "工具已存在"
         data += 1
         percent = int(data * single_progress) + success_progress
-        await safe_ws_send(ws, f"解压进度：{percent}%")
+        await resp.send(f"data: 解压进度：{percent}%\n\n")
 
         version = "v" + str(int(time.time() * 1000))
 
@@ -251,15 +231,15 @@ async def all_tools(request):
     query参数:
         - page: 页码（默认1）     int
         - size: 每页数量（默认10）     int
-        - name: 工具名称（可选，模糊搜索）   str
+        - key: 名称和描述的搜索（可选，模糊搜索）   str
     """
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 10))
-    name_filter = request.json.get("name", "").strip()
+    key = request.json.get("key", "").strip()
 
     subquery = Tool.filter(deleted=False).annotate(max_version=Max("version")).group_by("name")
-    if name_filter:
-        subquery = subquery.filter(name__icontains=name_filter)
+    if key:
+        subquery = subquery.filter(Q(name__icontains=key) | Q(description__icontains=key))
     subquery_results = await subquery.values("name", "max_version")
     if not subquery_results:
         return response_ok({

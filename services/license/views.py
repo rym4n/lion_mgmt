@@ -1,7 +1,9 @@
 # coding=utf-8
 
 import base64
+import hashlib
 import json
+import os
 import time
 
 import aiofile
@@ -13,6 +15,9 @@ from sanic import Blueprint
 from sanic import response
 from sanic.request import Request
 
+from core.error_code import ErrorCode
+from core.response import response_ok
+from libs.error_code.exception import CustomError
 from settings import PUBLIC_KEY, LICENSE_DIR
 
 license_bp = Blueprint('license', url_prefix='v1/license')
@@ -38,42 +43,57 @@ async def verify_license_api(request: Request):
     if is_valid:
         if license_data.get("expireTime"):
             if int(time.time() * 1000) >= license_data.get("expireTime"):
-                return response.json({
-                    "message": f"验证失败，您的license已过期。"
-                })
+                raise CustomError(ErrorCode.LicenseExpired)
             else:
-                async with aiofile.AIOFile(LICENSE_DIR + "/license.lic", 'w', encoding='utf-8') as f:
-                    await f.write(encoded)
-
-                return response.json({
-                    "license_data": license_data
-                })
+                license_path = hashlib.md5(f"{encoded}".encode()).hexdigest() + ".lic"
+                for root, dirs, files in os.walk(LICENSE_DIR):
+                    for file in files:
+                        full_path = os.path.join(root, file)
+                        new_path = os.path.join(root, license_path)
+                        async with aiofile.AIOFile(full_path, 'w', encoding='utf-8') as f:
+                            await f.write(encoded)
+                        if os.path.exists(full_path):
+                            os.rename(full_path, new_path)
+                return response_ok(license_data)
     else:
-        return response.json({
-            "message": f"验证失败，请检查您的license文件是否正确。"
-        })
+        raise CustomError(ErrorCode.InvalidLicenseError)
 
-# @license_bp.post("/get")
-# async def get_license(request: Request):
-#     """
-#     获取许可文件权限
-#
-#     无需请求参数
-#     """
-#     async with aiofile.AIOFile(LICENSE_DIR + "/license.lic", 'r', encoding='utf-8') as f:
-#         data = await f.read()
-#
-#     menu_list = []
-#
-#     if data:
-#         json_str = base64.b64decode(data.encode("utf-8")).decode("utf-8")
-#         license_data = orjson.loads(json_str)
-#         is_valid = verify_license(license_data)
-#         if is_valid:
-#             if license_data.get("expireTime"):
-#                 if int(time.time() * 1000) < license_data.get("expireTime"):
-#                     settings.LICENSE_DATA = license_data
 
+@license_bp.post("/get")
+async def get_license(request: Request):
+    """
+    获取许可文件权限
+
+    无需请求参数
+    """
+    for root, dirs, files in os.walk(LICENSE_DIR):
+        for file in files:
+            filename, ext = os.path.splitext(file)
+            full_path = os.path.join(root, file)
+            async with aiofile.AIOFile(full_path, 'r', encoding='utf-8') as f:
+                data = await f.read()
+                if filename != hashlib.md5(f"{data}".encode()).hexdigest():
+                    raise CustomError(ErrorCode.InvalidLicenseError)
+
+    menu_dict = {}
+
+    if data:
+        json_str = base64.b64decode(data.encode("utf-8")).decode("utf-8")
+        license_data = orjson.loads(json_str)
+        is_valid = verify_license(license_data)
+        if is_valid:
+            if license_data.get("expireTime"):
+                if int(time.time() * 1000) < license_data.get("expireTime"):
+                    for item in license_data["menuInfo"]["moduleList"]:
+                        module = item["module"]
+                        auth = item["auth"]
+
+                        if module not in menu_dict:
+                            menu_dict[module] = False
+                        if auth and int(item["expireTime"]) > int(time.time() * 1000):
+                            menu_dict[module] = True
+
+    return response_ok(menu_dict)
 
 
 def verify_license(license_data: dict) -> bool:

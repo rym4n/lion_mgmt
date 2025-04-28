@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # coding=utf-8
+import time
+
 import orjson
 from sanic import Blueprint, Request, Websocket
 from sanic.log import logger
@@ -12,6 +14,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import gen_order_version
 from models import Playbook, Scene
+from settings import LICENSE_DATA
 
 workflow_bp = Blueprint('workflow', url_prefix='v1/playbook')
 _all__ = ["workflow_bp"]
@@ -30,8 +33,20 @@ async def create_workflow(request):
         flow_json: 流程图布局信息，可选
         scenes: 场景，列表格式，可选
     """
+    total_up_value = 0
+    # 判断剧本数量是否达到了创建上限
+    total_count = await Playbook.filter(deleted=False, internal=False).count()
+    if LICENSE_DATA:
+        for item in LICENSE_DATA["menuInfo"]["moduleList"]:
+            if item["name"] == "剧本数量限制":
+                if item["auth"] and int(item["expireTime"]) > int(time.time() * 1000):
+                    total_up_value = int(item["value"])
+
+    if total_count >= total_up_value:
+        raise CustomError(ErrorCode.PlaybookCreateLimit)
+
     # 判断name是否已经存在，如果存在的话要抛出异常
-    if await Playbook.filter(name=request.json.get("name")).exists():
+    if await Playbook.filter(name=request.json.get("name"), deleted=False).exists():
         raise CustomError(ErrorCode.PlaybookNameExists)
 
     playbook = await Playbook.create(
@@ -48,6 +63,7 @@ async def create_workflow(request):
     if request.json.get('scenes'):
         scenes = await Scene.filter(name__in=request.json.get('scenes')).all()
         await playbook.scenes.add(*scenes)
+    await playbook.fetch_related("scenes", "updator")
 
     return response_ok(playbook.json)
 
@@ -170,7 +186,7 @@ async def delete_workflow(request):
     请求参数：
         id: 剧本ID
     """
-    await Playbook.filter(id=request.json.get("id")).update(deleted=True)
+    await Playbook.filter(id=request.json.get("id"), internal=False).update(deleted=True)
     return response_ok("剧本删除成功")
 
 

@@ -1,5 +1,6 @@
 # coding=utf-8
 import base64
+import hashlib
 import importlib
 import os
 import time
@@ -47,17 +48,20 @@ def create_app() -> Sanic:
 
 
 def license_data():
-    with open(LICENSE_DIR + "/license.lic", "r") as f:
-        data = f.read()
-
-    if data:
-        json_str = base64.b64decode(data.encode("utf-8")).decode("utf-8")
-        license_data = orjson.loads(json_str)
-        is_valid = verify_license(license_data)
-        if is_valid:
-            if license_data.get("expireTime"):
-                if int(time.time() * 1000) < license_data.get("expireTime"):
-                    settings.LICENSE_DATA = license_data
+    for root, dirs, files in os.walk(LICENSE_DIR):
+        for file in files:
+            filename, ext = os.path.splitext(file)
+            full_path = os.path.join(root, file)
+            with open(full_path, "r") as f:
+                data = f.read()
+                if filename == hashlib.md5(f"{data}".encode()).hexdigest():
+                    json_str = base64.b64decode(data.encode("utf-8")).decode("utf-8")
+                    license_data = orjson.loads(json_str)
+                    is_valid = verify_license(license_data)
+                    if is_valid:
+                        if license_data.get("expireTime"):
+                            if int(time.time() * 1000) < license_data.get("expireTime"):
+                                settings.LICENSE_DATA = license_data
 
 
 def should_register_modules():
