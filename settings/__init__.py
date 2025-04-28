@@ -29,6 +29,10 @@ os.makedirs(SUPERVISOR_PATH, exist_ok=True)
 TOOLS_DIR = "./data/tools"
 os.makedirs(TOOLS_DIR, exist_ok=True)
 
+# 存储许可文件的目录
+LICENSE_DIR = "./data/license"
+os.makedirs(LICENSE_DIR, exist_ok=True)
+
 if os.environ.get("RY_ENV") == 'DEV':
     try:
         from dotenv import load_dotenv
@@ -36,6 +40,23 @@ if os.environ.get("RY_ENV") == 'DEV':
         load_dotenv(os.path.join(BASE_DIR, 'settings/.env'))
     except:
         pass
+
+# 认证公钥
+PUBLIC_KEY = """
+-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4JGlUlZpDORYyH6QKwUT
+Tpb6PGhxZda5YVHmCatE3rNHo7dslet1ZbQAhf4X21Zb3WAu9qDKFdG9IYaFsAgA
+0YeQdfxe7h98UuZ3BUcMQ0yuWSMxlfCEv22yF+4kxSw903q7IRWP6RCr3vJTwu3r
+nKaNJv0JOFF5YFt5RzHi8tKP6MwGQVag4FbGHL0KyRRITP2j1LwX2kzIa9X896WV
+ykr6ioBH7A9tu7wXXzpd5YZQdtMFTF9xaxO8fJSKiArs4d5S9y48PtMn+kKT2qef
+nvb7oyNZcuqvq/6M35t9p+HPKKTRAcXRKunDXFTDa3YIjWhKUJRR2byS3SYT0J7p
+fQIDAQAB
+-----END PUBLIC KEY-----
+
+"""
+
+# 产品许可的内容
+LICENSE_DATA = None
 
 # 系统背景图片名称配置
 BG_NAME = "bg-oEDCYcDF"

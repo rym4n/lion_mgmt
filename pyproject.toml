@@ -24,6 +24,7 @@ dependencies = [
     "pyyaml (>=6.0.2,<7.0.0)",
     "sanic-ext (>=24.12.0,<25.0.0)",
     "orjson (>=3.10.16,<4.0.0)",
+    "cryptography (>=44.0.2,<45.0.0)",
 ]
 
 [build-system]

@@ -15,9 +15,10 @@ class Playbook(BaseModel):
     tags = fields.JSONField(default=[], description="标签")
     scenes = fields.ManyToManyField("models.Scene", through="playbook_scene")
     flow_json = fields.JSONField(default={}, description="流程图flow数据，包含edges和nodes")
-    version = fields.IntField(default=0, description="版本号，每次publish都会生成新纪录，用于版本回溯")
+    version = fields.CharField(max_length=30, default=0, description="版本号，每次publish都会生成新纪录，用于版本回溯")
     creator = fields.ForeignKeyField("models.Account", related_name="created_playbooks", description="创建人")
     updator = fields.ForeignKeyField("models.Account", related_name="updated_playbooks", description="更新人")
+    internal = fields.BooleanField(default=False, description="是否内部工具")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -35,7 +36,8 @@ class Playbook(BaseModel):
             "scenes": [scene.name for scene in self.scenes] if self.scenes else [],
             "flow_json": self.flow_json,
             "creator": self.updator.username if self.updator else "",
-            "updator": self.updator.username if self.updator else ""
+            "updator": self.updator.username if self.updator else "",
+            "internal": self.internal
         }
 
     @property
@@ -57,4 +59,4 @@ class Playbook(BaseModel):
         table = "playbook"
         ordering = ["-utime"]
 
-        unique_together = [("name", "version")]
+        unique_together = (("name", "version"),)
