@@ -1,17 +1,20 @@
 # coding=utf-8
-
+import base64
 import importlib
 import os
+import time
 
 import orjson
 from sanic import Sanic, Blueprint
 from sanic.log import logger
 from tortoise.contrib.sanic import register_tortoise
 
+import settings
 from core.exception_handlers import EXC_HDL_TUPLE, BaseExcHandler
 from core.listeners import LISTENER_TUPLE, BaseListener
 from core.middlewares import MIDDLEWARE_TUPLE, BaseMiddleware
-from settings import BASE_LOGGING, TORTOISE
+from services.license.views import verify_license
+from settings import BASE_LOGGING, TORTOISE, LICENSE_DIR
 
 
 def create_app() -> Sanic:
@@ -35,25 +38,63 @@ def create_app() -> Sanic:
     # 注册异常处理
     register_exception_handler(app)
 
+    license_data()
+
     # 注册蓝图
     register_blueprints(app)
 
     return app
 
 
+def license_data():
+    with open(LICENSE_DIR + "/license.lic", "r") as f:
+        data = f.read()
+
+    if data:
+        json_str = base64.b64decode(data.encode("utf-8")).decode("utf-8")
+        license_data = orjson.loads(json_str)
+        is_valid = verify_license(license_data)
+        if is_valid:
+            if license_data.get("expireTime"):
+                if int(time.time() * 1000) < license_data.get("expireTime"):
+                    settings.LICENSE_DATA = license_data
+
+
+def should_register_modules():
+    """根据产品许可返回需要注册模块"""
+    module_flags = {}
+    if settings.LICENSE_DATA:
+        for item in settings.LICENSE_DATA["menuInfo"]["moduleList"]:
+            module = item["module"]
+            auth = item["auth"]
+
+            if module not in module_flags:
+                module_flags[module] = False
+            if auth and int(item["expireTime"]) > int(time.time() * 1000):
+                module_flags[module] = True
+
+    return [mod for mod, should_register in module_flags.items() if should_register]
+
+
 def register_blueprints(app: Sanic) -> None:
     """注册蓝图"""
+    allowed_modules = should_register_modules()
+    logger.info(f"allowed modules: {allowed_modules}")
     for root, _, files in os.walk('services'):
         for filename in files:
             if filename.endswith(".py") and filename != "__init__.py":
                 module_path = os.path.join(root, filename)
                 module_name = os.path.splitext(module_path.replace(os.sep, '.'))[0]
+
                 try:
                     module = importlib.import_module(module_name)
                     # 检查模块中所有变量，寻找 Blueprint 实例
                     for attr_name in dir(module):
                         attr = getattr(module, attr_name)
                         if isinstance(attr, Blueprint):
+                            if attr_name not in allowed_modules:
+                                logger.info(f"module {module_name} not allowed, skip register")
+                                continue
                             app.blueprint(attr)
                 except Exception as e:
                     logger.error(f"无法导入 {module_name}: {e}")
