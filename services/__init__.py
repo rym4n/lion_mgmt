@@ -62,12 +62,17 @@ def license_data():
                         if license_data.get("expireTime"):
                             if int(time.time() * 1000) < license_data.get("expireTime"):
                                 settings.LICENSE_DATA = license_data
+                            else:
+                                settings.LICENSE_DATA = "timeout"
 
 
 def should_register_modules():
     """根据产品许可返回需要注册模块"""
     module_flags = {}
     if settings.LICENSE_DATA:
+        if settings.LICENSE_DATA == "timeout":
+            return ["license_bp"]
+
         for item in settings.LICENSE_DATA["menuInfo"]["moduleList"]:
             module = item["module"]
             auth = item["auth"]
