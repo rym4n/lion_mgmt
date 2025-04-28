@@ -69,6 +69,11 @@ class ErrorCode(BaseErrorCode):
     RoleAlreadyUsed = ErrorData(4049, "角色已分配，请先取消分配")
     PlaybookNameExists = ErrorData(4050, "剧本名称重复，请重新命名")
     ScriptExistsError = ErrorData(4051, "绑定剧本已存在其他判断条件，请删除后再次进行绑定")
+
+    RoomNameExists = ErrorData(4052, "作战室名称重复，请重新命名")
+    RoomNotExists = ErrorData(4053, "房间不存在")
+    RoomDeleteNotAllowed = ErrorData(4054, "无权删除该房间，仅房间创建者或管理员可删除")
+    ParamValueError = ErrorData(4055, "缺少消息查询参数")
     PlaybookCreateLimit = ErrorData(4052, "剧本创建上限，请删除已有剧本或升级套餐")
     LicenseExpired = ErrorData(4053, "许可证已过期")
     InvalidLicenseError = ErrorData(4054, "无效的许可证")

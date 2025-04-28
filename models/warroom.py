@@ -38,7 +38,7 @@ class Message(BaseModel):
     """
     content: str = fields.TextField(null=False, description="文本消息内容")
     image_content: str = fields.TextField(default=None, description="图片消息内容")
-    type = fields.CharField(null=False, max_length=10, description="消息类型，public群聊private私聊/system系统/announcement公告")
+    type = fields.CharField(null=False, max_length=20, description="消息类型，public群聊private私聊/system系统/announcement公告")
     sender = fields.ForeignKeyField(model_name="models.Account", related_name="msg_sender", description="消息发送方")
     receiver = fields.ForeignKeyField(model_name="models.Account", related_name="msg_receiver", description="消息接收方")
     room = fields.ForeignKeyField(model_name="models.Room", related_name="msg_room", description="消息所在房间（若为群聊）")
