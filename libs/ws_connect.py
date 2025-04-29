@@ -13,17 +13,6 @@ from models.warroom import Room, Message
 from models.user import Account
 
 
-
-async def is_admin_user(user):
-    """待修改，鉴角色"""
-    user_roles = await user.roles.all()
-    for role in user_roles:
-        permissions = role.permissions or []
-        if '*' in permissions:
-            return True
-    return False
-
-
 async def get_or_create_private_chat_room(user_id1: str, user_id2: str) -> Room:
     if user_id1 > user_id2:
         user_id1, user_id2 = user_id2, user_id1
@@ -108,10 +97,7 @@ class ConnectionManager:
 
             # 广播给所有连接的客户端
             for uid, connection in self.active_connections.items():
-                try:
-                    await connection.send(json.dumps(status_message))
-                except:
-                    pass
+                await connection.send(json.dumps(status_message))
         except Exception as e:
             logger.error(f"广播用户状态错误: {str(e)}")
 
@@ -126,11 +112,11 @@ class ConnectionManager:
                 await self._handle_private_message(user_id, data)
             elif message_type == "recall":
                 await self._handle_recall_message(user_id, data)
-            elif message_type == "announcement":  # 发布公告
+            elif message_type == "announcement":
                 await self._handle_announcement(user_id, data)
             elif message_type == "delete_announcement":
                 await self._handle_delete_announcement(user_id, data)
-            elif message_type == "request_online_users":  # 请求在线用户列表
+            elif message_type == "request_online_users":
                 await self._handle_request_online_users(user_id, data)
             elif message_type == "heartbeat":
                 await self._handle_heartbeat(user_id)
@@ -270,8 +256,11 @@ class ConnectionManager:
             await self._send_error(user_id, "消息不存在")
             return
 
+        # 非管理员只能2分钟以内撤回
         now = datetime.now()
         message_time = message.ctime
+
+        # 确保时区一致，将两个时间都转换为无时区信息
         if message_time.tzinfo is not None:
             message_time = message_time.replace(tzinfo=None)
 
@@ -290,7 +279,9 @@ class ConnectionManager:
         }
 
         if message.type == "public":
-            await self._broadcast_to_room(str(message.room), recall_notice)
+            # 获取关联的room对象
+            room = await message.room
+            await self._broadcast_to_room(str(room.id), recall_notice)
         elif message.type == "private":
             sender = await message.sender
             receiver = await message.receiver
@@ -310,6 +301,7 @@ class ConnectionManager:
         user = await Account.get(id=user_id)
 
         content = data.get("content")
+        image_content = data.get("image_content", "")
         room_id = data.get("room_id")
         if not content or not room_id:
             await self._send_error(user_id, "公告内容和作战室ID不能为空")
@@ -325,6 +317,7 @@ class ConnectionManager:
             sender=user,
             room=room,
             content=content,
+            image_content=image_content,
             is_pinned=True,
             receiver=user  # 设公告发送者自己作为占位符
         )
@@ -334,8 +327,10 @@ class ConnectionManager:
             "type": "new_announcement",
             "id": str(announcement.id),
             "content": announcement.content,
+            "image_content": announcement.image_content,
             "timestamp": str(announcement.ctime),
             "sender_name": user.username,
+            "sender_id": str(user.id),
             "room_id": room_id
         })
 
@@ -351,14 +346,18 @@ class ConnectionManager:
             await self._send_error(user_id, "公告不存在")
             return
 
-        user = await Account.get(id=user_id)
+        sender = await announcement.sender
+        sender_id = str(sender.id)
 
-        if str(announcement.sender) != user_id:
+        if sender_id != user_id:
             await self._send_error(user_id, "无权删除该公告")
             return
 
-        room_id = str(announcement.room.id)
-        await announcement.delete()
+        # 获取房间对象
+        room = await announcement.room
+        room_id = str(room.id)
+        announcement.deleted = True
+        await announcement.save()
 
         # 通知房间内所有成员
         await self._broadcast_to_room(room_id, {
@@ -386,17 +385,13 @@ class ConnectionManager:
         """向指定作战室广播消息"""
         exclude = exclude or []
         closed_connections = []
-
         # 获取房间成员
         room = await Room.get(id=room_id)
         if not room:
             return
 
         try:
-            # 首先尝试使用内存中的房间成员
             room_members = self.room_members.get(room_id, set())
-
-            # 如果内存中没有成员，则从数据库获取
             if not room_members:
                 members = await room.users.all()
                 room_members = {str(member.id) for member in members}
@@ -420,7 +415,7 @@ class ConnectionManager:
                 await self.disconnect(uid)
 
         except Exception as e:
-            # 异常情况下尝试简单广播
+            logger.error(f"{e} | {traceback.format_exc()}")
             for uid in self.active_connections.keys():
                 if uid not in exclude:
                     await self.active_connections[uid].send(json.dumps(message))
@@ -435,7 +430,8 @@ class ConnectionManager:
                     "message": message,
                     "timestamp": str(datetime.now())
                 }))
-            except ConnectionClosed:
+            except ConnectionClosed as e:
+                logger.error(f"{e} | {traceback.format_exc()}")
                 await self.disconnect(user_id)
 
     async def _handle_request_online_users(self, user_id: str, data: dict):
@@ -473,6 +469,7 @@ class ConnectionManager:
                 }))
 
         except Exception as e:
+            logger.error(f"{e} | {traceback.format_exc()}")
             await self._send_error(user_id, "获取在线用户列表失败")
 
     async def check_heartbeats(self):
@@ -486,7 +483,6 @@ class ConnectionManager:
                         inactive_users.append(uid)
                 for uid in inactive_users:
                     await self.disconnect(uid)
-
                 # 每30秒广播一次完整在线用户列表
                 for uid, connection in self.active_connections.items():
                     await connection.send(json.dumps({
@@ -494,8 +490,7 @@ class ConnectionManager:
                         "online_users": list(self.online_users),
                         "timestamp": str(now)
                     }))
-
-
                 await asyncio.sleep(30)
             except Exception as e:
+                logger.error(f"{e} | {traceback.format_exc()}")
                 await asyncio.sleep(60)

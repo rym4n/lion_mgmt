@@ -44,12 +44,13 @@ async def warroom_ws(request: Request, ws: Websocket):
                 break
             except Exception as e1:
                 logger.error(f"{e1} | {traceback.format_exc()}")
-    except Exception as e2:
+    except ConnectionClosed as e2:
         logger.error(f"{e2} | {traceback.format_exc()}")
     finally:
         if user_id is not None:
             await manager.disconnect(user_id)
-        await ws.close(code=1011, reason="服务器错误")
+        await ws.close()
+
 
 
 @warroom_bp.after_server_start
@@ -185,12 +186,13 @@ async def acquire_members(request: Request):
     room_users = await query
     user_list = []
     for user in room_users:
-        # 角色待修改
-        is_admin = any('*' in (role.permissions or []) for role in await user.roles.all())
+        # 获取用户角色（用户和角色是多对多的关系）
+        user_roles = await user.roles.all()
+        roles_list = [role.name for role in user_roles]
         user_list.append({
             "id": str(user.id),
             "username": user.username,
-            "is_admin": is_admin
+            "roles": roles_list
         })
 
     return response_ok(data={
@@ -428,12 +430,14 @@ async def query_messages(request: Request):
 
         total_count = await Message.filter(
             type="announcement",
-            room_id=room_id
+            room_id=room_id,
+            deleted=False
         ).count()
 
         announcements = await Message.filter(
             type="announcement",
-            room_id=room_id
+            room_id=room_id,
+            deleted=False
         ).order_by("-ctime").offset(offset).limit(limit)
 
         announcement_list = []
@@ -442,6 +446,7 @@ async def query_messages(request: Request):
             announcement_list.append({
                 "id": str(msg.id),
                 "content": msg.content,
+                "image_content": msg.image_content,
                 "timestamp": str(msg.ctime),
                 "sender_name": sender.username if sender else "",
                 "sender_id": str(sender.id) if sender else "0",
