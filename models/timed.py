@@ -19,6 +19,7 @@ class Timed(BaseModel):
     result = fields.CharField(max_length=50, description="执行结果")
     success_rate = fields.CharField(max_length=10, description="成功率")
     enable = fields.IntField(max_length=1, default=1, description="是否启用, 0为禁用，1为启用")
+    end_time = fields.CharField(max_length=50, description="结束时间")
     creator = fields.ForeignKeyField("models.Account", related_name="created_timed", description="创建人")
     updator = fields.ForeignKeyField("models.Account", related_name="updated_timed", description="更新人")
 
@@ -40,6 +41,7 @@ class Timed(BaseModel):
             "result": self.result,
             "success_rate": self.success_rate,
             "enable": self.enable,
+            "end_time": self.end_time,
             "creator": self.creator.username if self.creator else "",
             "updator": self.updator.username if self.updator else "",
         }
