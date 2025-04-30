@@ -69,7 +69,7 @@ async def upload_and_extract_zip(request):
         if total_count >= total_up_value:
             return response_ok({"error": "应用数量已达到上限"})
 
-        config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, resp,
+        config_data, version, tool_name, tool_id, msg = await unzip(zip_file.body, creator, single_progress, resp,
                                                            success_progress)
         if msg != "success":
             results.append({"tool": tool_name, "msg": msg})
@@ -79,17 +79,32 @@ async def upload_and_extract_zip(request):
             await resp.send(f"data: 解压进度：{percent}%\n\n")
             continue
 
-        for action in config_data.get("actions"):
+        # 将config数据存入redis
+        redis_client = request.app.ctx.cache_client
+        await redis_client.set(tool_id, config_data, ttl=2592000)
+
+        if "actions" in config_data.keys():
+            action_key = "actions"
+        elif "action" in config_data.keys():
+            action_key = "action"
+        else:
+            results.append({"tool": tool_name, "msg": "config文件内容错误，缺失actions字段"})
+            data += 1
+            percent = int((data * single_progress))
+            success_progress = percent
+            continue
+        for action in config_data.get(action_key):
             await ToolAction.create(tool_name=config_data.get("name"), version_number=version,
                                     action=action)
             actions = await ActionPermissions.filter(tool_name=tool_name, deleted=False).values("action_name")
             action_names = {action["action_name"] for action in actions}
-            if action["action"] not in action_names:
-                await ActionPermissions.create(tool_name=tool_name, action_name=action["action"],
-                                               action_description=action["description"], roles_id=[], users_id=[])
+
+            if action["name"] not in action_names:
+                await ActionPermissions.create(tool_name=tool_name, action_name=action["name"],
+                                               action_description=action.get("description") or "", roles_id=[], users_id=[])
         configuration = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values("resources")
         if not configuration or configuration["resources"] != config_data.get("resource"):
-            await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource"))
+            await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {})
 
         results.append({"tool": tool_name, "msg": msg})
 
@@ -155,8 +170,17 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress):
 
         name = config_data.get("name")
         py_file_name = config_data.get("main")
-        logo_name = config_data.get("logo").split("/")[1]
-        class_name_list = [action.get("class_name") for action in config_data.get("actions", [])]
+        logo_name = config_data.get("logo")
+        if "/" in logo_name:
+            logo_name = logo_name.split("/")[1]
+
+        if "actions" in config_data.keys():
+            action_key = "actions"
+        elif "action" in config_data.keys():
+            action_key = "action"
+        else:
+            return config_data, version, tool_name, "config文件内容错误，缺失actions字段"
+        class_name_list = [action.get("func") for action in config_data.get(action_key, [])]
 
         if not py_file_name:
             return config_data, version, tool_name, "config文件内容错误"
@@ -219,7 +243,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress):
             main=py_file_name,
         )
 
-        return config_data, version, tool.name, "success"
+        return config_data, version, tool.name, tool.id,"success"
 
 
 @tool_management_bp.post("/all")
@@ -892,3 +916,25 @@ async def health_check_config(request):
     await config.save()
 
     return response_ok({"message": "资源健康检查配置修改成功"})
+
+
+@tool_management_bp.post("/action/input")
+@requires_permission("tool:r")
+async def tool_action_input(request):
+    """
+    获取工具动作输入参数（需要工具查看权限）
+
+    query参数:
+        - id : 动作ID     int
+    """
+    action_id = request.json.get("id")
+    if not action_id:
+        raise CustomError(ErrorCode.ParameterError)
+    action = await ToolAction.filter(id=action_id, deleted=False).first()
+    if not action:
+        raise CustomError(ErrorCode.ActionNotFoundError)
+
+    input_data = action.action["input"]
+
+    return response_ok(input_data)
+
