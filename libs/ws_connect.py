@@ -189,7 +189,7 @@ class ConnectionManager:
                 await self._send_error(user_id, "找不到发送者")
                 return
 
-            receiver = await Account.get(id=user_id)
+            receiver = await Account.get(id=receiver_id)
             if not receiver:
                 await self._send_error(user_id, "接收者不存在")
                 return
