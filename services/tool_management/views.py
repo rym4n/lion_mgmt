@@ -69,8 +69,8 @@ async def upload_and_extract_zip(request):
         if total_count >= total_up_value:
             return response_ok({"error": "应用数量已达到上限"})
 
-        config_data, version, tool_name, tool_id, msg = await unzip(zip_file.body, creator, single_progress, resp,
-                                                                    success_progress)
+        config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, resp,
+                                                           success_progress, request.app.ctx.cache_client)
         if msg != "success":
             results.append({"tool": tool_name, "msg": msg})
             data += 1
@@ -78,10 +78,6 @@ async def upload_and_extract_zip(request):
             success_progress = percent
             await resp.send(f"data: 解压进度：{percent}%\n\n")
             continue
-
-        # 将config数据存入redis
-        redis_client = request.app.ctx.cache_client
-        await redis_client.set(tool_id, config_data, ttl=2592000)
 
         if "actions" in config_data.keys():
             action_key = "actions"
@@ -121,7 +117,7 @@ async def upload_and_extract_zip(request):
     return resp
 
 
-async def unzip(zip_data, creator, single_progress, resp, success_progress):
+async def unzip(zip_data, creator, single_progress, resp, success_progress, redis_client):
     """
     解压 ZIP 文件，直接从文件流读取，并进行文件结构校验
     """
@@ -244,7 +240,10 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress):
             main=py_file_name,
         )
 
-        return config_data, version, tool.name, tool.id, "success"
+        # 将config数据存入redis
+        await redis_client.set(name + "_" + version, config_data, ttl=2592000)
+
+        return config_data, version, tool.name, "success"
 
 
 @tool_management_bp.post("/all")
