@@ -13,7 +13,9 @@ class Timed(BaseModel):
     name = fields.CharField(description="任务名称", max_length=255)
     type = fields.IntField(max_length=1, description="执行类型，0为执行剧本，1为执行动作")
     playbook = fields.ForeignKeyField("models.Playbook", null=True, related_name="playbook_timed", description="关联剧本")
+    playbook_input = fields.JSONField(null=True, description="剧本输入参数")
     action = fields.ForeignKeyField("models.ToolAction", null=True, related_name="action_timed", description="关联工具动作")
+    action_input = fields.JSONField(null=True, description="工具动作输入参数")
     status = fields.IntField(max_length=1, description="执行状态，0为单次执行，1为周期执行")
     tactics = fields.CharField(max_length=50, description="执行策略")
     result = fields.CharField(max_length=50, null=True, description="执行结果")
@@ -35,7 +37,9 @@ class Timed(BaseModel):
             "name": self.name,
             "type": self.type,
             "playbook": self.playbook.name if self.playbook else "",
+            "playbook_input": self.playbook_input,
             "action": self.action.action["action"] if self.action else "",
+            "action_input": self.action_input,
             "status": self.status,
             "tactics": self.tactics,
             "result": self.result,
