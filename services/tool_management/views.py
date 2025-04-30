@@ -70,7 +70,7 @@ async def upload_and_extract_zip(request):
             return response_ok({"error": "应用数量已达到上限"})
 
         config_data, version, tool_name, tool_id, msg = await unzip(zip_file.body, creator, single_progress, resp,
-                                                           success_progress)
+                                                                    success_progress)
         if msg != "success":
             results.append({"tool": tool_name, "msg": msg})
             data += 1
@@ -101,7 +101,8 @@ async def upload_and_extract_zip(request):
 
             if action["name"] not in action_names:
                 await ActionPermissions.create(tool_name=tool_name, action_name=action["name"],
-                                               action_description=action.get("description") or "", roles_id=[], users_id=[])
+                                               action_description=action.get("description") or "", roles_id=[],
+                                               users_id=[])
         configuration = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values("resources")
         if not configuration or configuration["resources"] != config_data.get("resource"):
             await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {})
@@ -243,7 +244,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress):
             main=py_file_name,
         )
 
-        return config_data, version, tool.name, tool.id,"success"
+        return config_data, version, tool.name, tool.id, "success"
 
 
 @tool_management_bp.post("/all")
@@ -908,7 +909,7 @@ async def health_check_config(request):
     config = await Config.filter(key=key).first()
 
     if not config:
-        config = await Config.create(key=key, value=orjson.dumps({"cron": cron}), module=["tool"])
+        config = await Config.create(key=key, value={"cron": cron}, module=["tool"])
         config.deleted = (switch == "off")
     else:
         config.deleted = (switch == "off")
@@ -916,6 +917,24 @@ async def health_check_config(request):
     await config.save()
 
     return response_ok({"message": "资源健康检查配置修改成功"})
+
+
+@tool_management_bp.post("/health/check/get")
+@requires_permission("tool:r")
+async def health_check_get(request):
+    """
+    获取健康检测配置信息（需要工具查看权限）
+
+    请求参数：
+        无
+    """
+    config = await Config.filter(key="health_check_config").first()
+    if not config:
+        return response_ok({"switch": "off", "cron": None})
+
+    value = config.value
+
+    return response_ok({"switch": "on" if not config.deleted else "off", "cron": value.get("cron")})
 
 
 @tool_management_bp.post("/action/input")
@@ -937,4 +956,3 @@ async def tool_action_input(request):
     input_data = action.action["input"]
 
     return response_ok(input_data)
-
