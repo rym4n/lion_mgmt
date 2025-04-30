@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import importlib
+import json
 import os
 import time
 
@@ -14,8 +15,10 @@ import settings
 from core.exception_handlers import EXC_HDL_TUPLE, BaseExcHandler
 from core.listeners import LISTENER_TUPLE, BaseListener
 from core.middlewares import MIDDLEWARE_TUPLE, BaseMiddleware
-from services.license.views import verify_license
-from settings import BASE_LOGGING, TORTOISE, LICENSE_DIR
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from settings import BASE_LOGGING, TORTOISE, LICENSE_DIR, PUBLIC_KEY
 
 
 def create_app() -> Sanic:
@@ -39,12 +42,39 @@ def create_app() -> Sanic:
     # 注册异常处理
     register_exception_handler(app)
 
+    # 许可认证检测
     license_data()
 
     # 注册蓝图
     register_blueprints(app)
 
     return app
+
+
+def verify_license(license_data: dict) -> bool:
+    signature_hex = license_data.get("signature")
+    if not signature_hex:
+        return False
+
+    public_key = serialization.load_pem_public_key(PUBLIC_KEY.encode())
+
+    signature = bytes.fromhex(signature_hex)
+
+    license_str = json.dumps(
+        {key: value for key, value in license_data.items() if key != "signature"},
+        sort_keys=True
+    ).encode()
+
+    try:
+        public_key.verify(
+            signature,
+            license_str,
+            padding.PKCS1v15(),
+            hashes.SHA256()
+        )
+        return True
+    except InvalidSignature:
+        return False
 
 
 def license_data():
@@ -64,6 +94,8 @@ def license_data():
                                 settings.LICENSE_DATA = license_data
                             else:
                                 settings.LICENSE_DATA = "timeout"
+                    else:
+                        settings.LICENSE_DATA = "timeout"
 
 
 def should_register_modules():
@@ -71,7 +103,7 @@ def should_register_modules():
     module_flags = {}
     if settings.LICENSE_DATA:
         if settings.LICENSE_DATA == "timeout":
-            return ["license_bp"]
+            return ["license_bp", "user_bp"]
 
         for item in settings.LICENSE_DATA["menuInfo"]["moduleList"]:
             module = item["module"]

@@ -3,23 +3,22 @@
 import base64
 import datetime
 import hashlib
-import json
 import os
+import sys
 import time
 
 import aiofile
 import orjson
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
 from sanic import Blueprint
 from sanic import response
 from sanic.request import Request
 
+import settings
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from settings import PUBLIC_KEY, LICENSE_DIR
+from services import verify_license
+from settings import LICENSE_DIR
 
 license_bp = Blueprint('license', url_prefix='v1/license')
 _all__ = ["license_bp"]
@@ -39,11 +38,12 @@ async def verify_license_api(request: Request):
     license_file = request.files.get("file")
     encoded = license_file.body.decode("utf-8")
     json_str = base64.b64decode(encoded.encode("utf-8")).decode("utf-8")
-    license_data = json.loads(json_str)
+    license_data = orjson.loads(json_str)
     is_valid = verify_license(license_data)
     if is_valid:
         if license_data.get("expireTime"):
             if int(time.time() * 1000) >= license_data.get("expireTime"):
+                settings.LICENSE_DATA = "timeout"
                 raise CustomError(ErrorCode.LicenseExpired)
             else:
                 license_path = hashlib.md5(f"{encoded}".encode()).hexdigest() + ".lic"
@@ -55,7 +55,9 @@ async def verify_license_api(request: Request):
                             await f.write(encoded)
                         if os.path.exists(full_path):
                             os.rename(full_path, new_path)
-                return response_ok(license_data)
+                        settings.LICENSE_DATA = license_data
+
+                os._exit(1)
     else:
         raise CustomError(ErrorCode.InvalidLicenseError)
 
@@ -67,6 +69,8 @@ async def get_license(request: Request):
 
     无需请求参数
     """
+    menu_dict = {}
+
     for root, dirs, files in os.walk(LICENSE_DIR):
         for file in files:
             filename, ext = os.path.splitext(file)
@@ -74,9 +78,9 @@ async def get_license(request: Request):
             async with aiofile.AIOFile(full_path, 'r', encoding='utf-8') as f:
                 data = await f.read()
                 if filename != hashlib.md5(f"{data}".encode()).hexdigest():
-                    raise CustomError(ErrorCode.InvalidLicenseError)
-
-    menu_dict = {}
+                    menu_dict["license_bp"] = True
+                    menu_dict["user_bp"] = True
+                    return response_ok(menu_dict)
 
     if data:
         json_str = base64.b64decode(data.encode("utf-8")).decode("utf-8")
@@ -93,6 +97,8 @@ async def get_license(request: Request):
                             menu_dict[module] = False
                         if auth and int(item["expireTime"]) > int(time.time() * 1000):
                             menu_dict[module] = True
+    menu_dict["license_bp"] = True
+    menu_dict["user_bp"] = True
 
     return response_ok(menu_dict)
 
@@ -149,29 +155,3 @@ def formatted_time(timestamp: int) -> str:
     dt = datetime.datetime.fromtimestamp(timestamp / 1000)
     formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
     return formatted_time
-
-
-def verify_license(license_data: dict) -> bool:
-    signature_hex = license_data.get("signature")
-    if not signature_hex:
-        return False
-
-    public_key = serialization.load_pem_public_key(PUBLIC_KEY.encode())
-
-    signature = bytes.fromhex(signature_hex)
-
-    license_str = json.dumps(
-        {key: value for key, value in license_data.items() if key != "signature"},
-        sort_keys=True
-    ).encode()
-
-    try:
-        public_key.verify(
-            signature,
-            license_str,
-            padding.PKCS1v15(),
-            hashes.SHA256()
-        )
-        return True
-    except InvalidSignature:
-        return False

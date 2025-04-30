@@ -591,7 +591,7 @@ async def binding_event_ingestion_script(request):
 
     for script_id in script_ids:
         process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
-        command = f"python start.py -m auto -f {script_id} -t {topic}"
+        command = f"python start.py -f {script_id} -t {topic}"
         supervisor.add_process(process_name, command)
 
     events_ingestion = await EventRelatedScript.create(condition=conditions, event_ingestion_id=event_ingestion_id,
