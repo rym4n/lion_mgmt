@@ -137,7 +137,7 @@ async def get_all_license(request: Request):
                                 continue
                             menu_dict["menuInfo"].setdefault(group, []).append({name: True})
                         else:
-                            menu_dict["menuInfo"].setdefault(group, []).append({name: True})
+                            menu_dict["menuInfo"].setdefault(group, []).append({name: False})
 
     return response_ok(menu_dict)
 
