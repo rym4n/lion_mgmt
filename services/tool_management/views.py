@@ -651,13 +651,13 @@ async def download_zip(request):
     if tool.internal:
         raise CustomError(ErrorCode.InternalToolError)
 
-    zip_path = os.path.abspath(os.path.join(tool.path, f"SourceFile.zip"))
+    zip_path = os.path.abspath(os.path.join(os.path.dirname(tool.path), f"SourceFile.zip"))
 
     tool_name = tool.name
     version = tool.version
 
     if not os.path.exists(zip_path):
-        return CustomError(ErrorCode.ToolNotFoundError)
+        raise CustomError(ErrorCode.ToolNotFoundError)
 
     return await response.file(zip_path, filename=f"{tool_name}_{version}.zip", mime_type="application/zip")
 
