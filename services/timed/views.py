@@ -20,11 +20,11 @@ DISABLED = 0
 ENABLED = 1
 
 
-def build_timer_rule(timed_id, status, tactics, end_time):
+def build_timer_rule(status, tactics, end_time):
     if status == EXEC_TYPE_ONCE:
-        return {"timer": "once", "timer_rule": {"run_date": tactics, "id": timed_id}}
+        return {"timer": "once", "timer_rule": {"run_date": tactics}}
     else:
-        return {"timer": "cron", "timer_rule": {"end_date": end_time, "crontab": tactics, "id": timed_id}}
+        return {"timer": "cron", "timer_rule": {"end_date": end_time, "crontab": tactics}}
 
 
 @timed_bp.post("/add")
@@ -120,7 +120,7 @@ async def add_timed(request):
     timed = await Timed.create(name=name, type=type, playbook=playbook, playbook_input=playbook_input, action=action,
                                action_input=action_input, status=status, tactics=tactics, end_time=end_time, enable=1,
                                creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
-    timer_rule["id"] = timed.id
+    msg["timer_id"] = timed.id
     msg["timer_rule"] = timer_rule
     await send_kafka_message(kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg)
     return response_ok(timed.json)
@@ -244,10 +244,11 @@ async def update_timed(request):
 
     if enable == DISABLED:
         msg["timer"] = "remove"
-        msg["timer_rule"] = {"id": timed.id}
+        msg["timer_rule"] = {}
     else:
-        timer_info = build_timer_rule(timed.id, status, tactics, end_time)
+        timer_info = build_timer_rule(status, tactics, end_time)
         msg.update(timer_info)
+    msg["timer_id"] = timed.id
 
     timed.enable = enable
     timed.status = status
@@ -287,7 +288,8 @@ async def delete_timed(request):
         msg["run_type"] = "action"
         msg["run_args"] = timed.action_input
     msg["timer"] = "remove"
-    msg["timer_rule"] = {"id": timed.id}
+    msg["timer_id"] = timed.id
+    msg["timer_rule"] = {}
     await send_kafka_message(kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg)
 
     timed.deleted = True

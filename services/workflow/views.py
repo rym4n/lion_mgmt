@@ -119,7 +119,7 @@ async def detail_workflow(request):
     请求参数：
         id: 必填，剧本ID
     """
-    playbook = await Playbook.get(id=request.json.get("id"))
+    playbook = await Playbook.get(id=request.json.get("id")).prefetch_related("creator", "updator", "scenes")
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
     return response_ok(playbook.json)
@@ -141,7 +141,6 @@ async def edit_workflow(request):
         audit_list: 可选，审批节点
         tags: 可选，标签
         flow_json: 可选，流程图布局信息
-        flow_data: 可选，各节点详细信息
     """
     playbook = await Playbook.get(id=request.json.get("id"))
     if not playbook:
@@ -197,11 +196,33 @@ async def delete_workflow(request):
 @workflow_bp.websocket('/run')
 async def execute_action(request: Request, ws: Websocket):
     """
-        执行剧本，websocket通信
+        执行接口，websocket通信
 
         请求参数：
-            id: 剧本ID
-        """
+            - type str 类型 flow代表执行剧本， action代表执行动作
+            - playbook_input dict 剧本输入参数 当type为flow时必填,示例如下：
+            {
+                "flow_id": "73ecfba0-1aa4-4128-b99a-b97fb08a14be",      剧本id
+                "flow_input": {
+                    "l":"123456789",        剧本输入参数
+                    "c":"123456789"         剧本输入参数
+                }
+            }
+            - action_input dict 动作输入参数 当type为action时必填,示例如下：
+            {
+                "app_name":"huorong_edr",         应用名称，英文标识
+                "app_ver":"v1746495758839",      应用版本号
+                "main":"huorong_edr.py",          主程序文件名  获取工具版本时会传
+                "action_input":{
+                    "node_name":"自定义扫描",    动作描述
+                    "action":"custom_scan",     动作名称
+                    "action_name":"自定义扫描",    动作描述
+                    "clients":"abcd",             动作输入参数
+                    "groups":"123456789"          动作输入参数
+                },
+                "action_args":["clients","groups"]   动作输入参数名称列表
+            }
+    """
     async for msg in ws:
         try:
             data = orjson.loads(msg)
@@ -253,13 +274,15 @@ async def input_data(request):
                     for action in actions:
                         if node["properties"]["data"]["action"] == action.action["name"]:
                             input_list.append({value.split(".output.")[-1].rstrip("}"): action.action})
-                    tool = await Tool.filter(name=node["properties"]["app_name"], version=node["properties"]["version"]).first()
+                    tool = await Tool.filter(name=node["properties"]["app_name"],
+                                             version=node["properties"]["version"]).first()
                     if tool:
                         config_path = os.path.abspath(os.path.join(tool.path), f"config.json")
 
                         async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
                             content = await f.read()
                             # 将config数据存入redis
-                            await redis_client.set(node["properties"]["app_name"] + "_" + node["properties"]["version"], content, ttl=2592000)
+                            await redis_client.set(node["properties"]["app_name"] + "_" + node["properties"]["version"],
+                                                   content, ttl=2592000)
 
     return response_ok(input_list)

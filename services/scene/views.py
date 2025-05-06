@@ -30,7 +30,8 @@ async def add_scene(request):
 
     if await Scene.filter(name=request.json.get("name")).exists():
         raise CustomError(ErrorCode.SceneExistsError)
-
+    if status == 2:
+        await Scene.filter(status=2).update(status=1)
     scene = await Scene.create(name=name, remark=remark, status=status, creator=request.ctx.session['account_info'],
                                updator=request.ctx.session['account_info'])
 
@@ -61,6 +62,8 @@ async def update_scene(request):
     if remark:
         scene.remark = remark
     if status is not None:
+        if status == 2:
+            await Scene.filter(status=2).update(status=1)
         scene.status = status
     scene.updator = request.ctx.session['account_info']
     await scene.save()
@@ -121,6 +124,7 @@ async def set_current_scene(request):
     id = request.json.get('id')
     if not id:
         raise CustomError(ErrorCode.ParameterError)
+    await Scene.filter(status=2).update(status=1)
     scene = await Scene.filter(id=id).first()
     if not scene:
         raise CustomError(ErrorCode.NotFound)
