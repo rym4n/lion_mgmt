@@ -1,24 +1,26 @@
 # coding=utf-8
-import traceback
-import json
 import asyncio
-from libs.ws_connect import ConnectionManager, get_or_create_private_chat_room
-from websockets import ConnectionClosed
+import traceback
+
+import orjson
 from sanic import Blueprint, Request, Websocket
+from sanic.log import logger
+from tortoise.expressions import Q
+from websockets import ConnectionClosed
+
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from sanic.log import logger
-from models.warroom import Room, Message
+from libs.ws_connect import ConnectionManager, get_or_create_private_chat_room
 from models.user import Account
-from tortoise.expressions import Q
-
+from models.warroom import Room, Message
 
 warroom_bp = Blueprint('warroom', url_prefix='v1/warroom')
 __all__ = ['warroom_bp']
 
 manager = ConnectionManager()
+
 
 @warroom_bp.websocket('/ws')
 async def warroom_ws(request: Request, ws: Websocket):
@@ -27,19 +29,20 @@ async def warroom_ws(request: Request, ws: Websocket):
     try:
         # 先获取认证信息
         auth_data = await asyncio.wait_for(ws.recv(), timeout=5.0)
-        auth_json = json.loads(auth_data)
+        auth_json = orjson.loads(auth_data)
         user_id = auth_json['request_header']['id']
-        # user_id = '43782755-6382-4f42-82a2-5e557370d858'
         # 建立连接
         await manager.connect(ws, user_id)
         # 持续接收和处理消息
         while True:
             try:
                 data = await asyncio.wait_for(ws.recv(), timeout=60.0)
-                message = json.loads(data)
+                if not data:
+                    continue
+                message = orjson.loads(data)
                 await manager.handle_message(user_id, message)
             except asyncio.TimeoutError:
-                await ws.send(json.dumps({"type": "heartbeat", "status": "ping"}))
+                await ws.send(orjson.dumps({"type": "heartbeat", "status": "ping"}).decode())
             except asyncio.CancelledError:
                 break
             except Exception as e1:
@@ -50,7 +53,6 @@ async def warroom_ws(request: Request, ws: Websocket):
         if user_id is not None:
             await manager.disconnect(user_id)
         await ws.close()
-
 
 
 @warroom_bp.after_server_start
@@ -242,7 +244,7 @@ async def get_user_rooms(request: Request):
     if keyword:
         query = query.filter(name__contains=keyword)
     user_rooms = await query.order_by('-ctime')
-    
+
     room_list = []
     for room in user_rooms:
         creator = await room.creator
@@ -253,7 +255,7 @@ async def get_user_rooms(request: Request):
             "creator_name": creator.username if creator else "",
             "ctime": str(room.ctime),
         })
-    
+
     return response_ok({
         "rooms": room_list
     })
@@ -284,7 +286,7 @@ async def query_messages(request: Request):
     keyword = request.json.get("keyword", "")
     limit = request.json.get("limit", 20)
     offset = request.json.get("offset", 0)
-    
+
     if not query_type:
         return CustomError(ErrorCode.ParamValueError)
 

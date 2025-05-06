@@ -52,7 +52,6 @@ ykr6ioBH7A9tu7wXXzpd5YZQdtMFTF9xaxO8fJSKiArs4d5S9y48PtMn+kKT2qef
 nvb7oyNZcuqvq/6M35t9p+HPKKTRAcXRKunDXFTDa3YIjWhKUJRR2byS3SYT0J7p
 fQIDAQAB
 -----END PUBLIC KEY-----
-
 """
 
 # 产品许可的内容
