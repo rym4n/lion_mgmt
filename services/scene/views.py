@@ -50,7 +50,7 @@ async def update_scene(request):
     """
     id = request.json.get('id')
     remark = (request.json.get('remark') or None)
-    status = (request.json.get('status') or None)
+    status = request.json.get('status')
     if not id:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -60,7 +60,7 @@ async def update_scene(request):
 
     if remark:
         scene.remark = remark
-    if status:
+    if status is not None:
         scene.status = status
     scene.updator = request.ctx.session['account_info']
     await scene.save()
@@ -83,7 +83,7 @@ async def get_all_scene(request):
     page = int(request.json.get('page') or 1)
     page_size = int(request.json.get('page_size') or 10)
     key = request.json.get('key') or None
-    status = request.json.get('status' or None)
+    status = request.json.get('status')
 
     query = Scene.all()
 

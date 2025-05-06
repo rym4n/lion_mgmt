@@ -549,7 +549,7 @@ async def tool_resources_detailed(request):
 
     resources = await ToolResources.filter(tool_name=tool_name, deleted=False).values()
     if not resources:
-        raise CustomError(ErrorCode.ResourcesNotFoundError)
+        return response_ok("工具资源不存在")
 
     return response_ok(resources)
 

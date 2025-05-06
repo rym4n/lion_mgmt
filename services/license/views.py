@@ -4,7 +4,6 @@ import base64
 import datetime
 import hashlib
 import os
-import sys
 import time
 
 import aiofile
@@ -17,14 +16,32 @@ import settings
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.security.authorization import requires_permission
 from services import verify_license
 from settings import LICENSE_DIR
 
 license_bp = Blueprint('license', url_prefix='v1/license')
 _all__ = ["license_bp"]
 
+MENU_DICT = {
+    "role_bp": "role",
+    "user_bp": "user",
+    "event_bp": "event",
+    "event_ingestion_bp": "ingestion",
+    "var_bp": "var",
+    "approve_bp": "approve",
+    "tool_management_bp": "tool",
+    "workflow_bp": "flow",
+    "system_bp": "system",
+    "scene_bp": "scene",
+    "timed_bp": "timed",
+    "license_bp": "lic",
+    "warroom_bp": "warroom"
+}
+
 
 @license_bp.post("/verify")
+@requires_permission("lic:c")
 async def verify_license_api(request: Request):
     """
     验证license文件
@@ -63,6 +80,7 @@ async def verify_license_api(request: Request):
 
 
 @license_bp.post("/get")
+@requires_permission("lic:r")
 async def get_license(request: Request):
     """
     获取许可文件权限，加载页面
@@ -100,10 +118,16 @@ async def get_license(request: Request):
     menu_dict["license_bp"] = True
     menu_dict["user_bp"] = True
 
-    return response_ok(menu_dict)
+    new_menu_dict = {}
+    for key, value in menu_dict.items():
+        if key in MENU_DICT:
+            new_menu_dict[MENU_DICT[key]] = value
+
+    return response_ok(new_menu_dict)
 
 
 @license_bp.post("/show")
+@requires_permission("lic:r")
 async def get_all_license(request: Request):
     """
     获取所有license文件信息用于页面展示
