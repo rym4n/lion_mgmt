@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-
+import logging
 import os
 import time
 # try:
@@ -16,14 +16,14 @@ SUPERVISOR_CONFIG_DIR = SUPERVISOR_PATH
 
 def write_process_config(process_name, command):
     """写入 supervisor 配置文件"""
-    config_path = os.path.join(SUPERVISOR_CONFIG_DIR, "{}.ini".format(process_name))
+    config_path = os.path.join(SUPERVISOR_CONFIG_DIR, "{}.conf".format(process_name))
     with open(config_path, "w") as f:
         f.write("""
-[program:{}]
-command={}
-autorestart=true
-""".format(process_name, command))
-    print("写入配置文件: {}".format(config_path))
+            [program:{}]
+            command={}
+            autorestart=true
+            """.format(process_name, command))
+    logging.info("写入配置文件: {}".format(config_path))
 
 
 def add_process(process_name, command):
@@ -32,62 +32,62 @@ def add_process(process_name, command):
     try:
         SUPERVISOR_SERVER.supervisor.reloadConfig()
         SUPERVISOR_SERVER.supervisor.addProcessGroup(process_name)
-        print("进程 {} 添加成功".format(process_name))
+        logging.info("进程 {} 添加成功".format(process_name))
     except Fault as e:
         if "ALREADY_ADDED" in e.faultString:
-            print("进程 {} 已存在".format(process_name))
+            logging.info("进程 {} 已存在".format(process_name))
         else:
-            print("添加进程时发生错误: {}".format(e.faultString))
+            logging.info("添加进程时发生错误: {}".format(e.faultString))
 
 
 def start_process(process_name):
     """启动进程（如果未运行则启动）"""
     try:
         process_info = SUPERVISOR_SERVER.supervisor.getProcessInfo(process_name)
-        print("process_info", process_info)
+        logging.info("process_info", process_info)
         if process_info['statename'] == 'STARTING':
-            print("进程 {} 正在启动中".format(process_name))
+            logging.info("进程 {} 正在启动中".format(process_name))
             time.sleep(1)
             process_info = SUPERVISOR_SERVER.supervisor.getProcessInfo(process_name)
             if process_info['statename'] != 'RUNNING':
                 SUPERVISOR_SERVER.supervisor.startProcess(process_name)
-                print("进程 {} 启动成功".format(process_name))
+                logging.info("进程 {} 启动成功".format(process_name))
             else:
-                print("进程 {} 已经在运行中".format(process_name))
+                logging.info("进程 {} 已经在运行中".format(process_name))
         elif process_info['statename'] == 'RUNNING':
-            print("进程 {} 已经在运行中".format(process_name))
+            logging.info("进程 {} 已经在运行中".format(process_name))
         else:
             SUPERVISOR_SERVER.supervisor.startProcess(process_name)
-            print("进程 {} 启动成功".format(process_name))
+            logging.info("进程 {} 启动成功".format(process_name))
     except Fault as e:
         if "BAD_NAME" in e.faultString or "UNKNOWN" in e.faultString:
-            print("进程 {} 不存在，无法启动".format(process_name))
+            logging.info("进程 {} 不存在，无法启动".format(process_name))
         else:
-            print("启动进程时发生错误: {}".format(e.faultString))
+            logging.info("启动进程时发生错误: {}".format(e.faultString))
 
 
 def stop_process(process_name):
     """停止进程"""
     try:
         SUPERVISOR_SERVER.supervisor.stopProcess(process_name)
-        print("进程 {} 已停止".format(process_name))
+        logging.info("进程 {} 已停止".format(process_name))
     except Fault as e:
         if "NOT_RUNNING" in e.faultString:
-            print("进程 {} 当前未运行".format(process_name))
+            logging.info("进程 {} 当前未运行".format(process_name))
         else:
-            print("停止进程时发生错误: {}".format(e.faultString))
+            logging.info("停止进程时发生错误: {}".format(e.faultString))
 
 
 def remove_process(process_name):
     """删除进程组"""
     try:
         SUPERVISOR_SERVER.supervisor.removeProcessGroup(process_name)
-        print("进程 {} 已删除".format(process_name))
+        logging.info("进程 {} 已删除".format(process_name))
     except Fault as e:
         if "BAD_NAME" in e.faultString:
-            print("进程 {} 不存在，无法删除".format(process_name))
+            logging.info("进程 {} 不存在，无法删除".format(process_name))
         else:
-            print("删除进程时发生错误: {}".format(e.faultString))
+            logging.info("删除进程时发生错误: {}".format(e.faultString))
 
 
 def process_status(process_name):
@@ -100,9 +100,9 @@ def process_status(process_name):
             return "unhealthy"
     except Fault as e:
         if "BAD_NAME" in e.faultString:
-            print("进程 {} 不存在".format(process_name))
+            logging.info("进程 {} 不存在".format(process_name))
         else:
-            print("获取进程状态时发生错误: {}".format(e.faultString))
+            logging.info("获取进程状态时发生错误: {}".format(e.faultString))
         return "unknown"
 
 # if __name__ == '__main__':
