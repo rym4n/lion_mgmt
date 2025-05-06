@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 # coding=utf-8
+import os
 import time
 
+import aiofile
 import orjson
 from sanic import Blueprint, Request, Websocket
 from sanic.log import logger
@@ -13,7 +15,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import gen_order_version
-from models import Playbook, Scene
+from models import Playbook, Scene, ToolAction, Tool
 from settings import LICENSE_DATA
 
 workflow_bp = Blueprint('workflow', url_prefix='v1/playbook')
@@ -97,7 +99,8 @@ async def list_workflow(request):
     if request.json.get("status"):
         condition = condition & Q(status=request.json.get("status"))
     total = await Playbook.filter(condition).count()
-    playbooks = await Playbook.filter(condition).offset(offset).limit(limit).all().prefetch_related("scenes", "creator", "updator")
+    playbooks = await Playbook.filter(condition).offset(offset).limit(limit).all().prefetch_related("scenes", "creator",
+                                                                                                    "updator")
     return response_ok({
         "total": total,
         "page": page,
@@ -173,7 +176,8 @@ async def publish_workflow(request):
     请求参数：
         id: 必填，剧本ID
     """
-    await Playbook.filter(id=request.json.get("id")).update(status=1, updator=request.ctx.session['account_info'], version=gen_order_version())
+    await Playbook.filter(id=request.json.get("id")).update(status=1, updator=request.ctx.session['account_info'],
+                                                            version=gen_order_version())
     return response_ok("剧本发布成功")
 
 
@@ -207,3 +211,55 @@ async def execute_action(request: Request, ws: Websocket):
             return
         except Exception as e:
             logger.error(e)
+
+
+@workflow_bp.post('/input')
+@requires_permission("workflow:r")
+async def input_data(request):
+    """
+    获取指定剧本的输入参数
+
+    请求参数：
+        id: 剧本ID
+    """
+    redis_client = request.app.ctx.cache_client
+    playbook = await Playbook.get(id=request.json.get("id"))
+    if not playbook:
+        raise CustomError(ErrorCode.PlaybookNotFound)
+
+    nodes = playbook.flow_json["nodes"]
+
+    input_id = nodes[0]["id"]
+
+    input_list = []
+
+    for node in nodes[1:]:
+        if "data" not in node["properties"].keys():
+            continue
+        for key, value in node["properties"]["data"].items():
+            if input_id in value:
+                data = await redis_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"])
+                if data:
+                    if "actions" in data.keys():
+                        action_key = "actions"
+                    elif "action" in data.keys():
+                        action_key = "action"
+                    for action in data.get(action_key):
+                        if node["properties"]["data"]["action"] in action.values():
+                            input_list.append({value.split(".output.")[-1].rstrip("}"): action})
+                else:
+                    actions = await ToolAction.filter(tool_name=node["properties"]["app_name"],
+                                                      version_number=node["properties"]["version"]).all()
+                    for action in actions:
+                        if node["properties"]["data"]["action"] == action.action["name"]:
+                            input_list.append({value.split(".output.")[-1].rstrip("}"): action.action})
+                    tool = await Tool.filter(name=node["properties"]["app_name"], version=node["properties"]["version"]).first()
+                    if tool:
+                        config_path = os.path.abspath(os.path.join(tool.path), f"config.json")
+
+                        async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
+                            content = await f.read()
+                            # 将config数据存入redis
+                            await redis_client.set(node["properties"]["app_name"] + "_" + node["properties"]["version"], content, ttl=2592000)
+
+    return response_ok(input_list)
