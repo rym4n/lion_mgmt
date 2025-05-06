@@ -20,7 +20,7 @@ from libs.utils import get_client_ip
 from models.event import EventsIngestion, EventRelatedScript
 from models.playbook import Playbook
 from services.event_ingestion import supervisor
-from settings import SAMPLE_SINK_PATH, VECTOR_CFG
+from settings import SAMPLE_SINK_PATH, VECTOR_CFG, KAFKA_CONFIG
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='v1/event/ingestion')
 _all__ = ["event_ingestion_bp"]
@@ -579,7 +579,7 @@ async def binding_event_ingestion_script(request):
     data["sinks"][f"{topic}_sinks"] = {
         "inputs": [f"{topic}_transforms"],
         "type": "kafka",
-        "bootstrap_servers": "lion-kafka:9092",
+        "bootstrap_servers": KAFKA_CONFIG,
         "topic": topic,
         "encoding": {
             "codec": "json"
@@ -591,7 +591,7 @@ async def binding_event_ingestion_script(request):
 
     for script_id in script_ids:
         process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
-        command = f"python start.py -f {script_id} -t {topic}"
+        command = f"python start.py -m auto -f {script_id} -t {topic}"
         supervisor.add_process(process_name, command)
 
     events_ingestion = await EventRelatedScript.create(condition=conditions, event_ingestion_id=event_ingestion_id,
