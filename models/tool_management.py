@@ -13,6 +13,7 @@ class ToolAction(BaseModel):
     tool_name: str = fields.CharField(max_length=255, null=True, description="工具名称")
     version_number: str = fields.CharField(max_length=50, null=True, description="版本号")
     action: list[str] = fields.JSONField(null=True, description="动作")
+    playbook: list[str] = fields.JSONField(null=True, description="绑定的剧本列表")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -25,7 +26,8 @@ class ToolAction(BaseModel):
             "utime": str(self.utime),
             "tool_name": self.tool_name,
             "version_number": self.version_number,
-            "action": self.action
+            "action": self.action,
+            "playbook": self.playbook
         }
 
     class Meta:
