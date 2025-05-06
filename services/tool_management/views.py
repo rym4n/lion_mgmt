@@ -955,3 +955,93 @@ async def tool_action_input(request):
     input_data = action.action["input"]
 
     return response_ok(input_data)
+
+
+@tool_management_bp.post("/action/update")
+@requires_permission("tool:u")
+async def tool_action_update(request):
+    """
+    为动作绑定剧本id
+
+    query参数:
+        - data   动作数据    dict
+            {
+                "剧本id": [
+                    "动作a id",
+                    "动作b id"
+                ]
+            }
+    """
+    data = request.json.get("data")
+    if not isinstance(data, dict):
+        raise CustomError(ErrorCode.ParameterError)
+
+    affected_tools = set()
+
+    for playbook_id, action_ids in data.items():
+        for action_id in action_ids:
+            action = await ToolAction.filter(id=action_id, deleted=False).first()
+            if not action:
+                continue
+
+            if not isinstance(action.playbook, list):
+                action.playbook = []
+
+            if playbook_id not in action.playbook:
+                action.playbook.append(playbook_id)
+                await action.save()
+
+                affected_tools.add((action.tool_name, action.version_number))
+
+    for tool_name, version in affected_tools:
+        tool = await Tool.filter(name=tool_name, version=version, deleted=False).first()
+        if tool and tool.status != 1:
+            tool.status = 1
+            await tool.save()
+
+    return response_ok("动作绑定剧本成功")
+
+
+@tool_management_bp.post("/action/playbook/delete")
+@requires_permission("tool:u")
+async def tool_action_playbook_delete(request):
+    """
+    删除动作绑定的剧本
+
+    query参数:
+        - data   动作数据    dict
+            {
+                "剧本id": [
+                    "动作a id",
+                    "动作b id"
+                ]
+            }
+    """
+    data = request.json.get("data")
+    if not isinstance(data, dict):
+        raise CustomError(ErrorCode.ParameterError)
+
+    affected_tools = set()
+
+    for playbook_id, action_ids in data.items():
+        for action_id in action_ids:
+            action = await ToolAction.filter(id=action_id, deleted=False).first()
+            if not action:
+                continue
+            if not isinstance(action.playbook, list):
+                action.playbook = []
+
+            if playbook_id in action.playbook:
+                action.playbook.remove(playbook_id)
+                await action.save()
+            affected_tools.add((action.tool_name, action.version_number))
+
+    for tool_name, version in affected_tools:
+        actions = await ToolAction.filter(tool_name=tool_name, version_number=version, deleted=False).all()
+        has_playbook = any(action.playbook for action in actions)
+        tool = await Tool.filter(name=tool_name, version=version, deleted=False).first()
+        if tool:
+            tool.status = 1 if has_playbook else 0
+            await tool.save()
+
+    return response_ok("动作解绑剧本成功")
