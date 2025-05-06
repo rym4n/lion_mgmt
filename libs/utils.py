@@ -5,6 +5,7 @@ import os.path
 import random
 import time
 import zipfile
+import orjson
 from io import BytesIO
 from pathlib import Path, PurePath
 from string import ascii_uppercase, digits
@@ -14,6 +15,7 @@ import aiofiles
 from aiofile import async_open
 from argon2 import PasswordHasher
 from sanic.utils import str_to_bool as sanic_str_to_bool
+from aiokafka import AIOKafkaProducer
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
@@ -147,3 +149,15 @@ def gen_order_version(length=5):
     number = gen_random_code(True, length)
     times = time.strftime("%Y%m%d%H%M%S", time.localtime(time.time()))
     return str(times) + '' + str(number)
+
+
+async def send_kafka_message(kafka_bootstrap_servers, topic, message):
+    """
+    发送kafka消息
+    """
+    async with AIOKafkaProducer(
+        bootstrap_servers=kafka_bootstrap_servers,
+        value_serializer=lambda m: orjson.dumps(m)
+    ) as producer:
+        await producer.start()
+        await producer.send_and_wait(topic, message)

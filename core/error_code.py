@@ -78,3 +78,5 @@ class ErrorCode(BaseErrorCode):
     LicenseExpired = ErrorData(4053, "许可证已过期")
     InvalidLicenseError = ErrorData(4054, "无效的许可证")
     SceneExistsError = ErrorData(4055, "场景已存在")
+    TimedNameExists = ErrorData(4056, "定时任务名称重复，请重新命名")
+    TimedNotFound = ErrorData(4057, "定时任务不存在")

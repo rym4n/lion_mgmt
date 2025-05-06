@@ -61,6 +61,12 @@ LICENSE_DATA = None
 # 系统背景图片名称配置
 BG_NAME = "bg-oEDCYcDF"
 
+# kafka配置
+KAFKA_CONFIG = os.environ.get("RY_KAFKA_SERVERS")
+
+# 定时任务发送主题
+TIMED_TASK_TOPIC = os.environ.get("RY_TASK_TOPIC")
+
 # 安全相关
 SECRET = os.environ.get("RY_SECRET_KEY", '5tdPY^zTX6I$akvNtLXey3y#gFEG@^46f!iLUdSy$Y')
 
