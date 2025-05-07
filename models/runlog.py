@@ -25,7 +25,7 @@ class Runlog(BaseModel):
 
     status = fields.IntField(default=0, description="执行状态")
     args = fields.JSONField(null=True, description="执行入参")
-    result = fields.JSONField(null=True, description="输出结果")
+    result = fields.TextField(null=True, description="输出结果,啥格式都有可能")
 
     start_time = fields.DatetimeField(null=True, description="开始时间")
     end_time = fields.DatetimeField(null=True, description="结束时间")
