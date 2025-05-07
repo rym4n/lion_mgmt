@@ -279,15 +279,14 @@ async def execute_action(request: Request, ws: Websocket):
                 "app_ver":"v1746495758839",      应用版本号
                 "main":"huorong_edr.py",          主程序文件名  获取工具版本时会传
                 "action_input":{
-                    "node_name":"自定义扫描",    动作描述
-                    "action":"custom_scan",     动作名称
-                    "action_name":"自定义扫描",    动作描述
                     "clients":"abcd",             动作输入参数
                     "groups":"123456789"          动作输入参数
                 },
-                "action_args":["clients","groups"],   动作输入参数名称列表
-                "retry_times": 3,                  动作执行失败重试次数
-                "action_timeout": 60               动作执行超时时间,单位秒
+                "node_name":"自定义扫描",    动作描述
+                "action":"custom_scan",     动作名称
+                "action_name":"自定义扫描",    动作描述
+                "retry_times":1,             重试次数
+                "timeout":300,               超时时间,单位秒
             }
     """
     auth_data = await asyncio.wait_for(ws.recv(), timeout=10)
