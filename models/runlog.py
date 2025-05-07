@@ -65,4 +65,4 @@ class Runlog(BaseModel):
         table = "runlog"
         ordering = ["-utime"]
 
-        unique_together = (("run_id", "node_id"),)
+        # unique_together = (("run_id", "node_id"),)
