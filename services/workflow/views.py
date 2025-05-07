@@ -279,15 +279,14 @@ async def execute_action(request: Request, ws: Websocket):
                 "app_ver":"v1746495758839",      应用版本号
                 "main":"huorong_edr.py",          主程序文件名  获取工具版本时会传
                 "action_input":{
-                    "node_name":"自定义扫描",    动作描述
-                    "action":"custom_scan",     动作名称
-                    "action_name":"自定义扫描",    动作描述
                     "clients":"abcd",             动作输入参数
                     "groups":"123456789"          动作输入参数
                 },
-                "action_args":["clients","groups"],   动作输入参数名称列表
-                "retry_times": 3,                  动作执行失败重试次数
-                "action_timeout": 60               动作执行超时时间,单位秒
+                "node_name":"自定义扫描",    动作描述
+                "action":"custom_scan",     动作名称
+                "action_name":"自定义扫描",    动作描述
+                "retry_times":1,             重试次数
+                "timeout":300,               超时时间,单位秒
             }
     """
     auth_data = await asyncio.wait_for(ws.recv(), timeout=10)
@@ -340,9 +339,9 @@ async def input_data(request):
     input_list = []
 
     for node in nodes[1:]:
-        if "data" not in node["properties"].keys():
+        if "input" not in node["properties"].keys():
             continue
-        for key, value in node["properties"]["data"].items():
+        for key, value in node["properties"]["input"].items():
             if input_id in value:
                 data = orjson.loads(
                     await redis_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"]))
@@ -352,7 +351,7 @@ async def input_data(request):
                     elif "action" in data.keys():
                         action_key = "action"
                     for action in data.get(action_key):
-                        if node["properties"]["data"]["action"] in action.values():
+                        if node["properties"]["action"] in action.values():
                             for item in action["input"]:
                                 if key == item["key"]:
                                     action["input"] = item
@@ -362,7 +361,7 @@ async def input_data(request):
                     actions = await ToolAction.filter(tool_name=node["properties"]["app_name"],
                                                       version_number=node["properties"]["version"]).all()
                     for action in actions:
-                        if node["properties"]["data"]["action"] == action.action["name"]:
+                        if node["properties"]["action"] == action.action["name"]:
                             for item in action.action["input"]:
                                 if key == item["key"]:
                                     action.action["input"] = item
@@ -385,11 +384,9 @@ async def input_data(request):
 async def statistics_data(flow_json):
     actions_list = []
     for node in flow_json["nodes"]:
-        if "data" not in node["properties"].keys():
-            continue
         tool_name = node["properties"]["app_name"]
         version_number = node["properties"]["version"]
-        action_name = node["properties"]["data"]["action"]
+        action_name = node["properties"]["action"]
         actions = await ToolAction.filter(tool_name=tool_name, version_number=version_number).all()
         for action in actions:
             if action_name == action.action["func"]:

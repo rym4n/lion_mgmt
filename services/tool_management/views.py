@@ -1,6 +1,7 @@
 # coding=utf-8
 import hashlib
 import os
+import re
 import time
 import zipfile
 from io import BytesIO
@@ -81,8 +82,6 @@ async def upload_and_extract_zip(request):
 
         if "actions" in config_data.keys():
             action_key = "actions"
-        elif "action" in config_data.keys():
-            action_key = "action"
         else:
             results.append({"tool": tool_name, "msg": "config文件内容错误，缺失actions字段"})
             data += 1
@@ -95,9 +94,9 @@ async def upload_and_extract_zip(request):
             actions = await ActionPermissions.filter(tool_name=tool_name, deleted=False).values("action_name")
             action_names = {action["action_name"] for action in actions}
 
-            if action["name"] not in action_names:
-                await ActionPermissions.create(tool_name=tool_name, action_name=action["name"],
-                                               action_description=action.get("description") or "", roles_id=[],
+            if action["func"] not in action_names:
+                await ActionPermissions.create(tool_name=tool_name, action_name=action["func"],
+                                               action_description=action.get("name") or "", roles_id=[],
                                                users_id=[])
         configuration = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values("resources")
         if not configuration or configuration["resources"] != config_data.get("resource"):
@@ -139,6 +138,12 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
             config_data = orjson.loads(config_file.read().decode("utf-8"))
 
         tool_name = config_data.get("name")
+        pattern = r'^[A-Za-z][A-Za-z0-9_]*$'
+        if not bool(re.match(pattern, tool_name)):
+            return config_data, version, tool_name, "工具名称不合法"
+
+        if "description" not in config_data.keys():
+            return config_data, version, tool_name, "config文件内容错误，缺失description字段"
 
         hash_func = getattr(hashlib, "md5", None)
         if hash_func is None:
@@ -173,11 +178,24 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 
         if "actions" in config_data.keys():
             action_key = "actions"
-        elif "action" in config_data.keys():
-            action_key = "action"
         else:
             return config_data, version, tool_name, "config文件内容错误，缺失actions字段"
         class_name_list = [action.get("func") for action in config_data.get(action_key, [])]
+
+        for action in config_data.get(action_key, []):
+            if not all(k in action for k in ["func", "name", "input"]):
+                return config_data, version, tool_name, "actions字段内容错误"
+
+            inputs = action.get("input")
+            if not isinstance(inputs, list):
+                return config_data, version, tool_name, "input字段内容错误"
+
+            for input_item in inputs:
+                if not all(k in input_item for k in ["key", "type", "required", "description"]):
+                    return config_data, version, tool_name, "input字段内容错误"
+
+                if any(input_item[k] in (None, "") for k in ["key", "type", "required", "description"]):
+                    return config_data, version, tool_name, "input字段内容错误"
 
         if not py_file_name:
             return config_data, version, tool_name, "config文件内容错误"
@@ -340,8 +358,11 @@ async def tool_actions(request):
     if not tool:
         raise CustomError(ErrorCode.ToolNotFoundError)
 
-    actions = await ToolAction.filter(tool_name=name, version_number=version).values("action")
-    action_list = [action.get("action") for action in actions]
+    actions = await ToolAction.filter(tool_name=name, version_number=version).values("action", "id")
+    action_list = []
+    for action in actions:
+        action.get("action")["id"] = action.get("id")
+        action_list.append(action.get("action"))
 
     return response_ok({"actions": action_list})
 

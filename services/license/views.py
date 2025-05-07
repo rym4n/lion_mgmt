@@ -4,6 +4,7 @@ import base64
 import datetime
 import hashlib
 import os
+import threading
 import time
 
 import aiofile
@@ -40,6 +41,11 @@ MENU_DICT = {
 }
 
 
+def delayed_exit():
+    time.sleep(1)
+    os._exit(1)  # 强制退出进程
+
+
 @license_bp.post("/verify")
 @requires_permission("lic:c")
 async def verify_license_api(request: Request):
@@ -74,7 +80,8 @@ async def verify_license_api(request: Request):
                             os.rename(full_path, new_path)
                         settings.LICENSE_DATA = license_data
 
-                os._exit(1)
+                threading.Thread(target=delayed_exit, args=(1,), daemon=True).start()
+                return response_ok("上传成功，正在加载配置文件，请稍后！")
     else:
         raise CustomError(ErrorCode.InvalidLicenseError)
 

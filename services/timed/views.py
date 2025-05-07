@@ -52,13 +52,14 @@ async def add_timed(request):
                 "app_ver":"v1746495758839",      应用版本号
                 "main":"huorong_edr.py",          主程序文件名  获取工具版本时会传
                 "action_input":{
-                    "node_name":"自定义扫描",    动作描述
-                    "action":"custom_scan",     动作名称
-                    "action_name":"自定义扫描",    动作描述
                     "clients":"abcd",             动作输入参数
                     "groups":"123456789"          动作输入参数
                 },
-                "action_args":["clients","groups"]   动作输入参数名称列表
+                "node_name":"自定义扫描",    动作描述
+                "action":"custom_scan",     动作名称
+                "action_name":"自定义扫描",    动作描述
+                "retry_times":1,             重试次数
+                "timeout":300,               超时时间,单位秒
             }
        - status int 执行类型  必填  0为单次执行，1为周期执行
        - tactics str 执行策略  必填   如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数
@@ -95,8 +96,8 @@ async def add_timed(request):
         if not playbook:
             raise CustomError(ErrorCode.PlaybookNotFound)
         msg["run_type"] = "flow"
-        args = playbook_input
-        msg["run_args"] = args
+        playbook_input["executor"] = request.ctx.session.get("account_info").id
+        msg["run_args"] = playbook_input
         if status == 0:
             msg["timer"] = "once"
             timer_rule["run_date"] = tactics
@@ -108,6 +109,7 @@ async def add_timed(request):
         action = await ToolAction.filter(id=action_id, deleted=False).first()
         if not action:
             raise CustomError(ErrorCode.ActionNotFoundError)
+        action_input["executor"] = request.ctx.session.get("account_info").id
         msg["run_type"] = "action"
         msg["run_args"] = action_input
         if status == 0:
