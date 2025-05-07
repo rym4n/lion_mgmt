@@ -15,23 +15,23 @@ class Runlog(BaseModel):
     node_name = fields.CharField(max_length=255, description="节点名称")
     node_type = fields.CharField(max_length=36, description="节点类型")
 
-    tool_id = fields.CharField(max_length=36, description="工具ID")
-    tool_name = fields.CharField(max_length=255, description="工具标识")
-    tool_display_name = fields.CharField(max_length=255, description="工具中文名称")
+    tool_id = fields.CharField(null=True, max_length=36, description="工具ID")
+    tool_name = fields.CharField(null=True, max_length=255, description="工具标识")
+    tool_version = fields.CharField(null=True, max_length=255, description="工具版本")
+    tool_display_name = fields.CharField(null=True, max_length=255, description="工具中文名称")
 
-    action_id = fields.CharField(max_length=36, description="动作ID")
-    action_name = fields.CharField(max_length=255, description="动作标识")
-    action_display_name = fields.CharField(max_length=255, description="动作中文名称")
+    action_name = fields.CharField(null=True, max_length=255, description="动作标识")
+    action_display_name = fields.CharField(null=True, max_length=255, description="动作中文名称")
 
     status = fields.IntField(default=0, description="执行状态")
-    args = fields.JSONField(default=[], description="执行入参")
-    result = fields.JSONField(default=[], description="输出结果")
+    args = fields.JSONField(null=True, description="执行入参")
+    result = fields.JSONField(null=True, description="输出结果")
 
-    start_time = fields.DatetimeField(null=False, auto_now_add=True, description="开始时间")
-    end_time = fields.DatetimeField(null=False, auto_now_add=True, description="结束时间")
+    start_time = fields.DatetimeField(null=True, description="开始时间")
+    end_time = fields.DatetimeField(null=True, description="结束时间")
 
     playbook = fields.ForeignKeyField("models.Playbook", related_name="playbook_runlog", description="关联剧本")
-    creator = fields.ForeignKeyField("models.Account", related_name="account_run", description="执行人")
+    executor = fields.ForeignKeyField("models.Account", related_name="account_run", description="执行人")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -49,7 +49,6 @@ class Runlog(BaseModel):
             "tool_id": self.tool_id,
             "tool_name": self.tool_name,
             "tool_display_name": self.tool_display_name,
-            "action_id": self.action_id,
             "action_name": self.action_name,
             "action_display_name": self.action_display_name,
             "status": self.status,
@@ -57,10 +56,12 @@ class Runlog(BaseModel):
             "result": self.result,
             "start_time": str(self.start_time),
             "end_time": str(self.end_time),
-            "playbook": self.playbook.simple_json(),
-            "creator": self.creator.simple_json()
+            "playbook": self.playbook,
+            "creator": self.executor.username
         }
 
     class Meta:
         table = "runlog"
         ordering = ["-utime"]
+
+        unique_together = (("run_id", "node_id"),)
