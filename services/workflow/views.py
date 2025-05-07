@@ -176,7 +176,7 @@ async def edit_workflow(request):
             await playbook.create()
         else:
             await playbook.save()
-    return response_ok(playbook.json)
+    return response_ok({"id": playbook.id, "name": playbook.name, "version": playbook.version, "status": playbook.status})
 
 
 @workflow_bp.post("/publish")

@@ -18,7 +18,7 @@ class Playbook(BaseModel):
     version = fields.CharField(max_length=30, default=0, description="版本号，每次publish都会生成新纪录，用于版本回溯")
     creator = fields.ForeignKeyField("models.Account", related_name="created_playbooks", description="创建人")
     updator = fields.ForeignKeyField("models.Account", related_name="updated_playbooks", description="更新人")
-    internal = fields.BooleanField(default=False, description="是否内部工具")
+    internal = fields.BooleanField(default=False, description="是否内置剧本")
 
     def validate(self) -> None:
         raise NotImplementedError
