@@ -1,11 +1,15 @@
 #!/usr/bin/env python
 # coding=utf-8
+import asyncio
 import os
 import time
+from datetime import datetime
 
 import aiofile
 import orjson
+import pytz
 from sanic import Blueprint, Request, Websocket
+from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
 from tortoise.expressions import Q
 from websockets.exceptions import ConnectionClosed
@@ -14,9 +18,10 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import gen_order_version
-from models import Playbook, Scene, ToolAction, Tool
-from settings import LICENSE_DATA
+from libs.utils import gen_order_version, send_kafka_message
+from models import Playbook, Scene, ToolAction, Tool, Runlog
+from services.tool_management.views import tool_action_update, tool_action_playbook_delete
+from settings import LICENSE_DATA, KAFKA_CONFIG, TIMED_TASK_TOPIC
 
 workflow_bp = Blueprint('workflow', url_prefix='v1/playbook')
 _all__ = ["workflow_bp"]
@@ -61,6 +66,9 @@ async def create_workflow(request):
         creator=request.ctx.session['account_info'],
         updator=request.ctx.session['account_info']
     )
+
+    action_ids = await statistics_data(playbook.flow_json)
+    await tool_action_update({playbook.id: action_ids})
 
     if request.json.get('scenes'):
         scenes = await Scene.filter(name__in=request.json.get('scenes')).all()
@@ -152,6 +160,11 @@ async def edit_workflow(request):
         # 敏感属性不允许修改
         if p in ['id', 'ctime', 'utime', 'deleted', 'creator', 'updator', 'status', 'version']:
             continue
+        if p == "flow_json":
+            action_ids = await statistics_data(playbook.flow_json)
+            await tool_action_playbook_delete({playbook.id: action_ids})
+            action_ids = await statistics_data(params[p])
+            await tool_action_update({playbook.id: action_ids})
         if hasattr(playbook, p):
             has_change = True
             setattr(playbook, p, params[p])
@@ -189,8 +202,58 @@ async def delete_workflow(request):
     请求参数：
         id: 剧本ID
     """
-    await Playbook.filter(id=request.json.get("id"), internal=False).update(deleted=True)
+    playbook = await Playbook.filter(id=request.json.get("id"), internal=False).first()
+    if not playbook:
+        raise CustomError(ErrorCode.PlaybookNotFound)
+    playbook.deleted = True
+    await playbook.save()
+    action_ids = await statistics_data(playbook.flow_json)
+    await tool_action_playbook_delete({playbook.id: action_ids})
     return response_ok("剧本删除成功")
+
+
+async def poll_database_and_notify(ws, run_id, formatted_time):
+    updated_time = formatted_time
+    print(run_id)
+    try:
+        while True:
+            datas = await Runlog.filter(run_id=run_id, utime__gt=updated_time).all()
+            if datas:
+                payload = []
+                for data in datas:
+                    payload.append({
+                        "id": data.id,
+                        "ctime": data.ctime.isoformat(),
+                        "utime": data.utime.isoformat(),
+                        "run_id": data.run_id,
+                        "node_id": data.node_id,
+                        "node_name": data.node_name,
+                        "node_type": data.node_type,
+                        "tool_id": data.tool_id,
+                        "tool_version": data.tool_version,
+                        "tool_display_name": data.tool_display_name,
+                        "tool_name": data.tool_name,
+                        "action_name": data.action_name,
+                        "action_display_name": data.action_display_name,
+                        "status": data.status,
+                        "start_time": data.start_time.isoformat(),
+                        "end_time": data.end_time.isoformat(),
+                        "args": data.args,
+                        "result": data.result,
+                        "playbook_id": data.playbook_id,
+                        "executor_id": data.executor_id,
+                    })
+                await ws.send(orjson.dumps({"data": payload}))
+                updated_time = datas[-1].utime
+            await asyncio.sleep(5)
+    except WebsocketClosed:
+        logger.info("Websocket已关闭，停止轮询")
+    except asyncio.CancelledError:
+        logger.info("Websocket已取消，停止轮询")
+    except ConnectionClosed:
+        logger.info("Websocket连接已断开，停止轮询")
+    except Exception as e:
+        logger.error(f"轮询异常：{e}")
 
 
 @workflow_bp.websocket('/run')
@@ -199,8 +262,9 @@ async def execute_action(request: Request, ws: Websocket):
         执行接口，websocket通信
 
         请求参数：
-            - type str 类型 flow代表执行剧本， action代表执行动作
-            - playbook_input dict 剧本输入参数 当type为flow时必填,示例如下：
+            - type str 类型 flow代表执行剧本， action代表执行动作      放在路由中传输
+            - playbook_input dict 剧本输入参数 当type为flow时必填      用websocket发送
+            示例如下：
             {
                 "flow_id": "73ecfba0-1aa4-4128-b99a-b97fb08a14be",      剧本id
                 "flow_input": {
@@ -208,7 +272,8 @@ async def execute_action(request: Request, ws: Websocket):
                     "c":"123456789"         剧本输入参数
                 }
             }
-            - action_input dict 动作输入参数 当type为action时必填,示例如下：
+            - action_input dict 动作输入参数 当type为action时必填      用websocket发送
+            示例如下：
             {
                 "app_name":"huorong_edr",         应用名称，英文标识
                 "app_ver":"v1746495758839",      应用版本号
@@ -220,18 +285,38 @@ async def execute_action(request: Request, ws: Websocket):
                     "clients":"abcd",             动作输入参数
                     "groups":"123456789"          动作输入参数
                 },
-                "action_args":["clients","groups"]   动作输入参数名称列表
+                "action_args":["clients","groups"],   动作输入参数名称列表
+                "retry_times": 3,                  动作执行失败重试次数
+                "action_timeout": 60               动作执行超时时间,单位秒
             }
     """
-    async for msg in ws:
-        try:
-            data = orjson.loads(msg)
-            await ws.send(data.get('action', ''))
-        except ConnectionClosed:
-            logger.info("ws closed.")
-            return
-        except Exception as e:
-            logger.error(e)
+    auth_data = await asyncio.wait_for(ws.recv(), timeout=10)
+    auth_json = orjson.loads(auth_data)
+    user_id = auth_json['request_header']['id']
+
+    tz = pytz.timezone("Asia/Shanghai")
+    now = datetime.now(tz)
+    formatted_time = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + " +0800"
+    formatted_time = datetime.strptime(formatted_time, '%Y-%m-%d %H:%M:%S.%f %z')
+
+    msg = {}
+    type = request.args.get("type")
+    msg["run_type"] = type
+    msg["run_id"] = gen_order_version(length=6)
+    if type == "flow":
+        raw = await ws.recv()
+        params = orjson.loads(raw)
+        params["executor"] = user_id
+        msg["run_args"] = params
+    elif type == "action":
+        raw = await ws.recv()
+        params = orjson.loads(raw)
+        params["executor"] = user_id
+        msg["run_args"] = params
+
+    await send_kafka_message(kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg)
+
+    await poll_database_and_notify(ws, msg.get("run_id"), formatted_time)
 
 
 @workflow_bp.post('/input')
@@ -259,7 +344,8 @@ async def input_data(request):
             continue
         for key, value in node["properties"]["data"].items():
             if input_id in value:
-                data = await redis_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"])
+                data = orjson.loads(
+                    await redis_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"]))
                 if data:
                     if "actions" in data.keys():
                         action_key = "actions"
@@ -267,17 +353,25 @@ async def input_data(request):
                         action_key = "action"
                     for action in data.get(action_key):
                         if node["properties"]["data"]["action"] in action.values():
+                            for item in action["input"]:
+                                if key == item["key"]:
+                                    action["input"] = item
+                                    break
                             input_list.append({value.split(".output.")[-1].rstrip("}"): action})
                 else:
                     actions = await ToolAction.filter(tool_name=node["properties"]["app_name"],
                                                       version_number=node["properties"]["version"]).all()
                     for action in actions:
                         if node["properties"]["data"]["action"] == action.action["name"]:
+                            for item in action.action["input"]:
+                                if key == item["key"]:
+                                    action.action["input"] = item
+                                    break
                             input_list.append({value.split(".output.")[-1].rstrip("}"): action.action})
                     tool = await Tool.filter(name=node["properties"]["app_name"],
                                              version=node["properties"]["version"]).first()
                     if tool:
-                        config_path = os.path.abspath(os.path.join(tool.path), f"config.json")
+                        config_path = os.path.abspath(os.path.join(tool.path, f"config.json"))
 
                         async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
                             content = await f.read()
@@ -286,3 +380,19 @@ async def input_data(request):
                                                    content, ttl=2592000)
 
     return response_ok(input_list)
+
+
+async def statistics_data(flow_json):
+    actions_list = []
+    for node in flow_json["nodes"]:
+        if "data" not in node["properties"].keys():
+            continue
+        tool_name = node["properties"]["app_name"]
+        version_number = node["properties"]["version"]
+        action_name = node["properties"]["data"]["action"]
+        actions = await ToolAction.filter(tool_name=tool_name, version_number=version_number).all()
+        for action in actions:
+            if action_name == action.action["func"]:
+                actions_list.append(action.id)
+
+    return actions_list

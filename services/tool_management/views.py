@@ -207,7 +207,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
         await resp.send(f"data: 解压进度：{percent}%\n\n")
 
         configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False).first().values("resources")
-        if configuration and configuration["resources"] != config_data.get("resource"):
+        if configuration and configuration["resources"] != config_data.get("resource", {}):
             return config_data, version, tool_name, "工具资源不一致，请新建工具或删除原工具后再次上传"
         data += 1
         percent = int(data * single_progress) + success_progress
@@ -957,13 +957,9 @@ async def tool_action_input(request):
     return response_ok(input_data)
 
 
-@tool_management_bp.post("/action/update")
-@requires_permission("tool:u")
-async def tool_action_update(request):
+async def tool_action_update(data):
     """
     为动作绑定剧本id
-
-    query参数:
         - data   动作数据    dict
             {
                 "剧本id": [
@@ -972,7 +968,6 @@ async def tool_action_update(request):
                 ]
             }
     """
-    data = request.json.get("data")
     if not isinstance(data, dict):
         raise CustomError(ErrorCode.ParameterError)
 
@@ -999,16 +994,10 @@ async def tool_action_update(request):
             tool.status = 1
             await tool.save()
 
-    return response_ok("动作绑定剧本成功")
 
-
-@tool_management_bp.post("/action/playbook/delete")
-@requires_permission("tool:u")
-async def tool_action_playbook_delete(request):
+async def tool_action_playbook_delete(data):
     """
     删除动作绑定的剧本
-
-    query参数:
         - data   动作数据    dict
             {
                 "剧本id": [
@@ -1017,7 +1006,6 @@ async def tool_action_playbook_delete(request):
                 ]
             }
     """
-    data = request.json.get("data")
     if not isinstance(data, dict):
         raise CustomError(ErrorCode.ParameterError)
 
@@ -1043,5 +1031,3 @@ async def tool_action_playbook_delete(request):
         if tool:
             tool.status = 1 if has_playbook else 0
             await tool.save()
-
-    return response_ok("动作解绑剧本成功")
