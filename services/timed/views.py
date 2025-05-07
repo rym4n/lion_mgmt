@@ -49,15 +49,16 @@ async def add_timed(request):
        - action_input dict 动作输入参数 当type为1时必填,示例如下：
             {
                 "app_name":"huorong_edr",         应用名称，英文标识
+                "name": "中文名称",               应用中文名称
                 "app_ver":"v1746495758839",      应用版本号
                 "main":"huorong_edr.py",          主程序文件名  获取工具版本时会传
                 "action_input":{
                     "clients":"abcd",             动作输入参数
                     "groups":"123456789"          动作输入参数
                 },
-                "node_name":"自定义扫描",    动作描述
-                "action":"custom_scan",     动作名称
-                "action_name":"自定义扫描",    动作描述
+                "node_name":"自定义扫描",    节点名称，定时任务模块中取动作描述
+                "action":"custom_scan",     动作名称 英文标识
+                "action_name":"自定义扫描",    动作名称 中文名称
                 "retry_times":1,             重试次数
                 "timeout":300,               超时时间,单位秒
             }
@@ -154,7 +155,7 @@ async def get_all(request):
 
             action_desc = ""
             if item.action and isinstance(item.action.action, dict):
-                action_desc = item.action.action.get("description", "")
+                action_desc = item.action.action.get("name", "")
             action_match = keyword in action_desc.lower()
 
             playbook_name = item.playbook.name if item.playbook else ""
