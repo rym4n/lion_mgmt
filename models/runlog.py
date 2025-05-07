@@ -15,7 +15,6 @@ class Runlog(BaseModel):
     node_name = fields.CharField(max_length=255, description="节点名称")
     node_type = fields.CharField(max_length=36, description="节点类型")
 
-    tool_id = fields.CharField(null=True, max_length=36, description="工具ID")
     tool_name = fields.CharField(null=True, max_length=255, description="工具标识")
     tool_version = fields.CharField(null=True, max_length=255, description="工具版本")
     tool_display_name = fields.CharField(null=True, max_length=255, description="工具中文名称")
@@ -30,8 +29,9 @@ class Runlog(BaseModel):
     start_time = fields.DatetimeField(null=True, description="开始时间")
     end_time = fields.DatetimeField(null=True, description="结束时间")
 
+    executor = fields.CharField(null=True, max_length=36, description="执行者ID")
+
     playbook = fields.ForeignKeyField("models.Playbook", related_name="playbook_runlog", description="关联剧本")
-    executor = fields.ForeignKeyField("models.Account", related_name="account_run", description="执行人")
 
     def validate(self) -> None:
         raise NotImplementedError
