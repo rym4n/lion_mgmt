@@ -41,18 +41,8 @@ if os.environ.get("RY_ENV") == 'DEV':
     except:
         pass
 
-# 认证公钥
-PUBLIC_KEY = """
------BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4JGlUlZpDORYyH6QKwUT
-Tpb6PGhxZda5YVHmCatE3rNHo7dslet1ZbQAhf4X21Zb3WAu9qDKFdG9IYaFsAgA
-0YeQdfxe7h98UuZ3BUcMQ0yuWSMxlfCEv22yF+4kxSw903q7IRWP6RCr3vJTwu3r
-nKaNJv0JOFF5YFt5RzHi8tKP6MwGQVag4FbGHL0KyRRITP2j1LwX2kzIa9X896WV
-ykr6ioBH7A9tu7wXXzpd5YZQdtMFTF9xaxO8fJSKiArs4d5S9y48PtMn+kKT2qef
-nvb7oyNZcuqvq/6M35t9p+HPKKTRAcXRKunDXFTDa3YIjWhKUJRR2byS3SYT0J7p
-fQIDAQAB
------END PUBLIC KEY-----
-"""
+# todo: 暂时从环境变量获取
+PUBLIC_KEY = os.environ.get("RY_KEY")
 
 # 产品许可的内容
 LICENSE_DATA = None
