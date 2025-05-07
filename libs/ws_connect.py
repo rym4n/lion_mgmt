@@ -13,17 +13,22 @@ from models.warroom import Room, Message
 from models.user import Account
 
 
+# 获取或创建私聊作战室
 async def get_or_create_private_chat_room(user_id1: str, user_id2: str) -> Room:
+    # 保证顺序
     if user_id1 > user_id2:
         user_id1, user_id2 = user_id2, user_id1
     users = await Account.filter(id__in=[user_id1, user_id2])
+    # ID到对象的映射
     user_map = {str(user.id): user for user in users}
     user1 = user_map.get(user_id1)
     user2 = user_map.get(user_id2)
     if not user1 or not user2:
         raise CustomError(ErrorCode.AccountNotFound)
+    # 作战室名字
     private_room_name = f"私聊_{user1.username}_{user2.username}"
     room = await Room.filter(name=private_room_name).prefetch_related('users').first()
+    # 先查后创
     if not room:
         room = await Room.create(name=private_room_name, creator=user1)
         await room.users.add(user1, user2)
@@ -68,7 +73,7 @@ class ConnectionManager:
         self.heartbeats.pop(user_id, None)
         self.online_users.discard(user_id)
 
-        # 广播用户离开作战室
+        # 广播
         if current_room_id:
             user = await Account.get(id=user_id)
             if user:
@@ -95,7 +100,7 @@ class ConnectionManager:
                 "timestamp": str(datetime.now())
             }
 
-            # 广播给所有连接的客户端
+            # 广播
             for uid, connection in self.active_connections.items():
                 await connection.send(json.dumps(status_message))
         except Exception as e:
@@ -105,14 +110,14 @@ class ConnectionManager:
         """消息处理"""
         try:
             message_type = data.get("type")
-            # 按消息类型调用处理方法
+            # 按消息类型调用处理方法 (前端发送)
             if message_type == "public":
                 await self._handle_public_message(user_id, data)
             elif message_type == "private":
                 await self._handle_private_message(user_id, data)
             elif message_type == "recall":
                 await self._handle_recall_message(user_id, data)
-            elif message_type == "announcement":
+            elif message_type == "announcement":  # 发布公告，公告查询在消息查询API接口里
                 await self._handle_announcement(user_id, data)
             elif message_type == "delete_announcement":
                 await self._handle_delete_announcement(user_id, data)
@@ -158,7 +163,7 @@ class ConnectionManager:
                 receiver=user  # 群聊消息设为发送者自己作为占位符
             )
 
-            # 广播消息到房间所有用户
+            # 广播
             message_data = {
                 "type": "public",
                 "message_id": str(message.id),
@@ -232,11 +237,9 @@ class ConnectionManager:
                 "room_id": str(chat_room.id)
             }
 
-            # 发送给发送方
+            # 发送方和接收方都接收
             if user_id in self.active_connections:
                 await self.active_connections[user_id].send(json.dumps(message_data))
-
-            # 发送给接收方
             if receiver_id in self.active_connections:
                 await self.active_connections[receiver_id].send(json.dumps(message_data))
 
@@ -256,7 +259,6 @@ class ConnectionManager:
             await self._send_error(user_id, "消息不存在")
             return
 
-        # 非管理员只能2分钟以内撤回
         now = datetime.now()
         message_time = message.ctime
 
@@ -279,7 +281,7 @@ class ConnectionManager:
         }
 
         if message.type == "public":
-            # 获取关联的room对象
+            # 获取关联的room对象 (注意有坑, 获取外键关系时不加await的话获取不到实际数据, 其他地方类似)
             room = await message.room
             await self._broadcast_to_room(str(room.id), recall_notice)
         elif message.type == "private":
@@ -374,7 +376,7 @@ class ConnectionManager:
 
     async def _handle_heartbeat(self, user_id: str):
         """处理心跳消息"""
-        self.heartbeats[user_id] = datetime.now()
+        self.heartbeats[user_id] = datetime.now()  # 记录最后心跳时间
         if user_id in self.active_connections:
             await self.active_connections[user_id].send(json.dumps({
                 "type": "heartbeat",
@@ -389,7 +391,6 @@ class ConnectionManager:
         room = await Room.get(id=room_id)
         if not room:
             return
-
         try:
             room_members = self.room_members.get(room_id, set())
             if not room_members:
@@ -406,8 +407,6 @@ class ConnectionManager:
                     try:
                         await self.active_connections[uid].send(json.dumps(message))
                     except ConnectionClosed:
-                        closed_connections.append(uid)
-                    except Exception as e:
                         closed_connections.append(uid)
 
             # 处理已关闭的连接

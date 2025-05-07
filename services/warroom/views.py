@@ -127,6 +127,7 @@ async def delete_room(request: Request):
         return CustomError(ErrorCode.RoomNotExists)
     user = request.ctx.session['account_info']
     creator = await room.creator
+    # 房间只能由创建者删除
     if str(creator.id) != str(user.id):
         return CustomError(ErrorCode.RoomDeleteNotAllowed)
     await Room.filter(id=room_id).update(deleted=True)
@@ -147,7 +148,7 @@ async def get_roomsList(request: Request):
 
     if keyword:
         query = query.filter(name__contains=keyword)
-
+    # 前端是先获取再查询, 没有使用到这里的查询参数.
     rooms = await query.order_by('-ctime').select_related('creator')
 
     room_list = []
@@ -180,7 +181,7 @@ async def acquire_members(request: Request):
     room = await Room.get(id=room_id)
     if room is None:
         raise CustomError(ErrorCode.RoomNotExists)
-
+    # 查询参数预留, 前端暂未使用查询
     query = room.users.all()
     if keyword:
         query = query.filter(Q(username__contains=keyword))
@@ -214,6 +215,7 @@ async def get_private_room(request: Request):
     user = request.ctx.session['account_info']
     partner_id = request.json.get('partner_id')
 
+    # 先获取私聊房间
     chat_room = await get_or_create_private_chat_room(str(user.id), partner_id)
 
     # 缓存房间ID到连接管理器
@@ -239,7 +241,7 @@ async def get_user_rooms(request: Request):
     """
     user = request.ctx.session['account_info']
     keyword = request.json.get('keyword', '')
-
+    # 筛选 deleted=False, 该项目使用软删除的方式
     query = Room.filter(users__id=user.id, deleted=False)
     if keyword:
         query = query.filter(name__contains=keyword)
@@ -290,7 +292,7 @@ async def query_messages(request: Request):
     if not query_type:
         return CustomError(ErrorCode.ParamValueError)
 
-    # 群聊历史
+    # 群聊历史. 先查询后创建消息发送
     if query_type == "public_history":
         if not room_id:
             return CustomError(ErrorCode.ParamValueError)
@@ -328,13 +330,14 @@ async def query_messages(request: Request):
             return CustomError(ErrorCode.ParamValueError)
 
         chat_room = await get_or_create_private_chat_room(user_id, partner_id)
+        # 消息计数
         total_count = await Message.filter(
             Q(Q(sender_id=user_id) & Q(receiver_id=partner_id)) |
             Q(Q(sender_id=partner_id) & Q(receiver_id=user_id)),
             type="private",
             room_id=chat_room.id
         ).count()
-
+        # 分页处理
         messages = await Message.filter(
             Q(Q(sender_id=user_id) & Q(receiver_id=partner_id)) |
             Q(Q(sender_id=partner_id) & Q(receiver_id=user_id)),
@@ -374,7 +377,7 @@ async def query_messages(request: Request):
     elif query_type == "search_messages":
         if not keyword:
             return CustomError(ErrorCode.ParamValueError)
-
+        # 传入房间ID, 搜索房间群聊记录
         if room_id:
             query = Message.filter(
                 type="public",
@@ -382,10 +385,11 @@ async def query_messages(request: Request):
                 content__contains=keyword,
                 is_recalled=False,
             )
-
+        # 传入私聊用户ID, 搜索私聊历史记录
         elif partner_id:
             chat_room = await get_or_create_private_chat_room(user_id, partner_id)
             query = Message.filter(
+                # 筛消息发送/接收包含私聊双方的，建议改造创建私聊房间逻辑，直接按房间号筛就得了
                 Q(Q(sender_id=user_id) & Q(receiver_id=partner_id)) |
                 Q(Q(sender_id=partner_id) & Q(receiver_id=user_id)),
                 type="private",
