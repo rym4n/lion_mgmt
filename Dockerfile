@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=$POETRY_CACHE_DIR poetry install --without dev --n
 
 COPY . ./
 
-RUN pyarmor gen -O dist -r -i core services models libs
+# RUN pyarmor gen -O dist -r -i core services models libs
 
 FROM python:3.11-slim as runtime
 
@@ -38,7 +38,11 @@ ENV VIRTUAL_ENV=/app/.venv \
 WORKDIR /app
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
-COPY --from=builder /app/dist/ ./
+# COPY --from=builder /app/dist/ ./
+COPY core ./core
+COPY services ./services
+COPY models ./models
+COPY libs ./libs
 COPY settings ./settings
 COPY server.py ./
 
