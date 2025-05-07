@@ -3,6 +3,7 @@
 
 from tortoise import fields
 
+from libs.utils import strip_timezone_to_seconds
 from models import BaseModel
 
 
@@ -27,7 +28,7 @@ class AuditLog(BaseModel):
         return {
             "id": self.id,
             "username": self.username,
-            "ctime": str(self.ctime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
             "action": self.action,
             "module": self.module,
             "result": self.result,

@@ -2,6 +2,7 @@
 
 from tortoise import fields
 
+from libs.utils import strip_timezone_to_seconds
 from models.base import BaseModel
 
 
@@ -23,8 +24,8 @@ class Scene(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "name": self.name,
             "remark": self.remark,
             "status": self.status,

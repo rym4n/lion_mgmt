@@ -2,6 +2,7 @@
 
 from tortoise import fields
 
+from libs.utils import strip_timezone_to_seconds
 from models import BaseModel
 
 
@@ -24,8 +25,8 @@ class SystemCustomConfiguration(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "system_name": self.system_name,
             "system_version": self.system_version,
             "copyright": self.copyright,
@@ -57,8 +58,8 @@ class SystemStatus(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "systemname": self.systemname,
             "instancename": self.instancename,
             "uptime": self.uptime,

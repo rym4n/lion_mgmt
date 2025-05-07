@@ -4,6 +4,7 @@ import re
 from tortoise import fields
 from tortoise.validators import RegexValidator
 
+from libs.utils import strip_timezone_to_seconds
 from models.base import BaseModel
 
 
@@ -42,8 +43,8 @@ class Account(BaseModel):
     def json(self) -> dict:
         tmp = {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "email": self.email,
             "username": self.username,
             "phone": self.phone,
@@ -80,8 +81,8 @@ class Role(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "name": self.name,
             "description": self.description,
             "permissions": self.permissions,
@@ -108,8 +109,8 @@ class PermissionsMenu(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "model": self.model,
             "description": self.description,
             "permissions": self.Permissions,

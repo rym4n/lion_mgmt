@@ -2,6 +2,7 @@
 
 from tortoise import fields
 
+from libs.utils import strip_timezone_to_seconds
 from models.base import BaseModel
 
 
@@ -32,8 +33,8 @@ class Timed(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "name": self.name,
             "type": self.type,
             "playbook": self.playbook.name if self.playbook else "",

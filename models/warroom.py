@@ -2,6 +2,7 @@
 
 from tortoise import fields
 
+from libs.utils import strip_timezone_to_seconds
 from models.base import BaseModel
 
 
@@ -20,8 +21,8 @@ class Room(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "name": self.name,
             "creator": self.creator.username if self.creator else "",
             "users": [user.username if user else "" for user in self.users.all()]
@@ -52,8 +53,8 @@ class Message(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "content": self.content,
             "image_content": self.image_content,
             "type": self.type,

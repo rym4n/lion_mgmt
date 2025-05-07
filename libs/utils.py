@@ -5,17 +5,17 @@ import os.path
 import random
 import time
 import zipfile
-import orjson
 from io import BytesIO
 from pathlib import Path, PurePath
 from string import ascii_uppercase, digits
 
 import aiofile
 import aiofiles
+import orjson
 from aiofile import async_open
+from aiokafka import AIOKafkaProducer
 from argon2 import PasswordHasher
 from sanic.utils import str_to_bool as sanic_str_to_bool
-from aiokafka import AIOKafkaProducer
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
@@ -156,8 +156,14 @@ async def send_kafka_message(kafka_bootstrap_servers, topic, message):
     发送kafka消息
     """
     async with AIOKafkaProducer(
-        bootstrap_servers=kafka_bootstrap_servers,
-        value_serializer=lambda m: orjson.dumps(m)
+            bootstrap_servers=kafka_bootstrap_servers,
+            value_serializer=lambda m: orjson.dumps(m)
     ) as producer:
         await producer.start()
         await producer.send_and_wait(topic, message)
+
+
+def strip_timezone_to_seconds(dt_str):
+    dt = datetime.datetime.fromisoformat(str(dt_str))
+    dt_local = dt.astimezone()
+    return dt_local.strftime("%Y-%m-%d %H:%M:%S")

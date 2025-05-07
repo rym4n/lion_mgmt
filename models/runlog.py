@@ -2,6 +2,7 @@
 
 from tortoise import fields
 
+from libs.utils import strip_timezone_to_seconds
 from models.base import BaseModel
 
 
@@ -40,8 +41,8 @@ class Runlog(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "run_id": self.run_id,
             "node_id": self.node_id,
             "node_name": self.node_name,
@@ -54,8 +55,8 @@ class Runlog(BaseModel):
             "status": self.status,
             "args": self.args,
             "result": self.result,
-            "start_time": str(self.start_time),
-            "end_time": str(self.end_time),
+            "start_time": strip_timezone_to_seconds(self.start_time),
+            "end_time": strip_timezone_to_seconds(self.end_time),
             "playbook": self.playbook,
             "creator": self.executor.username
         }

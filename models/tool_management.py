@@ -2,6 +2,7 @@
 
 from tortoise import fields
 
+from libs.utils import strip_timezone_to_seconds
 from models import BaseModel
 
 
@@ -22,8 +23,8 @@ class ToolAction(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "tool_name": self.tool_name,
             "version_number": self.version_number,
             "action": self.action,
@@ -59,8 +60,8 @@ class Tool(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "name": self.name,
             "version": self.version,
             "description": self.description,
@@ -93,8 +94,8 @@ class ToolResourcesModel(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "tool_name": self.tool_name,
             "resources": self.resources,
         }
@@ -125,8 +126,8 @@ class ToolResources(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "tool_name": self.tool_name,
             "name": self.name,
             "description": self.description,
@@ -160,8 +161,8 @@ class ActionPermissions(BaseModel):
     def json(self) -> dict:
         return {
             "id": self.id,
-            "ctime": str(self.ctime),
-            "utime": str(self.utime),
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
             "action_name": self.action_name,
             "action_description": self.action_description,
             "tool_name": self.tool_name,
