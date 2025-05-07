@@ -47,8 +47,8 @@ class Runlog(BaseModel):
             "node_id": self.node_id,
             "node_name": self.node_name,
             "node_type": self.node_type,
-            "tool_id": self.tool_id,
             "tool_name": self.tool_name,
+            "tool_version": self.tool_version,
             "tool_display_name": self.tool_display_name,
             "action_name": self.action_name,
             "action_display_name": self.action_display_name,
@@ -57,8 +57,8 @@ class Runlog(BaseModel):
             "result": self.result,
             "start_time": strip_timezone_to_seconds(self.start_time),
             "end_time": strip_timezone_to_seconds(self.end_time),
-            "playbook": self.playbook,
-            "creator": self.executor.username
+            "playbook": self.playbook.id if self.playbook else "",
+            "creator": self.executor
         }
 
     class Meta:

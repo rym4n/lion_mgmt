@@ -217,32 +217,11 @@ async def poll_database_and_notify(ws, run_id, formatted_time):
     print(run_id)
     try:
         while True:
-            datas = await Runlog.filter(run_id=run_id, utime__gt=updated_time).all()
+            datas = await Runlog.filter(run_id=run_id, utime__gt=updated_time).all().prefetch_related("playbook")
             if datas:
                 payload = []
                 for data in datas:
-                    payload.append({
-                        "id": data.id,
-                        "ctime": data.ctime.isoformat(),
-                        "utime": data.utime.isoformat(),
-                        "run_id": data.run_id,
-                        "node_id": data.node_id,
-                        "node_name": data.node_name,
-                        "node_type": data.node_type,
-                        "tool_id": data.tool_id,
-                        "tool_version": data.tool_version,
-                        "tool_display_name": data.tool_display_name,
-                        "tool_name": data.tool_name,
-                        "action_name": data.action_name,
-                        "action_display_name": data.action_display_name,
-                        "status": data.status,
-                        "start_time": data.start_time.isoformat(),
-                        "end_time": data.end_time.isoformat(),
-                        "args": data.args,
-                        "result": data.result,
-                        "playbook_id": data.playbook_id,
-                        "executor_id": data.executor_id,
-                    })
+                    payload.append(data.json)
                 await ws.send(orjson.dumps({"data": payload}))
                 updated_time = datas[-1].utime
             await asyncio.sleep(5)
@@ -276,15 +255,16 @@ async def execute_action(request: Request, ws: Websocket):
             示例如下：
             {
                 "app_name":"huorong_edr",         应用名称，英文标识
+                "name": "中文名称",               应用中文名称
                 "app_ver":"v1746495758839",      应用版本号
                 "main":"huorong_edr.py",          主程序文件名  获取工具版本时会传
                 "action_input":{
                     "clients":"abcd",             动作输入参数
                     "groups":"123456789"          动作输入参数
                 },
-                "node_name":"自定义扫描",    动作描述
-                "action":"custom_scan",     动作名称
-                "action_name":"自定义扫描",    动作描述
+                "node_name":"自定义扫描",    节点名称，定时任务模块中取动作描述
+                "action":"custom_scan",     动作名称 英文标识
+                "action_name":"自定义扫描",    动作名称 中文名称
                 "retry_times":1,             重试次数
                 "timeout":300,               超时时间,单位秒
             }
@@ -302,16 +282,10 @@ async def execute_action(request: Request, ws: Websocket):
     type = request.args.get("type")
     msg["run_type"] = type
     msg["run_id"] = gen_order_version(length=6)
-    if type == "flow":
-        raw = await ws.recv()
-        params = orjson.loads(raw)
-        params["executor"] = user_id
-        msg["run_args"] = params
-    elif type == "action":
-        raw = await ws.recv()
-        params = orjson.loads(raw)
-        params["executor"] = user_id
-        msg["run_args"] = params
+    raw = await ws.recv()
+    params = orjson.loads(raw)
+    params["executor"] = user_id
+    msg["run_args"] = params
 
     await send_kafka_message(kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg)
 
