@@ -340,9 +340,9 @@ async def input_data(request):
     input_list = []
 
     for node in nodes[1:]:
-        if "data" not in node["properties"].keys():
+        if "input" not in node["properties"].keys():
             continue
-        for key, value in node["properties"]["data"].items():
+        for key, value in node["properties"]["input"].items():
             if input_id in value:
                 data = orjson.loads(
                     await redis_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"]))
@@ -352,7 +352,7 @@ async def input_data(request):
                     elif "action" in data.keys():
                         action_key = "action"
                     for action in data.get(action_key):
-                        if node["properties"]["data"]["action"] in action.values():
+                        if node["properties"]["action"] in action.values():
                             for item in action["input"]:
                                 if key == item["key"]:
                                     action["input"] = item
@@ -362,7 +362,7 @@ async def input_data(request):
                     actions = await ToolAction.filter(tool_name=node["properties"]["app_name"],
                                                       version_number=node["properties"]["version"]).all()
                     for action in actions:
-                        if node["properties"]["data"]["action"] == action.action["name"]:
+                        if node["properties"]["action"] == action.action["name"]:
                             for item in action.action["input"]:
                                 if key == item["key"]:
                                     action.action["input"] = item
@@ -385,11 +385,9 @@ async def input_data(request):
 async def statistics_data(flow_json):
     actions_list = []
     for node in flow_json["nodes"]:
-        if "data" not in node["properties"].keys():
-            continue
         tool_name = node["properties"]["app_name"]
         version_number = node["properties"]["version"]
-        action_name = node["properties"]["data"]["action"]
+        action_name = node["properties"]["action"]
         actions = await ToolAction.filter(tool_name=tool_name, version_number=version_number).all()
         for action in actions:
             if action_name == action.action["func"]:
