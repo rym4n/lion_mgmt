@@ -65,7 +65,13 @@ async def create_event(request):
         event_name: str 事件名称
         event_source: str 事件来源   (人工创建时默认传人工)
         event_level: str 事件级别
-        owner: list 负责人
+        owner: list 负责人 示例：
+        [
+            {
+            "role":["root"],
+            "user":["test"]
+            }
+        ]
         event_summary: str 事件概要 (非必填)
         event_ingestion_id: str 事件接入id   (人工创建时不传此参数)
         log_data: str 日志数据 (非必填)
@@ -141,4 +147,73 @@ async def bind_event_to_run(request):
         await event.save(update_fields=["run_id"])
 
     return response_ok("绑定成功")
+
+
+@event_bp.post('/update')
+@requires_permission('event:u')
+async def update_event(request):
+    """
+    更新事件（需要事件更新权限）
+
+    请求参数：
+        id: str 事件id
+        event_name: str 事件名称    (非必填)
+        event_level: str 事件级别    (非必填)
+        owner: list 负责人          (非必填)
+        示例：
+        [
+            {
+            "role":["root"],
+            "user":["test"]
+            }
+        ]
+        event_summary: str 事件概要 (非必填)
+        event_process_status: str 事件处理状态 (非必填)
+    """
+    params = request.json
+    event_id = params.get("id")
+    if not event_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    event = await Events.get_or_none(id=event_id, deleted=False)
+    if not event:
+        raise CustomError(ErrorCode.NotFound)
+
+    update_fields = []
+
+    if name := params.get("event_name"):
+        event.event_name = name
+        update_fields.append("event_name")
+
+    if level := params.get("event_level"):
+        event.event_level = level
+        update_fields.append("event_level")
+
+    if summary := params.get("event_summary"):
+        event.event_summary = summary
+        update_fields.append("event_summary")
+
+    if status := params.get("event_process_status"):
+        event.event_process_status = status
+        update_fields.append("event_process_status")
+
+    new_owner = params.get("owner")
+    if new_owner is not None:
+        if not isinstance(event.owner, list) or not event.owner:
+            event.owner = [{"role": [], "user": []}]
+        owner_data = event.owner[0]
+        for o in new_owner[0].get("user", []):
+            if o not in owner_data.get("user", []):
+                owner_data.get("user", []).append(o)
+        for o in new_owner[0].get("role", []):
+            if o not in owner_data.get("role", []):
+                owner_data.get("role", []).append(o)
+        update_fields.append("owner")
+
+    if update_fields:
+        await event.save(update_fields=update_fields)
+
+    return response_ok("更新成功")
+
+
 
