@@ -31,7 +31,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
-dev = ["dotenv>=0.9.9,<0.10"]
+dev = [
+    "cython>=3.0.12",
+    "dotenv>=0.9.9,<0.10",
+]
 
 [tool.uv]
 package = false

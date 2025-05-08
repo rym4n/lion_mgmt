@@ -14,7 +14,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from services import verify_license
+from libs.utils import verify_license
 from settings import LICENSE_DIR, LICENSE_DATA
 
 license_bp = Blueprint('license', url_prefix='v1/license')

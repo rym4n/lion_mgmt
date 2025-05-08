@@ -205,26 +205,6 @@ def verify_license(data: bytes):
     if lic.get("expireTime", 0) > int(time.time() * 1000):
         settings.LICENSE_DATA = lic
     else:
-        settings.LICENSE_DATA = "timeout"
         raise CustomError(ErrorCode.LicenseExpired)
 
 
-def get_modules():
-    """根据产品许可返回需要注册模块"""
-    module_flags = {}
-    if settings.LICENSE_DATA:
-        if settings.LICENSE_DATA == "timeout":
-            return ["license_bp", "user_bp"]
-
-        for item in settings.LICENSE_DATA["menuInfo"]["moduleList"]:
-            module = item["module"]
-            auth = item["auth"]
-
-            if module not in module_flags:
-                module_flags[module] = False
-            if auth and int(item["expireTime"]) > int(time.time() * 1000):
-                module_flags[module] = True
-
-        return [mod for mod, should_register in module_flags.items() if should_register]
-    else:
-        return ["license_bp", "user_bp"]

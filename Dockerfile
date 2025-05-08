@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     libaio-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install uv==0.7.0 pyarmor==9.1.2
+RUN pip install uv==0.7.0 cython==3.0.12
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/app \
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY . ./
 
-# RUN pyarmor gen -O dist -r -i core services models libs
+RUN python compile.py
 
 FROM python:3.11-slim as runtime
 
@@ -36,12 +36,6 @@ ENV VIRTUAL_ENV=/app/.venv \
 WORKDIR /app
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
-# COPY --from=builder /app/dist/ ./
-COPY core ./core
-COPY services ./services
-COPY models ./models
-COPY libs ./libs
-COPY settings ./settings
-COPY server.py ./
+COPY --from=builder /app/dist/ ./
 
 ENTRYPOINT ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

@@ -1,6 +1,9 @@
 # coding=utf-8
 
 import functools
+import hashlib
+import os
+import time
 
 from sanic.log import logger
 from sanic.request import Request
@@ -8,6 +11,8 @@ from sanic.request import Request
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
+from libs.utils import verify_license
+from settings import LICENSE_DIR, LICENSE_DATA
 
 
 async def check_permissions(request: Request, *required_permissions: str) -> bool:
@@ -98,3 +103,39 @@ def requires_role(*required_roles: str):
         return wrapper
 
     return decorator
+
+
+def load_license():
+    for root, dirs, files in os.walk(LICENSE_DIR):
+        for file in files:
+            filename, ext = os.path.splitext(file)
+            full_path = os.path.join(root, file)
+            with open(full_path, "r") as f:
+                data = f.read()
+                if filename == hashlib.md5(f"{data}".encode()).hexdigest():
+                    try:
+                        verify_license(data)
+                        return
+                    except Exception as e:
+                        logger.error(f"License无效: {e}")
+
+
+def get_modules():
+    """根据产品许可返回需要注册模块"""
+    module_flags = {}
+    if LICENSE_DATA:
+        if LICENSE_DATA == "timeout":
+            return ["license_bp", "user_bp"]
+
+        for item in LICENSE_DATA["menuInfo"]["moduleList"]:
+            module = item["module"]
+            auth = item["auth"]
+
+            if module not in module_flags:
+                module_flags[module] = False
+            if auth and int(item["expireTime"]) > int(time.time() * 1000):
+                module_flags[module] = True
+
+        return [mod for mod, should_register in module_flags.items() if should_register]
+    else:
+        return ["license_bp", "user_bp"]
