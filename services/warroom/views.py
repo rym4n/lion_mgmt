@@ -75,7 +75,7 @@ async def create_room(request: Request):
     members_ids = request.json.get('members', [])
 
     # 作战室名称唯一
-    if await Room.filter(name=room_name).exists():
+    if await Room.filter(name=room_name, deleted=False).exists():
         return CustomError(ErrorCode.RoomNameExists)
     creator = request.ctx.session['account_info']
     room = await Room.create(name=room_name, creator=creator)
