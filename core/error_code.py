@@ -80,3 +80,4 @@ class ErrorCode(BaseErrorCode):
     SceneExistsError = ErrorData(4055, "场景已存在")
     TimedNameExists = ErrorData(4056, "定时任务名称重复，请重新命名")
     TimedNotFound = ErrorData(4057, "定时任务不存在")
+    EventNameExists = ErrorData(4058, "事件名称重复，请重新命名")
