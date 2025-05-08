@@ -22,6 +22,7 @@ class Events(BaseModel):
     log_data: str = fields.TextField(default=dict, description="日志数据")
     event_ingestion_id: str = fields.CharField(max_length=255, description="事件接入id，管理事件接入表")
     run_id: str = fields.JSONField(default=list, null=True, description="运行id")
+    room = fields.ForeignKeyField("models.Room", null=True, related_name="room_events", description="更新人")
 
     def validate(self) -> None:
         raise NotImplementedError

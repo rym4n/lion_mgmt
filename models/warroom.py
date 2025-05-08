@@ -10,7 +10,7 @@ class Room(BaseModel):
     """
     作战室房间模型
     """
-    name: str = fields.CharField(null=False, max_length=50, unique=True, description="作战室名称")
+    name: str = fields.CharField(null=False, max_length=50, description="作战室名称")
     creator = fields.ForeignKeyField(model_name="models.Account", related_name="created_room", description="房主")
     users = fields.ManyToManyField(model_name="models.Account", through="room_accounts")
 
