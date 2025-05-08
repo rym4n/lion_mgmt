@@ -8,21 +8,19 @@ RUN apt-get update && apt-get install -y \
     libaio-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install poetry==2.1.1 pyarmor==9.1.2
+RUN pip install uv==0.7.0 pyarmor==9.1.2
 
-ENV POETRY_NO_INTERACTION=1 \
-    POETRY_VIRTUALENVS_IN_PROJECT=1 \
-    POETRY_VIRTUALENVS_CREATE=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    POETRY_CACHE_DIR=/tmp/poetry_cache
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app/app \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
 
 WORKDIR /app
 
-COPY pyproject.toml poetry.lock ./
-
-RUN touch README.md
-
-RUN --mount=type=cache,target=$POETRY_CACHE_DIR poetry install --without dev --no-root
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-install-project --no-dev
 
 COPY . ./
 
@@ -46,4 +44,4 @@ COPY libs ./libs
 COPY settings ./settings
 COPY server.py ./
 
-ENTRYPOINT ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "8"]
+ENTRYPOINT ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
