@@ -10,7 +10,9 @@ from sanic import Blueprint
 from sanic import response
 from sanic.request import Request
 
+from core.error_code import ErrorCode
 from core.response import response_ok
+from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from services import verify_license
 from settings import LICENSE_DIR, LICENSE_DATA
@@ -102,6 +104,8 @@ async def get_all_license(request: Request):
     获取所有license文件信息用于页面展示
     """
     menu_dict = dict()
+    if not LICENSE_DATA:
+        raise CustomError(ErrorCode.InvalidLicenseError)
     menu_dict["name"] = LICENSE_DATA["company"]
     menu_dict["version"] = LICENSE_DATA["version"]
     menu_dict["createTime"] = formatted_time(LICENSE_DATA["createTime"])

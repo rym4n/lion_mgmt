@@ -195,11 +195,11 @@ def rsa_chunk_decrypt(ciphertext: bytes, rsa_priv_key: rsa.RSAPrivateKey) -> byt
 def verify_license(data: bytes):
     try:
         lic_enc = base64.b32decode(data)
-        pkey = serialization.load_pem_private_key(base64.b64decode(RY_KEY), password=None)
+        pkey = serialization.load_pem_private_key(base64.b64decode(RY_KEY.encode()), password=None)
         decrypted = rsa_chunk_decrypt(lic_enc, pkey)
         machine_id = uuid.getnode()
-        lic = jwt.decode(decrypted, machine_id, "HS256")
-    except Exception as e:
+        lic = jwt.decode(decrypted, str(machine_id), "HS256")
+    except Exception:
         raise CustomError(ErrorCode.InvalidLicenseError)
 
     if lic.get("expireTime", 0) > int(time.time() * 1000):
