@@ -36,7 +36,6 @@ def create_app() -> Sanic:
     # 注册异常处理
     register_exception_handler(app)
 
-    # 许可认证检测
     load_license()
 
     # 注册蓝图
@@ -53,7 +52,10 @@ def load_license():
             with open(full_path, "r") as f:
                 data = f.read()
                 if filename == hashlib.md5(f"{data}".encode()).hexdigest():
-                    verify_license(data)
+                    try:
+                        verify_license(data)
+                    except Exception as e:
+                        logger.error(f"License无效: {e}")
 
 
 def register_blueprints(app: Sanic) -> None:

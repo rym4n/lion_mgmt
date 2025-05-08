@@ -1,7 +1,6 @@
 # coding=utf-8
 
 from sanic import Blueprint
-from sanic.log import logger
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode

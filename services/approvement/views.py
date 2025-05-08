@@ -8,7 +8,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Account, Approvement
+from models import Approvement
 
 approve_bp = Blueprint('approve', url_prefix='v1/approve')
 _all__ = ["approve_bp"]

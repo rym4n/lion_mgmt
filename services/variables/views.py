@@ -8,7 +8,6 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Account
 from models.variables import Variables
 
 var_bp = Blueprint('var', url_prefix='v1/var')

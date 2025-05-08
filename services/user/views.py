@@ -49,7 +49,7 @@ async def new_user(request):
         # 添加角色
         if request.json.get("role_names"):
             roles = await Role.filter(name__in=request.json.get("role_names")).all()
-            await account.roles.add(*roles).prefetch_related('roles')
+            await account.roles.add(*roles)
         res = account.json
         if mfa_enable:
             res['mfa_uri'] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name='AIOE')
@@ -111,7 +111,7 @@ async def login(request):
         user_attempts = 0
     if user_attempts > MAX_CHALLENGE_ATTEMPTS:
         raise CustomError(ErrorCode.MaxChallenge)
-        
+
     client_ip = get_client_ip(request)
 
     # 防止暴力破解/撞库
