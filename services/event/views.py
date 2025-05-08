@@ -7,7 +7,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Events, Runlog
+from models import Events, Runlog, Room, Account
 
 event_bp = Blueprint('event', url_prefix='v1/event')
 _all__ = ["event_bp"]
@@ -74,7 +74,7 @@ async def create_event(request):
         ]
         event_summary: str 事件概要 (非必填)
         event_ingestion_id: str 事件接入id   (人工创建时不传此参数)
-        log_data: str 日志数据 (非必填)
+        log_data: str 日志数据 (非必填)    (人工创建时不传此参数)
     """
     event_name = request.json.get("event_name")
     event_process_status = "待处理"
@@ -86,6 +86,9 @@ async def create_event(request):
     event_summary = (request.json.get("event_summary") or "")
     event_ingestion_id = (request.json.get("event_ingestion_id") or "")
     log_data = (request.json.get("log_data") or "")
+
+    if await Events.filter(event_name=event_name, deleted=False).exists():
+        raise CustomError(ErrorCode.EventNameExists)
 
     async with in_transaction():
         role = await Events.create(event_name=event_name, event_process_status=event_process_status,
@@ -107,9 +110,18 @@ async def get_event_detail(request):
     """
     event_id = request.json.get("id")
 
-    event = await Events.get(id=event_id, deleted=False)
+    event = await Events.get(id=event_id, deleted=False).prefetch_related("room")
     if not event:
         raise CustomError(ErrorCode.NotFound)
+
+    if not event.room:
+        if await Room.filter(name=event.event_name, deleted=False).exists():
+            return CustomError(ErrorCode.RoomNameExists)
+        creator = request.ctx.session['account_info']
+        room = await Room.create(name=event.event_name, creator=creator)
+        await room.users.add(creator)
+        event.room = room
+        await event.save()
 
     event_dict = event.json
     event_dict["created_name"] = request.ctx.session['account_info'].username
@@ -118,6 +130,8 @@ async def get_event_detail(request):
     for run_id in event_dict["run_id"]:
         run_logs = await Runlog.filter(run_id=run_id, deleted=False).all().prefetch_related("playbook")
         event_dict["run_logs"].append([runlog.json for runlog in run_logs])
+
+    event_dict["room_users"] = [user.username if user else "" for user in await event.room.users.all()]
 
     return response_ok(event_dict)
 
@@ -169,13 +183,14 @@ async def update_event(request):
         ]
         event_summary: str 事件概要 (非必填)
         event_process_status: str 事件处理状态 (非必填)
+        room_user_id: str 作战室新增用户id (非必填)
     """
     params = request.json
     event_id = params.get("id")
     if not event_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    event = await Events.get_or_none(id=event_id, deleted=False)
+    event = await Events.get_or_none(id=event_id, deleted=False).prefetch_related("room")
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
@@ -196,6 +211,13 @@ async def update_event(request):
     if status := params.get("event_process_status"):
         event.event_process_status = status
         update_fields.append("event_process_status")
+
+    if room_user_id := params.get("room_user_id"):
+        is_member = await event.room.users.filter(id=room_user_id).exists()
+        if not is_member:
+            user = await Account.get_or_none(id=room_user_id)
+            if user:
+                await event.room.users.add(user)
 
     new_owner = params.get("owner")
     if new_owner is not None:
