@@ -71,7 +71,7 @@ async def upload_and_extract_zip(request):
             return response_ok({"error": "应用数量已达到上限"})
 
         config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, resp,
-                                                           success_progress, request.app.ctx.cache_client)
+                                                           success_progress, request.ctx.cache_client)
         if msg != "success":
             results.append({"tool": tool_name, "msg": msg})
             data += 1

@@ -1,6 +1,5 @@
 # coding=utf-8
 
-import base64
 import datetime
 import hashlib
 import os
@@ -8,18 +7,14 @@ import threading
 import time
 
 import aiofile
-import orjson
 from sanic import Blueprint
 from sanic import response
 from sanic.request import Request
 
-import settings
-from core.error_code import ErrorCode
 from core.response import response_ok
-from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from services import verify_license
-from settings import LICENSE_DIR
+from settings import LICENSE_DIR, LICENSE_DATA
 
 license_bp = Blueprint('license', url_prefix='v1/license')
 _all__ = ["license_bp"]
@@ -59,31 +54,18 @@ async def verify_license_api(request: Request):
         return response.json({"success": False, "message": "缺少必要字段"}, status=400)
 
     license_file = request.files.get("file")
-    encoded = license_file.body.decode("utf-8")
-    json_str = base64.b64decode(encoded.encode("utf-8")).decode("utf-8")
-    license_data = orjson.loads(json_str)
-    is_valid = verify_license(license_data)
-    if is_valid:
-        if license_data.get("expireTime"):
-            if int(time.time() * 1000) >= license_data.get("expireTime"):
-                settings.LICENSE_DATA = "timeout"
-                raise CustomError(ErrorCode.LicenseExpired)
-            else:
-                license_path = hashlib.md5(f"{encoded}".encode()).hexdigest() + ".lic"
-                for root, dirs, files in os.walk(LICENSE_DIR):
-                    for file in files:
-                        full_path = os.path.join(root, file)
-                        new_path = os.path.join(root, license_path)
-                        async with aiofile.AIOFile(full_path, 'w', encoding='utf-8') as f:
-                            await f.write(encoded)
-                        if os.path.exists(full_path):
-                            os.rename(full_path, new_path)
-                        settings.LICENSE_DATA = license_data
-
-                threading.Thread(target=delayed_exit, args=(1,), daemon=True).start()
-                return response_ok("上传成功，正在加载配置文件，请稍后！")
-    else:
-        raise CustomError(ErrorCode.InvalidLicenseError)
+    verify_license(license_file.body)
+    license_path = hashlib.md5(license_file.body).hexdigest() + ".lic"
+    for root, dirs, files in os.walk(LICENSE_DIR):
+        for file in files:
+            full_path = os.path.join(root, file)
+            new_path = os.path.join(root, license_path)
+            async with aiofile.AIOFile(full_path, 'w', encoding='utf-8') as f:
+                await f.write(license_file.body)
+            if os.path.exists(full_path):
+                os.rename(full_path, new_path)
+    threading.Thread(target=delayed_exit, args=(1,), daemon=True).start()
+    return response_ok("上传成功，正在加载配置文件，请稍后！")
 
 
 @license_bp.post("/get")
@@ -95,33 +77,14 @@ async def get_license(request: Request):
     无需请求参数
     """
     menu_dict = {}
+    for item in LICENSE_DATA["menuInfo"]["moduleList"]:
+        module = item["module"]
+        auth = item["auth"]
 
-    for root, dirs, files in os.walk(LICENSE_DIR):
-        for file in files:
-            filename, ext = os.path.splitext(file)
-            full_path = os.path.join(root, file)
-            async with aiofile.AIOFile(full_path, 'r', encoding='utf-8') as f:
-                data = await f.read()
-                if filename != hashlib.md5(f"{data}".encode()).hexdigest():
-                    menu_dict["license_bp"] = True
-                    menu_dict["user_bp"] = True
-                    return response_ok(menu_dict)
-
-    if data:
-        json_str = base64.b64decode(data.encode("utf-8")).decode("utf-8")
-        license_data = orjson.loads(json_str)
-        is_valid = verify_license(license_data)
-        if is_valid:
-            if license_data.get("expireTime"):
-                if int(time.time() * 1000) < license_data.get("expireTime"):
-                    for item in license_data["menuInfo"]["moduleList"]:
-                        module = item["module"]
-                        auth = item["auth"]
-
-                        if module not in menu_dict:
-                            menu_dict[module] = False
-                        if auth and int(item["expireTime"]) > int(time.time() * 1000):
-                            menu_dict[module] = True
+        if module not in menu_dict:
+            menu_dict[module] = False
+        if auth and int(item["expireTime"]) > int(time.time() * 1000):
+            menu_dict[module] = True
     menu_dict["license_bp"] = True
     menu_dict["user_bp"] = True
 
@@ -139,42 +102,24 @@ async def get_all_license(request: Request):
     """
     获取所有license文件信息用于页面展示
     """
-    for root, dirs, files in os.walk(LICENSE_DIR):
-        for file in files:
-            filename, ext = os.path.splitext(file)
-            full_path = os.path.join(root, file)
-            async with aiofile.AIOFile(full_path, 'r', encoding='utf-8') as f:
-                data = await f.read()
-                if filename != hashlib.md5(f"{data}".encode()).hexdigest():
-                    raise CustomError(ErrorCode.InvalidLicenseError)
+    menu_dict = dict()
+    menu_dict["name"] = LICENSE_DATA["company"]
+    menu_dict["version"] = LICENSE_DATA["version"]
+    menu_dict["createTime"] = formatted_time(LICENSE_DATA["createTime"])
+    menu_dict["expireTime"] = formatted_time(LICENSE_DATA["expireTime"])
+    menu_dict["menuInfo"] = {}
+    for item in LICENSE_DATA["menuInfo"]["moduleList"]:
+        name = item["name"]
+        auth = item["auth"]
+        group = item["group"]
 
-    menu_dict = {}
-
-    if data:
-        json_str = base64.b64decode(data.encode("utf-8")).decode("utf-8")
-        license_data = orjson.loads(json_str)
-        is_valid = verify_license(license_data)
-        if is_valid:
-            if license_data.get("expireTime"):
-                if int(time.time() * 1000) < license_data.get("expireTime"):
-                    menu_dict["name"] = license_data["company"]
-                    menu_dict["numbering"] = filename
-                    menu_dict["version"] = license_data["version"]
-                    menu_dict["createTime"] = formatted_time(license_data["createTime"])
-                    menu_dict["expireTime"] = formatted_time(license_data["expireTime"])
-                    menu_dict["menuInfo"] = {}
-                    for item in license_data["menuInfo"]["moduleList"]:
-                        name = item["name"]
-                        auth = item["auth"]
-                        group = item["group"]
-
-                        if auth and int(item["expireTime"]) > int(time.time() * 1000):
-                            if name in ["应用数量", "剧本数量限制"]:
-                                menu_dict["menuInfo"].setdefault(group, []).append({name: item["value"]})
-                                continue
-                            menu_dict["menuInfo"].setdefault(group, []).append({name: True})
-                        else:
-                            menu_dict["menuInfo"].setdefault(group, []).append({name: False})
+        if auth and int(item["expireTime"]) > int(time.time() * 1000):
+            if name in ["应用数量", "剧本数量限制"]:
+                menu_dict["menuInfo"].setdefault(group, []).append({name: item["value"]})
+                continue
+            menu_dict["menuInfo"].setdefault(group, []).append({name: True})
+        else:
+            menu_dict["menuInfo"].setdefault(group, []).append({name: False})
 
     return response_ok(menu_dict)
 

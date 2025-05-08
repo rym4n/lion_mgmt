@@ -301,7 +301,7 @@ async def input_data(request):
     请求参数：
         id: 剧本ID
     """
-    redis_client = request.app.ctx.cache_client
+    redis_client = request.ctx.cache_client
     playbook = await Playbook.get(id=request.json.get("id"))
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
@@ -358,12 +358,13 @@ async def input_data(request):
 async def statistics_data(flow_json):
     actions_list = []
     for node in flow_json["nodes"]:
-        tool_name = node["properties"]["app_name"]
-        version_number = node["properties"]["version"]
-        action_name = node["properties"]["action"]
-        actions = await ToolAction.filter(tool_name=tool_name, version_number=version_number).all()
-        for action in actions:
-            if action_name == action.action["func"]:
-                actions_list.append(action.id)
+        if "app_name" in node["properties"] and "action" in node["properties"] and "version" in node["properties"]:
+            tool_name = node["properties"]["app_name"]
+            version_number = node["properties"]["version"]
+            action_name = node["properties"]["action"]
+            actions = await ToolAction.filter(tool_name=tool_name, version_number=version_number).all()
+            for action in actions:
+                if action_name == action.action["func"]:
+                    actions_list.append(action.id)
 
     return actions_list

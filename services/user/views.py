@@ -49,7 +49,7 @@ async def new_user(request):
         # 添加角色
         if request.json.get("role_names"):
             roles = await Role.filter(name__in=request.json.get("role_names")).all()
-            await account.roles.add(*roles)
+            await account.roles.add(*roles).prefetch_related('roles')
         res = account.json
         if mfa_enable:
             res['mfa_uri'] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name='AIOE')

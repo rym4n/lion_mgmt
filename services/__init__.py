@@ -1,24 +1,18 @@
 # coding=utf-8
-import base64
 import hashlib
 import importlib
-import json
 import os
-import time
 
 import orjson
 from sanic import Sanic, Blueprint
 from sanic.log import logger
 from tortoise.contrib.sanic import register_tortoise
 
-import settings
 from core.exception_handlers import EXC_HDL_TUPLE, BaseExcHandler
 from core.listeners import LISTENER_TUPLE, BaseListener
 from core.middlewares import MIDDLEWARE_TUPLE, BaseMiddleware
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding
-from settings import BASE_LOGGING, TORTOISE, LICENSE_DIR, PUBLIC_KEY
+from libs.utils import verify_license, get_modules
+from settings import BASE_LOGGING, TORTOISE, LICENSE_DIR
 
 
 def create_app() -> Sanic:
@@ -43,7 +37,7 @@ def create_app() -> Sanic:
     register_exception_handler(app)
 
     # 许可认证检测
-    license_data()
+    load_license()
 
     # 注册蓝图
     register_blueprints(app)
@@ -51,33 +45,7 @@ def create_app() -> Sanic:
     return app
 
 
-def verify_license(license_data: dict) -> bool:
-    signature_hex = license_data.get("signature")
-    if not signature_hex:
-        return False
-
-    public_key = serialization.load_pem_public_key(PUBLIC_KEY.encode())
-
-    signature = bytes.fromhex(signature_hex)
-
-    license_str = json.dumps(
-        {key: value for key, value in license_data.items() if key != "signature"},
-        sort_keys=True
-    ).encode()
-
-    try:
-        public_key.verify(
-            signature,
-            license_str,
-            padding.PKCS1v15(),
-            hashes.SHA256()
-        )
-        return True
-    except InvalidSignature:
-        return False
-
-
-def license_data():
+def load_license():
     for root, dirs, files in os.walk(LICENSE_DIR):
         for file in files:
             filename, ext = os.path.splitext(file)
@@ -85,42 +53,12 @@ def license_data():
             with open(full_path, "r") as f:
                 data = f.read()
                 if filename == hashlib.md5(f"{data}".encode()).hexdigest():
-                    json_str = base64.b64decode(data.encode("utf-8")).decode("utf-8")
-                    license_data = orjson.loads(json_str)
-                    is_valid = verify_license(license_data)
-                    if is_valid:
-                        if license_data.get("expireTime"):
-                            if int(time.time() * 1000) < license_data.get("expireTime"):
-                                settings.LICENSE_DATA = license_data
-                            else:
-                                settings.LICENSE_DATA = "timeout"
-                    else:
-                        settings.LICENSE_DATA = "timeout"
-
-
-def should_register_modules():
-    """根据产品许可返回需要注册模块"""
-    module_flags = {}
-    if settings.LICENSE_DATA:
-        if settings.LICENSE_DATA == "timeout":
-            return ["license_bp", "user_bp"]
-
-        for item in settings.LICENSE_DATA["menuInfo"]["moduleList"]:
-            module = item["module"]
-            auth = item["auth"]
-
-            if module not in module_flags:
-                module_flags[module] = False
-            if auth and int(item["expireTime"]) > int(time.time() * 1000):
-                module_flags[module] = True
-
-    return [mod for mod, should_register in module_flags.items() if should_register]
+                    verify_license(data)
 
 
 def register_blueprints(app: Sanic) -> None:
     """注册蓝图"""
-    allowed_modules = should_register_modules()
-    logger.info(f"allowed modules: {allowed_modules}")
+    allowed_modules = get_modules()
     for root, _, files in os.walk('services'):
         for filename in files:
             if filename.endswith(".py") and filename != "__init__.py":
@@ -133,10 +71,9 @@ def register_blueprints(app: Sanic) -> None:
                     for attr_name in dir(module):
                         attr = getattr(module, attr_name)
                         if isinstance(attr, Blueprint):
-                            if attr_name not in allowed_modules:
-                                logger.info(f"module {module_name} not allowed, skip register")
-                                continue
-                            app.blueprint(attr)
+                            # 本地开发的话可以注释掉此行
+                            if attr_name in allowed_modules:
+                                app.blueprint(attr)
                 except Exception as e:
                     logger.error(f"无法导入 {module_name}: {e}")
     return None

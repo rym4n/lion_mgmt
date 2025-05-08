@@ -1,4 +1,5 @@
 # coding=utf-8
+import base64
 import datetime
 import ipaddress
 import os.path
@@ -11,14 +12,18 @@ from string import ascii_uppercase, digits
 
 import aiofile
 import aiofiles
+import jwt
 import orjson
 from aiofile import async_open
 from aiokafka import AIOKafkaProducer
 from argon2 import PasswordHasher
-from sanic.utils import str_to_bool as sanic_str_to_bool
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
 
+import settings
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
+from settings import RY_KEY
 
 password_hasher: PasswordHasher = PasswordHasher()
 
@@ -68,10 +73,6 @@ def get_expiration_date(seconds: int) -> datetime.datetime:
         if seconds > 0
         else None
     )
-
-
-def str_to_bool(val: str) -> bool:
-    return sanic_str_to_bool(val) if val else False
 
 
 def ip_in_list(ip_str: str, ip_list: list) -> bool:
@@ -167,3 +168,78 @@ def strip_timezone_to_seconds(dt_str):
     dt = datetime.datetime.fromisoformat(str(dt_str))
     dt_local = dt.astimezone()
     return dt_local.strftime("%Y-%m-%d %H:%M:%S")
+
+
+# 计算密文块大小（密钥长度 / 8）
+def get_cipher_block_size(privkey: rsa.RSAPrivateKey) -> int:
+    return privkey.key_size // 8  # 4096 位 → 512 字节
+
+
+# 分块解密函数
+def rsa_chunk_decrypt(ciphertext: bytes, rsa_priv_key: rsa.RSAPrivateKey) -> bytes:
+    """
+    ciphertext: 整段拼接好的 RSA 分块加密结果
+    rsa_priv_key: 加载后的 RSAPrivateKey 对象
+    return: 解密后的原始明文 bytes
+    """
+    block_size = get_cipher_block_size(rsa_priv_key)
+    if len(ciphertext) % block_size != 0:
+        raise ValueError("密文长度不是 RSA 块大小的整数倍，可能被篡改或截断")
+
+    blocks = [
+        ciphertext[i:i + block_size]
+        for i in range(0, len(ciphertext), block_size)
+    ]
+
+    plaintext = b""
+    for idx, block in enumerate(blocks, 1):
+        try:
+            decrypted_block = rsa_priv_key.decrypt(
+                block,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None
+                )
+            )
+            plaintext += decrypted_block
+        except ValueError as e:
+            print(f"[Error] 解密第 {idx} 块失败，块大小 {len(block)} 字节:", e)
+            raise
+    return plaintext
+
+
+def verify_license(data: bytes):
+    try:
+        lic_enc = base64.b32decode(data)
+        pkey = serialization.load_pem_private_key(base64.b64decode(RY_KEY), password=None)
+        decrypted = rsa_chunk_decrypt(lic_enc, pkey)
+        with open('/proc/1/root/etc/machine-id') as f:
+            machine_id = f.read()
+            lic = jwt.decode(decrypted, machine_id, "HS256")
+    except Exception:
+        raise CustomError(ErrorCode.InvalidLicenseError)
+
+    if lic.get("expireTime", 0) > int(time.time() * 1000):
+        settings.LICENSE_DATA = lic
+    else:
+        settings.LICENSE_DATA = "timeout"
+        raise CustomError(ErrorCode.LicenseExpired)
+
+def get_modules():
+    """根据产品许可返回需要注册模块"""
+    module_flags = {}
+    if settings.LICENSE_DATA:
+        if settings.LICENSE_DATA == "timeout":
+            return ["license_bp", "user_bp"]
+
+        for item in settings.LICENSE_DATA["menuInfo"]["moduleList"]:
+            module = item["module"]
+            auth = item["auth"]
+
+            if module not in module_flags:
+                module_flags[module] = False
+            if auth and int(item["expireTime"]) > int(time.time() * 1000):
+                module_flags[module] = True
+
+    return [mod for mod, should_register in module_flags.items() if should_register]
