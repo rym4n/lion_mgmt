@@ -5,6 +5,7 @@ import ipaddress
 import os.path
 import random
 import time
+import uuid
 import zipfile
 from io import BytesIO
 from pathlib import Path, PurePath
@@ -214,9 +215,8 @@ def verify_license(data: bytes):
         lic_enc = base64.b32decode(data)
         pkey = serialization.load_pem_private_key(base64.b64decode(RY_KEY), password=None)
         decrypted = rsa_chunk_decrypt(lic_enc, pkey)
-        with open('/proc/1/root/etc/machine-id') as f:
-            machine_id = f.read()
-            lic = jwt.decode(decrypted, machine_id, "HS256")
+        machine_id = uuid.getnode()
+        lic = jwt.decode(decrypted, machine_id, "HS256")
     except Exception:
         raise CustomError(ErrorCode.InvalidLicenseError)
 
