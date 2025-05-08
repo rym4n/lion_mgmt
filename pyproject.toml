@@ -2,11 +2,9 @@
 name = "lion-mgmt"
 version = "0.1.0"
 description = ""
-authors = [
-    { name = "regulus.y", email = "xy14qg@gmail.com" },
-]
-readme = "README.md"
+authors = [{ name = "regulus.y", email = "xy14qg@gmail.com" }]
 requires-python = ">=3.11,<4"
+readme = "README.md"
 dependencies = [
     "aiocache[redis] (>=0.12.3,<0.13.0)",
     "tortoise-orm[asyncpg] (>=0.24.2,<0.25.0)",
@@ -28,16 +26,14 @@ dependencies = [
 ]
 
 [build-system]
-requires = [
-    "poetry-core>=2.0.0,<3.0.0",
-]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.poetry]
-package-mode = false
+[dependency-groups]
+dev = ["dotenv>=0.9.9,<0.10"]
 
-[tool.poetry.group.dev.dependencies]
-dotenv = "^0.9.9"
+[tool.uv]
+package = false
 
 [tool.aerich]
 tortoise_orm = "settings.TORTOISE"
