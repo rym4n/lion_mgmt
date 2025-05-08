@@ -6,7 +6,6 @@ import os
 import threading
 import time
 
-import aiofile
 from sanic import Blueprint
 from sanic import response
 from sanic.request import Request
@@ -60,11 +59,11 @@ async def verify_license_api(request: Request):
         for file in files:
             full_path = os.path.join(root, file)
             new_path = os.path.join(root, license_path)
-            async with aiofile.AIOFile(full_path, 'w', encoding='utf-8') as f:
-                await f.write(license_file.body)
+            with open(full_path, 'wb') as f:
+                f.write(license_file.body)
             if os.path.exists(full_path):
                 os.rename(full_path, new_path)
-    threading.Thread(target=delayed_exit, args=(1,), daemon=True).start()
+    threading.Thread(target=delayed_exit, daemon=True).start()
     return response_ok("上传成功，正在加载配置文件，请稍后！")
 
 

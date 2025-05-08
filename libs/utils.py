@@ -12,10 +12,8 @@ from pathlib import Path, PurePath
 from string import ascii_uppercase, digits
 
 import aiofile
-import aiofiles
 import jwt
 import orjson
-from aiofile import async_open
 from aiokafka import AIOKafkaProducer
 from argon2 import PasswordHasher
 from cryptography.hazmat.primitives import hashes, serialization
@@ -124,24 +122,8 @@ async def unzip(zip_data, extra_path):
             else:
                 unpack_filename_path.parent.mkdir(parents=True, exist_ok=True)
                 with zip_ref.open(file_name) as file_data:
-                    async with async_open(str(unpack_filename_path), 'wb+') as out:
+                    async with aiofile.async_open(str(unpack_filename_path), 'wb+') as out:
                         await out.write(file_data.read())
-
-
-async def del_dirs(dirs_path):
-    """
-    删除文件夹,传入文件夹路径
-    """
-    for root, dirs, files in os.walk(dirs_path, topdown=False):
-        for name in files:
-            file_path = os.path.join(root, name)
-            await aiofiles.os.remove(file_path)
-
-        for name in dirs:
-            dir_path = os.path.join(root, name)
-            await aiofiles.os.rmdir(dir_path)
-
-    await aiofiles.os.rmdir(dirs_path)
 
 
 def gen_order_version(length=5):
@@ -217,7 +199,7 @@ def verify_license(data: bytes):
         decrypted = rsa_chunk_decrypt(lic_enc, pkey)
         machine_id = uuid.getnode()
         lic = jwt.decode(decrypted, machine_id, "HS256")
-    except Exception:
+    except Exception as e:
         raise CustomError(ErrorCode.InvalidLicenseError)
 
     if lic.get("expireTime", 0) > int(time.time() * 1000):

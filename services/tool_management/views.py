@@ -2,6 +2,7 @@
 import hashlib
 import os
 import re
+import shutil
 import time
 import zipfile
 from io import BytesIO
@@ -16,7 +17,6 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import del_dirs
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config
 from settings import TOOLS_DIR, LICENSE_DATA
 
@@ -418,7 +418,7 @@ async def delete_tool(request):
 
     tool_path = os.path.join(TOOLS_DIR, name, version)
     if os.path.exists(tool_path):
-        await del_dirs(tool_path)
+        shutil.rmtree(tool_path)
 
     tool.deleted = True
     tool.updater = request.ctx.session['account_info'].username
@@ -461,7 +461,7 @@ async def delete_tool_all(request):
     tool_path = os.path.join(TOOLS_DIR, name)
 
     if os.path.exists(tool_path):
-        await del_dirs(tool_path)
+        shutil.rmtree(tool_path)
 
     tool_actions = await ToolAction.filter(tool_name=name, deleted=False).all()
     if tool_actions:
