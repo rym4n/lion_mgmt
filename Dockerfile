@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     libaio-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install uv==0.7.0 cython==3.0.12
+RUN pip install uv==0.7.0 nuitka==2.7.1
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
@@ -22,9 +22,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project --no-dev
 
-COPY . .
+COPY . ./
 
-RUN python compile.py
+nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file core/
+nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file libs/
+nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file models/
+nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
 
 FROM python:3.11-slim as runtime
 
@@ -37,8 +40,7 @@ WORKDIR /app
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
-COPY services ./
-COPY settings ./
+COPY settings ./settings
 COPY server.py ./
 
 ENTRYPOINT ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]

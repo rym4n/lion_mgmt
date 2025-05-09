@@ -1,16 +1,26 @@
 # coding=utf-8
-import importlib
-import os
 
 import orjson
-from sanic import Sanic, Blueprint
-from sanic.log import logger
+from sanic import Sanic
 from tortoise.contrib.sanic import register_tortoise
 
 from core.exception_handlers import EXC_HDL_TUPLE, BaseExcHandler
 from core.listeners import LISTENER_TUPLE, BaseListener
 from core.middlewares import MIDDLEWARE_TUPLE, BaseMiddleware
-from libs.security.authorization import load_license, get_modules
+from libs.security.authorization import load_license
+from services.approvement.views import approve_bp
+from services.event.views import event_bp
+from services.event_ingestion.views import event_ingestion_bp
+from services.license.views import license_bp
+from services.role.views import role_bp
+from services.scene.views import scene_bp
+from services.system_configuration.views import system_bp
+from services.timed.views import timed_bp
+from services.tool_management.views import tool_management_bp
+from services.user.views import user_bp
+from services.variables.views import var_bp
+from services.warroom.views import warroom_bp
+from services.workflow.views import workflow_bp
 from settings import BASE_LOGGING, TORTOISE
 
 
@@ -27,23 +37,19 @@ def create_app() -> Sanic:
 
 
 def register_blueprints(app: Sanic) -> None:
-    allowed_modules = get_modules()
-    for root, _, files in os.walk('services'):
-        for filename in files:
-            if filename.endswith(".py") and filename != "__init__.py":
-                module_path = os.path.join(root, filename)
-                module_name = os.path.splitext(module_path.replace(os.sep, '.'))[0]
-
-                try:
-                    module = importlib.import_module(module_name)
-                    for attr_name in dir(module):
-                        attr = getattr(module, attr_name)
-                        if isinstance(attr, Blueprint):
-                            # 本地开发的话可以注释掉此行
-                            if attr_name in allowed_modules:
-                                app.blueprint(attr)
-                except Exception as e:
-                    logger.error(f"无法导入 {module_name}: {e}")
+    app.blueprint(approve_bp)
+    app.blueprint(event_bp)
+    app.blueprint(event_ingestion_bp)
+    app.blueprint(license_bp)
+    app.blueprint(role_bp)
+    app.blueprint(scene_bp)
+    app.blueprint(tool_management_bp)
+    app.blueprint(user_bp)
+    app.blueprint(var_bp)
+    app.blueprint(warroom_bp)
+    app.blueprint(workflow_bp)
+    app.blueprint(system_bp)
+    app.blueprint(timed_bp)
     return None
 
 

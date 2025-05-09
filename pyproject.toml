@@ -35,6 +35,7 @@ build-backend = "hatchling.build"
 dev = [
     "cython>=3.0.12",
     "dotenv>=0.9.9,<0.10",
+    "nuitka>=2.7.1",
 ]
 
 [tool.uv]
