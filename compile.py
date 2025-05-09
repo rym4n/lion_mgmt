@@ -89,7 +89,7 @@ class CleanCode(object):
         self.delete(root, exts=("py", "c"))
 
 
-TARGET_DIR = "app"
+TARGET_DIR = "dist"
 
 
 class CustomBuildExt(build_ext, CleanCode):
@@ -105,7 +105,7 @@ class CustomBuildExt(build_ext, CleanCode):
 if __name__ == "__main__":
     try:
         shutil.rmtree(TARGET_DIR, ignore_errors=True)
-        for src in ('core', 'libs', 'models'):
+        for src in ('core', 'libs'):
             shutil.copytree(src, TARGET_DIR + '/' + src)
         setup(
             name="lion_mgmt",
@@ -114,5 +114,8 @@ if __name__ == "__main__":
             script_args=["build_ext", "--inplace", "-j", "4"],
             cmdclass={'build_ext': CustomBuildExt}
         )
+        for src in ('models', 'services', 'settings'):
+            shutil.copytree(src, TARGET_DIR + '/' + src)
+        shutil.copyfile('server.py', TARGET_DIR + '/server.py')
     except Exception as e:
         print(f"{e} | {traceback.format_exc()}")

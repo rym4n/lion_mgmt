@@ -165,7 +165,7 @@ CACHE = {
     'default': {
         'cache': "aiocache.SimpleMemoryCache",
         'serializer': {
-            'class': "aiocache.serializers.StringSerializer"
+            'class': "aiocache.serializers.PickleSerializer"
         }
     },
     'redis': {

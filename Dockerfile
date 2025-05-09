@@ -29,7 +29,6 @@ RUN python compile.py
 FROM python:3.11-slim as runtime
 
 ENV VIRTUAL_ENV=/app/.venv \
-    PYTHONPATH=/app \
     RY_ENV=PROD \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
@@ -37,9 +36,9 @@ ENV VIRTUAL_ENV=/app/.venv \
 WORKDIR /app
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
-COPY --from=builder /app/app/ ./
-COPY services ./services
-COPY settings ./settings
+COPY --from=builder /app/dist/ ./
+COPY services ./
+COPY settings ./
 COPY server.py ./
 
 ENTRYPOINT ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
