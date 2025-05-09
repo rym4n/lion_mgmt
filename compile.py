@@ -114,9 +114,5 @@ if __name__ == "__main__":
             script_args=["build_ext", "--inplace", "-j", "4"],
             cmdclass={'build_ext': CustomBuildExt}
         )
-        for src in ('settings', 'services'):
-            shutil.copytree(src, TARGET_DIR + '/services')
-
-        shutil.copyfile("server.py", TARGET_DIR + "/server.py")
     except Exception as e:
         print(f"{e} | {traceback.format_exc()}")

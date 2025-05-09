@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --frozen --no-install-project --no-dev
 
-COPY . ./
+COPY . .
 
 RUN python compile.py
 
@@ -37,5 +37,8 @@ WORKDIR /app
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
+COPY services ./services
+COPY settings ./settings
+COPY server.py ./
 
 ENTRYPOINT ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
