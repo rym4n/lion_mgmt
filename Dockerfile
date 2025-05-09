@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y \
 RUN pip install uv==0.7.0 cython==3.0.12
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app/app \
+    PYTHONPATH=/app \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
@@ -29,6 +29,7 @@ RUN python compile.py
 FROM python:3.11-slim as runtime
 
 ENV VIRTUAL_ENV=/app/.venv \
+    PYTHONPATH=/app \
     RY_ENV=PROD \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
