@@ -19,9 +19,9 @@ def write_process_config(process_name, command):
     config_path = os.path.join(SUPERVISOR_CONFIG_DIR, "{}.conf".format(process_name))
     with open(config_path, "w") as f:
         f.write("""
-            [program:{}]
-            command={}
-            autorestart=true
+[program:{}]
+command={}
+autorestart=true
             """.format(process_name, command))
     logging.info("写入配置文件: {}".format(config_path))
 
