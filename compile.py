@@ -89,7 +89,7 @@ class CleanCode(object):
         self.delete(root, exts=("py", "c"))
 
 
-TARGET_DIR = "dist"
+TARGET_DIR = "app"
 
 
 class CustomBuildExt(build_ext, CleanCode):
