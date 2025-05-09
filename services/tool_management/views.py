@@ -16,9 +16,9 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
-from libs.security.authorization import requires_permission
+from libs.security.authorization import requires_permission, load_license
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config
-from settings import TOOLS_DIR, LICENSE_DATA
+from settings import TOOLS_DIR
 
 # 定义 Blueprint
 tool_management_bp = Blueprint("tool_management", url_prefix="v1/tool_management")
@@ -59,13 +59,18 @@ async def upload_and_extract_zip(request):
     success_progress = 0
     data = 0
     total_up_value = 0
+
+    lic = load_license()
+    if not lic:
+        raise CustomError(ErrorCode.InvalidLicenseError)
+
     for zip_file in zip_files:
         total_count = await Tool.filter(deleted=False, internal=False).count()
-        if LICENSE_DATA:
-            for item in LICENSE_DATA["menuInfo"]["moduleList"]:
-                if item["name"] == "应用数量":
-                    if item["auth"] and int(item["expireTime"]) > int(time.time() * 1000):
-                        total_up_value = int(item["value"])
+
+        for item in lic["menuInfo"]["moduleList"]:
+            if item["name"] == "应用数量":
+                if item["auth"] and int(item["expireTime"]) > int(time.time() * 1000):
+                    total_up_value = int(item["value"])
 
         if total_count >= total_up_value:
             return response_ok({"error": "应用数量已达到上限"})

@@ -13,9 +13,9 @@ from sanic.request import Request
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import requires_permission
+from libs.security.authorization import requires_permission, load_license
 from libs.utils import verify_license
-from settings import LICENSE_DIR, LICENSE_DATA
+from settings import LICENSE_DIR
 
 license_bp = Blueprint('license', url_prefix='v1/license')
 _all__ = ["license_bp"]
@@ -78,7 +78,10 @@ async def get_license(request: Request):
     无需请求参数
     """
     menu_dict = {}
-    for item in LICENSE_DATA["menuInfo"]["moduleList"]:
+    lic = load_license()
+    if not lic:
+        raise CustomError(ErrorCode.InvalidLicenseError)
+    for item in lic["menuInfo"]["moduleList"]:
         module = item["module"]
         auth = item["auth"]
 
@@ -104,14 +107,15 @@ async def get_all_license(request: Request):
     获取所有license文件信息用于页面展示
     """
     menu_dict = dict()
-    if not LICENSE_DATA:
+    lic = load_license()
+    if not lic:
         raise CustomError(ErrorCode.InvalidLicenseError)
-    menu_dict["name"] = LICENSE_DATA["company"]
-    menu_dict["version"] = LICENSE_DATA["version"]
-    menu_dict["createTime"] = formatted_time(LICENSE_DATA["createTime"])
-    menu_dict["expireTime"] = formatted_time(LICENSE_DATA["expireTime"])
+    menu_dict["name"] = lic["company"]
+    menu_dict["version"] = lic["version"]
+    menu_dict["createTime"] = formatted_time(lic["createTime"])
+    menu_dict["expireTime"] = formatted_time(lic["expireTime"])
     menu_dict["menuInfo"] = {}
-    for item in LICENSE_DATA["menuInfo"]["moduleList"]:
+    for item in lic["menuInfo"]["moduleList"]:
         name = item["name"]
         auth = item["auth"]
         group = item["group"]

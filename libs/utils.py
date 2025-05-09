@@ -19,7 +19,6 @@ from argon2 import PasswordHasher
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 
-import settings
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from settings import RY_KEY
@@ -203,7 +202,7 @@ def verify_license(data: bytes):
         raise CustomError(ErrorCode.InvalidLicenseError)
 
     if lic.get("expireTime", 0) > int(time.time() * 1000):
-        settings.LICENSE_DATA = lic
+        return lic
     else:
         raise CustomError(ErrorCode.LicenseExpired)
 

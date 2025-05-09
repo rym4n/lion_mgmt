@@ -1,7 +1,10 @@
 # coding=utf-8
+import time
+import traceback
 
 import orjson
 from sanic import Sanic
+from sanic.log import logger
 from tortoise.contrib.sanic import register_tortoise
 
 from core.exception_handlers import EXC_HDL_TUPLE, BaseExcHandler
@@ -37,19 +40,33 @@ def create_app() -> Sanic:
 
 
 def register_blueprints(app: Sanic) -> None:
-    app.blueprint(approve_bp)
-    app.blueprint(event_bp)
-    app.blueprint(event_ingestion_bp)
     app.blueprint(license_bp)
-    app.blueprint(role_bp)
-    app.blueprint(scene_bp)
-    app.blueprint(tool_management_bp)
     app.blueprint(user_bp)
-    app.blueprint(var_bp)
-    app.blueprint(warroom_bp)
-    app.blueprint(workflow_bp)
-    app.blueprint(system_bp)
-    app.blueprint(timed_bp)
+
+    try:
+        bp_dict = {
+            "approve_bp": approve_bp,
+            "event_bp": event_bp,
+            "event_ingestion_bp": event_ingestion_bp,
+            "role_bp": role_bp,
+            "scene_bp": scene_bp,
+            "tool_management_bp": tool_management_bp,
+            "var_bp": var_bp,
+            "warroom_bp": warroom_bp,
+            "workflow_bp": workflow_bp,
+            "system_bp": system_bp,
+            "timed_bp": timed_bp
+        }
+        license_data = load_license()
+        if license_data and 'menuInfo' in license_data:
+            for item in license_data["menuInfo"]["moduleList"]:
+                if item["auth"] and int(item["expireTime"]) > int(time.time() * 1000):
+                    if item["module"] not in bp_dict:
+                        continue
+                    app.blueprint(bp_dict[item["module"]])
+    except Exception as ex:
+        logger.info(f"{ex} | {traceback.format_exc()}")
+
     return None
 
 

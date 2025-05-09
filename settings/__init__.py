@@ -44,9 +44,6 @@ if os.environ.get("RY_ENV") == 'DEV':
 # todo: 暂时从环境变量获取
 RY_KEY = os.environ.get("RY_KEY")
 
-# 产品许可的内容
-LICENSE_DATA = None
-
 # 系统背景图片名称配置
 BG_NAME = "bg-oEDCYcDF"
 

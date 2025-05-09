@@ -17,11 +17,11 @@ from websockets.exceptions import ConnectionClosed
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import requires_permission
+from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_order_version, send_kafka_message
 from models import Playbook, Scene, ToolAction, Tool, Runlog
 from services.tool_management.views import tool_action_update, tool_action_playbook_delete
-from settings import LICENSE_DATA, KAFKA_CONFIG, TIMED_TASK_TOPIC
+from settings import KAFKA_CONFIG, TIMED_TASK_TOPIC
 
 workflow_bp = Blueprint('workflow', url_prefix='v1/playbook')
 _all__ = ["workflow_bp"]
@@ -43,11 +43,13 @@ async def create_workflow(request):
     total_up_value = 0
     # 判断剧本数量是否达到了创建上限
     total_count = await Playbook.filter(deleted=False, internal=False).count()
-    if LICENSE_DATA:
-        for item in LICENSE_DATA["menuInfo"]["moduleList"]:
-            if item["name"] == "剧本数量限制":
-                if item["auth"] and int(item["expireTime"]) > int(time.time() * 1000):
-                    total_up_value = int(item["value"])
+    lic = load_license()
+    if not lic:
+        raise CustomError(ErrorCode.InvalidLicenseError)
+    for item in lic["menuInfo"]["moduleList"]:
+        if item["name"] == "剧本数量限制":
+            if item["auth"] and int(item["expireTime"]) > int(time.time() * 1000):
+                total_up_value = int(item["value"])
 
     if total_count >= total_up_value:
         raise CustomError(ErrorCode.PlaybookCreateLimit)
