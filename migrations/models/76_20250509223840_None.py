@@ -101,6 +101,24 @@ COMMENT ON COLUMN "audit_log"."client_ua" IS '客户端UA';
 COMMENT ON COLUMN "audit_log"."uri" IS '请求URL';
 COMMENT ON COLUMN "audit_log"."request_data" IS '请求数据';
 COMMENT ON TABLE "audit_log" IS '操作审计记录';
+CREATE TABLE IF NOT EXISTS "config" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "key" VARCHAR(255) NOT NULL UNIQUE,
+    "value" JSONB NOT NULL,
+    "config_type" VARCHAR(255),
+    "module" VARCHAR(255) NOT NULL
+);
+COMMENT ON COLUMN "config"."ctime" IS '创建时间';
+COMMENT ON COLUMN "config"."utime" IS '更新时间';
+COMMENT ON COLUMN "config"."deleted" IS '删除标识';
+COMMENT ON COLUMN "config"."key" IS '配置项';
+COMMENT ON COLUMN "config"."value" IS '配置值';
+COMMENT ON COLUMN "config"."config_type" IS '配置状态';
+COMMENT ON COLUMN "config"."module" IS '所属模块';
+COMMENT ON TABLE "config" IS '通用配置表';
 CREATE TABLE IF NOT EXISTS "event_related_script" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -119,34 +137,6 @@ COMMENT ON COLUMN "event_related_script"."event_ingestion_id" IS '事件接入id
 COMMENT ON COLUMN "event_related_script"."topic" IS '主题名';
 COMMENT ON COLUMN "event_related_script"."script_id" IS '剧本id';
 COMMENT ON TABLE "event_related_script" IS '事件关联剧本表';
-CREATE TABLE IF NOT EXISTS "events" (
-    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
-    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "deleted" BOOL NOT NULL DEFAULT False,
-    "event_name" VARCHAR(255) NOT NULL UNIQUE,
-    "event_process_status" VARCHAR(50) NOT NULL,
-    "event_source" VARCHAR(255),
-    "event_level" VARCHAR(50) NOT NULL,
-    "owner" JSONB,
-    "created_id" VARCHAR(36) NOT NULL,
-    "event_summary" TEXT,
-    "log_data" TEXT NOT NULL,
-    "event_ingestion_id" VARCHAR(255) NOT NULL
-);
-COMMENT ON COLUMN "events"."ctime" IS '创建时间';
-COMMENT ON COLUMN "events"."utime" IS '更新时间';
-COMMENT ON COLUMN "events"."deleted" IS '删除标识';
-COMMENT ON COLUMN "events"."event_name" IS '事件名称';
-COMMENT ON COLUMN "events"."event_process_status" IS '事件处理状态（如 ASSIGNED, RESOLVED）';
-COMMENT ON COLUMN "events"."event_source" IS '事件来源';
-COMMENT ON COLUMN "events"."event_level" IS '事件等级';
-COMMENT ON COLUMN "events"."owner" IS '负责人（包括角色和用户）';
-COMMENT ON COLUMN "events"."created_id" IS '创建人ID，关联用户表';
-COMMENT ON COLUMN "events"."event_summary" IS '事件概要';
-COMMENT ON COLUMN "events"."log_data" IS '日志数据';
-COMMENT ON COLUMN "events"."event_ingestion_id" IS '事件接入id，管理事件接入表';
-COMMENT ON TABLE "events" IS '事件列表';
 CREATE TABLE IF NOT EXISTS "events_ingestion" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -161,6 +151,8 @@ CREATE TABLE IF NOT EXISTS "events_ingestion" (
     "syslog_config" VARCHAR(255),
     "file_path" VARCHAR(255),
     "vector_name" VARCHAR(255),
+    "enabled_health_status" VARCHAR(255),
+    "execution_health_status" VARCHAR(255),
     "creator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
     "updator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE
 );
@@ -176,21 +168,11 @@ COMMENT ON COLUMN "events_ingestion"."linked_execution" IS '是否开启联动�
 COMMENT ON COLUMN "events_ingestion"."syslog_config" IS 'syslog端口';
 COMMENT ON COLUMN "events_ingestion"."file_path" IS '配置文件路径';
 COMMENT ON COLUMN "events_ingestion"."vector_name" IS 'vector名称';
+COMMENT ON COLUMN "events_ingestion"."enabled_health_status" IS '上游接入健康状态';
+COMMENT ON COLUMN "events_ingestion"."execution_health_status" IS '联动执行健康状态';
 COMMENT ON COLUMN "events_ingestion"."creator_id" IS '创建人';
 COMMENT ON COLUMN "events_ingestion"."updator_id" IS '更新人';
 COMMENT ON TABLE "events_ingestion" IS '事件接入列表';
-CREATE TABLE IF NOT EXISTS "license" (
-    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
-    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "deleted" BOOL NOT NULL DEFAULT False,
-    "data" TEXT NOT NULL
-);
-COMMENT ON COLUMN "license"."ctime" IS '创建时间';
-COMMENT ON COLUMN "license"."utime" IS '更新时间';
-COMMENT ON COLUMN "license"."deleted" IS '删除标识';
-COMMENT ON COLUMN "license"."data" IS '许可数据';
-COMMENT ON TABLE "license" IS '产品许可表';
 CREATE TABLE IF NOT EXISTS "permissions_menu" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -212,14 +194,10 @@ CREATE TABLE IF NOT EXISTS "playbook" (
     "name" VARCHAR(255) NOT NULL,
     "remark" TEXT NOT NULL,
     "status" INT NOT NULL DEFAULT 0,
-    "start_app" VARCHAR(36) NOT NULL,
-    "end_app" VARCHAR(36) NOT NULL,
-    "if_list" TEXT NOT NULL,
-    "audit_list" TEXT NOT NULL,
     "tags" JSONB NOT NULL,
     "flow_json" JSONB NOT NULL,
-    "flow_data" JSONB NOT NULL,
-    "version" INT NOT NULL DEFAULT 0,
+    "version" VARCHAR(30) NOT NULL DEFAULT '0',
+    "internal" BOOL NOT NULL DEFAULT False,
     "creator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
     "updator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
     CONSTRAINT "uid_playbook_name_7d99d8" UNIQUE ("name", "version")
@@ -230,14 +208,10 @@ COMMENT ON COLUMN "playbook"."deleted" IS '删除标识';
 COMMENT ON COLUMN "playbook"."name" IS '剧本名称';
 COMMENT ON COLUMN "playbook"."remark" IS '描述';
 COMMENT ON COLUMN "playbook"."status" IS '剧本状态,0草稿,1已发布';
-COMMENT ON COLUMN "playbook"."start_app" IS '开始节点';
-COMMENT ON COLUMN "playbook"."end_app" IS '结束节点';
-COMMENT ON COLUMN "playbook"."if_list" IS '判断节点';
-COMMENT ON COLUMN "playbook"."audit_list" IS '审批节点';
 COMMENT ON COLUMN "playbook"."tags" IS '标签';
-COMMENT ON COLUMN "playbook"."flow_json" IS '流程图布局信息';
-COMMENT ON COLUMN "playbook"."flow_data" IS '各节点详细信息';
+COMMENT ON COLUMN "playbook"."flow_json" IS '流程图flow数据，包含edges和nodes';
 COMMENT ON COLUMN "playbook"."version" IS '版本号，每次publish都会生成新纪录，用于版本回溯';
+COMMENT ON COLUMN "playbook"."internal" IS '是否内置剧本';
 COMMENT ON COLUMN "playbook"."creator_id" IS '创建人';
 COMMENT ON COLUMN "playbook"."updator_id" IS '更新人';
 COMMENT ON TABLE "playbook" IS '剧本模型';
@@ -259,7 +233,7 @@ CREATE TABLE IF NOT EXISTS "room" (
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted" BOOL NOT NULL DEFAULT False,
-    "name" VARCHAR(50) NOT NULL UNIQUE,
+    "name" VARCHAR(50) NOT NULL,
     "creator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE
 );
 COMMENT ON COLUMN "room"."ctime" IS '创建时间';
@@ -268,14 +242,46 @@ COMMENT ON COLUMN "room"."deleted" IS '删除标识';
 COMMENT ON COLUMN "room"."name" IS '作战室名称';
 COMMENT ON COLUMN "room"."creator_id" IS '房主';
 COMMENT ON TABLE "room" IS '作战室房间模型';
+CREATE TABLE IF NOT EXISTS "events" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "event_name" VARCHAR(255) NOT NULL UNIQUE,
+    "event_process_status" VARCHAR(50) NOT NULL,
+    "event_source" VARCHAR(255),
+    "event_level" VARCHAR(50) NOT NULL,
+    "owner" JSONB,
+    "created_id" VARCHAR(36) NOT NULL,
+    "event_summary" TEXT,
+    "log_data" TEXT NOT NULL,
+    "event_ingestion_id" VARCHAR(255) NOT NULL,
+    "run_id" JSONB,
+    "room_id" VARCHAR(36) REFERENCES "room" ("id") ON DELETE CASCADE
+);
+COMMENT ON COLUMN "events"."ctime" IS '创建时间';
+COMMENT ON COLUMN "events"."utime" IS '更新时间';
+COMMENT ON COLUMN "events"."deleted" IS '删除标识';
+COMMENT ON COLUMN "events"."event_name" IS '事件名称';
+COMMENT ON COLUMN "events"."event_process_status" IS '事件处理状态（如 ASSIGNED, RESOLVED）';
+COMMENT ON COLUMN "events"."event_source" IS '事件来源';
+COMMENT ON COLUMN "events"."event_level" IS '事件等级';
+COMMENT ON COLUMN "events"."owner" IS '负责人（包括角色和用户）';
+COMMENT ON COLUMN "events"."created_id" IS '创建人ID，关联用户表';
+COMMENT ON COLUMN "events"."event_summary" IS '事件概要';
+COMMENT ON COLUMN "events"."log_data" IS '日志数据';
+COMMENT ON COLUMN "events"."event_ingestion_id" IS '事件接入id，管理事件接入表';
+COMMENT ON COLUMN "events"."run_id" IS '运行id';
+COMMENT ON COLUMN "events"."room_id" IS '更新人';
+COMMENT ON TABLE "events" IS '事件列表';
 CREATE TABLE IF NOT EXISTS "room_msg" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted" BOOL NOT NULL DEFAULT False,
     "content" TEXT NOT NULL,
-    "type" VARCHAR(10) NOT NULL,
-    "content_type" VARCHAR(10) NOT NULL DEFAULT 'text',
+    "image_content" TEXT NOT NULL,
+    "type" VARCHAR(20) NOT NULL,
     "is_recalled" BOOL NOT NULL DEFAULT False,
     "is_pinned" BOOL NOT NULL DEFAULT False,
     "receiver_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
@@ -285,15 +291,57 @@ CREATE TABLE IF NOT EXISTS "room_msg" (
 COMMENT ON COLUMN "room_msg"."ctime" IS '创建时间';
 COMMENT ON COLUMN "room_msg"."utime" IS '更新时间';
 COMMENT ON COLUMN "room_msg"."deleted" IS '删除标识';
-COMMENT ON COLUMN "room_msg"."content" IS '消息内容';
+COMMENT ON COLUMN "room_msg"."content" IS '文本消息内容';
+COMMENT ON COLUMN "room_msg"."image_content" IS '图片消息内容';
 COMMENT ON COLUMN "room_msg"."type" IS '消息类型，public群聊private私聊/system系统/announcement公告';
-COMMENT ON COLUMN "room_msg"."content_type" IS '消息内容类型，text文本/image图片';
 COMMENT ON COLUMN "room_msg"."is_recalled" IS '是否撤回';
 COMMENT ON COLUMN "room_msg"."is_pinned" IS '是否置顶（用于群公告）';
 COMMENT ON COLUMN "room_msg"."receiver_id" IS '消息接收方';
 COMMENT ON COLUMN "room_msg"."room_id" IS '消息所在房间（若为群聊）';
 COMMENT ON COLUMN "room_msg"."sender_id" IS '消息发送方';
 COMMENT ON TABLE "room_msg" IS '作战室消息模型';
+CREATE TABLE IF NOT EXISTS "runlog" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "run_id" VARCHAR(36) NOT NULL,
+    "node_id" VARCHAR(36) NOT NULL,
+    "node_name" VARCHAR(255) NOT NULL,
+    "node_type" VARCHAR(36) NOT NULL,
+    "tool_name" VARCHAR(255),
+    "tool_version" VARCHAR(255),
+    "tool_display_name" VARCHAR(255),
+    "action_name" VARCHAR(255),
+    "action_display_name" VARCHAR(255),
+    "status" INT NOT NULL DEFAULT 0,
+    "args" JSONB,
+    "result" TEXT,
+    "start_time" TIMESTAMPTZ,
+    "end_time" TIMESTAMPTZ,
+    "executor" VARCHAR(36),
+    "playbook_id" VARCHAR(36) REFERENCES "playbook" ("id") ON DELETE CASCADE
+);
+COMMENT ON COLUMN "runlog"."ctime" IS '创建时间';
+COMMENT ON COLUMN "runlog"."utime" IS '更新时间';
+COMMENT ON COLUMN "runlog"."deleted" IS '删除标识';
+COMMENT ON COLUMN "runlog"."run_id" IS '每次运行的唯一ID';
+COMMENT ON COLUMN "runlog"."node_id" IS '节点ID';
+COMMENT ON COLUMN "runlog"."node_name" IS '节点名称';
+COMMENT ON COLUMN "runlog"."node_type" IS '节点类型';
+COMMENT ON COLUMN "runlog"."tool_name" IS '工具标识';
+COMMENT ON COLUMN "runlog"."tool_version" IS '工具版本';
+COMMENT ON COLUMN "runlog"."tool_display_name" IS '工具中文名称';
+COMMENT ON COLUMN "runlog"."action_name" IS '动作标识';
+COMMENT ON COLUMN "runlog"."action_display_name" IS '动作中文名称';
+COMMENT ON COLUMN "runlog"."status" IS '执行状态';
+COMMENT ON COLUMN "runlog"."args" IS '执行入参';
+COMMENT ON COLUMN "runlog"."result" IS '输出结果,啥格式都有可能';
+COMMENT ON COLUMN "runlog"."start_time" IS '开始时间';
+COMMENT ON COLUMN "runlog"."end_time" IS '结束时间';
+COMMENT ON COLUMN "runlog"."executor" IS '执行者ID';
+COMMENT ON COLUMN "runlog"."playbook_id" IS '关联剧本';
+COMMENT ON TABLE "runlog" IS '所有节点的执行记录';
 CREATE TABLE IF NOT EXISTS "scene" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -369,8 +417,9 @@ CREATE TABLE IF NOT EXISTS "tool" (
     "creator" VARCHAR(255),
     "updater" VARCHAR(255),
     "hash_value" VARCHAR(255),
-    "internal" VARCHAR(255) NOT NULL,
-    "tag" JSONB
+    "internal" BOOL NOT NULL DEFAULT False,
+    "tag" JSONB,
+    "main" VARCHAR(255)
 );
 COMMENT ON COLUMN "tool"."ctime" IS '创建时间';
 COMMENT ON COLUMN "tool"."utime" IS '更新时间';
@@ -385,6 +434,7 @@ COMMENT ON COLUMN "tool"."updater" IS '更新者';
 COMMENT ON COLUMN "tool"."hash_value" IS '文件hash值';
 COMMENT ON COLUMN "tool"."internal" IS '是否内部工具';
 COMMENT ON COLUMN "tool"."tag" IS '工具标签';
+COMMENT ON COLUMN "tool"."main" IS '入口文件';
 COMMENT ON TABLE "tool" IS '工具管理表';
 CREATE TABLE IF NOT EXISTS "tool_action" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
@@ -393,7 +443,8 @@ CREATE TABLE IF NOT EXISTS "tool_action" (
     "deleted" BOOL NOT NULL DEFAULT False,
     "tool_name" VARCHAR(255),
     "version_number" VARCHAR(50),
-    "action" JSONB
+    "action" JSONB,
+    "playbook" JSONB
 );
 COMMENT ON COLUMN "tool_action"."ctime" IS '创建时间';
 COMMENT ON COLUMN "tool_action"."utime" IS '更新时间';
@@ -401,7 +452,46 @@ COMMENT ON COLUMN "tool_action"."deleted" IS '删除标识';
 COMMENT ON COLUMN "tool_action"."tool_name" IS '工具名称';
 COMMENT ON COLUMN "tool_action"."version_number" IS '版本号';
 COMMENT ON COLUMN "tool_action"."action" IS '动作';
+COMMENT ON COLUMN "tool_action"."playbook" IS '绑定的剧本列表';
 COMMENT ON TABLE "tool_action" IS '工具动作管理表';
+CREATE TABLE IF NOT EXISTS "timed" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "name" VARCHAR(255) NOT NULL,
+    "type" INT NOT NULL,
+    "playbook_input" JSONB,
+    "action_input" JSONB,
+    "status" INT NOT NULL,
+    "tactics" VARCHAR(50) NOT NULL,
+    "result" VARCHAR(50),
+    "success_rate" VARCHAR(10),
+    "enable" INT NOT NULL DEFAULT 1,
+    "end_time" VARCHAR(50) NOT NULL,
+    "action_id" VARCHAR(36) REFERENCES "tool_action" ("id") ON DELETE CASCADE,
+    "creator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
+    "playbook_id" VARCHAR(36) REFERENCES "playbook" ("id") ON DELETE CASCADE,
+    "updator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE
+);
+COMMENT ON COLUMN "timed"."ctime" IS '创建时间';
+COMMENT ON COLUMN "timed"."utime" IS '更新时间';
+COMMENT ON COLUMN "timed"."deleted" IS '删除标识';
+COMMENT ON COLUMN "timed"."name" IS '任务名称';
+COMMENT ON COLUMN "timed"."type" IS '执行类型，0为执行剧本，1为执行动作';
+COMMENT ON COLUMN "timed"."playbook_input" IS '剧本输入参数';
+COMMENT ON COLUMN "timed"."action_input" IS '工具动作输入参数';
+COMMENT ON COLUMN "timed"."status" IS '执行状态，0为单次执行，1为周期执行';
+COMMENT ON COLUMN "timed"."tactics" IS '执行策略';
+COMMENT ON COLUMN "timed"."result" IS '执行结果';
+COMMENT ON COLUMN "timed"."success_rate" IS '成功率';
+COMMENT ON COLUMN "timed"."enable" IS '是否启用, 0为禁用，1为启用';
+COMMENT ON COLUMN "timed"."end_time" IS '结束时间';
+COMMENT ON COLUMN "timed"."action_id" IS '关联工具动作';
+COMMENT ON COLUMN "timed"."creator_id" IS '创建人';
+COMMENT ON COLUMN "timed"."playbook_id" IS '关联剧本';
+COMMENT ON COLUMN "timed"."updator_id" IS '更新人';
+COMMENT ON TABLE "timed" IS '运行场景模型';
 CREATE TABLE IF NOT EXISTS "tool_resources" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,

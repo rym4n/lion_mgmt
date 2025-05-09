@@ -32,7 +32,7 @@ class Runlog(BaseModel):
 
     executor = fields.CharField(null=True, max_length=36, description="执行者ID")
 
-    playbook = fields.ForeignKeyField("models.Playbook", related_name="playbook_runlog", description="关联剧本")
+    playbook = fields.ForeignKeyField("models.Playbook", null=True, related_name="playbook_runlog", description="关联剧本")
 
     def validate(self) -> None:
         raise NotImplementedError
