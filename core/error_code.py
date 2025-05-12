@@ -81,3 +81,5 @@ class ErrorCode(BaseErrorCode):
     TimedNameExists = ErrorData(4056, "定时任务名称重复，请重新命名")
     TimedNotFound = ErrorData(4057, "定时任务不存在")
     EventNameExists = ErrorData(4058, "事件名称重复，请重新命名")
+
+    NoExecutionRecord = ErrorData(4059, "无执行记录")

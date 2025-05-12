@@ -40,7 +40,7 @@ class Timed(BaseModel):
             "playbook": self.playbook.name if self.playbook else "",
             "playbook_remark": self.playbook.remark if self.playbook else "",
             "playbook_input": self.playbook_input,
-            "action": self.action.action["description"] if self.action else "",
+            "action": self.action.action["name"] if self.action else "",
             "action_input": self.action_input,
             "status": self.status,
             "tactics": self.tactics,

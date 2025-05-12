@@ -3,6 +3,7 @@
 import asyncio
 import os
 import time
+from collections import defaultdict
 from datetime import datetime
 
 import aiofile
@@ -178,7 +179,8 @@ async def edit_workflow(request):
             await playbook.create()
         else:
             await playbook.save()
-    return response_ok({"id": playbook.id, "name": playbook.name, "version": playbook.version, "status": playbook.status})
+    return response_ok(
+        {"id": playbook.id, "name": playbook.name, "version": playbook.version, "status": playbook.status})
 
 
 @workflow_bp.post("/publish")
@@ -292,6 +294,101 @@ async def execute_action(request: Request, ws: Websocket):
     await send_kafka_message(kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg)
 
     await poll_database_and_notify(ws, msg.get("run_id"), formatted_time)
+
+
+@workflow_bp.post('/run/detail')
+@requires_permission("workflow:r")
+async def run_detail(request):
+    """
+    获取当前剧本执行状态和结果以及各节点的处置状态和详细信息
+
+    请求参数：
+        run_id: 必填，执行记录ID
+    """
+    run_id = request.json.get("run_id")
+    run_logs = await Runlog.filter(run_id=run_id).all().prefetch_related("playbook")
+
+    if not run_logs:
+        raise CustomError(ErrorCode.NoExecutionRecord)
+
+    return response_ok([r.json for r in run_logs])
+
+
+@workflow_bp.post('/run/history')
+@requires_permission("workflow:r")
+async def run_history(request):
+    """
+    获取剧本执行历史
+
+    请求参数：
+        playbook_id: 必填，剧本ID
+        page: 可选，页码，默认1
+        size: 可选，每页组数，默认10
+    """
+    body = request.json
+    playbook_id = body.get("playbook_id")
+    page = int(body.get("page", 1))
+    size = int(body.get("size", 10))
+
+    if not playbook_id or page < 1 or size < 1:
+        raise CustomError(ErrorCode.ParameterError)
+
+    offset = (page - 1) * size
+    limit = size
+
+    all_run_ids = await Runlog.filter(playbook_id=playbook_id, deleted=False).order_by("-utime").values_list("run_id",
+                                                                                                             "utime")
+    seen = set()
+    run_ids_query = []
+    for run_id, utime in all_run_ids:
+        if run_id not in seen:
+            seen.add(run_id)
+            run_ids_query.append(run_id)
+
+    total = len(run_ids_query)
+
+    run_logs = await Runlog.filter(run_id__in=run_ids_query).order_by("-utime").prefetch_related("playbook")
+
+    grouped_data = defaultdict(list)
+    status_data = defaultdict(list)
+    for log in run_logs:
+        grouped_data[log.run_id].append(log.json)
+        status_data[log.run_id].append(log.status)
+
+    data = []
+    success = 0
+    fail = 0
+    for run_id in run_ids_query:
+        if -1 not in status_data[run_id]:
+            success += 1
+            status = "success"
+        else:
+            fail += 1
+            status = "fail"
+        data.append(
+            {
+                "run_id": run_id,
+                "status": status,
+                "logs": grouped_data.get(run_id, [])
+            })
+
+    data = data[offset:offset + limit]
+    if not data:
+        return response_ok({
+            "total": total,
+            "page": page,
+            "size": size,
+            "data": []
+        })
+
+    return response_ok({
+        "total": total,
+        "page": page,
+        "size": size,
+        "success": success,
+        "fail": fail,
+        "data": data
+    })
 
 
 @workflow_bp.post('/input')
