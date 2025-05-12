@@ -113,7 +113,7 @@ def load_license():
                 data = f.read()
                 if filename == hashlib.md5(f"{data}".encode()).hexdigest():
                     try:
-                        lic = verify_license(data)
+                        lic = verify_license(data.encode())
                         return lic
                     except Exception as e:
                         logger.error(f"License无效: {e}")
