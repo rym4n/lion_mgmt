@@ -1,10 +1,13 @@
 # coding=utf-8
 import hashlib
+import operator
 import os
 import re
 import shutil
 import time
 import zipfile
+from collections import defaultdict
+from functools import reduce
 from io import BytesIO
 
 import orjson
@@ -65,6 +68,15 @@ async def upload_and_extract_zip(request):
         raise CustomError(ErrorCode.InvalidLicenseError)
 
     for zip_file in zip_files:
+        header = zip_file.body[:4]
+        if header[:2] != b'PK' or header[2:] != b'\x03\x04' or not zip_file.name.lower().endswith('.zip'):
+            results.append({"tool": zip_file.name, "msg": "此文件不是标准ZIP文件，请重新上传"})
+            data += 1
+            percent = int((data * single_progress))
+            success_progress = percent
+            await resp.send(f"data: 解压进度：{percent}%\n\n")
+            continue
+
         total_count = await Tool.filter(deleted=False, internal=False).count()
 
         for item in lic["menuInfo"]["moduleList"]:
@@ -551,13 +563,13 @@ async def add_tool_resource(request):
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
 
-    await ToolResources.create(tool_name=tool_name, name=name, description=description,
-                               product_supplier=product_supplier,
-                               product_name=product_name, resources=resources,
-                               creator=request.ctx.session['account_info'].username
-                               , updater=request.ctx.session['account_info'].username)
+    resources = await ToolResources.create(tool_name=tool_name, name=name, description=description,
+                                           product_supplier=product_supplier,
+                                           product_name=product_name, resources=resources,
+                                           creator=request.ctx.session['account_info'].username
+                                           , updater=request.ctx.session['account_info'].username)
 
-    return response_ok({"message": "工具资源新增成功"})
+    return response_ok({"message": "工具资源新增成功", "id": resources.id})
 
 
 @tool_management_bp.post("/resource/detailed")
@@ -573,7 +585,7 @@ async def tool_resources_detailed(request):
     if not tool_name:
         raise CustomError(ErrorCode.ParameterError)
 
-    resources = await ToolResources.filter(tool_name=tool_name, deleted=False).values()
+    resources = await ToolResources.filter(tool_name=tool_name, deleted=False).all().values()
     if not resources:
         return response_ok("工具资源不存在")
 
@@ -696,14 +708,16 @@ async def add_permission(request):
 
     query参数:
         - name: 工具名称    str
+        - resource_id: 资源id    str
         - actions: 动作名称    list    可选，默认all
         - users_id: 用户ID列表    list
         - roles_id: 角色ID列表    list
     """
     name = request.json.get("name")
+    resource_id = request.json.get("resource_id")
     actions = request.json.get("actions", ["all"])
-    users_id = request.json.get("users_id", [])
-    roles_id = request.json.get("roles_id", [])
+    users_id = list(set(request.json.get("users_id", [])))
+    roles_id = list(set(request.json.get("roles_id", [])))
     if not name:
         raise CustomError(ErrorCode.ParameterError)
     if not isinstance(users_id, list) or not isinstance(roles_id, list) or not isinstance(actions, list):
@@ -718,8 +732,40 @@ async def add_permission(request):
         raise CustomError(ErrorCode.ActionNotFoundError)
 
     for permission in permissions:
-        permission.users_id = list(set(permission.users_id or []) | set(users_id))
-        permission.roles_id = list(set(permission.roles_id or []) | set(roles_id))
+        user_dict_list = []
+        if isinstance(permission.users_id, list):
+            user_dict_list = permission.users_id.copy()
+        elif isinstance(permission.users_id, str):
+            try:
+                user_dict_list = orjson.loads(permission.users_id)
+            except orjson.JSONDecodeError:
+                user_dict_list = []
+
+        if not user_dict_list or not isinstance(user_dict_list[0], dict):
+            user_dict_list = [{}]
+
+        current_users = user_dict_list[0].get(resource_id, [])
+        merged_users = list(set(current_users) | set(users_id))
+        user_dict_list[0][resource_id] = merged_users
+
+        role_dict_list = []
+        if isinstance(permission.roles_id, list):
+            role_dict_list = permission.roles_id.copy()
+        elif isinstance(permission.roles_id, str):
+            try:
+                role_dict_list = orjson.loads(permission.roles_id)
+            except orjson.JSONDecodeError:
+                role_dict_list = []
+
+        if not role_dict_list or not isinstance(role_dict_list[0], dict):
+            role_dict_list = [{}]
+
+        current_roles = role_dict_list[0].get(resource_id, [])
+        merged_roles = list(set(current_roles) | set(roles_id))
+        role_dict_list[0][resource_id] = merged_roles
+
+        permission.users_id = user_dict_list
+        permission.roles_id = role_dict_list
 
     await ActionPermissions.bulk_update(permissions, fields=["users_id", "roles_id"])
 
@@ -734,14 +780,16 @@ async def delete_permission(request):
 
     query参数:
         - name: 工具名称    str
+        - resource_id: 资源id    str
         - actions: 动作名称    list    可选，默认all
         - users_id: 用户ID列表    list
         - roles_id: 角色ID列表    list
     """
     name = request.json.get("name")
+    resource_id = request.json.get("resource_id")
     actions = request.json.get("actions", ["all"])
-    users_id = request.json.get("users_id", [])
-    roles_id = request.json.get("roles_id", [])
+    users_id = list(set(request.json.get("users_id", [])))
+    roles_id = list(set(request.json.get("roles_id", [])))
     if not name:
         raise CustomError(ErrorCode.ParameterError)
     if not isinstance(users_id, list) or not isinstance(roles_id, list) or not isinstance(actions, list):
@@ -756,12 +804,63 @@ async def delete_permission(request):
     if not permissions:
         raise CustomError(ErrorCode.ActionNotFoundError)
 
-    # 删除 users_id 和 roles_id
     for permission in permissions:
-        permission.users_id = list(set(permission.users_id or []) - set(users_id))
-        permission.roles_id = list(set(permission.roles_id or []) - set(roles_id))
+        user_dict_list = []
+        if isinstance(permission.users_id, list):
+            user_dict_list = permission.users_id.copy()
+        elif isinstance(permission.users_id, str):
+            try:
+                user_dict_list = orjson.loads(permission.users_id)
+            except orjson.JSONDecodeError:
+                user_dict_list = []
 
-    await ActionPermissions.bulk_update(permissions, fields=["users_id", "roles_id"])
+        if not user_dict_list or not isinstance(user_dict_list[0], dict):
+            user_dict_list = [{}]
+
+        if resource_id in user_dict_list[0]:
+            original_users = set(user_dict_list[0][resource_id])
+            removed_users = set(users_id)
+            updated_users = list(original_users - removed_users)
+
+            if updated_users:
+                user_dict_list[0][resource_id] = updated_users
+            else:
+                del user_dict_list[0][resource_id]
+                if not user_dict_list[0]:
+                    user_dict_list = []
+
+        permission.users_id = user_dict_list
+
+        role_dict_list = []
+        if isinstance(permission.roles_id, list):
+            role_dict_list = permission.roles_id.copy()
+        elif isinstance(permission.roles_id, str):
+            try:
+                role_dict_list = orjson.loads(permission.roles_id)
+            except orjson.JSONDecodeError:
+                role_dict_list = []
+
+        if not role_dict_list or not isinstance(role_dict_list[0], dict):
+            role_dict_list = [{}]
+
+        if resource_id in role_dict_list[0]:
+            original_roles = set(role_dict_list[0][resource_id])
+            removed_roles = set(roles_id)
+            updated_roles = list(original_roles - removed_roles)
+
+            if updated_roles:
+                role_dict_list[0][resource_id] = updated_roles
+            else:
+                del role_dict_list[0][resource_id]
+                if not role_dict_list[0]:
+                    role_dict_list = []
+
+        permission.roles_id = role_dict_list
+
+    await ActionPermissions.bulk_update(
+        permissions,
+        fields=["users_id", "roles_id"]
+    )
 
     return response_ok({"message": "工具动作权限删除成功"})
 
@@ -774,9 +873,11 @@ async def select_permission_all(request):
 
     query参数:
         - name: 工具名称    str
+        - resource_id: 资源id    str
         - actions: 动作名称    list    可选，默认all
     """
     name = request.json.get("name")
+    resource_id = request.json.get("resource_id")
     actions = request.json.get("actions", ["all"])
     if not name:
         raise CustomError(ErrorCode.ParameterError)
@@ -788,9 +889,41 @@ async def select_permission_all(request):
 
     if not permissions:
         raise CustomError(ErrorCode.ActionNotFoundError)
+
     permission_list = []
     for permission in permissions:
-        permission_list.append(permission.json)
+        users_data = []
+        if isinstance(permission.users_id, list):
+            users_data = permission.users_id
+        elif isinstance(permission.users_id, str):
+            try:
+                users_data = orjson.loads(permission.users_id)
+            except orjson.JSONDecodeError:
+                users_data = []
+
+        user_ids = []
+        if users_data and isinstance(users_data[0], dict):
+            user_ids = users_data[0].get(resource_id, [])
+
+        roles_data = []
+        if isinstance(permission.roles_id, list):
+            roles_data = permission.roles_id
+        elif isinstance(permission.roles_id, str):
+            try:
+                roles_data = orjson.loads(permission.roles_id)
+            except orjson.JSONDecodeError:
+                roles_data = []
+
+        role_ids = []
+        if roles_data and isinstance(roles_data[0], dict):
+            role_ids = roles_data[0].get(resource_id, [])
+
+        permission_list.append({
+            "name": permission.action_name,
+            "users_id": user_ids,
+            "roles_id": role_ids
+        })
+
     return response_ok(permission_list)
 
 
@@ -798,63 +931,90 @@ async def select_permission_all(request):
 @requires_permission("tool:r")
 async def judge_permission(request):
     """
-    判断用户是否有工具动作权限（需要工具查看权限）
+    多资源权限判断接口 (适配列表字典结构)
 
-    query参数:
-        - actions: list    工具下的动作名称列表
+    请求体参数:
+        - actions: 工具-资源-动作列表
             [
                 {
-                    "name": ["action1", "action2"],
-                }
+                    "tool_name": "工具名称",
+                    "resource_id": "资源ID",
+                    "actions": ["动作1", "动作2"]
+                },
+                ...
             ]
     """
+    action_groups = request.json.get("actions", [])
+    if not action_groups or not isinstance(action_groups, list):
+        raise CustomError(ErrorCode.ParameterError, "参数格式错误")
 
-    actions = request.json.get("actions", [])
-    if not actions or not isinstance(actions, list):
-        raise CustomError(ErrorCode.ParameterError)
-
-    user = request.ctx.session['account_info']
-    user_id = user.id
-
+    user = request.ctx.session.get('account_info')
     if not user:
         raise CustomError(ErrorCode.AccountNotFound)
 
-    role_ids = {role.id for role in user.roles}
+    user_id = str(user.id)
+    role_ids = {str(role.id) for role in user.roles}
 
-    tool_action_map = {}
-    for action in actions:
-        for tool_name, action_list in action.items():
-            if not isinstance(action_list, list):
-                raise CustomError(ErrorCode.ParameterError)
-            tool_action_map.setdefault(tool_name, []).extend(action_list)
+    query_conditions = []
+    for group in action_groups:
+        tool_name = group.get("tool_name")
+        resource_id = group.get("resource_id")
+        actions = group.get("actions", [])
 
-    all_permissions = await ActionPermissions.filter(
-        tool_name__in=tool_action_map.keys(),
-        action_name__in=[a for actions in tool_action_map.values() for a in actions],
+        if not all([tool_name, resource_id, isinstance(actions, list)]):
+            continue
+
+        query_conditions.append(Q(tool_name=tool_name, action_name__in=actions))
+
+    permissions = await ActionPermissions.filter(
+        reduce(operator.or_, query_conditions),
         deleted=False
-    ).all()
+    )
 
-    permission_lookup = {f"{p.tool_name}_{p.action_name}": p for p in all_permissions}
+    perm_dict = defaultdict(dict)
+    for p in permissions:
+        perm_dict[(p.tool_name, p.action_name)] = p
 
-    permission_dict = {}
-    for tool_name, action_list in tool_action_map.items():
-        for action_name in action_list:
-            key = f"{tool_name}_{action_name}"
-            permission = permission_lookup.get(key)
+    result = []
+    for group in action_groups:
+        tool_name = group["tool_name"]
+        resource_id = group["resource_id"]
+        action_results = {}
+
+        for action in group["actions"]:
+            permission = perm_dict.get((tool_name, action))
 
             if not permission:
-                permission_dict[key] = "false"
+                action_results[action] = False
                 continue
 
-            users_id = set(permission.users_id or [])
-            roles_id = set(permission.roles_id or [])
+            user_allowed = False
+            if permission.users_id:
+                for res_dict in permission.users_id:
+                    if resource_id in res_dict:
+                        user_allowed = user_id in map(str, res_dict[resource_id])
+                        if user_allowed:
+                            break
 
-            if user_id in users_id or (role_ids and roles_id & role_ids):
-                permission_dict[key] = "true"
-            else:
-                permission_dict[key] = "false"
+            role_allowed = False
+            if permission.roles_id:
+                for res_dict in permission.roles_id:
+                    if resource_id in res_dict:
+                        role_allowed = not role_ids.isdisjoint(
+                            map(str, res_dict[resource_id])
+                        )
+                        if role_allowed:
+                            break
 
-    return response_ok(permission_dict)
+            action_results[action] = user_allowed or role_allowed
+
+        result.append({
+            "tool_name": tool_name,
+            "resource_id": resource_id,
+            "permissions": action_results
+        })
+
+    return response_ok(result)
 
 
 @tool_management_bp.post("/tag/add")
