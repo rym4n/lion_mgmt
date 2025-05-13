@@ -124,3 +124,36 @@ class PermissionsMenu(BaseModel):
         ordering = ["-utime"]
 
 
+class ApiUserToken(BaseModel):
+    """
+    API用户Token管理表
+    """
+    name: str = fields.CharField(unique=True, max_length=32, description="API用户名称")
+    token: str = fields.TextField(description="API用户Token")
+    description: str = fields.CharField(max_length=255, null=True, description="API用户描述")
+    status: bool = fields.BooleanField(default=False, description="Token是否可用")
+    creator = fields.ForeignKeyField("models.Account", related_name="created_api_user_tokens", description="创建人")
+    user = fields.ForeignKeyField("models.Account", related_name="api_user", description="创建人")
+    expiration = fields.DatetimeField(null=True, description="Token过期时间")
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
+            "name": self.name,
+            "description": self.description,
+            "token": self.token,
+            "status": self.status,
+            "creator": self.creator.username if self.creator else "",
+            "expiration": strip_timezone_to_seconds(self.expiration),
+            "roles": [role.name for role in self.user.roles] if self.user.roles else [],
+        }
+
+    class Meta:
+        table = "api_user_token"
+        ordering = ["-utime"]
