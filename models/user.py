@@ -133,7 +133,7 @@ class ApiUserToken(BaseModel):
     description: str = fields.CharField(max_length=255, null=True, description="API用户描述")
     status: bool = fields.BooleanField(default=False, description="Token是否可用")
     creator = fields.ForeignKeyField("models.Account", related_name="created_api_user_tokens", description="创建人")
-    user = fields.ForeignKeyField("models.Account", related_name="api_user", description="创建人")
+    user = fields.ForeignKeyField("models.Account", related_name="api_user", description="API用户")
     expiration = fields.DatetimeField(null=True, description="Token过期时间")
 
     def validate(self) -> None:
