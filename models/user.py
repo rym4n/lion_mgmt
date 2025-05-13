@@ -39,6 +39,7 @@ class Account(BaseModel):
     disabled: bool = fields.BooleanField(default=False)
     roles: fields.ManyToManyRelation["Role"] = fields.ManyToManyField("models.Role", through="account_role")
     permit_ip: str = fields.CharField(null=True, max_length=255)
+    type: str = fields.CharField(max_length=255, default="user")
 
     @property
     def json(self) -> dict:
@@ -48,6 +49,7 @@ class Account(BaseModel):
             "utime": strip_timezone_to_seconds(self.utime),
             "email": self.email,
             "username": self.username,
+            "type": self.type,
             "phone": self.phone,
             "disabled": self.disabled,
             "oauth_id": self.oauth_id,
