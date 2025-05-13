@@ -1,10 +1,14 @@
 # coding=utf-8
+import time
 import uuid
+from datetime import datetime, timezone
 
+import jwt
 import pyotp
 from argon2.exceptions import VerificationError, InvalidHashError
 from sanic import Blueprint
 from tortoise.exceptions import IntegrityError, DoesNotExist
+from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -12,8 +16,8 @@ from libs.error_code.exception import CustomError
 from libs.security.authentication import validate_password, token_encode, refresh_token, validate_username
 from libs.security.authorization import requires_permission
 from libs.utils import password_hasher, ip_in_list, get_client_ip
-from models import Account, Role
-from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS
+from models import Account, Role, ApiUserToken
+from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS, SECRET, SESSION_ENCODING_ALGORITHM
 
 user_bp = Blueprint('user', url_prefix='v1/user')
 _all__ = ["user_bp"]
@@ -94,6 +98,179 @@ async def all_users(request):
     })
 
 
+@user_bp.post("/api/creat")
+@requires_permission("user:c")
+async def create_api_user(request):
+    """
+    创建API用户
+
+    请求参数：
+        - name: 必填，用户名
+        - expiration_time: 必填，过期时间，单位：秒
+        - role_names: 可选，角色名称列表，逗号分隔
+        - description: 可选，描述
+    """
+    account = await Account.create(
+        username=validate_username(request.json.get("name", '')),
+        password=password_hasher.hash(validate_password("Api@" + request.json.get("name", '') + "1")),
+        type="api"
+    )
+    # 添加角色
+    if request.json.get("role_names"):
+        roles = await Role.filter(name__in=request.json.get("role_names")).all()
+        await account.roles.add(*roles)
+
+    client_ip = get_client_ip(request)
+    current = int(time.time())
+    expiration_timestamp = current + request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION)
+
+    token_id = str(uuid.uuid4())
+    token = token_encode(account.id, account.username, account.mfa_enable, token_id,
+                         request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION), ip=client_ip)
+    await account.fetch_related("roles")
+    await request.ctx.cache_client.set(f"account_{account.id}", account,
+                                       request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION))
+
+    api_user = await ApiUserToken.create(
+        name=request.json.get("name"),
+        token=token,
+        description=request.json.get("description", ""),
+        status=True,
+        creator=request.ctx.session['account_info'],
+        user=account,
+        expiration=datetime.fromtimestamp(expiration_timestamp)
+    )
+
+    await api_user.fetch_related("user", "creator")
+    await api_user.user.fetch_related("roles")
+
+    return response_ok(api_user.json)
+
+
+@user_bp.post("/api/list")
+@requires_permission("user:r")
+async def list_api_users(request):
+    """
+    获取所有API用户信息
+
+    请求参数：
+        page: 可选，分页的页码，默认1
+        size: 可选，分页的大小，默认10
+        keyword: 可选，搜索时使用
+    """
+    page = int(request.json.get("page", 1))
+    size = int(request.json.get("size", 10))
+    offset = (page - 1) * size
+    limit = size
+    # 分页查询ApiUserToken，返回总数和数据
+    condition = Q()
+    keyword = request.json.get("keyword")
+    if keyword:
+        condition = Q(name__icontains=keyword) | Q(description__icontains=keyword)
+
+    total = await ApiUserToken.filter(condition).count()
+    api_users = await ApiUserToken.filter(condition).offset(offset).limit(limit).all().prefetch_related('user',
+                                                                                                        'creator')
+    data = []
+    for u in api_users:
+        await u.user.fetch_related("roles")
+        data.append(u.json)
+
+    return response_ok({
+        "total": total,
+        "page": page,
+        "size": size,
+        "total_pages": (total + size - 1) // size,
+        "data": data
+    })
+
+
+@user_bp.post("/api/refresh")
+@requires_permission("user:u")
+async def refresh_api_user(request):
+    """
+    刷新API用户token
+
+    请求参数：
+        id: 必填，API用户ID
+        expiration_time: 必填， 过期时间 ，单位：秒
+    """
+    api_user = await ApiUserToken.get(id=request.json.get("id")).prefetch_related("user", "creator")
+    await api_user.user.fetch_related("roles")
+    if not api_user:
+        raise CustomError(ErrorCode.ApiUserNotFound)
+
+    current = int(time.time())
+    expiration_timestamp = current + request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION)
+
+    token, session = await refresh_api_user_token(api_user, current, expiration_timestamp, "refresh")
+
+    account = await request.ctx.cache_client.get(f"account_{session['sub']}")
+    if not account:
+        account = api_user.user
+
+    await request.ctx.cache_client.set(f"account_{session['sub']}", account,
+                                       request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION))
+    api_user.expiration = datetime.fromtimestamp(expiration_timestamp)
+    api_user.token = token
+    await api_user.save(update_fields=["token", "expiration"])
+
+    return response_ok(api_user.json)
+
+
+async def refresh_api_user_token(api_user, current, expiration_timestamp, token_type):
+    if api_user.expiration.astimezone(timezone.utc) > datetime.utcnow().replace(tzinfo=timezone.utc) and token_type == "refresh":
+        token = api_user.token
+        session = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
+    else:
+        session = {'id': str(uuid.uuid4()), "sub": api_user.user.id, "name": api_user.user.username,
+                   "iat": int(time.time()), "exp": api_user.expiration.timestamp(), "mfa_enable": api_user.user.mfa_enable, "ip": ""}
+
+    session['iat'] = current
+    session['exp'] = expiration_timestamp
+    token = jwt.encode(session, SECRET, SESSION_ENCODING_ALGORITHM)
+
+    return token, session
+
+
+@user_bp.post("/api/update")
+@requires_permission("user:u")
+async def update_api_user(request):
+    """
+    更新API用户信息（需要user:u权限）
+
+    请求参数：
+        id: 必填，API用户ID
+        role_names: 可选，角色名称列表，逗号分隔, 如果是删除角色的话就传需要保留的角色名列表就行
+        description: 可选，描述
+        status: 可选，是否启用 true为启用 false为禁用
+    """
+    api_user = await ApiUserToken.get(id=request.json.get("id")).prefetch_related("user", "creator")
+    if not api_user:
+        raise CustomError(ErrorCode.ApiUserNotFound)
+
+    if request.json.get("description"):
+        api_user.description = request.json.get("description")
+    if request.json.get("role_names") is not None:
+        roles = await Role.filter(name__in=request.json.get("role_names")).all()
+        await api_user.user.roles.clear()
+        await api_user.user.roles.add(*roles)
+    if request.json.get("status") is not None:
+        if request.json.get("status"):
+            token, session = await refresh_api_user_token(api_user, int(time.time()), api_user.expiration.timestamp(), "update")
+            api_user.status = True
+            api_user.token = token
+        else:
+            token, session = await refresh_api_user_token(api_user, int(time.time()), int(time.time()), "update")
+            api_user.status = False
+            api_user.token = token
+
+    await api_user.save(update_fields=["description", "status", "token"])
+    await api_user.user.fetch_related("roles")
+
+    return response_ok(api_user.json)
+
+
 @user_bp.post("/login")
 async def login(request):
     """
@@ -153,10 +330,12 @@ async def login(request):
         # )
         # 如果开启了MFA，缓存记录MFA密钥，便于mfa认证
         if account.mfa_enable and account.mfa_key:
-            await request.ctx.cache_client.set(f'mfa_key_{token_id}', account.mfa_key, AUTHENTICATION_SESSION_EXPIRATION)
+            await request.ctx.cache_client.set(f'mfa_key_{token_id}', account.mfa_key,
+                                               AUTHENTICATION_SESSION_EXPIRATION)
             # 如果是开启mfa之后的第一次登录，在mfa还没绑定的情况下，返回mfa_uri，供前端渲染二维码
             if not account.mfa_bind:
-                resp['mfa_uri'] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name='AIOE')
+                resp['mfa_uri'] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username,
+                                                                                    issuer_name='AIOE')
 
         return response_ok(resp)
     except DoesNotExist:
@@ -180,7 +359,8 @@ async def refresh_session_token(request):
     account = await request.ctx.cache_client.get(f"account_{request.ctx.session['sub']}")
     if not account:
         account = await Account.filter(id=request.ctx.session["sub"]).first()
-    await request.ctx.cache_client.set(f"account_{request.ctx.session['sub']}", account, AUTHENTICATION_SESSION_EXPIRATION)
+    await request.ctx.cache_client.set(f"account_{request.ctx.session['sub']}", account,
+                                       AUTHENTICATION_SESSION_EXPIRATION)
     return response_ok(resp)
 
 

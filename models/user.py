@@ -50,6 +50,7 @@ class Account(BaseModel):
             "email": self.email,
             "username": self.username,
             "type": self.type,
+            "display_name": self.display_name,
             "phone": self.phone,
             "disabled": self.disabled,
             "oauth_id": self.oauth_id,
