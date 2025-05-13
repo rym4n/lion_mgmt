@@ -83,3 +83,5 @@ class ErrorCode(BaseErrorCode):
     EventNameExists = ErrorData(4058, "事件名称重复，请重新命名")
 
     NoExecutionRecord = ErrorData(4059, "无执行记录")
+    NoEventAccess = ErrorData(4060, "当前事件接入不存在")
+    NoLogInfo = ErrorData(4061, "暂无日志信息")
