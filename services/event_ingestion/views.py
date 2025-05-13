@@ -423,11 +423,11 @@ async def get_event_ingestion_detail(request):
     event_id = request.json.get('id')
     event = await EventsIngestion.filter(id=event_id).select_related("creator", "updator").first()
     if not event:
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NoEventAccess)
 
     file_path = os.path.abspath(event.file_path)
     if not os.path.exists(file_path):
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NoEventAccess)
 
     async with aiofile.AIOFile(file_path, 'r', encoding='utf-8') as f:
         content = await f.read()
@@ -456,14 +456,14 @@ async def get_event_ingestion_kafka_sample(request):
     if page < 1 or size < 1:
         raise CustomError(ErrorCode.ParameterError)
 
-    event = await EventsIngestion.filter(id=event_id).first()
+    event = await EventsIngestion.filter(id=event_id,deleted=False).first()
     if not event:
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NoEventAccess)
 
     log_path = os.path.join(SAMPLE_SINK_PATH, f"{event.vector_name}.log")
     log_path = log_path.replace("\\", "/")
     if not os.path.exists(log_path):
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NoLogInfo)
 
     async with aiofile.AIOFile(log_path, 'r', encoding='utf-8') as f:
         content = await f.read()
@@ -503,12 +503,12 @@ async def get_event_ingestion_syslog_sample(request):
 
     event = await EventsIngestion.filter(id=event_id).first()
     if not event:
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NoEventAccess)
 
     log_path = os.path.join(SAMPLE_SINK_PATH, f"{event.vector_name}.log")
     log_path = log_path.replace("\\", "/")
     if not os.path.exists(log_path):
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NoLogInfo)
 
     async with aiofile.AIOFile(log_path, 'r', encoding='utf-8') as f:
         content = await f.read()
