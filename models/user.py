@@ -131,7 +131,7 @@ class ApiUserToken(BaseModel):
     name: str = fields.CharField(unique=True, max_length=32, description="API用户名称")
     token: str = fields.TextField(description="API用户Token")
     description: str = fields.CharField(max_length=255, null=True, description="API用户描述")
-    status: bool = fields.BooleanField(default=False, description="Token是否可用")
+    status: bool = fields.BooleanField(default=True, description="Token是否可用")
     creator = fields.ForeignKeyField("models.Account", related_name="created_api_user_tokens", description="创建人")
     user = fields.ForeignKeyField("models.Account", related_name="api_user", description="API用户")
     expiration = fields.DatetimeField(null=True, description="Token过期时间")
