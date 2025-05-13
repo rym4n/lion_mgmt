@@ -26,8 +26,9 @@ async def new_user(request):
     新建用户
 
     请求参数
-        username: 账号名称
+        username: 账号
         password: 密码
+        display_name：姓名
         phone: 可选，电话号码
         email: 可选，邮箱
         disabled: 可选，是否禁用
@@ -40,6 +41,7 @@ async def new_user(request):
         account = await Account.create(
             username=validate_username(request.json.get("username", '')),
             password=password_hasher.hash(validate_password(request.json.get("password") or '')),
+            display_name=request.json.get("display_name"),
             email=request.json.get("email"),
             phone=request.json.get("phone"),
             disabled=request.json.get("disabled") or False,
@@ -50,6 +52,7 @@ async def new_user(request):
         if request.json.get("role_names"):
             roles = await Role.filter(name__in=request.json.get("role_names")).all()
             await account.roles.add(*roles)
+        await account.fetch_related("roles")
         res = account.json
         if mfa_enable:
             res['mfa_uri'] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name='AIOE')

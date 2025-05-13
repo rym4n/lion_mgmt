@@ -96,16 +96,10 @@ async def get_all_scene(request):
     if key:
         query = query.filter(Q(name__icontains=key) | Q(remark__icontains=key))
 
-    scenes = await query.limit(page_size).offset((page - 1) * page_size)
-
-    scene_list = []
-
-    for scene in scenes:
-        await scene.fetch_related("updator")
-        scene_list.append(scene.json)
+    scenes = await query.limit(page_size).offset((page - 1) * page_size).all().prefetch_related('updator')
 
     return response_ok({
-        "scenes": scene_list,
+        "scenes": [s.json for s in scenes],
         "page": page,
         "page_size": page_size,
         "total": await query.count()
