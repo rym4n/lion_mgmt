@@ -180,7 +180,6 @@ async def get_all(request):
     })
 
 
-
 @timed_bp.post("/update")
 @requires_permission("timed:u")
 async def update_timed(request):
@@ -202,15 +201,16 @@ async def update_timed(request):
     data = request.json
     timed_id = data.get("id")
     if not timed_id:
-        raise CustomError(ErrorCode.ParameterError, "缺少定时任务 ID")
+        raise CustomError(ErrorCode.ParameterError)
 
-    timed = await Timed.filter(id=timed_id, deleted=False).select_related("action", "playbook", "creator", "updator").first()
+    timed = await Timed.filter(id=timed_id, deleted=False).select_related("action", "playbook", "creator",
+                                                                          "updator").first()
     if not timed:
         raise CustomError(ErrorCode.TimedNotFound)
 
     run_type = data.get("type", timed.type)
     if run_type not in [RUN_TYPE_FLOW, RUN_TYPE_ACTION]:
-        raise CustomError(ErrorCode.ParameterError, "type 类型错误")
+        raise CustomError(ErrorCode.ParameterError)
 
     enable = data.get("enable", timed.enable)
     status = data.get("status", timed.status)
@@ -224,7 +224,7 @@ async def update_timed(request):
         playbook_input = data.get("playbook_input", timed.playbook_input)
 
         if not playbook_id or not playbook_input:
-            raise CustomError(ErrorCode.ParameterError, "缺少剧本信息")
+            raise CustomError(ErrorCode.ParameterError)
 
         timed.playbook = await Playbook.filter(id=playbook_id, deleted=False).first()
         timed.playbook_input = playbook_input
@@ -234,7 +234,7 @@ async def update_timed(request):
 
     else:
         if not timed.action and not data.get("action_id"):
-            raise CustomError(ErrorCode.ParameterError, "缺少动作信息")
+            raise CustomError(ErrorCode.ParameterError)
 
         action_id = data.get("action_id", timed.action.id if timed.action else None)
         action_input = data.get("action_input", timed.action_input)
