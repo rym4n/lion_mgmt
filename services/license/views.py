@@ -37,38 +37,10 @@ MENU_DICT = {
 }
 
 DESCRIPTION_DICT = {
-    "用户列表": "支持创建本地账号、LDAP账号，支持账号有效期配置、双因素认证绑定",
-    "角色管理": "预定义系统管理员、审计员、事件处理员、第三方协调员等角色，同时支持自定义角色，权限的颗粒度细化到每项子功能的查询、添加、修改、删除等",
-    "权限管理": "支持基于角色定义用户权限，用户绑定一个或多个角色",
-    "系统监控": "支持系统模块、服务实时监控，支持系统日志导出",
-    "系统审计": "系统审计日志包含时间、用户、IP地址、操作、类型、结果以及操作原始详情",
-    "系统备份与恢复": "支持定时、即时系统备份操作，支持系统配置恢复",
-    "事件接入": "支持kafka消息、API、syslog、邮件等多种事件接入方式",
-    "事件自动去重": "支持自定义去重规则，事件接入自动合并重复事件",
-    "事件分类": "支持自定义事件类型，根据事件类型关联处置动作或处置剧本",
-    "事件处理详情": "展示事件处置的详细内容，包括事件生命周期各阶段、剧本、动作详细输入、输出信息，去重事件关联关系",
-    "事件报告": "每条事件处理完成后，自动生成事件处理报告",
-    "应用APP开发SDK": "提供Python APP开发SDK，提供APP开发框架自动生成工具等快速APP开发工具包",
-    "应用集成对接方式": "支持API、SSH/Telnet、webSocket、HTTP、JDBC、SOAP、SNMP以及内部私有协议等多种对接方式",
-    "开发API接口": "开放南、北向API接口，包括事件接入API接口、报表查看API接口、应用对接API接口等",
-    "应用APP支持": "免费提供厂家已开发的APP下载，已经支持主流的防火墙、WAF、IPS、扫描器、威胁情报、网络设备、蜜罐等类型安全系统",
-    "应用权限控制": "支持支持细粒度权限控制，针对每资源、每动作配置权限，仅允许已配置的用户、角色执行动作.",
-    "应用数量": "除系统内置应用外，限制上传使用的应用数量",
-    "剧本编排": "剧本编排支持普通动作、规则引擎、审批节点、虚拟节点、异步节点等多种节点类型；支持草稿模式、安全模式、生产模式；支持剧本克隆；支持导入、导出功能；支持绑定安全场景、定义标签等",
-    "剧本数量限制": "除系统内置剧本外，限制新建的剧本数量",
-    "安全场景管理": "根据安全保障级别自定义安全场景，每个安全场景关联一组安全剧本，支持一键切换安全场景",
-    "仪表盘": "支持安全态势、事件趋势、事件处理时效、系统性能状况等仪表板展示",
-    "虚拟作战室": "默认支持10个使用授权。作战室支持全局模式、单事件模式；支持多人协同交流；支持AI机器人交互；支持任意动作、剧本执行；支持命令行快捷执行；支持专注模式，消除交互过程的噪音",
-    "剧本编排高级功能": "剧本编排支持循环、嵌套、函数等高级功能",
-    "快速编排功能": "支持从事件处理详情、作战室快速生成剧本",
-    "事件生命周期管理": "依据事件生命周期：调查取证、分析、遏制、根除、恢复、复盘各阶段进行管理，每阶段自动执行关联任务，完成事件处置工作",
-    "集群部署": "系统支持多台集群，平滑扩展",
-    "多引擎部署": "系统支持多执行引擎分布式部署，依据网络架构、性能需求、物理位置、云架构等情况，灵活部署多个执行引擎",
-    "人工审核": "人工审核",
-    "全局变量": "全局变量",
-    "许可管理": "展示系统版本信息、授权模块信息、授权过期时间等",
-    "场景管理": "场景管理",
-    "定时任务": "定时任务"
+    "剧本编排": "包含剧本编排、剧本编排高级功能、快速编排功能、场景管理等功能",
+    "应用集成": "包含应用集成对接方式、开发API接口、应用APP支持、应用权限控制等功能",
+    "事件管理": "包含事件接入、事件自动去重、事件分类、事件处理详情、事件报告等功能",
+    "基础功能": "包含用户列表、角色管理、权限管理、系统监控、系统审计、系统备份与恢复等功能、人工审核、许可管理等功能",
 }
 
 
@@ -157,12 +129,21 @@ async def get_all_license(request: Request):
         description = item["description"]
 
         if auth and int(item["expireTime"]) > int(time.time() * 1000):
-            if name in ["应用数量", "剧本数量限制"]:
-                menu_dict["menuInfo"].setdefault(group, []).append({"name": name, "value": item["value"], "auth": True, "description": description})
+            if name in ["应用数量", "剧本数量限制"] or group in ["高级功能"]:
+                menu_dict["menuInfo"].setdefault(name, {})["value"] = item["value"]
+                menu_dict["menuInfo"].setdefault(name, {})["auth"] = True
+                menu_dict["menuInfo"].setdefault(name, {})["description"] = description
+                menu_dict["menuInfo"].setdefault(name, {})["expireTime"] = item["expireTime"]
                 continue
-            menu_dict["menuInfo"].setdefault(group, []).append({"name": name, "value": None, "auth": True, "description": description})
+            menu_dict["menuInfo"].setdefault(group, {})["value"] = None
+            menu_dict["menuInfo"].setdefault(group, {})["auth"] = True
+            menu_dict["menuInfo"].setdefault(group, {})["description"] = DESCRIPTION_DICT.get(group, "")
+            menu_dict["menuInfo"].setdefault(group, {})["expireTime"] = item["expireTime"]
         else:
-            menu_dict["menuInfo"].setdefault(group, []).append({"name": name, "value": None, "auth": False, "description": description})
+            menu_dict["menuInfo"].setdefault(group, {})["value"] = None
+            menu_dict["menuInfo"].setdefault(group, {})["auth"] = True
+            menu_dict["menuInfo"].setdefault(group, {})["description"] = DESCRIPTION_DICT.get(group, "")
+            menu_dict["menuInfo"].setdefault(group, {})["expireTime"] = item["expireTime"]
 
     return response_ok(menu_dict)
 
