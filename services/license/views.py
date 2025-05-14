@@ -130,20 +130,26 @@ async def get_all_license(request: Request):
 
         if auth and int(item["expireTime"]) > int(time.time() * 1000):
             if name in ["应用数量", "剧本数量限制"] or group in ["高级功能"]:
-                menu_dict["menuInfo"].setdefault(name, {})["value"] = item["value"]
+                menu_dict["menuInfo"].setdefault(name, {})["value"] = item["value"] or None
                 menu_dict["menuInfo"].setdefault(name, {})["auth"] = True
                 menu_dict["menuInfo"].setdefault(name, {})["description"] = description
-                menu_dict["menuInfo"].setdefault(name, {})["expireTime"] = item["expireTime"]
+                menu_dict["menuInfo"].setdefault(name, {})["expireTime"] = formatted_time(item["expireTime"])
                 continue
             menu_dict["menuInfo"].setdefault(group, {})["value"] = None
             menu_dict["menuInfo"].setdefault(group, {})["auth"] = True
             menu_dict["menuInfo"].setdefault(group, {})["description"] = DESCRIPTION_DICT.get(group, "")
-            menu_dict["menuInfo"].setdefault(group, {})["expireTime"] = item["expireTime"]
+            menu_dict["menuInfo"].setdefault(group, {})["expireTime"] = formatted_time(item["expireTime"])
         else:
+            if group in ["高级功能"]:
+                menu_dict["menuInfo"].setdefault(name, {})["value"] = None
+                menu_dict["menuInfo"].setdefault(name, {})["auth"] = True
+                menu_dict["menuInfo"].setdefault(name, {})["description"] = description
+                menu_dict["menuInfo"].setdefault(name, {})["expireTime"] = formatted_time(item["expireTime"])
+                continue
             menu_dict["menuInfo"].setdefault(group, {})["value"] = None
             menu_dict["menuInfo"].setdefault(group, {})["auth"] = True
             menu_dict["menuInfo"].setdefault(group, {})["description"] = DESCRIPTION_DICT.get(group, "")
-            menu_dict["menuInfo"].setdefault(group, {})["expireTime"] = item["expireTime"]
+            menu_dict["menuInfo"].setdefault(group, {})["expireTime"] = formatted_time(item["expireTime"])
 
     return response_ok(menu_dict)
 
