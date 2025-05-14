@@ -556,7 +556,7 @@ async def add_tool_resource(request):
     product_supplier = request.json.get("product_supplier", None)
     product_name = request.json.get("product_name", None)
     resources = request.json.get("resources")
-    if not tool_name or not resources or not name or not description:
+    if tool_name is None or resources is None or name is None:
         raise CustomError(ErrorCode.ParameterError)
 
     existing_resource = await ToolResources.get_or_none(name=name, deleted=False)
