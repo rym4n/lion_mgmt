@@ -69,9 +69,9 @@ async def create_workflow(request):
         creator=request.ctx.session['account_info'],
         updator=request.ctx.session['account_info']
     )
-
-    action_ids = await statistics_data(playbook.flow_json)
-    await tool_action_update({playbook.id: action_ids})
+    if playbook.flow_json:
+        action_ids = await statistics_data(playbook.flow_json)
+        await tool_action_update({playbook.id: action_ids})
 
     if request.json.get('scenes'):
         scenes = await Scene.filter(name__in=request.json.get('scenes')).all()
@@ -211,8 +211,9 @@ async def delete_workflow(request):
         raise CustomError(ErrorCode.PlaybookNotFound)
     playbook.deleted = True
     await playbook.save()
-    action_ids = await statistics_data(playbook.flow_json)
-    await tool_action_playbook_delete({playbook.id: action_ids})
+    if playbook.flow_json:
+        action_ids = await statistics_data(playbook.flow_json)
+        await tool_action_playbook_delete({playbook.id: action_ids})
     return response_ok("剧本删除成功")
 
 
