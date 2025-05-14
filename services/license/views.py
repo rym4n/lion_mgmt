@@ -154,14 +154,15 @@ async def get_all_license(request: Request):
         name = item["name"]
         auth = item["auth"]
         group = item["group"]
+        description = item["description"]
 
         if auth and int(item["expireTime"]) > int(time.time() * 1000):
             if name in ["应用数量", "剧本数量限制"]:
-                menu_dict["menuInfo"].setdefault(group, []).append({"name": name, "value": item["value"], "auth": True, "description": DESCRIPTION_DICT[name]})
+                menu_dict["menuInfo"].setdefault(group, []).append({"name": name, "value": item["value"], "auth": True, "description": description})
                 continue
-            menu_dict["menuInfo"].setdefault(group, []).append({"name": name, "value": None, "auth": True, "description": DESCRIPTION_DICT[name]})
+            menu_dict["menuInfo"].setdefault(group, []).append({"name": name, "value": None, "auth": True, "description": description})
         else:
-            menu_dict["menuInfo"].setdefault(group, []).append({"name": name, "value": None, "auth": False, "description": DESCRIPTION_DICT[name]})
+            menu_dict["menuInfo"].setdefault(group, []).append({"name": name, "value": None, "auth": False, "description": description})
 
     return response_ok(menu_dict)
 
