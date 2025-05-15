@@ -163,10 +163,12 @@ async def edit_workflow(request):
         if p in ['id', 'ctime', 'utime', 'deleted', 'creator', 'updator', 'status', 'version']:
             continue
         if p == "flow_json":
-            action_ids = await statistics_data(playbook.flow_json)
-            await tool_action_playbook_delete({playbook.id: action_ids})
-            action_ids = await statistics_data(params[p])
-            await tool_action_update({playbook.id: action_ids})
+            if playbook.flow_json:
+                action_ids = await statistics_data(playbook.flow_json)
+                await tool_action_playbook_delete({playbook.id: action_ids})
+            if params[p]:
+                action_ids = await statistics_data(params[p])
+                await tool_action_update({playbook.id: action_ids})
         if hasattr(playbook, p):
             has_change = True
             setattr(playbook, p, params[p])
@@ -218,7 +220,6 @@ async def delete_workflow(request):
 
 async def poll_database_and_notify(ws, run_id, formatted_time):
     updated_time = formatted_time
-    print(run_id)
     try:
         while True:
             datas = await Runlog.filter(run_id=run_id, utime__gt=updated_time).all().prefetch_related("playbook")
@@ -226,7 +227,7 @@ async def poll_database_and_notify(ws, run_id, formatted_time):
                 payload = []
                 for data in datas:
                     payload.append(data.json)
-                await ws.send(orjson.dumps({"data": payload}))
+                await ws.send(orjson.dumps({"data": payload}).decode())
                 updated_time = datas[-1].utime
             await asyncio.sleep(5)
     except WebsocketClosed:
@@ -416,8 +417,9 @@ async def input_data(request):
             continue
         for key, value in node["properties"]["input"].items():
             if input_id in value:
-                data = orjson.loads(await redis_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"]))
+                data = await redis_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"])
                 if data:
+                    data = orjson.loads(orjson.dumps(data))
                     for action in (data.get('actions') or []):
                         if node["properties"]["action"] in action.values():
                             for item in action["input"]:

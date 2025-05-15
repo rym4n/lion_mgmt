@@ -126,7 +126,7 @@ async def get_all_license(request: Request):
             if name in ["虚拟作战室", "AI辅助", "集群部署", "软件升级", "维保服务", "多引擎部署"] or group in ["高级功能"]:
                 menu_dict["menuInfo"].setdefault(name, {})["value"] = None
                 menu_dict["menuInfo"].setdefault(name, {})["auth"] = True
-                menu_dict["menuInfo"].setdefault(name, {})["description"] = description
+                menu_dict["menuInfo"].setdefault(name, {})["description"] = lic["menuInfo"]["grouplist"].get(group, "")
                 menu_dict["menuInfo"].setdefault(name, {})["expireTime"] = formatted_time(item["expireTime"])
                 continue
             menu_dict["menuInfo"].setdefault(group, {})["value"] = item["value"] if name in ["应用数量", "剧本数量限制"] else None
@@ -137,7 +137,7 @@ async def get_all_license(request: Request):
             if name in ["虚拟作战室", "AI辅助", "集群部署", "软件升级", "维保服务", "多引擎部署"] or group in ["高级功能"]:
                 menu_dict["menuInfo"].setdefault(name, {})["value"] = None
                 menu_dict["menuInfo"].setdefault(name, {})["auth"] = True
-                menu_dict["menuInfo"].setdefault(name, {})["description"] = description
+                menu_dict["menuInfo"].setdefault(name, {})["description"] = lic["menuInfo"]["grouplist"].get(group, "")
                 menu_dict["menuInfo"].setdefault(name, {})["expireTime"] = formatted_time(item["expireTime"])
                 continue
             menu_dict["menuInfo"].setdefault(group, {})["value"] = None

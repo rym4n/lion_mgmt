@@ -16,7 +16,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authentication import validate_password, token_encode, refresh_token, validate_username
 from libs.security.authorization import requires_permission
 from libs.utils import password_hasher, ip_in_list, get_client_ip
-from models import Account, Role, ApiUserToken
+from models import Account, Role
 from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS, SECRET, SESSION_ENCODING_ALGORITHM
 
 user_bp = Blueprint('user', url_prefix='v1/user')
@@ -98,7 +98,7 @@ async def all_users(request):
     })
 
 
-@user_bp.post("/api/creat")
+@user_bp.post("/new-token")
 @requires_permission("user:c")
 async def create_api_user(request):
     """
@@ -109,45 +109,33 @@ async def create_api_user(request):
         - expiration_time: 必填，过期时间，单位：秒
         - role_names: 可选，角色名称列表，逗号分隔
         - description: 可选，描述
+        - permit_ip: 可选，允许访问的IP列表，逗号分隔 192.168.1.1,192.168.1.2  如果为空则为全部ip
     """
     account = await Account.create(
         username=validate_username(request.json.get("name", '')),
-        password=password_hasher.hash(validate_password("Api@" + request.json.get("name", '') + "1")),
-        type="api"
+        password=password_hasher.hash(str(uuid.uuid4())),
+        type="api",
+        display_name=request.json.get("description", ""),
+        expiration=datetime.fromtimestamp(int(time.time()) + request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION)),
+        creator=request.ctx.session['account_info'].username,
+        permit_ip=request.json.get("permit_ip", "all"),
     )
     # 添加角色
     if request.json.get("role_names"):
         roles = await Role.filter(name__in=request.json.get("role_names")).all()
         await account.roles.add(*roles)
 
-    client_ip = get_client_ip(request)
-    current = int(time.time())
-    expiration_timestamp = current + request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION)
-
     token_id = str(uuid.uuid4())
-    token = token_encode(account.id, account.username, account.mfa_enable, token_id,
-                         request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION), ip=client_ip)
+    token = token_encode(account.id, account.username, account.mfa_enable, token_id, request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION), account.password, permit_ip=account.permit_ip)
     await account.fetch_related("roles")
-    await request.ctx.cache_client.set(f"account_{account.id}", account,
-                                       request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION))
+    await request.ctx.cache_client.set(f"account_{account.id}", account, 7 * 24 * 3600)
 
-    api_user = await ApiUserToken.create(
-        name=request.json.get("name"),
-        token=token,
-        description=request.json.get("description", ""),
-        status=True,
-        creator=request.ctx.session['account_info'],
-        user=account,
-        expiration=datetime.fromtimestamp(expiration_timestamp)
-    )
-
-    await api_user.fetch_related("user", "creator")
-    await api_user.user.fetch_related("roles")
-
-    return response_ok(api_user.json)
+    data_json = account.api_json
+    data_json['token'] = token
+    return response_ok(data_json)
 
 
-@user_bp.post("/api/list")
+@user_bp.post("/list-token")
 @requires_permission("user:r")
 async def list_api_users(request):
     """
@@ -163,18 +151,17 @@ async def list_api_users(request):
     offset = (page - 1) * size
     limit = size
     # 分页查询ApiUserToken，返回总数和数据
-    condition = Q()
+    condition = Q(type="api") & Q(deleted=False)
     keyword = request.json.get("keyword")
     if keyword:
-        condition = Q(name__icontains=keyword) | Q(description__icontains=keyword)
+        condition = condition & Q(username__icontains=keyword) | Q(display_name=keyword)
 
-    total = await ApiUserToken.filter(condition).count()
-    api_users = await ApiUserToken.filter(condition).offset(offset).limit(limit).all().prefetch_related('user',
-                                                                                                        'creator')
+    total = await Account.filter(condition).count()
+    api_users = await Account.filter(condition).offset(offset).limit(limit).all().prefetch_related("roles")
     data = []
     for u in api_users:
-        await u.user.fetch_related("roles")
-        data.append(u.json)
+        print(u.expiration)
+        data.append(u.api_json)
 
     return response_ok({
         "total": total,
@@ -185,55 +172,7 @@ async def list_api_users(request):
     })
 
 
-@user_bp.post("/api/refresh")
-@requires_permission("user:u")
-async def refresh_api_user(request):
-    """
-    刷新API用户token
-
-    请求参数：
-        id: 必填，API用户ID
-        expiration_time: 必填， 过期时间 ，单位：秒
-    """
-    api_user = await ApiUserToken.get(id=request.json.get("id")).prefetch_related("user", "creator")
-    await api_user.user.fetch_related("roles")
-    if not api_user:
-        raise CustomError(ErrorCode.ApiUserNotFound)
-
-    current = int(time.time())
-    expiration_timestamp = current + request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION)
-
-    token, session = await refresh_api_user_token(api_user, current, expiration_timestamp, "refresh")
-
-    account = await request.ctx.cache_client.get(f"account_{session['sub']}")
-    if not account:
-        account = api_user.user
-
-    await request.ctx.cache_client.set(f"account_{session['sub']}", account,
-                                       request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION))
-    api_user.expiration = datetime.fromtimestamp(expiration_timestamp)
-    api_user.token = token
-    await api_user.save(update_fields=["token", "expiration"])
-
-    return response_ok(api_user.json)
-
-
-async def refresh_api_user_token(api_user, current, expiration_timestamp, token_type):
-    if api_user.expiration.astimezone(timezone.utc) > datetime.utcnow().replace(tzinfo=timezone.utc) and token_type == "refresh":
-        token = api_user.token
-        session = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
-    else:
-        session = {'id': str(uuid.uuid4()), "sub": api_user.user.id, "name": api_user.user.username,
-                   "iat": int(time.time()), "exp": api_user.expiration.timestamp(), "mfa_enable": api_user.user.mfa_enable, "ip": ""}
-
-    session['iat'] = current
-    session['exp'] = expiration_timestamp
-    token = jwt.encode(session, SECRET, SESSION_ENCODING_ALGORITHM)
-
-    return token, session
-
-
-@user_bp.post("/api/update")
+@user_bp.post("/del-token")
 @requires_permission("user:u")
 async def update_api_user(request):
     """
@@ -241,34 +180,17 @@ async def update_api_user(request):
 
     请求参数：
         id: 必填，API用户ID
-        role_names: 可选，角色名称列表，逗号分隔, 如果是删除角色的话就传需要保留的角色名列表就行
-        description: 可选，描述
-        status: 可选，是否启用 true为启用 false为禁用
     """
-    api_user = await ApiUserToken.get(id=request.json.get("id")).prefetch_related("user", "creator")
+    api_user = await Account.get(id=request.json.get("id"), deleted=False)
     if not api_user:
         raise CustomError(ErrorCode.ApiUserNotFound)
 
-    if request.json.get("description"):
-        api_user.description = request.json.get("description")
-    if request.json.get("role_names") is not None:
-        roles = await Role.filter(name__in=request.json.get("role_names")).all()
-        await api_user.user.roles.clear()
-        await api_user.user.roles.add(*roles)
-    if request.json.get("status") is not None:
-        if request.json.get("status"):
-            token, session = await refresh_api_user_token(api_user, int(time.time()), api_user.expiration.timestamp(), "update")
-            api_user.status = True
-            api_user.token = token
-        else:
-            token, session = await refresh_api_user_token(api_user, int(time.time()), int(time.time()), "update")
-            api_user.status = False
-            api_user.token = token
+    await request.ctx.cache_client.delete(f"account_{api_user.id}")
 
-    await api_user.save(update_fields=["description", "status", "token"])
-    await api_user.user.fetch_related("roles")
+    api_user.deleted = True
+    await api_user.save(update_fields=["deleted"])
 
-    return response_ok(api_user.json)
+    return response_ok("删除成功")
 
 
 @user_bp.post("/login")

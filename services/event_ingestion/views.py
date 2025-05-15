@@ -462,7 +462,7 @@ async def get_event_ingestion_kafka_sample(request):
     log_path = os.path.join(SAMPLE_SINK_PATH, f"{event.vector_name}.log")
     log_path = log_path.replace("\\", "/")
     if not os.path.exists(log_path):
-        raise CustomError(ErrorCode.NoLogInfo)
+        return response_ok("暂无日志信息")
 
     async with aiofile.AIOFile(log_path, 'r', encoding='utf-8') as f:
         content = await f.read()
@@ -507,7 +507,7 @@ async def get_event_ingestion_syslog_sample(request):
     log_path = os.path.join(SAMPLE_SINK_PATH, f"{event.vector_name}.log")
     log_path = log_path.replace("\\", "/")
     if not os.path.exists(log_path):
-        raise CustomError(ErrorCode.NoLogInfo)
+        return response_ok("暂无日志信息")
 
     async with aiofile.AIOFile(log_path, 'r', encoding='utf-8') as f:
         content = await f.read()
@@ -724,7 +724,7 @@ async def export_event_ingestion_script(request):
                 data = yaml.safe_load(content)
 
             event_data = event.json if hasattr(event, "json") else dict(event)
-            event_data["vector_config"] = data
+            event_data["vector_config"] = str(data)
             event_data.pop("file_path", None)
 
             filename = f"{sanitize_filename(event.event_ingestion_name or 'unnamed')}.json"
@@ -763,7 +763,10 @@ async def import_event_ingestion_script(request):
         vector_name = ''.join(random.choices(letters, k=12))
 
         raw_config = vector_config["vector_config"]
-        raw_config_dict = ast.literal_eval(raw_config)
+        if isinstance(raw_config, str):
+            raw_config_dict = ast.literal_eval(raw_config)
+        else:
+            raw_config_dict = raw_config
         json_str = orjson.dumps(raw_config_dict).decode()
         json_str = json_str.replace(vector_config["vector_name"], vector_name)
         data = orjson.loads(json_str)
