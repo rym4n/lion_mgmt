@@ -143,24 +143,15 @@ async def get_roomsList(request: Request):
         请求参数：
             keyword: 可选，搜索作战室
     """
+    condition = Q()
     keyword = request.json.get("keyword")
     if keyword:
         condition = Q(name__icontains=keyword) | Q(description__icontains=keyword)
 
     # 前端是先获取再查询, 没有使用到这里的查询参数.
     rooms = await Room.filter(condition).order_by('-ctime').prefetch_related('creator', 'users')
-
-    room_list = []
-    for room in rooms:
-        room_list.append({
-            "id": str(room.id),
-            "name": room.name,
-            "creator_id": str(room.creator.id) if room.creator else "",
-            "creator_name": room.creator.username if room.creator else "",
-            "ctime": str(room.ctime),
-        })
     return response_ok({
-        "rooms": room_list
+        "rooms": [r.json for r in rooms]
     })
 
 
