@@ -25,7 +25,7 @@ async def authenticate(request: Request):
     if not request.path.endswith('/user/mfa-auth') and payload.get('mfa_enable') is True and payload.get('mfa_auth') is not True:
         raise CustomError(ErrorCode.SecondFactorRequired)
 
-    if payload.get('ip') != get_client_ip(request):
+    if payload.get('ip') != "all" and get_client_ip(request) not in payload.get('ip'):
         # 防止会话劫持
         raise CustomError(ErrorCode.SessionInvalid)
 
@@ -48,7 +48,7 @@ def requires_authentication(arg=None):
     return decorator(arg) if callable(arg) else decorator
 
 
-def token_encode(account_id, username, mfa_enable, token_id: str, expiration=AUTHENTICATION_SESSION_EXPIRATION, **kwargs) -> str:
+def token_encode(account_id, username, mfa_enable, token_id: str, expiration=AUTHENTICATION_SESSION_EXPIRATION, secret=SECRET, **kwargs) -> str:
     """
     根据账号信息生成token
     """
@@ -63,7 +63,7 @@ def token_encode(account_id, username, mfa_enable, token_id: str, expiration=AUT
     }
     for key, value in kwargs.items():
         data[key] = value
-    encoded_session = jwt.encode(data, SECRET, SESSION_ENCODING_ALGORITHM)
+    encoded_session = jwt.encode(data, secret, SESSION_ENCODING_ALGORITHM)
     return encoded_session
 
 
