@@ -90,7 +90,7 @@ def ip_in_list(ip_str: str, ip_list: list) -> bool:
                 # 单个 IP 比较
                 if target_ip == ipaddress.ip_address(ip_item):
                     return True
-        except ValueError as e:
+        except ValueError:
             # 如果IP格式不合法，继续下一项
             continue
     return False

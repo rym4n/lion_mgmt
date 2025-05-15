@@ -48,8 +48,8 @@ class Timed(BaseModel):
             "success_rate": self.success_rate,
             "enable": self.enable,
             "end_time": self.end_time,
-            "creator": self.creator.username if self.creator else "",
-            "updator": self.updator.username if self.updator else "",
+            "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
+            "updator":  {"username": self.updator.username, "display_name": self.updator.display_name},
         }
 
     class Meta:

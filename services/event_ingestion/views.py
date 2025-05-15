@@ -6,7 +6,6 @@ import os
 import random
 import re
 import string
-import tempfile
 import time
 import zipfile
 
@@ -456,7 +455,7 @@ async def get_event_ingestion_kafka_sample(request):
     if page < 1 or size < 1:
         raise CustomError(ErrorCode.ParameterError)
 
-    event = await EventsIngestion.filter(id=event_id,deleted=False).first()
+    event = await EventsIngestion.filter(id=event_id, deleted=False).first()
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 

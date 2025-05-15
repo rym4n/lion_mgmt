@@ -110,8 +110,7 @@ async def list_workflow(request):
     if request.json.get("status"):
         condition = condition & Q(status=request.json.get("status"))
     total = await Playbook.filter(condition).count()
-    playbooks = await Playbook.filter(condition).offset(offset).limit(limit).all().prefetch_related("scenes", "creator",
-                                                                                                    "updator")
+    playbooks = await Playbook.filter(condition).offset(offset).limit(limit).all().prefetch_related("scenes", "creator", "updator")
     return response_ok({
         "total": total,
         "page": page,
@@ -417,14 +416,9 @@ async def input_data(request):
             continue
         for key, value in node["properties"]["input"].items():
             if input_id in value:
-                data = orjson.loads(
-                    await redis_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"]))
+                data = orjson.loads(await redis_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"]))
                 if data:
-                    if "actions" in data.keys():
-                        action_key = "actions"
-                    elif "action" in data.keys():
-                        action_key = "action"
-                    for action in data.get(action_key):
+                    for action in (data.get('actions') or []):
                         if node["properties"]["action"] in action.values():
                             for item in action["input"]:
                                 if key == item["key"]:
@@ -449,8 +443,7 @@ async def input_data(request):
                         async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
                             content = await f.read()
                             # 将config数据存入redis
-                            await redis_client.set(node["properties"]["app_name"] + "_" + node["properties"]["version"],
-                                                   content, ttl=2592000)
+                            await redis_client.set(node["properties"]["app_name"] + "_" + node["properties"]["version"], content, ttl=2592000)
 
     return response_ok(input_list)
 

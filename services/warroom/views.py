@@ -143,13 +143,12 @@ async def get_roomsList(request: Request):
         请求参数：
             keyword: 可选，搜索作战室
     """
-    keyword = request.json.get('keyword', '')
-    query = Room.filter(deleted=False)
-
+    keyword = request.json.get("keyword")
     if keyword:
-        query = query.filter(name__contains=keyword)
+        condition = Q(name__icontains=keyword) | Q(description__icontains=keyword)
+
     # 前端是先获取再查询, 没有使用到这里的查询参数.
-    rooms = await query.order_by('-ctime').select_related('creator')
+    rooms = await Room.filter(condition).order_by('-ctime').prefetch_related('creator', 'users')
 
     room_list = []
     for room in rooms:
@@ -173,22 +172,15 @@ async def acquire_members(request: Request):
 
     请求参数：
         id: 必填，房间id
-        keyword: 可选，搜索用户
     """
     room_id = request.json.get('id')
-    keyword = request.json.get('keyword', '')
 
-    room = await Room.get(id=room_id)
+    room = await Room.get(id=room_id).prefetch_related('creator', 'users')
     if room is None:
         raise CustomError(ErrorCode.RoomNotExists)
-    # 查询参数预留, 前端暂未使用查询
-    query = room.users.all()
-    if keyword:
-        query = query.filter(Q(username__contains=keyword))
 
-    room_users = await query
     user_list = []
-    for user in room_users:
+    for user in room.users:
         # 获取用户角色（用户和角色是多对多的关系）
         user_roles = await user.roles.all()
         roles_list = [role.name for role in user_roles]

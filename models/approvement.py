@@ -31,7 +31,7 @@ class Approvement(BaseModel):
             "status": self.status,
             "expire_time": self.expire_time,
             "approvers": self.approvers,
-            "processor": self.processor.username if self.processor else None
+            "processor": {"username": self.processor.username, "display_name": self.processor.display_name},
         }
 
     # 指定name+type作为唯一性约束

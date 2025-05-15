@@ -24,8 +24,8 @@ class Room(BaseModel):
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
             "name": self.name,
-            "creator": self.creator.username if self.creator else "",
-            "users": [user.username if user else "" for user in self.users.all()]
+            "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
+            "users": [{"username": user.username, "display_name": user.display_name} for user in self.users]
         }
 
     class Meta:

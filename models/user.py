@@ -150,7 +150,7 @@ class ApiUserToken(BaseModel):
             "description": self.description,
             "token": self.token,
             "status": self.status,
-            "creator": self.creator.username if self.creator else "",
+            "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
             "expiration": strip_timezone_to_seconds(self.expiration),
             "roles": [role.name for role in self.user.roles] if self.user.roles else [],
         }

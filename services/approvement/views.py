@@ -91,3 +91,22 @@ async def update_approvement(request):
     record.processor = request.ctx.session['account_info']
     await record.save()
     return response_ok(record.json)
+
+
+@approve_bp.post("/delete")
+@requires_permission("approve:d")
+async def delete_approvement(request):
+    """
+    删除全局变量（需要approve:d权限）
+
+    请求参数:
+        id: 删除的审核id
+    """
+    approvement_id = request.json.get("id")
+    if not approvement_id:
+        raise CustomError(ErrorCode.ParameterError)
+    record = await Approvement.filter(id=approvement_id).first()
+    if not record:
+        raise CustomError(ErrorCode.NotFound)
+    await record.delete()
+    return response_ok("success")

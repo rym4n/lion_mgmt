@@ -36,8 +36,8 @@ class Playbook(BaseModel):
             "tags": self.tags,
             "scenes": [scene.name for scene in self.scenes] if self.scenes else [],
             "flow_json": self.flow_json,
-            "creator": self.updator.username if self.updator else "",
-            "updator": self.updator.username if self.updator else "",
+            "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
+            "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
             "internal": self.internal
         }
 
@@ -52,8 +52,9 @@ class Playbook(BaseModel):
             "status": self.status,
             "tags": self.tags,
             "scenes": [scene.name for scene in self.scenes] if self.scenes else [],
-            "creator": self.updator.username if self.updator else "",
-            "updator": self.updator.username if self.updator else ""
+            "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
+            "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
+            "internal": self.internal
         }
 
     class Meta:
