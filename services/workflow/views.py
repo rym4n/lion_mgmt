@@ -417,9 +417,9 @@ async def input_data(request):
             continue
         for key, value in node["properties"]["input"].items():
             if input_id in value:
-                data = orjson.loads(
-                    await redis_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"]))
+                data = await redis_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"])
                 if data:
+                    data = orjson.loads(data)
                     if "actions" in data.keys():
                         action_key = "actions"
                     elif "action" in data.keys():
