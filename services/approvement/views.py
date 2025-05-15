@@ -8,7 +8,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Approvement
+from models import Approvement, Account
 
 approve_bp = Blueprint('approve', url_prefix='v1/approve')
 _all__ = ["approve_bp"]
@@ -31,7 +31,8 @@ async def new_approvement(request):
     if not title or not content or not approvers:
         raise CustomError(ErrorCode.ParameterError)
 
-    await Approvement.create(title=title, content=content, approvers=approvers)
+    users = await Account.filter(username__in=approvers.split(',')).all()
+    await Approvement.create(title=title, content=content, approvers=users)
     return response_ok("success")
 
 

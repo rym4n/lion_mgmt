@@ -32,8 +32,7 @@ async def add_scene(request):
         raise CustomError(ErrorCode.SceneExistsError)
     if status == 2:
         await Scene.filter(status=2).update(status=1)
-    scene = await Scene.create(name=name, remark=remark, status=status, creator=request.ctx.session['account_info'],
-                               updator=request.ctx.session['account_info'])
+    scene = await Scene.create(name=name, remark=remark, status=status, creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
 
     return response_ok(scene.json)
 
@@ -88,21 +87,24 @@ async def get_all_scene(request):
     key = request.json.get('key') or None
     status = request.json.get('status')
 
-    query = Scene.all()
+    condition = Q()
 
     if status is not None:
-        query = query.filter(status__not=status)
+        condition = condition & Q(status__not=status)
 
     if key:
-        query = query.filter(Q(name__icontains=key) | Q(remark__icontains=key))
+        condition = condition & (Q(name__icontains=key) | Q(remark__icontains=key))
 
-    scenes = await query.limit(page_size).offset((page - 1) * page_size).all().prefetch_related('updator')
+    total = await Scene.filter(condition).count()
+    scenes = list()
+    if total > 0:
+        scenes = await Scene.filter(condition).limit(page_size).offset((page - 1) * page_size).all().prefetch_related('creator', 'updator')
 
     return response_ok({
         "scenes": [s.json for s in scenes],
         "page": page,
         "page_size": page_size,
-        "total": await query.count()
+        "total": total
     })
 
 

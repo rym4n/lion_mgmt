@@ -26,7 +26,7 @@ class Variables(BaseModel):
             "utime": strip_timezone_to_seconds(self.utime),
             "name": self.name,
             "value": self.value,
-            "updator": self.updator.username if self.updator else ""
+            "updator": {"username": self.updator.username, "display_name": self.updator.display_name}
         }
 
     class Meta:

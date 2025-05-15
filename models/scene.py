@@ -29,11 +29,11 @@ class Scene(BaseModel):
             "name": self.name,
             "remark": self.remark,
             "status": self.status,
-            "creator": self.updator.username if self.updator else "",
-            "updator": self.updator.username if self.updator else ""
+            "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
+            "updator": {"username": self.updator.username, "display_name": self.updator.display_name}
         }
 
     # 指定name+type作为唯一性约束
     class Meta:
         table = "scene"
-        ordering = ["-utime"]
+        ordering = ["-ctime"]

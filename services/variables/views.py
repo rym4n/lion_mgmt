@@ -84,7 +84,7 @@ async def update_variable(request):
     if not name or not value:
         raise CustomError(ErrorCode.ParameterError)
 
-    var = await Variables.filter(name=name).first()
+    var = await Variables.get(name=name)
     if not var:
         raise CustomError(ErrorCode.NotFound)
 
