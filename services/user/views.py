@@ -135,80 +135,62 @@ async def create_api_user(request):
     return response_ok(data_json)
 
 
-# @user_bp.post("/api/list")
-# @requires_permission("user:r")
-# async def list_api_users(request):
-#     """
-#     获取所有API用户信息
-#
-#     请求参数：
-#         page: 可选，分页的页码，默认1
-#         size: 可选，分页的大小，默认10
-#         keyword: 可选，搜索时使用
-#     """
-#     page = int(request.json.get("page", 1))
-#     size = int(request.json.get("size", 10))
-#     offset = (page - 1) * size
-#     limit = size
-#     # 分页查询ApiUserToken，返回总数和数据
-#     condition = Q()
-#     keyword = request.json.get("keyword")
-#     if keyword:
-#         condition = Q(name__icontains=keyword) | Q(description__icontains=keyword)
-#
-#     total = await ApiUserToken.filter(condition).count()
-#     api_users = await ApiUserToken.filter(condition).offset(offset).limit(limit).all().prefetch_related('user',
-#                                                                                                         'creator')
-#     data = []
-#     for u in api_users:
-#         await u.user.fetch_related("roles")
-#         data.append(u.json)
-#
-#     return response_ok({
-#         "total": total,
-#         "page": page,
-#         "size": size,
-#         "total_pages": (total + size - 1) // size,
-#         "data": data
-#     })
+@user_bp.post("/list-token")
+@requires_permission("user:r")
+async def list_api_users(request):
+    """
+    获取所有API用户信息
+
+    请求参数：
+        page: 可选，分页的页码，默认1
+        size: 可选，分页的大小，默认10
+        keyword: 可选，搜索时使用
+    """
+    page = int(request.json.get("page", 1))
+    size = int(request.json.get("size", 10))
+    offset = (page - 1) * size
+    limit = size
+    # 分页查询ApiUserToken，返回总数和数据
+    condition = Q(type="api") & Q(deleted=False)
+    keyword = request.json.get("keyword")
+    if keyword:
+        condition = condition & Q(username__icontains=keyword) | Q(display_name=keyword)
+
+    total = await Account.filter(condition).count()
+    api_users = await Account.filter(condition).offset(offset).limit(limit).all().prefetch_related("roles")
+    data = []
+    for u in api_users:
+        print(u.expiration)
+        data.append(u.api_json)
+
+    return response_ok({
+        "total": total,
+        "page": page,
+        "size": size,
+        "total_pages": (total + size - 1) // size,
+        "data": data
+    })
 
 
-# @user_bp.post("/api/update")
-# @requires_permission("user:u")
-# async def update_api_user(request):
-#     """
-#     更新API用户信息（需要user:u权限）
-#
-#     请求参数：
-#         id: 必填，API用户ID
-#         role_names: 可选，角色名称列表，逗号分隔, 如果是删除角色的话就传需要保留的角色名列表就行
-#         description: 可选，描述
-#         status: 可选，是否启用 true为启用 false为禁用
-#     """
-#     api_user = await ApiUserToken.get(id=request.json.get("id")).prefetch_related("user", "creator")
-#     if not api_user:
-#         raise CustomError(ErrorCode.ApiUserNotFound)
-#
-#     if request.json.get("description"):
-#         api_user.description = request.json.get("description")
-#     if request.json.get("role_names") is not None:
-#         roles = await Role.filter(name__in=request.json.get("role_names")).all()
-#         await api_user.user.roles.clear()
-#         await api_user.user.roles.add(*roles)
-#     if request.json.get("status") is not None:
-#         if request.json.get("status"):
-#             token, session = await refresh_api_user_token(api_user, int(time.time()), api_user.expiration.timestamp(), "update")
-#             api_user.status = True
-#             api_user.token = token
-#         else:
-#             token, session = await refresh_api_user_token(api_user, int(time.time()), int(time.time()), "update")
-#             api_user.status = False
-#             api_user.token = token
-#
-#     await api_user.save(update_fields=["description", "status", "token"])
-#     await api_user.user.fetch_related("roles")
-#
-#     return response_ok(api_user.json)
+@user_bp.post("/del-token")
+@requires_permission("user:u")
+async def update_api_user(request):
+    """
+    更新API用户信息（需要user:u权限）
+
+    请求参数：
+        id: 必填，API用户ID
+    """
+    api_user = await Account.get(id=request.json.get("id"), deleted=False)
+    if not api_user:
+        raise CustomError(ErrorCode.ApiUserNotFound)
+
+    await request.ctx.cache_client.delete(f"account_{api_user.id}")
+
+    api_user.deleted = True
+    await api_user.save(update_fields=["deleted"])
+
+    return response_ok("删除成功")
 
 
 @user_bp.post("/login")
