@@ -56,6 +56,7 @@ async def add_timed(request):
                     "clients":"abcd",             动作输入参数
                     "groups":"123456789"          动作输入参数
                 },
+                "resource": "cs"                 资源名称
                 "node_name":"自定义扫描",    节点名称，定时任务模块中取动作描述
                 "action":"custom_scan",     动作名称 英文标识
                 "action_name":"自定义扫描",    动作名称 中文名称

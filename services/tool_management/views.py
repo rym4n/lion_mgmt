@@ -375,10 +375,11 @@ async def tool_actions(request):
     if not tool:
         raise CustomError(ErrorCode.ToolNotFoundError)
 
-    actions = await ToolAction.filter(tool_name=name, version_number=version).values("action", "id")
+    actions = await ToolAction.filter(tool_name=name, version_number=version).values("action", "id", "playbook")
     action_list = []
     for action in actions:
         action.get("action")["id"] = action.get("id")
+        action.get("action")["playbook"] = action.get("playbook")
         action_list.append(action.get("action"))
 
     return response_ok({"actions": action_list})

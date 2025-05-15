@@ -218,28 +218,6 @@ async def delete_workflow(request):
     return response_ok("剧本删除成功")
 
 
-async def poll_database_and_notify(ws, run_id, formatted_time):
-    updated_time = formatted_time
-    try:
-        while True:
-            datas = await Runlog.filter(run_id=run_id, utime__gt=updated_time).all().prefetch_related("playbook")
-            if datas:
-                payload = []
-                for data in datas:
-                    payload.append(data.json)
-                await ws.send(orjson.dumps({"data": payload}).decode())
-                updated_time = datas[-1].utime
-            await asyncio.sleep(5)
-    except WebsocketClosed:
-        logger.info("Websocket已关闭，停止轮询")
-    except asyncio.CancelledError:
-        logger.info("Websocket已取消，停止轮询")
-    except ConnectionClosed:
-        logger.info("Websocket连接已断开，停止轮询")
-    except Exception as e:
-        logger.error(f"轮询异常：{e}")
-
-
 @workflow_bp.websocket('/run')
 async def execute_action(request: Request, ws: Websocket):
     """
@@ -250,6 +228,7 @@ async def execute_action(request: Request, ws: Websocket):
             - playbook_input dict 剧本输入参数 当type为flow时必填      用websocket发送
             示例如下：
             {
+                "type": "run",
                 "flow_id": "73ecfba0-1aa4-4128-b99a-b97fb08a14be",      剧本id
                 "flow_input": {
                     "l":"123456789",        剧本输入参数
@@ -259,6 +238,7 @@ async def execute_action(request: Request, ws: Websocket):
             - action_input dict 动作输入参数 当type为action时必填      用websocket发送
             示例如下：
             {
+                "type": "run",
                 "app_name":"huorong_edr",         应用名称，英文标识
                 "name": "中文名称",               应用中文名称
                 "app_ver":"v1746495758839",      应用版本号
@@ -273,28 +253,54 @@ async def execute_action(request: Request, ws: Websocket):
                 "retry_times":1,             重试次数
                 "timeout":300,               超时时间,单位秒
             }
+            - 查询执行结果请求示例
+            {
+                "type": "query",
+                "run_id": "20250515065837328942",
+                "utime": "2025-05-15 17:54:58.886 +0800"
+            }
     """
     auth_data = await asyncio.wait_for(ws.recv(), timeout=10)
     auth_json = orjson.loads(auth_data)
     user_id = auth_json['request_header']['id']
 
-    tz = pytz.timezone("Asia/Shanghai")
-    now = datetime.now(tz)
-    formatted_time = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + " +0800"
-    formatted_time = datetime.strptime(formatted_time, '%Y-%m-%d %H:%M:%S.%f %z')
-
-    msg = {}
-    type = request.args.get("type")
-    msg["run_type"] = type
-    msg["run_id"] = gen_order_version(length=6)
     raw = await ws.recv()
-    params = orjson.loads(raw)
-    params["executor"] = user_id
-    msg["run_args"] = params
+    data = orjson.loads(raw)
 
-    await send_kafka_message(kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg)
+    if data.get("type") == "query":
+        utime_str = data.get("utime")
+        utime = datetime.strptime(utime_str, "%Y-%m-%d %H:%M:%S.%f %z")
+        run_id = data.get("run_id")
+        datas = await Runlog.filter(run_id=run_id, utime__gt=utime).all().prefetch_related("playbook")
+        if datas:
+            payload = []
+            for data in datas:
+                data_dic = data.json
+                start = data.start_time.astimezone(pytz.timezone("Asia/Shanghai"))
+                end = data.end_time.astimezone(pytz.timezone("Asia/Shanghai"))
+                delta = end - start
+                data_dic["run_time"] = int(delta.total_seconds() * 1000) if int(delta.total_seconds() * 1000) > 0 else 1
+                payload.append(data_dic)
+            await ws.send(orjson.dumps({"data": payload}).decode())
 
-    await poll_database_and_notify(ws, msg.get("run_id"), formatted_time)
+    elif data.get("type") == "run":
+        tz = pytz.timezone("Asia/Shanghai")
+        now = datetime.now(tz)
+        formatted_time = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + " +0800"
+        formatted_time = datetime.strptime(formatted_time, '%Y-%m-%d %H:%M:%S.%f %z')
+        msg = {}
+        type = request.args.get("type")
+        msg["run_type"] = type
+        msg["run_id"] = gen_order_version(length=6)
+        data.pop("type")
+        params = data
+        params["executor"] = user_id
+        msg["run_args"] = params
+
+        await send_kafka_message(kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg)
+
+        await ws.send(orjson.dumps({"run_id": msg["run_id"], "utime": formatted_time}).decode())
+
 
 
 @workflow_bp.post('/run/detail')
