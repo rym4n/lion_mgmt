@@ -36,12 +36,6 @@ MENU_DICT = {
     "warroom_bp": "warroom"
 }
 
-DESCRIPTION_DICT = {
-    "剧本编排": "包含剧本编排、剧本编排高级功能、快速编排功能、场景管理等功能",
-    "应用集成": "包含应用集成对接方式、开发API接口、应用APP支持、应用权限控制等功能",
-    "事件管理": "包含事件接入、事件自动去重、事件分类、事件处理详情、事件报告等功能",
-    "基础功能": "包含用户列表、角色管理、权限管理、系统监控、系统审计、系统备份与恢复等功能、人工审核、许可管理等功能",
-}
 
 
 def delayed_exit():
@@ -129,18 +123,18 @@ async def get_all_license(request: Request):
         description = item["description"]
 
         if auth and int(item["expireTime"]) > int(time.time() * 1000):
-            if name in ["应用数量", "剧本数量限制"] or group in ["高级功能"]:
-                menu_dict["menuInfo"].setdefault(name, {})["value"] = item["value"] or None
+            if name in ["虚拟作战室", "AI辅助", "集群部署", "软件升级", "维保服务", "多引擎部署"] or group in ["高级功能"]:
+                menu_dict["menuInfo"].setdefault(name, {})["value"] = None
                 menu_dict["menuInfo"].setdefault(name, {})["auth"] = True
                 menu_dict["menuInfo"].setdefault(name, {})["description"] = description
                 menu_dict["menuInfo"].setdefault(name, {})["expireTime"] = formatted_time(item["expireTime"])
                 continue
-            menu_dict["menuInfo"].setdefault(group, {})["value"] = None
+            menu_dict["menuInfo"].setdefault(group, {})["value"] = item["value"] if name in ["应用数量", "剧本数量限制"] else None
             menu_dict["menuInfo"].setdefault(group, {})["auth"] = True
-            menu_dict["menuInfo"].setdefault(group, {})["description"] = DESCRIPTION_DICT.get(group, "")
+            menu_dict["menuInfo"].setdefault(group, {})["description"] = lic["menuInfo"]["grouplist"].get(group, "")
             menu_dict["menuInfo"].setdefault(group, {})["expireTime"] = formatted_time(item["expireTime"])
         else:
-            if group in ["高级功能"]:
+            if name in ["虚拟作战室", "AI辅助", "集群部署", "软件升级", "维保服务", "多引擎部署"] or group in ["高级功能"]:
                 menu_dict["menuInfo"].setdefault(name, {})["value"] = None
                 menu_dict["menuInfo"].setdefault(name, {})["auth"] = True
                 menu_dict["menuInfo"].setdefault(name, {})["description"] = description
@@ -148,7 +142,7 @@ async def get_all_license(request: Request):
                 continue
             menu_dict["menuInfo"].setdefault(group, {})["value"] = None
             menu_dict["menuInfo"].setdefault(group, {})["auth"] = True
-            menu_dict["menuInfo"].setdefault(group, {})["description"] = DESCRIPTION_DICT.get(group, "")
+            menu_dict["menuInfo"].setdefault(group, {})["description"] = lic["menuInfo"]["grouplist"].get(group, "")
             menu_dict["menuInfo"].setdefault(group, {})["expireTime"] = formatted_time(item["expireTime"])
 
     return response_ok(menu_dict)
@@ -158,6 +152,6 @@ def formatted_time(timestamp: int) -> str:
     """
     格式化时间戳
     """
-    dt = datetime.datetime.fromtimestamp(timestamp / 1000)
+    dt = datetime.datetime.fromtimestamp(int(timestamp) / 1000)
     formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
     return formatted_time
