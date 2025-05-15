@@ -1,15 +1,18 @@
 # coding=utf-8
 
 import functools
+import ipaddress
 import re
 import time
 
 import jwt
 from sanic import Request
+from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.utils import get_client_ip
+from models import Account
 from settings import SECRET, SESSION_ENCODING_ALGORITHM, AUTHENTICATION_SESSION_EXPIRATION
 
 
@@ -17,7 +20,7 @@ async def authenticate(request: Request):
     """
     客户端身份验证会话和账户验证。 如果客户端身份验证会话在身份验证过程中过期，自动续期token。
     """
-    payload = token_decode(request)
+    payload = await token_decode(request)
 
     if payload.get('exp', 0) < int(time.time()):
         raise CustomError(ErrorCode.SessionExpired)
@@ -25,9 +28,18 @@ async def authenticate(request: Request):
     if not request.path.endswith('/user/mfa-auth') and payload.get('mfa_enable') is True and payload.get('mfa_auth') is not True:
         raise CustomError(ErrorCode.SecondFactorRequired)
 
-    if payload.get('ip') != "all" and get_client_ip(request) not in payload.get('ip'):
+    if payload.get('ip') and payload.get('ip') != get_client_ip(request):
         # 防止会话劫持
         raise CustomError(ErrorCode.SessionInvalid)
+
+    # API访问时验证是否满足IP白名单
+    if 'permit_ip' in payload and payload['permit_ip'] != "all":
+        permit_ips = payload['permit_ip'].split(",")
+        permit_networks = [ipaddress.ip_network(ip.strip()) for ip in permit_ips]
+        client_ip = ipaddress.ip_address(get_client_ip(request))
+        is_allowed = any(client_ip in network for network in permit_networks)
+        if not is_allowed:
+            raise CustomError(ErrorCode.IpForbidden)
 
     request.ctx.session = payload
 
@@ -81,7 +93,7 @@ def refresh_token(old_data: dict, **kwargs) -> str:
     return token
 
 
-def token_decode(request: Request) -> dict:
+async def token_decode(request: Request) -> dict:
     """
     将token解码成数据字典
     """
@@ -90,9 +102,19 @@ def token_decode(request: Request) -> dict:
         raise CustomError(ErrorCode.SessionInvalid)
 
     try:
-        payload = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
+        if ":" in token:
+            user_id = token.split(":")[0]
+            token = token.split(":")[1]
+            secret = await request.ctx.cache_client.get(f"account_{user_id}")
+            if not secret:
+                secret = await Account.get(id=user_id, deleted=False)
+                await request.ctx.cache_client.set(f"account_{secret.id}", secret, 7 * 24 * 3600)
+            payload = jwt.decode(token, secret.password, SESSION_ENCODING_ALGORITHM)
+        else:
+            payload = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
         return payload
-    except:
+    except Exception as e:
+        logger.error(f"token decode error: {e}")
         raise CustomError(ErrorCode.SessionInvalid)
 
 

@@ -26,6 +26,11 @@ from settings import RY_KEY
 password_hasher: PasswordHasher = PasswordHasher()
 
 
+def clean_ip(ip_str: str) -> str:
+    # 去除方括号、引号及前后空白
+    return ip_str.strip().strip('"').strip("[]")
+
+
 def get_client_ip(request) -> str:
     """
     从 Sanic Request 中提取真实客户端 IP，支持 IPv4/IPv6 和多级代理。
@@ -37,10 +42,6 @@ def get_client_ip(request) -> str:
 
     会自动去除方括号 []、引号 " 以及多余空白。
     """
-
-    def clean_ip(ip_str: str) -> str:
-        # 去除方括号、引号及前后空白
-        return ip_str.strip().strip('"').strip("[]")
 
     # 1. 多级代理时的原始客户端 IP
     xff = request.headers.get('x-forwarded-for')
@@ -55,7 +56,7 @@ def get_client_ip(request) -> str:
         return clean_ip(xri)
 
     # 3. 回退到 request.remote_addr（通常是 Nginx 的 IP）
-    return clean_ip(request.remote_addr)
+    return clean_ip(request.client_ip)
 
 
 def gen_random_code(digits_only: bool = True, length=6) -> str:
@@ -205,5 +206,3 @@ def verify_license(data: bytes):
         return lic
     else:
         raise CustomError(ErrorCode.LicenseExpired)
-
-

@@ -98,7 +98,7 @@ async def all_users(request):
     })
 
 
-@user_bp.post("/api/creat")
+@user_bp.post("/new-token")
 @requires_permission("user:c")
 async def create_api_user(request):
     """
@@ -113,7 +113,7 @@ async def create_api_user(request):
     """
     account = await Account.create(
         username=validate_username(request.json.get("name", '')),
-        password=password_hasher.hash(validate_password("Api@" + request.json.get("name", '') + "1")),
+        password=password_hasher.hash(str(uuid.uuid4())),
         type="api",
         display_name=request.json.get("description", ""),
         expiration=datetime.fromtimestamp(int(time.time()) + request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION)),
@@ -126,10 +126,9 @@ async def create_api_user(request):
         await account.roles.add(*roles)
 
     token_id = str(uuid.uuid4())
-    token = token_encode(account.id, account.username, account.mfa_enable, token_id, request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION), account.password, ip=account.permit_ip)
+    token = token_encode(account.id, account.username, account.mfa_enable, token_id, request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION), account.password, permit_ip=account.permit_ip)
     await account.fetch_related("roles")
-    await request.ctx.cache_client.set(f"account_{account.id}", account,
-                                       request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION))
+    await request.ctx.cache_client.set(f"account_{account.id}", account, 7 * 24 * 3600)
 
     data_json = account.api_json
     data_json['token'] = token

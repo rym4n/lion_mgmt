@@ -15,7 +15,7 @@ from settings import LICENSE_DIR
 
 
 async def check_permissions(request: Request, *required_permissions: str) -> bool:
-    payload = token_decode(request)
+    payload = await token_decode(request)
     account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
     if not account:
         logger.warning("redis里已经没有account信息了")
@@ -55,7 +55,7 @@ def check_wildcard(wildcard: str, pattern: str):
 
 
 async def check_roles(request: Request, *required_roles: str) -> bool:
-    payload = token_decode(request)
+    payload = await token_decode(request)
     account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
     if not account:
         logger.warning("redis里已经没有account信息了")
