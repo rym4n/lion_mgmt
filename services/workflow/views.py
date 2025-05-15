@@ -163,10 +163,12 @@ async def edit_workflow(request):
         if p in ['id', 'ctime', 'utime', 'deleted', 'creator', 'updator', 'status', 'version']:
             continue
         if p == "flow_json":
-            action_ids = await statistics_data(playbook.flow_json)
-            await tool_action_playbook_delete({playbook.id: action_ids})
-            action_ids = await statistics_data(params[p])
-            await tool_action_update({playbook.id: action_ids})
+            if playbook.flow_json:
+                action_ids = await statistics_data(playbook.flow_json)
+                await tool_action_playbook_delete({playbook.id: action_ids})
+            if params[p]:
+                action_ids = await statistics_data(params[p])
+                await tool_action_update({playbook.id: action_ids})
         if hasattr(playbook, p):
             has_change = True
             setattr(playbook, p, params[p])
