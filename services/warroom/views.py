@@ -143,12 +143,12 @@ async def get_roomsList(request: Request):
         请求参数：
             keyword: 可选，搜索作战室
     """
-    condition = Q()
+    condition = Q(users__id=request.ctx.session['account_info'].id)
     keyword = request.json.get("keyword")
     if keyword:
-        condition = Q(name__icontains=keyword) | Q(description__icontains=keyword)
+        condition = condition & Q(name__icontains=keyword)
 
-    # 前端是先获取再查询, 没有使用到这里的查询参数.
+    # 前端是先获取再查询, 没有使用到这里的查询参数
     rooms = await Room.filter(condition).order_by('-ctime').prefetch_related('creator', 'users')
     return response_ok({
         "rooms": [r.json for r in rooms]
