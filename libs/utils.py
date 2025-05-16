@@ -4,7 +4,9 @@ import datetime
 import ipaddress
 import os.path
 import random
+import socket
 import time
+import traceback
 import uuid
 import zipfile
 from io import BytesIO
@@ -14,10 +16,12 @@ from string import ascii_uppercase, digits
 import aiofile
 import jwt
 import orjson
+import psutil
 from aiokafka import AIOKafkaProducer
 from argon2 import PasswordHasher
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
@@ -197,12 +201,38 @@ def verify_license(data: bytes):
         lic_enc = base64.b32decode(data)
         pkey = serialization.load_pem_private_key(base64.b64decode(RY_KEY.encode()), password=None)
         decrypted = rsa_chunk_decrypt(lic_enc, pkey)
-        machine_id = uuid.getnode()
+        machine_id = generate_mac_uuid()
+        logger.info(decrypted)
+        logger.info(machine_id)
         lic = jwt.decode(decrypted, str(machine_id), "HS256")
-    except Exception:
+    except Exception as e:
+        logger.error(f"{e} | {traceback.format_exc()}")
         raise CustomError(ErrorCode.InvalidLicenseError)
 
     if lic.get("expireTime", 0) > int(time.time() * 1000):
         return lic
     else:
         raise CustomError(ErrorCode.LicenseExpired)
+
+
+def get_default_interface():
+    # 方法1或方法2的实现（此处以psutil为例）
+    for interface, addrs in psutil.net_if_addrs().items():
+        for addr in addrs:
+            if addr.family == socket.AF_INET and addr.address != "127.0.0.1":
+                return interface
+    return None
+
+
+def get_mac_address(interface):
+    addrs = psutil.net_if_addrs().get(interface, [])
+    for addr in addrs:
+        if addr.family == psutil.AF_LINK:
+            return addr.address.replace("-", ":").upper()
+    return None
+
+
+def generate_mac_uuid():
+    interface = get_default_interface()
+    mac_address = get_mac_address(interface)
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, mac_address))

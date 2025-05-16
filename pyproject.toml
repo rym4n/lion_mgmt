@@ -25,6 +25,7 @@ dependencies = [
     "cryptography (>=44.0.2,<45.0.0)",
     "gmssl-python>=2.2.2",
     "msgpack>=1.1.0",
+    "psutil>=7.0.0",
 ]
 
 [build-system]
