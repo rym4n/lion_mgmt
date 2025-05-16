@@ -130,7 +130,7 @@ async def create_api_user(request):
     await request.ctx.cache_client.set(f"account_{account.id}", account, 7 * 24 * 3600)
 
     data_json = account.api_json
-    data_json['token'] = token
+    data_json['token'] = account.id + ":" + token
     return response_ok(data_json)
 
 

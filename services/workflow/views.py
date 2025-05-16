@@ -3,8 +3,10 @@
 import asyncio
 import os
 import time
+import jwt
 from collections import defaultdict
 from datetime import datetime
+from sanic.log import logger
 
 import aiofile
 import orjson
@@ -15,11 +17,12 @@ from tortoise.expressions import Q
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.security.authentication import validate_token
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_order_version, send_kafka_message
 from models import Playbook, Scene, ToolAction, Tool, Runlog
 from services.tool_management.views import tool_action_update, tool_action_playbook_delete
-from settings import KAFKA_CONFIG, TIMED_TASK_TOPIC
+from settings import KAFKA_CONFIG, TIMED_TASK_TOPIC, SECRET, SESSION_ENCODING_ALGORITHM
 
 workflow_bp = Blueprint('workflow', url_prefix='v1/playbook')
 _all__ = ["workflow_bp"]
@@ -257,9 +260,17 @@ async def execute_action(request: Request, ws: Websocket):
                 "utime": "2025-05-15 17:54:58.886 +0800"
             }
     """
-    auth_data = await asyncio.wait_for(ws.recv(), timeout=10)
+    # 先获取认证信息
+    auth_data = await asyncio.wait_for(ws.recv(), timeout=10.0)
     auth_json = orjson.loads(auth_data)
-    user_id = auth_json['request_header']['id']
+    payload = jwt.decode(auth_json['auth'], SECRET, SESSION_ENCODING_ALGORITHM)
+    validate_token(payload, request)
+
+    account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
+    if not account:
+        logger.warning("redis里已经没有account信息了")
+        raise CustomError(ErrorCode.SessionInvalid)
+    user_id = account.id
 
     while True:
         raw = await ws.recv()
