@@ -18,7 +18,8 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
     if sender.id > receiver.id:
         key = f"{receiver.id}&{sender.id}"
         private_room_name = f"{receiver.display_name}和{sender.display_name}的私聊"
-    room = await cache_client.hget("user_private_chat_rooms", key)
+    user_private_chat_rooms = await cache_client.get("user_private_chat_rooms")
+    room = user_private_chat_rooms[key]
     if not room:
         # 作战室名字
         room = await Room.get(name=private_room_name)
@@ -27,7 +28,8 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
             room = await Room.create(name=private_room_name, creator=sender)
             await room.users.add(*sender)
             await room.users.add(*receiver)
-        await cache_client.hset("user_private_chat_rooms", key, room)
+        user_private_chat_rooms[key] = room
+        await cache_client.set("user_private_chat_rooms", user_private_chat_rooms)
     return room
 
 
@@ -42,32 +44,44 @@ class ChatManager:
         # user_current_room 用户当前所在房间
         # private_chat_rooms 私聊房间映射
         # online_users 在线用户ID集合
-        self.cache_client = cache_client.client
+        self.cache_client = cache_client
         self.ws = ws
         self.user = user
 
     async def connect(self):
         """处理用户连接"""
-        await self.cache_client.hset("active_connections", self.user.id, self.ws)
-        await self.cache_client.sadd("online_users", self.user.id)
-        await self._broadcast_user_status(self.user.id, True)
+        active_connections = await self.cache_client.get("active_connections")
+        active_connections[self.user.id] = self.ws
+        await self.cache_client.set("active_connections", active_connections)
+        online_users = await self.cache_client.get("online_users")
+        online_users.add(self.user.id)
+        await self.cache_client.set("online_users", online_users)
+        await self._broadcast_user_status(True)
 
     async def disconnect(self, user_id: str):
         """处理用户断开连接"""
         # current_room_id = await self.cache_client.hget(f"user_current_room", user_id)
 
         # 从所有房间成员列表中移除该用户
-        rooms = await self.cache_client.hkeys("room_members")
-        for room_id in rooms:
-            members = await self.cache_client.hget(f"room_members", room_id)
-            if user_id in members:
-                members.discard(user_id)
-                await self.cache_client.hset(f"room_members", room_id, members)
+        rooms = await self.cache_client.get("room_members")
+        if rooms:
+            for room_id, members in rooms.items():
+                if user_id in members:
+                    members.discard(user_id)
+                    await self.cache_client.set(f"room_members", rooms)
 
-        # 清除内存相关记录
-        await self.cache_client.hdel("user_current_room", user_id)
-        await self.cache_client.hdel("active_connections", user_id)
-        await self.cache_client.srem("online_users", user_id)
+        # 清除相关记录
+        user_current_room = await self.cache_client.get("user_current_room")
+        user_current_room.pop(user_id, None)
+        await self.cache_client.set("user_current_room", user_current_room)
+
+        active_connections = await self.cache_client.get("active_connections")
+        active_connections.pop(user_id, None)
+        await self.cache_client.set("active_connections", active_connections)
+
+        online_users = await self.cache_client.get("online_users")
+        online_users.discard(user_id)
+        await self.cache_client.set("online_users", online_users)
 
         # 广播
         # if current_room_id:
@@ -75,22 +89,18 @@ class ChatManager:
         #     # 广播用户离线状态变更
         #     await self._broadcast_user_status(user_id, False)
 
-
-    async def _broadcast_user_status(self, user_id: str, is_online: bool):
+    async def _broadcast_user_status(self, is_online: bool):
         """广播用户在线状态变更"""
         try:
-            user = await Account.get(id=user_id)
-            if not user:
-                return
-
             status_message = {
                 "type": "user_status",
-                "user_id": user_id,
-                "username": user.username,
+                "user_id": self.user.id,
+                "username": self.user.username,
                 "online": is_online,
                 "timestamp": str(datetime.now())
             }
-            async for _, conn in self.cache_client.hgetall("active_connections").items():
+            active_connections = await self.cache_client.get("active_connections")
+            for _, conn in active_connections.items():
                 await conn.send(orjson.dumps(status_message).decode())
         except Exception as e:
             logger.error(f"广播用户状态错误: {str(e)}")
@@ -126,7 +136,8 @@ class ChatManager:
         try:
             current_room_id = data.get("room_id")
             if not current_room_id:
-                current_room_id = await self.cache_client.hget("user_current_room", self.user.id)
+                user_current_room = await self.cache_client.get("user_current_room")
+                current_room_id = user_current_room[self.user.id]
             if not current_room_id:
                 await self.send_error("未加入任何作战室")
                 return
@@ -208,10 +219,10 @@ class ChatManager:
                 "timestamp": str(message.ctime),
                 "room_id": str(chat_room.id)
             }
+            active_connections = await self.cache_client.get("active_connections")
             for uid in [self.user.id, receiver_id]:
-                conn = self.cache_client.hget("active_connections", uid)
-                if conn:
-                    await conn.send(orjson.dumps(message_data).decode())
+                if uid in active_connections:
+                    await active_connections[uid].send(orjson.dumps(message_data).decode())
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
             await self.send_error("发送私聊消息失败")
@@ -251,9 +262,10 @@ class ChatManager:
         if message.type == "public":
             await self._broadcast_to_room(message.room.id, recall_notice)
         elif message.type == "private":
-            async for uid, conn in self.cache_client.hgetall("active_connections").items():
-                if uid in [message.sender.id, message.receiver.id]:
-                    await conn.send(orjson.dumps(recall_notice).decode())
+            active_connections = await self.cache_client.get("active_connections")
+            for uid in [message.sender.id, message.receiver.id]:
+                if uid in active_connections:
+                    await active_connections[uid].send(orjson.dumps(recall_notice).decode())
 
         await self.ws.send(orjson.dumps({"type": "recall_success", "message_id": message_id}).decode())
 
@@ -322,30 +334,33 @@ class ChatManager:
     async def _handle_heartbeat(self):
         """处理心跳消息"""
         now = datetime.now()
-        await self.cache_client.hset("heartbeat", self.user.id, now)  # 记录最后心跳时间
-        online_users = await self.cache_client.smembers("online_users")
+        online_users = await self.cache_client.get("online_users")
         await self.ws.send(orjson.dumps({"type": "online_users_update", "online_users": list(online_users), "timestamp": str(now)}).decode())
 
     async def _broadcast_to_room(self, room_id: str, message: dict):
         """向指定作战室广播消息"""
         closed_connections = []
         # 获取房间成员
-        room = await Room.get(id=room_id)
+        room = await Room.get(id=room_id).prefetch_related("users")
         if not room:
             return
         try:
-            room_members = await self.cache_client.hget("room_members", room_id)
-            if not room_members:
-                members = await room.users.all()
-                room_members = {str(member.id) for member in members}
+            rooms = await self.cache_client.get("room_members")
+            members = set()
+            if rooms:
+                members = rooms.get(room_id) or set()
+            else:
+                members = {u.id for u in room.users}
                 # 更新内存中的房间成员
-                await self.cache_client.hset("room_members", room_id, room_members)
+                rooms[room_id] = members
+                await self.cache_client.set("room_members", rooms)
 
             # 广播消息给所有在线成员
-            for uid in room_members:
-                ws_conn = await self.cache_client.hget("active_connections", uid)
+            active_connections = await self.cache_client.get("active_connections")
+            for uid in members:
                 try:
-                    await ws_conn.send(orjson.dumps(message).decode())
+                    if uid in active_connections:
+                        await active_connections[uid].send(orjson.dumps(message).decode())
                 except ConnectionClosed:
                     closed_connections.append(uid)
 
@@ -355,8 +370,9 @@ class ChatManager:
 
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
-            async for _, conn in self.cache_client.hgetall("active_connections").items():
-                await conn.send(orjson.dumps(message).decode())
+            active_connections = await self.cache_client.get("active_connections")
+            for k in active_connections:
+                await active_connections[k].send(orjson.dumps(message).decode())
 
     async def send_error(self, message: str):
         """发送错误消息给指定用户"""
@@ -384,9 +400,9 @@ class ChatManager:
             online_status = []
 
             # 构建在线状态信息
+            online_users = await self.cache_client.get("online_users")
             for user in room_users:
-                is_online = await self.cache_client.sismember("online_users", user.id)
-                online_status.append({"user_id": str(user.id), "username": user.username, "online": bool(is_online)})
+                online_status.append({"user_id": str(user.id), "username": user.username, "online": user.id in online_users})
 
             # 发送在线状态列表
             await self.ws.send(orjson.dumps({"type": "online_users_list", "room_id": room_id, "users": online_status}).decode())
