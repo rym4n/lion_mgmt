@@ -3,7 +3,6 @@
 import datetime
 import hashlib
 import os
-import threading
 import time
 
 from sanic import Blueprint
@@ -37,11 +36,6 @@ MENU_DICT = {
 }
 
 
-def delayed_exit():
-    time.sleep(1)
-    os._exit(1)  # 强制退出进程
-
-
 @license_bp.post("/verify")
 @requires_permission("lic:c")
 async def verify_license_api(request: Request):
@@ -65,7 +59,7 @@ async def verify_license_api(request: Request):
                 f.write(license_file.body)
             if os.path.exists(full_path):
                 os.rename(full_path, new_path)
-    threading.Thread(target=delayed_exit, daemon=True).start()
+    request.app.m.restart(zero_downtime=True, all_workers=True)
     return response_ok("上传成功，正在加载配置文件，请稍后！")
 
 
@@ -106,43 +100,56 @@ async def get_all_license(request: Request):
     """
     获取所有license文件信息用于页面展示
     """
+    advanced_modules = ["虚拟作战室", "AI辅助", "集群部署", "软件升级", "维保服务", "多引擎部署"]
+    advanced_groups = ["高级功能"]
+
     menu_dict = dict()
     lic = load_license()
+
     if not lic:
         raise CustomError(ErrorCode.InvalidLicenseError)
+
+    # 基础字段赋值
     menu_dict["name"] = lic["company"]
     menu_dict["version"] = lic["version"]
-    menu_dict["createTime"] = fmt_time(lic["createTime"])
-    menu_dict["expireTime"] = fmt_time(lic["expireTime"])
+    menu_dict["createTime"] = fmt_time(lic.get("createTime"))
+    menu_dict["expireTime"] = fmt_time(lic.get("expireTime"))
     menu_dict["menuInfo"] = {}
-    for item in lic["menuInfo"]["moduleList"]:
-        name = item["name"]
-        auth = item["auth"]
-        group = item["group"]
-        description = item["description"]
 
-        if auth and int(item["expireTime"]) > int(time.time() * 1000):
-            if name in ["虚拟作战室", "AI辅助", "集群部署", "软件升级", "维保服务", "多引擎部署"] or group in ["高级功能"]:
-                menu_dict["menuInfo"].setdefault(name, {})["value"] = None
-                menu_dict["menuInfo"].setdefault(name, {})["auth"] = True
-                menu_dict["menuInfo"].setdefault(name, {})["description"] = lic["menuInfo"]["grouplist"].get(group, "")
-                menu_dict["menuInfo"].setdefault(name, {})["expireTime"] = fmt_time(item["expireTime"])
-                continue
-            menu_dict["menuInfo"].setdefault(group, {})["value"] = item["value"] if name in ["应用数量", "剧本数量限制"] else None
-            menu_dict["menuInfo"].setdefault(group, {})["auth"] = True
-            menu_dict["menuInfo"].setdefault(group, {})["description"] = lic["menuInfo"]["grouplist"].get(group, "")
-            menu_dict["menuInfo"].setdefault(group, {})["expireTime"] = fmt_time(item["expireTime"])
+    # 获取菜单信息
+    menu_info = lic.get("menuInfo", {})
+    module_list = menu_info.get("moduleList", [])
+    group_list = menu_info.get("grouplist", {})
+
+    for item in module_list:
+        name = item.get("name")
+        group = item.get("group")
+        auth = item.get("auth")
+        expire_time = item.get("expireTime")
+        value = item.get("value")
+
+        # 时间有效性判断
+        try:
+            expire_time_int = int(expire_time)
+            current_time_int = int(time.time() * 1000)
+            is_valid = auth and expire_time_int > current_time_int
+        except (TypeError, ValueError):
+            is_valid = False
+
+        if name in advanced_modules or group in advanced_groups:
+            key = name
+            val = None
         else:
-            if name in ["虚拟作战室", "AI辅助", "集群部署", "软件升级", "维保服务", "多引擎部署"] or group in ["高级功能"]:
-                menu_dict["menuInfo"].setdefault(name, {})["value"] = None
-                menu_dict["menuInfo"].setdefault(name, {})["auth"] = True
-                menu_dict["menuInfo"].setdefault(name, {})["description"] = lic["menuInfo"]["grouplist"].get(group, "")
-                menu_dict["menuInfo"].setdefault(name, {})["expireTime"] = fmt_time(item["expireTime"])
-                continue
-            menu_dict["menuInfo"].setdefault(group, {})["value"] = None
-            menu_dict["menuInfo"].setdefault(group, {})["auth"] = True
-            menu_dict["menuInfo"].setdefault(group, {})["description"] = lic["menuInfo"]["grouplist"].get(group, "")
-            menu_dict["menuInfo"].setdefault(group, {})["expireTime"] = fmt_time(item["expireTime"])
+            key = group
+            val = value if name in ["应用数量", "剧本数量限制"] else None
+
+        description = group_list.get(group, "")
+
+        menu_entry = menu_dict["menuInfo"].setdefault(key, {})
+        menu_entry["value"] = val
+        menu_entry["auth"] = True if is_valid else True
+        menu_entry["description"] = description
+        menu_entry["expireTime"] = fmt_time(expire_time)
 
     return response_ok(menu_dict)
 

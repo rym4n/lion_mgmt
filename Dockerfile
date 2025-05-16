@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     libaio-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install uv==0.7.0 nuitka==2.7.1
+RUN pip install uv==0.7.4 nuitka==2.7.2
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
@@ -24,10 +24,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY . ./
 
-#RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file core/
-#RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file libs/
-#RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file models/
-#RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file core/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file libs/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file models/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
 
 FROM python:3.11-slim as runtime
 
@@ -41,9 +41,8 @@ ENV VIRTUAL_ENV=/app/.venv \
 WORKDIR /app
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
-#COPY --from=builder /app/dist/ ./
-#COPY settings ./settings
-#COPY server.py ./
-COPY . .
+COPY --from=builder /app/dist/ ./
+COPY settings ./settings
+COPY server.py ./
 
-ENTRYPOINT ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+ENTRYPOINT ["sanic", "server:app", "--host", "0.0.0.0", "--port", "8000", "--fast"]
