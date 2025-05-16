@@ -62,8 +62,7 @@ async def warroom_ws(request: Request, ws: Websocket):
         logger.error(f"{e2} | {traceback.format_exc()}")
     except Exception as e:
         logger.error(f"{e} | {traceback.format_exc()}")
-        await manager.send_error(f"{e} | {traceback.format_exc()}")
-        await ws.send({"message": "会话token无效", "error": str(e)})
+        await ws.send(orjson.dumps({"type": "error", "message": str(e)}).decode())
     finally:
         if user_id:
             await manager.disconnect(user_id)

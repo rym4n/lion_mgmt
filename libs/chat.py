@@ -42,7 +42,7 @@ class ChatManager:
         # user_current_room 用户当前所在房间
         # private_chat_rooms 私聊房间映射
         # online_users 在线用户ID集合
-        self.cache_client = cache_client
+        self.cache_client = cache_client.client
         self.ws = ws
         self.user = user
 
