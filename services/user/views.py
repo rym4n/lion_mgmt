@@ -1,9 +1,8 @@
 # coding=utf-8
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
-import jwt
 import pyotp
 from argon2.exceptions import VerificationError, InvalidHashError
 from sanic import Blueprint
@@ -17,7 +16,7 @@ from libs.security.authentication import validate_password, token_encode, refres
 from libs.security.authorization import requires_permission
 from libs.utils import password_hasher, ip_in_list, get_client_ip
 from models import Account, Role
-from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS, SECRET, SESSION_ENCODING_ALGORITHM
+from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS
 
 user_bp = Blueprint('user', url_prefix='v1/user')
 _all__ = ["user_bp"]

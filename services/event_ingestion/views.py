@@ -723,7 +723,7 @@ async def export_event_ingestion_script(request):
                 content = await afp.read()
                 data = yaml.safe_load(content)
 
-            event_data = event.json if hasattr(event, "json") else dict(event)
+            event_data = event.json
             event_data["vector_config"] = str(data)
             event_data.pop("file_path", None)
 

@@ -14,6 +14,7 @@ import orjson
 from sanic import Blueprint, response
 from tortoise.expressions import Q
 from tortoise.functions import Max
+from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -427,26 +428,21 @@ async def delete_tool(request):
     if not name or not version:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool = await Tool.filter(name=name, version=version, deleted=False).first()
-    if not tool:
-        raise CustomError(ErrorCode.ToolAlreadyDeletedError)
+    async with in_transaction():
+        tool = await Tool.get(name=name, version=version, deleted=False)
+        if not tool:
+            raise CustomError(ErrorCode.ToolAlreadyDeletedError)
 
-    if tool.status == 1:
-        raise CustomError(ErrorCode.ToolHasScriptError)
+        if tool.status == 1:
+            raise CustomError(ErrorCode.ToolHasScriptError)
 
-    tool_path = os.path.join(TOOLS_DIR, name, version)
-    if os.path.exists(tool_path):
-        shutil.rmtree(tool_path)
+        tool_path = os.path.join(TOOLS_DIR, name, version)
+        if os.path.exists(tool_path):
+            shutil.rmtree(tool_path)
 
-    tool.deleted = True
-    tool.updater = request.ctx.session['account_info'].username
-    await tool.save()
-
-    tool_actions = await ToolAction.filter(tool_name=name, version_number=version, deleted=False).all()
-    if tool_actions:
-        for action in tool_actions:
-            action.deleted = True
-            await action.save()
+        tool.deleted = True
+        tool.updater = request.ctx.session['account_info'].username
+        await tool.save()
 
     return response_ok({"message": "工具删除成功"})
 
@@ -464,46 +460,18 @@ async def delete_tool_all(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tools = await Tool.filter(name=name, deleted=False).all()
-    if not tools:
-        raise CustomError(ErrorCode.ToolAlreadyDeletedError)
+    if await Tool.filter(name=name, deleted=False, status=1).exists():
+        raise CustomError(ErrorCode.ToolHasScriptError)
 
-    for tool in tools:
-        if tool.status == 1:
-            raise CustomError(ErrorCode.ToolHasScriptError)
+    async with in_transaction():
+        tool_path = os.path.join(TOOLS_DIR, name)
+        if os.path.exists(tool_path):
+            shutil.rmtree(tool_path)
 
-        tool.deleted = True
-        tool.updater = request.ctx.session['account_info'].username
-        await tool.save()
-
-    tool_path = os.path.join(TOOLS_DIR, name)
-
-    if os.path.exists(tool_path):
-        shutil.rmtree(tool_path)
-
-    tool_actions = await ToolAction.filter(tool_name=name, deleted=False).all()
-    if tool_actions:
-        for action in tool_actions:
-            action.deleted = True
-            await action.save()
-
-    tool_resource_models = await ToolResourcesModel.filter(tool_name=name, deleted=False).all()
-    if tool_resource_models:
-        for resource_model in tool_resource_models:
-            resource_model.deleted = True
-            await resource_model.save()
-
-    tool_resources = await ToolResources.filter(tool_name=name, deleted=False).all()
-    if tool_resources:
-        for resource in tool_resources:
-            resource.deleted = True
-            await resource.save()
-
-    action_permissions = await ActionPermissions.filter(tool_name=name, deleted=False).all()
-    if action_permissions:
-        for permission in action_permissions:
-            permission.deleted = True
-            await permission.save()
+        tool_actions = await ToolAction.filter(tool_name=name, deleted=False).update(deleted=True)
+        tool_resource_models = await ToolResourcesModel.filter(tool_name=name, deleted=False).update(deleted=True)
+        tool_resources = await ToolResources.filter(tool_name=name, deleted=False).update(deleted=True)
+        action_permissions = await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
 
     return response_ok({"message": "全部工具删除成功"})
 
@@ -947,7 +915,7 @@ async def judge_permission(request):
     """
     action_groups = request.json.get("actions", [])
     if not action_groups or not isinstance(action_groups, list):
-        raise CustomError(ErrorCode.ParameterError, "参数格式错误")
+        raise CustomError(ErrorCode.ParameterError)
 
     user = request.ctx.session.get('account_info')
     if not user:
@@ -1099,7 +1067,7 @@ async def health_check_config(request):
         config.deleted = (switch == "off")
     else:
         config.deleted = (switch == "off")
-        config.value = orjson.dumps({"cron": cron})
+        config.value = orjson.dumps({"cron": cron}).decode()
     await config.save()
 
     return response_ok({"message": "资源健康检查配置修改成功"})

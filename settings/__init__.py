@@ -179,3 +179,12 @@ CACHE = {
         'pool_max_size': 50
     }
 }
+
+REDIS_NODES = [
+    {
+        'host': os.environ.get('RY_REDIS_HOST'),
+        'port': os.environ.get('RY_REDIS_PORT'),
+        'db': os.environ.get('RY_REDIS_DB'),
+        'password': os.environ.get('RY_REDIS_PASS', ''),
+    }
+]

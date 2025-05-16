@@ -11,6 +11,7 @@ class Runlog(BaseModel):
     所有节点的执行记录
     """
     run_id = fields.CharField(max_length=36, description="每次运行的唯一ID")
+    timer_id = fields.ForeignKeyField("models.Timed", null=True, related_name="timer_runlog", description="关联定时任务")
 
     node_id = fields.CharField(max_length=36, description="节点ID")
     node_name = fields.CharField(max_length=255, description="节点名称")
@@ -44,6 +45,7 @@ class Runlog(BaseModel):
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
             "run_id": self.run_id,
+            "timer_id": self.timer_id,
             "node_id": self.node_id,
             "node_name": self.node_name,
             "node_type": self.node_type,
@@ -57,12 +59,12 @@ class Runlog(BaseModel):
             "result": self.result,
             "start_time": strip_timezone_to_seconds(self.start_time),
             "end_time": strip_timezone_to_seconds(self.end_time),
-            "playbook": self.playbook.id if self.playbook else "",
+            "playbook": self.playbook,
             "creator": self.executor
         }
 
     class Meta:
         table = "runlog"
-        ordering = ["-utime"]
+        ordering = ["-ctime"]
 
         # unique_together = (("run_id", "node_id"),)

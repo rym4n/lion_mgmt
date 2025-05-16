@@ -10,10 +10,7 @@ import aiofile
 import orjson
 import pytz
 from sanic import Blueprint, Request, Websocket
-from sanic.exceptions import WebsocketClosed
-from sanic.log import logger
 from tortoise.expressions import Q
-from websockets.exceptions import ConnectionClosed
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -300,7 +297,6 @@ async def execute_action(request: Request, ws: Websocket):
         await send_kafka_message(kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg)
 
         await ws.send(orjson.dumps({"run_id": msg["run_id"], "utime": formatted_time}).decode())
-
 
 
 @workflow_bp.post('/run/detail')

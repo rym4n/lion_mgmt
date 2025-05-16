@@ -2,6 +2,7 @@
 import asyncio
 import traceback
 
+import jwt
 import orjson
 from sanic import Blueprint, Request, Websocket
 from sanic.log import logger
@@ -10,27 +11,34 @@ from websockets import ConnectionClosed
 
 from core.error_code import ErrorCode
 from core.response import response_ok
+from libs.chat import ChatManager
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.ws_connect import ConnectionManager, get_or_create_private_chat_room
 from models.user import Account
 from models.warroom import Room, Message
+from settings import SECRET, SESSION_ENCODING_ALGORITHM
 
 warroom_bp = Blueprint('warroom', url_prefix='v1/warroom')
 __all__ = ['warroom_bp']
-
-manager = ConnectionManager()
 
 
 @warroom_bp.websocket('/ws')
 async def warroom_ws(request: Request, ws: Websocket):
     """WebSocket连接处理"""
     user_id = None
+    manager = ChatManager(request.ctx.cache_client)
     try:
         # 先获取认证信息
         auth_data = await asyncio.wait_for(ws.recv(), timeout=5.0)
         auth_json = orjson.loads(auth_data)
-        user_id = auth_json['request_header']['id']
+        payload = jwt.decode(auth_json['aioe-auth'], SECRET, SESSION_ENCODING_ALGORITHM)
+
+        account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
+        if not account:
+            logger.warning("redis里已经没有account信息了")
+            raise CustomError(ErrorCode.SessionInvalid)
+        user_id = account.id
+
         # 建立连接
         await manager.connect(ws, user_id)
         # 持续接收和处理消息
@@ -40,7 +48,7 @@ async def warroom_ws(request: Request, ws: Websocket):
                 if not data:
                     continue
                 message = orjson.loads(data)
-                await manager.handle_message(user_id, message)
+                await manager.handle_message(account, message)
             except asyncio.TimeoutError:
                 await ws.send(orjson.dumps({"type": "heartbeat", "status": "ping"}).decode())
             except asyncio.CancelledError:
@@ -49,16 +57,13 @@ async def warroom_ws(request: Request, ws: Websocket):
                 logger.error(f"{e1} | {traceback.format_exc()}")
     except ConnectionClosed as e2:
         logger.error(f"{e2} | {traceback.format_exc()}")
+    except Exception as e:
+        logger.error(f"{e} | {traceback.format_exc()}")
+        await ws.send({"message": "会话token无效", "error": str(e)})
     finally:
-        if user_id is not None:
+        if user_id:
             await manager.disconnect(user_id)
         await ws.close()
-
-
-@warroom_bp.after_server_start
-async def start_heartbeat_check(_app, _loop):
-    """启动服务后开始心跳检查"""
-    asyncio.create_task(manager.check_heartbeats())
 
 
 @warroom_bp.post("/create")
@@ -94,7 +99,7 @@ async def create_room(request: Request):
 
 
 @warroom_bp.post("/join")
-@requires_permission('warroom:c')
+@requires_permission('warroom:u')
 async def join_room(request: Request):
     """
     加入指定作战室
@@ -122,13 +127,12 @@ async def delete_room(request: Request):
         id: 必填， 房间id
     """
     room_id = request.json.get("id")
-    room = await Room.get(id=room_id)
+    room = await Room.get(id=room_id).prefetch_related('creator')
     if room is None:
         return CustomError(ErrorCode.RoomNotExists)
     user = request.ctx.session['account_info']
-    creator = await room.creator
     # 房间只能由创建者删除
-    if str(creator.id) != str(user.id):
+    if str(room.creator.id) != str(user.id):
         return CustomError(ErrorCode.RoomDeleteNotAllowed)
     await Room.filter(id=room_id).update(deleted=True)
     return response_ok("房间删除成功")
@@ -187,7 +191,7 @@ async def acquire_members(request: Request):
 
 
 @warroom_bp.post("/get_private_room")
-@requires_permission('warroom:r')
+@requires_permission('warroom:c')
 async def get_private_room(request: Request):
     """
     获取或创建与指定用户的私聊房间
@@ -197,24 +201,16 @@ async def get_private_room(request: Request):
     """
     user = request.ctx.session['account_info']
     partner_id = request.json.get('partner_id')
-
+    partner = await Account.get(id=partner_id)
+    if partner is None:
+        return CustomError(ErrorCode.AccountNotFound)
     # 先获取私聊房间
-    chat_room = await get_or_create_private_chat_room(str(user.id), partner_id)
-
-    # 缓存房间ID到连接管理器
-    if str(user.id) < partner_id:
-        manager.private_chat_rooms[(str(user.id), partner_id)] = str(chat_room.id)
-    else:
-        manager.private_chat_rooms[(partner_id, str(user.id))] = str(chat_room.id)
-
-    return response_ok({
-        "room_id": str(chat_room.id),
-        "name": chat_room.name
-    })
+    chat_room = await ChatManager(request.ctx.cache_client).get_or_create_private_chat_room(user, partner)
+    return response_ok({"room_id": chat_room.id, "name": chat_room.name})
 
 
 @warroom_bp.post("/user_rooms")
-@requires_permission('warroom:r')
+@requires_permission('warroom:a')
 async def get_user_rooms(request: Request):
     """
     获取当前用户已加入的作战室列表
@@ -247,7 +243,7 @@ async def get_user_rooms(request: Request):
 
 
 @warroom_bp.post("/query_messages")
-@requires_permission('warroom:r')
+@requires_permission('warroom:a')
 async def query_messages(request: Request):
     """
     统一消息查询接口，整合了原WebSocket的多个查询功能
@@ -312,7 +308,11 @@ async def query_messages(request: Request):
         if not partner_id:
             return CustomError(ErrorCode.ParamValueError)
 
-        chat_room = await get_or_create_private_chat_room(user_id, partner_id)
+        partner = await Account.get(id=partner_id)
+        if partner is None:
+            return CustomError(ErrorCode.AccountNotFound)
+        # 先获取私聊房间
+        chat_room = await ChatManager(request.ctx.cache_client).get_or_create_private_chat_room(user, partner)
         # 消息计数
         total_count = await Message.filter(
             Q(Q(sender_id=user_id) & Q(receiver_id=partner_id)) |
@@ -370,7 +370,11 @@ async def query_messages(request: Request):
             )
         # 传入私聊用户ID, 搜索私聊历史记录
         elif partner_id:
-            chat_room = await get_or_create_private_chat_room(user_id, partner_id)
+            partner = await Account.get(id=partner_id)
+            if partner is None:
+                return CustomError(ErrorCode.AccountNotFound)
+            # 先获取私聊房间
+            chat_room = await ChatManager(request.ctx.cache_client).get_or_create_private_chat_room(user, partner)
             query = Message.filter(
                 # 筛消息发送/接收包含私聊双方的，建议改造创建私聊房间逻辑，直接按房间号筛就得了
                 Q(Q(sender_id=user_id) & Q(receiver_id=partner_id)) |

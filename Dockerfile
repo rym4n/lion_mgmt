@@ -31,6 +31,8 @@ RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove
 
 FROM python:3.11-slim as runtime
 
+RUN apt-get update && apt-get install -y curl
+
 ENV VIRTUAL_ENV=/app/.venv \
     RY_ENV=PROD \
     PYTHONDONTWRITEBYTECODE=1 \
