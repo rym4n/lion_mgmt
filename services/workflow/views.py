@@ -261,42 +261,49 @@ async def execute_action(request: Request, ws: Websocket):
     auth_json = orjson.loads(auth_data)
     user_id = auth_json['request_header']['id']
 
-    raw = await ws.recv()
-    data = orjson.loads(raw)
+    while True:
+        raw = await ws.recv()
+        data = orjson.loads(raw)
 
-    if data.get("type") == "query":
-        utime_str = data.get("utime")
-        utime = datetime.strptime(utime_str, "%Y-%m-%d %H:%M:%S.%f %z")
-        run_id = data.get("run_id")
-        datas = await Runlog.filter(run_id=run_id, utime__gt=utime).all().prefetch_related("playbook")
-        if datas:
-            payload = []
-            for data in datas:
-                data_dic = data.json
-                start = data.start_time.astimezone(pytz.timezone("Asia/Shanghai"))
-                end = data.end_time.astimezone(pytz.timezone("Asia/Shanghai"))
-                delta = end - start
-                data_dic["run_time"] = int(delta.total_seconds() * 1000) if int(delta.total_seconds() * 1000) > 0 else 1
-                payload.append(data_dic)
-            await ws.send(orjson.dumps({"data": payload}).decode())
+        if data.get("type") == "query":
+            utime_str = data.get("utime")
+            utime = datetime.strptime(utime_str, "%Y-%m-%dT%H:%M:%S.%f%z")
+            run_id = data.get("run_id")
+            datas = await Runlog.filter(run_id=run_id, utime__gt=utime).all().prefetch_related("playbook")
+            if datas:
+                payload = []
+                for data in datas:
+                    data_dic = data.json
+                    start = data.start_time.astimezone(pytz.timezone("Asia/Shanghai"))
+                    end = data.end_time.astimezone(pytz.timezone("Asia/Shanghai"))
+                    delta = end - start
+                    data_dic["run_time"] = int(delta.total_seconds() * 1000) if int(delta.total_seconds() * 1000) > 0 else 1
+                    payload.append(data_dic)
+                tz = pytz.timezone("Asia/Shanghai")
+                now = datetime.now(tz)
+                formatted_time = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + " +0800"
+                formatted_time = datetime.strptime(formatted_time, '%Y-%m-%d %H:%M:%S.%f %z')
+                await ws.send(orjson.dumps({"data": payload, "utime": formatted_time}).decode())
 
-    elif data.get("type") == "run":
-        tz = pytz.timezone("Asia/Shanghai")
-        now = datetime.now(tz)
-        formatted_time = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + " +0800"
-        formatted_time = datetime.strptime(formatted_time, '%Y-%m-%d %H:%M:%S.%f %z')
-        msg = {}
-        type = request.args.get("type")
-        msg["run_type"] = type
-        msg["run_id"] = gen_order_version(length=6)
-        data.pop("type")
-        params = data
-        params["executor"] = user_id
-        msg["run_args"] = params
+        elif data.get("type") == "run":
+            tz = pytz.timezone("Asia/Shanghai")
+            now = datetime.now(tz)
+            formatted_time = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + " +0800"
+            formatted_time = datetime.strptime(formatted_time, '%Y-%m-%d %H:%M:%S.%f %z')
+            msg = {}
+            type = request.args.get("type")
+            msg["run_type"] = type
+            msg["run_id"] = gen_order_version(length=6)
+            data.pop("type")
+            params = data
+            params["executor"] = user_id
+            msg["run_args"] = params
 
-        await send_kafka_message(kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg)
+            await send_kafka_message(kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg)
 
-        await ws.send(orjson.dumps({"run_id": msg["run_id"], "utime": formatted_time}).decode())
+            await ws.send(orjson.dumps({"run_id": msg["run_id"], "utime": formatted_time}).decode())
+        elif data.get("type") == "exit":
+            break
 
 
 @workflow_bp.post('/run/detail')
