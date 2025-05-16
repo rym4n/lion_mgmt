@@ -80,6 +80,13 @@ del(.topic)
             ''',
 }
 
+CEF_REGEX = re.compile(
+    r"^CEF:(?P<version>\d+)\|(?P<device_vendor>(?:\\\||[^|])*)\|"
+    r"(?P<device_product>(?:\\\||[^|])*)\|(?P<device_version>(?:\\\||[^|])*)\|"
+    r"(?P<deviceEventClassId>(?:\\\||[^|])*)\|(?P<Name>(?:\\\||[^|])*)\|"
+    r"(?P<Severity>(?:\\\||[^|])*)\|(?P<Extension>.*)$"
+)
+
 
 # 生成配置文件
 # noinspection PyTypeChecker
@@ -741,7 +748,7 @@ async def export_event_ingestion_script(request):
 @requires_permission('event:r')
 async def import_event_ingestion_script(request):
     """
-    导入事件接入脚本
+    导入事件
     请求参数:
         files: 上传的文件
     """
@@ -789,3 +796,53 @@ async def import_event_ingestion_script(request):
         file_results.append({f"{vector_config['event_ingestion_name']}": "上传成功"})
 
     return response_ok(file_results)
+
+
+@event_ingestion_bp.post('/parse')
+@requires_permission('event:r')
+async def parse_log(request):
+    """
+    解析日志（需要事件查看权限）
+
+    请求参数:
+        msg: 日志内容 (str)
+        type: 解析类型 (str): JSON、key-value、CEF、Grok、Delimiter
+        value: 附加参数 (str)
+            - key-value: 格式 "=,:", 代表键值对与键值之间的分隔符
+            - Grok: Grok 正则
+            - Delimiter: 分隔符
+    """
+    msg = request.json.get('msg')
+    parse_type = request.json.get('type')
+    value = request.json.get('value', None)
+    if not msg or not parse_type:
+        raise CustomError(ErrorCode.ParameterError)
+
+    if parse_type == "JSON":
+        return response_ok(orjson.loads(msg))
+    elif parse_type == "key-value":
+        if not value or "," not in value:
+            raise CustomError(ErrorCode.ParameterError)
+        key_value_list = msg.split(value.split(",")[0])
+        result = {}
+        for kv in key_value_list:
+            if not kv:
+                continue
+            key_value = kv.split(value.split(",")[1])
+            if len(key_value) == 2:
+                result[key_value[0]] = key_value[1]
+        return response_ok(result)
+    elif parse_type == "CEF":
+        new_msg = CEF_REGEX.match(msg)
+        if not new_msg:
+            return response_ok("解析失败，请检查日志是否符合CEF标准")
+        return response_ok(new_msg.groupdict())
+    elif parse_type == "Grok":
+        new_msg = re.match(value, msg)
+        return response_ok(new_msg.groupdict())
+    elif parse_type == "Delimiter":
+        if not value:
+            raise CustomError(ErrorCode.ParameterError)
+        return response_ok(msg.split(value))
+
+
