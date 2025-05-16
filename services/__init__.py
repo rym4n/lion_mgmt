@@ -34,7 +34,6 @@ def create_app() -> Sanic:
     register_tortoise(app, config=TORTOISE, generate_schemas=False)
     register_middleware(app)
     register_exception_handler(app)
-    load_license()
     register_blueprints(app)
     return app
 
