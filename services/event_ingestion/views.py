@@ -155,7 +155,6 @@ async def event_ingestion(request):
         sasl_password: sasl密码 (str)   事件来源类型为kafka时才传，默认为None
         enabled_status: 上游接入(int) 启用为 1 ，禁用为 0 默认启用
         linked_execution: 联动执行 (int) 启用为 1 ，禁用为 0 默认禁用
-        created_id: str 创建人ID
     """
     data = request.json  # 只解析一次
     event_name = data.get('event_name')
@@ -313,7 +312,7 @@ async def update_event_ingestion(request):
         syslog_port: 日志端口 (int) 端口范围500-2000  事件来源类型为syslog时才传，默认为None       非必填
         communication_type: 通信类型 (str)   事件来源类型为syslog时才传，默认为None       非必填
         kafka_group_id: kafka消费组ID (str)   事件来源类型为kafka时才传，默认为None      非必填
-        transforms_type: 转换类型 (str) 目前支持Grok、CEF、key-value、Json、Delimiter(分割符)       非必填
+        transforms_type: 转换类型 (str) 目前支持Grok、CEF、key-value、JSON、Delimiter(分割符)       非必填
         transforms_config: 转换配置 (str) 只有Grok时需要填写，默认情况下为None       非必填
         key_value_delimiter: 键值对分隔符 (str) 只有key-value时需要填写，默认情况下为None       非必填
         key_delimiter_value: 键值分隔符 (str) 只有key-value时需要填写，默认情况下为None       非必填
@@ -537,22 +536,21 @@ async def binding_event_ingestion_script(request):
     """
     绑定事件接入和剧本(需要事件创建权限)
     请求参数:
-        judge: 判断条件 (json)  ，
-            {
-                type: "&&" or "||" or None,         (&&为and，||为or)
-                conditions: [
-                    {
-                        type: "type",
-                        name: "name",
-                        value: "value"
-                    },
-                    {
-                        type: "type",
-                        name: "name",
-                        value: "value"
-                    }
-                ]
-            }
+        conditions: 条件 (list)
+            conditions: [
+                {
+                    type: "type",
+                    name: "name",
+                    value: "value",
+                    connect_type: "&&" or "||" or None
+                },
+                {
+                    type: "type",
+                    name: "name",
+                    value: "value",
+                    connect_type: "&&" or "||" or None
+                }
+            ]
         目前支持的判断条件类型有：
             等于 == ，不等于!= ，大于 > ，小于 < ，大于等于 >= ，小于等于 <=
             字段中存在字符串 contains ，字段中不包含字符串 !contains
@@ -560,11 +558,10 @@ async def binding_event_ingestion_script(request):
             字段存在 exists ，字段不存在 !exists        value为空
             字段为空 is_empty ，字段不为空 !is_empty    value为空
             正则表达式 match  字段匹配正则表达式       value为正则表达式，如"^abc.*$"
-    # judge = request.json.get('judge')
         event_ingestion_id: 事件接入ID (str)
         script_ids: 剧本ID (list)
     """
-    conditions = request.json.get('judge')
+    conditions = request.json.get('conditions')
     event_ingestion_id = request.json.get('event_ingestion_id')
     script_ids = request.json.get('script_ids')
     event = await EventsIngestion.filter(id=event_ingestion_id).first()
@@ -590,9 +587,7 @@ async def binding_event_ingestion_script(request):
     conditional_statements = ""
 
     if conditions:
-        connect_type = conditions["type"] if conditions["type"] in ["&&", "||"] else None
-        for index, condition in enumerate(conditions["conditions"]):
-            is_last_condition = index == len(conditions["conditions"]) - 1
+        for index, condition in enumerate(conditions):
             if bool(re.fullmatch(r"[^\w\s]+", condition["type"])):
                 conditional_statements += f""".{condition["name"]} {condition['type']} "{condition['value']}" """
             elif condition["type"] == "contains":
@@ -605,7 +600,8 @@ async def binding_event_ingestion_script(request):
                 conditional_statements += f"""match(string!(.{condition['name']}), "{condition['value']}")"""
             else:
                 raise CustomError(ErrorCode.ParameterError)
-            if connect_type and not is_last_condition:
+            connect_type = condition["connect_type"] if condition.get("connect_type") in ["&&", "||"] else None
+            if connect_type:
                 conditional_statements += f" {connect_type} "
 
     async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
@@ -758,7 +754,8 @@ async def import_event_ingestion_script(request):
     file_results = []
     for file in files:
         vector_config = orjson.loads(file.body.decode('utf-8'))
-        if await EventsIngestion.filter(event_ingestion_name=vector_config.get("event_ingestion_name"), deleted=False).exists():
+        if await EventsIngestion.filter(event_ingestion_name=vector_config.get("event_ingestion_name"),
+                                        deleted=False).exists():
             file_results.append({f"{vector_config['event_ingestion_name']}": "已存在相同名称的事件接入"})
             continue
 
@@ -838,11 +835,15 @@ async def parse_log(request):
             return response_ok("解析失败，请检查日志是否符合CEF标准")
         return response_ok(new_msg.groupdict())
     elif parse_type == "Grok":
+        if not value:
+            return response_ok("解析失败，请检查是否存在正则表达式")
         new_msg = re.match(value, msg)
+        if not new_msg:
+            return response_ok("解析失败，请检查日志是否符合Grok的正则表达式")
         return response_ok(new_msg.groupdict())
     elif parse_type == "Delimiter":
         if not value:
             raise CustomError(ErrorCode.ParameterError)
+        if value not in msg:
+            return response_ok("解析失败，请检查日志是否包含分隔符")
         return response_ok(msg.split(value))
-
-
