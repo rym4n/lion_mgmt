@@ -21,7 +21,10 @@ async def authenticate(request: Request):
     客户端身份验证会话和账户验证。 如果客户端身份验证会话在身份验证过程中过期，自动续期token。
     """
     payload = await token_decode(request)
+    validate_token(payload, request)
 
+
+def validate_token(payload, request):
     if payload.get('exp', 0) < int(time.time()):
         raise CustomError(ErrorCode.SessionExpired)
 

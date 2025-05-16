@@ -11,8 +11,9 @@ from websockets import ConnectionClosed
 
 from core.error_code import ErrorCode
 from core.response import response_ok
-from libs.chat import ChatManager
+from libs.chat import ChatManager, get_or_create_private_chat_room
 from libs.error_code.exception import CustomError
+from libs.security.authentication import validate_token
 from libs.security.authorization import requires_permission
 from models.user import Account
 from models.warroom import Room, Message
@@ -26,12 +27,13 @@ __all__ = ['warroom_bp']
 async def warroom_ws(request: Request, ws: Websocket):
     """WebSocket连接处理"""
     user_id = None
-    manager = ChatManager(request.ctx.cache_client)
+    manager = None
     try:
         # 先获取认证信息
         auth_data = await asyncio.wait_for(ws.recv(), timeout=5.0)
         auth_json = orjson.loads(auth_data)
-        payload = jwt.decode(auth_json['aioe-auth'], SECRET, SESSION_ENCODING_ALGORITHM)
+        payload = jwt.decode(auth_json['auth'], SECRET, SESSION_ENCODING_ALGORITHM)
+        validate_token(payload, request)
 
         account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
         if not account:
@@ -39,8 +41,9 @@ async def warroom_ws(request: Request, ws: Websocket):
             raise CustomError(ErrorCode.SessionInvalid)
         user_id = account.id
 
+        manager = ChatManager(account, ws, request.ctx.cache_client)
         # 建立连接
-        await manager.connect(ws, user_id)
+        await manager.connect()
         # 持续接收和处理消息
         while True:
             try:
@@ -48,7 +51,7 @@ async def warroom_ws(request: Request, ws: Websocket):
                 if not data:
                     continue
                 message = orjson.loads(data)
-                await manager.handle_message(account, message)
+                await manager.handle_message(message)
             except asyncio.TimeoutError:
                 await ws.send(orjson.dumps({"type": "heartbeat", "status": "ping"}).decode())
             except asyncio.CancelledError:
@@ -59,6 +62,7 @@ async def warroom_ws(request: Request, ws: Websocket):
         logger.error(f"{e2} | {traceback.format_exc()}")
     except Exception as e:
         logger.error(f"{e} | {traceback.format_exc()}")
+        await manager.send_error(f"{e} | {traceback.format_exc()}")
         await ws.send({"message": "会话token无效", "error": str(e)})
     finally:
         if user_id:
@@ -140,7 +144,7 @@ async def delete_room(request: Request):
 
 @warroom_bp.post("/rooms_list")
 @requires_permission('warroom:r')
-async def get_roomsList(request: Request):
+async def get_room_list(request: Request):
     """
         获取所有作战室列表
 
@@ -205,7 +209,7 @@ async def get_private_room(request: Request):
     if partner is None:
         return CustomError(ErrorCode.AccountNotFound)
     # 先获取私聊房间
-    chat_room = await ChatManager(request.ctx.cache_client).get_or_create_private_chat_room(user, partner)
+    chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
     return response_ok({"room_id": chat_room.id, "name": chat_room.name})
 
 
@@ -312,7 +316,7 @@ async def query_messages(request: Request):
         if partner is None:
             return CustomError(ErrorCode.AccountNotFound)
         # 先获取私聊房间
-        chat_room = await ChatManager(request.ctx.cache_client).get_or_create_private_chat_room(user, partner)
+        chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
         # 消息计数
         total_count = await Message.filter(
             Q(Q(sender_id=user_id) & Q(receiver_id=partner_id)) |
@@ -374,7 +378,7 @@ async def query_messages(request: Request):
             if partner is None:
                 return CustomError(ErrorCode.AccountNotFound)
             # 先获取私聊房间
-            chat_room = await ChatManager(request.ctx.cache_client).get_or_create_private_chat_room(user, partner)
+            chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
             query = Message.filter(
                 # 筛消息发送/接收包含私聊双方的，建议改造创建私聊房间逻辑，直接按房间号筛就得了
                 Q(Q(sender_id=user_id) & Q(receiver_id=partner_id)) |
