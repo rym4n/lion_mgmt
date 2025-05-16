@@ -21,11 +21,13 @@ from aiokafka import AIOKafkaProducer
 from argon2 import PasswordHasher
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from settings import RY_KEY
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(filename)s:%(lineno)d:%(funcName)s] [%(levelname)s] %(message)s')
 
 password_hasher: PasswordHasher = PasswordHasher()
 
