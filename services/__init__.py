@@ -34,6 +34,7 @@ def create_app() -> Sanic:
     register_tortoise(app, config=TORTOISE, generate_schemas=False)
     register_middleware(app)
     register_exception_handler(app)
+    load_license()
     register_blueprints(app)
     return app
 
@@ -57,6 +58,7 @@ def register_blueprints(app: Sanic) -> None:
             "timed_bp": timed_bp
         }
         license_data = load_license()
+        logger.info(f"license_data: {license_data}")
         if license_data and 'menuInfo' in license_data:
             for item in license_data["menuInfo"]["moduleList"]:
                 if item["auth"] and int(item["expireTime"]) > int(time.time() * 1000):
