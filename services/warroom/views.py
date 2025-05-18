@@ -57,7 +57,7 @@ async def warroom_ws(request: Request, ws: Websocket):
         await ws.send(orjson.dumps({"type": "error", "message": str(e)}).decode())
     finally:
         if account:
-            await chat_manager.disconnect(account)
+            await chat_manager.disconnect(account.id)
         await ws.close()
 
 

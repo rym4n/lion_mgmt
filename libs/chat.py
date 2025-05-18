@@ -5,6 +5,7 @@ from datetime import datetime
 
 import orjson
 from aiocache import caches
+from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
 
 from models.user import Account
@@ -42,11 +43,6 @@ class ChatManager:
     """
 
     def __init__(self):
-        # active_connections 活跃连接
-        # room_members 房间在线成员集合
-        # user_current_room 用户当前所在房间
-        # private_chat_rooms 私聊房间映射
-        # online_users 在线用户ID集合
         caches.set_config(CACHE)
         self.cache_client = caches.get("redis_chat")
         self.msg_pub = self.cache_client.client
@@ -62,13 +58,14 @@ class ChatManager:
             "online": True,
             "timestamp": str(datetime.now())
         }
-        await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=30)
+        await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
         await self.msg_pub.publish("wr_group_chat", orjson.dumps(status_message).decode())
 
-    async def disconnect(self, user: Account):
+    async def disconnect(self, user_id):
         """处理用户断开连接"""
-        await self.cache_client.delete(f"room_online_{user.id}")
-        await self.msg_pub.publish("wr_group_chat", orjson.dumps({"type": "system", "message": f"{user.username} 离开作战室"}).decode())
+        self.active_connections.pop(user_id, None)
+        await self.cache_client.delete(f"room_online_{user_id}")
+        # await self.msg_pub.publish("wr_group_chat", orjson.dumps({"type": "system", "message": f"{user.username} 离开作战室"}).decode())
 
     async def msg_listener(self):
         async with self.cache_client.client.pubsub() as msg_sub:
@@ -78,21 +75,16 @@ class ChatManager:
                     if message.get('type') != 'message':
                         continue
                     msg = orjson.loads(message['data'])
-                    if msg.get('type') == 'private':
-                        logger.info(message['data'])
-                        if msg.get("receiver_id") in self.active_connections:
-                            await self.active_connections[msg["receiver_id"]]['conn'].send(message['data'].decode())
-                    else:
-                        room_id = msg.get('room_id')
-                        for k in self.active_connections:
-                            if k == msg.get('sender_id'):
-                                continue
-                            if room_id and self.active_connections[k]['current_room'] == room_id:
-                                await self.active_connections[k]['conn'].send(message['data'].decode())
-                            elif room_id is None:
-                                await self.active_connections[k]['conn'].send(message['data'].decode())
+                    room_id = msg.get('room_id')
+                    for k in self.active_connections:
+                        if room_id and self.active_connections[k]['current_room'] == room_id:
+                            await self.active_connections[k]['conn'].send(message['data'].decode())
+                        elif room_id is None:
+                            await self.active_connections[k]['conn'].send(message['data'].decode())
                 except orjson.JSONDecodeError:
                     logger.error(f"JSONDecodeError | {message.get('data')}")
+                except WebsocketClosed:
+                    self.disconnect(k)
                 except Exception as e:
                     logger.error(f"{e} | {traceback.format_exc()}")
                     break
@@ -122,7 +114,7 @@ class ChatManager:
                 # 发送在线状态列表
                 await ws.send(orjson.dumps({"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
             elif message_type == "heartbeat":
-                await self.cache_client.expire(f"room_online_{user.id}", 30)
+                await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
             else:
                 logger.error(f"{traceback.format_exc()}")
                 raise Exception("未知消息类型")

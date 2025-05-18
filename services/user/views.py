@@ -279,9 +279,8 @@ async def refresh_session_token(request):
     }
     account = await request.ctx.cache_client.get(f"account_{request.ctx.session['sub']}")
     if not account:
-        account = await Account.filter(id=request.ctx.session["sub"]).first()
-    await request.ctx.cache_client.set(f"account_{request.ctx.session['sub']}", account,
-                                       AUTHENTICATION_SESSION_EXPIRATION)
+        account = await Account.filter(id=request.ctx.session["sub"]).first().prefetch_related('roles')
+    await request.ctx.cache_client.set(f"account_{request.ctx.session['sub']}", account, AUTHENTICATION_SESSION_EXPIRATION)
     return response_ok(resp)
 
 
