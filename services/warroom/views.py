@@ -219,16 +219,15 @@ async def get_user_rooms(request: Request):
     query = Room.filter(users__id=user.id, deleted=False)
     if keyword:
         query = query.filter(name__contains=keyword)
-    user_rooms = await query.order_by('-ctime')
+    user_rooms = await query.order_by('-ctime').prefetch_related('creator')
 
     room_list = []
     for room in user_rooms:
-        creator = await room.creator
         room_list.append({
             "id": str(room.id),
             "name": room.name,
-            "creator_id": str(creator.id) if creator else "",
-            "creator_name": creator.username if creator else "",
+            "creator_id": room.creator.id,
+            "creator_name": room.creator.display_name,
             "ctime": str(room.ctime),
         })
 
@@ -255,7 +254,6 @@ async def query_messages(request: Request):
         offset: 可选，偏移量，默认0
     """
     user = request.ctx.session['account_info']
-    user_id = str(user.id)
     query_type = request.json.get("query_type")
     room_id = request.json.get("room_id")
     partner_id = request.json.get("partner_id")
@@ -274,15 +272,14 @@ async def query_messages(request: Request):
         messages = await Message.filter(
             type="public",
             room_id=room_id
-        ).order_by("-ctime").offset(offset).limit(limit)
+        ).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
         message_list = []
         for msg in reversed(messages):
-            sender = await msg.sender
             message_list.append({
                 "type": "public",
                 "message_id": str(msg.id),
-                "sender_id": str(sender.id),
-                "sender_name": sender.username,
+                "sender_id": str(msg.sender.id),
+                "sender_name": msg.sender.display_name,
                 "content": "[已撤回]" if msg.is_recalled else msg.content,
                 "image_content": msg.image_content,
                 "timestamp": str(msg.ctime),
@@ -308,33 +305,21 @@ async def query_messages(request: Request):
             return CustomError(ErrorCode.AccountNotFound)
         # 先获取私聊房间
         chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
+        condition = (Q(sender__id=user.id) & Q(receiver_id=partner_id)) | (Q(sender_id=partner_id) & Q(receiver_id=user.id))
         # 消息计数
-        total_count = await Message.filter(
-            Q(Q(sender_id=user_id) & Q(receiver_id=partner_id)) |
-            Q(Q(sender_id=partner_id) & Q(receiver_id=user_id)),
-            type="private",
-            room_id=chat_room.id
-        ).count()
+        total_count = await Message.filter(condition, type="private", room_id=chat_room.id).count()
         # 分页处理
-        messages = await Message.filter(
-            Q(Q(sender_id=user_id) & Q(receiver_id=partner_id)) |
-            Q(Q(sender_id=partner_id) & Q(receiver_id=user_id)),
-            type="private",
-            room_id=chat_room.id
-        ).order_by("-ctime").offset(offset).limit(limit)
-
-        partner = await Account.get(id=partner_id)
+        messages = await Message.filter(condition, type="private", room_id=chat_room.id).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
         message_list = []
         if partner:
             for msg in reversed(messages):
-                sender = await msg.sender
                 message_list.append({
                     "type": "private",
-                    "message_id": str(msg.id),
-                    "sender_id": str(sender.id),
-                    "sender_name": sender.username,
-                    "receiver_id": str(partner.id),
-                    "receiver_name": partner.username,
+                    "message_id": msg.id,
+                    "sender_id": msg.sender.id,
+                    "sender_name": msg.sender.display_name,
+                    "receiver_id": partner.id,
+                    "receiver_name": partner.display_name,
                     "content": "[已撤回]" if msg.is_recalled else msg.content,
                     "image_content": msg.image_content,
                     "timestamp": str(msg.ctime),
@@ -370,36 +355,27 @@ async def query_messages(request: Request):
                 return CustomError(ErrorCode.AccountNotFound)
             # 先获取私聊房间
             chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
-            query = Message.filter(
-                # 筛消息发送/接收包含私聊双方的，建议改造创建私聊房间逻辑，直接按房间号筛就得了
-                Q(Q(sender_id=user_id) & Q(receiver_id=partner_id)) |
-                Q(Q(sender_id=partner_id) & Q(receiver_id=user_id)),
-                type="private",
-                room_id=chat_room.id,
-                content__contains=keyword,
-                is_recalled=False,
-            )
+            # 筛消息发送/接收包含私聊双方的，建议改造创建私聊房间逻辑，直接按房间号筛就得了
+            query = Message.filter((Q(sender_id=user.id) & Q(receiver_id=partner_id)) | (Q(sender_id=partner_id) & Q(receiver_id=user.id)), type="private", room_id=chat_room.id, content__contains=keyword, is_recalled=False)
         else:
             return CustomError(ErrorCode.ParamValueError)
 
         total_count = await query.count()
-        messages = await query.order_by("-ctime").offset(offset).limit(limit)
+        messages = await query.order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender', 'receiver')
         message_list = []
         for msg in messages:
-            sender = await msg.sender
-            receiver = await msg.receiver
             message_list.append({
                 "message_id": str(msg.id),
                 "type": msg.type,
                 "content": "[已撤回]" if msg.is_recalled else msg.content,
                 "image_content": msg.image_content,
                 "timestamp": str(msg.ctime),
-                "sender_id": str(sender.id),
-                "sender_name": sender.username,
-                "receiver_id": str(receiver.id),
-                "receiver_name": receiver.username,
+                "sender_id": msg.sender.id,
+                "sender_name": msg.sender.display_name,
+                "receiver_id": msg.receiver.id,
+                "receiver_name": msg.receiver.display_name,
                 "is_recalled": msg.is_recalled,
-                "room_id": str(msg.room)
+                "room_id": msg.room.id
             })
 
         return response_ok({
@@ -426,18 +402,17 @@ async def query_messages(request: Request):
             type="announcement",
             room_id=room_id,
             deleted=False
-        ).order_by("-ctime").offset(offset).limit(limit)
+        ).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
 
         announcement_list = []
         for msg in announcements:
-            sender = await msg.sender
             announcement_list.append({
                 "id": str(msg.id),
                 "content": msg.content,
                 "image_content": msg.image_content,
                 "timestamp": str(msg.ctime),
-                "sender_name": sender.username if sender else "",
-                "sender_id": str(sender.id) if sender else "0",
+                "sender_name": msg.sender.display_name,
+                "sender_id": msg.sender.id,
                 "room_id": room_id
             })
 

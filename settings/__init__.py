@@ -41,9 +41,6 @@ if os.environ.get("RY_ENV") == 'DEV':
     except:
         pass
 
-# todo: 暂时从环境变量获取
-RY_KEY = os.environ.get("RY_KEY")
-
 # 系统背景图片名称配置
 BG_NAME = "bg-oEDCYcDF"
 

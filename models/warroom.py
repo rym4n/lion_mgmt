@@ -67,4 +67,4 @@ class Message(BaseModel):
 
     class Meta:
         table = "room_msg"
-        ordering = ["-utime"]
+        ordering = ["-ctime"]

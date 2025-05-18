@@ -23,7 +23,6 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from settings import RY_KEY
 
 password_hasher: PasswordHasher = PasswordHasher()
 
@@ -197,7 +196,7 @@ def rsa_chunk_decrypt(ciphertext: bytes, rsa_priv_key: rsa.RSAPrivateKey) -> byt
 def verify_license(data: bytes):
     try:
         lic_enc = base64.b32decode(data)
-        pkey = serialization.load_pem_private_key(base64.b64decode(RY_KEY.encode()), password=None)
+        pkey = serialization.load_pem_private_key(base64.b64decode('$$$LIC$$$'), password=None)
         decrypted = rsa_chunk_decrypt(lic_enc, pkey)
         machine_id = generate_mac_uuid()
         lic = jwt.decode(decrypted, str(machine_id), "HS256")
