@@ -11,9 +11,8 @@ from websockets import ConnectionClosed
 
 from core.error_code import ErrorCode
 from core.response import response_ok
-from libs.chat import ChatManager, get_or_create_private_chat_room
+from libs.chat import get_or_create_private_chat_room, chat_manager
 from libs.error_code.exception import CustomError
-from libs.security.authentication import validate_token
 from libs.security.authorization import requires_permission
 from models.user import Account
 from models.warroom import Room, Message
@@ -26,32 +25,25 @@ __all__ = ['warroom_bp']
 @warroom_bp.websocket('/ws')
 async def warroom_ws(request: Request, ws: Websocket):
     """WebSocket连接处理"""
-    user_id = None
-    manager = None
+    account = None
     try:
         # 先获取认证信息
-        auth_data = await asyncio.wait_for(ws.recv(), timeout=5.0)
+        auth_data = await asyncio.wait_for(ws.recv(), timeout=30.0)
         auth_json = orjson.loads(auth_data)
         payload = jwt.decode(auth_json['auth'], SECRET, SESSION_ENCODING_ALGORITHM)
-        validate_token(payload, request)
+        # validate_token(payload, request)
 
         account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
         if not account:
             logger.warning("redis里已经没有account信息了")
             raise CustomError(ErrorCode.SessionInvalid)
-        user_id = account.id
-
-        manager = ChatManager(account, ws, request.ctx.cache_client)
         # 建立连接
-        await manager.connect()
+        await chat_manager.connect(account, ws)
         # 持续接收和处理消息
-        while True:
+        async for msg in ws:
             try:
-                data = await asyncio.wait_for(ws.recv(), timeout=60.0)
-                if not data:
-                    continue
-                message = orjson.loads(data)
-                await manager.handle_message(message)
+                message = orjson.loads(msg)
+                await chat_manager.handle_message(account, ws, message)
             except asyncio.TimeoutError:
                 await ws.send(orjson.dumps({"type": "heartbeat", "status": "ping"}).decode())
             except asyncio.CancelledError:
@@ -64,8 +56,8 @@ async def warroom_ws(request: Request, ws: Websocket):
         logger.error(f"{e} | {traceback.format_exc()}")
         await ws.send(orjson.dumps({"type": "error", "message": str(e)}).decode())
     finally:
-        if user_id:
-            await manager.disconnect(user_id)
+        if account:
+            await chat_manager.disconnect(account)
         await ws.close()
 
 

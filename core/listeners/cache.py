@@ -6,6 +6,7 @@ from aiocache import caches
 from sanic import Sanic
 from sanic.log import logger
 
+from libs.chat import chat_manager
 from settings import CACHE
 from .base import BaseListener
 
@@ -16,12 +17,9 @@ class CacheListener(BaseListener):
     async def after_server_start(self, app: Sanic, loop: BaseEventLoop) -> None:
         """app绑定内存/Redis"""
         caches.set_config(CACHE)
-        if CACHE['redis']['endpoint']:
-            app.ctx.cache_client = caches.get('redis')
-            logger.info("使用Redis作为缓存")
-        else:
-            app.ctx.cache_client = caches.get('default')
-            logger.info("使用内存作为缓存")
+        app.ctx.cache_client = caches.get('redis_mgmt')
+        logger.info("使用Redis作为缓存")
+        app.add_task(chat_manager.msg_listener)
 
     async def before_server_stop(self, app: Sanic, loop: BaseEventLoop) -> None:
         """释放连接"""

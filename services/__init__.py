@@ -57,7 +57,6 @@ def register_blueprints(app: Sanic) -> None:
             "timed_bp": timed_bp
         }
         license_data = load_license()
-        logger.info(f"license_data: {license_data}")
         if license_data and 'menuInfo' in license_data:
             for item in license_data["menuInfo"]["moduleList"]:
                 if item["auth"] and int(item["expireTime"]) > int(time.time() * 1000):

@@ -77,7 +77,7 @@ HEALTH_URL_PREFIX = '/health'
 ENABLE_CORS: bool = os.environ.get("RY_CORS", True)
 CORS_SUPPORTS_CREDENTIALS: bool = os.environ.get("RY_CORS_CREDENTIAL", True)
 
-WEBSOCKET_MAX_SIZE = 2 ** 20
+WEBSOCKET_MAX_SIZE = 2 ** 20 # # 消息最大1MB
 WEBSOCKET_PING_INTERVAL = 20
 WEBSOCKET_PING_TIMEOUT = 20
 
@@ -140,7 +140,7 @@ TORTOISE = {
                 "user": os.environ.get("RY_DB_USER"),
                 "password": os.environ.get("RY_DB_PASS"),
                 "database": os.environ.get("RY_DB_NAME"),
-                "maxsize": os.environ.get("RY_DB_POOL") or 50,  # 最大连接数
+                "maxsize": os.environ.get("RY_DB_POOL") or 200,  # 最大连接数
                 # "minsize": 1, # 最小连接数
                 # 关闭池中非活动连接的秒数。通过 0 则禁用此机制。
                 "max_inactive_connection_lifetime": 60 * 60
@@ -165,16 +165,29 @@ CACHE = {
             'class': "aiocache.serializers.PickleSerializer"
         }
     },
-    'redis': {
+    'redis_mgmt': {
         'cache': "aiocache.RedisCache",
         'serializer': {
             'class': "aiocache.serializers.PickleSerializer"
         },
-        'namespace': 'lion',
+        'namespace': 'lion_mgmt',
         'timeout': 2,
         'endpoint': os.environ.get('RY_REDIS_HOST'),
         'port': os.environ.get('RY_REDIS_PORT'),
         'db': os.environ.get('RY_REDIS_DB'),
+        'password': os.environ.get('RY_REDIS_PASS', ''),
+        'pool_max_size': 50
+    },
+    'redis_chat': {
+        'cache': "aiocache.RedisCache",
+        'serializer': {
+            'class': "aiocache.serializers.PickleSerializer"
+        },
+        'namespace': 'lion_mgmt',
+        'timeout': 2,
+        'endpoint': os.environ.get('RY_REDIS_HOST'),
+        'port': os.environ.get('RY_REDIS_PORT'),
+        'db': os.environ.get('RY_CHAT_DB'),
         'password': os.environ.get('RY_REDIS_PASS', ''),
         'pool_max_size': 50
     }

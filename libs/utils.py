@@ -2,12 +2,10 @@
 import base64
 import datetime
 import ipaddress
-import logging
 import os.path
 import random
 import socket
 import time
-import traceback
 import uuid
 import zipfile
 from io import BytesIO
@@ -26,9 +24,6 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from settings import RY_KEY
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(filename)s:%(lineno)d:%(funcName)s] [%(levelname)s] %(message)s')
 
 password_hasher: PasswordHasher = PasswordHasher()
 
@@ -205,11 +200,8 @@ def verify_license(data: bytes):
         pkey = serialization.load_pem_private_key(base64.b64decode(RY_KEY.encode()), password=None)
         decrypted = rsa_chunk_decrypt(lic_enc, pkey)
         machine_id = generate_mac_uuid()
-        logger.info(decrypted)
-        logger.info(machine_id)
         lic = jwt.decode(decrypted, str(machine_id), "HS256")
-    except Exception as e:
-        logger.error(f"{e} | {traceback.format_exc()}")
+    except Exception:
         raise CustomError(ErrorCode.InvalidLicenseError)
 
     if lic.get("expireTime", 0) > int(time.time() * 1000):

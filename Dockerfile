@@ -45,4 +45,4 @@ COPY --from=builder /app/dist/ ./
 COPY settings ./settings
 COPY server.py ./
 
-ENTRYPOINT ["sanic", "server:app", "--host", "0.0.0.0", "--port", "8000", "--fast"]
+ENTRYPOINT ["sanic", "server:app", "--host", "0.0.0.0", "--port", "8000", "--fast", "--no-access-logs", "--no-motd"]
