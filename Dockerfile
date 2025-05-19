@@ -43,7 +43,8 @@ ENV VIRTUAL_ENV=/app/.venv \
 WORKDIR /app
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
-COPY --from=builder /app/dist/ ./
+#COPY --from=builder /app/dist/ ./
+COPY --from=builder /app ./
 COPY settings ./settings
 COPY server.py ./
 
