@@ -12,7 +12,8 @@ jobs:
     condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
   - !CommandStep
     name: 替换key
-    runInContainer: false
+    runInContainer: true
+    image: alpine:latest
     interpreter: !ShellInterpreter
       shell: bash
       commands: |
