@@ -196,7 +196,7 @@ def rsa_chunk_decrypt(ciphertext: bytes, rsa_priv_key: rsa.RSAPrivateKey) -> byt
 def verify_license(data: bytes):
     try:
         lic_enc = base64.b32decode(data)
-        pkey = serialization.load_pem_private_key(base64.b64decode('$$$LIC$$$'), password=None)
+        pkey = serialization.load_pem_private_key(base64.b64decode('AIOE_LICENSE_KEY'), password=None)
         decrypted = rsa_chunk_decrypt(lic_enc, pkey)
         machine_id = generate_mac_uuid()
         lic = jwt.decode(decrypted, str(machine_id), "HS256")

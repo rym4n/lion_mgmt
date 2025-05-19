@@ -18,7 +18,7 @@ jobs:
       commands: |
         TMSG=$(git tag -l --format='%(contents)' @tag@)
         echo $TMSG
-        sed -i "s/\$\$\$LIC\$\$\$/${TMSG}/g" @project_path@/libs/utils.py
+        sed -i "s/AIOE_LICENSE_KEY/${TMSG}/g" @project_path@/libs/utils.py
         cat @project_path@/libs/utils.py
     useTTY: true
     condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
