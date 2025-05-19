@@ -1,4 +1,4 @@
-version: 38
+version: 39
 jobs:
 - name: ci
   jobExecutor: local
@@ -9,6 +9,16 @@ jobs:
     withLfs: false
     withSubmodules: false
     checkoutPath: '@project_path@'
+    condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
+  - !CommandStep
+    name: 替换key
+    runInContainer: false
+    interpreter: !ShellInterpreter
+      shell: bash
+      commands: |
+        MESSAGE=$(git tag -l --format='%(contents)' @tag@)
+        sed -i "s/\$\$\$LIC\$\$\$/${MESSAGE}/g" @project_path@/libs/utils.py
+    useTTY: true
     condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
   - !BuildImageStep
     name: 构建镜像
