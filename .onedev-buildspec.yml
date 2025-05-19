@@ -14,8 +14,7 @@ jobs:
     name: 替换key
     runInContainer: true
     image: alpine:latest
-    interpreter: !ShellInterpreter
-      shell: bash
+    interpreter: !DefaultInterpreter
       commands: |
         MESSAGE=$(git tag -l --format='%(contents)' @tag@)
         sed -i "s/\$\$\$LIC\$\$\$/${MESSAGE}/g" @project_path@/libs/utils.py
