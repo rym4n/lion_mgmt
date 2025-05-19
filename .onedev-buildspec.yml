@@ -16,10 +16,12 @@ jobs:
     image: alpine:latest
     interpreter: !DefaultInterpreter
       commands: |
+        apk add --no-cache git
+        cd @project_path@
         TMSG=$(git tag -l --format='%(contents)' @tag@)
         echo $TMSG
-        sed -i "s/AIOE_LICENSE_KEY/${TMSG}/g" @project_path@/libs/utils.py
-        cat @project_path@/libs/utils.py
+        sed -i "s/AIOE_LICENSE_KEY/${TMSG}/g" libs/utils.py
+        cat libs/utils.py
     useTTY: true
     condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
   - !BuildImageStep
