@@ -26,10 +26,10 @@ COPY . ./
 
 RUN sed -i "s|AIOE_LICENSE_KEY|$(cat LICKEY | tr -d '\n')|g" libs/utils.py
 
-#RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file core/
-#RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file libs/
-#RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file models/
-#RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file core/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file libs/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file models/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
 
 FROM python:3.11-slim as runtime
 
@@ -43,8 +43,7 @@ ENV VIRTUAL_ENV=/app/.venv \
 WORKDIR /app
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
-#COPY --from=builder /app/dist/ ./
-COPY --from=builder /app ./
+COPY --from=builder /app/dist/ ./
 COPY settings ./settings
 COPY server.py ./
 

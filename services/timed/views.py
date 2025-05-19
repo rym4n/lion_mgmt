@@ -3,8 +3,8 @@ from sanic import Blueprint
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
-from libs.utils import send_kafka_message
 from models import Timed, Playbook, ToolAction
 from settings import KAFKA_CONFIG, TIMED_TASK_TOPIC
 
@@ -126,7 +126,7 @@ async def add_timed(request):
                                creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
     msg["timer_id"] = timed.id
     msg["timer_rule"] = timer_rule
-    await send_kafka_message(kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg)
+    await aproduce(KAFKA_CONFIG, TIMED_TASK_TOPIC, msg)
     return response_ok(timed.json)
 
 
@@ -262,9 +262,7 @@ async def update_timed(request):
     timed.updator = request.ctx.session.get("account_info")
 
     await timed.save()
-    await send_kafka_message(
-        kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg
-    )
+    await aproduce(KAFKA_CONFIG, TIMED_TASK_TOPIC, msg)
     return response_ok(timed.json)
 
 
@@ -294,7 +292,7 @@ async def delete_timed(request):
     msg["timer"] = "remove"
     msg["timer_id"] = timed.id
     msg["timer_rule"] = {}
-    await send_kafka_message(kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg)
+    await aproduce(KAFKA_CONFIG, TIMED_TASK_TOPIC, msg)
 
     timed.deleted = True
     timed.updator = request.ctx.session.get("account_info")

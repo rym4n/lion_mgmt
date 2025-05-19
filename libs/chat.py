@@ -84,7 +84,7 @@ class ChatManager:
                 except orjson.JSONDecodeError:
                     logger.error(f"JSONDecodeError | {message.get('data')}")
                 except WebsocketClosed:
-                    self.disconnect(k)
+                    await self.disconnect(k)
                 except Exception as e:
                     logger.error(f"{e} | {traceback.format_exc()}")
                     break

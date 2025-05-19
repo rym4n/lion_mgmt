@@ -3,23 +3,24 @@
 import asyncio
 import os
 import time
-import jwt
 from collections import defaultdict
 from datetime import datetime
-from sanic.log import logger
 
 import aiofile
+import jwt
 import orjson
 import pytz
 from sanic import Blueprint, Request, Websocket
+from sanic.log import logger
 from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.kafka import aproduce
 from libs.security.authentication import validate_token
 from libs.security.authorization import requires_permission, load_license
-from libs.utils import gen_order_version, send_kafka_message
+from libs.utils import gen_order_version
 from models import Playbook, Scene, ToolAction, Tool, Runlog
 from services.tool_management.views import tool_action_update, tool_action_playbook_delete
 from settings import KAFKA_CONFIG, TIMED_TASK_TOPIC, SECRET, SESSION_ENCODING_ALGORITHM
@@ -310,7 +311,7 @@ async def execute_action(request: Request, ws: Websocket):
             params["executor"] = user_id
             msg["run_args"] = params
 
-            await send_kafka_message(kafka_bootstrap_servers=KAFKA_CONFIG, topic=TIMED_TASK_TOPIC, message=msg)
+            await aproduce(KAFKA_CONFIG, TIMED_TASK_TOPIC, msg)
 
             await ws.send(orjson.dumps({"run_id": msg["run_id"], "utime": formatted_time}).decode())
         elif data.get("type") == "exit":

@@ -4,7 +4,6 @@ import datetime
 import ipaddress
 import os.path
 import random
-import socket
 import time
 import uuid
 import zipfile
@@ -14,9 +13,7 @@ from string import ascii_uppercase, digits
 
 import aiofile
 import jwt
-import orjson
 import psutil
-from aiokafka import AIOKafkaProducer
 from argon2 import PasswordHasher
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
@@ -136,18 +133,6 @@ def gen_order_version(length=5):
     return str(times) + '' + str(number)
 
 
-async def send_kafka_message(kafka_bootstrap_servers, topic, message):
-    """
-    发送kafka消息
-    """
-    async with AIOKafkaProducer(
-            bootstrap_servers=kafka_bootstrap_servers,
-            value_serializer=lambda m: orjson.dumps(m)
-    ) as producer:
-        await producer.start()
-        await producer.send_and_wait(topic, message)
-
-
 def strip_timezone_to_seconds(dt_str):
     dt = datetime.datetime.fromisoformat(str(dt_str))
     dt_local = dt.astimezone()
@@ -209,24 +194,10 @@ def verify_license(data: bytes):
         raise CustomError(ErrorCode.LicenseExpired)
 
 
-def get_default_interface():
-    # 方法1或方法2的实现（此处以psutil为例）
-    for interface, addrs in psutil.net_if_addrs().items():
-        for addr in addrs:
-            if addr.family == socket.AF_INET and addr.address != "127.0.0.1":
-                return interface
-    return None
-
-
-def get_mac_address(interface):
-    addrs = psutil.net_if_addrs().get(interface, [])
-    for addr in addrs:
-        if addr.family == psutil.AF_LINK:
-            return addr.address.replace("-", ":").upper()
-    return None
-
-
 def generate_mac_uuid():
-    interface = get_default_interface()
-    mac_address = get_mac_address(interface)
-    return str(uuid.uuid5(uuid.NAMESPACE_DNS, mac_address))
+    for _, addrs in psutil.net_if_addrs().items():
+        for addr in addrs:
+            if addr.family == psutil.AF_LINK and addr.address != "00:00:00:00:00:00":
+                mac_address = addr.address.replace("-", ":").upper()
+                return str(uuid.uuid5(uuid.NAMESPACE_DNS, mac_address))
+    return ''
