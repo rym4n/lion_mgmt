@@ -26,7 +26,7 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
     user_private_chat_rooms = await cache_client.get("user_private_chat_rooms") or {}
     if key not in user_private_chat_rooms:
         # 作战室名字
-        room = await Room.filter(name=private_room_name).first()
+        room = await Room.get_or_none(name=private_room_name)
         # 先查后创
         if not room:
             room = await Room.create(name=private_room_name, creator=sender)
@@ -184,7 +184,7 @@ class ChatManager:
             if not receiver_id:
                 raise Exception("缺少接收者ID")
 
-            receiver = await Account.filter(id=receiver_id).first()
+            receiver = await Account.get_or_none(id=receiver_id)
             if not receiver:
                 raise Exception("接收者不存在")
 
@@ -261,7 +261,7 @@ class ChatManager:
         if not content or not room_id:
             raise Exception("公告内容和作战室ID不能为空")
 
-        room = await Room.filter(id=room_id).first()
+        room = await Room.get_or_none(id=room_id)
         if not room:
             raise Exception("作战室不存在")
 

@@ -448,7 +448,7 @@ async def assign_role_to_user(request):
         role_names: 角色名称，多个用英文逗号隔开
     """
     username = request.json.get('username')
-    account = await Account.filter(username=username, deleted=False).first()
+    account = await Account.get_or_none(username=username, deleted=False)
     if not account:
         raise CustomError(ErrorCode.AccountNotFound)
 

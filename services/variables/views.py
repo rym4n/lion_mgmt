@@ -68,7 +68,7 @@ async def delelte_variable(request):
     请求参数:
         name: 变量名
     """
-    var = await Variables.filter(name=request.json.get("name")).first()
+    var = await Variables.get_or_none(name=request.json.get("name"))
     if not var:
         raise CustomError(ErrorCode.NotFound)
     await var.delete()

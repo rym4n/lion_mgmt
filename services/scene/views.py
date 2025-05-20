@@ -54,7 +54,7 @@ async def update_scene(request):
     if not id:
         raise CustomError(ErrorCode.ParameterError)
 
-    scene = await Scene.get_or_none(id=id)
+    scene = await Scene.get_or_none(id=id).prefetch_related('creator')
     if not scene:
         raise CustomError(ErrorCode.NotFound)
 
@@ -121,7 +121,7 @@ async def set_current_scene(request):
     if not id:
         raise CustomError(ErrorCode.ParameterError)
     await Scene.filter(status=2).update(status=1)
-    scene = await Scene.filter(id=id).first()
+    scene = await Scene.get_or_none(id=id)
     if not scene:
         raise CustomError(ErrorCode.NotFound)
 

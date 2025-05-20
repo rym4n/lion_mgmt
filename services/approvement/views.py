@@ -84,7 +84,7 @@ async def update_approvement(request):
         raise CustomError(ErrorCode.ParameterError)
 
     agree = bool(agree)
-    record = await Approvement.filter(id=approvement_id).first()
+    record = await Approvement.get_or_none(id=approvement_id)
     if not record:
         raise CustomError(ErrorCode.NotFound)
 
@@ -106,7 +106,7 @@ async def delete_approvement(request):
     approvement_id = request.json.get("id")
     if not approvement_id:
         raise CustomError(ErrorCode.ParameterError)
-    record = await Approvement.filter(id=approvement_id).first()
+    record = await Approvement.get_or_none(id=approvement_id)
     if not record:
         raise CustomError(ErrorCode.NotFound)
     await record.delete()

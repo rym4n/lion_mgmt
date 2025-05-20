@@ -426,7 +426,7 @@ async def get_event_ingestion_detail(request):
         id: 事件ID (str)
     """
     event_id = request.json.get('id')
-    event = await EventsIngestion.filter(id=event_id).select_related("creator", "updator").first()
+    event = await EventsIngestion.get_or_none(id=event_id).select_related("creator", "updator")
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
@@ -461,7 +461,7 @@ async def get_event_ingestion_kafka_sample(request):
     if page < 1 or size < 1:
         raise CustomError(ErrorCode.ParameterError)
 
-    event = await EventsIngestion.filter(id=event_id, deleted=False).first()
+    event = await EventsIngestion.get_or_none(id=event_id, deleted=False)
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
@@ -506,7 +506,7 @@ async def get_event_ingestion_syslog_sample(request):
     if page < 1 or size < 1:
         raise CustomError(ErrorCode.ParameterError)
 
-    event = await EventsIngestion.filter(id=event_id).first()
+    event = await EventsIngestion.get_or_none(id=event_id)
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
@@ -564,7 +564,7 @@ async def binding_event_ingestion_script(request):
     conditions = request.json.get('conditions')
     event_ingestion_id = request.json.get('event_ingestion_id')
     script_ids = request.json.get('script_ids')
-    event = await EventsIngestion.filter(id=event_ingestion_id).first()
+    event = await EventsIngestion.get_or_none(id=event_ingestion_id)
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
@@ -577,7 +577,7 @@ async def binding_event_ingestion_script(request):
             raise CustomError(ErrorCode.ScriptExistsError)
 
     for script_id in script_ids:
-        script = await Playbook.filter(id=script_id, deleted=False).first()
+        script = await Playbook.get_or_none(id=script_id, deleted=False)
         if not script:
             raise CustomError(ErrorCode.NotFound)
 
@@ -670,7 +670,7 @@ async def unbundled_event_ingestion_script(request):
                     await ers.save()
                     break
                 else:  # 剧本id小于等于1代表单个剧本绑定到同一个判断条件，需删除数据库数据和vector配置文件
-                    event = await EventsIngestion.filter(id=event_ingestion_id).first()
+                    event = await EventsIngestion.get_or_none(id=event_ingestion_id)
                     if not event:
                         raise CustomError(ErrorCode.NotFound)
 

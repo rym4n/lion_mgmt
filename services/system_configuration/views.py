@@ -72,7 +72,7 @@ async def upload_image(request):
 
     async with in_transaction():
         # 先查询是否已存在相同 system_version 的记录
-        existing_config = await SystemCustomConfiguration.filter(system_version=system_version).first()
+        existing_config = await SystemCustomConfiguration.get_or_none(system_version=system_version)
 
         if existing_config:
             # 存在则更新
@@ -174,7 +174,7 @@ async def up_system(request):
     uptime = request.json.get("uptime")
     check_time = request.json.get("check_time")
     status = request.json.get("status")
-    system = await SystemStatus.filter(id=system_id, deleted=False).first()
+    system = await SystemStatus.get_or_none(id=system_id, deleted=False)
     if not system:
         raise CustomError(ErrorCode.NotFound)
     if systemname:
@@ -201,7 +201,7 @@ async def del_system(request):
         system_id：系统id
     """
     system_id = request.json.get("system_id")
-    system = await SystemStatus.filter(id=system_id, deleted=False).first()
+    system = await SystemStatus.get_or_none(id=system_id, deleted=False)
     if not system:
         raise CustomError(ErrorCode.NotFound)
     system.deleted = True

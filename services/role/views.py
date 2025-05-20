@@ -67,7 +67,7 @@ async def find_role(request):
         role_id：角色id
     """
     role_id = request.json.get("role_id")
-    role = await Role.filter(id=role_id, deleted=False).first()
+    role = await Role.get_or_none(id=role_id, deleted=False)
     if not role:
         raise CustomError(ErrorCode.RoleNotFound)
     return response_ok(role.json)
@@ -86,7 +86,7 @@ async def delete_role(request):
     exists = await Account.filter(roles__id=role_id).exists()
     if exists:
         return response_fail(ErrorCode.RoleAlreadyUsed)
-    role = await Role.filter(id=role_id, deleted=False).first()
+    role = await Role.get_or_none(id=role_id, deleted=False)
     if not role:
         raise CustomError(ErrorCode.RoleNotFound)
     role.deleted = True
@@ -110,7 +110,7 @@ async def update_role(request):
     name = request.json.get("name")
     description = request.json.get("description", "")
     permissions = request.json.get("permissions", [])
-    role = await Role.filter(id=role_id, deleted=False).first()
+    role = await Role.get_or_none(id=role_id, deleted=False)
     if not role:
         raise CustomError(ErrorCode.RoleNotFound)
     if name:

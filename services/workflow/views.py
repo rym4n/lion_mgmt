@@ -5,28 +5,24 @@ import os
 import time
 import traceback
 from collections import defaultdict
-from datetime import datetime
-from websockets import ConnectionClosed
 
 import aiofile
 import jwt
 import orjson
-import pytz
 from sanic import Blueprint, Request, Websocket
 from sanic.log import logger
 from tortoise.expressions import Q
+from websockets import ConnectionClosed
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.chat import chat_manager
 from libs.error_code.exception import CustomError
-from libs.kafka import aproduce
-from libs.security.authentication import validate_token
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_order_version
 from models import Playbook, Scene, ToolAction, Tool, Runlog
 from services.tool_management.views import tool_action_update, tool_action_playbook_delete
-from settings import KAFKA_CONFIG, TIMED_TASK_TOPIC, SECRET, SESSION_ENCODING_ALGORITHM
+from settings import SECRET, SESSION_ENCODING_ALGORITHM
 
 workflow_bp = Blueprint('workflow', url_prefix='v1/playbook')
 _all__ = ["workflow_bp"]
@@ -211,7 +207,7 @@ async def delete_workflow(request):
     请求参数：
         id: 剧本ID
     """
-    playbook = await Playbook.filter(id=request.json.get("id"), internal=False).first()
+    playbook = await Playbook.get_or_none(id=request.json.get("id"), internal=False)
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
     playbook.deleted = True

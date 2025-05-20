@@ -7,12 +7,11 @@ import re
 import shutil
 import time
 import zipfile
-import aiofile
 from collections import defaultdict
 from functools import reduce
 from io import BytesIO
-from sanic.log import logger
 
+import aiofile
 import orjson
 from sanic import Blueprint, response
 from tortoise.expressions import Q
@@ -365,7 +364,7 @@ async def all_versions(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool = await Tool.filter(name=name, deleted=False).order_by("-ctime").first()
+    tool = await Tool.get_or_none(name=name, deleted=False).order_by("-ctime")
     if not tool:
         raise CustomError(ErrorCode.ToolNotFoundError)
 
@@ -392,7 +391,7 @@ async def tool_actions(request):
     if not name or not version:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool = await Tool.filter(name=name, version=version, deleted=False).first()
+    tool = await Tool.get_or_none(name=name, version=version, deleted=False)
     if not tool:
         raise CustomError(ErrorCode.ToolNotFoundError)
 
@@ -423,7 +422,7 @@ async def update_tool_status(request):
     if not name or not version or status not in [0, 1]:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool = await Tool.filter(name=name, version=version, deleted=False).first()
+    tool = await Tool.get_or_none(name=name, version=version, deleted=False)
     if not tool:
         raise CustomError(ErrorCode.ToolNotFoundError)
 
@@ -613,7 +612,7 @@ async def update_tool_resource(request):
     if not tool_name or not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool_resource = await ToolResources.filter(tool_name=tool_name, name=name, deleted=False).first()
+    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False)
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
@@ -647,7 +646,7 @@ async def delete_tool_resource(request):
     if not tool_name or not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool_resource = await ToolResources.filter(tool_name=tool_name, name=name, deleted=False).first()
+    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False)
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
@@ -671,7 +670,7 @@ async def download_zip(request):
     tool_id = request.json.get("tool_id")
     if not tool_id:
         raise CustomError(ErrorCode.ParameterError)
-    tool = await Tool.filter(id=tool_id, deleted=False).first()
+    tool = await Tool.get_or_none(id=tool_id, deleted=False)
     if not tool:
         raise CustomError(ErrorCode.ToolNotFoundError)
 
@@ -1080,7 +1079,7 @@ async def health_check_config(request):
         raise CustomError(ErrorCode.ParameterError)
 
     key = "health_check_config"
-    config = await Config.filter(key=key).first()
+    config = await Config.get_or_none(key=key)
 
     if not config:
         config = await Config.create(key=key, value={"cron": cron}, module=["tool"])
@@ -1102,7 +1101,7 @@ async def health_check_get(request):
     请求参数：
         无
     """
-    config = await Config.filter(key="health_check_config").first()
+    config = await Config.get_or_none(key="health_check_config")
     if not config:
         return response_ok({"switch": "off", "cron": None})
 
@@ -1123,7 +1122,7 @@ async def tool_action_input(request):
     action_id = request.json.get("id")
     if not action_id:
         raise CustomError(ErrorCode.ParameterError)
-    action = await ToolAction.filter(id=action_id, deleted=False).first()
+    action = await ToolAction.get_or_none(id=action_id, deleted=False)
     if not action:
         raise CustomError(ErrorCode.ActionNotFoundError)
 
@@ -1150,7 +1149,7 @@ async def tool_action_update(data):
 
     for playbook_id, action_ids in data.items():
         for action_id in action_ids:
-            action = await ToolAction.filter(id=action_id, deleted=False).first()
+            action = await ToolAction.get_or_none(id=action_id, deleted=False)
             if not action:
                 continue
 
@@ -1164,7 +1163,7 @@ async def tool_action_update(data):
                 affected_tools.add((action.tool_name, action.version_number))
 
     for tool_name, version in affected_tools:
-        tool = await Tool.filter(name=tool_name, version=version, deleted=False).first()
+        tool = await Tool.get_or_none(name=tool_name, version=version, deleted=False)
         if tool and tool.status != 1:
             tool.status = 1
             await tool.save()
@@ -1188,7 +1187,7 @@ async def tool_action_playbook_delete(data):
 
     for playbook_id, action_ids in data.items():
         for action_id in action_ids:
-            action = await ToolAction.filter(id=action_id, deleted=False).first()
+            action = await ToolAction.get_or_none(id=action_id, deleted=False)
             if not action:
                 continue
             if not isinstance(action.playbook, list):
@@ -1202,7 +1201,7 @@ async def tool_action_playbook_delete(data):
     for tool_name, version in affected_tools:
         actions = await ToolAction.filter(tool_name=tool_name, version_number=version, deleted=False).all()
         has_playbook = any(action.playbook for action in actions)
-        tool = await Tool.filter(name=tool_name, version=version, deleted=False).first()
+        tool = await Tool.get_or_none(name=tool_name, version=version, deleted=False)
         if tool:
             tool.status = 1 if has_playbook else 0
             await tool.save()

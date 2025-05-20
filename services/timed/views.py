@@ -94,7 +94,7 @@ async def add_timed(request):
     action = None
     timer_rule = {}
     if type == 0:
-        playbook = await Playbook.filter(id=playbook_id, deleted=False).first()
+        playbook = await Playbook.get_or_none(id=playbook_id, deleted=False)
         if not playbook:
             raise CustomError(ErrorCode.PlaybookNotFound)
         msg["run_type"] = "flow"
@@ -108,7 +108,7 @@ async def add_timed(request):
             timer_rule["end_date"] = end_time
             timer_rule["crontab"] = tactics
     elif type == 1:
-        action = await ToolAction.filter(id=action_id, deleted=False).first()
+        action = await ToolAction.get_or_none(id=action_id, deleted=False)
         if not action:
             raise CustomError(ErrorCode.ActionNotFoundError)
         action_input["executor"] = request.ctx.session.get("account_info").id
@@ -227,7 +227,7 @@ async def update_timed(request):
         if not playbook_id or not playbook_input:
             raise CustomError(ErrorCode.ParameterError)
 
-        timed.playbook = await Playbook.filter(id=playbook_id, deleted=False).first()
+        timed.playbook = await Playbook.get_or_none(id=playbook_id, deleted=False)
         timed.playbook_input = playbook_input
         timed.action = None
         timed.action_input = {}
@@ -240,7 +240,7 @@ async def update_timed(request):
         action_id = data.get("action_id", timed.action.id if timed.action else None)
         action_input = data.get("action_input", timed.action_input)
 
-        timed.action = await ToolAction.filter(id=action_id, deleted=False).first()
+        timed.action = await ToolAction.get_or_none(id=action_id, deleted=False)
         timed.action_input = action_input
         timed.playbook = None
         timed.playbook_input = {}
@@ -279,7 +279,7 @@ async def delete_timed(request):
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    timed = await Timed.filter(id=timed_id, deleted=False).first()
+    timed = await Timed.get_or_none(id=timed_id, deleted=False)
     if not timed:
         raise CustomError(ErrorCode.TimedNotFound)
     msg = {}
