@@ -3,8 +3,10 @@
 import asyncio
 import os
 import time
+import traceback
 from collections import defaultdict
 from datetime import datetime
+from websockets import ConnectionClosed
 
 import aiofile
 import jwt
@@ -16,6 +18,7 @@ from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
 from core.response import response_ok
+from libs.chat import chat_manager
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authentication import validate_token
@@ -225,11 +228,10 @@ async def execute_action(request: Request, ws: Websocket):
         执行接口，websocket通信
 
         请求参数：
-            - type str 类型 flow代表执行剧本， action代表执行动作      放在路由中传输
             - playbook_input dict 剧本输入参数 当type为flow时必填      用websocket发送
             示例如下：
             {
-                "type": "run",
+                "type": "flow",
                 "flow_id": "73ecfba0-1aa4-4128-b99a-b97fb08a14be",      剧本id
                 "flow_input": {
                     "l":"123456789",        剧本输入参数
@@ -239,7 +241,7 @@ async def execute_action(request: Request, ws: Websocket):
             - action_input dict 动作输入参数 当type为action时必填      用websocket发送
             示例如下：
             {
-                "type": "run",
+                "type": "action",
                 "app_name":"huorong_edr",         应用名称，英文标识
                 "name": "中文名称",               应用中文名称
                 "app_ver":"v1746495758839",      应用版本号
@@ -262,60 +264,40 @@ async def execute_action(request: Request, ws: Websocket):
             }
     """
     # 先获取认证信息
-    auth_data = await asyncio.wait_for(ws.recv(), timeout=10.0)
-    auth_json = orjson.loads(auth_data)
-    payload = jwt.decode(auth_json['auth'], SECRET, SESSION_ENCODING_ALGORITHM)
-    validate_token(payload, request)
+    account = None
+    try:
+        # 先获取认证信息
+        auth_data = await asyncio.wait_for(ws.recv(), timeout=30.0)
+        auth_json = orjson.loads(auth_data)
+        payload = jwt.decode(auth_json['auth'], SECRET, SESSION_ENCODING_ALGORITHM)
+        # validate_token(payload, request)
 
-    account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
-    if not account:
-        logger.warning("redis里已经没有account信息了")
-        raise CustomError(ErrorCode.SessionInvalid)
-    user_id = account.id
-
-    while True:
-        raw = await ws.recv()
-        data = orjson.loads(raw)
-
-        if data.get("type") == "query":
-            utime_str = data.get("utime")
-            utime = datetime.strptime(utime_str, "%Y-%m-%dT%H:%M:%S.%f%z")
-            run_id = data.get("run_id")
-            datas = await Runlog.filter(run_id=run_id, utime__gt=utime).all().prefetch_related("playbook")
-            if datas:
-                payload = []
-                for data in datas:
-                    data_dic = data.json
-                    start = data.start_time.astimezone(pytz.timezone("Asia/Shanghai"))
-                    end = data.end_time.astimezone(pytz.timezone("Asia/Shanghai"))
-                    delta = end - start
-                    data_dic["run_time"] = int(delta.total_seconds() * 1000) if int(delta.total_seconds() * 1000) > 0 else 1
-                    payload.append(data_dic)
-                tz = pytz.timezone("Asia/Shanghai")
-                now = datetime.now(tz)
-                formatted_time = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + " +0800"
-                formatted_time = datetime.strptime(formatted_time, '%Y-%m-%d %H:%M:%S.%f %z')
-                await ws.send(orjson.dumps({"data": payload, "utime": formatted_time}).decode())
-
-        elif data.get("type") == "run":
-            tz = pytz.timezone("Asia/Shanghai")
-            now = datetime.now(tz)
-            formatted_time = now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + " +0800"
-            formatted_time = datetime.strptime(formatted_time, '%Y-%m-%d %H:%M:%S.%f %z')
-            msg = {}
-            type = request.args.get("type")
-            msg["run_type"] = type
-            msg["run_id"] = gen_order_version(length=6)
-            data.pop("type")
-            params = data
-            params["executor"] = user_id
-            msg["run_args"] = params
-
-            await aproduce(KAFKA_CONFIG, TIMED_TASK_TOPIC, msg)
-
-            await ws.send(orjson.dumps({"run_id": msg["run_id"], "utime": formatted_time}).decode())
-        elif data.get("type") == "exit":
-            break
+        account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
+        if not account:
+            logger.warning("redis里已经没有account信息了")
+            raise CustomError(ErrorCode.SessionInvalid)
+        # 建立连接
+        await chat_manager.connect(account, ws)
+        # 持续接收和处理消息
+        async for msg in ws:
+            try:
+                message = orjson.loads(msg)
+                await chat_manager.handle_message(account, ws, message)
+            except asyncio.TimeoutError:
+                await ws.send(orjson.dumps({"type": "heartbeat", "status": "ping"}).decode())
+            except asyncio.CancelledError:
+                break
+            except Exception as e1:
+                logger.error(f"{e1} | {traceback.format_exc()}")
+    except ConnectionClosed as e2:
+        logger.error(f"{e2} | {traceback.format_exc()}")
+    except Exception as e:
+        logger.error(f"{e} | {traceback.format_exc()}")
+        await ws.send(orjson.dumps({"type": "error", "message": str(e)}).decode())
+    finally:
+        if account:
+            await chat_manager.disconnect(account.id)
+        await ws.close()
 
 
 @workflow_bp.post('/run/detail')

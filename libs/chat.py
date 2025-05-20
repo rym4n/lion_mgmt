@@ -8,9 +8,11 @@ from aiocache import caches
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
 
+from libs.kafka import aproduce
+from libs.utils import gen_order_version
 from models.user import Account
 from models.warroom import Room, Message
-from settings import CACHE
+from settings import CACHE, KAFKA_CONFIG, TIMED_TASK_TOPIC
 
 
 # 获取或创建私聊作战室
@@ -50,7 +52,7 @@ class ChatManager:
 
     async def connect(self, user: Account, ws):
         """处理用户连接"""
-        self.active_connections[user.id] = {"conn": ws, "current_room": None}
+        self.active_connections[user.id] = {"conn": ws, "current_room": None, "run_id": None}
         status_message = {
             "type": "user_status",
             "user_id": user.id,
@@ -75,6 +77,11 @@ class ChatManager:
                     if message.get('type') != 'message':
                         continue
                     msg = orjson.loads(message['data'])
+                    if "run_id" in msg.keys():
+                        for k in self.active_connections:
+                            if self.active_connections[k]['run_id'] == msg.get('run_id'):
+                                await self.active_connections[k]['conn'].send(orjson.dumps({"data": msg}).decode())
+                        continue
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
@@ -93,6 +100,7 @@ class ChatManager:
     async def handle_message(self, user: Account, ws, data: dict):
         """消息处理"""
         try:
+            print("data", data)
             message_type = data.get("type")
             # 按消息类型调用处理方法 (前端发送)
             if message_type == "public":
@@ -115,6 +123,16 @@ class ChatManager:
                 await ws.send(orjson.dumps({"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
             elif message_type == "heartbeat":
                 await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
+            elif message_type in ["action", "flow"]:
+                data.pop("type")
+                params = data
+                params["executor"] = user.id
+                msg = {"run_type": message_type, "run_id": gen_order_version(length=6), "run_args": params}
+                print("msg", msg)
+                print("---------------------------------")
+                await aproduce(KAFKA_CONFIG, TIMED_TASK_TOPIC, msg)
+                self.active_connections[user.id]["run_id"] = msg["run_id"]
+                print(self.active_connections)
             else:
                 logger.error(f"{traceback.format_exc()}")
                 raise Exception("未知消息类型")
