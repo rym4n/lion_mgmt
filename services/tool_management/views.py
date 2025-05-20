@@ -11,6 +11,7 @@ import aiofile
 from collections import defaultdict
 from functools import reduce
 from io import BytesIO
+from sanic.log import logger
 
 import orjson
 from sanic import Blueprint, response
@@ -323,18 +324,21 @@ async def all_tools(request):
     for latest_tool in latest_tools:
         data = await request.ctx.cache_client.get(latest_tool["name"] + "_" + latest_tool["version"])
         if not data:
-            config_path = os.path.abspath(os.path.join(latest_tool.get("path"), f"config.json"))
+            config_path = os.path.abspath(os.path.join(latest_tool["path"], f"config.json"))
             async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
                 data = await f.read()
                 # 将config数据存入redis
                 await request.ctx.cache_client.set(latest_tool["name"] + "_" + latest_tool["version"], data, ttl=2592000)
-        data = orjson.loads(orjson.dumps(data))
-        logo_path = os.path.abspath(os.path.join(latest_tool.get("path"), data.get("logo")))
+            data = orjson.loads(data)
+        else:
+            if isinstance(data, (str, bytes)):
+                data = orjson.loads(data)
+        logo_path = os.path.abspath(os.path.join(latest_tool["path"], data.get("logo")))
         if os.path.exists(logo_path):
-            async with aiofile.AIOFile(logo_path, 'r', encoding='utf-8') as l:
-                logo_str = base64.b64encode(await l.read()).decode('utf-8')
+            async with aiofile.AIOFile(logo_path, 'rb') as l:
+                logo_data = await l.read()
+                logo_str = base64.b64encode(logo_data).decode('utf-8')
                 latest_tool["logo"] = logo_str
-
         latest_tool.pop("path")
 
     total_count = await Tool.filter(condition).count()
