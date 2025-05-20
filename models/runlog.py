@@ -12,6 +12,7 @@ class Runlog(BaseModel):
     """
     run_id = fields.CharField(max_length=36, description="每次运行的唯一ID")
     timer_id = fields.ForeignKeyField("models.Timed", null=True, related_name="timer_runlog", description="关联定时任务")
+    event_id = fields.ForeignKeyField("models.Events", null=True, related_name="event_runlog", description="关联事件")
 
     node_id = fields.CharField(max_length=36, description="节点ID")
     node_name = fields.CharField(max_length=255, description="节点名称")

@@ -20,7 +20,6 @@ class Events(BaseModel):
     event_summary: str = fields.TextField(null=True, description="事件概要")
     log_data: str = fields.TextField(default=dict, description="日志数据")
     event_ingestion_id: str = fields.CharField(max_length=255, description="事件接入id，管理事件接入表")
-    run_id = fields.JSONField(default=list, null=True, description="运行id")
     room = fields.ForeignKeyField("models.Room", null=True, related_name="room_events", description="更新人")
 
     def validate(self) -> None:
@@ -40,7 +39,6 @@ class Events(BaseModel):
             "event_summary": self.event_summary,
             "log_data": self.log_data,
             "event_ingestion_id": self.event_ingestion_id,
-            "run_id": self.run_id
         }
 
     class Meta:
