@@ -81,7 +81,8 @@ async def all_users(request):
     limit = size
     # 分页查询Account，返回总数和数据
     condition = {
-        "deleted": False
+        "deleted": False,
+        "type": "user"
     }
     if request.json.get("username"):
         condition["username"] = request.json.get("username")
