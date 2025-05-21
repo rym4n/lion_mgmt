@@ -560,10 +560,13 @@ async def binding_event_ingestion_script(request):
             正则表达式 match  字段匹配正则表达式       value为正则表达式，如"^abc.*$"
         event_ingestion_id: 事件接入ID (str)
         script_ids: 剧本ID (list)
+        event_name: 事件名称 (str)  用户选择的事件名称，传default
+        自定义名称案例：to_string!(.name) + "_" + to_string(.datetime_str) + "234"
     """
     conditions = request.json.get('conditions')
     event_ingestion_id = request.json.get('event_ingestion_id')
     script_ids = request.json.get('script_ids')
+    event_name = request.json.get('event_name')
     event = await EventsIngestion.get_or_none(id=event_ingestion_id).prefetch_related("creator")
     if not event:
         raise CustomError(ErrorCode.NotFound)
@@ -623,23 +626,28 @@ async def binding_event_ingestion_script(request):
             event.vector_name],
         "condition": conditional_statements
     }
-
+    if event_name == "default":
+        event_name = '"{}" + "_" + to_string(.datetime_str)'.format(event.event_ingestion_name)
+    else:
+        event_name = "{}".format(event_name)
     data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
         "type": "remap",
         "inputs": [f"{topic}_transforms"],
         "source": """
 .event_id = uuid_v4()
 .id = .event_id
-.ctime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%SZ") ?? "1970-01-01T00:00:00Z"
-.utime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%SZ") ?? "1970-01-01T00:00:00Z"
+.ctime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
+.utime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
+.datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
 .deleted = false
-.event_name = "{}" + "_" + to_string(.ctime)
+.event_name = {}
 .event_process_status = "待处理"
 .event_source = "kafka"
 .created_id = "{}"
 .log_data = to_string!(.message)
 .event_ingestion_id = "{}"
-""".format(event.event_ingestion_name, event.creator.id, event_ingestion_id)
+del(.datetime_str)
+""".format(event_name, event.creator.id, event_ingestion_id)
     }
 
     data["sinks"][f"{topic}_sinks"] = {
@@ -841,7 +849,7 @@ async def parse_log(request):
     parse_type = request.json.get('type')
     value = request.json.get('value', None)
     if not msg or not parse_type:
-        raise CustomError(ErrorCode.ParameterError)
+        return response_ok("参数错误")
 
     if parse_type == "JSON":
         return response_ok(orjson.loads(msg))
