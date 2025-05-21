@@ -10,6 +10,7 @@ from sanic.log import logger
 
 from libs.kafka import aproduce
 from libs.utils import gen_order_version
+from models import Runlog
 from models.user import Account
 from models.warroom import Room, Message
 from settings import CACHE, KAFKA_CONFIG, TIMED_TASK_TOPIC
@@ -49,6 +50,7 @@ class ChatManager:
         self.cache_client = caches.get("redis_chat")
         self.msg_pub = self.cache_client.client
         self.active_connections: dict[str, dict] = {}
+        self.run_connections: dict[str, dict] = {}
 
     async def connect(self, user: Account, ws):
         """处理用户连接"""
@@ -63,9 +65,24 @@ class ChatManager:
         await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
         await self.msg_pub.publish("wr_group_chat", orjson.dumps(status_message).decode())
 
+    async def run_connect(self, user: Account, ws):
+        """处理运行连接"""
+        self.run_connections[user.id] = {"conn": ws, "run_id": None}
+        status_message = {
+            "type": "user_status",
+            "user_id": user.id,
+            "username": user.username,
+            "online": True,
+            "timestamp": str(datetime.now())
+        }
+        await self.msg_pub.publish("wr_group_chat", orjson.dumps(status_message).decode())
+
     async def disconnect(self, user_id):
         """处理用户断开连接"""
-        self.active_connections.pop(user_id, None)
+        if user_id in self.active_connections.keys():
+            self.active_connections.pop(user_id, None)
+        if user_id in self.run_connections.keys():
+            self.run_connections.pop(user_id, None)
         await self.cache_client.delete(f"room_online_{user_id}")
         # await self.msg_pub.publish("wr_group_chat", orjson.dumps({"type": "system", "message": f"{user.username} 离开作战室"}).decode())
 
@@ -78,9 +95,13 @@ class ChatManager:
                         continue
                     msg = orjson.loads(message['data'])
                     if "run_id" in msg.keys():
-                        for k in self.active_connections:
-                            if self.active_connections[k]['run_id'] == msg.get('run_id'):
-                                await self.active_connections[k]['conn'].send(orjson.dumps({"data": msg}).decode())
+                        for k in self.run_connections:
+                            if self.run_connections[k]['run_id'] == msg.get('run_id'):
+                                await self.run_connections[k]['conn'].send(orjson.dumps({"data": msg}).decode())
+                        valid_fields = set(Runlog._meta.fields_map.keys())
+                        filtered_msg = {k: v for k, v in msg.items() if k in valid_fields}
+                        logger.info(f"创建runlog消息：{filtered_msg}")
+                        await Runlog.create(**filtered_msg)
                         continue
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
@@ -100,7 +121,6 @@ class ChatManager:
     async def handle_message(self, user: Account, ws, data: dict):
         """消息处理"""
         try:
-            print("data", data)
             message_type = data.get("type")
             # 按消息类型调用处理方法 (前端发送)
             if message_type == "public":
@@ -128,11 +148,8 @@ class ChatManager:
                 params = data
                 params["executor"] = user.id
                 msg = {"run_type": message_type, "run_id": gen_order_version(length=6), "run_args": params}
-                print("msg", msg)
-                print("---------------------------------")
                 await aproduce(KAFKA_CONFIG, TIMED_TASK_TOPIC, msg)
-                self.active_connections[user.id]["run_id"] = msg["run_id"]
-                print(self.active_connections)
+                self.run_connections[user.id]["run_id"] = msg["run_id"]
             else:
                 logger.error(f"{traceback.format_exc()}")
                 raise Exception("未知消息类型")
