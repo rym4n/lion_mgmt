@@ -368,8 +368,6 @@ async def all_versions(request):
 
     for tool in tools:
         tool.pop("path")
-    else:
-        raise CustomError(ErrorCode.ToolNotFoundError)
 
     return response_ok(tools)
 

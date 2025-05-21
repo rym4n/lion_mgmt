@@ -119,44 +119,19 @@ async def get_event_detail(request):
         event.room = room
         await event.save()
 
-    event_dict = event.json
-    event_dict["created_name"] = request.ctx.session['account_info'].username
+    event_dict = {"created_name": request.ctx.session['account_info'].username}
 
-    event_dict["run_logs"] = []
-    for run_id in event_dict["run_id"]:
-        run_logs = await Runlog.filter(run_id=run_id, deleted=False).all().prefetch_related("playbook")
-        event_dict["run_logs"].append([runlog.json for runlog in run_logs])
+    run_logs = await Runlog.filter(event_id=event_id, deleted=False).all().prefetch_related("playbook")
+    run_logs_grouped = {}
+    for runlog in run_logs:
+        run_logs_grouped.setdefault(runlog.run_id, []).append(runlog.json)
+    event_dict["run_logs"] = run_logs_grouped
 
     event_dict["room_users"] = [user.username if user else "" for user in await event.room.users.all()]
 
+    event_dict.update(event.json)
+
     return response_ok(event_dict)
-
-
-@event_bp.post('/bind')
-@requires_permission('event:u')
-async def bind_event_to_run(request):
-    """
-    绑定运行记录到事件（需要事件更新权限）
-
-    请求参数：
-        event_id: str 事件id
-        run_id: str 运行记录id
-    """
-    event_id = request.json.get("event_id")
-    run_id = request.json.get("run_id")
-
-    event = await Events.get(id=event_id, deleted=False)
-    if not event:
-        raise CustomError(ErrorCode.NotFound)
-
-    if not isinstance(event.run_id, list):
-        event.run_id = []
-
-    if run_id not in event.run_id:
-        event.run_id.append(run_id)
-        await event.save(update_fields=["run_id"])
-
-    return response_ok("绑定成功")
 
 
 @event_bp.post('/update')
@@ -195,7 +170,6 @@ async def update_event(request):
         event.event_name = name
         update_fields.append("event_name")
 
-
     if summary := params.get("event_summary"):
         event.event_summary = summary
         update_fields.append("event_summary")
@@ -228,6 +202,3 @@ async def update_event(request):
         await event.save(update_fields=update_fields)
 
     return response_ok("更新成功")
-
-
-

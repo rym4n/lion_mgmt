@@ -5,7 +5,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
-from models import Timed, Playbook, ToolAction
+from models import Timed, Playbook, ToolAction, Runlog
 from settings import KAFKA_CONFIG, TIMED_TASK_TOPIC
 
 timed_bp = Blueprint('timed', url_prefix='v1/timed')
@@ -69,7 +69,7 @@ async def add_timed(request):
     """
     data = request.json
     name = data.get("name")
-    type = int(data.get("type"))
+    operate_type = int(data.get("type"))
     playbook_id = data.get("playbook_id") or ""
     playbook_input = data.get("playbook_input") or {}
     action_id = data.get("action_id") or ""
@@ -77,13 +77,13 @@ async def add_timed(request):
     status = int(data.get("status"))
     tactics = data.get("tactics")
     end_time = data.get("end_time") or ""
-    if any(x is None for x in [name, type, status, tactics]):
+    if any(x is None for x in [name, operate_type, status, tactics]):
         raise CustomError(ErrorCode.ParameterError)
-    if status not in [0, 1] or type not in [0, 1]:
+    if status not in [0, 1] or operate_type not in [0, 1]:
         raise CustomError(ErrorCode.ParameterError)
-    if type == 0 and not playbook_id:
+    if operate_type == 0 and not playbook_id:
         raise CustomError(ErrorCode.ParameterError)
-    if type == 1 and not action_id:
+    if operate_type == 1 and not action_id:
         raise CustomError(ErrorCode.ParameterError)
 
     if await Timed.filter(name=request.json.get("name"), deleted=False).exists():
@@ -93,7 +93,7 @@ async def add_timed(request):
     playbook = None
     action = None
     timer_rule = {}
-    if type == 0:
+    if operate_type == 0:
         playbook = await Playbook.get_or_none(id=playbook_id, deleted=False)
         if not playbook:
             raise CustomError(ErrorCode.PlaybookNotFound)
@@ -107,7 +107,7 @@ async def add_timed(request):
             msg["timer"] = "cron"
             timer_rule["end_date"] = end_time
             timer_rule["crontab"] = tactics
-    elif type == 1:
+    elif operate_type == 1:
         action = await ToolAction.get_or_none(id=action_id, deleted=False)
         if not action:
             raise CustomError(ErrorCode.ActionNotFoundError)
@@ -121,7 +121,7 @@ async def add_timed(request):
             msg["timer"] = "cron"
             timer_rule["end_date"] = end_time
             timer_rule["crontab"] = tactics
-    timed = await Timed.create(name=name, type=type, playbook=playbook, playbook_input=playbook_input, action=action,
+    timed = await Timed.create(name=name, type=operate_type, playbook=playbook, playbook_input=playbook_input, action=action,
                                action_input=action_input, status=status, tactics=tactics, end_time=end_time, enable=1,
                                creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
     msg["timer_id"] = timed.id
@@ -298,3 +298,33 @@ async def delete_timed(request):
     timed.updator = request.ctx.session.get("account_info")
     await timed.save()
     return response_ok("定时任务删除成功")
+
+
+@timed_bp.post("/runlog")
+@requires_permission("timed:r")
+async def get_run_log(request):
+    """
+    获取定时任务执行日志 (需要定时任务查看权限)
+    请求参数：
+        - id str 定时任务id  必填
+        - page int 页码  必填   默认1
+        - size int 页大小  必填   默认10
+    """
+    timed_id = request.json.get("id")
+    page = int(request.json.get("page") or 1)
+    size = int(request.json.get("size") or 10)
+    offset = (page - 1) * size
+    limit = size
+    if not timed_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    total = await Runlog.filter(timer_id=timed_id, deleted=False).count()
+
+    run_logs = await Runlog.filter(timer_id=timed_id, deleted=False).offset(offset).limit(limit)
+
+    return response_ok({
+        "page": page,
+        "size": size,
+        "total": total,
+        "data": [runlog.json for runlog in run_logs]
+    })
