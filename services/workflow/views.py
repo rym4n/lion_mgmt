@@ -273,7 +273,7 @@ async def execute_action(request: Request, ws: Websocket):
             logger.warning("redis里已经没有account信息了")
             raise CustomError(ErrorCode.SessionInvalid)
         # 建立连接
-        await chat_manager.connect(account, ws)
+        await chat_manager.run_connect(account, ws)
         # 持续接收和处理消息
         async for msg in ws:
             try:
