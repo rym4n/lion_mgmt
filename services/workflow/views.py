@@ -296,24 +296,6 @@ async def execute_action(request: Request, ws: Websocket):
         await ws.close()
 
 
-@workflow_bp.post('/run/detail')
-@requires_permission("workflow:r")
-async def run_detail(request):
-    """
-    获取当前剧本执行状态和结果以及各节点的处置状态和详细信息
-
-    请求参数：
-        run_id: 必填，执行记录ID
-    """
-    run_id = request.json.get("run_id")
-    run_logs = await Runlog.filter(run_id=run_id).all().prefetch_related("playbook")
-
-    if not run_logs:
-        raise CustomError(ErrorCode.NoExecutionRecord)
-
-    return response_ok([r.json for r in run_logs])
-
-
 @workflow_bp.post('/run/history')
 @requires_permission("workflow:r")
 async def run_history(request):

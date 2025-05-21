@@ -564,7 +564,7 @@ async def binding_event_ingestion_script(request):
     conditions = request.json.get('conditions')
     event_ingestion_id = request.json.get('event_ingestion_id')
     script_ids = request.json.get('script_ids')
-    event = await EventsIngestion.get_or_none(id=event_ingestion_id)
+    event = await EventsIngestion.get_or_none(id=event_ingestion_id).prefetch_related("creator")
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
@@ -624,14 +624,42 @@ async def binding_event_ingestion_script(request):
         "condition": conditional_statements
     }
 
-    data["sinks"][f"{topic}_sinks"] = {
+    data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
+        "type": "remap",
         "inputs": [f"{topic}_transforms"],
+        "source": """
+.event_id = uuid_v4()
+.id = .event_id
+.ctime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%SZ") ?? "1970-01-01T00:00:00Z"
+.utime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%SZ") ?? "1970-01-01T00:00:00Z"
+.deleted = false
+.event_name = "{}" + "_" + to_string(.ctime)
+.event_process_status = "待处理"
+.event_source = "kafka"
+.created_id = "{}"
+.log_data = to_string!(.message)
+.event_ingestion_id = "{}"
+""".format(event.event_ingestion_name, event.creator.id, event_ingestion_id)
+    }
+
+    data["sinks"][f"{topic}_sinks"] = {
+        "inputs": [f"{topic}_event_transforms"],
         "type": "kafka",
         "bootstrap_servers": KAFKA_CONFIG,
         "topic": topic,
         "encoding": {
             "codec": "json"
         }}
+
+    endpoint = "postgresql://{}:{}@{}:{}/{}".format(os.environ.get("RY_DB_USER"), os.environ.get("RY_DB_PASS"),
+                                                    os.environ.get("RY_DB_HOST"), os.environ.get("RY_DB_PORT"),
+                                                    os.environ.get("RY_DB_NAME"))
+    data["sinks"][f"{topic}_event_sinks"] = {
+        "inputs": [f"{topic}_event_transforms"],
+        "type": "postgres",
+        "endpoint": endpoint,
+        "table": "events"
+    }
 
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
