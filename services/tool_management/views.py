@@ -364,14 +364,12 @@ async def all_versions(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool = await Tool.get_or_none(name=name, deleted=False).order_by("-ctime")
-    if not tool:
-        raise CustomError(ErrorCode.ToolNotFoundError)
-
     tools = await Tool.filter(name=name, deleted=False).order_by("-ctime").values()
 
     for tool in tools:
         tool.pop("path")
+    else:
+        raise CustomError(ErrorCode.ToolNotFoundError)
 
     return response_ok(tools)
 
