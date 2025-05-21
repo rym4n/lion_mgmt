@@ -178,7 +178,7 @@ CACHE = {
     'redis_chat': {
         'cache': "aiocache.RedisCache",
         'serializer': {
-            'class': "aiocache.serializers.PickleSerializer"
+            'class': "aiocache.serializers.MsgPackSerializer"
         },
         'namespace': 'lion_mgmt',
         'timeout': 2,
