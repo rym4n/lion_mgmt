@@ -114,6 +114,7 @@ async def get_all_license(request: Request):
     menu_dict["version"] = lic["version"]
     menu_dict["createTime"] = fmt_time(lic.get("createTime"))
     menu_dict["expireTime"] = fmt_time(lic.get("expireTime"))
+    menu_dict["lic_status"] = True if lic.get("expireTime") > int(time.time() * 1000) else False
     menu_dict["menuInfo"] = {}
 
     # 获取菜单信息
