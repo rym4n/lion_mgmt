@@ -76,7 +76,7 @@ async def create_room(request: Request):
 
     # 作战室名称唯一
     if await Room.filter(name=room_name, deleted=False).exists():
-        return CustomError(ErrorCode.RoomNameExists)
+        raise CustomError(ErrorCode.RoomNameExists)
     creator = request.ctx.session['account_info']
     room = await Room.create(name=room_name, creator=creator)
     await room.users.add(creator)
@@ -124,11 +124,11 @@ async def delete_room(request: Request):
     room_id = request.json.get("id")
     room = await Room.get(id=room_id).prefetch_related('creator')
     if room is None:
-        return CustomError(ErrorCode.RoomNotExists)
+        raise CustomError(ErrorCode.RoomNotExists)
     user = request.ctx.session['account_info']
     # 房间只能由创建者删除
     if str(room.creator.id) != str(user.id):
-        return CustomError(ErrorCode.RoomDeleteNotAllowed)
+        raise CustomError(ErrorCode.RoomDeleteNotAllowed)
     await Room.filter(id=room_id).update(deleted=True)
     return response_ok("房间删除成功")
 
@@ -198,7 +198,7 @@ async def get_private_room(request: Request):
     partner_id = request.json.get('partner_id')
     partner = await Account.get(id=partner_id)
     if partner is None:
-        return CustomError(ErrorCode.AccountNotFound)
+        raise CustomError(ErrorCode.AccountNotFound)
     # 先获取私聊房间
     chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
     return response_ok({"room_id": chat_room.id, "name": chat_room.name})
@@ -262,12 +262,12 @@ async def query_messages(request: Request):
     offset = request.json.get("offset", 0)
 
     if not query_type:
-        return CustomError(ErrorCode.ParamValueError)
+        raise CustomError(ErrorCode.ParamValueError)
 
     # 群聊历史. 先查询后创建消息发送
     if query_type == "public_history":
         if not room_id:
-            return CustomError(ErrorCode.ParamValueError)
+            raise CustomError(ErrorCode.ParamValueError)
         total_count = await Message.filter(type="public", room_id=room_id).count()
         messages = await Message.filter(
             type="public",
@@ -298,11 +298,11 @@ async def query_messages(request: Request):
     # 私聊历史
     elif query_type == "private_history":
         if not partner_id:
-            return CustomError(ErrorCode.ParamValueError)
+            raise CustomError(ErrorCode.ParamValueError)
 
         partner = await Account.get(id=partner_id)
         if partner is None:
-            return CustomError(ErrorCode.AccountNotFound)
+            raise CustomError(ErrorCode.AccountNotFound)
         # 先获取私聊房间
         chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
         condition = (Q(sender__id=user.id) & Q(receiver_id=partner_id)) | (Q(sender_id=partner_id) & Q(receiver_id=user.id))
@@ -339,7 +339,7 @@ async def query_messages(request: Request):
     # 搜索消息
     elif query_type == "search_messages":
         if not keyword:
-            return CustomError(ErrorCode.ParamValueError)
+            raise CustomError(ErrorCode.ParamValueError)
         # 传入房间ID, 搜索房间群聊记录
         if room_id:
             query = Message.filter(
@@ -352,13 +352,13 @@ async def query_messages(request: Request):
         elif partner_id:
             partner = await Account.get(id=partner_id)
             if partner is None:
-                return CustomError(ErrorCode.AccountNotFound)
+                raise CustomError(ErrorCode.AccountNotFound)
             # 先获取私聊房间
             chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
             # 筛消息发送/接收包含私聊双方的，建议改造创建私聊房间逻辑，直接按房间号筛就得了
             query = Message.filter((Q(sender_id=user.id) & Q(receiver_id=partner_id)) | (Q(sender_id=partner_id) & Q(receiver_id=user.id)), type="private", room_id=chat_room.id, content__contains=keyword, is_recalled=False)
         else:
-            return CustomError(ErrorCode.ParamValueError)
+            raise CustomError(ErrorCode.ParamValueError)
 
         total_count = await query.count()
         messages = await query.order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender', 'receiver')
@@ -390,7 +390,7 @@ async def query_messages(request: Request):
     # 获取公告列表
     elif query_type == "announcements":
         if not room_id:
-            return CustomError(ErrorCode.ParamValueError)
+            raise CustomError(ErrorCode.ParamValueError)
 
         total_count = await Message.filter(
             type="announcement",

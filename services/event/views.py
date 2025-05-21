@@ -112,7 +112,7 @@ async def get_event_detail(request):
 
     if not event.room:
         if await Room.filter(name=event.event_name, deleted=False).exists():
-            return CustomError(ErrorCode.RoomNameExists)
+            raise CustomError(ErrorCode.RoomNameExists)
         creator = request.ctx.session['account_info']
         room = await Room.create(name=event.event_name, creator=creator)
         await room.users.add(creator)
