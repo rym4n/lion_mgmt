@@ -20,7 +20,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import get_client_ip
+from libs.utils import get_client_ip, fetch_latest_messages
 from models.event import EventsIngestion, EventRelatedScript
 from models.playbook import Playbook
 from services.event_ingestion import supervisor
@@ -64,12 +64,14 @@ parsed = split(string!(.message), "{}")
 
 clear_data_config = {
     "syslog": r'''
+.datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
 del(.host)
 del(.port)
 del(.source_type)
 del(.timestamp)
 ''',
     "kafka": r'''
+.datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
 del(.headers)
 del(.message_key)
 del(.offset)
@@ -92,25 +94,14 @@ CEF_REGEX = re.compile(
 # noinspection PyTypeChecker
 async def build_kafka_file_configuration_file(output_path, sources,
                                               source_id, topic):
-    log_path = os.path.join("/data", f"{topic}.log")
-    log_path = log_path.replace("\\", "/")
-    check_path = os.path.join("/data", f"{topic}_check.log")
-    check_path = check_path.replace("\\", "/")
     config = {
         "sources": sources,
         "sinks": {
             f"{topic}_sample_sinks": {
-                "type": "file",
+                "type": "kafka",
                 "inputs": [source_id],
-                "path": log_path,
-                "encoding": {
-                    "codec": "json"
-                }
-            },
-            f"{topic}_check_sinks": {
-                "type": "file",
-                "inputs": [source_id],
-                "path": check_path,
+                "bootstrap_servers": KAFKA_CONFIG,
+                "topic": topic,
                 "encoding": {
                     "codec": "json"
                 }
@@ -442,92 +433,28 @@ async def get_event_ingestion_detail(request):
 
 
 # noinspection PyTypeChecker
-@event_ingestion_bp.post('/finished/sample')
+@event_ingestion_bp.post('/sample')
 @requires_permission('event:r')
 async def get_event_ingestion_kafka_sample(request):
     """
     获取事件接入处理后的日志样例(需要事件查看权限)
     请求参数:
          id: 事件id (str)
-         page: 页码 (int)，从1开始，默认1
          size: 每页条数 (int)，默认10
-         keyword: 模糊搜索关键字 (str)，可选
     """
     data = request.json
     event_id = data.get('id')
-    page = data.get('page', 1)
     size = data.get('size', 10)
-    keyword = data.get('keyword', None)
-    if page < 1 or size < 1:
+    if size < 1:
         raise CustomError(ErrorCode.ParameterError)
 
     event = await EventsIngestion.get_or_none(id=event_id, deleted=False)
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    log_path = os.path.join(SAMPLE_SINK_PATH, f"{event.vector_name}.log")
-    log_path = log_path.replace("\\", "/")
-    if not os.path.exists(log_path):
-        return response_ok("暂无日志信息")
+    messages = await fetch_latest_messages([KAFKA_CONFIG], event.vector_name, size)
 
-    async with aiofile.AIOFile(log_path, 'r', encoding='utf-8') as f:
-        content = await f.read()
-        logs = content.strip().split("\n")
-
-    if keyword:
-        logs = [log for log in logs if keyword.lower() in log.lower()]
-
-    start = (page - 1) * size
-    end = start + size
-    alogs = logs[start:end]
-
-    return response_ok({
-        "logs": alogs,
-        "total": len(logs),
-        "page": page,
-        "size": size,
-    })
-
-
-# noinspection PyTypeChecker
-@event_ingestion_bp.post('/original/sample')
-@requires_permission('event:r')
-async def get_event_ingestion_syslog_sample(request):
-    """
-    获取事件接入原始日志样例(需要事件查看权限)
-    请求参数:
-         id: 事件id (str)
-         page: 页码 (int)
-         size: 页面大小 (int)
-    """
-    event_id = request.json.get('id')
-    page = request.json.get('page', 1)
-    size = request.json.get('size', 10)
-    if page < 1 or size < 1:
-        raise CustomError(ErrorCode.ParameterError)
-
-    event = await EventsIngestion.get_or_none(id=event_id)
-    if not event:
-        raise CustomError(ErrorCode.NoEventAccess)
-
-    log_path = os.path.join(SAMPLE_SINK_PATH, f"{event.vector_name}.log")
-    log_path = log_path.replace("\\", "/")
-    if not os.path.exists(log_path):
-        return response_ok("暂无日志信息")
-
-    async with aiofile.AIOFile(log_path, 'r', encoding='utf-8') as f:
-        content = await f.read()
-        logs = content.strip().split("\n")
-        start = (page - 1) * size
-        end = start + size
-        alogs = logs[start:end]
-
-        return response_ok({
-            "logs": alogs,
-            "total": len(logs),
-            "page": page,
-            "size": size,
-        })
+    return response_ok(messages)
 
 
 @event_ingestion_bp.post('/binding')
@@ -634,17 +561,16 @@ async def binding_event_ingestion_script(request):
         "type": "remap",
         "inputs": [f"{topic}_transforms"],
         "source": """
+.log_data = to_string(encode_json(.))
 .event_id = uuid_v4()
 .id = .event_id
 .ctime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
 .utime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
-.datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
 .deleted = false
 .event_name = {}
 .event_process_status = "待处理"
 .event_source = "kafka"
 .created_id = "{}"
-.log_data = to_string!(.message)
 .event_ingestion_id = "{}"
 del(.datetime_str)
 """.format(event_name, event.creator.id, event_ingestion_id)

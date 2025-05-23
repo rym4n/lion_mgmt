@@ -7,6 +7,7 @@ import random
 import time
 import uuid
 import zipfile
+import asyncio
 from io import BytesIO
 from pathlib import Path, PurePath
 from string import ascii_uppercase, digits
@@ -17,6 +18,8 @@ import psutil
 from argon2 import PasswordHasher
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from aiokafka import AIOKafkaConsumer, TopicPartition
+from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
@@ -201,3 +204,46 @@ def generate_mac_uuid():
                 mac_address = addr.address.replace("-", ":").upper()
                 return str(uuid.uuid5(uuid.NAMESPACE_DNS, mac_address))
     return ''
+
+
+# 获取kafka指定主题最新消息
+async def fetch_latest_messages(bootstrap_servers, topic, num_messages=10):
+    consumer = AIOKafkaConsumer(
+        bootstrap_servers=bootstrap_servers,
+        group_id=None,
+        enable_auto_commit=False,
+        auto_offset_reset="latest"
+    )
+
+    try:
+        await consumer.start()
+
+        partitions = consumer.partitions_for_topic(topic)
+        if not partitions:
+            return f"主题 {topic} 不存在或无可访问分区"
+
+        tps = [TopicPartition(topic, p) for p in partitions]
+        consumer.assign(tps)
+
+        end_offsets = await consumer.end_offsets(tps)
+
+        for tp in tps:
+            latest_offset = end_offsets[tp]
+            seek_offset = max(0, latest_offset - num_messages)
+            consumer.seek(tp, seek_offset)
+
+        messages = []
+        batch = await consumer.getmany(timeout_ms=600)
+        for tp_msgs in batch.values():
+            for msg in tp_msgs:
+                messages.append(msg)
+                if len(messages) >= num_messages:
+                    break
+
+        return [m.value.decode(errors='ignore') for m in messages]
+
+    finally:
+        try:
+            await consumer.stop()
+        except asyncio.CancelledError:
+            logger.info("停止消费者时被取消")
