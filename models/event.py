@@ -62,6 +62,7 @@ class EventsIngestion(BaseModel):
     syslog_config: str = fields.CharField(max_length=255, null=True, description="syslog端口")
     file_path: str = fields.CharField(max_length=255, null=True, description="配置文件路径")
     vector_name: str = fields.CharField(max_length=255, null=True, description="vector名称")
+    config_info = fields.JSONField(default={}, null=True, description="转换配置信息")
     enabled_health_status: str = fields.CharField(max_length=255, null=True, description="上游接入健康状态")
     execution_health_status: str = fields.CharField(max_length=255, null=True, description="联动执行健康状态")
 
@@ -87,6 +88,7 @@ class EventsIngestion(BaseModel):
             "vector_name": self.vector_name,
             "enabled_health_status": self.enabled_health_status,
             "execution_health_status": self.execution_health_status,
+            "config_info": self.config_info
         }
 
     class Meta:
