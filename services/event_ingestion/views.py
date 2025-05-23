@@ -24,7 +24,7 @@ from libs.utils import get_client_ip, fetch_latest_messages
 from models.event import EventsIngestion, EventRelatedScript
 from models.playbook import Playbook
 from services.event_ingestion import supervisor
-from settings import SAMPLE_SINK_PATH, VECTOR_CFG, KAFKA_CONFIG
+from settings import VECTOR_CFG, KAFKA_CONFIG
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='v1/event/ingestion')
 _all__ = ["event_ingestion_bp"]

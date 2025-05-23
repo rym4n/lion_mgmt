@@ -17,10 +17,6 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 VECTOR_CFG = "./data/ship"
 os.makedirs(VECTOR_CFG, exist_ok=True)
 
-# 样例日志输出目录
-SAMPLE_SINK_PATH = "./data/sample_sinks"
-os.makedirs(SAMPLE_SINK_PATH, exist_ok=True)
-
 # 子进程配置文件输出目录
 SUPERVISOR_PATH = "./data/action"
 os.makedirs(SUPERVISOR_PATH, exist_ok=True)
