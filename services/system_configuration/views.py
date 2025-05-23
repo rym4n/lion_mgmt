@@ -13,7 +13,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
-from models import SystemCustomConfiguration, SystemStatus, AuditLog
+from models import SystemCustomConfiguration, AuditLog
 from settings import UPLOAD_FOLDER, BG_NAME
 
 system_bp = Blueprint('system', url_prefix='v1/system')
