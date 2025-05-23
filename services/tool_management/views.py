@@ -294,6 +294,7 @@ async def all_tools(request):
         - page: 页码（默认1）     int
         - size: 每页数量（默认10）     int
         - key: 名称和描述的搜索（可选，模糊搜索）   str
+        - tag: 标签名称（可选，精确搜索）   str
     """
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 10))
@@ -302,6 +303,8 @@ async def all_tools(request):
     subquery = Tool.filter(deleted=False).annotate(max_version=Max("version")).group_by("name")
     if key:
         subquery = subquery.filter(Q(name__icontains=key) | Q(description__icontains=key))
+    if request.json.get("tag"):
+        subquery = subquery.filter(tag__contains=[request.json.get("tag")])
     subquery_results = await subquery.values("name", "max_version")
     if not subquery_results:
         return response_ok({
@@ -572,6 +575,11 @@ async def tool_resources_detailed(request):
     resources = await ToolResources.filter(tool_name=tool_name, deleted=False).all().values()
     if not resources:
         return response_ok("工具资源不存在")
+
+    for resource in resources:
+        for value in resource["resources"].values():
+            if value["data_type"] == "password":
+                value["value"] = "******"
 
     return response_ok(resources)
 
