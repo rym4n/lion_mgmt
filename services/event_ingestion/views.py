@@ -356,6 +356,12 @@ async def update_event_ingestion(request):
         else:
             data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[transforms_type].format(
                 clear_data_config[event.event_source_type])
+
+        if transforms_type in ["Delimiter", "Grok"]:
+            event.config_info = {transforms_type: transformsconfig}
+        elif transforms_type == "key-value":
+            event.config_info = {transforms_type: key_value_delimiter + "_" + key_delimiter_value}
+
     if syslog_port:
         data["sources"][event.vector_name]["address"] = f"0.0.0.0:{syslog_port}"
         event.syslog_config = event.syslog_config[:3] + str(syslog_port)
