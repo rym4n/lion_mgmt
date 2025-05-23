@@ -38,6 +38,7 @@ async def new_user(request):
         mfa_enable: 可选，是否启用MFA
         mfa_key: 可选，MFA密钥
         role_names: 可选，角色名称列表，逗号分隔
+        permit_ip: 可选，允许访问的IP列表，逗号分隔 192.168.1.1,192.168.1.2  如果为空则为全部ip
     """
     try:
         mfa_enable = bool(request.json.get('mfa_enable', False)) or False
@@ -49,7 +50,8 @@ async def new_user(request):
             phone=request.json.get("phone"),
             disabled=request.json.get("disabled") or False,
             mfa_enable=mfa_enable,
-            mfa_key=pyotp.random_base32(32) if mfa_enable else None
+            mfa_key=pyotp.random_base32(32) if mfa_enable else None,
+            permit_ip=request.json.get("permit_ip", None),
         )
         # 添加角色
         if request.json.get("role_names"):
