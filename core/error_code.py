@@ -85,3 +85,5 @@ class ErrorCode(BaseErrorCode):
     NoExecutionRecord = ErrorData(4059, "无执行记录")
     NoEventAccess = ErrorData(4060, "当前事件接入不存在")
     ApiUserNotFound = ErrorData(4061, "API用户不存在")
+
+    CheckStatusNotFound = ErrorData(4062, "系统服务健康检查结果不存在")

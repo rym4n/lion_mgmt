@@ -1,14 +1,18 @@
 import json
 import os
+from datetime import datetime
 
 import aiofile
+import orjson
 from sanic import Blueprint
 from tortoise.transactions import in_transaction
 
+import settings
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
+from libs.utils import strip_timezone_to_seconds
 from models import SystemCustomConfiguration, SystemStatus, AuditLog
 from settings import UPLOAD_FOLDER, BG_NAME
 
@@ -126,87 +130,20 @@ async def get_system_status(request):
 
     无需参数直接请求则返回全部系统状况数据
     """
-    data = await SystemStatus.all().values()
-    return response_ok(data)
-
-
-@system_bp.post("/status/add")
-@requires_permission("system:c")
-async def add_system(request):
-    """
-    添加新的系统信息    需要系统配置新增权限
-
-    请求参数：
-        systemname：系统名
-        instancename：实例名
-        uptime：启动时间
-        check_time：检查时间
-        status：系统状态
-    """
-    systemname = request.json.get("systemname")
-    instancename = request.json.get("instancename")
-    uptime = request.json.get("uptime")
-    check_time = request.json.get("check_time")
-    status = request.json.get("status")
-    async with in_transaction():
-        systemstatus = await SystemStatus.create(systemname=systemname, instancename=instancename, uptime=uptime,
-                                                 checkTime=check_time, status=status)
-    return response_ok(systemstatus.json)
-
-
-@system_bp.post("/status/update")
-@requires_permission("system:u")
-async def up_system(request):
-    """
-    添加新的系统信息    需要系统配置修改权限
-
-    请求参数：
-        system_id：系统id
-        systemname：系统名
-        instancename：实例名
-        uptime：启动时间
-        check_time：检查时间
-        status：系统状态
-    """
-    system_id = request.json.get("system_id")
-    systemname = request.json.get("systemname")
-    instancename = request.json.get("instancename")
-    uptime = request.json.get("uptime")
-    check_time = request.json.get("check_time")
-    status = request.json.get("status")
-    system = await SystemStatus.get_or_none(id=system_id, deleted=False)
-    if not system:
-        raise CustomError(ErrorCode.NotFound)
-    if systemname:
-        system.systemname = systemname
-    if instancename:
-        system.instancename = instancename
-    if uptime:
-        system.uptime = uptime
-    if check_time:
-        system.checkTime = check_time
-    if status:
-        system.status = status
-    await system.save()
-    return response_ok(system.json)
-
-
-@system_bp.post("/status/delete")
-@requires_permission("system:d")
-async def del_system(request):
-    """
-    删除具体的系统    需要系统配置删除权限
-
-    请求参数：
-        system_id：系统id
-    """
-    system_id = request.json.get("system_id")
-    system = await SystemStatus.get_or_none(id=system_id, deleted=False)
-    if not system:
-        raise CustomError(ErrorCode.NotFound)
-    system.deleted = True
-    await system.save()
-    return response_ok("系统删除成功")
+    name_map = {'lion-mgmt': 'Web控制台', 'lion-web': 'Nginx服务', 'lion-pg': 'Postgres数据库', 'lion-redis': 'Redis数据库', 'lion-ship': 'ETL服务', 'lion-job': '任务调度', 'lion-worker': '执行引擎', 'lion-kafka': 'Kafka消息队列'}
+    # 获取文件的修改时间
+    status_file = os.path.join(settings.BASE_DIR, "data/status.json")
+    if not os.path.exists(status_file):
+        raise CustomError(ErrorCode.CheckStatusNotFound)
+    modify_time = datetime.strftime(datetime.fromtimestamp(os.path.getmtime(status_file)), "%Y-%m-%d %H:%M:%S")
+    async with aiofile.AIOFile(status_file, 'r', encoding='utf-8') as f:
+        content = await f.read()
+        data = orjson.loads(content)
+        for item in data:
+            item['name'] = name_map.get(item['name'], item['name'])
+            item['start_time'] = strip_timezone_to_seconds(item['start_time'])
+            item['check_time'] = modify_time
+        return response_ok(data)
 
 
 @system_bp.post("/audit")
