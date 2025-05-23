@@ -1,4 +1,5 @@
 # coding=utf-8
+import asyncio
 import base64
 import datetime
 import ipaddress
@@ -7,7 +8,6 @@ import random
 import time
 import uuid
 import zipfile
-import asyncio
 from io import BytesIO
 from pathlib import Path, PurePath
 from string import ascii_uppercase, digits
@@ -15,10 +15,10 @@ from string import ascii_uppercase, digits
 import aiofile
 import jwt
 import psutil
+from aiokafka import AIOKafkaConsumer, TopicPartition
 from argon2 import PasswordHasher
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from aiokafka import AIOKafkaConsumer, TopicPartition
 from sanic.log import logger
 
 from core.error_code import ErrorCode
@@ -73,6 +73,21 @@ def get_expiration_date(seconds: int) -> datetime.datetime:
         if seconds > 0
         else None
     )
+
+
+def validate_ips(ip_str):
+    for ip in ip_str.split(','):
+        cleaned_ip = ip.strip()
+        if not cleaned_ip:
+            return False
+        try:
+            if '/' in cleaned_ip:
+                ipaddress.IPv4Network(cleaned_ip, strict=True)
+            else:
+                ipaddress.IPv4Address(cleaned_ip)
+        except ValueError:
+            return False
+    return True
 
 
 def ip_in_list(ip_str: str, ip_list: list) -> bool:

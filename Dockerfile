@@ -38,6 +38,7 @@ RUN apt-get update && apt-get install -y curl
 ENV VIRTUAL_ENV=/app/.venv \
     RY_ENV=PROD \
     PYTHONDONTWRITEBYTECODE=1 \
+    TZ="Asia/Shanghai" \
     PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app

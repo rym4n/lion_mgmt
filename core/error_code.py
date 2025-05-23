@@ -5,6 +5,7 @@ from libs.error_code.enum import BaseErrorCode, ErrorData
 
 class ErrorCode(BaseErrorCode):
     """错误码枚举类"""
+
     ServerError = ErrorData(5000, "服务异常，请稍后重试")
     ParameterError = ErrorData(4000, "参数错误")
     InvalidJsonError = ErrorData(4001, "请求体是无效的json格式")
@@ -87,3 +88,4 @@ class ErrorCode(BaseErrorCode):
     ApiUserNotFound = ErrorData(4061, "API用户不存在")
 
     CheckStatusNotFound = ErrorData(4062, "系统服务健康检查结果不存在")
+    InvalidIP = ErrorData(4063, "IP地址输入错误")

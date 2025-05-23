@@ -14,6 +14,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.chat import get_or_create_private_chat_room, chat_manager
 from libs.error_code.exception import CustomError
+from libs.security.authentication import validate_token
 from libs.security.authorization import requires_permission
 from models.user import Account
 from models.warroom import Room, Message
@@ -32,7 +33,7 @@ async def warroom_ws(request: Request, ws: Websocket):
         auth_data = await asyncio.wait_for(ws.recv(), timeout=30.0)
         auth_json = orjson.loads(auth_data)
         payload = jwt.decode(auth_json['auth'], SECRET, SESSION_ENCODING_ALGORITHM)
-        # validate_token(payload, request)
+        validate_token(payload, request)
 
         account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
         if not account:

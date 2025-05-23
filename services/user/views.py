@@ -14,7 +14,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authentication import validate_password, token_encode, refresh_token, validate_username
 from libs.security.authorization import requires_permission
-from libs.utils import password_hasher, ip_in_list, get_client_ip
+from libs.utils import password_hasher, ip_in_list, get_client_ip, validate_ips
 from models import Account, Role
 from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS
 
@@ -40,6 +40,9 @@ async def new_user(request):
         role_names: 可选，角色名称列表，逗号分隔
         permit_ip: 可选，允许访问的IP列表，逗号分隔 192.168.1.1,192.168.1.2  如果为空则为全部ip
     """
+    if request.json.get("permit_ip"):
+        if validate_ips(request.json["permit_ip"]) is not True:
+            raise CustomError(ErrorCode.InvalidIP)
     try:
         mfa_enable = bool(request.json.get('mfa_enable', False)) or False
         account = await Account.create(
@@ -51,7 +54,7 @@ async def new_user(request):
             disabled=request.json.get("disabled") or False,
             mfa_enable=mfa_enable,
             mfa_key=pyotp.random_base32(32) if mfa_enable else None,
-            permit_ip=request.json.get("permit_ip", None),
+            permit_ip=request.json.get("permit_ip"),
         )
         # 添加角色
         if request.json.get("role_names"):
@@ -113,6 +116,9 @@ async def create_api_user(request):
         - description: 可选，描述
         - permit_ip: 可选，允许访问的IP列表，逗号分隔 192.168.1.1,192.168.1.2  如果为空则为全部ip
     """
+    if request.json.get("permit_ip"):
+        if validate_ips(request.json["permit_ip"]) is not True:
+            raise CustomError(ErrorCode.InvalidIP)
     account = await Account.create(
         username=validate_username(request.json.get("name", '')),
         password=password_hasher.hash(str(uuid.uuid4())),
@@ -120,7 +126,7 @@ async def create_api_user(request):
         display_name=request.json.get("description", ""),
         expiration=datetime.fromtimestamp(int(time.time()) + request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION)),
         creator=request.ctx.session['account_info'].username,
-        permit_ip=request.json.get("permit_ip", "all"),
+        permit_ip=request.json.get("permit_ip"),
     )
     # 添加角色
     if request.json.get("role_names"):

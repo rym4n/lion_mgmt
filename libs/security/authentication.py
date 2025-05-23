@@ -1,7 +1,6 @@
 # coding=utf-8
 
 import functools
-import ipaddress
 import re
 import time
 
@@ -11,7 +10,7 @@ from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from libs.utils import get_client_ip
+from libs.utils import get_client_ip, ip_in_list
 from models import Account
 from settings import SECRET, SESSION_ENCODING_ALGORITHM, AUTHENTICATION_SESSION_EXPIRATION
 
@@ -31,17 +30,15 @@ def validate_token(payload, request):
     if not request.path.endswith('/user/mfa-auth') and payload.get('mfa_enable') is True and payload.get('mfa_auth') is not True:
         raise CustomError(ErrorCode.SecondFactorRequired)
 
-    if payload.get('ip') and payload.get('ip') != get_client_ip(request):
+    client_ip = get_client_ip(request)
+
+    if payload.get('ip') and payload.get('ip') != client_ip:
         # 防止会话劫持
         raise CustomError(ErrorCode.SessionInvalid)
 
     # API访问时验证是否满足IP白名单
-    if 'permit_ip' in payload and payload['permit_ip'] != "all":
-        permit_ips = payload['permit_ip'].split(",")
-        permit_networks = [ipaddress.ip_network(ip.strip()) for ip in permit_ips]
-        client_ip = ipaddress.ip_address(get_client_ip(request))
-        is_allowed = any(client_ip in network for network in permit_networks)
-        if not is_allowed:
+    if payload.get('permit_ip'):
+        if ip_in_list(client_ip, payload['permit_ip'].split(',')) is False:
             raise CustomError(ErrorCode.IpForbidden)
 
     request.ctx.session = payload
