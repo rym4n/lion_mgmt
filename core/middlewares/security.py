@@ -24,6 +24,9 @@ class SecurityMiddleware(BaseMiddleware):
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
         """统一记录操作日志"""
         if hasattr(request.ctx, "session"):
-            await AuditLog.create(username=request.ctx.session['name'], action="访问", module=request.endpoint, result="成功" if response.status == 200 else "失败",
+            params = request.json if 'multipart' not in request.content_type else None
+            if 'password' in params:
+                params['password'] = '******'
+            await AuditLog.create(username=request.ctx.session['name'], result="成功" if response.status == 200 else "失败",
                                   uri=request.path, client_ip=request.ctx.session['ip'], client_ua=request.headers.get('User-Agent', ''),
                                   request_data=request.json if 'multipart' not in request.content_type else None)

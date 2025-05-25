@@ -180,14 +180,12 @@ async def search_audit(request):
         filters["username"] = username
 
     total = await AuditLog.filter(**filters).count()
-    data = await AuditLog.filter(**filters).offset(offset).limit(limit).values("id", "username", "ctime", "action",
-                                                                               "module", "result", "client_ip",
-                                                                               "client_ua", "uri")
+    data = await AuditLog.filter(**filters).offset(offset).limit(limit)
 
     return response_ok({
         "total": total,
         "page": page,
         "size": size,
         "total_pages": (total + size - 1) // size,
-        "data": data
+        "data": [item.json for item in data]
     })
