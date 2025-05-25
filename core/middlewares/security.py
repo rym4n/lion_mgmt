@@ -4,7 +4,6 @@ import os
 from sanic import Request, HTTPResponse
 
 from libs.security.authentication import authenticate
-from libs.utils import get_client_ip
 from models import AuditLog
 from .base import BaseMiddleware
 
@@ -24,7 +23,7 @@ class SecurityMiddleware(BaseMiddleware):
 
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
         """统一记录操作日志"""
-        if response.status == 200 and hasattr(request.ctx, "session"):
-            await AuditLog.create(username=request.ctx.session['name'], action="访问", module=request.endpoint, result="成功",
-                                  uri=request.path, client_ip=get_client_ip(request), client_ua=request.headers.get('User-Agent', ''),
+        if hasattr(request.ctx, "session"):
+            await AuditLog.create(username=request.ctx.session['name'], action="访问", module=request.endpoint, result="成功" if response.status == 200 else "失败",
+                                  uri=request.path, client_ip=request.ctx.session['ip'], client_ua=request.headers.get('User-Agent', ''),
                                   request_data=request.json if 'multipart' not in request.content_type else None)
