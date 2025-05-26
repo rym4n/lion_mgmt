@@ -93,7 +93,8 @@ class ChatManager:
                 try:
                     if message.get('type') != 'message':
                         continue
-                    msg = orjson.loads(message['data'])
+                    start_index = message['data'].find(b'{')
+                    msg = orjson.loads(message['data'][start_index:].decode())
                     if "run_id" in msg.keys():
                         for k in self.run_connections:
                             if self.run_connections[k]['run_id'] == msg.get('run_id'):

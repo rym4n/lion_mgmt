@@ -26,7 +26,10 @@ async def add_scene(request):
     name = request.json.get('name')
     remark = request.json.get('remark')
     status = int(request.json.get('status'))
-    if not all([name, remark, status]):
+    if not all([name, remark]):
+        raise CustomError(ErrorCode.ParameterError)
+
+    if status is None:
         raise CustomError(ErrorCode.ParameterError)
 
     if await Scene.filter(name=request.json.get("name")).exists():

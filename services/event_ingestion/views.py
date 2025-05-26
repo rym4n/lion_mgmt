@@ -611,7 +611,10 @@ del(.datetime_str)
         supervisor.add_process(process_name, command)
 
     events_ingestion = await EventRelatedScript.create(condition=conditions, event_ingestion_id=event_ingestion_id,
-                                                       script_id=script_ids, topic=topic)
+                                                       script_id=script_ids, topic=topic, event_name=event_name)
+
+    event.linked_execution = 1
+    await event.save()
 
     return response_ok(events_ingestion.json)
 
@@ -815,3 +818,5 @@ async def parse_log(request):
         if value not in msg:
             return response_ok("解析失败，请检查日志是否包含分隔符")
         return response_ok(msg.split(value))
+
+
