@@ -14,6 +14,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import verify_license
+from models import Tool, Playbook
 from settings import LICENSE_DIR
 
 license_bp = Blueprint('license', url_prefix='v1/license')
@@ -100,6 +101,11 @@ async def get_all_license(request: Request):
     """
     获取所有license文件信息用于页面展示
     """
+    consume_info = {
+        "应用数量": await Tool.filter(deleted=False, internal=False).count(),
+        "剧本数量限制": await Playbook.filter(deleted=False, internal=False).count()
+    }
+
     advanced_modules = ["虚拟作战室", "AI辅助", "集群部署", "软件升级", "维保服务", "多引擎部署"]
     advanced_groups = ["高级功能"]
 
@@ -142,7 +148,7 @@ async def get_all_license(request: Request):
             val = None
         else:
             key = group
-            val = value if name in ["应用数量", "剧本数量限制"] else None
+            val = consume_info["name"] if name in ["应用数量", "剧本数量限制"] else None
 
         description = group_list.get(group, "")
 
