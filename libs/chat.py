@@ -106,6 +106,7 @@ class ChatManager:
                         filtered_msg["end_time"] = datetime.fromtimestamp(filtered_msg["end_time"], tz=timezone.utc).astimezone(timezone(timedelta(hours=8))).isoformat()
                         await Runlog.create(**filtered_msg)
                         continue
+                    msg = orjson.loads(message['data'])
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
