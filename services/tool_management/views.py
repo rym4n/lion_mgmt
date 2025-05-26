@@ -71,15 +71,6 @@ async def upload_and_extract_zip(request):
         raise CustomError(ErrorCode.InvalidLicenseError)
 
     for zip_file in zip_files:
-        header = zip_file.body[:4]
-        if header[:2] != b'PK' or header[2:] != b'\x03\x04' or not zip_file.name.lower().endswith('.zip'):
-            results.append({"tool": zip_file.name, "msg": "此文件不是标准ZIP文件，请重新上传"})
-            data += 1
-            percent = int((data * single_progress))
-            success_progress = percent
-            await resp.send(f"data: 解压进度：{percent}%\n\n")
-            continue
-
         total_count = await Tool.filter(deleted=False, internal=False).count()
 
         for item in lic["menuInfo"]["moduleList"]:
@@ -89,6 +80,15 @@ async def upload_and_extract_zip(request):
 
         if total_count >= total_up_value:
             return response_ok({"error": "应用数量已达到上限"})
+
+        header = zip_file.body[:4]
+        if header[:2] != b'PK' or header[2:] != b'\x03\x04' or not zip_file.name.lower().endswith('.zip'):
+            results.append({"tool": zip_file.name, "msg": "此文件不是标准ZIP文件，请重新上传"})
+            data += 1
+            percent = int((data * single_progress))
+            success_progress = percent
+            await resp.send(f"data: 解压进度：{percent}%\n\n")
+            continue
 
         config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, resp,
                                                            success_progress, request.ctx.cache_client)
