@@ -89,3 +89,5 @@ class ErrorCode(BaseErrorCode):
 
     CheckStatusNotFound = ErrorData(4062, "系统服务健康检查结果不存在")
     InvalidIP = ErrorData(4063, "IP地址输入错误")
+    TagExistError = ErrorData(4064, "标签已存在")
+    TagNotFoundError = ErrorData(4065, "标签不存在")

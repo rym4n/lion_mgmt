@@ -23,7 +23,7 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
-from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config
+from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag
 from settings import TOOLS_DIR
 
 # 定义 Blueprint
@@ -1209,3 +1209,65 @@ async def tool_action_playbook_delete(data):
         if tool:
             tool.status = 1 if has_playbook else 0
             await tool.save()
+
+
+@tool_management_bp.post("/tag/new")
+@requires_permission("tool:c")
+async def new_tag(request):
+    """
+    新建标签（需要工具新增权限）
+
+    请求参数：
+        - name: 标签名称    str
+    """
+    name = request.json.get("name", "").strip()
+    if not name:
+        raise CustomError(ErrorCode.ParameterError)
+
+    if await Tag.get_or_none(name=name, type=1):
+        raise CustomError(ErrorCode.TagExistError)
+
+    await Tag.create(name=name, type=1)
+
+    return response_ok("标签新建成功")
+
+
+@tool_management_bp.post("/tag/list")
+@requires_permission("tool:r")
+async def tag_list(request):
+    """
+    获取标签列表（需要工具查看权限）
+
+    请求参数：
+        无
+    """
+    tags = await Tag.filter(type=1, deleted=False).all()
+
+    return response_ok([tag.name for tag in tags])
+
+
+@tool_management_bp.post("/tag/remove")
+@requires_permission("tool:d")
+async def remove_tag(request):
+    """
+    删除标签（需要工具删除权限）
+
+    请求参数：
+        - name: 标签名称    str
+    """
+    name = request.json.get("name")
+    if not name:
+        raise CustomError(ErrorCode.ParameterError)
+
+    tag = await Tag.get_or_none(name=name, type=1)
+    if not tag:
+        raise CustomError(ErrorCode.TagNotFoundError)
+    await tag.delete()
+
+    tools = await Tool.filter(tag__contains=[name], deleted=False).all()
+
+    for tool in tools:
+        tool.tag = [t for t in tool.tag if t != name]
+        await tool.save(update_fields=["tag"])
+
+    return response_ok("标签删除成功")

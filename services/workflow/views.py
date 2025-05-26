@@ -20,7 +20,7 @@ from libs.chat import chat_manager
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_order_version
-from models import Playbook, Scene, ToolAction, Tool, Runlog
+from models import Playbook, Scene, ToolAction, Tool, Runlog, Tag
 from services.tool_management.views import tool_action_update, tool_action_playbook_delete
 from settings import SECRET, SESSION_ENCODING_ALGORITHM
 
@@ -93,6 +93,7 @@ async def list_workflow(request):
         keyword: 可选，搜索时使用，支持搜索名称或备注
         scene: 可选，搜索时使用，支持搜索场景
         status: 可选，搜索时使用，支持搜索状态，0:草稿 1:已发布
+        tag: 可选，搜索时使用，支持搜索标签 str
     """
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 10))
@@ -109,6 +110,8 @@ async def list_workflow(request):
         condition = condition & Q(scenes__in=scenes)
     if request.json.get("status"):
         condition = condition & Q(status=request.json.get("status"))
+    if request.json.get("tag"):
+        condition = condition & Q(tags__contains=[request.json.get("tag")])
     total = await Playbook.filter(condition).count()
     playbooks = await Playbook.filter(condition).offset(offset).limit(limit).all().prefetch_related("scenes", "creator", "updator")
     return response_ok({
@@ -445,3 +448,65 @@ async def statistics_data(flow_json):
                     actions_list.append(action.id)
 
     return actions_list
+
+
+@workflow_bp.post("/tag/new")
+@requires_permission("workflow:c")
+async def new_tag(request):
+    """
+    新建标签（需要工具新增权限）
+
+    请求参数：
+        - name: 标签名称    str
+    """
+    name = request.json.get("name", "").strip()
+    if not name:
+        raise CustomError(ErrorCode.ParameterError)
+
+    if await Tag.get_or_none(name=name, type=0):
+        raise CustomError(ErrorCode.TagExistError)
+
+    await Tag.create(name=name, type=1)
+
+    return response_ok("标签新建成功")
+
+
+@workflow_bp.post("/tag/list")
+@requires_permission("workflow:r")
+async def tag_list(request):
+    """
+    获取标签列表（需要工具查看权限）
+
+    请求参数：
+        无
+    """
+    tags = await Tag.filter(type=0, deleted=False).all()
+
+    return response_ok([tag.name for tag in tags])
+
+
+@workflow_bp.post("/tag/remove")
+@requires_permission("workflow:d")
+async def remove_tag(request):
+    """
+    删除标签（需要工具删除权限）
+
+    请求参数：
+        - name: 标签名称    str
+    """
+    name = request.json.get("name")
+    if not name:
+        raise CustomError(ErrorCode.ParameterError)
+
+    tag = await Tag.get_or_none(name=name, type=0)
+    if not tag:
+        raise CustomError(ErrorCode.TagNotFoundError)
+    await tag.delete()
+
+    tools = await Tool.filter(tag__contains=[name], deleted=False).all()
+
+    for tool in tools:
+        tool.tag = [t for t in tool.tag if t != name]
+        await tool.save(update_fields=["tag"])
+
+    return response_ok("标签删除成功")
