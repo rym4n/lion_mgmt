@@ -466,7 +466,7 @@ async def new_tag(request):
     if await Tag.get_or_none(name=name, type=0):
         raise CustomError(ErrorCode.TagExistError)
 
-    await Tag.create(name=name, type=1)
+    await Tag.create(name=name, type=0)
 
     return response_ok("标签新建成功")
 
