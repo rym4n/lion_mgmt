@@ -1,11 +1,12 @@
 from sanic import Blueprint
 from tortoise.expressions import Q
+from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Scene
+from models import Scene, Playbook
 
 scene_bp = Blueprint('scene', url_prefix='v1/scene')
 _all__ = ["scene_bp"]
@@ -24,7 +25,7 @@ async def add_scene(request):
     """
     name = request.json.get('name')
     remark = request.json.get('remark')
-    status = request.json.get('status')
+    status = int(request.json.get('status'))
     if not all([name, remark, status]):
         raise CustomError(ErrorCode.ParameterError)
 
@@ -32,7 +33,8 @@ async def add_scene(request):
         raise CustomError(ErrorCode.SceneExistsError)
     if status == 1:
         await Scene.filter(status=1).update(status=0)
-    scene = await Scene.create(name=name, remark=remark, status=status, creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
+    scene = await Scene.create(name=name, remark=remark, status=status, creator=request.ctx.session['account_info'],
+                               updator=request.ctx.session['account_info'])
 
     return response_ok(scene.json)
 
@@ -98,7 +100,8 @@ async def get_all_scene(request):
     total = await Scene.filter(condition).count()
     scenes = list()
     if total > 0:
-        scenes = await Scene.filter(condition).limit(page_size).offset((page - 1) * page_size).all().prefetch_related('creator', 'updator')
+        scenes = await Scene.filter(condition).limit(page_size).offset((page - 1) * page_size).all().prefetch_related(
+            'creator', 'updator')
 
     return response_ok({
         "scenes": [s.json for s in scenes],
@@ -153,6 +156,12 @@ async def remove_scene(request):
     if scene.status == 1:
         raise CustomError(ErrorCode.SceneDeleteNotAllowed)
 
-    await scene.delete()
+    async with in_transaction():
+        playbooks = await Playbook.filter(scenes__id=id).all()
+
+        for playbook in playbooks:
+            await playbook.scenes.remove(scene)
+
+        await scene.delete()
 
     return response_ok("删除成功")

@@ -503,10 +503,10 @@ async def remove_tag(request):
         raise CustomError(ErrorCode.TagNotFoundError)
     await tag.delete()
 
-    tools = await Tool.filter(tag__contains=[name], deleted=False).all()
+    playbooks = await Playbook.filter(tag__contains=[name], deleted=False).all()
 
-    for tool in tools:
-        tool.tag = [t for t in tool.tag if t != name]
-        await tool.save(update_fields=["tag"])
+    for playbook in playbooks:
+        playbook.tags = [t for t in playbook.tags if t != name]
+        await playbook.save(update_fields=["tags"])
 
     return response_ok("标签删除成功")
