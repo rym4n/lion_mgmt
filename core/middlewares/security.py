@@ -25,8 +25,9 @@ class SecurityMiddleware(BaseMiddleware):
         """统一记录操作日志"""
         if hasattr(request.ctx, "session"):
             params = request.json if 'multipart' not in request.content_type else None
-            if 'password' in params:
-                params['password'] = '******'
+            for key in ['password', 'code', 'token']:
+                if key in params:
+                    params[key] = '******'
             await AuditLog.create(username=request.ctx.session['name'], result="成功" if response.status == 200 else "失败",
                                   uri=request.path, client_ip=request.ctx.session['ip'], client_ua=request.headers.get('User-Agent', ''),
                                   request_data=request.json if 'multipart' not in request.content_type else None)

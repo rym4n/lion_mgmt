@@ -20,6 +20,7 @@ class CacheListener(BaseListener):
         app.ctx.cache_client = caches.get('redis_mgmt')
         logger.info("使用Redis作为缓存")
         app.add_task(chat_manager.msg_listener)
+        app.add_task(chat_manager.log_listener)
 
     async def before_server_stop(self, app: Sanic, loop: BaseEventLoop) -> None:
         """释放连接"""

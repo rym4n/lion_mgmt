@@ -41,7 +41,7 @@ if os.environ.get("RY_ENV") == 'DEV':
 BG_NAME = "bg-oEDCYcDF"
 
 # kafka配置
-KAFKA_CONFIG = os.environ.get("RY_KAFKA_SERVERS")
+KAFKA_SERVERS = os.environ.get("RY_KAFKA_SERVERS")
 
 # 定时任务发送主题
 TIMED_TASK_TOPIC = os.environ.get("RY_TASK_TOPIC")

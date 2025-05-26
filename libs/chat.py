@@ -1,19 +1,19 @@
 # coding=utf-8
 import time
 import traceback
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 
 import orjson
 from aiocache import caches
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
 
-from libs.kafka import aproduce
+from libs.kafka import aproduce, aconsume
 from libs.utils import gen_order_version
 from models import Runlog
 from models.user import Account
 from models.warroom import Room, Message
-from settings import CACHE, KAFKA_CONFIG, TIMED_TASK_TOPIC
+from settings import CACHE, KAFKA_SERVERS, TIMED_TASK_TOPIC
 
 
 # 获取或创建私聊作战室
@@ -94,16 +94,6 @@ class ChatManager:
                     if message.get('type') != 'message':
                         continue
                     msg = orjson.loads(message['data'])
-                    if "run_id" in msg.keys():
-                        for k in self.run_connections:
-                            if self.run_connections[k]['run_id'] == msg.get('run_id'):
-                                await self.run_connections[k]['conn'].send(orjson.dumps({"data": msg}).decode())
-                        valid_fields = set(Runlog._meta.fields_map.keys())
-                        filtered_msg = {k: v for k, v in msg.items() if k in valid_fields}
-                        logger.info(f"创建runlog消息：{filtered_msg}")
-                        if not await Runlog.filter(id=filtered_msg['id']).exists():
-                            await Runlog.create(**filtered_msg)
-                        continue
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
@@ -118,6 +108,22 @@ class ChatManager:
                     logger.error(f"{e} | {traceback.format_exc()}")
                     break
             await msg_sub.unsubscribe("wr_group_chat")
+
+    async def log_listener(self):
+        await aconsume(KAFKA_SERVERS, 'lion_action_runlog', 'lion_mgmt_listener', self.handle_runlog, 50)
+
+    async def handle_runlog(self, log):
+        if log.get('type') == 'audit':
+            logger.info(f"暂时不处理: {log}")
+            return
+        for k in self.run_connections:
+            if self.run_connections[k]['run_id'] == log.get('run_id'):
+                await self.run_connections[k]['conn'].send(orjson.dumps({"data": log}).decode())
+        valid_fields = set(Runlog._meta.fields_map.keys())
+        filtered_msg = {k: v for k, v in log.items() if k in valid_fields}
+        logger.info(f"创建runlog消息：{filtered_msg}")
+        if not await Runlog.filter(id=filtered_msg['id']).exists():
+            await Runlog.create(**filtered_msg)
 
     async def handle_message(self, user: Account, ws, data: dict):
         """消息处理"""
@@ -149,7 +155,7 @@ class ChatManager:
                 params = data
                 params["executor"] = user.id
                 msg = {"run_type": message_type, "run_id": gen_order_version(length=6), "run_args": params}
-                await aproduce(KAFKA_CONFIG, TIMED_TASK_TOPIC, msg)
+                await aproduce(KAFKA_SERVERS, TIMED_TASK_TOPIC, msg)
                 self.run_connections[user.id]["run_id"] = msg["run_id"]
             else:
                 logger.error(f"{traceback.format_exc()}")

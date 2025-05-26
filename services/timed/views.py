@@ -6,7 +6,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from models import Timed, Playbook, ToolAction, Runlog
-from settings import KAFKA_CONFIG, TIMED_TASK_TOPIC
+from settings import KAFKA_SERVERS, TIMED_TASK_TOPIC
 
 timed_bp = Blueprint('timed', url_prefix='v1/timed')
 _all__ = ["timed_bp"]
@@ -126,7 +126,7 @@ async def add_timed(request):
                                creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
     msg["timer_id"] = timed.id
     msg["timer_rule"] = timer_rule
-    await aproduce(KAFKA_CONFIG, TIMED_TASK_TOPIC, msg)
+    await aproduce(KAFKA_SERVERS, TIMED_TASK_TOPIC, msg)
     return response_ok(timed.json)
 
 
@@ -262,7 +262,7 @@ async def update_timed(request):
     timed.updator = request.ctx.session.get("account_info")
 
     await timed.save()
-    await aproduce(KAFKA_CONFIG, TIMED_TASK_TOPIC, msg)
+    await aproduce(KAFKA_SERVERS, TIMED_TASK_TOPIC, msg)
     return response_ok(timed.json)
 
 
@@ -292,7 +292,7 @@ async def delete_timed(request):
     msg["timer"] = "remove"
     msg["timer_id"] = timed.id
     msg["timer_rule"] = {}
-    await aproduce(KAFKA_CONFIG, TIMED_TASK_TOPIC, msg)
+    await aproduce(KAFKA_SERVERS, TIMED_TASK_TOPIC, msg)
 
     timed.deleted = True
     timed.updator = request.ctx.session.get("account_info")

@@ -24,7 +24,7 @@ from libs.utils import get_client_ip, fetch_latest_messages
 from models.event import EventsIngestion, EventRelatedScript
 from models.playbook import Playbook
 from services.event_ingestion import supervisor
-from settings import VECTOR_CFG, KAFKA_CONFIG
+from settings import VECTOR_CFG, KAFKA_SERVERS
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='v1/event/ingestion')
 _all__ = ["event_ingestion_bp"]
@@ -100,7 +100,7 @@ async def build_kafka_file_configuration_file(output_path, sources,
             f"{topic}_sample_sinks": {
                 "type": "kafka",
                 "inputs": [source_id],
-                "bootstrap_servers": KAFKA_CONFIG,
+                "bootstrap_servers": KAFKA_SERVERS,
                 "topic": topic,
                 "encoding": {
                     "codec": "json"
@@ -458,7 +458,7 @@ async def get_event_ingestion_kafka_sample(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    messages = await fetch_latest_messages([KAFKA_CONFIG], event.vector_name, size)
+    messages = await fetch_latest_messages([KAFKA_SERVERS], event.vector_name, size)
 
     return response_ok(messages)
 
@@ -585,7 +585,7 @@ del(.datetime_str)
     data["sinks"][f"{topic}_sinks"] = {
         "inputs": [f"{topic}_event_transforms"],
         "type": "kafka",
-        "bootstrap_servers": KAFKA_CONFIG,
+        "bootstrap_servers": KAFKA_SERVERS,
         "topic": topic,
         "encoding": {
             "codec": "json"
