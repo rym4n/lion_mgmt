@@ -520,25 +520,8 @@ async def binding_event_ingestion_script(request):
     timestamp_int = str(int(time.time()))
     topic = f"{event.vector_name}_{timestamp_int}"
 
-    conditional_statements = ""
-
     if conditions:
-        for index, condition in enumerate(conditions):
-            if bool(re.fullmatch(r"[^\w\s]+", condition["type"])):
-                conditional_statements += f""".{condition["name"]} {condition['type']} "{condition['value']}" """
-            elif condition["type"] == "contains":
-                conditional_statements += f"""{condition['type']}(string!(.{condition['name']}), "{condition['value']}")"""
-            elif condition["type"] in ["includes", "!includes"]:
-                conditional_statements += f"""{condition['type']}({condition['value']}, string!(.{condition['name']}))"""
-            elif condition["type"] in ["exists", "is_empty", "!exists", "!is_empty"]:
-                conditional_statements += f"""{condition['type']}(string!(.{condition['name']}))"""
-            elif condition["type"] == "match":
-                conditional_statements += f"""match(string!(.{condition['name']}), "{condition['value']}")"""
-            else:
-                raise CustomError(ErrorCode.ParameterError)
-            connect_type = condition["connect_type"] if condition.get("connect_type") in ["&&", "||"] else None
-            if connect_type:
-                conditional_statements += f" {connect_type} "
+        conditional_statements = get_conditional_statements(conditions)
 
     async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
         content = await f.read()
@@ -562,7 +545,7 @@ async def binding_event_ingestion_script(request):
     if event_name == "default":
         event_name = '"{}" + "_" + to_string(.datetime_str)'.format(event.event_ingestion_name)
     else:
-        event_name = "{}".format(event_name)
+        event_name = '"{}"'.format(event_name)
     data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
         "type": "remap",
         "inputs": [f"{topic}_transforms"],
@@ -820,3 +803,144 @@ async def parse_log(request):
         return response_ok(msg.split(value))
 
 
+@event_ingestion_bp.post('/config/list')
+@requires_permission('event:r')
+async def event_ingestion_config_list(request):
+    """
+    获取事件接入配置列表
+    请求参数:
+        id： str 事件接入id
+    """
+    event_id = request.json.get('id')
+    if not event_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    config_list = []
+    events = await EventRelatedScript.filter(event_ingestion_id=event_id).all()
+    if not events:
+        return response_ok("当前未配置接入规则")
+
+    for event in events:
+        config_list.append(event.json)
+
+    return response_ok(config_list)
+
+
+@event_ingestion_bp.post('/binding/update')
+@requires_permission('event:u')
+async def event_ingestion_binding_update(request):
+    """
+    更新剧本接入配置
+
+    请求参数：
+        script_access_id: 剧本接入ID (str)  必填
+        conditions: 条件 (list)       非必填
+            conditions: [
+                {
+                    type: "type",
+                    name: "name",
+                    value: "value",
+                    connect_type: "&&" or "||" or None
+                },
+                {
+                    type: "type",
+                    name: "name",
+                    value: "value",
+                    connect_type: "&&" or "||" or None
+                }
+            ]
+        目前支持的判断条件类型有：
+            等于 == ，不等于!= ，大于 > ，小于 < ，大于等于 >= ，小于等于 <=
+            字段中存在字符串 contains ，字段中不包含字符串 !contains
+            字段中存在集合 includes ，字段中不存在集合 !includes     value为集合，如"[\"abc\",\"lmd\"]"
+            字段存在 exists ，字段不存在 !exists        value为空
+            字段为空 is_empty ，字段不为空 !is_empty    value为空
+            正则表达式 match  字段匹配正则表达式       value为正则表达式，如"^abc.*$"
+        script_ids: 剧本ID (list)     非必填
+        event_name: 事件名称 (str)  用户选择的事件名称，传default      非必填
+        自定义名称案例：to_string!(.name) + "_" + to_string(.datetime_str) + "234"
+    """
+    data = request.json
+    conditions = data.get('conditions')
+    script_access_id = data.get('script_access_id')
+    script_ids = data.get('script_ids')
+    event_name = data.get('event_name')
+
+    if not script_access_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    event_related_script = await EventRelatedScript.get_or_none(id=script_access_id)
+    if not event_related_script:
+        raise CustomError(ErrorCode.NotFound)
+
+    if await EventRelatedScript.filter(condition=conditions, event_ingestion_id=event_related_script.event_ingestion_id, deleted=False).exists():
+        raise CustomError(ErrorCode.ConditionExistsError)
+
+    event_ingestion = await EventsIngestion.get_or_none(id=event_related_script.event_ingestion_id, deleted=False)
+    if not event_ingestion:
+        raise CustomError(ErrorCode.NotFound)
+
+    async with aiofile.AIOFile(event_ingestion.file_path, 'r', encoding='utf-8') as f:
+        content = await f.read()
+        data = yaml.safe_load(content)
+
+    if conditions:
+        data["transforms"][f"{event_related_script.topic}_transforms"]["condition"] = get_conditional_statements(
+            conditions)
+        event_related_script.condition = conditions
+    if event_name:
+        if event_name == "default":
+            event_name = '"{}" + "_" + to_string(.datetime_str)'.format(event_ingestion.event_ingestion_name)
+        else:
+            event_name = f'"{event_name}"'
+        source = data["transforms"][f'{event_related_script.topic}_event_transforms']['source']
+
+        source = re.sub(r'\.event_name\s*=\s*.*', f'.event_name = {event_name}', source)
+
+        data["transforms"][f'{event_related_script.topic}_event_transforms']['source'] = source
+
+        event_related_script.event_name = event_name
+
+    async with aiofile.AIOFile(event_ingestion.file_path, 'w', encoding='utf-8') as f:
+        yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+        await f.write(yaml_str)
+
+    if script_ids:
+        for script_id in event_related_script.script_id:
+            process_name = hashlib.md5(f"{event_related_script.event_ingestion_id}_{script_id}".encode()).hexdigest()
+            supervisor.stop_process(process_name)
+            supervisor.remove_process(process_name)
+
+        for script_id in script_ids:
+            process_name = hashlib.md5(f"{event_related_script.event_ingestion_id}_{script_id}".encode()).hexdigest()
+            command = f"python start.py -m auto -f {script_id} -t {event_related_script.topic}"
+            supervisor.add_process(process_name, command)
+
+        event_related_script.script_id = script_ids
+
+    await event_related_script.save()
+
+    return response_ok("更新成功")
+
+
+def get_conditional_statements(conditions):
+    conditional_statements = ""
+
+    for index, condition in enumerate(conditions):
+        if bool(re.fullmatch(r"[^\w\s]+", condition["type"])):
+            conditional_statements += f""".{condition["name"]} {condition['type']} "{condition['value']}" """
+        elif condition["type"] == "contains":
+            conditional_statements += f"""{condition['type']}(string!(.{condition['name']}), "{condition['value']}")"""
+        elif condition["type"] in ["includes", "!includes"]:
+            conditional_statements += f"""{condition['type']}({condition['value']}, string!(.{condition['name']}))"""
+        elif condition["type"] in ["exists", "is_empty", "!exists", "!is_empty"]:
+            conditional_statements += f"""{condition['type']}(string!(.{condition['name']}))"""
+        elif condition["type"] == "match":
+            conditional_statements += f"""match(string!(.{condition['name']}), "{condition['value']}")"""
+        else:
+            raise CustomError(ErrorCode.ParameterError)
+        connect_type = condition["connect_type"] if condition.get("connect_type") in ["&&", "||"] else None
+        if connect_type:
+            conditional_statements += f" {connect_type} "
+
+    return conditional_statements
