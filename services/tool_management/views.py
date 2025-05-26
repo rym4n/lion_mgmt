@@ -330,15 +330,16 @@ async def all_tools(request):
             async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
                 data = await f.read()
                 # 将config数据存入redis
-                await request.ctx.cache_client.set(latest_tool["name"] + "_" + latest_tool["version"], data, ttl=2592000)
+                await request.ctx.cache_client.set(latest_tool["name"] + "_" + latest_tool["version"], data,
+                                                   ttl=2592000)
             data = orjson.loads(data)
         else:
             if isinstance(data, (str, bytes)):
                 data = orjson.loads(data)
         logo_path = os.path.abspath(os.path.join(latest_tool["path"], data.get("logo")))
         if os.path.exists(logo_path):
-            async with aiofile.AIOFile(logo_path, 'rb') as l:
-                logo_data = await l.read()
+            async with aiofile.AIOFile(logo_path, 'rb') as logo:
+                logo_data = await logo.read()
                 logo_str = base64.b64encode(logo_data).decode('utf-8')
                 latest_tool["logo"] = logo_str
         latest_tool.pop("path")
@@ -486,10 +487,10 @@ async def delete_tool_all(request):
         if os.path.exists(tool_path):
             shutil.rmtree(tool_path)
 
-        tool_actions = await ToolAction.filter(tool_name=name, deleted=False).update(deleted=True)
-        tool_resource_models = await ToolResourcesModel.filter(tool_name=name, deleted=False).update(deleted=True)
-        tool_resources = await ToolResources.filter(tool_name=name, deleted=False).update(deleted=True)
-        action_permissions = await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
+        await ToolAction.filter(tool_name=name, deleted=False).update(deleted=True)
+        await ToolResourcesModel.filter(tool_name=name, deleted=False).update(deleted=True)
+        await ToolResources.filter(tool_name=name, deleted=False).update(deleted=True)
+        await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
 
     return response_ok({"message": "全部工具删除成功"})
 

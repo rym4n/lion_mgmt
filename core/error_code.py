@@ -91,3 +91,4 @@ class ErrorCode(BaseErrorCode):
     InvalidIP = ErrorData(4063, "IP地址输入错误")
     TagExistError = ErrorData(4064, "标签已存在")
     TagNotFoundError = ErrorData(4065, "标签不存在")
+    SceneDeleteNotAllowed = ErrorData(4065, "当前场景已启用，只运行删除禁用场景")

@@ -13,7 +13,7 @@ class Scene(BaseModel):
 
     name = fields.CharField(description="场景名称", unique=True, max_length=255)
     remark = fields.CharField(description="描述", max_length=255)
-    status = fields.IntField(max_length=1, description="是否启用，2启用且为当前场景，1启用，0禁用")
+    status = fields.IntField(max_length=1, description="是否启用，1启用，0禁用")
     creator = fields.ForeignKeyField("models.Account", related_name="created_scenes", description="创建人")
     updator = fields.ForeignKeyField("models.Account", related_name="updated_scenes", description="更新人")
 

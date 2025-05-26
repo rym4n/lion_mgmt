@@ -20,7 +20,7 @@ async def add_scene(request):
     请求参数：
         name str 场景名称 必填
         remark str 场景描述 必填
-        status int 场景状态 必填 0-禁用 1-启用 2-启用并设置成当前场景
+        status int 场景状态 必填 0-禁用 1-启用
     """
     name = request.json.get('name')
     remark = request.json.get('remark')
@@ -30,8 +30,8 @@ async def add_scene(request):
 
     if await Scene.filter(name=request.json.get("name")).exists():
         raise CustomError(ErrorCode.SceneExistsError)
-    if status == 2:
-        await Scene.filter(status=2).update(status=1)
+    if status == 1:
+        await Scene.filter(status=1).update(status=0)
     scene = await Scene.create(name=name, remark=remark, status=status, creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
 
     return response_ok(scene.json)
@@ -46,7 +46,7 @@ async def update_scene(request):
     请求参数：
         id str 场景id 必填
         remark str 场景描述 非必填
-        status int 场景状态 非必填 0-禁用 1-启用 2-启用并设置成当前场景
+        status int 场景状态 非必填 0-禁用 1-启用
     """
     id = request.json.get('id')
     remark = (request.json.get('remark') or None)
@@ -61,8 +61,8 @@ async def update_scene(request):
     if remark:
         scene.remark = remark
     if status is not None:
-        if status == 2:
-            await Scene.filter(status=2).update(status=1)
+        if status == 1:
+            await Scene.filter(status=1).update(status=0)
         scene.status = status
     scene.updator = request.ctx.session['account_info']
     await scene.save()
@@ -80,7 +80,7 @@ async def get_all_scene(request):
         page int 页码 非必填 默认为1
         page_size int 每页数量 非必填 默认为10
         key str 搜索关键字 非必填 默认为空
-        status int 场景状态 非必填 0-禁用 1-启用 2-启用并设置成当前场景,隐藏禁用场景时传递
+        status int 场景状态 非必填 0-禁用 1-启用
     """
     page = int(request.json.get('page') or 1)
     page_size = int(request.json.get('page_size') or 10)
@@ -120,13 +120,39 @@ async def set_current_scene(request):
     id = request.json.get('id')
     if not id:
         raise CustomError(ErrorCode.ParameterError)
-    await Scene.filter(status=2).update(status=1)
+    await Scene.filter(status=1).update(status=0)
     scene = await Scene.get_or_none(id=id)
     if not scene:
         raise CustomError(ErrorCode.NotFound)
 
-    scene.status = 2
+    scene.status = 1
     scene.updator = request.ctx.session['account_info']
     await scene.save()
 
     return response_ok("设置成功")
+
+
+@scene_bp.post("/remove")
+@requires_permission("scene:d")
+async def remove_scene(request):
+    """
+    删除场景 (需要场景删除权限)
+
+    请求参数：
+        id str 场景id 必填
+    """
+    id = request.json.get('id')
+    if not id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    scene = await Scene.get_or_none(id=id)
+
+    if not scene:
+        raise CustomError(ErrorCode.NotFound)
+
+    if scene.status == 1:
+        raise CustomError(ErrorCode.SceneDeleteNotAllowed)
+
+    await scene.delete()
+
+    return response_ok("删除成功")
