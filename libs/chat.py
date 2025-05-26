@@ -93,8 +93,7 @@ class ChatManager:
                 try:
                     if message.get('type') != 'message':
                         continue
-                    start_index = int(message['data'].find(b'{'))
-                    msg = orjson.loads(message['data'][start_index:].decode())
+                    msg = orjson.loads(message['data'])
                     if "run_id" in msg.keys():
                         for k in self.run_connections:
                             if self.run_connections[k]['run_id'] == msg.get('run_id'):
@@ -102,11 +101,9 @@ class ChatManager:
                         valid_fields = set(Runlog._meta.fields_map.keys())
                         filtered_msg = {k: v for k, v in msg.items() if k in valid_fields}
                         logger.info(f"创建runlog消息：{filtered_msg}")
-                        filtered_msg["start_time"] = datetime.fromisoformat(filtered_msg["start_time"]).replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=8))).isoformat()
-                        filtered_msg["end_time"] = datetime.fromtimestamp(filtered_msg["end_time"], tz=timezone.utc).astimezone(timezone(timedelta(hours=8))).isoformat()
-                        await Runlog.create(**filtered_msg)
+                        if not await Runlog.filter(id=filtered_msg['id']).exists():
+                            await Runlog.create(**filtered_msg)
                         continue
-                    msg = orjson.loads(message['data'])
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
