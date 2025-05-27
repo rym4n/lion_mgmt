@@ -248,7 +248,7 @@ async def fetch_latest_messages(bootstrap_servers, topic, num_messages=10):
             consumer.seek(tp, seek_offset)
 
         messages = []
-        batch = await consumer.getmany(timeout_ms=600)
+        batch = await consumer.getmany(max_records=num_messages, timeout_ms=1000)
         for tp_msgs in batch.values():
             for msg in tp_msgs:
                 messages.append(msg)

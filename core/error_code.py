@@ -93,3 +93,5 @@ class ErrorCode(BaseErrorCode):
     TagNotFoundError = ErrorData(4065, "标签不存在")
     SceneDeleteNotAllowed = ErrorData(4066, "当前场景已启用，只运行删除禁用场景")
     ConditionExistsError = ErrorData(4067, "当前判断条件已存在")
+    ActionInputError = ErrorData(4068, "缺少执行动作必须参数")
+    PlaybookInputError = ErrorData(4069, "缺少执行剧本必须参数")

@@ -99,6 +99,8 @@ async def add_timed(request):
             raise CustomError(ErrorCode.PlaybookNotFound)
         msg["run_type"] = "flow"
         playbook_input["executor"] = request.ctx.session.get("account_info").id
+        if flow_parameter_detection(playbook_input):
+            raise CustomError(ErrorCode.PlaybookInputError)
         msg["run_args"] = playbook_input
         if status == 0:
             msg["timer"] = "once"
@@ -112,6 +114,8 @@ async def add_timed(request):
         if not action:
             raise CustomError(ErrorCode.ActionNotFoundError)
         action_input["executor"] = request.ctx.session.get("account_info").id
+        if action_parameter_detection(action_input):
+            raise CustomError(ErrorCode.ActionInputError)
         msg["run_type"] = "action"
         msg["run_args"] = action_input
         if status == 0:
@@ -228,6 +232,10 @@ async def update_timed(request):
             raise CustomError(ErrorCode.ParameterError)
 
         timed.playbook = await Playbook.get_or_none(id=playbook_id, deleted=False)
+
+        if flow_parameter_detection(playbook_input):
+            raise CustomError(ErrorCode.PlaybookInputError)
+
         timed.playbook_input = playbook_input
         timed.action = None
         timed.action_input = {}
@@ -241,6 +249,10 @@ async def update_timed(request):
         action_input = data.get("action_input", timed.action_input)
 
         timed.action = await ToolAction.get_or_none(id=action_id, deleted=False)
+
+        if action_parameter_detection(action_input):
+            raise CustomError(ErrorCode.ActionInputError)
+
         timed.action_input = action_input
         timed.playbook = None
         timed.playbook_input = {}
@@ -328,3 +340,13 @@ async def get_run_log(request):
         "total": total,
         "data": [runlog.json for runlog in run_logs]
     })
+
+
+def action_parameter_detection(action_input):
+    allowed_keys = ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name", "action", "executor", "retry_times", "timeout"]
+    return any(key not in action_input.keys() for key in allowed_keys)
+
+
+def flow_parameter_detection(playbook_input):
+    allowed_keys = ["flow_id", "flow_input", "executor"]
+    return any(key not in playbook_input.keys() for key in allowed_keys)
