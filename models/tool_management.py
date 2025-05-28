@@ -112,9 +112,7 @@ class ToolResources(BaseModel):
 
     tool_name: str = fields.CharField(max_length=255, description="工具名称")
     name: str = fields.CharField(max_length=255, unique=True, description="资源名称")
-    description: str = fields.CharField(max_length=255, description="资源描述")
-    product_supplier: str = fields.CharField(max_length=255, null=True, description="供应商")
-    product_name: str = fields.CharField(max_length=255, null=True, description="产品名称")
+    engine: str = fields.CharField(max_length=255, null=True, description="执行引擎")
     resources: list[str] = fields.JSONField(description="资源配置")
     creator: str = fields.CharField(max_length=255, null=True, description="创建者")
     updater: str = fields.CharField(max_length=255, null=True, description="更新者")
@@ -130,12 +128,10 @@ class ToolResources(BaseModel):
             "utime": strip_timezone_to_seconds(self.utime),
             "tool_name": self.tool_name,
             "name": self.name,
-            "description": self.description,
-            "product_supplier": self.product_supplier,
-            "product_name": self.product_name,
             "resources": self.resources,
             "creator": self.creator,
-            "updater": self.updater
+            "updater": self.updater,
+            "engine": self.engine
         }
 
     class Meta:
