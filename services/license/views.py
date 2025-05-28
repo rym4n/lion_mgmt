@@ -150,7 +150,7 @@ async def get_all_license(request: Request):
             key = group
             val = str(consume_info[name]) + "/" + str(value) if name in ["应用数量", "剧本数量限制"] else None
 
-        description = group_list.get(group, "")
+        description = group_list.get(group, "") if group != "高级功能" else group_list.get(name, "")
 
         menu_entry = menu_dict["menuInfo"].setdefault(key, {})
         menu_entry["value"] = val
