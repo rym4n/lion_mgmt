@@ -524,9 +524,7 @@ async def add_tool_resource(request):
     query参数:
         - tool_name: 工具名称    str
         - name: 资源名称    str
-        - description: 资源描述    str
-        - product_supplier: 供应商    str    可选
-        - product_name: 产品名称    str    可选
+        - engine: 执行引擎    str
         - resources: 资源模板   dict
                 {"Lizhu_username": {
                         "order": 0,
@@ -540,9 +538,7 @@ async def add_tool_resource(request):
     """
     tool_name = request.json.get("tool_name")
     name = request.json.get("name")
-    description = request.json.get("description")
-    product_supplier = request.json.get("product_supplier", None)
-    product_name = request.json.get("product_name", None)
+    engine = request.json.get("engine")
     resources = request.json.get("resources")
     if tool_name is None or resources is None or name is None:
         raise CustomError(ErrorCode.ParameterError)
@@ -551,9 +547,8 @@ async def add_tool_resource(request):
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
 
-    resources = await ToolResources.create(tool_name=tool_name, name=name, description=description,
-                                           product_supplier=product_supplier,
-                                           product_name=product_name, resources=resources,
+    resources = await ToolResources.create(tool_name=tool_name, name=name, engine=engine,
+                                           resources=resources,
                                            creator=request.ctx.session['account_info'].username
                                            , updater=request.ctx.session['account_info'].username)
 
@@ -594,9 +589,7 @@ async def update_tool_resource(request):
     query参数:
         - tool_name: 工具名称    str\
         - name: 资源名称    str  不可修改，修改其他值的凭证
-        - description: 资源描述    str    可选
-        - product_supplier: 供应商    str    可选
-        - product_name: 产品名称    str    可选
+        - engine: 资源描述    str    可选
         - resources: 资源模板   dict    可选
                 {"Lizhu_username": {
                         "order": 0,
@@ -610,9 +603,7 @@ async def update_tool_resource(request):
     """
     tool_name = request.json.get("tool_name")
     name = request.json.get("name")
-    description = request.json.get("description", None)
-    product_supplier = request.json.get("product_supplier", None)
-    product_name = request.json.get("product_name", None)
+    engine = request.json.get("engine", None)
     resources = request.json.get("resources", None)
     if not tool_name or not name:
         raise CustomError(ErrorCode.ParameterError)
@@ -622,12 +613,8 @@ async def update_tool_resource(request):
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
 
-    if description:
-        tool_resource.description = description
-    if product_supplier:
-        tool_resource.product_supplier = product_supplier
-    if product_name:
-        tool_resource.product_name = product_name
+    if engine:
+        tool_resource.engine = engine
     if resources:
         tool_resource.resources = resources
 
