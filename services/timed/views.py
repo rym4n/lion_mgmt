@@ -233,6 +233,8 @@ async def update_timed(request):
 
         timed.playbook = await Playbook.get_or_none(id=playbook_id, deleted=False)
 
+        playbook_input["executor"] = request.ctx.session.get("account_info").id
+
         if flow_parameter_detection(playbook_input):
             raise CustomError(ErrorCode.PlaybookInputError)
 
@@ -250,6 +252,7 @@ async def update_timed(request):
 
         timed.action = await ToolAction.get_or_none(id=action_id, deleted=False)
 
+        action_input["executor"] = request.ctx.session.get("account_info").id
         if action_parameter_detection(action_input):
             raise CustomError(ErrorCode.ActionInputError)
 
