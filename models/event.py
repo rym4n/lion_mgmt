@@ -63,6 +63,7 @@ class EventsIngestion(BaseModel):
     file_path: str = fields.CharField(max_length=255, null=True, description="配置文件路径")
     vector_name: str = fields.CharField(max_length=255, null=True, description="vector名称")
     config_info = fields.JSONField(default={}, null=True, description="转换配置信息")
+    vector_config: str = fields.TextField(default=dict, null=True, description="vector配置信息")
     enabled_health_status: str = fields.CharField(max_length=255, null=True, description="上游接入健康状态")
     execution_health_status: str = fields.CharField(max_length=255, null=True, description="联动执行健康状态")
 

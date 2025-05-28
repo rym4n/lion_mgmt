@@ -95,3 +95,4 @@ class ErrorCode(BaseErrorCode):
     ConditionExistsError = ErrorData(4067, "当前判断条件已存在")
     ActionInputError = ErrorData(4068, "缺少执行动作必须参数")
     PlaybookInputError = ErrorData(4069, "缺少执行剧本必须参数")
+    CronExpressionError = ErrorData(4070, "cron表达式错误")
