@@ -1,4 +1,7 @@
+import re
+
 from sanic import Blueprint
+from sanic.log import logger
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -65,7 +68,7 @@ async def add_timed(request):
             }
        - status int 执行类型  必填  0为单次执行，1为周期执行
        - tactics str 执行策略  必填   如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数
-       - end_time int 结束时间  为周期执行时填写，格式为2025-12-12 00:00:00
+       - end_time str 结束时间  为周期执行时填写，格式为2025-12-12 00:00:00
     """
     data = request.json
     name = data.get("name")
@@ -108,6 +111,9 @@ async def add_timed(request):
         elif status == 1:
             msg["timer"] = "cron"
             timer_rule["end_date"] = end_time
+            if not is_valid_crontab(tactics):
+                logger.info(f"定时任务{name}的执行策略{tactics}不符合crontab格式，创建失败")
+                raise CustomError(ErrorCode.CronExpressionError)
             timer_rule["crontab"] = tactics
     elif operate_type == 1:
         action = await ToolAction.get_or_none(id=action_id, deleted=False)
@@ -124,6 +130,9 @@ async def add_timed(request):
         elif status == 1:
             msg["timer"] = "cron"
             timer_rule["end_date"] = end_time
+            if not is_valid_crontab(tactics):
+                logger.info(f"定时任务{name}的执行策略{tactics}不符合crontab格式，创建失败")
+                raise CustomError(ErrorCode.CronExpressionError)
             timer_rule["crontab"] = tactics
     timed = await Timed.create(name=name, type=operate_type, playbook=playbook, playbook_input=playbook_input, action=action,
                                action_input=action_input, status=status, tactics=tactics, end_time=end_time, enable=1,
@@ -265,6 +274,10 @@ async def update_timed(request):
         msg["timer"] = "remove"
         msg["timer_rule"] = {}
     else:
+        if status == EXEC_TYPE_CRON:
+            if not is_valid_crontab(tactics):
+                logger.info(f"定时任务{timed.name}的执行策略{tactics}不符合crontab格式，更新失败")
+                raise CustomError(ErrorCode.CronExpressionError)
         timer_info = build_timer_rule(status, tactics, end_time)
         msg.update(timer_info)
     msg["timer_id"] = timed.id
@@ -353,3 +366,39 @@ def action_parameter_detection(action_input):
 def flow_parameter_detection(playbook_input):
     allowed_keys = ["flow_id", "flow_input", "executor"]
     return any(key not in playbook_input.keys() for key in allowed_keys)
+
+
+def is_valid_crontab(expr):
+    parts = expr.strip().split()
+    if len(parts) != 5:
+        return False
+
+    ranges = [
+        (0, 59), (0, 23), (1, 31), (1, 12), (0, 7)
+    ]
+
+    pattern = r'^\*(\/\d+)?$|^\d+(-\d+)?(\/\d+)?$'
+    segment_re = re.compile(pattern)
+
+    for i, part in enumerate(parts):
+        min_val, max_val = ranges[i]
+        for segment in part.split(','):
+            if not segment_re.match(segment):
+                return False
+
+            step = None
+            if '/' in segment:
+                base, step_str = segment.split('/', 1)
+                if not step_str.isdigit() or (step := int(step_str)) < 1:
+                    return False
+                segment = base
+
+            if '-' in segment:
+                start, end = map(int, segment.split('-'))
+                if not (min_val <= start <= end <= max_val):
+                    return False
+            elif segment != '*':
+                if not segment.isdigit() or not (min_val <= (num := int(segment)) <= max_val):
+                    return False
+
+    return True

@@ -10,7 +10,7 @@ from sanic.log import logger
 
 from libs.kafka import aproduce, aconsume
 from libs.utils import gen_order_version
-from models import Runlog
+from models import Runlog, Events, Timed
 from models.user import Account
 from models.warroom import Room, Message
 from settings import CACHE, KAFKA_SERVERS, TIMED_TASK_TOPIC
@@ -120,7 +120,14 @@ class ChatManager:
             if self.run_connections[k]['run_id'] == log.get('run_id'):
                 await self.run_connections[k]['conn'].send(orjson.dumps({"data": log}).decode())
         valid_fields = set(Runlog._meta.fields_map.keys())
-        filtered_msg = {k: v for k, v in log.items() if k in valid_fields}
+        filtered_msg = {}
+        for k, v in log.items():
+            if k in valid_fields:
+                if k == "event_id" and v is not None:
+                    v = await Events.get_or_none(id=v)
+                elif k == "timer_id" and v is not None:
+                    v = await Timed.get_or_none(id=v)
+            filtered_msg[k] = v
         logger.info(f"创建runlog消息：{filtered_msg}")
         if not await Runlog.filter(id=filtered_msg['id']).exists():
             await Runlog.create(**filtered_msg)
