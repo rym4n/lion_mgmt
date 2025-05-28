@@ -58,7 +58,7 @@ async def oauth_callback(request: Request, client: BaseOAuth2, redirect_uri: str
                 oauth_id=oauth_id,
                 verified=True,
             )
-        aioe_token = token_encode(account.id, account.username, account.mfa_enable, oauth_id)
+        aioe_token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, oauth_id)
         return token_info, aioe_token
     except IntegrityError:
         raise CustomError(ErrorCode.CredentialsError)

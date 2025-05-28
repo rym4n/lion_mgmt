@@ -148,7 +148,7 @@ async def get_all_license(request: Request):
             val = None
         else:
             key = group
-            val = consume_info["name"] if name in ["应用数量", "剧本数量限制"] else None
+            val = consume_info[name] if name in ["应用数量", "剧本数量限制"] else None
 
         description = group_list.get(group, "")
 

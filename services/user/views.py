@@ -134,7 +134,7 @@ async def create_api_user(request):
         await account.roles.add(*roles)
 
     token_id = str(uuid.uuid4())
-    token = token_encode(account.id, account.username, account.mfa_enable, token_id, request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION), account.password, permit_ip=account.permit_ip)
+    token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, token_id, request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION), account.password, permit_ip=account.permit_ip)
     await account.fetch_related("roles")
     await request.ctx.cache_client.set(f"account_{account.id}", account, 7 * 24 * 3600)
 
@@ -246,7 +246,7 @@ async def login(request):
             raise CustomError(ErrorCode.AccountDisabled)
         resp = account.json
         token_id = str(uuid.uuid4())
-        token = token_encode(account.id, account.username, account.mfa_enable, token_id, ip=client_ip)
+        token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, token_id, ip=client_ip)
         await request.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
         resp['aioe-auth'] = token
         # response.cookies.add_cookie(

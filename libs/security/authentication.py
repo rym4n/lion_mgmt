@@ -60,7 +60,7 @@ def requires_authentication(arg=None):
     return decorator(arg) if callable(arg) else decorator
 
 
-def token_encode(account_id, username, mfa_enable, token_id: str, expiration=AUTHENTICATION_SESSION_EXPIRATION, secret=SECRET, **kwargs) -> str:
+def token_encode(account_id, username, display_name, mfa_enable, token_id: str, expiration=AUTHENTICATION_SESSION_EXPIRATION, secret=SECRET, **kwargs) -> str:
     """
     根据账号信息生成token
     """
@@ -69,6 +69,7 @@ def token_encode(account_id, username, mfa_enable, token_id: str, expiration=AUT
         "id": token_id,
         "sub": account_id,
         "name": username,
+        "display_name": display_name,
         "iat": current,
         "exp": current + expiration,
         "mfa_enable": mfa_enable

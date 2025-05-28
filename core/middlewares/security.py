@@ -28,6 +28,6 @@ class SecurityMiddleware(BaseMiddleware):
             for key in ['password', 'code', 'token']:
                 if key in params:
                     params[key] = '******'
-            await AuditLog.create(username=request.ctx.session['name'], display_name=request.ctx.session['account_info'].get('display_name'), client_ip=request.ctx.session['ip'],
+            await AuditLog.create(username=request.ctx.session['name'], display_name=request.ctx.session['display_name'], client_ip=request.ctx.session['ip'],
                                   result="成功" if response.status == 200 else "失败", uri=request.path, client_ua=request.headers.get('User-Agent', ''),
                                   request_data=request.json if 'multipart' not in request.content_type else None)
