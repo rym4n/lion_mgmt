@@ -102,8 +102,8 @@ async def get_all_license(request: Request):
     获取所有license文件信息用于页面展示
     """
     consume_info = {
-        "应用数量": await Tool.filter(deleted=False, internal=False).count(),
-        "剧本数量限制": await Playbook.filter(deleted=False, internal=False).count()
+        "应用数量": await Tool.filter(deleted=False).count(),
+        "剧本数量限制": await Playbook.filter(deleted=False).count()
     }
 
     advanced_modules = ["虚拟作战室", "AI辅助", "集群部署", "软件升级", "维保服务", "多引擎部署"]
@@ -148,7 +148,7 @@ async def get_all_license(request: Request):
             val = None
         else:
             key = group
-            val = consume_info[name] if name in ["应用数量", "剧本数量限制"] else None
+            val = str(consume_info[name]) + "/" + str(value) if name in ["应用数量", "剧本数量限制"] else None
 
         description = group_list.get(group, "")
 

@@ -43,7 +43,7 @@ async def create_workflow(request):
     """
     total_up_value = 0
     # 判断剧本数量是否达到了创建上限
-    total_count = await Playbook.filter(deleted=False, internal=False).count()
+    total_count = await Playbook.filter(deleted=False).count()
     lic = load_license()
     if not lic:
         raise CustomError(ErrorCode.InvalidLicenseError)

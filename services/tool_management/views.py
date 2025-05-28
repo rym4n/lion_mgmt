@@ -71,7 +71,7 @@ async def upload_and_extract_zip(request):
         raise CustomError(ErrorCode.InvalidLicenseError)
 
     for zip_file in zip_files:
-        total_count = await Tool.filter(deleted=False, internal=False).count()
+        total_count = await Tool.filter(deleted=False).count()
 
         for item in lic["menuInfo"]["moduleList"]:
             if item["name"] == "应用数量":
