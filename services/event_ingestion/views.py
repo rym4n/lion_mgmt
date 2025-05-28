@@ -113,16 +113,18 @@ async def build_kafka_file_configuration_file(output_path, sources,
     async with aiofile.AIOFile(output_path, mode='w', encoding='utf-8') as file:
         await file.write(yaml_str)
 
+    return config
+
 
 async def creat_event_ingestion_dbdata(event_ingestion_name, event_ingestion_describe, event_source_type,
                                        enabled_status, create, updator, file_path, client_ip, linked_execution,
-                                       syslog_config, vector_name):
+                                       syslog_config, vector_name, vector_config):
     events_ingestion = await EventsIngestion.create(event_ingestion_name=event_ingestion_name,
                                                     event_ingestion_describe=event_ingestion_describe,
                                                     event_source_type=event_source_type, enabled_status=enabled_status,
                                                     creator=create, updator=updator, file_path=file_path,
                                                     linked_execution=linked_execution,
-                                                    syslog_config=syslog_config, vector_name=vector_name)
+                                                    syslog_config=syslog_config, vector_name=vector_name, vector_config=vector_config)
     logger.info(f"Client {client_ip} has added a new role {events_ingestion.id}.")
     return events_ingestion.json
 
@@ -188,7 +190,7 @@ async def event_ingestion(request):
             "address": f"0.0.0.0:{syslog_port}",
             "mode": communication_type
         }}
-        await build_kafka_file_configuration_file(output_path=output_path, sources=sources, source_id=vector_name,
+        vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources, source_id=vector_name,
                                                   topic=topic)
         event_source_type = "syslog"
     elif event_source_type == "kafka":
@@ -211,7 +213,7 @@ async def event_ingestion(request):
                 "group_id": kafka_group_id,
                 "topics": kafka_topic,
             }}
-        await build_kafka_file_configuration_file(output_path=output_path, sources=sources, source_id=vector_name,
+        vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources, source_id=vector_name,
                                                   topic=topic)
     else:
         raise CustomError(ErrorCode.ParameterError)
@@ -226,7 +228,8 @@ async def event_ingestion(request):
                                                                 updator=request.ctx.session['account_info'],
                                                                 linked_execution=linked_execution,
                                                                 syslog_config=syslog_config,
-                                                                vector_name=vector_name)
+                                                                vector_name=vector_name,
+                                                                vector_config=vector_config)
 
     return response_ok(event_ingestion_dbdata)
 
@@ -331,9 +334,7 @@ async def update_event_ingestion(request):
     key_value_delimiter = data.get('key_value_delimiter', None)
     event = await EventsIngestion.get(id=event_id)
 
-    async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
-        content = await f.read()
-        data = yaml.safe_load(content)
+    data = event.vector_config
 
     if event_source_address:
         data["sources"][event.vector_name]["bootstrap_servers"] = ",".join(event_source_address)
@@ -408,6 +409,8 @@ async def update_event_ingestion(request):
 
     event.updator = request.ctx.session["account_info"]
 
+    event.vector_config = data
+
     await event.save()
 
     return response_ok("事件更新成功")
@@ -427,15 +430,7 @@ async def get_event_ingestion_detail(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    file_path = os.path.abspath(event.file_path)
-    if not os.path.exists(file_path):
-        raise CustomError(ErrorCode.NoEventAccess)
-
-    async with aiofile.AIOFile(file_path, 'r', encoding='utf-8') as f:
-        content = await f.read()
-        data = yaml.safe_load(content)
-
-    return response_ok({"config_data": data, "event": event.json})
+    return response_ok({"config_data": event.vector_config, "event": event.json})
 
 
 # noinspection PyTypeChecker
@@ -523,9 +518,7 @@ async def binding_event_ingestion_script(request):
     if conditions:
         conditional_statements = get_conditional_statements(conditions)
 
-    async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
-        content = await f.read()
-        data = yaml.safe_load(content)
+    data = event.vector_config
 
     condition_list = [
         transform.get("condition")
@@ -597,6 +590,9 @@ del(.datetime_str)
                                                        script_id=script_ids, topic=topic, event_name=event_name)
 
     event.linked_execution = 1
+
+    event.vector_config = data
+
     await event.save()
 
     return response_ok(events_ingestion.json)
@@ -616,6 +612,12 @@ async def unbundled_event_ingestion_script(request):
 
     event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False).all()
 
+    event = await EventsIngestion.get_or_none(id=event_ingestion_id)
+    if not event:
+        raise CustomError(ErrorCode.NotFound)
+
+    data = event.vector_config
+
     for script_id in script_ids:
         for ers in event_related_scripts:
             if script_id in ers.script_id:  # ers.script_id 是列表
@@ -624,33 +626,33 @@ async def unbundled_event_ingestion_script(request):
                     await ers.save()
                     break
                 else:  # 剧本id小于等于1代表单个剧本绑定到同一个判断条件，需删除数据库数据和vector配置文件
-                    event = await EventsIngestion.get_or_none(id=event_ingestion_id)
-                    if not event:
-                        raise CustomError(ErrorCode.NotFound)
+                    if f"{ers.topic}_transforms" in data["transforms"]:
+                        del data["transforms"][f"{ers.topic}_transforms"]
 
-                    async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as f:
-                        content = await f.read()
-                        data = yaml.safe_load(content)
+                    if f"{ers.topic}_transforms" in data["transforms"]:
+                        del data["transforms"][f"{ers.topic}_event_transforms"]
 
-                    key_to_delete_transforms = f"{ers.topic}_transforms"
-                    key_to_delete_sinks = f"{ers.topic}_sinks"
+                    if f"{ers.topic}_sinks" in data["sinks"]:
+                        del data["sinks"][f"{ers.topic}_sinks"]
 
-                    if key_to_delete_transforms in data["transforms"]:
-                        del data["transforms"][key_to_delete_transforms]
-
-                    if key_to_delete_sinks in data["sinks"]:
-                        del data["sinks"][key_to_delete_sinks]
-
-                    async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
-                        yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
-                        await f.write(yaml_str)
+                    if f"{ers.topic}_event_sinks" in data["sinks"]:
+                        del data["sinks"][f"{ers.topic}_event_sinks"]
 
                     ers.deleted = True
                     await ers.save()
                     break
+
         process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
         supervisor.stop_process(process_name)
         supervisor.remove_process(process_name)
+
+    async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
+        yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+        await f.write(yaml_str)
+
+    event.vector_config = data
+
+    await event.save()
 
     return response_ok("剧本解绑成功")
 
@@ -675,13 +677,8 @@ async def export_event_ingestion_script(request):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for event in events:
-            # 使用 aiofile 异步读取文件
-            async with aiofile.AIOFile(event.file_path, 'r', encoding='utf-8') as afp:
-                content = await afp.read()
-                data = yaml.safe_load(content)
-
             event_data = event.json
-            event_data["vector_config"] = str(data)
+            event_data["vector_config"] = str(event.vector_config)
             event_data.pop("file_path", None)
 
             filename = f"{sanitize_filename(event.event_ingestion_name or 'unnamed')}.json"
@@ -880,9 +877,7 @@ async def event_ingestion_binding_update(request):
     if not event_ingestion:
         raise CustomError(ErrorCode.NotFound)
 
-    async with aiofile.AIOFile(event_ingestion.file_path, 'r', encoding='utf-8') as f:
-        content = await f.read()
-        data = yaml.safe_load(content)
+    data = event_ingestion.vector_config
 
     if conditions:
         data["transforms"][f"{event_related_script.topic}_transforms"]["condition"] = get_conditional_statements(
@@ -918,6 +913,8 @@ async def event_ingestion_binding_update(request):
 
         event_related_script.script_id = script_ids
 
+    event_ingestion.vector_config = data
+    await event_ingestion.save()
     await event_related_script.save()
 
     return response_ok("更新成功")
