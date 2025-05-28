@@ -284,9 +284,8 @@ async def delete_event_ingestion(request):
         return response_ok("事件已启用，禁止删除，请先禁用事件")
 
     async with in_transaction():
-        os.rename(event.file_path, event.file_path + "_deleted")
         event.deleted = True
-        event.file_path = event.file_path + "_deleted"
+        event.file_path = None
         event.updator = request.ctx.session["account_info"]
         await event.save()
 
@@ -385,11 +384,11 @@ async def update_event_ingestion(request):
     if enabled_status in [0, 1]:
         file_path = event.file_path
         if enabled_status == 0:
-            os.rename(file_path, file_path + "_unenabled")
-            event.file_path = file_path + "_unenabled"
+            os.remove(file_path)
         else:
-            os.rename(file_path, file_path.replace("_unenabled", ""))
-            event.file_path = file_path.replace("_unenabled", "")
+            async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
+                yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+                await f.write(yaml_str)
         event.enabled_status = enabled_status
     if linked_execution in [0, 1]:
         if linked_execution == 0:
