@@ -82,7 +82,7 @@ async def get_license(request: Request):
 
         if module not in menu_dict:
             menu_dict[module] = False
-        if auth and int(item["expireTime"]) > int(time.time() * 1000):
+        if auth and int(lic["grouplist"][item["group"]]["expireTime"]) > int(time.time() * 1000):
             menu_dict[module] = True
     menu_dict["license_bp"] = True
     menu_dict["user_bp"] = True
@@ -102,12 +102,9 @@ async def get_all_license(request: Request):
     获取所有license文件信息用于页面展示
     """
     consume_info = {
-        "应用数量": await Tool.filter(deleted=False).count(),
-        "剧本数量限制": await Playbook.filter(deleted=False).count()
+        "应用集成": await Tool.filter(deleted=False).count(),
+        "剧本编排": await Playbook.filter(deleted=False).count()
     }
-
-    advanced_modules = ["虚拟作战室", "AI辅助", "集群部署", "软件升级", "维保服务", "多引擎部署"]
-    advanced_groups = ["高级功能"]
 
     menu_dict = dict()
     lic = load_license()
@@ -120,43 +117,25 @@ async def get_all_license(request: Request):
     menu_dict["version"] = lic["version"]
     menu_dict["createTime"] = fmt_time(lic.get("createTime"))
     menu_dict["expireTime"] = fmt_time(lic.get("expireTime"))
-    menu_dict["lic_status"] = True if lic.get("expireTime") > int(time.time() * 1000) else False
+    menu_dict["lic_status"] = True if int(lic.get("expireTime")) > int(time.time() * 1000) else False
     menu_dict["menuInfo"] = {}
 
     # 获取菜单信息
     menu_info = lic.get("menuInfo", {})
-    module_list = menu_info.get("moduleList", [])
     group_list = menu_info.get("grouplist", {})
 
-    for item in module_list:
-        name = item.get("name")
-        group = item.get("group")
-        auth = item.get("auth")
-        expire_time = item.get("expireTime")
-        value = item.get("value")
-
-        # 时间有效性判断
-        try:
-            expire_time_int = int(expire_time)
-            current_time_int = int(time.time() * 1000)
-            is_valid = auth and expire_time_int > current_time_int
-        except (TypeError, ValueError):
-            is_valid = False
-
-        if name in advanced_modules or group in advanced_groups:
-            key = name
-            val = None
-        else:
-            key = group
-            val = str(consume_info[name]) + "/" + str(value) if name in ["应用数量", "剧本数量限制"] else None
-
-        description = group_list.get(group, "") if group != "高级功能" else group_list.get(name, "")
-
+    for key, item in group_list.items():
+        val = None
+        if key in ["剧本编排","应用集成"]:
+            if int(item.get("value", 0)) == 99999:
+                val = "无限"
+            else:
+                val = str(consume_info.get(key, 0)) + "/" + str(item.get("value", 0))
         menu_entry = menu_dict["menuInfo"].setdefault(key, {})
         menu_entry["value"] = val
-        menu_entry["auth"] = True if is_valid else True
-        menu_entry["description"] = description
-        menu_entry["expireTime"] = fmt_time(expire_time)
+        menu_entry["auth"] = True if int(item.get("expireTime")) > int(time.time() * 1000) else False
+        menu_entry["description"] = item.get("description")
+        menu_entry["expireTime"] = fmt_time(int(item.get("expireTime")))
 
     return response_ok(menu_dict)
 
