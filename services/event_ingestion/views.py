@@ -65,13 +65,20 @@ parsed = split(string!(.message), "{}")
 clear_data_config = {
     "syslog": r'''
 .datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
+''',
+    "kafka": r'''
+.datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
+''',
+}
+
+remove_data_config = {
+    "syslog": r'''
 del(.host)
 del(.port)
 del(.source_type)
 del(.timestamp)
 ''',
     "kafka": r'''
-.datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
 del(.headers)
 del(.message_key)
 del(.offset)
@@ -79,7 +86,7 @@ del(.partition)
 del(.source_type)
 del(.timestamp)
 del(.topic)
-            ''',
+''',
 }
 
 CEF_REGEX = re.compile(
@@ -92,19 +99,26 @@ CEF_REGEX = re.compile(
 
 # 生成配置文件
 # noinspection PyTypeChecker
-async def build_kafka_file_configuration_file(output_path, sources,
+async def build_kafka_file_configuration_file(output_path, sources, event_source_type,
                                               source_id, topic):
     config = {
         "sources": sources,
         "sinks": {
             f"{topic}_sample_sinks": {
                 "type": "kafka",
-                "inputs": [source_id],
+                "inputs": [f"{topic}_remove_transforms"],
                 "bootstrap_servers": KAFKA_SERVERS,
                 "topic": topic,
                 "encoding": {
                     "codec": "json"
                 }
+            }
+        },
+        "transforms": {
+            f"{topic}_remove_transforms": {
+                "type": "remap",
+                "inputs": [source_id],
+                "source": f"{remove_data_config[event_source_type]}"
             }
         }
     }
@@ -124,7 +138,8 @@ async def creat_event_ingestion_dbdata(event_ingestion_name, event_ingestion_des
                                                     event_source_type=event_source_type, enabled_status=enabled_status,
                                                     creator=create, updator=updator, file_path=file_path,
                                                     linked_execution=linked_execution,
-                                                    syslog_config=syslog_config, vector_name=vector_name, vector_config=vector_config)
+                                                    syslog_config=syslog_config, vector_name=vector_name,
+                                                    vector_config=vector_config)
     logger.info(f"Client {client_ip} has added a new role {events_ingestion.id}.")
     return events_ingestion.json
 
@@ -156,7 +171,7 @@ async def event_ingestion(request):
     syslog_port = data.get('syslog_port', None)
     event_source_address = data.get('event_source_address', [])
     communication_type = data.get('communication_type', None)
-    kafka_group_id = data.get('kafka_group_id', None)
+    kafka_group_id = data.get('kafka_group_id', "Aioe_lion_ship")
     kafka_topic = data.get('kafka_topic', [])
     sasl_mechanism = data.get('sasl_mechanism', None)
     sasl_username = data.get('sasl_username', None)
@@ -190,9 +205,10 @@ async def event_ingestion(request):
             "address": f"0.0.0.0:{syslog_port}",
             "mode": communication_type
         }}
-        vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources, source_id=vector_name,
-                                                  topic=topic)
         event_source_type = "syslog"
+        vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
+                                                                  source_id=vector_name, event_source_type=event_source_type,
+                                                                  topic=topic)
     elif event_source_type == "kafka":
         if sasl_mechanism:
             sources = {vector_name: {
@@ -211,10 +227,11 @@ async def event_ingestion(request):
                 "type": "kafka",
                 "bootstrap_servers": ",".join(event_source_address),
                 "group_id": kafka_group_id,
-                "topics": kafka_topic,
+                "topics": kafka_topic
             }}
-        vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources, source_id=vector_name,
-                                                  topic=topic)
+        vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
+                                                                  source_id=vector_name, event_source_type=event_source_type,
+                                                                  topic=topic)
     else:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -345,7 +362,7 @@ async def update_event_ingestion(request):
         data["sinks"][f"{event.vector_name}_sample_sinks"]["inputs"] = [
             f"{event.vector_name}_transforms"]
         data.setdefault("transforms", {}).setdefault(f"{event.vector_name}_transforms", {})["type"] = "remap"
-        data["transforms"][f"{event.vector_name}_transforms"]["inputs"] = [event.vector_name]
+        data["transforms"][f"{event.vector_name}_transforms"]["inputs"] = [f"{event.vector_name}_remove_transforms"]
         data["transforms"][f"{event.vector_name}_transforms"]["drop_on_error"] = False
         if transforms_type in ["Grok", "Delimiter"]:
             data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[transforms_type].format(
@@ -869,7 +886,8 @@ async def event_ingestion_binding_update(request):
     if not event_related_script:
         raise CustomError(ErrorCode.NotFound)
 
-    if await EventRelatedScript.filter(condition=conditions, event_ingestion_id=event_related_script.event_ingestion_id, deleted=False).exists():
+    if await EventRelatedScript.filter(condition=conditions, event_ingestion_id=event_related_script.event_ingestion_id,
+                                       deleted=False).exists():
         raise CustomError(ErrorCode.ConditionExistsError)
 
     event_ingestion = await EventsIngestion.get_or_none(id=event_related_script.event_ingestion_id, deleted=False)

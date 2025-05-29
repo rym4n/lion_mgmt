@@ -491,6 +491,7 @@ async def delete_tool_all(request):
         await ToolResourcesModel.filter(tool_name=name, deleted=False).update(deleted=True)
         await ToolResources.filter(tool_name=name, deleted=False).update(deleted=True)
         await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
+        await Tool.filter(name=name, deleted=False).update(deleted=True)
 
     return response_ok({"message": "全部工具删除成功"})
 
