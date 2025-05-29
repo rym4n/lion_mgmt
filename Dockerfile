@@ -31,6 +31,8 @@ RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove
 RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file models/
 RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
 
+FROM timberio/vector:0.47.0-debian as vector
+
 FROM python:3.11-slim as runtime
 
 RUN apt-get update && apt-get install -y curl
@@ -43,8 +45,11 @@ ENV VIRTUAL_ENV=/app/.venv \
 
 WORKDIR /app
 
+RUN mkdir /var/lib/vector
+
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
+COPY --from=vector /usr/bin/vector /usr/bin/vector
 COPY settings ./settings
 COPY server.py ./
 
