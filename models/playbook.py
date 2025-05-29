@@ -36,6 +36,7 @@ class Playbook(BaseModel):
             "tags": self.tags,
             "scenes": [scene.name for scene in self.scenes] if self.scenes else [],
             "flow_json": self.flow_json,
+            "version": self.version,
             "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
             "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
             "internal": self.internal
@@ -51,6 +52,7 @@ class Playbook(BaseModel):
             "remark": self.remark,
             "status": self.status,
             "tags": self.tags,
+            "version": self.version,
             "scenes": [scene.name for scene in self.scenes] if self.scenes else [],
             "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
             "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
