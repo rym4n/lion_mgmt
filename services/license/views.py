@@ -76,7 +76,7 @@ async def get_license(request: Request):
     lic = load_license()
     if not lic:
         raise CustomError(ErrorCode.InvalidLicenseError)
-    for item in lic["menuInfo"]["moduleList"]:
+    for item in lic["moduleList"]:
         module = item["module"]
         auth = item["auth"]
 
@@ -121,8 +121,7 @@ async def get_all_license(request: Request):
     menu_dict["menuInfo"] = {}
 
     # 获取菜单信息
-    menu_info = lic.get("menuInfo", {})
-    group_list = menu_info.get("grouplist", {})
+    group_list = lic.get("grouplist", {})
 
     for key, item in group_list.items():
         val = None
