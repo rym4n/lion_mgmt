@@ -73,12 +73,12 @@ async def upload_and_extract_zip(request):
     for zip_file in zip_files:
         total_count = await Tool.filter(deleted=False).count()
 
-        for item in lic["menuInfo"]["moduleList"]:
-            if item["name"] == "应用数量":
-                if item["auth"] and int(item["expireTime"]) > int(time.time() * 1000):
+        for key, item in lic["grouplist"].items():
+            if key == "应用集成":
+                if int(item["expireTime"]) > int(time.time() * 1000):
                     total_up_value = int(item["value"])
 
-        if total_count >= total_up_value:
+        if total_up_value != 99999 and total_count >= total_up_value:
             return response_ok({"error": "应用数量已达到上限"})
 
         header = zip_file.body[:4]

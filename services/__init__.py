@@ -57,12 +57,14 @@ def register_blueprints(app: Sanic) -> None:
             "timed_bp": timed_bp
         }
         license_data = load_license()
-        if license_data and 'menuInfo' in license_data:
-            for item in license_data["menuInfo"]["moduleList"]:
+        if license_data and 'moduleList' in license_data:
+            for item in license_data["moduleList"]:
                 if item["auth"] and int(item["expireTime"]) > int(time.time() * 1000):
                     if item["module"] not in bp_dict:
                         continue
                     app.blueprint(bp_dict[item["module"]])
+        # for item in bp_dict.values():
+        #     app.blueprint(item)
     except Exception as ex:
         logger.info(f"{ex} | {traceback.format_exc()}")
 

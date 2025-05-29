@@ -47,12 +47,12 @@ async def create_workflow(request):
     lic = load_license()
     if not lic:
         raise CustomError(ErrorCode.InvalidLicenseError)
-    for item in lic["menuInfo"]["moduleList"]:
-        if item["name"] == "剧本数量限制":
-            if item["auth"] and int(item["expireTime"]) > int(time.time() * 1000):
+    for key, item in lic["grouplist"].items():
+        if key == "剧本编排":
+            if int(item["expireTime"]) > int(time.time() * 1000):
                 total_up_value = int(item["value"])
 
-    if total_count >= total_up_value:
+    if total_up_value != 99999 and total_count >= total_up_value:
         raise CustomError(ErrorCode.PlaybookCreateLimit)
 
     # 判断name是否已经存在，如果存在的话要抛出异常
