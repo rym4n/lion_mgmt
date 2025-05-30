@@ -159,7 +159,7 @@ async def get_all(request):
     keyword = request.json.get("keyword", "").strip()
 
     # 获取全部（后续在 Python 层过滤）
-    all_items = await Timed.filter(deleted=False).select_related("action", "playbook", "creator", "updator")
+    all_items = await Timed.filter(deleted=False).prefetch_related("action", "playbook_version", "creator", "updator")
 
     if keyword:
         keyword = keyword.lower()
@@ -217,8 +217,7 @@ async def update_timed(request):
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    timed = await Timed.filter(id=timed_id, deleted=False).select_related("action", "playbook", "creator",
-                                                                          "updator").first()
+    timed = await Timed.filter(id=timed_id, deleted=False).select_related("action", "playbook_version", "creator", "updator").first()
     if not timed:
         raise CustomError(ErrorCode.TimedNotFound)
 
