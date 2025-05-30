@@ -172,7 +172,7 @@ async def get_all(request):
                 action_desc = item.action.action.get("name", "")
             action_match = keyword in action_desc.lower()
 
-            playbook_name = item.playbook.name if item.playbook else ""
+            playbook_name = item.playbook_version.name if item.playbook_version else ""
             playbook_match = keyword in playbook_name.lower()
 
             return name_match or action_match or playbook_match
@@ -240,7 +240,7 @@ async def update_timed(request):
         if not playbook_id or not playbook_input:
             raise CustomError(ErrorCode.ParameterError)
 
-        timed.playbook = await Playbook.get_or_none(id=playbook_id, deleted=False)
+        timed.playbook_version = await Playbook.get_or_none(id=playbook_id, deleted=False)
 
         playbook_input["executor"] = request.ctx.session.get("account_info").id
 
@@ -266,7 +266,7 @@ async def update_timed(request):
             raise CustomError(ErrorCode.ActionInputError)
 
         timed.action_input = action_input
-        timed.playbook = None
+        timed.playbook_version = None
         timed.playbook_input = {}
         msg["run_args"] = action_input
 

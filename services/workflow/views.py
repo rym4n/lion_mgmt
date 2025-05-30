@@ -4,7 +4,6 @@ import asyncio
 import os
 import time
 import traceback
-import uuid
 from collections import defaultdict
 
 import aiofile
@@ -13,6 +12,7 @@ import orjson
 from sanic import Blueprint, Request, Websocket
 from sanic.log import logger
 from tortoise.expressions import Q
+from tortoise.transactions import in_transaction
 from websockets import ConnectionClosed
 
 from core.error_code import ErrorCode
@@ -21,7 +21,7 @@ from libs.chat import chat_manager
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_order_version
-from models import Playbook, Scene, ToolAction, Tool, Runlog, Tag
+from models import Playbook, Scene, ToolAction, Tool, Runlog, Tag, PlaybookVersion
 from services.tool_management.views import tool_action_update, tool_action_playbook_delete
 from settings import SECRET, SESSION_ENCODING_ALGORITHM
 
@@ -38,9 +38,9 @@ async def create_workflow(request):
     请求参数：
         name: 剧本名，必须参数
         remark: 备注，可选
-        tags: 标签，可选
-        flow_json: 流程图布局信息，可选
-        scenes: 场景，列表格式，可选
+        tags: 标签，列表格式，例如 ["aaa","bbb"]，可选
+        scenes: 场景，列表格式，例如 ["aaa","bbb"]，可选
+        flow_json: 流程图具体内容, 可选
     """
     total_up_value = 0
     # 判断剧本数量是否达到了创建上限
@@ -60,26 +60,33 @@ async def create_workflow(request):
     if await Playbook.filter(name=request.json.get("name"), deleted=False).exists():
         raise CustomError(ErrorCode.PlaybookNameExists)
 
-    playbook = await Playbook.create(
-        name=request.json.get("name"),
-        remark=request.json.get("remark", ""),
-        tags=request.json.get("tags") or [],
-        flow_json=request.json.get("flow_json") or {},
-        status=0,
-        version=gen_order_version(),
-        creator=request.ctx.session['account_info'],
-        updator=request.ctx.session['account_info']
-    )
-    if playbook.flow_json:
-        action_ids = await statistics_data(playbook.flow_json)
-        await tool_action_update({playbook.id: action_ids})
+    flow_json = request.json.get("flow_json") or {}
+    async with in_transaction():
+        playbook = await Playbook.create(
+            name=request.json.get("name"),
+            remark=request.json.get("remark", "")
+        )
+        if request.json.get('tags'):
+            tags = await Tag.filter(name__in=request.json.get('tags')).all()
+            await playbook.tags.add(*tags)
+        if request.json.get('scenes'):
+            scenes = await Scene.filter(name__in=request.json.get('scenes')).all()
+            await playbook.scenes.add(*scenes)
+        pv = await PlaybookVersion.create(
+            playbook=playbook,
+            version=gen_order_version(),
+            status=0,
+            change_desc=request.json.get("change_desc", ''),
+            flow_json=flow_json,
+            creator=request.ctx.session['account_info'],
+            updator=request.ctx.session['account_info']
+        )
 
-    if request.json.get('scenes'):
-        scenes = await Scene.filter(name__in=request.json.get('scenes')).all()
-        await playbook.scenes.add(*scenes)
-    await playbook.fetch_related("scenes", "updator")
+        if flow_json:
+            action_ids = await statistics_data(flow_json)
+            await tool_action_update({pv.id: action_ids})
 
-    return response_ok(playbook.json)
+        return response_ok(pv.json)
 
 
 @workflow_bp.post("/list")
@@ -112,15 +119,21 @@ async def list_workflow(request):
     if request.json.get("status"):
         condition = condition & Q(status=request.json.get("status"))
     if request.json.get("tag"):
-        condition = condition & Q(tags__contains=[request.json.get("tag")])
+        tags = await Tag.filter(name__in=request.json.get("tag")).all()
+        condition = condition & Q(tags__in=tags)
+
     total = await Playbook.filter(condition).count()
     playbooks = await Playbook.filter(condition).offset(offset).limit(limit).all().prefetch_related("scenes", "creator", "updator")
+    data = []
+    for p in playbooks:
+        versions = await PlaybookVersion.filter(playbook=p).count()
+        data.append({**p.json, "versions": versions})
     return response_ok({
         "total": total,
         "page": page,
         "size": size,
         "total_pages": (total + size - 1) // size,
-        "data": [p.simple_json for p in playbooks]
+        "data": data
     })
 
 
@@ -131,25 +144,25 @@ async def list_workflow_versions(request):
     获取剧本版本列表
 
     请求参数：
-        name: 必填，剧本名称
+        id: 必填，剧本id
     """
-    playbooks = await Playbook.filter(name=request.json.get("name"), deleted=False).all()
-    return response_ok([p.simple_json for p in await playbooks])
+    playbooks = await PlaybookVersion.filter(playbook__id=request.json.get("id"), deleted=False).all().prefetch_related("playbook", "creator", "updator")
+    return response_ok([p.json for p in playbooks])
 
 
-@workflow_bp.post("/detail")
-@requires_permission("workflow:r")
-async def detail_workflow(request):
-    """
-    获取剧本详情
-
-    请求参数：
-        id: 必填，剧本ID
-    """
-    playbook = await Playbook.get(id=request.json.get("id")).prefetch_related("creator", "updator", "scenes")
-    if not playbook:
-        raise CustomError(ErrorCode.PlaybookNotFound)
-    return response_ok(playbook.json)
+# @workflow_bp.post("/detail")
+# @requires_permission("workflow:r")
+# async def detail_workflow(request):
+#     """
+#     获取剧本详情
+#
+#     请求参数：
+#         id: 必填，剧本特定版本的ID
+#     """
+#     playbook = await PlaybookVersion.get(id=request.json.get("id")).prefetch_related("creator", "updator", "playbook")
+#     if not playbook:
+#         raise CustomError(ErrorCode.PlaybookNotFound)
+#     return response_ok(playbook.json)
 
 
 @workflow_bp.post("/edit")
@@ -165,38 +178,59 @@ async def edit_workflow(request):
         start_app: 可选，开始节点
         end_app: 可选，结束节点
         tags: 可选，标签
-        flow_json: 可选，流程图布局信息
     """
-    playbook = await Playbook.get(id=request.json.get("id"))
+    playbook = await Playbook.get(id=request.json.get("id")).prefetch_related("scenes")
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
-    params = request.json
     has_change = False
-    for p in params:
+    for p in request.json:
         # 敏感属性不允许修改
-        if p in ['id', 'ctime', 'utime', 'deleted', 'creator', 'updator', 'status', 'version']:
+        if p in ['id', 'ctime', 'utime', 'deleted', 'creator', 'updator', 'internal']:
             continue
-        if p == "flow_json":
-            if playbook.flow_json:
-                action_ids = await statistics_data(playbook.flow_json)
-                await tool_action_playbook_delete({playbook.id: action_ids})
-            if params[p]:
-                action_ids = await statistics_data(params[p])
-                await tool_action_update({playbook.id: action_ids})
         if hasattr(playbook, p):
             has_change = True
-            setattr(playbook, p, params[p])
+            setattr(playbook, p, request.json[p])
     if has_change:
         playbook.updator = request.ctx.session['account_info']
-        # 已发布的剧本是不允许修改的
-        if playbook.status == 1:
-            playbook.version = gen_order_version()
-            playbook.id = str(uuid.uuid4())
-            await playbook.create()
-        else:
-            await playbook.save()
-    return response_ok({"id": playbook.id, "name": playbook.name, "version": playbook.version, "status": playbook.status})
+        await playbook.save()
+    return response_ok(playbook.json)
+
+
+@workflow_bp.post("/edit-flow")
+@requires_permission("workflow:u")
+async def edit_workflow_flow(request):
+    """
+    修改剧本流程图内容
+
+    请求参数:
+        id: 必填，剧本版本ID
+        flow_json: 必填，流程图布局信息
+    """
+    if not request.json.get("id") or not request.json.get("flow_json"):
+        raise CustomError(ErrorCode.ParameterError)
+
+    pv = await PlaybookVersion.get(id=request.json.get("id"))
+    old_data = pv.flow_json
+    pv.flow_json = request.json.get("flow_json")
+    pv.updator = request.ctx.session['account_info']
+    # 已发布的剧本是不允许修改的
+    if pv.status == 1:
+        pv.version = gen_order_version()
+        pv.creator = request.ctx.session['account_info']
+        logger.info(pv.json)
+        await pv.create()
+    else:
+        await pv.save()
+
+    if old_data:
+        action_ids = await statistics_data(old_data)
+        await tool_action_playbook_delete({pv.id: action_ids})
+
+    action_ids = await statistics_data(pv.flow_json)
+    await tool_action_update({pv.id: action_ids})
+
+    return response_ok(pv.json)
 
 
 @workflow_bp.post("/publish")
@@ -206,10 +240,13 @@ async def publish_workflow(request):
     发布剧本
 
     请求参数：
-        id: 必填，剧本ID
+        id: 必填，剧本版本ID
+        change_desc: 必填, 版本变更说明
     """
-    await Playbook.filter(id=request.json.get("id")).update(status=1, updator=request.ctx.session['account_info'],
-                                                            version=gen_order_version())
+    if not request.json.get("id") or not request.json.get("change_desc"):
+        raise CustomError(ErrorCode.ParameterError)
+    await PlaybookVersion.filter(id=request.json.get("id"), status=0).update(status=1, updator=request.ctx.session['account_info'],
+                                                                             version=gen_order_version(), change_desc=request.json.get("change_desc"))
     return response_ok("剧本发布成功")
 
 
@@ -227,10 +264,26 @@ async def delete_workflow(request):
         raise CustomError(ErrorCode.PlaybookNotFound)
     playbook.deleted = True
     await playbook.save()
-    if playbook.flow_json:
-        action_ids = await statistics_data(playbook.flow_json)
-        await tool_action_playbook_delete({playbook.id: action_ids})
     return response_ok("剧本删除成功")
+
+
+@workflow_bp.post("/del-version")
+@requires_permission("workflow:d")
+async def delete_workflow_version(request):
+    """
+    删除剧本版本
+
+    请求参数：
+        id: 剧本版本ID
+    """
+    pv = await PlaybookVersion.get_or_none(id=request.json.get("id"))
+    if not pv:
+        raise CustomError(ErrorCode.PlaybookNotFound)
+
+    await pv.delete()
+    if pv.flow_json:
+        action_ids = await statistics_data(pv.flow_json)
+        await tool_action_playbook_delete({pv.id: action_ids})
 
 
 @workflow_bp.websocket('/run')
@@ -333,8 +386,7 @@ async def run_history(request):
     offset = (page - 1) * size
     limit = size
 
-    all_run_ids = await Runlog.filter(playbook_id=playbook_id, deleted=False).order_by("-utime").values_list("run_id",
-                                                                                                             "utime")
+    all_run_ids = await Runlog.filter(playbook_id=playbook_id, deleted=False).order_by("-utime").values_list("run_id", "utime")
     seen = set()
     run_ids_query = []
     for run_id, utime in all_run_ids:
@@ -395,10 +447,10 @@ async def input_data(request):
     获取指定剧本的输入参数
 
     请求参数：
-        id: 剧本ID
+        id: 剧本版本ID
     """
     redis_client = request.ctx.cache_client
-    playbook = await Playbook.get(id=request.json.get("id"))
+    playbook = await PlaybookVersion.get(id=request.json.get("id"))
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
 

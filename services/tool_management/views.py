@@ -1147,10 +1147,10 @@ async def tool_action_update(data):
                 continue
 
             if not isinstance(action.playbook, list):
-                action.playbook = []
+                action.playbook_version = []
 
             if playbook_id not in action.playbook:
-                action.playbook.append(playbook_id)
+                action.playbook_version.append(playbook_id)
                 await action.save()
 
                 affected_tools.add((action.tool_name, action.version_number))
@@ -1184,10 +1184,10 @@ async def tool_action_playbook_delete(data):
             if not action:
                 continue
             if not isinstance(action.playbook, list):
-                action.playbook = []
+                action.playbook_version = []
 
             if playbook_id in action.playbook:
-                action.playbook.remove(playbook_id)
+                action.playbook_version.remove(playbook_id)
                 await action.save()
             affected_tools.add((action.tool_name, action.version_number))
 

@@ -10,15 +10,10 @@ class Playbook(BaseModel):
     """
     剧本模型
     """
-    name = fields.CharField(max_length=255, description="剧本名称")
+    name = fields.CharField(max_length=255, unique=True, description="剧本名称")
     remark = fields.TextField(description="描述")
-    status = fields.IntField(max_length=1, default=0, description="剧本状态,0草稿,1已发布")
-    tags = fields.JSONField(default=[], description="标签")
-    scenes = fields.ManyToManyField("models.Scene", through="playbook_scene")
-    flow_json = fields.JSONField(default={}, description="流程图flow数据，包含edges和nodes")
-    version = fields.CharField(max_length=30, default=0, description="版本号，每次publish都会生成新纪录，用于版本回溯")
-    creator = fields.ForeignKeyField("models.Account", related_name="created_playbooks", description="创建人")
-    updator = fields.ForeignKeyField("models.Account", related_name="updated_playbooks", description="更新人")
+    tags = fields.ManyToManyField("models.Tag", null=True, through="playbook_tag")
+    scenes = fields.ManyToManyField("models.Scene", null=True, through="playbook_scene")
     internal = fields.BooleanField(default=False, description="是否内置剧本")
 
     def validate(self) -> None:
@@ -32,30 +27,8 @@ class Playbook(BaseModel):
             "utime": strip_timezone_to_seconds(self.utime),
             "name": self.name,
             "remark": self.remark,
-            "status": self.status,
-            "tags": self.tags,
+            "tags": [tag.name for tag in self.tags] if self.tags else [],
             "scenes": [scene.name for scene in self.scenes] if self.scenes else [],
-            "flow_json": self.flow_json,
-            "version": self.version,
-            "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
-            "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
-            "internal": self.internal
-        }
-
-    @property
-    def simple_json(self) -> dict:
-        return {
-            "id": self.id,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-            "utime": strip_timezone_to_seconds(self.utime),
-            "name": self.name,
-            "remark": self.remark,
-            "status": self.status,
-            "tags": self.tags,
-            "version": self.version,
-            "scenes": [scene.name for scene in self.scenes] if self.scenes else [],
-            "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
-            "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
             "internal": self.internal
         }
 
@@ -63,4 +36,47 @@ class Playbook(BaseModel):
         table = "playbook"
         ordering = ["-utime"]
 
-        unique_together = (("name", "version"),)
+        unique_together = (("name", "deleted"),)
+
+
+class PlaybookVersion(BaseModel):
+    """
+    剧本版本模型
+    """
+    playbook = fields.ForeignKeyField("models.Playbook", related_name="playbook_versions")
+    change_desc = fields.TextField(null=False, description="变更说明")
+    version = fields.CharField(max_length=30, default=0, description="版本号，每次publish都会生成新纪录，用于版本回溯")
+    status = fields.IntField(max_length=1, default=0, description="剧本状态,0草稿,1已发布")
+    flow_json = fields.JSONField(default={}, description="流程图flow数据，包含edges和nodes")
+    creator = fields.ForeignKeyField("models.Account", related_name="created_playbooks", description="创建人")
+    updator = fields.ForeignKeyField("models.Account", related_name="updated_playbooks", description="更新人")
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "flow_id": self.playbook.id,
+            "version_id": self.id,
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
+            "name": self.playbook.name,
+            "remark": self.playbook.remark,
+            "change_desc": self.change_desc,
+            "status": self.status,
+            "tags": [tag.name for tag in self.playbook.tags] if self.playbook.tags else [],
+            "scenes": [scene.name for scene in self.playbook.scenes] if self.playbook.scenes else [],
+            "flow_json": self.flow_json,
+            "version": self.version,
+            "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
+            "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
+            "internal": self.playbook.internal
+        }
+
+
+    class Meta:
+        table = "playbook_version"
+        ordering = ["-utime"]
+
+        unique_together = (("playbook", "version"),)

@@ -11,7 +11,7 @@ class Approvement(BaseModel):
     字段：
     """
     title: str = fields.CharField(max_length=50, index=True, description="审核标题")
-    flow_id = fields.ForeignKeyField("models.Playbook", description="关联剧本ID")
+    workflow_id = fields.ForeignKeyField("models.PlaybookVersion", description="关联剧本ID")
     run_id = fields.CharField(max_length=50, description="关联运行ID")
     content = fields.TextField(description="审核描述内容")
     status = fields.IntField(default=0, description="审核状态，0代表待审核，1代表审核通过，2代表审核拒绝，3代表审核过期")
