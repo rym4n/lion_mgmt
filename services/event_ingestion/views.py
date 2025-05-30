@@ -129,7 +129,7 @@ async def build_kafka_file_configuration_file(output_path, sources, event_source
 
     result = run_linux_command(f'vector validate --config-yaml {tmp_path}')
 
-    if result["status"] != 0:
+    if result["code"] != 0:
         os.remove(tmp_path)
         return None
 
@@ -409,7 +409,7 @@ async def update_event_ingestion(request):
 
     result = run_linux_command(f'vector validate --config-yaml {event.file_path}')
 
-    if result["status"] != 0:
+    if result["code"] != 0:
         os.remove(event.file_path)
         async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
             yaml_str = yaml.dump(event.vector_config, allow_unicode=True, default_flow_style=False)
@@ -621,7 +621,7 @@ del(.datetime_str)
 
     result = run_linux_command(f'vector validate --config-yaml {event.file_path}')
 
-    if result["status"] != 0:
+    if result["code"] != 0:
         os.remove(event.file_path)
         async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
             yaml_str = yaml.dump(event.vector_config, allow_unicode=True, default_flow_style=False)
@@ -699,7 +699,7 @@ async def unbundled_event_ingestion_script(request):
 
     result = run_linux_command(f'vector validate --config-yaml {event.file_path}')
 
-    if result["status"] != 0:
+    if result["code"] != 0:
         os.remove(event.file_path)
         async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
             yaml_str = yaml.dump(event.vector_config, allow_unicode=True, default_flow_style=False)
@@ -959,7 +959,7 @@ async def event_ingestion_binding_update(request):
 
     result = run_linux_command(f'vector validate --config-yaml {event_ingestion.file_path}')
 
-    if result["status"] != 0:
+    if result["code"] != 0:
         os.remove(event_ingestion.file_path)
         async with aiofile.AIOFile(event_ingestion.file_path, 'w', encoding='utf-8') as f:
             yaml_str = yaml.dump(event_ingestion.vector_config, allow_unicode=True, default_flow_style=False)
