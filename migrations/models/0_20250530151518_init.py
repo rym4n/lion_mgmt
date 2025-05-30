@@ -55,29 +55,6 @@ COMMENT ON COLUMN "action_permissions"."tool_name" IS '工具名称';
 COMMENT ON COLUMN "action_permissions"."roles_id" IS '有权限执行的角色';
 COMMENT ON COLUMN "action_permissions"."users_id" IS '有权限执行的用户';
 COMMENT ON TABLE "action_permissions" IS '动作权限表';
-CREATE TABLE IF NOT EXISTS "approvement" (
-    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
-    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "deleted" BOOL NOT NULL DEFAULT False,
-    "title" VARCHAR(50) NOT NULL,
-    "content" TEXT NOT NULL,
-    "status" INT NOT NULL DEFAULT 0,
-    "expire_time" TIMESTAMPTZ,
-    "approvers" VARCHAR(255),
-    "processor_id" VARCHAR(36) REFERENCES "account" ("id") ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS "idx_approvement_title_2bd859" ON "approvement" ("title");
-COMMENT ON COLUMN "approvement"."ctime" IS '创建时间';
-COMMENT ON COLUMN "approvement"."utime" IS '更新时间';
-COMMENT ON COLUMN "approvement"."deleted" IS '删除标识';
-COMMENT ON COLUMN "approvement"."title" IS '审核标题';
-COMMENT ON COLUMN "approvement"."content" IS '审核描述内容';
-COMMENT ON COLUMN "approvement"."status" IS '审核状态，0代表待审核，1代表审核通过，2代表审核拒绝，3代表审核过期';
-COMMENT ON COLUMN "approvement"."expire_time" IS '审核过期时间';
-COMMENT ON COLUMN "approvement"."approvers" IS '审核人列表，多个用逗号分隔';
-COMMENT ON COLUMN "approvement"."processor_id" IS '实际审核处理人';
-COMMENT ON TABLE "approvement" IS '人工审核模型';
 CREATE TABLE IF NOT EXISTS "audit_log" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -157,6 +134,7 @@ CREATE TABLE IF NOT EXISTS "events_ingestion" (
     "file_path" VARCHAR(255),
     "vector_name" VARCHAR(255),
     "config_info" JSONB,
+    "vector_config" JSONB,
     "enabled_health_status" VARCHAR(255),
     "execution_health_status" VARCHAR(255),
     "creator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
@@ -175,6 +153,7 @@ COMMENT ON COLUMN "events_ingestion"."syslog_config" IS 'syslog端口';
 COMMENT ON COLUMN "events_ingestion"."file_path" IS '配置文件路径';
 COMMENT ON COLUMN "events_ingestion"."vector_name" IS 'vector名称';
 COMMENT ON COLUMN "events_ingestion"."config_info" IS '转换配置信息';
+COMMENT ON COLUMN "events_ingestion"."vector_config" IS 'vector配置信息';
 COMMENT ON COLUMN "events_ingestion"."enabled_health_status" IS '上游接入健康状态';
 COMMENT ON COLUMN "events_ingestion"."execution_health_status" IS '联动执行健康状态';
 COMMENT ON COLUMN "events_ingestion"."creator_id" IS '创建人';
@@ -198,30 +177,73 @@ CREATE TABLE IF NOT EXISTS "playbook" (
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted" BOOL NOT NULL DEFAULT False,
-    "name" VARCHAR(255) NOT NULL,
+    "name" VARCHAR(255) NOT NULL UNIQUE,
     "remark" TEXT NOT NULL,
-    "status" INT NOT NULL DEFAULT 0,
-    "tags" JSONB NOT NULL,
-    "flow_json" JSONB NOT NULL,
-    "version" VARCHAR(30) NOT NULL DEFAULT '0',
     "internal" BOOL NOT NULL DEFAULT False,
-    "creator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
-    "updator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
-    CONSTRAINT "uid_playbook_name_7d99d8" UNIQUE ("name", "version")
+    CONSTRAINT "uid_playbook_name_1a146f" UNIQUE ("name", "deleted")
 );
 COMMENT ON COLUMN "playbook"."ctime" IS '创建时间';
 COMMENT ON COLUMN "playbook"."utime" IS '更新时间';
 COMMENT ON COLUMN "playbook"."deleted" IS '删除标识';
 COMMENT ON COLUMN "playbook"."name" IS '剧本名称';
 COMMENT ON COLUMN "playbook"."remark" IS '描述';
-COMMENT ON COLUMN "playbook"."status" IS '剧本状态,0草稿,1已发布';
-COMMENT ON COLUMN "playbook"."tags" IS '标签';
-COMMENT ON COLUMN "playbook"."flow_json" IS '流程图flow数据，包含edges和nodes';
-COMMENT ON COLUMN "playbook"."version" IS '版本号，每次publish都会生成新纪录，用于版本回溯';
 COMMENT ON COLUMN "playbook"."internal" IS '是否内置剧本';
-COMMENT ON COLUMN "playbook"."creator_id" IS '创建人';
-COMMENT ON COLUMN "playbook"."updator_id" IS '更新人';
 COMMENT ON TABLE "playbook" IS '剧本模型';
+CREATE TABLE IF NOT EXISTS "playbook_version" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "change_desc" TEXT NOT NULL,
+    "version" VARCHAR(30) NOT NULL DEFAULT '0',
+    "status" INT NOT NULL DEFAULT 0,
+    "flow_json" JSONB NOT NULL,
+    "creator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
+    "playbook_id" VARCHAR(36) NOT NULL REFERENCES "playbook" ("id") ON DELETE CASCADE,
+    "updator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
+    CONSTRAINT "uid_playbook_ve_playboo_808e98" UNIQUE ("playbook_id", "version")
+);
+COMMENT ON COLUMN "playbook_version"."ctime" IS '创建时间';
+COMMENT ON COLUMN "playbook_version"."utime" IS '更新时间';
+COMMENT ON COLUMN "playbook_version"."deleted" IS '删除标识';
+COMMENT ON COLUMN "playbook_version"."change_desc" IS '变更说明';
+COMMENT ON COLUMN "playbook_version"."version" IS '版本号，每次publish都会生成新纪录，用于版本回溯';
+COMMENT ON COLUMN "playbook_version"."status" IS '剧本状态,0草稿,1已发布';
+COMMENT ON COLUMN "playbook_version"."flow_json" IS '流程图flow数据，包含edges和nodes';
+COMMENT ON COLUMN "playbook_version"."creator_id" IS '创建人';
+COMMENT ON COLUMN "playbook_version"."updator_id" IS '更新人';
+COMMENT ON TABLE "playbook_version" IS '剧本版本模型';
+CREATE TABLE IF NOT EXISTS "approvement" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "title" VARCHAR(50) NOT NULL,
+    "run_id" VARCHAR(50) NOT NULL,
+    "content" TEXT NOT NULL,
+    "status" INT NOT NULL DEFAULT 0,
+    "expire_time" TIMESTAMPTZ NOT NULL,
+    "audit_node_id" VARCHAR(50) NOT NULL,
+    "created_at" TIMESTAMPTZ NOT NULL,
+    "params" JSONB NOT NULL,
+    "processor_id" VARCHAR(36) REFERENCES "account" ("id") ON DELETE CASCADE,
+    "workflow_id_id" VARCHAR(36) NOT NULL REFERENCES "playbook_version" ("id") ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS "idx_approvement_title_2bd859" ON "approvement" ("title");
+COMMENT ON COLUMN "approvement"."ctime" IS '创建时间';
+COMMENT ON COLUMN "approvement"."utime" IS '更新时间';
+COMMENT ON COLUMN "approvement"."deleted" IS '删除标识';
+COMMENT ON COLUMN "approvement"."title" IS '审核标题';
+COMMENT ON COLUMN "approvement"."run_id" IS '关联运行ID';
+COMMENT ON COLUMN "approvement"."content" IS '审核描述内容';
+COMMENT ON COLUMN "approvement"."status" IS '审核状态，0代表待审核，1代表审核通过，2代表审核拒绝，3代表审核过期';
+COMMENT ON COLUMN "approvement"."expire_time" IS '审核过期时间';
+COMMENT ON COLUMN "approvement"."audit_node_id" IS '审核节点ID';
+COMMENT ON COLUMN "approvement"."created_at" IS '审核触发的时间';
+COMMENT ON COLUMN "approvement"."params" IS '自定义参数';
+COMMENT ON COLUMN "approvement"."processor_id" IS '实际审核处理人';
+COMMENT ON COLUMN "approvement"."workflow_id_id" IS '关联剧本ID';
+COMMENT ON TABLE "approvement" IS '人工审核模型';
 CREATE TABLE IF NOT EXISTS "role" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -426,7 +448,7 @@ CREATE TABLE IF NOT EXISTS "timed" (
     "end_time" VARCHAR(50) NOT NULL,
     "action_id" VARCHAR(36) REFERENCES "tool_action" ("id") ON DELETE CASCADE,
     "creator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
-    "playbook_id" VARCHAR(36) REFERENCES "playbook" ("id") ON DELETE CASCADE,
+    "playbook_version_id" VARCHAR(36) REFERENCES "playbook_version" ("id") ON DELETE CASCADE,
     "updator_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE
 );
 COMMENT ON COLUMN "timed"."ctime" IS '创建时间';
@@ -444,7 +466,7 @@ COMMENT ON COLUMN "timed"."enable" IS '是否启用, 0为禁用，1为启用';
 COMMENT ON COLUMN "timed"."end_time" IS '结束时间';
 COMMENT ON COLUMN "timed"."action_id" IS '关联工具动作';
 COMMENT ON COLUMN "timed"."creator_id" IS '创建人';
-COMMENT ON COLUMN "timed"."playbook_id" IS '关联剧本';
+COMMENT ON COLUMN "timed"."playbook_version_id" IS '关联剧本';
 COMMENT ON COLUMN "timed"."updator_id" IS '更新人';
 COMMENT ON TABLE "timed" IS '运行场景模型';
 CREATE TABLE IF NOT EXISTS "runlog" (
@@ -468,7 +490,7 @@ CREATE TABLE IF NOT EXISTS "runlog" (
     "end_time" TIMESTAMPTZ,
     "executor" VARCHAR(36),
     "event_id_id" VARCHAR(36) REFERENCES "events" ("id") ON DELETE CASCADE,
-    "playbook_id" VARCHAR(36) REFERENCES "playbook" ("id") ON DELETE CASCADE,
+    "playbook_version_id" VARCHAR(36) REFERENCES "playbook_version" ("id") ON DELETE CASCADE,
     "timer_id_id" VARCHAR(36) REFERENCES "timed" ("id") ON DELETE CASCADE
 );
 COMMENT ON COLUMN "runlog"."ctime" IS '创建时间';
@@ -490,7 +512,7 @@ COMMENT ON COLUMN "runlog"."start_time" IS '开始时间';
 COMMENT ON COLUMN "runlog"."end_time" IS '结束时间';
 COMMENT ON COLUMN "runlog"."executor" IS '执行者ID';
 COMMENT ON COLUMN "runlog"."event_id_id" IS '关联事件';
-COMMENT ON COLUMN "runlog"."playbook_id" IS '关联剧本';
+COMMENT ON COLUMN "runlog"."playbook_version_id" IS '关联剧本';
 COMMENT ON COLUMN "runlog"."timer_id_id" IS '关联定时任务';
 COMMENT ON TABLE "runlog" IS '所有节点的执行记录';
 CREATE TABLE IF NOT EXISTS "tool_resources" (
@@ -556,6 +578,16 @@ CREATE TABLE IF NOT EXISTS "playbook_scene" (
     "scene_id" VARCHAR(36) NOT NULL REFERENCES "scene" ("id") ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uidx_playbook_sc_playboo_63ed52" ON "playbook_scene" ("playbook_id", "scene_id");
+CREATE TABLE IF NOT EXISTS "playbook_tag" (
+    "playbook_id" VARCHAR(36) NOT NULL REFERENCES "playbook" ("id") ON DELETE CASCADE,
+    "tag_id" VARCHAR(36) NOT NULL REFERENCES "tag" ("id") ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uidx_playbook_ta_playboo_34329c" ON "playbook_tag" ("playbook_id", "tag_id");
+CREATE TABLE IF NOT EXISTS "approve_accounts" (
+    "approvement_id" VARCHAR(36) NOT NULL REFERENCES "approvement" ("id") ON DELETE CASCADE,
+    "account_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uidx_approve_acc_approve_13ec1c" ON "approve_accounts" ("approvement_id", "account_id");
 CREATE TABLE IF NOT EXISTS "room_accounts" (
     "room_id" VARCHAR(36) NOT NULL REFERENCES "room" ("id") ON DELETE CASCADE,
     "account_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE

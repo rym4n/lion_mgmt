@@ -288,7 +288,7 @@ async def refresh_session_token(request):
     }
     account = await request.ctx.cache_client.get(f"account_{request.ctx.session['sub']}")
     if not account:
-        account = await Account.filter(id=request.ctx.session["sub"]).first().prefetch_related('roles')
+        account = await Account.get(id=request.ctx.session["sub"]).select_related('roles')
     await request.ctx.cache_client.set(f"account_{request.ctx.session['sub']}", account, AUTHENTICATION_SESSION_EXPIRATION)
     return response_ok(resp)
 
@@ -377,7 +377,7 @@ async def edit_user(request):
         disabled: 可选，是否禁用
         permit_ip: 可选，允许登录的IP地址，支持多个IP或CIDR格式（逗号分隔），例如 192.168.1.1,10.0.2.0/24
     """
-    user = await Account.get(username=request.json.get("username"), deleted=False).prefetch_related('roles')
+    user = await Account.get(username=request.json.get("username"), deleted=False).select_related('roles')
     if not user:
         raise CustomError(ErrorCode.AccountNotFound)
 

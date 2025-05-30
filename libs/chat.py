@@ -119,7 +119,7 @@ class ChatManager:
 
         # 处理审批消息
         if log.get('type') == 'approval-info':
-            approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'], content=log['content'],
+            approve = await Approvement.create(title=log['node_name'], workflow_id=log['flow_id'], run_id=log['run_id'], content=log['content'],
                                                expire_time=log['expire_time'], created_at=log['created_at'], audit_node_id=log['audit_app'])
             if log.get('users'):
                 users = Account.filter(id__in=log['users']).all()

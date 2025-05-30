@@ -102,7 +102,7 @@ async def add_timed(request):
             raise CustomError(ErrorCode.PlaybookNotFound)
         msg["run_type"] = "flow"
         playbook_input["executor"] = request.ctx.session.get("account_info").id
-        if flow_parameter_detection(playbook_input):
+        if any(key not in playbook_input.keys() for key in ["flow_id", "flow_input", "executor"]):
             raise CustomError(ErrorCode.PlaybookInputError)
         msg["run_args"] = playbook_input
         if status == 0:
@@ -120,7 +120,7 @@ async def add_timed(request):
         if not action:
             raise CustomError(ErrorCode.ActionNotFoundError)
         action_input["executor"] = request.ctx.session.get("account_info").id
-        if action_parameter_detection(action_input):
+        if any(key not in action_input for key in ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name", "action", "executor", "retry_times", "timeout"]):
             raise CustomError(ErrorCode.ActionInputError)
         msg["run_type"] = "action"
         msg["run_args"] = action_input
@@ -159,7 +159,7 @@ async def get_all(request):
     keyword = request.json.get("keyword", "").strip()
 
     # 获取全部（后续在 Python 层过滤）
-    all_items = await Timed.filter(deleted=False).select_related("action", "playbook", "creator", "updator")
+    all_items = await Timed.filter(deleted=False).prefetch_related("action", "playbook_version", "creator", "updator")
 
     if keyword:
         keyword = keyword.lower()
@@ -172,7 +172,7 @@ async def get_all(request):
                 action_desc = item.action.action.get("name", "")
             action_match = keyword in action_desc.lower()
 
-            playbook_name = item.playbook.name if item.playbook else ""
+            playbook_name = item.playbook_version.name if item.playbook_version else ""
             playbook_match = keyword in playbook_name.lower()
 
             return name_match or action_match or playbook_match
@@ -217,8 +217,7 @@ async def update_timed(request):
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    timed = await Timed.filter(id=timed_id, deleted=False).select_related("action", "playbook", "creator",
-                                                                          "updator").first()
+    timed = await Timed.get(id=timed_id, deleted=False).select_related("action", "playbook_version", "creator", "updator")
     if not timed:
         raise CustomError(ErrorCode.TimedNotFound)
 
@@ -240,11 +239,11 @@ async def update_timed(request):
         if not playbook_id or not playbook_input:
             raise CustomError(ErrorCode.ParameterError)
 
-        timed.playbook = await Playbook.get_or_none(id=playbook_id, deleted=False)
+        timed.playbook_version = await Playbook.get_or_none(id=playbook_id, deleted=False)
 
         playbook_input["executor"] = request.ctx.session.get("account_info").id
 
-        if flow_parameter_detection(playbook_input):
+        if any(key not in playbook_input.keys() for key in ["flow_id", "flow_input", "executor"]):
             raise CustomError(ErrorCode.PlaybookInputError)
 
         timed.playbook_input = playbook_input
@@ -262,11 +261,11 @@ async def update_timed(request):
         timed.action = await ToolAction.get_or_none(id=action_id, deleted=False)
 
         action_input["executor"] = request.ctx.session.get("account_info").id
-        if action_parameter_detection(action_input):
+        if any(key not in action_input for key in ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name", "action", "executor", "retry_times", "timeout"]):
             raise CustomError(ErrorCode.ActionInputError)
 
         timed.action_input = action_input
-        timed.playbook = None
+        timed.playbook_version = None
         timed.playbook_input = {}
         msg["run_args"] = action_input
 
@@ -356,16 +355,6 @@ async def get_run_log(request):
         "total": total,
         "data": [runlog.json for runlog in run_logs]
     })
-
-
-def action_parameter_detection(action_input):
-    allowed_keys = ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name", "action", "executor", "retry_times", "timeout"]
-    return any(key not in action_input.keys() for key in allowed_keys)
-
-
-def flow_parameter_detection(playbook_input):
-    allowed_keys = ["flow_id", "flow_input", "executor"]
-    return any(key not in playbook_input.keys() for key in allowed_keys)
 
 
 def is_valid_crontab(expr):

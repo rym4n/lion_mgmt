@@ -106,7 +106,7 @@ async def get_event_detail(request):
     """
     event_id = request.json.get("id")
 
-    event = await Events.get(id=event_id, deleted=False).prefetch_related("room")
+    event = await Events.get(id=event_id, deleted=False).select_related("room")
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
@@ -121,7 +121,7 @@ async def get_event_detail(request):
 
     event_dict = {"created_name": request.ctx.session['account_info'].username}
 
-    run_logs = await Runlog.filter(event_id=event_id, deleted=False).all().prefetch_related("playbook")
+    run_logs = await Runlog.filter(event_id=event_id, deleted=False).all().prefetch_related("playbook_version")
     run_logs_grouped = {}
     for runlog in run_logs:
         run_logs_grouped.setdefault(runlog.run_id, []).append(runlog.json)
@@ -160,7 +160,7 @@ async def update_event(request):
     if not event_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    event = await Events.get_or_none(id=event_id, deleted=False).prefetch_related("room")
+    event = await Events.get(id=event_id, deleted=False).select_related("room")
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
