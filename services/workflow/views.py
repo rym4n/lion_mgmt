@@ -153,8 +153,8 @@ async def list_workflow_versions(request):
     请求参数：
         id: 必填，剧本id
     """
-    playbooks = await PlaybookVersion.filter(playbook__id=request.json.get("id"), deleted=False).all().prefetch_related("playbook", "creator", "updator")
-    return response_ok([p.json for p in playbooks])
+    pv = await PlaybookVersion.filter(playbook__id=request.json.get("id"), deleted=False).all().prefetch_related("playbook", "creator", "updator")
+    return response_ok([p.json for p in pv])
 
 
 # @workflow_bp.post("/detail")
@@ -456,52 +456,50 @@ async def input_data(request):
     请求参数：
         id: 剧本版本ID
     """
-    redis_client = request.ctx.cache_client
-    playbook = await PlaybookVersion.get(id=request.json.get("id"))
+    playbook = await PlaybookVersion.get(id=request.json.get("id"), deleted=False)
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
-    nodes = playbook.flow_json["nodes"]
-
-    input_id = nodes[0]["id"]
-
     input_list = []
+    if playbook.flow_json:
+        nodes = playbook.flow_json["nodes"]
+        input_id = nodes[0]["id"]
 
-    for node in nodes[1:]:
-        if "input" not in node["properties"].keys():
-            continue
-        for key, value in node["properties"]["input"].items():
-            if input_id in value:
-                data = await redis_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"])
-                if data:
-                    if isinstance(data, (str, bytes)):
-                        data = orjson.loads(data)
-                    for action in (data.get('actions') or []):
-                        if node["properties"]["action"] in action.values():
-                            for item in action["input"]:
-                                if key == item["key"]:
-                                    action["input"] = item
-                                    break
-                            input_list.append({value.split(".output.")[-1].rstrip("}"): action})
-                else:
-                    actions = await ToolAction.filter(tool_name=node["properties"]["app_name"],
-                                                      version_number=node["properties"]["version"]).all()
-                    for action in actions:
-                        if node["properties"]["action"] == action.action["name"]:
-                            for item in action.action["input"]:
-                                if key == item["key"]:
-                                    action.action["input"] = item
-                                    break
-                            input_list.append({value.split(".output.")[-1].rstrip("}"): action.action})
-                    tool = await Tool.filter(name=node["properties"]["app_name"],
-                                             version=node["properties"]["version"]).first()
-                    if tool:
-                        config_path = os.path.abspath(os.path.join(tool.path, f"config.json"))
+        for node in nodes[1:]:
+            if "input" not in node["properties"].keys():
+                continue
+            for key, value in node["properties"]["input"].items():
+                if input_id in value:
+                    data = await request.ctx.cache_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"])
+                    if data:
+                        if isinstance(data, (str, bytes)):
+                            data = orjson.loads(data)
+                        for action in (data.get('actions') or []):
+                            if node["properties"]["action"] in action.values():
+                                for item in action["input"]:
+                                    if key == item["key"]:
+                                        action["input"] = item
+                                        break
+                                input_list.append({value.split(".output.")[-1].rstrip("}"): action})
+                    else:
+                        actions = await ToolAction.filter(tool_name=node["properties"]["app_name"],
+                                                          version_number=node["properties"]["version"]).all()
+                        for action in actions:
+                            if node["properties"]["action"] == action.action["name"]:
+                                for item in action.action["input"]:
+                                    if key == item["key"]:
+                                        action.action["input"] = item
+                                        break
+                                input_list.append({value.split(".output.")[-1].rstrip("}"): action.action})
+                        tool = await Tool.filter(name=node["properties"]["app_name"],
+                                                 version=node["properties"]["version"]).first()
+                        if tool:
+                            config_path = os.path.abspath(os.path.join(tool.path, f"config.json"))
 
-                        async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
-                            content = await f.read()
-                            # 将config数据存入redis
-                            await redis_client.set(node["properties"]["app_name"] + "_" + node["properties"]["version"], content, ttl=2592000)
+                            async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
+                                content = await f.read()
+                                # 将config数据存入redis
+                                await request.ctx.cache_client.set(node["properties"]["app_name"] + "_" + node["properties"]["version"], content, ttl=2592000)
 
     return response_ok(input_list)
 
