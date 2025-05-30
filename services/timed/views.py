@@ -217,7 +217,7 @@ async def update_timed(request):
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    timed = await Timed.filter(id=timed_id, deleted=False).select_related("action", "playbook_version", "creator", "updator").first()
+    timed = await Timed.get(id=timed_id, deleted=False).select_related("action", "playbook_version", "creator", "updator")
     if not timed:
         raise CustomError(ErrorCode.TimedNotFound)
 

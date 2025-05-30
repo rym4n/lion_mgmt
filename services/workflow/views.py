@@ -42,6 +42,10 @@ async def create_workflow(request):
         scenes: 场景，列表格式，例如 ["aaa","bbb"]，可选
         flow_json: 流程图具体内容, 可选
     """
+    data = request.json
+    if not data.get("name"):
+        raise CustomError(ErrorCode.ParameterError)
+
     total_up_value = 0
     # 判断剧本数量是否达到了创建上限
     total_count = await Playbook.filter(deleted=False).count()
@@ -57,26 +61,29 @@ async def create_workflow(request):
         raise CustomError(ErrorCode.PlaybookCreateLimit)
 
     # 判断name是否已经存在，如果存在的话要抛出异常
-    if await Playbook.filter(name=request.json.get("name"), deleted=False).exists():
+    if await Playbook.filter(name=data.get("name"), deleted=False).exists():
         raise CustomError(ErrorCode.PlaybookNameExists)
 
-    flow_json = request.json.get("flow_json") or {}
+    flow_json = data.get("flow_json") or {}
     async with in_transaction():
         playbook = await Playbook.create(
-            name=request.json.get("name"),
-            remark=request.json.get("remark", "")
+            name=data.get("name"),
+            remark=data.get("remark", "")
         )
-        if request.json.get('tags'):
-            tags = await Tag.filter(name__in=request.json.get('tags')).all()
+        if data.get('tags'):
+            tags = await Tag.filter(name__in=data.get('tags')).all()
             await playbook.tags.add(*tags)
-        if request.json.get('scenes'):
-            scenes = await Scene.filter(name__in=request.json.get('scenes')).all()
+        if data.get('scenes'):
+            scenes = await Scene.filter(name__in=data.get('scenes')).all()
             await playbook.scenes.add(*scenes)
+
+        await playbook.fetch_related('tags', 'scenes')
+
         pv = await PlaybookVersion.create(
             playbook=playbook,
             version=gen_order_version(),
             status=0,
-            change_desc=request.json.get("change_desc", ''),
+            change_desc=data.get("change_desc", ''),
             flow_json=flow_json,
             creator=request.ctx.session['account_info'],
             updator=request.ctx.session['account_info']
@@ -179,7 +186,7 @@ async def edit_workflow(request):
         end_app: 可选，结束节点
         tags: 可选，标签
     """
-    playbook = await Playbook.get(id=request.json.get("id")).prefetch_related("scenes")
+    playbook = await Playbook.get(id=request.json.get("id")).select_related("scenes")
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
 

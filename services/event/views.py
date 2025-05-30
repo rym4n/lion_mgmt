@@ -106,7 +106,7 @@ async def get_event_detail(request):
     """
     event_id = request.json.get("id")
 
-    event = await Events.get(id=event_id, deleted=False).prefetch_related("room")
+    event = await Events.get(id=event_id, deleted=False).select_related("room")
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
@@ -160,7 +160,7 @@ async def update_event(request):
     if not event_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    event = await Events.get_or_none(id=event_id, deleted=False).prefetch_related("room")
+    event = await Events.get(id=event_id, deleted=False).select_related("room")
     if not event:
         raise CustomError(ErrorCode.NotFound)
 

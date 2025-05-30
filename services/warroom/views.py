@@ -124,7 +124,7 @@ async def delete_room(request: Request):
         id: 必填， 房间id
     """
     room_id = request.json.get("id")
-    room = await Room.get(id=room_id).prefetch_related('creator')
+    room = await Room.select_related('creator').get(id=room_id)
     if room is None:
         raise CustomError(ErrorCode.RoomNotExists)
     user = request.ctx.session['account_info']
@@ -167,7 +167,7 @@ async def acquire_members(request: Request):
     """
     room_id = request.json.get('id')
 
-    room = await Room.get(id=room_id).prefetch_related('creator', 'users')
+    room = await Room.get(id=room_id).select_related('creator', 'users')
     if room is None:
         raise CustomError(ErrorCode.RoomNotExists)
 
