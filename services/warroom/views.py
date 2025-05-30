@@ -30,7 +30,7 @@ async def warroom_ws(request: Request, ws: Websocket):
     account = None
     try:
         # 先获取认证信息
-        auth_data = await asyncio.wait_for(ws.recv(), timeout=30.0)
+        auth_data = await asyncio.wait_for(ws.recv(), timeout=15)
         auth_json = orjson.loads(auth_data)
         payload = jwt.decode(auth_json['auth'], SECRET, SESSION_ENCODING_ALGORITHM)
         validate_token(payload, request)
