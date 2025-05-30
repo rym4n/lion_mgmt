@@ -123,7 +123,7 @@ async def list_workflow(request):
         condition = condition & Q(tags__in=tags)
 
     total = await Playbook.filter(condition).count()
-    playbooks = await Playbook.filter(condition).offset(offset).limit(limit).all().prefetch_related("scenes", "creator", "updator")
+    playbooks = await Playbook.filter(condition).offset(offset).limit(limit).all().prefetch_related("scenes")
     data = []
     for p in playbooks:
         versions = await PlaybookVersion.filter(playbook=p).count()
@@ -169,7 +169,7 @@ async def list_workflow_versions(request):
 @requires_permission("workflow:u")
 async def edit_workflow(request):
     """
-    修改剧本，已发布的剧本是不允许修改的，如果修改已经发布的剧本，会自动生成一个新版本的草稿
+    修改剧本的基本信息
 
     请求参数：
         id: 必填，剧本ID
@@ -186,7 +186,7 @@ async def edit_workflow(request):
     has_change = False
     for p in request.json:
         # 敏感属性不允许修改
-        if p in ['id', 'ctime', 'utime', 'deleted', 'creator', 'updator', 'internal']:
+        if p in ['id', 'ctime', 'utime', 'deleted', 'internal']:
             continue
         if hasattr(playbook, p):
             has_change = True
@@ -201,7 +201,7 @@ async def edit_workflow(request):
 @requires_permission("workflow:u")
 async def edit_workflow_flow(request):
     """
-    修改剧本流程图内容
+    修改剧本流程图内容,修改已发布的剧本会自动生成一个新的版本
 
     请求参数:
         id: 必填，剧本版本ID
