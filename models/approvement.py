@@ -11,11 +11,16 @@ class Approvement(BaseModel):
     字段：
     """
     title: str = fields.CharField(max_length=50, index=True, description="审核标题")
+    flow_id = fields.ForeignKeyField("models.Playbook", description="关联剧本ID")
+    run_id = fields.CharField(max_length=50, description="关联运行ID")
     content = fields.TextField(description="审核描述内容")
     status = fields.IntField(default=0, description="审核状态，0代表待审核，1代表审核通过，2代表审核拒绝，3代表审核过期")
-    expire_time = fields.DatetimeField(null=True, description="审核过期时间")
-    approvers = fields.CharField(max_length=255, null=True, description="审核人列表，多个用逗号分隔")
-    processor = fields.ForeignKeyField("models.Account", null=True, description="实际审核处理人")
+    expire_time = fields.DatetimeField(description="审核过期时间")
+    approvers = fields.ManyToManyField(model_name="models.Account", through="approve_accounts")
+    audit_node_id = fields.CharField(max_length=50, description="审核节点ID")
+    created_at = fields.DatetimeField(description="审核触发的时间")
+    params = fields.JSONField(default=[], description="自定义参数")
+    processor = fields.ForeignKeyField("models.Account", related_name="approve_processor", null=True, description="实际审核处理人")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -30,8 +35,9 @@ class Approvement(BaseModel):
             "content": self.content,
             "status": self.status,
             "expire_time": self.expire_time,
-            "approvers": self.approvers,
-            "processor": {"username": self.processor.username, "display_name": self.processor.display_name} if self.processor else "",
+            "approvers": [{"username": i.username, "display_name": i.display_name} for i in self.approvers],
+            "params": self.params,
+            "processor": {"username": self.processor.username, "display_name": self.processor.display_name} if self.processor else {},
         }
 
     # 指定name+type作为唯一性约束

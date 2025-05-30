@@ -4,6 +4,7 @@ import asyncio
 import os
 import time
 import traceback
+import uuid
 from collections import defaultdict
 
 import aiofile
@@ -123,6 +124,19 @@ async def list_workflow(request):
     })
 
 
+@workflow_bp.post("/versions")
+@requires_permission("workflow:r")
+async def list_workflow_versions(request):
+    """
+    获取剧本版本列表
+
+    请求参数：
+        name: 必填，剧本名称
+    """
+    playbooks = await Playbook.filter(name=request.json.get("name"), deleted=False).all()
+    return response_ok([p.simple_json for p in await playbooks])
+
+
 @workflow_bp.post("/detail")
 @requires_permission("workflow:r")
 async def detail_workflow(request):
@@ -150,8 +164,6 @@ async def edit_workflow(request):
         remark: 可选，备注
         start_app: 可选，开始节点
         end_app: 可选，结束节点
-        if_list: 可选，判断节点
-        audit_list: 可选，审批节点
         tags: 可选，标签
         flow_json: 可选，流程图布局信息
     """
@@ -180,11 +192,11 @@ async def edit_workflow(request):
         # 已发布的剧本是不允许修改的
         if playbook.status == 1:
             playbook.version = gen_order_version()
+            playbook.id = str(uuid.uuid4())
             await playbook.create()
         else:
             await playbook.save()
-    return response_ok(
-        {"id": playbook.id, "name": playbook.name, "version": playbook.version, "status": playbook.status})
+    return response_ok({"id": playbook.id, "name": playbook.name, "version": playbook.version, "status": playbook.status})
 
 
 @workflow_bp.post("/publish")

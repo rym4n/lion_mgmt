@@ -98,7 +98,7 @@ async def update_approvement(request):
 @requires_permission("approve:d")
 async def delete_approvement(request):
     """
-    删除全局变量（需要approve:d权限）
+    删除人工任务（需要approve:d权限）
 
     请求参数:
         id: 删除的审核id

@@ -18,11 +18,7 @@ def write_process_config(process_name, command):
     """写入 supervisor 配置文件"""
     config_path = os.path.join(SUPERVISOR_CONFIG_DIR, "{}.conf".format(process_name))
     with open(config_path, "w") as f:
-        f.write("""
-[program:{}]
-command={}
-autorestart=true
-            """.format(process_name, command))
+        f.write("""[program:{}]\ncommand={}\nautostart=true\nautorestart=true\nredirect_stderr=true\nstdout_logfile=/dev/null""".format(process_name, command))
     logging.info("写入配置文件: {}".format(config_path))
 
 

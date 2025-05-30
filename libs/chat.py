@@ -10,7 +10,7 @@ from sanic.log import logger
 
 from libs.kafka import aproduce, aconsume
 from libs.utils import gen_order_version
-from models import Runlog, Events, Timed
+from models import Runlog, Approvement
 from models.user import Account
 from models.warroom import Room, Message
 from settings import CACHE, KAFKA_SERVERS, TIMED_TASK_TOPIC
@@ -113,23 +113,27 @@ class ChatManager:
         await aconsume(KAFKA_SERVERS, 'lion_action_runlog', 'lion_mgmt_listener', self.handle_runlog, 50)
 
     async def handle_runlog(self, log):
-        if log.get('type') == 'audit':
-            logger.info(f"暂时不处理: {log}")
-            return
         for k in self.run_connections:
             if self.run_connections[k]['run_id'] == log.get('run_id'):
                 await self.run_connections[k]['conn'].send(orjson.dumps({"data": log}).decode())
-        valid_fields = set(Runlog._meta.fields_map.keys())
-        filtered_msg = {}
-        for k, v in log.items():
-            if k in valid_fields:
-                if k == "event_id" and v is not None:
-                    v = await Events.get_or_none(id=v)
-                elif k == "timer_id" and v is not None:
-                    v = await Timed.get_or_none(id=v)
-            filtered_msg[k] = v
-        logger.info(f"创建runlog消息：{filtered_msg}")
-        if not await Runlog.filter(id=filtered_msg['id']).exists():
+
+        # 处理审批消息
+        if log.get('type') == 'approval-info':
+            approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'], content=log['content'],
+                                               expire_time=log['expire_time'], created_at=log['created_at'], audit_node_id=log['audit_app'])
+            if log.get('users'):
+                users = Account.filter(id__in=log['users']).all()
+                approve.approvers.add(*users)
+            if log.get('roles'):
+                users = Account.filter(role_id__in=log['roles']).all()
+                approve.approvers.add(*users)
+        else:
+            # 处理runlog消息
+            filtered_msg = {}
+            for k, v in log.items():
+                if hasattr(Runlog, k):
+                    filtered_msg[k] = v
+            logger.info(f"创建runlog消息：{filtered_msg}")
             await Runlog.create(**filtered_msg)
 
     async def handle_message(self, user: Account, ws, data: dict):
