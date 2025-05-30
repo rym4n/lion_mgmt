@@ -55,7 +55,7 @@ class PlaybookVersion(BaseModel):
         raise NotImplementedError
 
     @property
-    def json(self) -> dict:
+    def full_json(self) -> dict:
         return {
             "flow_id": self.playbook.id,
             "version_id": self.id,
@@ -74,6 +74,23 @@ class PlaybookVersion(BaseModel):
             "internal": self.playbook.internal
         }
 
+    @property
+    def json(self) -> dict:
+        return {
+            "flow_id": self.playbook.id,
+            "version_id": self.id,
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
+            "name": self.playbook.name,
+            "remark": self.playbook.remark,
+            "change_desc": self.change_desc,
+            "status": self.status,
+            "flow_json": self.flow_json,
+            "version": self.version,
+            "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
+            "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
+            "internal": self.playbook.internal
+        }
 
     class Meta:
         table = "playbook_version"

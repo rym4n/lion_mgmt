@@ -153,8 +153,8 @@ async def list_workflow_versions(request):
     请求参数：
         id: 必填，剧本id
     """
-    playbooks = await PlaybookVersion.filter(playbook__id=request.json.get("id"), deleted=False).all().prefetch_related("playbook", "creator", "updator")
-    return response_ok([p.json for p in playbooks])
+    pv = await PlaybookVersion.filter(playbook__id=request.json.get("id"), deleted=False).all().prefetch_related("playbook", "creator", "updator")
+    return response_ok([p.json for p in pv])
 
 
 # @workflow_bp.post("/detail")
