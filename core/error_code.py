@@ -96,3 +96,4 @@ class ErrorCode(BaseErrorCode):
     ActionInputError = ErrorData(4068, "缺少执行动作必须参数")
     PlaybookInputError = ErrorData(4069, "缺少执行剧本必须参数")
     CronExpressionError = ErrorData(4070, "cron表达式错误")
+    ConfigFileGenerateError = ErrorData(4071, "配置文件生成失败，请联系管理进行处理")

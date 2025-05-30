@@ -5,6 +5,7 @@ import datetime
 import ipaddress
 import os.path
 import random
+import subprocess
 import time
 import uuid
 import zipfile
@@ -264,3 +265,24 @@ async def fetch_latest_messages(bootstrap_servers, topic, num_messages=10):
             await consumer.stop()
         except asyncio.CancelledError:
             logger.info("停止消费者时被取消")
+
+
+def run_linux_command(command):
+    """
+    在 Linux 上执行命令，并返回执行结果。
+
+    :param command: 字符串或字符串列表，表示要执行的命令。
+    :return: 字典，包含 stdout、stderr 和 returncode。
+    """
+    result = subprocess.run(
+        command,
+        shell=isinstance(command, str),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
+    return {
+        "stdout": result.stdout.strip(),
+        "stderr": result.stderr.strip(),
+        "code": result.returncode
+    }
