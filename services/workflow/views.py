@@ -130,7 +130,7 @@ async def list_workflow(request):
         condition = condition & Q(tags__in=tags)
 
     total = await Playbook.filter(condition).count()
-    playbooks = await Playbook.filter(condition).offset(offset).limit(limit).all().prefetch_related("scenes")
+    playbooks = await Playbook.filter(condition).offset(offset).limit(limit).all().prefetch_related("scenes", 'tags')
     data = []
     for p in playbooks:
         versions = await PlaybookVersion.filter(playbook=p).count()
