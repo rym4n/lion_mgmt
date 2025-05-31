@@ -14,16 +14,12 @@ class SecurityMiddleware(BaseMiddleware):
     async def before_request(self, request: Request) -> None:
         # 判断请求URI是否需要身份验证
         white_urls = ["/v1/user/login", "/health", "/v1/playbook/run", "/v1/warroom/ws"]
-        if os.environ.get("RY_ENV") == 'TEST':
+        if os.environ.get("RY_ENV") != 'PROD':
             # 开发测试环境，放行docs文档页面路径
             white_urls.extend(["/docs", "/docs/openapi.json"])
 
         if request.path not in white_urls:
             await authenticate(request)
-
-        if request.path.endswith("/upload"):
-            # 设置80秒超时
-            request.conn.timeout_request = 80
 
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
         """统一记录操作日志"""

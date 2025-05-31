@@ -25,7 +25,7 @@ from models import Playbook, Scene, ToolAction, Tool, Runlog, Tag, PlaybookVersi
 from services.tool_management.views import tool_action_update, tool_action_playbook_delete
 from settings import SECRET, SESSION_ENCODING_ALGORITHM
 
-workflow_bp = Blueprint('workflow', url_prefix='v1/playbook')
+workflow_bp = Blueprint('workflow', version=1, url_prefix='/playbook')
 _all__ = ["workflow_bp"]
 
 

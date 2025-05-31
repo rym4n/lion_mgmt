@@ -10,7 +10,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import Approvement, Account
 
-approve_bp = Blueprint('approve', url_prefix='v1/approve')
+approve_bp = Blueprint('approve', version=1, url_prefix='/approve')
 _all__ = ["approve_bp"]
 
 

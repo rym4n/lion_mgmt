@@ -16,7 +16,7 @@ from libs.utils import strip_timezone_to_seconds
 from models import SystemCustomConfiguration, AuditLog
 from settings import UPLOAD_FOLDER, BG_NAME
 
-system_bp = Blueprint('system', url_prefix='v1/system')
+system_bp = Blueprint('system', version=1, url_prefix='/system')
 _all__ = ["system_bp"]
 
 

@@ -8,7 +8,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import Scene, Playbook
 
-scene_bp = Blueprint('scene', url_prefix='v1/scene')
+scene_bp = Blueprint('scene', version=1, url_prefix='/scene')
 _all__ = ["scene_bp"]
 
 

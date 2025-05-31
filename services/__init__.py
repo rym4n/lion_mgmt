@@ -49,12 +49,12 @@ def register_blueprints(app: Sanic) -> None:
             "event_ingestion_bp": event_ingestion_bp,
             "role_bp": role_bp,
             "scene_bp": scene_bp,
+            "system_bp": system_bp,
+            "timed_bp": timed_bp,
             "tool_management_bp": tool_management_bp,
             "var_bp": var_bp,
             "warroom_bp": warroom_bp,
             "workflow_bp": workflow_bp,
-            "system_bp": system_bp,
-            "timed_bp": timed_bp
         }
         license_data = load_license()
         if license_data and 'moduleList' in license_data:
@@ -63,8 +63,6 @@ def register_blueprints(app: Sanic) -> None:
                     if item["module"] not in bp_dict:
                         continue
                     app.blueprint(bp_dict[item["module"]])
-        # for item in bp_dict.values():
-        #     app.blueprint(item)
     except Exception as ex:
         logger.info(f"{ex} | {traceback.format_exc()}")
 

@@ -73,7 +73,8 @@ HEALTH_URL_PREFIX = '/health'
 ENABLE_CORS: bool = os.environ.get("RY_CORS", True)
 CORS_SUPPORTS_CREDENTIALS: bool = os.environ.get("RY_CORS_CREDENTIAL", True)
 
-WEBSOCKET_MAX_SIZE = 2 ** 20 # # 消息最大1MB
+# Websocket
+WEBSOCKET_MAX_SIZE = 2 ** 20 # 消息最大1MB
 WEBSOCKET_PING_INTERVAL = 20
 WEBSOCKET_PING_TIMEOUT = 20
 

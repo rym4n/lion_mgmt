@@ -20,7 +20,7 @@ from models.user import Account
 from models.warroom import Room, Message
 from settings import SECRET, SESSION_ENCODING_ALGORITHM
 
-warroom_bp = Blueprint('warroom', url_prefix='v1/warroom')
+warroom_bp = Blueprint('warroom', version=1, url_prefix='/warroom')
 __all__ = ['warroom_bp']
 
 

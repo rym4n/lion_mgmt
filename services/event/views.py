@@ -10,7 +10,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import Events, Runlog, Room, Account
 
-event_bp = Blueprint('event', url_prefix='v1/event')
+event_bp = Blueprint('event', version=1, url_prefix='/event')
 _all__ = ["event_bp"]
 
 

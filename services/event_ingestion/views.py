@@ -26,7 +26,7 @@ from models.playbook import Playbook
 from services.event_ingestion import supervisor
 from settings import VECTOR_CFG, KAFKA_SERVERS, VECTOR_TMP
 
-event_ingestion_bp = Blueprint('event_ingestion', url_prefix='v1/event/ingestion')
+event_ingestion_bp = Blueprint('event_ingestion', version=1, url_prefix='/event/ingestion')
 _all__ = ["event_ingestion_bp"]
 
 # transforms配置

@@ -11,7 +11,7 @@ from libs.security.authorization import requires_permission
 from models import Timed, Playbook, ToolAction, Runlog
 from settings import KAFKA_SERVERS, TIMED_TASK_TOPIC
 
-timed_bp = Blueprint('timed', url_prefix='v1/timed')
+timed_bp = Blueprint('timed', version=1, url_prefix='/timed')
 _all__ = ["timed_bp"]
 
 # 枚举类型

@@ -10,7 +10,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models.variables import Variables
 
-var_bp = Blueprint('var', url_prefix='v1/var')
+var_bp = Blueprint('var', version=1, url_prefix='/var')
 _all__ = ["var_bp"]
 
 

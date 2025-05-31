@@ -27,7 +27,7 @@ from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPe
 from settings import TOOLS_DIR
 
 # 定义 Blueprint
-tool_management_bp = Blueprint("tool_management", url_prefix="v1/tool_management")
+tool_management_bp = Blueprint("tool_management", version=1, url_prefix="/tool_management")
 __all__ = ["tool_management_bp"]
 
 # 预期的文件结构
