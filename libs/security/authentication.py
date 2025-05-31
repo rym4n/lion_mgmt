@@ -32,9 +32,12 @@ def validate_token(payload, request):
 
     client_ip = get_client_ip(request)
 
-    if payload.get('ip') and payload.get('ip') != client_ip:
-        # 防止会话劫持
-        raise CustomError(ErrorCode.SessionInvalid)
+    if payload.get('ip'):
+        if payload.get('ip') != client_ip:
+            # 防止会话劫持
+            raise CustomError(ErrorCode.SessionInvalid)
+    else:
+        payload['ip'] = client_ip
 
     # API访问时验证是否满足IP白名单
     if payload.get('permit_ip'):

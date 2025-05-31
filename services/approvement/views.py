@@ -8,39 +8,17 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Approvement, Account
+from models import Approvement
 
 approve_bp = Blueprint('approve', version=1, url_prefix='/approve')
 _all__ = ["approve_bp"]
-
-
-@approve_bp.post("/new")
-@requires_permission("approve:c")
-async def new_approvement(request):
-    """
-    新建人工审核单子（需要approve:c权限）
-
-    请求参数
-        title: 标题
-        content: 内容
-        approvers: 审批人username，逗号分隔
-    """
-    title = request.json.get("title")
-    content = request.json.get("content")
-    approvers = request.json.get("approvers")
-    if not title or not content or not approvers:
-        raise CustomError(ErrorCode.ParameterError)
-
-    users = await Account.filter(username__in=approvers.split(',')).all()
-    await Approvement.create(title=title, content=content, approvers=users)
-    return response_ok("success")
 
 
 @approve_bp.post("/list")
 @requires_permission("approve:r")
 async def all_approvement(request):
     """
-    获取所有全局变量信息（需要approve:r权限）
+    获取所有人工审批任务信息（需要approve:r权限）
     
     请求参数：
         page: 页码
@@ -75,8 +53,10 @@ async def update_approvement(request):
     更新全局变量（需要approve:u权限）
 
     请求参数:
-        id: 审核id
-        agree: true/false，同意或拒绝
+        id: 审核id，必填参数
+        agree: true/false，同意或拒绝，必填参数
+        remark: 审批备注信息
+        params: 自定义参数的内容信息, 例如 {"aaa": "bbb"}
     """
     approvement_id = request.json.get("id")
     agree = request.json.get("agree")
@@ -84,30 +64,8 @@ async def update_approvement(request):
         raise CustomError(ErrorCode.ParameterError)
 
     agree = bool(agree)
-    record = await Approvement.get_or_none(id=approvement_id)
-    if not record:
-        raise CustomError(ErrorCode.NotFound)
-
+    record = await Approvement.get(id=approvement_id)
     record.status = 1 if agree else 2
     record.processor = request.ctx.session['account_info']
     await record.save()
     return response_ok(record.json)
-
-
-@approve_bp.post("/delete")
-@requires_permission("approve:d")
-async def delete_approvement(request):
-    """
-    删除人工任务（需要approve:d权限）
-
-    请求参数:
-        id: 删除的审核id
-    """
-    approvement_id = request.json.get("id")
-    if not approvement_id:
-        raise CustomError(ErrorCode.ParameterError)
-    record = await Approvement.get_or_none(id=approvement_id)
-    if not record:
-        raise CustomError(ErrorCode.NotFound)
-    await record.delete()
-    return response_ok("success")
