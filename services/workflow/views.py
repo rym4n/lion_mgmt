@@ -266,9 +266,7 @@ async def delete_workflow(request):
     请求参数：
         id: 剧本ID
     """
-    playbook = await Playbook.get_or_none(id=request.json.get("id"), internal=False)
-    if not playbook:
-        raise CustomError(ErrorCode.PlaybookNotFound)
+    playbook = await Playbook.get(id=request.json.get("id"), internal=False)
     playbook.deleted = True
     await playbook.save()
     return response_ok("剧本删除成功")
@@ -283,10 +281,7 @@ async def delete_workflow_version(request):
     请求参数：
         id: 剧本版本ID
     """
-    pv = await PlaybookVersion.get_or_none(id=request.json.get("id"))
-    if not pv:
-        raise CustomError(ErrorCode.PlaybookNotFound)
-
+    pv = await PlaybookVersion.get(id=request.json.get("id"))
     await pv.delete()
     if pv.flow_json:
         action_ids = await statistics_data(pv.flow_json)
@@ -456,7 +451,7 @@ async def input_data(request):
     请求参数：
         id: 剧本版本ID
     """
-    playbook = await PlaybookVersion.get(id=request.json.get("id"), deleted=False)
+    playbook = await PlaybookVersion.get_or_none(id=request.json.get("id"))
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
 

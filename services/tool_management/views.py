@@ -38,7 +38,7 @@ EXPECTED_STRUCTURE = {
 connected_clients = {}
 
 
-@tool_management_bp.post("/upload", timeout=80)
+@tool_management_bp.post("/upload")
 @requires_permission("tool:c")
 async def upload_and_extract_zip(request):
     """

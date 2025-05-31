@@ -21,6 +21,10 @@ class SecurityMiddleware(BaseMiddleware):
         if request.path not in white_urls:
             await authenticate(request)
 
+        if request.path.endswith("/upload"):
+            # 设置80秒超时
+            request.conn.timeout_request = 80
+
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
         """统一记录操作日志"""
         if hasattr(request.ctx, "session"):
