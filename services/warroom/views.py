@@ -167,9 +167,7 @@ async def acquire_members(request: Request):
     """
     room_id = request.json.get('id')
 
-    room = await Room.get(id=room_id).select_related('creator', 'users')
-    if room is None:
-        raise CustomError(ErrorCode.RoomNotExists)
+    room = await Room.get(id=room_id).prefetch_related('creator', 'users')
 
     user_list = []
     for user in room.users:

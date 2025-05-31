@@ -217,9 +217,7 @@ async def update_timed(request):
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    timed = await Timed.get(id=timed_id, deleted=False).select_related("action", "playbook_version", "creator", "updator")
-    if not timed:
-        raise CustomError(ErrorCode.TimedNotFound)
+    timed = await Timed.get(id=timed_id, deleted=False).prefetch_related("action", "playbook_version", "creator", "updator")
 
     run_type = data.get("type", timed.type)
     if run_type not in [RUN_TYPE_FLOW, RUN_TYPE_ACTION]:

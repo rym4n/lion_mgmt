@@ -464,7 +464,7 @@ async def get_event_ingestion_detail(request):
         id: 事件ID (str)
     """
     event_id = request.json.get('id')
-    event = await EventsIngestion.get(id=event_id).select_related("creator", "updator")
+    event = await EventsIngestion.get(id=event_id).prefetch_related("creator", "updator")
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
@@ -533,7 +533,7 @@ async def binding_event_ingestion_script(request):
     event_ingestion_id = request.json.get('event_ingestion_id')
     script_ids = request.json.get('script_ids')
     event_name = request.json.get('event_name')
-    event = await EventsIngestion.get(id=event_ingestion_id).select_related("creator")
+    event = await EventsIngestion.get(id=event_ingestion_id).prefetch_related("creator")
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
