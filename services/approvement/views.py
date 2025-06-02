@@ -46,6 +46,39 @@ async def all_approvement(request):
     })
 
 
+@approve_bp.post("/todolist")
+@requires_permission("approve:r")
+async def todo_approvement(request):
+    """
+    获取当前登录用户的待处理任务信息（需要approve:r权限）
+    主要用于右上角的待办提醒
+
+    请求参数：
+        page: 页码
+        size: 每页数量
+        keyword: 关键字，模糊搜索审核标题或者审核内容，可选参数
+    """
+    page = int(request.json.get("page", 1))
+    size = int(request.json.get("size", 10))
+
+    user = request.ctx.session['account_info']
+    # 查询 Approvement 表中 status 为 0 且 approvers 中包含当前用户 ID 的记录
+    total = await Approvement.filter(status=0, approvers__contains=[user.sub]).count()
+    records = await Approvement.filter(status=0, approvers__contains=[user.sub]).offset((page - 1) * size).limit(size).all()
+    return response_ok({
+        "total": total,
+        "page": page,
+        "size": size,
+        "total_pages": (total + size - 1) // size,
+        "data": [{
+            "id": a.id,
+            "title": a.title,
+            "content": a.content,
+            "expire_time": a.expire_time
+        } for a in records]
+    })
+
+
 @approve_bp.post("/update")
 @requires_permission("approve:u")
 async def update_approvement(request):

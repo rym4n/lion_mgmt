@@ -204,7 +204,6 @@ def verify_license(data: bytes):
         decrypted = rsa_chunk_decrypt(lic_enc, pkey)
         machine_id = generate_mac_uuid()
         lic = jwt.decode(decrypted, str(machine_id), "HS256")
-        logger.info(lic)
         if lic.get("expireTime", 0) > int(time.time() * 1000):
             for m in lic['moduleList']:
                 m['expireTime'] = lic['grouplist'][m['group']]['expireTime']

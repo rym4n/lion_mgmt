@@ -6,7 +6,6 @@ import time
 
 import jwt
 from sanic import Request
-from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
@@ -117,8 +116,7 @@ async def token_decode(request: Request) -> dict:
         else:
             payload = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
         return payload
-    except Exception as e:
-        logger.error(f"token decode error: {e}")
+    except Exception:
         raise CustomError(ErrorCode.SessionInvalid)
 
 

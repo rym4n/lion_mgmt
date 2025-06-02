@@ -70,14 +70,14 @@ async def create_room(request: Request):
     新建作战室
 
     请求参数：
-        name: 必填， 房间名称
+        name: 必填， 作战室名称
         members: 选填，邀请其他用户ID列表
     """
     room_name = request.json.get('name')
     members_ids = request.json.get('members', [])
 
     # 作战室名称唯一
-    if await Room.filter(name=room_name, deleted=False).exists():
+    if await Room.filter(name=room_name).exists():
         raise CustomError(ErrorCode.RoomNameExists)
     creator = request.ctx.session['account_info']
     room = await Room.create(name=room_name, creator=creator)
@@ -102,11 +102,11 @@ async def join_room(request: Request):
     加入指定作战室
 
     请求参数：
-        id: 必填，房间id
+        id: 必填，作战室id
     """
     room = await Room.get(id=request.json.get('id'))
     user = request.ctx.session['account_info']
-    # 检查当前用户是否已加入该房间
+    # 检查当前用户是否已加入该作战室
     is_member = await room.users.filter(id=user.id).exists()
     if is_member:
         return response_ok("用户已经是该作战室成员")
@@ -115,34 +115,53 @@ async def join_room(request: Request):
 
 
 @warroom_bp.post("/delete")
-@requires_permission('warroom:d')
+@requires_permission('warroom:r')
 async def delete_room(request: Request):
     """
-    删除指定作战室
+    在作战室列表删除指定作战室，类似微信的消息列表，删除只是暂时不显示而已
 
     请求参数：
-        id: 必填， 房间id
+        id: 必填， 作战室id
     """
     room_id = request.json.get("id")
     room = await Room.select_related('creator').get(id=room_id)
     if room is None:
         raise CustomError(ErrorCode.RoomNotExists)
     user = request.ctx.session['account_info']
-    # 房间只能由创建者删除
+    # 作战室只能由创建者删除
     if str(room.creator.id) != str(user.id):
         raise CustomError(ErrorCode.RoomDeleteNotAllowed)
     await Room.filter(id=room_id).update(deleted=True)
-    return response_ok("房间删除成功")
+    return response_ok("成功")
+
+
+@warroom_bp.post("/quit")
+@requires_permission('warroom:u')
+async def quit_room(request: Request):
+    """
+    退出指定作战室，只有群聊可以退出，私聊不可以
+
+    请求参数：
+        id: 必填， 作战室id
+    """
+    room = await Room.get(id=request.json.get('id'))
+    user = request.ctx.session['account_info']
+    # 检查当前用户是否已加入该作战室
+    is_member = await room.users.filter(id=user.id).exists()
+    if not is_member:
+        return response_ok("用户并不在该作战室，无需退出")
+    await room.users.remove(user)
+    return response_ok("成功退出作战室")
 
 
 @warroom_bp.post("/rooms_list")
 @requires_permission('warroom:r')
 async def get_room_list(request: Request):
     """
-        获取所有作战室列表
+    获取所有作战室列表
 
-        请求参数：
-            keyword: 可选，搜索作战室
+    请求参数：
+        keyword: 可选，搜索作战室
     """
     condition = Q(users__id=request.ctx.session['account_info'].id)
     keyword = request.json.get("keyword")
@@ -163,7 +182,7 @@ async def acquire_members(request: Request):
     获取指定作战室的用户列表
 
     请求参数：
-        id: 必填，房间id
+        id: 必填，作战室id
     """
     room_id = request.json.get('id')
 
@@ -189,7 +208,7 @@ async def acquire_members(request: Request):
 @requires_permission('warroom:c')
 async def get_private_room(request: Request):
     """
-    获取或创建与指定用户的私聊房间
+    获取或创建与指定用户的私聊作战室
 
     请求参数：
         partner_id: 必填，私聊对象用户ID
@@ -199,7 +218,7 @@ async def get_private_room(request: Request):
     partner = await Account.get(id=partner_id)
     if partner is None:
         raise CustomError(ErrorCode.AccountNotFound)
-    # 先获取私聊房间
+    # 先获取私聊作战室
     chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
     return response_ok({"room_id": chat_room.id, "name": chat_room.name})
 
@@ -215,8 +234,7 @@ async def get_user_rooms(request: Request):
     """
     user = request.ctx.session['account_info']
     keyword = request.json.get('keyword', '')
-    # 筛选 deleted=False, 该项目使用软删除的方式
-    query = Room.filter(users__id=user.id, deleted=False)
+    query = Room.filter(users__id=user.id)
     if keyword:
         query = query.filter(name__contains=keyword)
     user_rooms = await query.order_by('-ctime').prefetch_related('creator')
@@ -247,7 +265,7 @@ async def query_messages(request: Request):
             "private_history" - 获取私聊历史
             "search_messages" - 搜索消息
             "announcements" - 获取公告列表
-        room_id: 除了私聊以外必填，房间ID
+        room_id: 除了私聊以外必填，作战室ID
         partner_id: 私聊必填，私聊对象ID
         keyword: 搜索必填，搜索关键词
         limit: 可选，每页条数，默认20
@@ -303,7 +321,7 @@ async def query_messages(request: Request):
         partner = await Account.get(id=partner_id)
         if partner is None:
             raise CustomError(ErrorCode.AccountNotFound)
-        # 先获取私聊房间
+        # 先获取私聊作战室
         chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
         condition = (Q(sender__id=user.id) & Q(receiver_id=partner_id)) | (Q(sender_id=partner_id) & Q(receiver_id=user.id))
         # 消息计数
@@ -340,7 +358,7 @@ async def query_messages(request: Request):
     elif query_type == "search_messages":
         if not keyword:
             raise CustomError(ErrorCode.ParamValueError)
-        # 传入房间ID, 搜索房间群聊记录
+        # 传入作战室ID, 搜索作战室群聊记录
         if room_id:
             query = Message.filter(
                 type="public",
@@ -353,9 +371,9 @@ async def query_messages(request: Request):
             partner = await Account.get(id=partner_id)
             if partner is None:
                 raise CustomError(ErrorCode.AccountNotFound)
-            # 先获取私聊房间
+            # 先获取私聊作战室
             chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
-            # 筛消息发送/接收包含私聊双方的，建议改造创建私聊房间逻辑，直接按房间号筛就得了
+            # 筛消息发送/接收包含私聊双方的，建议改造创建私聊作战室逻辑，直接按作战室号筛就得了
             query = Message.filter((Q(sender_id=user.id) & Q(receiver_id=partner_id)) | (Q(sender_id=partner_id) & Q(receiver_id=user.id)), type="private", room_id=chat_room.id, content__contains=keyword, is_recalled=False)
         else:
             raise CustomError(ErrorCode.ParamValueError)
@@ -394,14 +412,12 @@ async def query_messages(request: Request):
 
         total_count = await Message.filter(
             type="announcement",
-            room_id=room_id,
-            deleted=False
+            room_id=room_id
         ).count()
 
         announcements = await Message.filter(
             type="announcement",
-            room_id=room_id,
-            deleted=False
+            room_id=room_id
         ).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
 
         announcement_list = []
