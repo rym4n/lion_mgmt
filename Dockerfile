@@ -15,15 +15,14 @@ RUN pip install uv==0.7.4 nuitka==2.7.2 -i https://mirrors.aliyun.com/pypi/simpl
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
+    UV_LINK_MODE=copy
 
 WORKDIR /app
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-install-project --no-dev --default-index https://mirrors.aliyun.com/pypi/simple
 
 COPY . ./
 
