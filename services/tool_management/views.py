@@ -1,4 +1,5 @@
 # coding=utf-8
+import asyncio
 import base64
 import hashlib
 import operator
@@ -13,6 +14,7 @@ from io import BytesIO
 
 import aiofile
 import orjson
+from PIL import Image
 from sanic import Blueprint, response
 from tortoise.expressions import Q
 from tortoise.functions import Max
@@ -36,6 +38,12 @@ EXPECTED_STRUCTURE = {
 }
 
 connected_clients = {}
+
+
+def check_image_size(image_info):
+    with Image.open(image_info) as img:
+        width, height = img.size
+        return width == 32 and height == 32
 
 
 @tool_management_bp.post("/upload")
@@ -231,6 +239,13 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 
         if logo_name not in actual_files:
             return config_data, version, tool_name, "logo文件不存在"
+        if logo_name.split(".")[-1] != "ico":
+            return config_data, version, tool_name, "logo文件格式错误，请上传ico格式"
+        for file_info in files_info:
+            if file_info.filename.lower().endswith(".ico"):
+                with zip_ref.open(files_info) as logo_file:
+                    if not check_image_size(logo_file):
+                        return config_data, version, tool_name, "logo文件大小错误，请上传32x32像素的ico格式图片"
         data += 1
         percent = int(data * single_progress) + success_progress
         await resp.send(f"data: 解压进度：{percent}%\n\n")
@@ -323,26 +338,9 @@ async def all_tools(request):
         .limit(size) \
         .values()
 
-    for latest_tool in latest_tools:
-        data = await request.ctx.cache_client.get(latest_tool["name"] + "_" + latest_tool["version"])
-        if not data:
-            config_path = os.path.abspath(os.path.join(latest_tool["path"], f"config.json"))
-            async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
-                data = await f.read()
-                # 将config数据存入redis
-                await request.ctx.cache_client.set(latest_tool["name"] + "_" + latest_tool["version"], data,
-                                                   ttl=2592000)
-            data = orjson.loads(data)
-        else:
-            if isinstance(data, (str, bytes)):
-                data = orjson.loads(data)
-        logo_path = os.path.abspath(os.path.join(latest_tool["path"], data.get("logo")))
-        if os.path.exists(logo_path):
-            async with aiofile.AIOFile(logo_path, 'rb') as logo:
-                logo_data = await logo.read()
-                logo_str = base64.b64encode(logo_data).decode('utf-8')
-                latest_tool["logo"] = logo_str
-        latest_tool.pop("path")
+    latest_tools = await asyncio.gather(*[
+        enrich_tool(tool, request.ctx.cache_client) for tool in latest_tools
+    ])
 
     total_count = await Tool.filter(condition).count()
 
@@ -353,6 +351,29 @@ async def all_tools(request):
         "size": size,
         "total_pages": (total_count + size - 1) // size
     })
+
+
+async def enrich_tool(tool, cache_client):
+    cache_key = f"{tool['name']}_{tool['version']}"
+    data = await cache_client.get(cache_key)
+
+    if not data:
+        config_path = os.path.join(tool["path"], "config.json")
+        async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
+            data = await f.read()
+            await cache_client.set(cache_key, data, ttl=2592000)
+        data = orjson.loads(data)
+    else:
+        if isinstance(data, (str, bytes)):
+            data = orjson.loads(data)
+
+    logo_path = os.path.join(tool["path"], data.get("logo"))
+    if os.path.exists(logo_path):
+        async with aiofile.AIOFile(logo_path, 'rb') as logo_file:
+            logo_data = await logo_file.read()
+            tool["logo"] = base64.b64encode(logo_data).decode("utf-8")
+    tool.pop("path", None)
+    return tool
 
 
 @tool_management_bp.post("/versions")
