@@ -243,7 +243,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
             return config_data, version, tool_name, "logo文件格式错误，请上传ico格式"
         for file_info in files_info:
             if file_info.filename.lower().endswith(".ico"):
-                with zip_ref.open(files_info) as logo_file:
+                with zip_ref.open(file_info) as logo_file:
                     if not check_image_size(logo_file):
                         return config_data, version, tool_name, "logo文件大小错误，请上传32x32像素的ico格式图片"
         data += 1
