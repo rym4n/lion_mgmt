@@ -53,7 +53,7 @@ jobs:
   retryDelay: 30
   timeout: 14400
 - name: 信创arm构建
-  jobExecutor: hw-arm
+  jobExecutor: hw-arm-docker
   steps:
   - !CheckoutStep
     name: 拉取最新代码
