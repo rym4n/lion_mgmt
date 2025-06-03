@@ -1,31 +1,6 @@
-version: 39
+version: 40
 jobs:
-- name: ci
-  jobExecutor: local
-  steps:
-  - !CheckoutStep
-    name: 拉取最新代码
-    cloneCredential: !DefaultCredential {}
-    withLfs: false
-    withSubmodules: false
-    checkoutPath: '@project_path@'
-    condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
-  - !BuildImageStep
-    name: 构建镜像
-    buildPath: '@project_path@'
-    dockerfile: '@project_path@/Dockerfile'
-    output: !RegistryOutput
-      tags: dev.xy14qg.top/lion_mgmt/lion_mgmt:@tag@
-    condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
-  triggers:
-  - !TagCreateTrigger
-    branches: master
-    projects: lion_mgmt
-  retryCondition: never
-  maxRetries: 3
-  retryDelay: 30
-  timeout: 14400
-- name: cd
+- name: 托管云环境自动更新
   jobExecutor: tgy-deploy
   steps:
   - !CommandStep
@@ -37,14 +12,69 @@ jobs:
         sed -i -E "s#(dev\.xy14qg\.top/lion_mgmt/lion_mgmt:)v[0-9]+\.[0-9]+\.[0-9]+#\1${NEW_VER}#" /opt/lion/docker-compose.yml
         docker-compose -f /opt/lion/docker-compose.yml --env-file /opt/lion/.env up -d
     useTTY: true
-    condition: ALL_PREVIOUS_STEPS_WERE_SUCCESSFUL
+    condition: SUCCESSFUL
+    optional: false
   triggers:
   - !DependencyFinishedTrigger
     projects: lion_mgmt
   jobDependencies:
-  - jobName: ci
+  - jobName: x86构建
     requireSuccessful: true
     artifacts: '**'
+  retryCondition: never
+  maxRetries: 3
+  retryDelay: 30
+  timeout: 14400
+- name: x86构建
+  jobExecutor: local
+  steps:
+  - !CheckoutStep
+    name: 拉取最新代码
+    cloneCredential: !DefaultCredential {}
+    withLfs: false
+    withSubmodules: false
+    checkoutPath: '@project_path@'
+    condition: SUCCESSFUL
+    optional: false
+  - !BuildImageStep
+    name: 构建镜像
+    buildPath: '@project_path@'
+    dockerfile: '@project_path@/Dockerfile'
+    output: !RegistryOutput
+      tags: dev.xy14qg.top/lion_mgmt/lion_mgmt:@tag@
+    condition: SUCCESSFUL
+    optional: false
+  triggers:
+  - !TagCreateTrigger
+    branches: master
+    projects: lion_mgmt
+  retryCondition: never
+  maxRetries: 3
+  retryDelay: 30
+  timeout: 14400
+- name: 信创arm构建
+  jobExecutor: hw-arm
+  steps:
+  - !CheckoutStep
+    name: 拉取最新代码
+    cloneCredential: !DefaultCredential {}
+    withLfs: false
+    withSubmodules: false
+    checkoutPath: '@project_path@'
+    condition: SUCCESSFUL
+    optional: false
+  - !BuildImageStep
+    name: 构建镜像
+    buildPath: '@project_path@'
+    dockerfile: '@project_path@/Dockerfile'
+    output: !OCIOutput
+      destPath: '@project_path@'
+    condition: SUCCESSFUL
+    optional: false
+  triggers:
+  - !TagCreateTrigger
+    branches: master
+    projects: lion_mgmt
   retryCondition: never
   maxRetries: 3
   retryDelay: 30
