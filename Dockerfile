@@ -1,5 +1,7 @@
 FROM python:3.11-slim AS builder
 
+RUN sed -i 's/http:\/\/deb.debian.org/https:\/\/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
+
 RUN apt-get update && apt-get install -y \
     gcc \
     libc-dev \
@@ -8,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     libaio-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install uv==0.7.4 nuitka==2.7.2
+RUN pip install uv==0.7.4 nuitka==2.7.2 -i https://mirrors.aliyun.com/pypi/simple
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
@@ -35,7 +37,9 @@ FROM timberio/vector:0.47.0-debian AS vector
 
 FROM python:3.11-slim AS runtime
 
-RUN apt-get update && apt-get install -y curl
+RUN sed -i 's/http:\/\/deb.debian.org/https:\/\/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
+
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 ENV VIRTUAL_ENV=/app/.venv \
     RY_ENV=PROD \
