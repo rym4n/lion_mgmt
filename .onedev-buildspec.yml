@@ -67,8 +67,8 @@ jobs:
     name: 构建镜像
     buildPath: '@project_path@'
     dockerfile: '@project_path@/Dockerfile'
-    output: !OCIOutput
-      destPath: '@project_path@'
+    output: !RegistryOutput
+      tags: swr.cn-north-4.myhuaweicloud.com/regulus.y/lion_mgmt:@tag@
     condition: SUCCESSFUL
     optional: false
   triggers:
