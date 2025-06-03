@@ -186,7 +186,7 @@ async def edit_workflow(request):
         end_app: 可选，结束节点
         tags: 可选，标签
     """
-    playbook = await Playbook.get(id=request.json.get("id")).prefetch_related("scenes")
+    playbook = await Playbook.get(id=request.json.get("id")).prefetch_related("scenes", "tags")
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
