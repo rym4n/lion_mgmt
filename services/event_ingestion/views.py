@@ -6,6 +6,7 @@ import os
 import random
 import re
 import string
+import tempfile
 import time
 import zipfile
 
@@ -24,7 +25,7 @@ from libs.utils import get_client_ip, fetch_latest_messages, run_linux_command
 from models.event import EventsIngestion, EventRelatedScript
 from models.playbook import Playbook
 from services.event_ingestion import supervisor
-from settings import VECTOR_CFG, KAFKA_SERVERS, VECTOR_TMP
+from settings import VECTOR_CFG, KAFKA_SERVERS
 
 event_ingestion_bp = Blueprint('event_ingestion', version=1, url_prefix='/event/ingestion')
 _all__ = ["event_ingestion_bp"]
@@ -100,7 +101,7 @@ CEF_REGEX = re.compile(
 # 生成配置文件
 # noinspection PyTypeChecker
 async def build_kafka_file_configuration_file(output_path, sources, event_source_type,
-                                              source_id, topic, tmp_path):
+                                              source_id, topic):
     config = {
         "sources": sources,
         "sinks": {
@@ -124,13 +125,9 @@ async def build_kafka_file_configuration_file(output_path, sources, event_source
     }
     yaml_str = yaml.dump(config, default_flow_style=False, allow_unicode=True)
 
-    async with aiofile.AIOFile(tmp_path, mode='w', encoding='utf-8') as file:
-        await file.write(yaml_str)
+    result = check_vector_config(config)
 
-    result = run_linux_command(f'vector validate --config-yaml {tmp_path}')
-
-    if result["code"] != 0:
-        os.remove(tmp_path)
+    if not result:
         return None
 
     async with aiofile.AIOFile(output_path, mode='w', encoding='utf-8') as file:
@@ -205,7 +202,6 @@ async def event_ingestion(request):
             raise CustomError(ErrorCode.DataAlreadyExists)
 
     output_path = os.path.join(VECTOR_CFG, vector_name + ".yaml")
-    tmp_path = os.path.join(VECTOR_TMP, vector_name + ".yaml")
 
     topic = vector_name
 
@@ -217,7 +213,6 @@ async def event_ingestion(request):
         }}
         event_source_type = "syslog"
         vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
-                                                                  tmp_path=tmp_path,
                                                                   source_id=vector_name,
                                                                   event_source_type=event_source_type,
                                                                   topic=topic)
@@ -242,7 +237,6 @@ async def event_ingestion(request):
                 "topics": kafka_topic
             }}
         vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
-                                                                  tmp_path=tmp_path,
                                                                   source_id=vector_name,
                                                                   event_source_type=event_source_type,
                                                                   topic=topic)
@@ -407,18 +401,13 @@ async def update_event_ingestion(request):
     if sasl_password:
         data["sources"][event.vector_name]["sasl"]["password"] = sasl_password
 
+    result = check_vector_config(data)
+    if not result:
+        raise CustomError(ErrorCode.ConfigFileGenerateError)
+
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
         await f.write(yaml_str)
-
-    result = run_linux_command(f'vector validate --config-yaml {event.file_path}')
-
-    if result["code"] != 0:
-        os.remove(event.file_path)
-        async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
-            yaml_str = yaml.dump(event.vector_config, allow_unicode=True, default_flow_style=False)
-            await f.write(yaml_str)
-        raise CustomError(ErrorCode.ConfigFileGenerateError)
 
     if event_describe:
         event.event_ingestion_describe = event_describe
@@ -429,6 +418,9 @@ async def update_event_ingestion(request):
         if enabled_status == 0:
             os.remove(file_path)
         else:
+            result = check_vector_config(data)
+            if not result:
+                raise CustomError(ErrorCode.ConfigFileGenerateError)
             async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
                 yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
                 await f.write(yaml_str)
@@ -634,18 +626,13 @@ del(.datetime_str)
         "table": "events"
     }
 
+    result = check_vector_config(data)
+    if not result:
+        raise CustomError(ErrorCode.ConfigFileGenerateError)
+
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
         await f.write(yaml_str)
-
-    result = run_linux_command(f'vector validate --config-yaml {event.file_path}')
-
-    if result["code"] != 0:
-        os.remove(event.file_path)
-        async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
-            yaml_str = yaml.dump(event.vector_config, allow_unicode=True, default_flow_style=False)
-            await f.write(yaml_str)
-        raise CustomError(ErrorCode.ConfigFileGenerateError)
 
     for script_id in script_ids:
         process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
@@ -713,18 +700,13 @@ async def unbundled_event_ingestion_script(request):
         supervisor.stop_process(process_name)
         supervisor.remove_process(process_name)
 
+    result = check_vector_config(data)
+    if not result:
+        raise CustomError(ErrorCode.ConfigFileGenerateError)
+
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
         await f.write(yaml_str)
-
-    result = run_linux_command(f'vector validate --config-yaml {event.file_path}')
-
-    if result["code"] != 0:
-        os.remove(event.file_path)
-        async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
-            yaml_str = yaml.dump(event.vector_config, allow_unicode=True, default_flow_style=False)
-            await f.write(yaml_str)
-        raise CustomError(ErrorCode.ConfigFileGenerateError)
 
     event.vector_config = data
 
@@ -973,18 +955,13 @@ async def event_ingestion_binding_update(request):
 
         event_related_script.event_name = event_name
 
+    result = check_vector_config(data)
+    if not result:
+        raise CustomError(ErrorCode.ConfigFileGenerateError)
+
     async with aiofile.AIOFile(event_ingestion.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
         await f.write(yaml_str)
-
-    result = run_linux_command(f'vector validate --config-yaml {event_ingestion.file_path}')
-
-    if result["code"] != 0:
-        os.remove(event_ingestion.file_path)
-        async with aiofile.AIOFile(event_ingestion.file_path, 'w', encoding='utf-8') as f:
-            yaml_str = yaml.dump(event_ingestion.vector_config, allow_unicode=True, default_flow_style=False)
-            await f.write(yaml_str)
-        raise CustomError(ErrorCode.ConfigFileGenerateError)
 
     if script_ids:
         for script_id in event_related_script.script_id:
@@ -1030,3 +1007,28 @@ def get_conditional_statements(conditions):
             conditional_statements += f" {connect_type} "
 
     return conditional_statements
+
+
+def check_vector_config(vector_config):
+    with tempfile.NamedTemporaryFile(
+            mode='w',
+            suffix='.yaml',
+            encoding='utf-8',
+            delete=False
+    ) as tmp_file:
+
+        yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
+        tmp_file.write(yaml_str)
+        tmp_file.flush()
+
+        tmp_path = tmp_file.name
+
+        result = run_linux_command(f'vector validate --config-yaml {tmp_path}')
+
+    try:
+        if result["code"] != 0:
+            return False
+        else:
+            return True
+    finally:
+        os.unlink(tmp_path)

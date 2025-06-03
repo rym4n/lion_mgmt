@@ -14,7 +14,6 @@ from io import BytesIO
 
 import aiofile
 import orjson
-from PIL import Image
 from sanic import Blueprint, response
 from tortoise.expressions import Q
 from tortoise.functions import Max
@@ -40,10 +39,15 @@ EXPECTED_STRUCTURE = {
 connected_clients = {}
 
 
-def check_image_size(image_info):
-    with Image.open(image_info) as img:
-        width, height = img.size
-        return width == 32 and height == 32
+def check_file_size(file_obj, max_size_kb=5):
+    current_pos = file_obj.tell()
+    file_obj.seek(0, 2)
+    file_size_bytes = file_obj.tell()
+
+    file_obj.seek(current_pos)
+
+    file_size_kb = file_size_bytes / 1024
+    return file_size_kb <= max_size_kb
 
 
 @tool_management_bp.post("/upload")
@@ -239,13 +243,14 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 
         if logo_name not in actual_files:
             return config_data, version, tool_name, "logo文件不存在"
-        if logo_name.split(".")[-1] != "ico":
-            return config_data, version, tool_name, "logo文件格式错误，请上传ico格式"
+
         for file_info in files_info:
             if file_info.filename.lower().endswith(".ico"):
                 with zip_ref.open(file_info) as logo_file:
-                    if not check_image_size(logo_file):
-                        return config_data, version, tool_name, "logo文件大小错误，请上传32x32像素的ico格式图片"
+                    if not check_file_size(logo_file):
+                        return config_data, version, tool_name, "logo文件大小超过5KB限制，请压缩后重新上传"
+            else:
+                return config_data, version, tool_name, "logo文件格式错误，目前只支持png、jpg、jpeg、ico格式图片"
         data += 1
         percent = int(data * single_progress) + success_progress
         await resp.send(f"data: 解压进度：{percent}%\n\n")
