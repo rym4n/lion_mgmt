@@ -60,7 +60,7 @@ class ErrorCode(BaseErrorCode):
     ActionNotFoundError = ErrorData(4041, "工具动作不存在")
     ResourcesNotFoundError = ErrorData(4042, "工具资源未找到")
     MissingLogoError = ErrorData(4043, "logo文件不存在")
-    InternalToolError = ErrorData(4044, "内部工具不支持下载")
+    InternalToolError = ErrorData(4044, "内置应用不支持下载")
 
     IpForbidden = ErrorData(4045, "IP禁止访问")
 

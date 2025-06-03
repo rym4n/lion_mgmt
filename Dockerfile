@@ -1,4 +1,4 @@
-FROM python:3.11-slim as builder
+FROM python:3.11-slim AS builder
 
 RUN apt-get update && apt-get install -y \
     gcc \
@@ -31,9 +31,9 @@ RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove
 RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file models/
 RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
 
-FROM timberio/vector:0.47.0-debian as vector
+FROM timberio/vector:0.47.0-debian AS vector
 
-FROM python:3.11-slim as runtime
+FROM python:3.11-slim AS runtime
 
 RUN apt-get update && apt-get install -y curl
 
