@@ -15,7 +15,8 @@ RUN pip install uv==0.7.4 nuitka==2.7.2 -i https://mirrors.aliyun.com/pypi/simpl
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
 
 WORKDIR /app
 
