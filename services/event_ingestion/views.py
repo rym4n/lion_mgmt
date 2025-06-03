@@ -216,8 +216,10 @@ async def event_ingestion(request):
             "mode": communication_type
         }}
         event_source_type = "syslog"
-        vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources, tmp_path=tmp_path,
-                                                                  source_id=vector_name, event_source_type=event_source_type,
+        vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
+                                                                  tmp_path=tmp_path,
+                                                                  source_id=vector_name,
+                                                                  event_source_type=event_source_type,
                                                                   topic=topic)
     elif event_source_type == "kafka":
         if sasl_mechanism:
@@ -239,8 +241,10 @@ async def event_ingestion(request):
                 "group_id": kafka_group_id,
                 "topics": kafka_topic
             }}
-        vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources, tmp_path=tmp_path,
-                                                                  source_id=vector_name, event_source_type=event_source_type,
+        vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
+                                                                  tmp_path=tmp_path,
+                                                                  source_id=vector_name,
+                                                                  event_source_type=event_source_type,
                                                                   topic=topic)
     else:
         raise CustomError(ErrorCode.ParameterError)
@@ -492,6 +496,19 @@ async def get_event_ingestion_kafka_sample(request):
         raise CustomError(ErrorCode.NoEventAccess)
 
     messages = await fetch_latest_messages([KAFKA_SERVERS], event.vector_name, size)
+    data = orjson.loads(messages[0])
+
+    if "message" in data.keys():
+        event.enabled_health_status = "healthy"
+    else:
+        event.enabled_health_status = "unhealthy"
+
+    if len(data.keys()) > 2:
+        event.convert_health_status = "healthy"
+    else:
+        event.convert_health_status = "unhealthy"
+
+    await event.save()
 
     return response_ok(messages)
 
@@ -633,10 +650,11 @@ del(.datetime_str)
         command = f"python start.py -m auto -f {script_id} -t {topic}"
         supervisor.add_process(process_name, command)
 
+        if event.linked_execution == 1:
+            supervisor.start_process(process_name)
+
     events_ingestion = await EventRelatedScript.create(condition=conditions, event_ingestion_id=event_ingestion_id,
                                                        script_id=script_ids, topic=topic, event_name=event_name)
-
-    event.linked_execution = 1
 
     event.vector_config = data
 
@@ -976,6 +994,9 @@ async def event_ingestion_binding_update(request):
             process_name = hashlib.md5(f"{event_related_script.event_ingestion_id}_{script_id}".encode()).hexdigest()
             command = f"python start.py -m auto -f {script_id} -t {event_related_script.topic}"
             supervisor.add_process(process_name, command)
+
+            if event_ingestion.linked_execution == 1:
+                supervisor.start_process(process_name)
 
         event_related_script.script_id = script_ids
 
