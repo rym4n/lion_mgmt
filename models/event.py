@@ -66,6 +66,7 @@ class EventsIngestion(BaseModel):
     vector_config = fields.JSONField(default={}, null=True, description="vector配置信息")
     enabled_health_status: str = fields.CharField(max_length=255, null=True, description="上游接入健康状态")
     execution_health_status: str = fields.CharField(max_length=255, null=True, description="联动执行健康状态")
+    convert_health_status: str = fields.CharField(max_length=255, null=True, description="转换配置健康状态")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -89,6 +90,7 @@ class EventsIngestion(BaseModel):
             "vector_name": self.vector_name,
             "enabled_health_status": self.enabled_health_status,
             "execution_health_status": self.execution_health_status,
+            "convert_health_status": self.convert_health_status,
             "config_info": self.config_info
         }
 
