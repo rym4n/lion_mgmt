@@ -496,19 +496,21 @@ async def get_event_ingestion_kafka_sample(request):
         raise CustomError(ErrorCode.NoEventAccess)
 
     messages = await fetch_latest_messages([KAFKA_SERVERS], event.vector_name, size)
-    data = orjson.loads(messages[0])
 
-    if "message" in data.keys():
-        event.enabled_health_status = "healthy"
-    else:
-        event.enabled_health_status = "unhealthy"
+    if messages:
+        data = orjson.loads(messages[0])
 
-    if len(data.keys()) > 2:
-        event.convert_health_status = "healthy"
-    else:
-        event.convert_health_status = "unhealthy"
+        if "message" in data.keys():
+            event.enabled_health_status = "healthy"
+        else:
+            event.enabled_health_status = "unhealthy"
 
-    await event.save()
+        if len(data.keys()) > 2:
+            event.convert_health_status = "healthy"
+        else:
+            event.convert_health_status = "unhealthy"
+
+        await event.save()
 
     return response_ok(messages)
 
