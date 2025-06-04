@@ -69,6 +69,10 @@ jobs:
     dockerfile: '@project_path@/Dockerfile'
     output: !RegistryOutput
       tags: swr.cn-north-4.myhuaweicloud.com/regulus.y/lion_mgmt:@tag@
+    registryLogins:
+    - registryUrl: swr.cn-north-4.myhuaweicloud.com
+      userName: cn-north-4@@HPUAHLCE1EUOBHBSSTTL
+      passwordSecret: DOCKER_REGISTRY_TOKEN
     condition: SUCCESSFUL
     optional: false
   triggers:
