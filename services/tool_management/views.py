@@ -1274,15 +1274,7 @@ async def remove_tag(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tag = await Tag.get_or_none(name=name, type=1)
-    if not tag:
-        raise CustomError(ErrorCode.TagNotFoundError)
+    tag = await Tag.get(name=name, type=1)
     await tag.delete()
-
-    tools = await Tool.filter(tag__contains=[name], deleted=False).all()
-
-    for tool in tools:
-        tool.tag = [t for t in tool.tag if t != name]
-        await tool.save(update_fields=["tag"])
 
     return response_ok("标签删除成功")

@@ -10,7 +10,7 @@ from sanic.log import logger
 
 from libs.kafka import aproduce, aconsume
 from libs.utils import gen_order_version
-from models import Runlog, Approvement, Events, Timed
+from models import Runlog, Approvement
 from models.user import Account
 from models.warroom import Room, Message
 from settings import CACHE, KAFKA_SERVERS, TIMED_TASK_TOPIC
@@ -130,8 +130,8 @@ class ChatManager:
         else:
             logger.info(f"创建runlog消息：{log}")
             try:
-                log["event_id"] = await Events.get_or_none(id=log["event_id"]) if log["event_id"] is not None else None
-                log["timer_id"] = await Timed.get_or_none(id=log["timer_id"]) if log["timer_id"] is not None else None
+                # log["event_id"] = await Events.get_or_none(id=log["event_id"]) if log["event_id"] is not None else None
+                # log["timer_id"] = await Timed.get_or_none(id=log["timer_id"]) if log["timer_id"] is not None else None
                 await Runlog.create(**log)
             except Exception as e:
                 logger.error(e)

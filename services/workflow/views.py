@@ -182,25 +182,21 @@ async def edit_workflow(request):
         id: 必填，剧本ID
         name: 可选，剧本名
         remark: 可选，备注
-        start_app: 可选，开始节点
-        end_app: 可选，结束节点
+        scenes: 可选，关联场景名称，列表格式
+        tags: 可选，标签名称，列表格式
         tags: 可选，标签
     """
-    playbook = await Playbook.get(id=request.json.get("id")).prefetch_related("scenes", "tags")
+    params = request.json
+    playbook = await Playbook.get(id=params.get("id")).prefetch_related("scenes", "tags")
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
-    has_change = False
-    for p in request.json:
-        # 敏感属性不允许修改
-        if p in ['id', 'ctime', 'utime', 'deleted', 'internal']:
-            continue
-        if hasattr(playbook, p):
-            has_change = True
-            setattr(playbook, p, request.json[p])
-    if has_change:
-        playbook.updator = request.ctx.session['account_info']
-        await playbook.save()
+    playbook.name = params.get("name")
+    playbook.remark = params.get("remark")
+    playbook.scenes = await Scene.filter(name__in=params.get("scenes")).all()
+    playbook.tags = await Tag.filter(name__in=params.get("tags")).all()
+    playbook.updator = request.ctx.session['account_info']
+    await playbook.save()
     return response_ok(playbook.json)
 
 
@@ -512,7 +508,7 @@ async def statistics_data(flow_json):
 @requires_permission("workflow:c")
 async def new_tag(request):
     """
-    新建标签（需要工具新增权限）
+    新建标签（需要剧本新增权限）
 
     请求参数：
         - name: 标签名称    str
@@ -533,13 +529,12 @@ async def new_tag(request):
 @requires_permission("workflow:r")
 async def tag_list(request):
     """
-    获取标签列表（需要工具查看权限）
+    获取标签列表（需要剧本查看权限）
 
     请求参数：
         无
     """
-    tags = await Tag.filter(type=0, deleted=False).all()
-
+    tags = await Tag.filter(type=0).all()
     return response_ok([tag.name for tag in tags])
 
 
@@ -547,7 +542,7 @@ async def tag_list(request):
 @requires_permission("workflow:d")
 async def remove_tag(request):
     """
-    删除标签（需要工具删除权限）
+    删除标签（需要剧本删除权限）
 
     请求参数：
         - name: 标签名称    str
@@ -556,15 +551,6 @@ async def remove_tag(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tag = await Tag.get_or_none(name=name, type=0)
-    if not tag:
-        raise CustomError(ErrorCode.TagNotFoundError)
+    tag = await Tag.get(name=name, type=0)
     await tag.delete()
-
-    playbooks = await Playbook.filter(tag__contains=[name], deleted=False).all()
-
-    for playbook in playbooks:
-        playbook.tags = [t for t in playbook.tags if t != name]
-        await playbook.save(update_fields=["tags"])
-
     return response_ok("标签删除成功")
