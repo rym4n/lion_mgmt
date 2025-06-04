@@ -64,6 +64,7 @@ class EventsIngestion(BaseModel):
     vector_name: str = fields.CharField(max_length=255, null=True, description="vector名称")
     config_info = fields.JSONField(default={}, null=True, description="转换配置信息")
     vector_config = fields.JSONField(default={}, null=True, description="vector配置信息")
+    vector_config_raw = fields.JSONField(default={}, null=True, description="未进行配置剧本接入的vector配置信息")
     enabled_health_status: str = fields.CharField(max_length=255, null=True, description="上游接入健康状态")
     execution_health_status: str = fields.CharField(max_length=255, null=True, description="联动执行健康状态")
     convert_health_status: str = fields.CharField(max_length=255, null=True, description="转换配置健康状态")
