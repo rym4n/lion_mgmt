@@ -1,7 +1,10 @@
+import datetime
 import re
 
+import pytz
 from sanic import Blueprint
 from sanic.log import logger
+from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -120,7 +123,9 @@ async def add_timed(request):
         if not action:
             raise CustomError(ErrorCode.ActionNotFoundError)
         action_input["executor"] = request.ctx.session.get("account_info").id
-        if any(key not in action_input for key in ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name", "action", "executor", "retry_times", "timeout"]):
+        if any(key not in action_input for key in
+               ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name", "action",
+                "executor", "retry_times", "timeout"]):
             raise CustomError(ErrorCode.ActionInputError)
         msg["run_type"] = "action"
         msg["run_args"] = action_input
@@ -134,7 +139,8 @@ async def add_timed(request):
                 logger.info(f"定时任务{name}的执行策略{tactics}不符合crontab格式，创建失败")
                 raise CustomError(ErrorCode.CronExpressionError)
             timer_rule["crontab"] = tactics
-    timed = await Timed.create(name=name, type=operate_type, playbook=playbook, playbook_input=playbook_input, action=action,
+    timed = await Timed.create(name=name, type=operate_type, playbook=playbook, playbook_input=playbook_input,
+                               action=action,
                                action_input=action_input, status=status, tactics=tactics, end_time=end_time, enable=1,
                                creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
     msg["timer_id"] = timed.id
@@ -217,7 +223,8 @@ async def update_timed(request):
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    timed = await Timed.get(id=timed_id, deleted=False).prefetch_related("action", "playbook_version", "creator", "updator")
+    timed = await Timed.get(id=timed_id, deleted=False).prefetch_related("action", "playbook_version", "creator",
+                                                                         "updator")
 
     run_type = data.get("type", timed.type)
     if run_type not in [RUN_TYPE_FLOW, RUN_TYPE_ACTION]:
@@ -259,7 +266,9 @@ async def update_timed(request):
         timed.action = await ToolAction.get_or_none(id=action_id, deleted=False)
 
         action_input["executor"] = request.ctx.session.get("account_info").id
-        if any(key not in action_input for key in ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name", "action", "executor", "retry_times", "timeout"]):
+        if any(key not in action_input for key in
+               ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name", "action",
+                "executor", "retry_times", "timeout"]):
             raise CustomError(ErrorCode.ActionInputError)
 
         timed.action_input = action_input
@@ -334,18 +343,39 @@ async def get_run_log(request):
         - id str 定时任务id  必填
         - page int 页码  必填   默认1
         - size int 页大小  必填   默认10
+        - start_time str 开始时间  非必填   格式为2025-12-12 00:00:00
+        - end_time str 结束时间  非必填   格式为2025-12-12 00:00:00
+        - status int 状态  非必填   0为成功，1为失败
     """
     timed_id = request.json.get("id")
     page = int(request.json.get("page") or 1)
     size = int(request.json.get("size") or 10)
+    start_time = request.json.get("start_time")
+    end_time = request.json.get("end_time")
+    status = int(request.json.get("status"))
     offset = (page - 1) * size
     limit = size
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    total = await Runlog.filter(timer_id=timed_id, deleted=False).count()
+    condition = Q(timer_id=timed_id, deleted=False)
 
-    run_logs = await Runlog.filter(timer_id=timed_id, deleted=False).offset(offset).limit(limit)
+    if start_time:
+        start_time = datetime.datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
+        start_time = pytz.timezone("Asia/Shanghai").localize(start_time)
+        condition &= Q(start_time__gte=start_time)
+    if end_time:
+        end_time = datetime.datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
+        end_time = pytz.timezone("Asia/Shanghai").localize(end_time)
+        condition &= Q(start_time__lte=end_time)
+    if status in [0, 1]:
+        condition &= Q(status=status)
+
+    total = await Runlog.filter(condition).count()
+
+    run_logs = await Runlog.filter(condition).offset(offset).limit(limit)
+
+    await timer_success_rate(timed_id)
 
     return response_ok({
         "page": page,
@@ -389,3 +419,28 @@ def is_valid_crontab(expr):
                     return False
 
     return True
+
+
+async def timer_success_rate(timed_id):
+    timed = await Timed.get_or_none(id=timed_id, deleted=False)
+    beijing_tz = pytz.timezone("Asia/Shanghai")
+    now = datetime.datetime.now(beijing_tz)
+
+    start_of_day = beijing_tz.localize(
+        datetime.datetime.combine(now.date(), datetime.time.min)
+    )
+    end_of_day = start_of_day + datetime.timedelta(days=1)
+
+    quantity = await Runlog.filter(timer_id=timed_id, start_time__gte=start_of_day, start_time__lte=end_of_day,
+                                   deleted=False).count()
+
+    if quantity > 10:
+        success_quantity = await Runlog.filter(timer_id=timed_id, start_time__gte=start_of_day,
+                                               start_time__lte=end_of_day, deleted=False, status=0).count()
+        timed.success_rate = str(round(success_quantity / quantity, 4) * 100) + "%"
+        await timed.save()
+    else:
+        recent_logs = await Runlog.filter(timer_id=timed_id, deleted=False).limit(10)
+        success_quantity = sum(1 for log in recent_logs if log.status == 0)
+        timed.success_rate = str(round(success_quantity / 10, 4) * 100) + "%"
+        await timed.save()
