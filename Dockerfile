@@ -22,7 +22,7 @@ WORKDIR /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --no-dev --default-index https://mirrors.aliyun.com/pypi/simple
+    uv sync --frozen --no-install-project --no-dev
 
 COPY . ./
 
@@ -57,4 +57,4 @@ COPY --from=vector /usr/bin/vector /usr/bin/vector
 COPY settings ./settings
 COPY server.py ./
 
-ENTRYPOINT ["sanic", "server:app", "--host", "0.0.0.0", "--port", "8000", "--fast", "--no-access-logs", "--no-motd"]
+ENTRYPOINT ["sanic", "server:app", "--host", "0.0.0.0", "--port", "8000", "-w", "4", "--no-access-logs", "--no-motd"]
