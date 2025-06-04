@@ -128,18 +128,13 @@ class ChatManager:
                 users = Account.filter(role_id__in=log['roles']).all()
                 approve.approvers.add(*users)
         else:
-            # 处理runlog消息
-            valid_fields = set(Runlog._meta.fields_map.keys())
-            filtered_msg = {}
-            for k, v in log.items():
-                if k in valid_fields:
-                    if k == "event_id" and v is not None:
-                        v = await Events.get_or_none(id=v)
-                    elif k == "timer_id" and v is not None:
-                        v = await Timed.get_or_none(id=v)
-                filtered_msg[k] = v
-            logger.info(f"创建runlog消息：{filtered_msg}")
-            await Runlog.create(**filtered_msg)
+            logger.info(f"创建runlog消息：{log}")
+            try:
+                log["event_id"] = await Events.get_or_none(id=log["event_id"]) if log["event_id"] is not None else None
+                log["timer_id"] = await Timed.get_or_none(id=log["timer_id"]) if log["timer_id"] is not None else None
+                await Runlog.create(**log)
+            except Exception as e:
+                logger.error(e)
 
     async def handle_message(self, user: Account, ws, data: dict):
         """消息处理"""
