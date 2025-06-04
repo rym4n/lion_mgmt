@@ -576,7 +576,7 @@ async def binding_event_ingestion_script(request):
             "condition": conditional_statements
         }
         if event_name == "default":
-            event_name = '"{}" + "_" + to_string(.datetime_str)'.format(event.event_ingestion_name)
+            event_name = '"{}" + "_" + to_string!(.datetime_str)'.format(event.event_ingestion_name)
         else:
             event_name = '"{}"'.format(event_name)
         data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
