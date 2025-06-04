@@ -53,3 +53,55 @@ jobs:
   maxRetries: 3
   retryDelay: 30
   timeout: 14400
+- name: arm-ci
+  jobExecutor: arm-build
+  steps:
+  - !CheckoutStep
+    name: 拉取最新代码
+    cloneCredential: !DefaultCredential {}
+    withLfs: false
+    withSubmodules: false
+    checkoutPath: '@project_path@'
+    condition: SUCCESSFUL
+    optional: false
+  - !BuildImageStep
+    name: 构建镜像
+    buildPath: '@project_path@'
+    dockerfile: '@project_path@/Dockerfile'
+    output: !RegistryOutput
+      tags: reg.hongcloud.net/lion_mgmt:@tag@
+    condition: SUCCESSFUL
+    optional: false
+  triggers:
+  - !TagCreateTrigger
+    branches: master
+    projects: lion_mgmt
+  retryCondition: never
+  maxRetries: 3
+  retryDelay: 30
+  timeout: 14400
+- name: arm-cd
+  jobExecutor: arm-build
+  steps:
+  - !CommandStep
+    name: 更新docker-compose配置
+    runInContainer: false
+    interpreter: !DefaultInterpreter
+      commands: |
+        NEW_VER=@tag@
+        sed -i -E "s#(reg\.hongcloud\.net/lion_mgmt:)v[0-9]+\.[0-9]+\.[0-9]+#\1${NEW_VER}#" /opt/lion/docker-compose.yml
+        docker-compose -f /opt/lion/docker-compose.yml --env-file /opt/lion/.env up -d
+    useTTY: true
+    condition: SUCCESSFUL
+    optional: false
+  triggers:
+  - !DependencyFinishedTrigger
+    projects: lion_mgmt
+  jobDependencies:
+  - jobName: arm-ci
+    requireSuccessful: true
+    artifacts: '**'
+  retryCondition: never
+  maxRetries: 3
+  retryDelay: 30
+  timeout: 14400
