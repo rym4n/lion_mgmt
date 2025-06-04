@@ -225,7 +225,6 @@ async def edit_workflow_flow(request):
     if pv.status == 1:
         pv.version = gen_order_version()
         pv.creator = request.ctx.session['account_info']
-        logger.info(pv.json)
         await pv.create()
     else:
         await pv.save()
@@ -237,7 +236,7 @@ async def edit_workflow_flow(request):
     action_ids = await statistics_data(pv.flow_json)
     await tool_action_update({pv.id: action_ids})
 
-    return response_ok(pv.json)
+    return response_ok('success')
 
 
 @workflow_bp.post("/publish")
