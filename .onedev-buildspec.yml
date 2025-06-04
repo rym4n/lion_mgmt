@@ -1,6 +1,6 @@
 version: 40
 jobs:
-- name: 托管云环境自动更新
+- name: cd
   jobExecutor: tgy-deploy
   steps:
   - !CommandStep
@@ -18,15 +18,15 @@ jobs:
   - !DependencyFinishedTrigger
     projects: lion_mgmt
   jobDependencies:
-  - jobName: x86构建
+  - jobName: ci
     requireSuccessful: true
     artifacts: '**'
   retryCondition: never
   maxRetries: 3
   retryDelay: 30
   timeout: 14400
-- name: x86构建
-  jobExecutor: local
+- name: ci
+  jobExecutor: tgy-builder
   steps:
   - !CheckoutStep
     name: 拉取最新代码
@@ -41,38 +41,8 @@ jobs:
     buildPath: '@project_path@'
     dockerfile: '@project_path@/Dockerfile'
     output: !RegistryOutput
-      tags: dev.xy14qg.top/lion_mgmt/lion_mgmt:@tag@
-    condition: SUCCESSFUL
-    optional: false
-  triggers:
-  - !TagCreateTrigger
-    branches: master
-    projects: lion_mgmt
-  retryCondition: never
-  maxRetries: 3
-  retryDelay: 30
-  timeout: 14400
-- name: 信创arm构建
-  jobExecutor: hw-arm
-  steps:
-  - !CheckoutStep
-    name: 拉取最新代码
-    cloneCredential: !DefaultCredential {}
-    withLfs: false
-    withSubmodules: false
-    checkoutPath: '@project_path@'
-    condition: SUCCESSFUL
-    optional: false
-  - !BuildImageStep
-    name: 构建镜像
-    buildPath: '@project_path@'
-    dockerfile: '@project_path@/Dockerfile'
-    output: !RegistryOutput
-      tags: swr.cn-north-4.myhuaweicloud.com/regulus.y/lion_mgmt:@tag@
-    registryLogins:
-    - registryUrl: swr.cn-north-4.myhuaweicloud.com
-      userName: cn-north-4@@HPUAHLCE1EUOBHBSSTTL
-      passwordSecret: DOCKER_REGISTRY_TOKEN
+      tags: reg.hongcloud.net/lion_mgmt:@tag@
+    platforms: linux/amd64,linux/arm64
     condition: SUCCESSFUL
     optional: false
   triggers:
