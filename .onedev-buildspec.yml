@@ -9,7 +9,7 @@ jobs:
     interpreter: !DefaultInterpreter
       commands: |
         NEW_VER=@tag@
-        sed -i -E "s#(dev\.xy14qg\.top/lion_mgmt/lion_mgmt:)v[0-9]+\.[0-9]+\.[0-9]+#\1${NEW_VER}#" /opt/lion/docker-compose.yml
+        sed -i -E "s#(reg\.hongcloud\.net/lion_mgmt:)v[0-9]+\.[0-9]+\.[0-9]+#\1${NEW_VER}#" /opt/lion/docker-compose.yml
         docker-compose -f /opt/lion/docker-compose.yml --env-file /opt/lion/.env up -d
     useTTY: true
     condition: SUCCESSFUL
