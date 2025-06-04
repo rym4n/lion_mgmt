@@ -41,7 +41,6 @@ dev = [
 
 [tool.uv]
 package = false
-index-url = "https://mirrors.aliyun.com/pypi/simple"
 
 [tool.aerich]
 tortoise_orm = "settings.TORTOISE"
