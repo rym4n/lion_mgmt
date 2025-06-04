@@ -315,17 +315,12 @@ async def execute_action(request: Request, ws: Websocket):
                     "clients":"abcd",             动作输入参数
                     "groups":"123456789"          动作输入参数
                 },
+                "resource": "abc",               资源名称
                 "node_name":"自定义扫描",    节点名称，定时任务模块中取动作描述
                 "action":"custom_scan",     动作名称 英文标识
                 "action_name":"自定义扫描",    动作名称 中文名称
                 "retry_times":1,             重试次数
                 "timeout":300,               超时时间,单位秒
-            }
-            - 查询执行结果请求示例
-            {
-                "type": "query",
-                "run_id": "20250515065837328942",
-                "utime": "2025-05-15 17:54:58.886 +0800"
             }
     """
     # 先获取认证信息
