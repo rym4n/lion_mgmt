@@ -352,7 +352,7 @@ async def get_run_log(request):
     size = int(request.json.get("size") or 10)
     start_time = request.json.get("start_time")
     end_time = request.json.get("end_time")
-    status = int(request.json.get("status"))
+    status = request.json.get("status")
     offset = (page - 1) * size
     limit = size
     if not timed_id:
@@ -368,8 +368,8 @@ async def get_run_log(request):
         end_time = datetime.datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
         end_time = pytz.timezone("Asia/Shanghai").localize(end_time)
         condition &= Q(start_time__lte=end_time)
-    if status in [0, 1]:
-        condition &= Q(status=status)
+    if status in ['0', '1']:
+        condition &= Q(status=int(status))
 
     total = await Runlog.filter(condition).count()
 

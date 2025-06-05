@@ -24,17 +24,9 @@ class UnknownExcHandler(BaseExcHandler):
             logger.exception(exception)
         if isinstance(exception, exceptions.NotFound) or isinstance(exception, DoesNotExist):
             return response_fail(ErrorCode.NotFound)
-        elif isinstance(exception, ValidationError):
+        elif isinstance(exception, ValidationError) or isinstance(exception, ValueError) or isinstance(exception, TypeError) or isinstance(exception, KeyError) or isinstance(exception, FieldError):
             return response_fail(ErrorCode.ParameterError)
-        elif isinstance(exception, ValueError):
-            return response_fail(ErrorCode.ParameterError)
-        elif isinstance(exception, KeyError):
-            return response_fail(ErrorCode.ParameterError)
-        elif isinstance(exception, IntegrityError):
-            return response_fail(ErrorCode.DataAlreadyExists)
-        elif isinstance(exception, FieldError):
-            return response_fail(ErrorCode.ParameterError)
-        elif isinstance(exception, UniqueViolationError):
+        elif isinstance(exception, IntegrityError) or isinstance(exception, UniqueViolationError):
             return response_fail(ErrorCode.DataAlreadyExists)
         else:
             return response_fail(ErrorCode.ServerError, 500)
