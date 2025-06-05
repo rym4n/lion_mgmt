@@ -16,8 +16,9 @@ from libs.chat import get_or_create_private_chat_room, chat_manager
 from libs.error_code.exception import CustomError
 from libs.security.authentication import validate_token
 from libs.security.authorization import requires_permission
+from models import Approvement
 from models.user import Account
-from models.warroom import Room, Message
+from models.warroom import Room, Message, MessageAccount
 from settings import SECRET, SESSION_ENCODING_ALGORITHM
 
 warroom_bp = Blueprint('warroom', version=1, url_prefix='/warroom')
@@ -440,3 +441,40 @@ async def query_messages(request: Request):
                 "limit": limit
             }
         })
+
+
+@warroom_bp.post("/get/list")
+@requires_permission("warroom_bp:r")
+async def get_list(request):
+    """
+    获取待办和消息列表（需要作战室查看权限）
+
+    请求参数：
+        无
+    """
+    to_do_list = []
+    message_list = []
+    account = request.ctx.session['account_info']
+    approvements = await Approvement.filter(approvers=account.id, status=0).all()
+    for approvement in approvements:
+        to_do_list.append(approvement.json)
+    messages = await MessageAccount.filter(account_id=account.id, status=0).all().prefetch_related("message__sender")
+    for message in messages:
+        message_list.append(message.json)
+    return response_ok({"to_do_list": to_do_list, "message_list": message_list})
+
+
+@warroom_bp.post("/up/status")
+@requires_permission("warroom_bp:u")
+async def up_status(request):
+    """
+    更新消息阅读状态（需要作战室更新权限）
+
+    请求参数：
+        id: 必填，消息ID
+    """
+    id = request.json.get("id")
+    if not id:
+        raise CustomError(ErrorCode.ParamValueError)
+    await MessageAccount.filter(id=id).update(status=1)
+    return response_ok("")

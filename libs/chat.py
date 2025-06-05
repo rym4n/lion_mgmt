@@ -12,7 +12,7 @@ from libs.kafka import aproduce, aconsume
 from libs.utils import gen_order_version
 from models import Runlog, Approvement
 from models.user import Account
-from models.warroom import Room, Message
+from models.warroom import Room, Message, MessageAccount
 from settings import CACHE, KAFKA_SERVERS, TIMED_TASK_TOPIC
 
 
@@ -184,6 +184,7 @@ class ChatManager:
 
         content = data.get("content", "")
         image_content = data.get("image_content", "")
+        specify_user = data.get("specify_user", "")
 
         if not content and not image_content:
             raise Exception("消息不能为空")
@@ -197,6 +198,10 @@ class ChatManager:
             image_content=image_content,
             receiver=user  # 群聊消息设为发送者自己作为占位符
         )
+
+        if specify_user:
+            # 指定用户发送消息
+            await MessageAccount.create(message=message, account_id=specify_user)
 
         # 广播
         message_data = {
@@ -225,6 +230,7 @@ class ChatManager:
 
             content = data.get("content", "")
             image_content = data.get("image_content", "")
+            specify_user = data.get("specify_user", "")
 
             # 获取或创建私聊房间
             chat_room = await get_or_create_private_chat_room(self.cache_client, user, receiver)
@@ -237,6 +243,10 @@ class ChatManager:
                 image_content=image_content,
                 room=chat_room
             )
+
+            if specify_user:
+                # 指定用户发送消息
+                await MessageAccount.create(message=message, account_id=specify_user)
 
             # 构建消息数据
             message_data = {

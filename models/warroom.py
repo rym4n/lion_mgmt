@@ -88,7 +88,7 @@ class MessageAccount(BaseModel):
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
             "message": self.message.content if self.message else "",
-            "sender": self.message.sender.username if self.message and self.message.sender else ""
+            "sender": {"display_name": self.message.sender.display_name, "username": self.message.sender.username} if self.message and self.message.sender else ""
         }
 
     class Meta:
