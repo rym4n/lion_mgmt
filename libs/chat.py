@@ -13,7 +13,7 @@ from libs.utils import gen_order_version
 from models import Runlog, Approvement
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import KAFKA_SERVERS, TIMED_TASK_TOPIC
+from settings import KAFKA_SERVERS, TIMED_TASK_TOPIC, CACHE
 
 
 # 获取或创建私聊作战室
@@ -48,6 +48,7 @@ class ChatManager:
     """
 
     def __init__(self):
+        caches.set_config(CACHE)
         self.redis = caches.get("redis_mgmt")
         self.cache_client = caches.get("redis_chat")
         self.msg_pub = self.cache_client.client
