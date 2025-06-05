@@ -378,7 +378,7 @@ async def get_run_log(request):
 
     total = await Runlog.filter(condition).count()
 
-    run_logs = await Runlog.filter(condition).offset(offset).limit(limit)
+    run_logs = await Runlog.filter(condition).offset(offset).limit(limit).prefetch_related("event_id", "timer_id", "playbook_version")
 
     await timer_success_rate(timed_id)
 

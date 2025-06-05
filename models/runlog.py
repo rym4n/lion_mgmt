@@ -60,7 +60,7 @@ class Runlog(BaseModel):
             "result": self.result,
             "start_time": strip_timezone_to_seconds(self.start_time),
             "end_time": strip_timezone_to_seconds(self.end_time),
-            "playbook": self.playbook_id if self.playbook_version else None,
+            "playbook": self.playbook_version.id if self.playbook_version else None,
             "creator": self.executor
         }
 
