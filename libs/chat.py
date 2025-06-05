@@ -36,7 +36,7 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
         data = {"room_id": room.id, "name": room.name}
         user_private_chat_rooms[key] = data
         logger.info(user_private_chat_rooms)
-        await cache_client.set("user_private_chat_rooms", user_private_chat_rooms)
+        await cache_client.set("user_private_chat_rooms", user_private_chat_rooms, ttl=60 * 60 * 24)
         return data
     else:
         return user_private_chat_rooms[key]

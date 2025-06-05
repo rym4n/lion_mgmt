@@ -213,7 +213,7 @@ async def edit_workflow_flow(request):
     if not request.json.get("id") or not request.json.get("flow_json"):
         raise CustomError(ErrorCode.ParameterError)
 
-    pv = await PlaybookVersion.get(id=request.json.get("id"))
+    pv = await PlaybookVersion.get(id=request.json.get("id")).prefetch_related("playbook", "creator", "updator")
     old_data = pv.flow_json
     pv.flow_json = request.json.get("flow_json")
     pv.updator = request.ctx.session['account_info']
@@ -232,7 +232,7 @@ async def edit_workflow_flow(request):
     action_ids = await statistics_data(pv.flow_json)
     await tool_action_update({pv.id: action_ids})
 
-    return response_ok('success')
+    return response_ok(pv.json)
 
 
 @workflow_bp.post("/publish")
