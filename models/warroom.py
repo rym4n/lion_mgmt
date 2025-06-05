@@ -68,3 +68,29 @@ class Message(BaseModel):
     class Meta:
         table = "room_msg"
         ordering = ["-ctime"]
+
+
+class MessageAccount(BaseModel):
+    """
+    消息与用户关系表
+    """
+    message = fields.ForeignKeyField(model_name="models.Message", related_name="msg_account", description="消息")
+    account_id = fields.CharField(null=False, max_length=255, description="用户")
+    status = fields.IntField(default=0, description="阅读状态，0代表未读，1代表已读")
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
+            "message": self.message.content if self.message else "",
+            "sender": {"display_name": self.message.sender.display_name, "username": self.message.sender.username} if self.message and self.message.sender else ""
+        }
+
+    class Meta:
+        table = "room_msg_account"
+        ordering = ["-ctime"]
