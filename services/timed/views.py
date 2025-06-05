@@ -11,7 +11,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
-from models import Timed, Playbook, ToolAction, Runlog
+from models import Timed, Playbook, ToolAction, Runlog, PlaybookVersion
 from settings import KAFKA_SERVERS, TIMED_TASK_TOPIC
 
 timed_bp = Blueprint('timed', version=1, url_prefix='/timed')
@@ -98,9 +98,11 @@ async def add_timed(request):
     msg = {}
     playbook = None
     action = None
+    playbook_version = None
     timer_rule = {}
     if operate_type == 0:
         playbook = await Playbook.get_or_none(id=playbook_id, deleted=False)
+        playbook_version = await PlaybookVersion.get_or_none(id=playbook_input.get("flow_id"))
         if not playbook:
             raise CustomError(ErrorCode.PlaybookNotFound)
         msg["run_type"] = "flow"
@@ -140,7 +142,7 @@ async def add_timed(request):
                 raise CustomError(ErrorCode.CronExpressionError)
             timer_rule["crontab"] = tactics
     timed = await Timed.create(name=name, type=operate_type, playbook=playbook, playbook_input=playbook_input,
-                               action=action,
+                               action=action, playbook_version=playbook_version.version if playbook_version else None,
                                action_input=action_input, status=status, tactics=tactics, end_time=end_time, enable=1,
                                creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
     msg["timer_id"] = timed.id
@@ -165,7 +167,7 @@ async def get_all(request):
     keyword = request.json.get("keyword", "").strip()
 
     # 获取全部（后续在 Python 层过滤）
-    all_items = await Timed.filter(deleted=False).prefetch_related("action", "playbook_version", "creator", "updator")
+    all_items = await Timed.filter(deleted=False).prefetch_related("action", "playbook", "creator", "updator")
 
     if keyword:
         keyword = keyword.lower()
@@ -178,7 +180,7 @@ async def get_all(request):
                 action_desc = item.action.action.get("name", "")
             action_match = keyword in action_desc.lower()
 
-            playbook_name = item.playbook_version.name if item.playbook_version else ""
+            playbook_name = item.playbook.name if item.playbook else ""
             playbook_match = keyword in playbook_name.lower()
 
             return name_match or action_match or playbook_match
@@ -223,10 +225,10 @@ async def update_timed(request):
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    timed = await Timed.get(id=timed_id, deleted=False).prefetch_related("action", "playbook_version", "creator",
+    timed = await Timed.get(id=timed_id, deleted=False).prefetch_related("action", "playbook", "creator",
                                                                          "updator")
 
-    run_type = data.get("type", timed.type)
+    run_type = int(data.get("type", timed.type))
     if run_type not in [RUN_TYPE_FLOW, RUN_TYPE_ACTION]:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -238,13 +240,15 @@ async def update_timed(request):
     msg = {"run_type": "flow" if run_type == RUN_TYPE_FLOW else "action"}
 
     if run_type == RUN_TYPE_FLOW:
-        playbook_id = data.get("playbook_id") or (timed.playbook_input or {}).get("flow_id")
+        playbook_id = data.get("playbook_id", timed.playbook.id)
         playbook_input = data.get("playbook_input", timed.playbook_input)
 
         if not playbook_id or not playbook_input:
             raise CustomError(ErrorCode.ParameterError)
 
-        timed.playbook_version = await Playbook.get_or_none(id=playbook_id, deleted=False)
+        timed.playbook = await Playbook.get_or_none(id=playbook_id, deleted=False)
+        playbook_version = await PlaybookVersion.get_or_none(id=playbook_input.get("flow_id"))
+        timed.playbook_version = playbook_version.version if playbook_version else None
 
         playbook_input["executor"] = request.ctx.session.get("account_info").id
 
@@ -272,6 +276,7 @@ async def update_timed(request):
             raise CustomError(ErrorCode.ActionInputError)
 
         timed.action_input = action_input
+        timed.playbook = None
         timed.playbook_version = None
         timed.playbook_input = {}
         msg["run_args"] = action_input
@@ -373,7 +378,7 @@ async def get_run_log(request):
 
     total = await Runlog.filter(condition).count()
 
-    run_logs = await Runlog.filter(condition).offset(offset).limit(limit)
+    run_logs = await Runlog.filter(condition).offset(offset).limit(limit).prefetch_related("event_id", "timer_id", "playbook_version")
 
     await timer_success_rate(timed_id)
 
