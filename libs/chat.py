@@ -204,7 +204,9 @@ class ChatManager:
 
         if specify_user:
             # 指定用户发送消息
+            user = await Account.filter(id=specify_user).first()
             await MessageAccount.create(message=message, account_id=specify_user)
+            await user.star_rooms.add(room)
 
         # 广播
         message_data = {

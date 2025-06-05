@@ -63,12 +63,10 @@ async def create_event(request):
         event_name: str 事件名称
         event_source: str 事件来源   (人工创建时默认传人工)
         owner: list 负责人 示例：
-        [
-            {
+        {
             "role":["root"],
             "user":["test"]
-            }
-        ]
+        }
         event_summary: str 事件概要 (非必填)
         event_ingestion_id: str 事件接入id   (人工创建时不传此参数)
         log_data: str 日志数据 (非必填)    (人工创建时不传此参数)
@@ -76,7 +74,7 @@ async def create_event(request):
     event_name = request.json.get("event_name") + "_" + str(int(time.time() * 1000))
     event_process_status = "待处理"
     event_source = request.json.get("event_source")
-    owner = (request.json.get("owner") or [])
+    owner = (request.json.get("owner") or {})
     user = request.ctx.session['account_info']
     created_id = user.id
     event_summary = (request.json.get("event_summary") or "")
@@ -145,12 +143,10 @@ async def update_event(request):
         event_name: str 事件名称    (非必填)
         owner: list 负责人          (非必填)
         示例：
-        [
-            {
+        {
             "role":["root"],
             "user":["test"]
-            }
-        ]
+        }
         event_summary: str 事件概要 (非必填)
         event_process_status: str 事件处理状态 (非必填)
         room_user_id: str 作战室新增用户id (非必填)
@@ -187,13 +183,13 @@ async def update_event(request):
 
     new_owner = params.get("owner")
     if new_owner is not None:
-        if not isinstance(event.owner, list) or not event.owner:
-            event.owner = [{"role": [], "user": []}]
-        owner_data = event.owner[0]
-        for o in new_owner[0].get("user", []):
+        if not isinstance(event.owner, dict) or not event.owner:
+            event.owner = {"role": [], "user": []}
+        owner_data = event.owner
+        for o in new_owner.get("user", []):
             if o not in owner_data.get("user", []):
                 owner_data.get("user", []).append(o)
-        for o in new_owner[0].get("role", []):
+        for o in new_owner.get("role", []):
             if o not in owner_data.get("role", []):
                 owner_data.get("role", []).append(o)
         update_fields.append("owner")

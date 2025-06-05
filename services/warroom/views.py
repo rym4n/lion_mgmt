@@ -16,7 +16,7 @@ from libs.chat import get_or_create_private_chat_room, chat_manager
 from libs.error_code.exception import CustomError
 from libs.security.authentication import validate_token
 from libs.security.authorization import requires_permission
-from models import Approvement
+from models import Approvement, Events
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
 from settings import SECRET, SESSION_ENCODING_ALGORITHM
@@ -76,19 +76,26 @@ async def create_room(request: Request):
     """
     room_name = request.json.get('name')
     members_ids = request.json.get('members', [])
-
+    user_id = []
     # 作战室名称唯一
     if await Room.filter(name=room_name).exists():
         raise CustomError(ErrorCode.RoomNameExists)
     creator = request.ctx.session['account_info']
     room = await Room.create(name=room_name, creator=creator)
     await room.users.add(creator)
+    await creator.star_rooms.add(room)
+    user_id.append(creator.id)
     # 可选择邀请其他用户
     if members_ids and isinstance(members_ids, list):
         for member_id in members_ids:
             member = await Account.get(id=member_id)
             if member:
                 await room.users.add(member)
+                await member.star_rooms.add(room)
+                user_id.append(member.id)
+
+    await Events.create(event_name=room_name, event_process_status="待处理", event_source="人工", owner={"role": [], "user": user_id}, created_id=creator.id,
+                        room=room)
 
     return response_ok({
         "room_id": str(room.id),
@@ -213,9 +220,8 @@ async def get_star_rooms(request: Request):
         keyword: 可选，搜索关注列表
     """
     user = request.ctx.session['account_info']
-    await user.star_rooms.prefetch_related('creator', 'users')
     return response_ok({
-        "star_rooms": [r.json for r in user.star_rooms]
+        "star_rooms": [r.json for r in await user.star_rooms.all().prefetch_related('creator', 'users')]
     })
 
 
