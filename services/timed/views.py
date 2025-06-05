@@ -225,7 +225,7 @@ async def update_timed(request):
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    timed = await Timed.get(id=timed_id, deleted=False).prefetch_related("action", "playbook_version", "creator",
+    timed = await Timed.get(id=timed_id, deleted=False).prefetch_related("action", "playbook", "creator",
                                                                          "updator")
 
     run_type = data.get("type", timed.type)
