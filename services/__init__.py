@@ -19,7 +19,7 @@ from services.role.views import role_bp
 from services.scene.views import scene_bp
 from services.system_configuration.views import system_bp
 from services.timed.views import timed_bp
-from services.tool_management.views import tool_management_bp
+from services.tools.views import tools_bp
 from services.user.views import user_bp
 from services.variables.views import var_bp
 from services.warroom.views import warroom_bp
@@ -51,7 +51,7 @@ def register_blueprints(app: Sanic) -> None:
             "scene_bp": scene_bp,
             "system_bp": system_bp,
             "timed_bp": timed_bp,
-            "tool_management_bp": tool_management_bp,
+            "tool_management_bp": tools_bp,
             "var_bp": var_bp,
             "warroom_bp": warroom_bp,
             "workflow_bp": workflow_bp,
