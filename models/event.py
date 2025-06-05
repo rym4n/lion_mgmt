@@ -13,9 +13,9 @@ class Events(BaseModel):
     """
 
     event_name: str = fields.CharField(max_length=255, unique=True, description="事件名称")
-    event_process_status: str = fields.CharField(max_length=50, description="事件处理状态（如 ASSIGNED, RESOLVED）")
+    event_process_status: str = fields.CharField(max_length=50, description="事件处理状态")
     event_source: str = fields.CharField(max_length=255, null=True, description="事件来源")
-    owner: List[Dict[str, Any]] = fields.JSONField(default=list, null=True, description="负责人（包括角色和用户）")
+    owner: Dict[str, Any] = fields.JSONField(default=list, null=True, description="负责人（包括角色和用户）")
     created_id: str = fields.CharField(max_length=36, description="创建人ID，关联用户表")
     event_summary: str = fields.TextField(null=True, description="事件概要")
     log_data: str = fields.TextField(default=dict, description="日志数据")
