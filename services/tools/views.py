@@ -28,8 +28,8 @@ from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPe
 from settings import TOOLS_DIR
 
 # 定义 Blueprint
-tool_management_bp = Blueprint("tool_management", version=1, url_prefix="/tool_management")
-__all__ = ["tool_management_bp"]
+tools_bp = Blueprint("tools", version=1, url_prefix="/tools")
+__all__ = ["tools_bp"]
 
 # 预期的文件结构
 EXPECTED_STRUCTURE = {
@@ -50,7 +50,7 @@ def check_file_size(file_obj, max_size_kb=5):
     return file_size_kb <= max_size_kb
 
 
-@tool_management_bp.post("/upload")
+@tools_bp.post("/upload")
 @requires_permission("tool:c")
 async def upload_and_extract_zip(request):
     """
@@ -304,7 +304,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
         return config_data, version, tool.name, "success"
 
 
-@tool_management_bp.post("/all")
+@tools_bp.post("/all")
 @requires_permission("tool:r")
 async def all_tools(request):
     """
@@ -381,7 +381,7 @@ async def enrich_tool(tool, cache_client):
     return tool
 
 
-@tool_management_bp.post("/versions")
+@tools_bp.post("/versions")
 @requires_permission("tool:r")
 async def all_versions(request):
     """
@@ -402,7 +402,7 @@ async def all_versions(request):
     return response_ok(tools)
 
 
-@tool_management_bp.post("/actions")
+@tools_bp.post("/actions")
 @requires_permission("tool:r")
 async def tool_actions(request):
     """
@@ -431,7 +431,7 @@ async def tool_actions(request):
     return response_ok({"actions": action_list})
 
 
-@tool_management_bp.post("/upstatus")
+@tools_bp.post("/upstatus")
 @requires_permission("tool:u")
 async def update_tool_status(request):
     """
@@ -458,7 +458,7 @@ async def update_tool_status(request):
     return response_ok({"message": "工具状态更新成功"})
 
 
-@tool_management_bp.post("/delete/version")
+@tools_bp.post("/delete/version")
 @requires_permission("tool:d")
 async def delete_tool(request):
     """
@@ -492,7 +492,7 @@ async def delete_tool(request):
     return response_ok({"message": "工具删除成功"})
 
 
-@tool_management_bp.post("/delete/all")
+@tools_bp.post("/delete/all")
 @requires_permission("tool:d")
 async def delete_tool_all(request):
     """
@@ -522,7 +522,7 @@ async def delete_tool_all(request):
     return response_ok({"message": "全部工具删除成功"})
 
 
-@tool_management_bp.post("/resource/model")
+@tools_bp.post("/resource/model")
 @requires_permission("tool:r")
 async def tool_resource_model(request):
     """
@@ -542,7 +542,7 @@ async def tool_resource_model(request):
     return response_ok(resources)
 
 
-@tool_management_bp.post("/resource/add")
+@tools_bp.post("/resource/add")
 @requires_permission("tool:c")
 async def add_tool_resource(request):
     """
@@ -582,7 +582,7 @@ async def add_tool_resource(request):
     return response_ok({"message": "工具资源新增成功", "id": resources.id})
 
 
-@tool_management_bp.post("/resource/detailed")
+@tools_bp.post("/resource/detailed")
 @requires_permission("tool:r")
 async def tool_resources_detailed(request):
     """
@@ -607,7 +607,7 @@ async def tool_resources_detailed(request):
     return response_ok(resources)
 
 
-@tool_management_bp.post("/resource/update")
+@tools_bp.post("/resource/update")
 @requires_permission("tool:u")
 async def update_tool_resource(request):
     """
@@ -650,7 +650,7 @@ async def update_tool_resource(request):
     return response_ok({"message": "工具资源更新成功"})
 
 
-@tool_management_bp.post("/resource/delete")
+@tools_bp.post("/resource/delete")
 @requires_permission("tool:d")
 async def delete_tool_resource(request):
     """
@@ -677,7 +677,7 @@ async def delete_tool_resource(request):
     return response_ok({"message": "工具资源删除成功"})
 
 
-@tool_management_bp.post("/download")
+@tools_bp.post("/download")
 @requires_permission("tool:r")
 async def download_zip(request):
     """
@@ -707,7 +707,7 @@ async def download_zip(request):
     return await response.file(zip_path, filename=f"{tool_name}_{version}.zip", mime_type="application/zip")
 
 
-@tool_management_bp.post("/action/permissions/add")
+@tools_bp.post("/action/permissions/add")
 @requires_permission("tool:u")
 async def add_permission(request):
     """
@@ -779,7 +779,7 @@ async def add_permission(request):
     return response_ok({"message": "工具动作权限新增成功"})
 
 
-@tool_management_bp.post("/action/permissions/delete")
+@tools_bp.post("/action/permissions/delete")
 @requires_permission("tool:u")
 async def delete_permission(request):
     """
@@ -872,7 +872,7 @@ async def delete_permission(request):
     return response_ok({"message": "工具动作权限删除成功"})
 
 
-@tool_management_bp.post("/action/permissions/select")
+@tools_bp.post("/action/permissions/select")
 @requires_permission("tool:r")
 async def select_permission_all(request):
     """
@@ -934,7 +934,7 @@ async def select_permission_all(request):
     return response_ok(permission_list)
 
 
-@tool_management_bp.post("/action/permissions/judge")
+@tools_bp.post("/action/permissions/judge")
 @requires_permission("tool:r")
 async def judge_permission(request):
     """
@@ -1024,7 +1024,7 @@ async def judge_permission(request):
     return response_ok(result)
 
 
-@tool_management_bp.post("/tag/add")
+@tools_bp.post("/tag/add")
 @requires_permission("tool:u")
 async def add_tag(request):
     """
@@ -1052,7 +1052,7 @@ async def add_tag(request):
     return response_ok({"message": "工具标签新增成功"})
 
 
-@tool_management_bp.post("/tag/delete")
+@tools_bp.post("/tag/delete")
 @requires_permission("tool:u")
 async def delete_tag(request):
     """
@@ -1080,7 +1080,7 @@ async def delete_tag(request):
     return response_ok({"message": "工具标签删除成功"})
 
 
-@tool_management_bp.post("/health/check/config")
+@tools_bp.post("/health/check/config")
 @requires_permission("tool:u")
 async def health_check_config(request):
     """
@@ -1111,7 +1111,7 @@ async def health_check_config(request):
     return response_ok({"message": "资源健康检查配置修改成功"})
 
 
-@tool_management_bp.post("/health/check/get")
+@tools_bp.post("/health/check/get")
 @requires_permission("tool:r")
 async def health_check_get(request):
     """
@@ -1129,7 +1129,7 @@ async def health_check_get(request):
     return response_ok({"switch": "on" if not config.deleted else "off", "cron": value.get("cron")})
 
 
-@tool_management_bp.post("/action/input")
+@tools_bp.post("/action/input")
 @requires_permission("tool:r")
 async def tool_action_input(request):
     """
@@ -1226,7 +1226,7 @@ async def tool_action_playbook_delete(data):
             await tool.save()
 
 
-@tool_management_bp.post("/tag/new")
+@tools_bp.post("/tag/new")
 @requires_permission("tool:c")
 async def new_tag(request):
     """
@@ -1247,7 +1247,7 @@ async def new_tag(request):
     return response_ok("标签新建成功")
 
 
-@tool_management_bp.post("/tag/list")
+@tools_bp.post("/tag/list")
 @requires_permission("tool:r")
 async def tag_list(request):
     """
@@ -1261,7 +1261,7 @@ async def tag_list(request):
     return response_ok([tag.name for tag in tags])
 
 
-@tool_management_bp.post("/tag/remove")
+@tools_bp.post("/tag/remove")
 @requires_permission("tool:d")
 async def remove_tag(request):
     """

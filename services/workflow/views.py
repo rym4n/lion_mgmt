@@ -22,7 +22,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_order_version
 from models import Playbook, Scene, ToolAction, Tool, Runlog, Tag, PlaybookVersion
-from services.tool_management.views import tool_action_update, tool_action_playbook_delete
+from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import SECRET, SESSION_ENCODING_ALGORITHM
 
 workflow_bp = Blueprint('workflow', version=1, url_prefix='/playbook')
