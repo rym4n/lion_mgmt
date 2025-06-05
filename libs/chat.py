@@ -13,7 +13,7 @@ from libs.utils import gen_order_version
 from models import Runlog, Approvement
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import CACHE, KAFKA_SERVERS, TIMED_TASK_TOPIC
+from settings import KAFKA_SERVERS, TIMED_TASK_TOPIC
 
 
 # 获取或创建私聊作战室
@@ -35,6 +35,7 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
             await room.users.add(receiver)
         data = {"room_id": room.id, "name": room.name}
         user_private_chat_rooms[key] = data
+        logger.info(user_private_chat_rooms)
         await cache_client.set("user_private_chat_rooms", user_private_chat_rooms)
         return data
     else:
@@ -47,7 +48,7 @@ class ChatManager:
     """
 
     def __init__(self):
-        caches.set_config(CACHE)
+        self.redis = caches.get("redis_mgmt")
         self.cache_client = caches.get("redis_chat")
         self.msg_pub = self.cache_client.client
         self.active_connections: dict[str, dict] = {}
@@ -234,7 +235,7 @@ class ChatManager:
             specify_user = data.get("specify_user", "")
 
             # 获取或创建私聊房间
-            chat_room = await get_or_create_private_chat_room(self.cache_client, user, receiver)
+            chat_room = await get_or_create_private_chat_room(self.redis, user, receiver)
 
             message = await Message.create(
                 type="private",

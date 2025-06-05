@@ -37,11 +37,12 @@ class Account(BaseModel):
     mfa_bind: bool = fields.BooleanField(default=False)
     oauth_id: str = fields.CharField(unique=True, null=True, max_length=255)
     disabled: bool = fields.BooleanField(default=False)
-    roles: fields.ManyToManyRelation["Role"] = fields.ManyToManyField("models.Role", through="account_role")
+    roles = fields.ManyToManyField("models.Role", through="account_role")
     permit_ip: str = fields.CharField(null=True, max_length=255)
     type: str = fields.CharField(max_length=255, default="user")
     creator = fields.CharField(max_length=32, null=True, description="创建人")
     expiration = fields.DatetimeField(null=True, description="Token过期时间")
+    star_rooms = fields.ManyToManyField("models.Room", through="account_star_room")
 
     @property
     def json(self) -> dict:

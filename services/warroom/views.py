@@ -42,7 +42,7 @@ async def warroom_ws(request: Request, ws: Websocket):
             raise CustomError(ErrorCode.SessionInvalid)
         # 建立连接
         await chat_manager.connect(account, ws)
-        # 持续接收和处理消息
+        # 持续接收和处理消息f
         async for msg in ws:
             try:
                 message = orjson.loads(msg)
@@ -113,27 +113,6 @@ async def join_room(request: Request):
         return response_ok("用户已经是该作战室成员")
     await room.users.add(user)
     return response_ok("成功加入作战室")
-
-
-@warroom_bp.post("/delete")
-@requires_permission('warroom:r')
-async def delete_room(request: Request):
-    """
-    在作战室列表删除指定作战室，类似微信的消息列表，删除只是暂时不显示而已
-
-    请求参数：
-        id: 必填， 作战室id
-    """
-    room_id = request.json.get("id")
-    room = await Room.select_related('creator').get(id=room_id)
-    if room is None:
-        raise CustomError(ErrorCode.RoomNotExists)
-    user = request.ctx.session['account_info']
-    # 作战室只能由创建者删除
-    if str(room.creator.id) != str(user.id):
-        raise CustomError(ErrorCode.RoomDeleteNotAllowed)
-    await Room.filter(id=room_id).update(deleted=True)
-    return response_ok("成功")
 
 
 @warroom_bp.post("/quit")
@@ -224,8 +203,64 @@ async def get_private_room(request: Request):
     return response_ok(room_info)
 
 
+@warroom_bp.post("/get_star_rooms")
+@requires_permission('warroom:r')
+async def get_star_rooms(request: Request):
+    """
+    获取关注列表
+
+    请求参数：
+        keyword: 可选，搜索关注列表
+    """
+    user = request.ctx.session['account_info']
+    await user.star_rooms.prefetch_related('creator', 'users')
+    return response_ok({
+        "star_rooms": [r.json for r in user.star_rooms]
+    })
+
+
+@warroom_bp.post("/star_room")
+@requires_permission('warroom:r')
+async def star_room(request: Request):
+    """
+    关注指定作战室
+
+    请求参数：
+        id: 必填， 作战室id
+    """
+    room_id = request.json.get('id')
+    room = await Room.get(id=room_id)
+    user = request.ctx.session['account_info']
+    # 检查当前用户是否已加入该作战室
+    is_member = await room.users.filter(id=user.id).exists()
+    if not is_member:
+        return response_ok("用户并不在该作战室，无需关注")
+    await user.star_rooms.add(room)
+    return response_ok("成功关注")
+
+
+@warroom_bp.post("/unstar_room")
+@requires_permission('warroom:r')
+async def unstar_room(request: Request):
+    """
+    取消关注指定作战室
+
+    请求参数：
+        id: 必填， 作战室id
+    """
+    room_id = request.json.get('id')
+    room = await Room.get(id=room_id)
+    user = request.ctx.session['account_info']
+    # 检查当前用户是否已加入该作战室
+    is_member = await room.users.filter(id=user.id).exists()
+    if not is_member:
+        return response_ok("用户并不在该作战室，无需取消关注")
+    await user.star_rooms.remove(room)
+    return response_ok("成功取消关注")
+
+
 @warroom_bp.post("/user_rooms")
-@requires_permission('warroom:a')
+@requires_permission('warroom:r')
 async def get_user_rooms(request: Request):
     """
     获取当前用户已加入的作战室列表
@@ -256,7 +291,7 @@ async def get_user_rooms(request: Request):
 
 
 @warroom_bp.post("/query_messages")
-@requires_permission('warroom:a')
+@requires_permission('warroom:r')
 async def query_messages(request: Request):
     """
     统一消息查询接口，整合了原WebSocket的多个查询功能
