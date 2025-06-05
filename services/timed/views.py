@@ -228,7 +228,7 @@ async def update_timed(request):
     timed = await Timed.get(id=timed_id, deleted=False).prefetch_related("action", "playbook", "creator",
                                                                          "updator")
 
-    run_type = data.get("type", timed.type)
+    run_type = int(data.get("type", timed.type))
     if run_type not in [RUN_TYPE_FLOW, RUN_TYPE_ACTION]:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -240,7 +240,7 @@ async def update_timed(request):
     msg = {"run_type": "flow" if run_type == RUN_TYPE_FLOW else "action"}
 
     if run_type == RUN_TYPE_FLOW:
-        playbook_id = data.get("playbook_id") or (timed.playbook_input or {}).get("flow_id")
+        playbook_id = data.get("playbook_id", timed.playbook.id)
         playbook_input = data.get("playbook_input", timed.playbook_input)
 
         if not playbook_id or not playbook_input:
