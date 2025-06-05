@@ -75,7 +75,7 @@ class MessageAccount(BaseModel):
     消息与用户关系表
     """
     message = fields.ForeignKeyField(model_name="models.Message", related_name="msg_account", description="消息")
-    account = fields.ForeignKeyField(model_name="models.Account", related_name="account_msg", description="用户")
+    account_id = fields.CharField(null=False, max_length=255, description="用户")
     status = fields.IntField(default=0, description="阅读状态，0代表未读，1代表已读")
 
     def validate(self) -> None:
