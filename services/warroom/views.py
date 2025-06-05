@@ -219,8 +219,8 @@ async def get_private_room(request: Request):
     if partner is None:
         raise CustomError(ErrorCode.AccountNotFound)
     # 先获取私聊作战室
-    chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
-    return response_ok({"room_id": chat_room.id, "name": chat_room.name})
+    room_info = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
+    return response_ok(room_info)
 
 
 @warroom_bp.post("/user_rooms")
@@ -325,9 +325,9 @@ async def query_messages(request: Request):
         chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
         condition = (Q(sender__id=user.id) & Q(receiver_id=partner_id)) | (Q(sender_id=partner_id) & Q(receiver_id=user.id))
         # 消息计数
-        total_count = await Message.filter(condition, type="private", room_id=chat_room.id).count()
+        total_count = await Message.filter(condition, type="private", room_id=chat_room['room_id']).count()
         # 分页处理
-        messages = await Message.filter(condition, type="private", room_id=chat_room.id).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
+        messages = await Message.filter(condition, type="private", room_id=chat_room['room_id']).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
         message_list = []
         if partner:
             for msg in reversed(messages):
@@ -342,7 +342,7 @@ async def query_messages(request: Request):
                     "image_content": msg.image_content,
                     "timestamp": str(msg.ctime),
                     "is_recalled": msg.is_recalled,
-                    "room_id": str(chat_room.id)
+                    "room_id": chat_room['room_id']
                 })
 
         return response_ok({
@@ -374,7 +374,7 @@ async def query_messages(request: Request):
             # 先获取私聊作战室
             chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
             # 筛消息发送/接收包含私聊双方的，建议改造创建私聊作战室逻辑，直接按作战室号筛就得了
-            query = Message.filter((Q(sender_id=user.id) & Q(receiver_id=partner_id)) | (Q(sender_id=partner_id) & Q(receiver_id=user.id)), type="private", room_id=chat_room.id, content__contains=keyword, is_recalled=False)
+            query = Message.filter((Q(sender_id=user.id) & Q(receiver_id=partner_id)) | (Q(sender_id=partner_id) & Q(receiver_id=user.id)), type="private", room_id=chat_room['room_id'], content__contains=keyword, is_recalled=False)
         else:
             raise CustomError(ErrorCode.ParamValueError)
 
