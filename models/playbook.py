@@ -44,8 +44,8 @@ class PlaybookVersion(BaseModel):
     剧本版本模型
     """
     playbook = fields.ForeignKeyField("models.Playbook", related_name="playbook_versions")
-    change_desc = fields.TextField(null=False, description="变更说明")
-    version = fields.CharField(max_length=30, default=0, description="版本号，每次publish都会生成新纪录，用于版本回溯")
+    change_desc = fields.TextField(null=True, description="变更说明")
+    version = fields.CharField(max_length=30, description="版本号，每次publish都会生成新纪录，用于版本回溯")
     status = fields.IntField(max_length=1, default=0, description="剧本状态,0草稿,1已发布")
     flow_json = fields.JSONField(default={}, description="流程图flow数据，包含edges和nodes")
     creator = fields.ForeignKeyField("models.Account", related_name="created_playbooks", description="创建人")
