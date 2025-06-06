@@ -219,9 +219,8 @@ async def edit_workflow_flow(request):
     pv.updator = request.ctx.session['account_info']
     # 已发布的剧本是不允许修改的
     if pv.status == 1:
-        pv.version = gen_order_version()
-        pv.creator = request.ctx.session['account_info']
-        await pv.create()
+        await PlaybookVersion.create(playbook=pv.playbook, version=gen_order_version(), flow_json=pv.flow_json, change_desc=None, status=0,
+                                     creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
     else:
         await pv.save()
 

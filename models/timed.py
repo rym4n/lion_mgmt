@@ -51,9 +51,9 @@ class Timed(BaseModel):
             "enable": self.enable,
             "end_time": self.end_time,
             "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
-            "updator":  {"username": self.updator.username, "display_name": self.updator.display_name},
+            "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
         }
 
     class Meta:
         table = "timed"
-        ordering = ["-utime"]
+        ordering = ["-ctime"]
