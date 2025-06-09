@@ -244,13 +244,17 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
         if logo_name not in actual_files:
             return config_data, version, tool_name, "logo文件不存在"
 
+        logo_found = False
         for file_info in files_info:
             if file_info.filename.lower().endswith((".png", ".jpg", ".jpeg", ".ico")):
+                logo_found = True
                 with zip_ref.open(file_info) as logo_file:
                     if not check_file_size(logo_file):
                         return config_data, version, tool_name, "logo文件大小超过5KB限制，请压缩后重新上传"
-            else:
-                return config_data, version, tool_name, "logo文件格式错误，目前只支持png、jpg、jpeg、ico格式图片"
+
+        if not logo_found:
+            return config_data, version, tool_name, "缺少logo文件"
+
         data += 1
         percent = int(data * single_progress) + success_progress
         await resp.send(f"data: 解压进度：{percent}%\n\n")
