@@ -50,6 +50,16 @@ def check_file_size(file_obj, max_size_kb=5):
     return file_size_kb <= max_size_kb
 
 
+def fix_zip_filename(filename: str) -> str:
+    try:
+        return filename.encode('cp437').decode('gbk')
+    except UnicodeDecodeError:
+        try:
+            return filename.encode('cp437').decode('utf-8')
+        except:
+            return filename
+
+
 @tools_bp.post("/upload")
 @requires_permission("tool:c")
 async def upload_and_extract_zip(request):
@@ -160,7 +170,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 
         files_info = zip_ref.infolist()
 
-        actual_files = {os.path.basename(f.filename) for f in files_info if not f.is_dir()}
+        actual_files = {os.path.basename(fix_zip_filename(f.filename)) for f in files_info if not f.is_dir()}
         py_files_dict = {os.path.basename(f.filename): f for f in files_info if f.filename.endswith(".py")}
         config_path = next((f for f in files_info if os.path.basename(f.filename) == "config.json"), None)
 
@@ -242,7 +252,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
         await resp.send(f"data: 解压进度：{percent}%\n\n")
 
         if logo_name not in actual_files:
-            return config_data, version, tool_name, "logo文件不存在"
+            return config_data, version, tool_name, "缺少logo文件"
 
         logo_found = False
         for file_info in files_info:

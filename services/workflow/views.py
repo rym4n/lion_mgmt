@@ -464,7 +464,7 @@ async def input_data(request):
                                     if key == item["key"]:
                                         action["input"] = item
                                         break
-                                input_list.append({value.split(".output.")[-1].rstrip("}"): action})
+                                input_list.append({value.split(".output.")[-1].rstrip("})"): action})
                     else:
                         actions = await ToolAction.filter(tool_name=node["properties"]["app_name"],
                                                           version_number=node["properties"]["version"]).all()
@@ -474,7 +474,7 @@ async def input_data(request):
                                     if key == item["key"]:
                                         action.action["input"] = item
                                         break
-                                input_list.append({value.split(".output.")[-1].rstrip("}"): action.action})
+                                input_list.append({value.split(".output.")[-1].rstrip("})"): action.action})
                         tool = await Tool.filter(name=node["properties"]["app_name"],
                                                  version=node["properties"]["version"]).first()
                         if tool:
