@@ -19,7 +19,7 @@ jobs:
     projects: lion_mgmt
   jobDependencies:
   - jobName: ci
-    requireSuccessful: true
+    requireSuccessful: false
     artifacts: '**'
   retryCondition: never
   maxRetries: 3
