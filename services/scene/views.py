@@ -29,7 +29,7 @@ async def add_scene(request):
     if not all([name, remark]):
         raise CustomError(ErrorCode.ParameterError)
 
-    if status is None:
+    if status is None and status not in [0, 1]:
         raise CustomError(ErrorCode.ParameterError)
 
     if await Scene.filter(name=request.json.get("name")).exists():
@@ -66,9 +66,12 @@ async def update_scene(request):
     if remark:
         scene.remark = remark
     if status is not None:
-        if status == 1:
-            await Scene.filter(status=1).update(status=0)
-        scene.status = status
+        if status in [0, 1]:
+            if status == 1:
+                await Scene.filter(status=1).update(status=0)
+            scene.status = status
+        else:
+            raise CustomError(ErrorCode.ParameterError)
     scene.updator = request.ctx.session['account_info']
     await scene.save()
 

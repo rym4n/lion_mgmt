@@ -1,5 +1,6 @@
 import datetime
 import re
+from collections import defaultdict
 
 import pytz
 from sanic import Blueprint
@@ -358,8 +359,7 @@ async def get_run_log(request):
     start_time = request.json.get("start_time")
     end_time = request.json.get("end_time")
     status = request.json.get("status")
-    offset = (page - 1) * size
-    limit = size
+
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -376,17 +376,27 @@ async def get_run_log(request):
     if status in [0, 1]:
         condition &= Q(status=int(status))
 
-    total = await Runlog.filter(condition).count()
+    total = await Runlog.filter(condition).order_by('run_id').distinct().values_list('run_id', flat=True)
 
-    run_logs = await Runlog.filter(condition).offset(offset).limit(limit).prefetch_related("event_id", "timer_id", "playbook_version")
+    run_ids = await Runlog.filter(condition).distinct().order_by('run_id').offset((page - 1) * size).limit(size).values_list('run_id', flat=True)
+
+    if run_ids:
+        all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).all().prefetch_related("event_id", "timer_id", "playbook_version")
+        logs_by_run_id = defaultdict(list)
+        for log in all_logs:
+            logs_by_run_id[log.run_id].append(log.json)
+
+        run_logs = [logs_by_run_id[run_id] for run_id in run_ids]
+    else:
+        run_logs = []
 
     await timer_success_rate(timed_id)
 
     return response_ok({
         "page": page,
         "size": size,
-        "total": total,
-        "data": [runlog.json for runlog in run_logs]
+        "total": len(total),
+        "data": run_logs
     })
 
 
