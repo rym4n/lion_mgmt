@@ -373,7 +373,7 @@ async def get_run_log(request):
         end_time = datetime.datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
         end_time = pytz.timezone("Asia/Shanghai").localize(end_time)
         condition &= Q(start_time__lte=end_time)
-    if status in ['0', '1']:
+    if status in [0, 1]:
         condition &= Q(status=int(status))
 
     total = await Runlog.filter(condition).count()
@@ -408,7 +408,6 @@ def is_valid_crontab(expr):
             if not segment_re.match(segment):
                 return False
 
-            step = None
             if '/' in segment:
                 base, step_str = segment.split('/', 1)
                 if not step_str.isdigit() or (step := int(step_str)) < 1:

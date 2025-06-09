@@ -14,12 +14,14 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.chat import get_or_create_private_chat_room, chat_manager
 from libs.error_code.exception import CustomError
+from libs.kafka import aproduce
 from libs.security.authentication import validate_token
 from libs.security.authorization import requires_permission
+from libs.utils import gen_order_version
 from models import Approvement, Events
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import SECRET, SESSION_ENCODING_ALGORITHM
+from settings import SECRET, SESSION_ENCODING_ALGORITHM, KAFKA_SERVERS, TIMED_TASK_TOPIC
 
 warroom_bp = Blueprint('warroom', version=1, url_prefix='/warroom')
 __all__ = ['warroom_bp']
@@ -94,7 +96,8 @@ async def create_room(request: Request):
                 await member.star_rooms.add(room)
                 user_id.append(member.id)
 
-    await Events.create(event_name=room_name, event_process_status="待处理", event_source="人工", owner={"role": [], "user": user_id}, created_id=creator.id,
+    await Events.create(event_name=room_name, event_process_status="待处理", event_source="人工",
+                        owner={"role": [], "user": user_id}, created_id=creator.id,
                         room=room)
 
     return response_ok({
@@ -519,3 +522,60 @@ async def up_status(request):
         raise CustomError(ErrorCode.ParamValueError)
     await MessageAccount.filter(id=id).update(status=1)
     return response_ok("")
+
+
+@warroom_bp.post("/run")
+@requires_permission("warroom_bp:c")
+async def run(request):
+    """
+    运行剧本或动作（需要作战室创建权限）
+
+    请求参数：
+        id: 必填，作战室ID
+        type: 必填，运行类型，flow/action
+        -playbook_input dict 剧本输入参数 当type为flow时必填      用websocket发送
+            示例如下：
+            {
+                "flow_id": "73ecfba0-1aa4-4128-b99a-b97fb08a14be",      剧本版本id
+                "flow_input": {
+                    "l":"123456789",        剧本输入参数
+                    "c":"123456789"         剧本输入参数
+                }
+            }
+        action_input dict 动作输入参数 当type为action时必填      用websocket发送
+            示例如下：
+            {
+                "app_name":"huorong_edr",         应用名称，英文标识
+                "name": "中文名称",               应用中文名称
+                "app_ver":"v1746495758839",      应用版本号
+                "main":"huorong_edr.py",          主程序文件名  获取工具版本时会传
+                "action_input":{
+                    "clients":"abcd",             动作输入参数
+                    "groups":"123456789"          动作输入参数
+                },
+                "resource": "abc",               资源名称
+                "node_name":"自定义扫描",    节点名称，定时任务模块中取动作描述
+                "action":"custom_scan",     动作名称 英文标识
+                "action_name":"自定义扫描",    动作名称 中文名称
+                "retry_times":1,             重试次数
+                "timeout":300,               超时时间,单位秒
+            }
+    """
+    room_id = request.json.get("id")
+    type = request.json.get("type")
+    user = request.ctx.session['account_info']
+    if not room_id or not type:
+        raise CustomError(ErrorCode.ParamValueError)
+    params = request.json.get("playbook_input") or request.json.get("action_input")
+    if not params:
+        raise CustomError(ErrorCode.ParamValueError)
+    params["executor"] = user.id
+    msg = {"run_type": type, "run_id": gen_order_version(length=6), "run_args": params}
+    room = await Room.get_or_none(id=room_id)
+    room.updator = user
+    room.run_id.append(msg["run_id"])
+    await room.save()
+    await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id)}, 3600)
+    await aproduce(KAFKA_SERVERS, TIMED_TASK_TOPIC, msg)
+
+    return response_ok("运行成功")

@@ -42,6 +42,29 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
         return user_private_chat_rooms[key]
 
 
+# 创建消息
+async def creat_message(room, log):
+    msg = await Message.create(
+        type="public",
+        sender=room.updator,
+        room=room,
+        content=str(log),
+        image_content="",
+        receiver=room.updator
+    )
+    message_data = {
+        "type": "public",
+        "message_id": str(msg.id),
+        "sender_id": room.updator.id,
+        "sender_name": room.updator.username,
+        "content": str(log),
+        "image_content": "",
+        "timestamp": str(msg.ctime),
+        "room_id": room.id
+    }
+    return message_data
+
+
 class ChatManager:
     """
     Websocket连接管理器，处理所有连接和消息
@@ -116,10 +139,22 @@ class ChatManager:
         await aconsume(KAFKA_SERVERS, 'lion_action_runlog', 'lion_mgmt_listener', self.handle_runlog, 50)
 
     async def handle_runlog(self, log):
-        for k in self.run_connections:
-            if self.run_connections[k]['run_id'] == log.get('run_id'):
-                await self.run_connections[k]['conn'].send(orjson.dumps({"data": log}).decode())
+        key = str(log.get('run_id'))
 
+        if await self.redis.exists(key):
+            data = await self.redis.get(key)
+            room = await Room.get_or_none(id=data["room_id"]).prefetch_related('updator')
+            message_data = await creat_message(room, log)
+            await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+
+        elif await Room.filter(run_id__contains=[key]).exists():
+            room = await Room.filter(run_id__contains=[key]).first().prefetch_related('updator')
+            message_data = await creat_message(room, log)
+            await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+        else:
+            for k in self.run_connections:
+                if self.run_connections[k]['run_id'] == log.get('run_id'):
+                    await self.run_connections[k]['conn'].send(orjson.dumps({"data": log}).decode())
         # 处理审批消息
         if log.get('type') == 'approval-info':
             approve = await Approvement.create(title=log['node_name'], workflow_id=log['flow_id'], run_id=log['run_id'], content=log['content'],
