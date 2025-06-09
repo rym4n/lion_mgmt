@@ -39,6 +39,7 @@ class Events(BaseModel):
             "event_summary": self.event_summary,
             "log_data": self.log_data,
             "event_ingestion_id": self.event_ingestion_id,
+            "room": self.room.id if self.room else None
         }
 
     class Meta:

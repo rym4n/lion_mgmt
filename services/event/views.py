@@ -8,7 +8,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Events, Runlog, Room, Account
+from models import Events, Runlog, Room, Account, Role
 
 event_bp = Blueprint('event', version=1, url_prefix='/event')
 _all__ = ["event_bp"]
@@ -127,7 +127,18 @@ async def get_event_detail(request):
 
     event_dict["room_users"] = [user.username if user else "" for user in await event.room.users.all()]
 
+    role_ids = event.owner["role"]
+    user_ids = event.owner["user"]
+
+    role_objs = await Role.filter(id__in=role_ids)
+    user_objs = await Account.filter(id__in=user_ids)
+
+    role_list = [{r.id: r.name} for r in role_objs]
+    user_list = [{u.id: {"display_name": u.display_name, "username": u.username}} for u in user_objs]
+
     event_dict.update(event.json)
+
+    event_dict["owner"] = {"role": role_list, "user": user_list}
 
     return response_ok(event_dict)
 
