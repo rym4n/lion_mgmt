@@ -51,11 +51,9 @@ async def update_scene(request):
     请求参数：
         id str 场景id 必填
         remark str 场景描述 非必填
-        status int 场景状态 非必填 0-禁用 1-启用
     """
     id = request.json.get('id')
     remark = (request.json.get('remark') or None)
-    status = request.json.get('status')
     if not id:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -65,13 +63,6 @@ async def update_scene(request):
 
     if remark:
         scene.remark = remark
-    if status is not None:
-        if status in [0, 1]:
-            if status == 1:
-                await Scene.filter(status=1).update(status=0)
-            scene.status = status
-        else:
-            raise CustomError(ErrorCode.ParameterError)
     scene.updator = request.ctx.session['account_info']
     await scene.save()
 

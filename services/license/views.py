@@ -33,7 +33,8 @@ MENU_DICT = {
     "scene_bp": "scene",
     "timed_bp": "timed",
     "license_bp": "lic",
-    "warroom_bp": "warroom"
+    "warroom_bp": "warroom",
+    "dashboard_bp": "dashboard"
 }
 
 
@@ -50,17 +51,22 @@ async def verify_license_api(request: Request):
         return response.json({"success": False, "message": "缺少必要字段"}, status=400)
 
     license_file = request.files.get("file")
-    verify_license(license_file.body)
-    license_path = hashlib.md5(license_file.body).hexdigest() + ".lic"
-    for root, dirs, files in os.walk(LICENSE_DIR):
-        for file in files:
-            full_path = os.path.join(root, file)
-            new_path = os.path.join(root, license_path)
-            with open(full_path, 'wb') as f:
-                f.write(license_file.body)
-            if os.path.exists(full_path):
-                os.rename(full_path, new_path)
+    file_content = license_file.body
+    verify_license(file_content)
+    new_filename = hashlib.md5(file_content).hexdigest() + ".lic"
+    new_file_path = os.path.join(LICENSE_DIR, new_filename)
+
+    for filename in os.listdir(LICENSE_DIR):
+        if filename.endswith(".lic"):
+            old_file_path = os.path.join(LICENSE_DIR, filename)
+            if os.path.isfile(old_file_path):
+                os.remove(old_file_path)
+
+    with open(new_file_path, "wb") as f:
+        f.write(file_content)
+
     request.app.m.restart(zero_downtime=True, all_workers=True)
+
     return response_ok("上传成功，正在加载配置文件，请稍后！")
 
 
