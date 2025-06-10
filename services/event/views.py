@@ -98,7 +98,7 @@ async def create_event(request):
     user = request.ctx.session['account_info']
     event_summary = (request.json.get("event_summary") or "")
     event_ingestion_id = (request.json.get("event_ingestion_id") or "")
-    log_data = (request.json.get("log_data")[0] or "")
+    log_data = (request.json.get("log_data") or "")
 
     if await Events.filter(event_name=event_name, deleted=False).exists():
         raise CustomError(ErrorCode.EventNameExists)
