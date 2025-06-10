@@ -105,12 +105,12 @@ async def create_event(request):
         raise CustomError(ErrorCode.EventNameExists)
 
     async with in_transaction():
-        role = await Events.create(event_name=event_name, event_process_status=event_process_status,
+        await Events.create(event_name=event_name, event_process_status=event_process_status,
                                    event_source=event_source, owner=owner,
                                    created_id=created_id, event_summary=event_summary,
                                    event_ingestion_id=event_ingestion_id, log_data=log_data)
 
-    return response_ok(role.json)
+    return response_ok("创建成功")
 
 
 @event_bp.post('/detail')
