@@ -592,10 +592,9 @@ async def binding_event_ingestion_script(request):
 .event_name = {}
 .event_process_status = "待处理"
 .event_source = "kafka"
-.created_id = "{}"
 .event_ingestion_id = "{}"
 del(.datetime_str)
-""".format(event_name, event.creator.id, event_ingestion_id)}
+""".format(event_name, event_ingestion_id)}
 
         data["sinks"][f"{topic}_sinks"] = {
             "inputs": [f"{topic}_event_transforms"],

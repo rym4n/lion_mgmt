@@ -20,8 +20,8 @@ class Events(BaseModel):
     log_data: str = fields.TextField(default=dict, description="日志数据")
     event_ingestion_id: str = fields.CharField(max_length=255, null=True, description="事件接入id，管理事件接入表")
     room = fields.ForeignKeyField("models.Room", null=True, related_name="room_events", description="关联房间")
-    updator = fields.ForeignKeyField("models.Account", related_name="updated_events", description="更新人")
-    creator = fields.ForeignKeyField("models.Account", related_name="creator_events", description="创建人")
+    updator = fields.ForeignKeyField("models.Account", null=True, related_name="updated_events", description="更新人")
+    creator = fields.ForeignKeyField("models.Account", null=True, related_name="creator_events", description="创建人")
 
     def validate(self) -> None:
         raise NotImplementedError
