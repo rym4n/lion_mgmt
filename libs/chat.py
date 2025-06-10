@@ -13,7 +13,7 @@ from libs.utils import gen_order_version
 from models import Runlog, Approvement, Events, Timed
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import KAFKA_SERVERS, TIMED_TASK_TOPIC, CACHE
+from settings import KAFKA_SERVERS, TIMED_TASK_TOPIC, CACHE, RUNLOG_TOPIC
 
 
 # 获取或创建私聊作战室
@@ -136,7 +136,7 @@ class ChatManager:
             await msg_sub.unsubscribe("wr_group_chat")
 
     async def log_listener(self):
-        await aconsume(KAFKA_SERVERS, 'lion_action_runlog', 'lion_mgmt_listener', self.handle_runlog, 50)
+        await aconsume(KAFKA_SERVERS, RUNLOG_TOPIC, 'lion_mgmt_listener', self.handle_runlog, 50)
 
     async def handle_runlog(self, log):
         key = str(log.get('run_id'))
