@@ -41,7 +41,7 @@ async def get_all_events(request):
     if request.json.get("event_source"):
         filters["event_source"] = request.json.get("event_source")
 
-    events = await Events.filter(**filters).offset(offset).limit(limit).all()
+    events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room")
     total = await Events.filter(**filters).count()
 
     return response_ok({
