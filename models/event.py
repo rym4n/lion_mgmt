@@ -39,7 +39,9 @@ class Events(BaseModel):
             "event_summary": self.event_summary,
             "log_data": self.log_data,
             "event_ingestion_id": self.event_ingestion_id,
-            "room": self.room.id if self.room else None
+            "room": self.room.id if self.room else None,
+            "creator": {"username": self.creator.username, "display_name": self.creator.display_name} if self.creator else None,
+            "updator": {"username": self.updator.username, "display_name": self.updator.display_name} if self.updator else None
         }
 
     class Meta:

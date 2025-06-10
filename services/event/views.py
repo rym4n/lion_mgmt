@@ -41,7 +41,7 @@ async def get_all_events(request):
     if request.json.get("event_source"):
         filters["event_source"] = request.json.get("event_source")
 
-    events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room")
+    events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room", "creator", "updator")
     total = await Events.filter(**filters).count()
 
     data = []
@@ -96,7 +96,6 @@ async def create_event(request):
     event_source = request.json.get("event_source")
     owner = (request.json.get("owner") or {})
     user = request.ctx.session['account_info']
-    created_id = user.id
     event_summary = (request.json.get("event_summary") or "")
     event_ingestion_id = (request.json.get("event_ingestion_id") or "")
     log_data = (request.json.get("log_data")[0] or "")
@@ -107,7 +106,7 @@ async def create_event(request):
     async with in_transaction():
         await Events.create(event_name=event_name, event_process_status=event_process_status,
                                    event_source=event_source, owner=owner,
-                                   created_id=created_id, event_summary=event_summary,
+                                   creator=user, event_summary=event_summary, updator=user,
                                    event_ingestion_id=event_ingestion_id, log_data=log_data)
 
     return response_ok("创建成功")
@@ -124,7 +123,7 @@ async def get_event_detail(request):
     """
     event_id = request.json.get("id")
 
-    event = await Events.get(id=event_id, deleted=False).prefetch_related("room")
+    event = await Events.get(id=event_id, deleted=False).prefetch_related("room", "creator", "updator")
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
@@ -187,7 +186,7 @@ async def update_event(request):
     if not event_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    event = await Events.get(id=event_id, deleted=False).prefetch_related("room")
+    event = await Events.get(id=event_id, deleted=False).prefetch_related("room", "creator", "updator")
     if not event:
         raise CustomError(ErrorCode.NotFound)
 

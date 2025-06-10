@@ -97,7 +97,7 @@ async def create_room(request: Request):
                 user_id.append(member.id)
 
     await Events.create(event_name=room_name, event_process_status="待处理", event_source="人工",
-                        owner={"role": [], "user": user_id}, created_id=creator.id,
+                        owner={"role": [], "user": user_id}, creator=creator, updator=creator,
                         room=room)
 
     return response_ok({
