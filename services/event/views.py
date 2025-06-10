@@ -44,8 +44,28 @@ async def get_all_events(request):
     events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room")
     total = await Events.filter(**filters).count()
 
+    data = []
+
+    for event in events:
+        event_dict = {}
+
+        role_ids = event.owner["role"]
+        user_ids = event.owner["user"]
+
+        role_objs = await Role.filter(id__in=role_ids)
+        user_objs = await Account.filter(id__in=user_ids)
+
+        role_list = [{r.id: r.name} for r in role_objs]
+        user_list = [{u.id: {"display_name": u.display_name, "username": u.username}} for u in user_objs]
+
+        event_dict.update(event.json)
+
+        event_dict["owner"] = {"role": role_list, "user": user_list}
+
+        data.append(event_dict)
+
     return response_ok({
-        "events": [event.json for event in events],
+        "events": data,
         "total": total,
         "page": page,
         "size": size,
