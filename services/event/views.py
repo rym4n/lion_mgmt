@@ -41,11 +41,31 @@ async def get_all_events(request):
     if request.json.get("event_source"):
         filters["event_source"] = request.json.get("event_source")
 
-    events = await Events.filter(**filters).offset(offset).limit(limit).all()
+    events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room")
     total = await Events.filter(**filters).count()
 
+    data = []
+
+    for event in events:
+        event_dict = {}
+
+        role_ids = event.owner["role"]
+        user_ids = event.owner["user"]
+
+        role_objs = await Role.filter(id__in=role_ids)
+        user_objs = await Account.filter(id__in=user_ids)
+
+        role_list = [{r.id: r.name} for r in role_objs]
+        user_list = [{u.id: {"display_name": u.display_name, "username": u.username}} for u in user_objs]
+
+        event_dict.update(event.json)
+
+        event_dict["owner"] = {"role": role_list, "user": user_list}
+
+        data.append(event_dict)
+
     return response_ok({
-        "events": [event.json for event in events],
+        "events": data,
         "total": total,
         "page": page,
         "size": size,
@@ -85,12 +105,12 @@ async def create_event(request):
         raise CustomError(ErrorCode.EventNameExists)
 
     async with in_transaction():
-        role = await Events.create(event_name=event_name, event_process_status=event_process_status,
+        await Events.create(event_name=event_name, event_process_status=event_process_status,
                                    event_source=event_source, owner=owner,
                                    created_id=created_id, event_summary=event_summary,
                                    event_ingestion_id=event_ingestion_id, log_data=log_data)
 
-    return response_ok(role.json)
+    return response_ok("创建成功")
 
 
 @event_bp.post('/detail')

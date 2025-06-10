@@ -533,7 +533,7 @@ async def run(request):
     请求参数：
         id: 必填，作战室ID
         type: 必填，运行类型，flow/action
-        -playbook_input dict 剧本输入参数 当type为flow时必填      用websocket发送
+        -playbook_input dict 剧本输入参数 当type为flow时必填
             示例如下：
             {
                 "flow_id": "73ecfba0-1aa4-4128-b99a-b97fb08a14be",      剧本版本id
@@ -542,7 +542,7 @@ async def run(request):
                     "c":"123456789"         剧本输入参数
                 }
             }
-        action_input dict 动作输入参数 当type为action时必填      用websocket发送
+        action_input dict 动作输入参数 当type为action时必填
             示例如下：
             {
                 "app_name":"huorong_edr",         应用名称，英文标识
