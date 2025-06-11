@@ -1174,7 +1174,7 @@ async def tool_action_update(data):
     为动作绑定剧本id
         - data   动作数据    dict
             {
-                "剧本id": [
+                "剧本版本id": [
                     "动作a id",
                     "动作b id"
                 ]
@@ -1212,7 +1212,7 @@ async def tool_action_playbook_delete(data):
     删除动作绑定的剧本
         - data   动作数据    dict
             {
-                "剧本id": [
+                "剧本版本id": [
                     "动作a id",
                     "动作b id"
                 ]

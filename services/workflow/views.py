@@ -219,8 +219,8 @@ async def edit_workflow_flow(request):
     pv.updator = request.ctx.session['account_info']
     # 已发布的剧本是不允许修改的
     if pv.status == 1:
-        await PlaybookVersion.create(playbook=pv.playbook, version=gen_order_version(), flow_json=pv.flow_json, change_desc=None, status=0,
-                                     creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
+        pv = await PlaybookVersion.create(playbook=pv.playbook, version=gen_order_version(), flow_json=pv.flow_json, change_desc=None, status=0,
+                                          creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
     else:
         await pv.save()
 
@@ -280,6 +280,7 @@ async def delete_workflow_version(request):
     if pv.flow_json:
         action_ids = await statistics_data(pv.flow_json)
         await tool_action_playbook_delete({pv.id: action_ids})
+    return response_ok("删除成功")
 
 
 @workflow_bp.websocket('/run')

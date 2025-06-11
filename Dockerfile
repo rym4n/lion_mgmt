@@ -37,10 +37,6 @@ FROM timberio/vector:0.47.0-debian AS vector
 
 FROM python:3.11-slim AS runtime
 
-RUN sed -i 's/http:\/\/deb.debian.org/https:\/\/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
-
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
 ENV VIRTUAL_ENV=/app/.venv \
     RY_ENV=PROD \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -49,11 +45,13 @@ ENV VIRTUAL_ENV=/app/.venv \
 
 WORKDIR /app
 
-RUN mkdir /var/lib/vector
+RUN sed -i 's/http:\/\/deb.debian.org/https:\/\/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 
+RUN apt-get update && apt-get install -y curl libc-dev python3-dev libaio-dev && rm -rf /var/lib/apt/lists/* && mkdir /var/lib/vector
+
+COPY --from=vector /usr/bin/vector /usr/bin/vector
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
-COPY --from=vector /usr/bin/vector /usr/bin/vector
 COPY settings ./settings
 COPY server.py ./
 
