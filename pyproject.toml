@@ -26,7 +26,6 @@ dependencies = [
     "msgpack>=1.1.0",
     "psutil>=7.0.0",
     "pillow>=11.2.1",
-    "gmssl>=3.2.2",
 ]
 
 [build-system]

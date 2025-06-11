@@ -30,7 +30,6 @@ from settings import TOOLS_DIR
 # 定义 Blueprint
 tools_bp = Blueprint("tools", version=1, url_prefix="/tools")
 __all__ = ["tools_bp"]
-
 # 预期的文件结构
 EXPECTED_STRUCTURE = {
     "required_files": ["config.json"]
@@ -1185,7 +1184,7 @@ async def tool_action_update(data):
 
     affected_tools = set()
 
-    for playbook_id, action_ids in data.items():
+    for playbook_version_id, action_ids in data.items():
         for action_id in action_ids:
             action = await ToolAction.get_or_none(id=action_id, deleted=False)
             if not action:
@@ -1194,8 +1193,8 @@ async def tool_action_update(data):
             if not isinstance(action.playbook, list):
                 action.playbook = []
 
-            if playbook_id not in action.playbook:
-                action.playbook.append(playbook_id)
+            if playbook_version_id not in action.playbook:
+                action.playbook.append(playbook_version_id)
                 await action.save()
 
                 affected_tools.add((action.tool_name, action.version_number))
