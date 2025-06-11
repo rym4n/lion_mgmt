@@ -14,6 +14,7 @@ from io import BytesIO
 
 import aiofile
 import orjson
+from aiocache import caches
 from sanic import Blueprint, response
 from tortoise.expressions import Q
 from tortoise.functions import Max
@@ -1287,3 +1288,20 @@ async def remove_tag(request):
     await tag.delete()
 
     return response_ok("标签删除成功")
+
+
+@tools_bp.post("/engine/list")
+@requires_permission("tool:r")
+async def engine_list(request):
+    """
+    获取执行引擎列表（需要工具查看权限）
+
+    请求参数：
+        无
+    """
+    c = caches.get("redis_action").client
+    lion_keys = []
+    async for key in c.scan_iter(match="lion_engine_*", count=100):  # 每次迭代100个key
+        lion_keys.append(key.decode())  # 字节转字符串
+
+    return response_ok(lion_keys)

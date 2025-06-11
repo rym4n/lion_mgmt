@@ -185,6 +185,19 @@ CACHE = {
         'db': os.environ.get('RY_CHAT_DB'),
         'password': os.environ.get('RY_REDIS_PASS', ''),
         'pool_max_size': 50
+    },
+    'redis_action': {
+        'cache': "aiocache.RedisCache",
+        'serializer': {
+            'class': "aiocache.serializers.MsgPackSerializer"
+        },
+        'namespace': 'lion_mgmt',
+        'timeout': 2,
+        'endpoint': os.environ.get('RY_REDIS_HOST'),
+        'port': os.environ.get('RY_REDIS_PORT'),
+        'db': os.environ.get('RY_ACTION_CACHE'),
+        'password': os.environ.get('RY_REDIS_PASS', ''),
+        'pool_max_size': 2
     }
 }
 
