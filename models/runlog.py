@@ -33,6 +33,7 @@ class Runlog(BaseModel):
     end_time = fields.DatetimeField(null=True, description="结束时间")
 
     executor = fields.CharField(null=True, max_length=36, description="执行者ID")
+    resource_name = fields.CharField(null=True, max_length=36, description="资源名称")
 
     playbook_version = fields.ForeignKeyField("models.PlaybookVersion", null=True, related_name="playbook_runlog", description="关联剧本")
 
@@ -61,7 +62,8 @@ class Runlog(BaseModel):
             "start_time": strip_timezone_to_seconds(self.start_time),
             "end_time": strip_timezone_to_seconds(self.end_time),
             "playbook": self.playbook_version.id if self.playbook_version else None,
-            "creator": self.executor
+            "creator": self.executor,
+            "resource_name": self.resource_name,
         }
 
     class Meta:
