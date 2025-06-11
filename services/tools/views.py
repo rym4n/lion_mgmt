@@ -442,7 +442,6 @@ async def tool_actions(request):
         pv_list = []
         if action.get("playbook"):
             for pv_id in action.get("playbook"):
-                print(pv_id)
                 pv = await PlaybookVersion.get_or_none(id=pv_id, deleted=False).prefetch_related("playbook")
                 pv_list.append({"pv_id": pv_id, "name": pv.playbook.name, "version": pv.version})
         action.get("action")["playbook"] = pv_list
