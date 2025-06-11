@@ -24,7 +24,7 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
-from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag
+from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion
 from settings import TOOLS_DIR
 
 # 定义 Blueprint
@@ -439,7 +439,13 @@ async def tool_actions(request):
     action_list = []
     for action in actions:
         action.get("action")["id"] = action.get("id")
-        action.get("action")["playbook"] = action.get("playbook")
+        pv_list = []
+        if action.get("playbook"):
+            for pv_id in action.get("playbook"):
+                print(pv_id)
+                pv = await PlaybookVersion.get_or_none(id=pv_id, deleted=False).prefetch_related("playbook")
+                pv_list.append({"pv_id": pv_id, "name": pv.playbook.name, "version": pv.version})
+        action.get("action")["playbook"] = pv_list
         action_list.append(action.get("action"))
 
     return response_ok({"actions": action_list})
