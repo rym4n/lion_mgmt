@@ -132,7 +132,8 @@ async def unzip(zip_data, extra_path):
 
         for in_file in files_info:
             file_name = in_file.filename
-            unpack_filename_path = Path(str(PurePath(extra_path, file_name)))
+            file_new_name = fix_zip_filename(file_name)
+            unpack_filename_path = Path(str(PurePath(extra_path, file_new_name)))
 
             if in_file.is_dir():
                 unpack_filename_path.mkdir(parents=True, exist_ok=True)
@@ -141,6 +142,19 @@ async def unzip(zip_data, extra_path):
                 with zip_ref.open(file_name) as file_data:
                     async with aiofile.async_open(str(unpack_filename_path), 'wb+') as out:
                         await out.write(file_data.read())
+
+
+def fix_zip_filename(filename: str) -> str:
+    """
+    修复中文编码问题
+    """
+    try:
+        return filename.encode('cp437').decode('gbk')
+    except UnicodeDecodeError:
+        try:
+            return filename.encode('cp437').decode('utf-8')
+        except:
+            return filename
 
 
 def gen_order_version(length=5):
