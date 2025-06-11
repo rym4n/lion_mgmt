@@ -1,4 +1,5 @@
 # coding=utf-8
+import ast
 import asyncio
 import base64
 import hashlib
@@ -25,7 +26,7 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
-from libs.utils import fix_zip_filename
+from libs.utils import fix_zip_filename, encrypt_aes256_gcm, decrypt_aes256_gcm
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion
 from settings import TOOLS_DIR
 
@@ -584,12 +585,16 @@ async def add_tool_resource(request):
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
 
-    resources = await ToolResources.create(tool_name=tool_name, name=name, engine=engine,
-                                           resources=resources,
-                                           creator=request.ctx.session['account_info'].username
-                                           , updater=request.ctx.session['account_info'].username)
+    new_resources = encrypt_aes256_gcm(str(resources))
 
-    return response_ok({"message": "工具资源新增成功", "id": resources.id})
+    tr = await ToolResources.create(tool_name=tool_name, name=name, engine=engine,
+                                    resources=new_resources,
+                                    creator=request.ctx.session['account_info'].username,
+                                    updater=request.ctx.session['account_info'].username)
+
+    await request.ctx.cache_client.set("resource_"+tr.id, resources)
+
+    return response_ok({"message": "工具资源新增成功", "id": tr.id})
 
 
 @tools_bp.post("/resource/detailed")
@@ -610,6 +615,7 @@ async def tool_resources_detailed(request):
         return response_ok("工具资源不存在")
 
     for resource in resources:
+        resource["resources"] = ast.literal_eval(decrypt_aes256_gcm(resource["resources"]))
         for value in resource["resources"].values():
             if value["data_type"] == "password":
                 value["value"] = "******"
@@ -653,7 +659,9 @@ async def update_tool_resource(request):
     if engine:
         tool_resource.engine = engine
     if resources:
-        tool_resource.resources = resources
+        new_resources = encrypt_aes256_gcm(str(resources))
+        tool_resource.resources = new_resources
+        await request.ctx.cache_client.set("resource_" + tool_resource.id, resources)
 
     tool_resource.updater = request.ctx.session['account_info'].username
     await tool_resource.save()
@@ -683,6 +691,8 @@ async def delete_tool_resource(request):
     tool_resource.deleted = True
     tool_resource.updater = request.ctx.session['account_info'].username
     await tool_resource.save()
+
+    await request.ctx.cache_client.delete("resource_" + tool_resource.id)
 
     return response_ok({"message": "工具资源删除成功"})
 

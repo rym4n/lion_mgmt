@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import datetime
+import os
 import ipaddress
 import os.path
 import random
@@ -24,6 +25,13 @@ from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
+
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.exceptions import InvalidTag
+
+from settings import RESOURCE_KEY
 
 password_hasher: PasswordHasher = PasswordHasher()
 
@@ -299,3 +307,66 @@ def run_linux_command(command):
         "stderr": result.stderr.strip(),
         "code": result.returncode
     }
+
+
+def derive_key(password: str, salt: bytes) -> bytes:
+    """使用PBKDF2HMAC从密码派生密钥"""
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,  # 256-bit key
+        salt=salt,
+        iterations=100000,
+        backend=default_backend()
+    )
+    return kdf.derive(password.encode('utf-8'))
+
+
+def encrypt_aes256_gcm(plaintext: str) -> dict:
+    """AES-GCM加密返回字典格式结果"""
+    # 生成随机盐
+    salt = os.urandom(16)
+    # 从密码派生密钥
+    key = derive_key(RESOURCE_KEY, salt)
+
+    # 生成随机nonce (12字节是GCM推荐长度)
+    nonce = os.urandom(12)
+
+    # 创建加密器并加密数据
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend())
+    encryptor = cipher.encryptor()
+    ciphertext = encryptor.update(plaintext.encode('utf-8')) + encryptor.finalize()
+
+    # 返回包含加密结果的字典
+    return {
+        'ciphertext': base64.b64encode(ciphertext).decode('utf-8'),
+        'nonce': base64.b64encode(nonce).decode('utf-8'),
+        'salt': base64.b64encode(salt).decode('utf-8'),
+        'tag': base64.b64encode(encryptor.tag).decode('utf-8')
+    }
+
+
+def decrypt_aes256_gcm(encrypted_data: dict) -> str:
+    """AES-GCM解密，输入为字典格式"""
+    try:
+        # 从Base64解码各组件
+        ciphertext = base64.b64decode(encrypted_data['ciphertext'])
+        nonce = base64.b64decode(encrypted_data['nonce'])
+        salt = base64.b64decode(encrypted_data['salt'])
+        tag = base64.b64decode(encrypted_data['tag'])
+
+        # 派生密钥
+        key = derive_key(RESOURCE_KEY, salt)
+
+        # 创建解密器
+        cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag), backend=default_backend())
+        decryptor = cipher.decryptor()
+
+        # 解密并返回UTF-8字符串
+        decrypted = decryptor.update(ciphertext) + decryptor.finalize()
+
+        return decrypted.decode('utf-8')
+
+    except (KeyError, InvalidTag, UnicodeDecodeError) as e:
+        # 处理可能的错误：数据篡改、密码错误或格式错误
+        raise ValueError("解密失败: 密码错误或数据损坏") from e
+
