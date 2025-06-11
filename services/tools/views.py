@@ -24,6 +24,7 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
+from libs.utils import fix_zip_filename
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion
 from settings import TOOLS_DIR
 
@@ -47,16 +48,6 @@ def check_file_size(file_obj, max_size_kb=5):
 
     file_size_kb = file_size_bytes / 1024
     return file_size_kb <= max_size_kb
-
-
-def fix_zip_filename(filename: str) -> str:
-    try:
-        return filename.encode('cp437').decode('gbk')
-    except UnicodeDecodeError:
-        try:
-            return filename.encode('cp437').decode('utf-8')
-        except:
-            return filename
 
 
 @tools_bp.post("/upload")
