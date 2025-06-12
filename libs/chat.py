@@ -139,6 +139,7 @@ class ChatManager:
         await aconsume(KAFKA_SERVERS, RUNLOG_TOPIC, 'lion_mgmt_listener', self.handle_runlog, 50)
 
     async def handle_runlog(self, log):
+        logger.info(f"runlog消息：{log}")
         key = str(log.get('run_id'))
 
         if await self.redis.exists(key):
@@ -170,7 +171,6 @@ class ChatManager:
                 users = Account.filter(role_id__in=log['roles']).all()
                 approve.approvers.add(*users)
         else:
-            logger.info(f"创建runlog消息：{log}")
             try:
                 log["event_id"] = await Events.get_or_none(id=log["event_id"]) if log["event_id"] is not None else None
                 log["timer_id"] = await Timed.get_or_none(id=log["timer_id"]) if log["timer_id"] is not None else None
