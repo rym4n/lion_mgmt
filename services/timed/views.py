@@ -452,9 +452,10 @@ async def timer_success_rate(timed_id):
         success_quantity = await Runlog.filter(timer_id=timed_id, start_time__gte=start_of_day,
                                                start_time__lte=end_of_day, deleted=False, status=0).count()
         timed.success_rate = str(round(success_quantity / quantity, 4) * 100) + "%"
-        await timed.save()
     else:
         recent_logs = await Runlog.filter(timer_id=timed_id, deleted=False).limit(10)
         success_quantity = sum(1 for log in recent_logs if log.status == 0)
-        timed.success_rate = str(round(success_quantity / 10, 4) * 100) + "%"
-        await timed.save()
+        timed.success_rate = str(round(success_quantity / len(recent_logs), 4) * 100) + "%"
+    runlog = await Runlog.filter(timer_id=timed_id, deleted=False).first()
+    timed.result = "success" if runlog.status == 0 else "fail"
+    await timed.save()
