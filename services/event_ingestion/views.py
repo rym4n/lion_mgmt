@@ -917,7 +917,7 @@ def check_vector_config(vector_config):
         yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
         tmp_file.write(yaml_str)
         tmp_file.flush()
-
+        logger.info(f"vector config: {yaml_str}")
         tmp_path = tmp_file.name
 
         result = run_linux_command(f'vector validate --config-yaml {tmp_path}')
