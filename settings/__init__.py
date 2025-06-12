@@ -38,7 +38,7 @@ if os.environ.get("RY_ENV") == 'DEV':
         pass
 
 # 应用资源配置加密密钥
-RESOURCE_KEY = os.environ.get("RESOURCE_KEY")
+RY_RES_KEY = os.environ.get("RY_RES_KEY")
 
 # 系统背景图片名称配置
 BG_NAME = "bg-oEDCYcDF"
