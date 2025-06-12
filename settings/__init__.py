@@ -40,6 +40,9 @@ if os.environ.get("RY_ENV") == 'DEV':
 # 应用资源配置加密密钥
 RY_RES_KEY = os.environ.get("RY_RES_KEY")
 
+# supervisord地址
+RY_JOB_SERVER = os.environ.get("RY_JOB_SERVER")
+
 # 系统背景图片名称配置
 BG_NAME = "bg-oEDCYcDF"
 

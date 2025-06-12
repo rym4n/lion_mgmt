@@ -578,7 +578,7 @@ async def binding_event_ingestion_script(request):
         data.setdefault("transforms", {})[f"{topic}_kafka_transforms"] = {
             "type": "remap",
             "inputs": [f"{topic}_transforms"],
-            "source": ".aioe_event_id = uuid_v4()"
+            "source": """.aioe_event_id = uuid_v4()"""
         }
 
         if event_name == "default":

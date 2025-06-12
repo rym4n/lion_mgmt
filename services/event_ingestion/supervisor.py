@@ -2,15 +2,14 @@
 import logging
 import os
 import time
-# try:
 from xmlrpc.client import ServerProxy, Fault  # Python 3
 
-from settings import SUPERVISOR_PATH
+from settings import SUPERVISOR_PATH, RY_JOB_SERVER
 
 # except ImportError:
 #     from xmlrpclib import ServerProxy, Fault  # Python 2
 
-SUPERVISOR_SERVER = ServerProxy("http://10.3.0.38:9001/RPC2")
+SUPERVISOR_SERVER = ServerProxy(RY_JOB_SERVER)
 SUPERVISOR_CONFIG_DIR = SUPERVISOR_PATH
 
 
