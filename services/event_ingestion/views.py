@@ -569,12 +569,12 @@ async def binding_event_ingestion_script(request):
         if conditions:
             conditional_statements = get_conditional_statements(conditions)
 
-        data.setdefault("transforms", {})[f"{topic}_transforms"] = {
-            "type": "filter",
-            "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [
-                event.vector_name],
-            "condition": f"{conditional_statements}"
-        }
+            data.setdefault("transforms", {})[f"{topic}_transforms"] = {
+                "type": "filter",
+                "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [
+                 event.vector_name],
+                "condition": f"{conditional_statements}"
+            }
         data.setdefault("transforms", {})[f"{topic}_kafka_transforms"] = {
             "type": "remap",
             "inputs": [f"{topic}_transforms"],
