@@ -48,19 +48,21 @@ async def get_all_events(request):
 
     for event in events:
         event_dict = {}
+        role_list = []
+        user_list = []
+        if event.owner:
+            role_ids = event.owner["role"]
+            user_ids = event.owner["user"]
 
-        role_ids = event.owner["role"]
-        user_ids = event.owner["user"]
+            role_objs = await Role.filter(id__in=role_ids)
+            user_objs = await Account.filter(id__in=user_ids)
 
-        role_objs = await Role.filter(id__in=role_ids)
-        user_objs = await Account.filter(id__in=user_ids)
-
-        role_list = [{r.id: r.name} for r in role_objs]
-        user_list = [{u.id: {"display_name": u.display_name, "username": u.username}} for u in user_objs]
+            role_list = [{r.id: r.name} for r in role_objs]
+            user_list = [{u.id: {"display_name": u.display_name, "username": u.username}} for u in user_objs]
 
         event_dict.update(event.json)
 
-        event_dict["owner"] = {"role": role_list, "user": user_list}
+        event_dict["owner"] = {"role": role_list , "user": user_list}
 
         data.append(event_dict)
 
