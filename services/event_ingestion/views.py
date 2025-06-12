@@ -575,6 +575,12 @@ async def binding_event_ingestion_script(request):
                 event.vector_name],
             "condition": conditional_statements
         }
+        data.setdefault("transforms", {})[f"{topic}_kafka_transforms"] = {
+            "type": "remap",
+            "inputs": [f"{topic}_transforms"],
+            "source": ".aioe_event_id = uuid_v4()"
+        }
+
         if event_name == "default":
             event_name = '"{}" + "_" + to_string!(.datetime_str)'.format(event.event_ingestion_name)
         else:
@@ -584,8 +590,7 @@ async def binding_event_ingestion_script(request):
             "inputs": [f"{topic}_transforms"],
             "source": """
 .log_data = to_string(encode_json(.))
-.event_id = uuid_v4()
-.id = .event_id
+.id = .aior_event_id
 .ctime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
 .utime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
 .deleted = false
@@ -597,7 +602,7 @@ del(.datetime_str)
 """.format(event_name, event_ingestion_id)}
 
         data["sinks"][f"{topic}_sinks"] = {
-            "inputs": [f"{topic}_event_transforms"],
+            "inputs": [f"{topic}_kafka_transforms"],
             "type": "kafka",
             "bootstrap_servers": KAFKA_SERVERS,
             "topic": topic,
@@ -674,6 +679,9 @@ async def unbundled_event_ingestion_script(request):
                 else:  # 剧本id小于等于1代表单个剧本绑定到同一个判断条件，需删除数据库数据和vector配置文件
                     if f"{ers.topic}_transforms" in data["transforms"]:
                         del data["transforms"][f"{ers.topic}_transforms"]
+
+                    if f"{ers.topic}_kafka_transforms" in data["transforms"]:
+                        del data["transforms"][f"{ers.topic}_kafka_transforms"]
 
                     if f"{ers.topic}_transforms" in data["transforms"]:
                         del data["transforms"][f"{ers.topic}_event_transforms"]
