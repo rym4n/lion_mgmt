@@ -535,7 +535,7 @@ async def binding_event_ingestion_script(request):
             ]
         目前支持的判断条件类型有：
             等于 == ，不等于!= ，大于 > ，小于 < ，大于等于 >= ，小于等于 <=
-            字段中存在字符串 contains ，字段中不包含字符串 !contains
+            字段中包含字符串 contains ，字段中不包含字符串 !contains
             字段中存在集合 includes ，字段中不存在集合 !includes     value为集合，如"[\"abc\",\"lmd\"]"
             字段存在 exists ，字段不存在 !exists        value为空
             字段为空 is_empty ，字段不为空 !is_empty    value为空
@@ -573,7 +573,7 @@ async def binding_event_ingestion_script(request):
             "type": "filter",
             "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [
                 event.vector_name],
-            "condition": conditional_statements
+            "condition": f"{conditional_statements}"
         }
         data.setdefault("transforms", {})[f"{topic}_kafka_transforms"] = {
             "type": "remap",
@@ -885,18 +885,33 @@ async def event_ingestion_config_list(request):
 
 def get_conditional_statements(conditions):
     conditional_statements = ""
-
     for index, condition in enumerate(conditions):
-        if bool(re.fullmatch(r"[^\w\s]+", condition["type"])):
-            conditional_statements += f""".{condition["name"]} {condition['type']} "{condition['value']}" """
-        elif condition["type"] == "contains":
-            conditional_statements += f"""{condition['type']}(string!(.{condition['name']}), "{condition['value']}")"""
+        if condition["type"] in ["==", "!="]:
+            conditional_statements += f"""
+.{condition["name"]} {condition['type']} "{condition['value']}"
+"""
+        elif condition["type"] in [">", "<", ">=", "<="]:
+            conditional_statements += f"""
+(to_int(.{condition["name"]}) ?? 0) {condition['type']} {int(condition['value'])}
+"""
+        elif condition["type"] in ["!contains", "contains"]:
+            conditional_statements += f"""
+{condition['type']}(string!(.{condition['name']}), "{condition['value']}")
+"""
         elif condition["type"] in ["includes", "!includes"]:
-            conditional_statements += f"""{condition['type']}({condition['value']}, string!(.{condition['name']}))"""
-        elif condition["type"] in ["exists", "is_empty", "!exists", "!is_empty"]:
-            conditional_statements += f"""{condition['type']}(string!(.{condition['name']}))"""
+            conditional_statements += f"""
+{condition['type']}({condition['value']}, string!(.{condition['name']}))
+"""
+        elif condition["type"] in ["exists", "!exists"]:
+            conditional_statements += f"""
+{condition['type']}(.{condition['name']})
+"""
+        elif condition["type"] in ["is_empty", "!is_empty"]:
+            conditional_statements += f"""
+{condition['type']}(to_string!(.{condition['name']}))
+"""
         elif condition["type"] == "match":
-            conditional_statements += f"""match(string!(.{condition['name']}), "{condition['value']}")"""
+            conditional_statements += f"match(string!(.{condition['name']}), r'{condition['value']}')"
         else:
             raise CustomError(ErrorCode.ParameterError)
         connect_type = condition["connect_type"] if condition.get("connect_type") in ["&&", "||"] else None
