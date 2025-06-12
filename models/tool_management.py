@@ -111,7 +111,7 @@ class ToolResources(BaseModel):
     """
 
     tool_name: str = fields.CharField(max_length=255, description="工具名称")
-    name: str = fields.CharField(max_length=255, unique=True, description="资源名称")
+    name: str = fields.CharField(max_length=255, description="资源名称")
     engine: str = fields.CharField(max_length=255, null=True, description="执行引擎")
     resources: list[str] = fields.JSONField(description="资源配置")
     creator: str = fields.CharField(max_length=255, null=True, description="创建者")
