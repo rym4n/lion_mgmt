@@ -589,10 +589,10 @@ async def binding_event_ingestion_script(request):
             event_name = '"{}"'.format(event_name)
         data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
             "type": "remap",
-            "inputs": [f"{topic}_transforms"],
+            "inputs": [f"{topic}_kafka_transforms"],
             "source": """
 .log_data = to_string(encode_json(.))
-.id = .aior_event_id
+.id = .aioe_event_id
 .ctime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
 .utime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
 .deleted = false
