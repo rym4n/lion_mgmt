@@ -148,14 +148,18 @@ class ChatManager:
             message_data = await creat_message(room, log)
             await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
             event = await Events.get_or_none(room_id=data["room_id"])
-            log["event_id"] = event.id
+            if event:
+                log["event_id"] = event.id
 
         elif await Room.filter(run_id__contains=[key]).exists():
             room = await Room.filter(run_id__contains=[key]).first().prefetch_related('updator')
             message_data = await creat_message(room, log)
             await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
             event = await Events.get_or_none(room_id=room.id)
-            log["event_id"] = event.id
+            if event:
+                log["event_id"] = event.id
+                print(1)
+            print(2)
         else:
             for k in self.run_connections:
                 if self.run_connections[k]['run_id'] == log.get('run_id'):
