@@ -628,9 +628,9 @@ del(.datetime_str)
         #     "max_events": 5000,
         #     "when_full": "block"
         # }
-        # result = check_vector_config(data)
-        # if not result:
-        #     raise CustomError(ErrorCode.ConfigFileGenerateError)
+        result = check_vector_config(data)
+        if not result:
+            raise CustomError(ErrorCode.ConfigFileGenerateError)
 
         data = data.copy()
 
