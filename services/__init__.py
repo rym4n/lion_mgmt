@@ -24,6 +24,7 @@ from services.user.views import user_bp
 from services.variables.views import var_bp
 from services.warroom.views import warroom_bp
 from services.workflow.views import workflow_bp
+from services.dashboard.views import dashboard_bp
 from settings import BASE_LOGGING, TORTOISE
 
 
@@ -55,6 +56,7 @@ def register_blueprints(app: Sanic) -> None:
             "var_bp": var_bp,
             "warroom_bp": warroom_bp,
             "workflow_bp": workflow_bp,
+            "dashboard_bp": dashboard_bp,
         }
         license_data = load_license()
         if license_data and 'moduleList' in license_data:
