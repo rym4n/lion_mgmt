@@ -554,10 +554,11 @@ async def binding_event_ingestion_script(request):
         raise CustomError(ErrorCode.NotFound)
     event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False).all()
     for event_related_script in event_related_scripts:
-        for script_id in event_related_script.script_id:
-            process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
-            supervisor.stop_process(process_name)
-            supervisor.remove_process(process_name)
+        if event_related_script.script_id:
+            for script_id in event_related_script.script_id:
+                process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
+                supervisor.stop_process(process_name)
+                supervisor.remove_process(process_name)
         await event_related_script.delete()
 
     data = copy.deepcopy(event.vector_config_raw)
@@ -627,9 +628,9 @@ del(.datetime_str)
         #     "max_events": 5000,
         #     "when_full": "block"
         # }
-        result = check_vector_config(data)
-        if not result:
-            raise CustomError(ErrorCode.ConfigFileGenerateError)
+        # result = check_vector_config(data)
+        # if not result:
+        #     raise CustomError(ErrorCode.ConfigFileGenerateError)
 
         data = data.copy()
 

@@ -34,6 +34,7 @@ class Runlog(BaseModel):
 
     executor = fields.CharField(null=True, max_length=36, description="执行者ID")
     resource_name = fields.CharField(null=True, max_length=36, description="资源名称")
+    playbook_name = fields.CharField(null=True, max_length=36, description="剧本名称")
 
     playbook_version = fields.ForeignKeyField("models.PlaybookVersion", null=True, related_name="playbook_runlog", description="关联剧本")
 
@@ -64,6 +65,7 @@ class Runlog(BaseModel):
             "playbook": self.playbook_version.id if self.playbook_version else None,
             "creator": self.executor,
             "resource_name": self.resource_name,
+            "playbook_name": self.playbook_name,
         }
 
     class Meta:
