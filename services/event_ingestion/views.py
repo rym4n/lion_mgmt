@@ -499,8 +499,10 @@ async def get_event_ingestion_kafka_sample(request):
             event.enabled_health_status = "healthy"
         else:
             event.enabled_health_status = "unhealthy"
-        logger.info(data.keys(),len(data.keys()))
+        logger.info(data.keys())
+        logger.info(len(data.keys()))
         if len(data.keys()) > 2:
+            logger.info(1)
             event.convert_health_status = "healthy"
         else:
             event.convert_health_status = "unhealthy"
