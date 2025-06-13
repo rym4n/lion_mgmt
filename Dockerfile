@@ -28,10 +28,10 @@ COPY . ./
 
 RUN sed -i "s|AIOE_LICENSE_KEY|$(cat LICKEY | tr -d '\n')|g" libs/utils.py
 
-RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file core/
-RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file libs/
-RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file models/
-RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=8 --remove-output --no-pyi-file core/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=8 --remove-output --no-pyi-file libs/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=8 --remove-output --no-pyi-file models/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=8 --remove-output --no-pyi-file services/
 
 FROM timberio/vector:0.47.0-debian AS vector
 

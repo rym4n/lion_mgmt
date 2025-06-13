@@ -136,8 +136,8 @@ TORTOISE = {
         "default": {
             "engine": "tortoise.backends.asyncpg",
             "credentials": {
-                "host": os.environ.get("RY_DB_HOST"),
-                "port": os.environ.get("RY_DB_PORT"),
+                "host": "lion_pg",
+                "port": 5432,
                 "user": os.environ.get("RY_DB_USER"),
                 "password": os.environ.get("RY_DB_PASS"),
                 "database": "lion_mgmt",
