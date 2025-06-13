@@ -146,7 +146,8 @@ async def creat_event_ingestion_dbdata(event_ingestion_name, event_ingestion_des
                                                     linked_execution=linked_execution,
                                                     syslog_config=syslog_config, vector_name=vector_name,
                                                     vector_config=vector_config,
-                                                    vector_config_raw=vector_config)
+                                                    vector_config_raw=vector_config,
+                                                    enabled_health_status = "healthy")
     logger.info(f"Client {client_ip} has added a new role {events_ingestion.id}.")
     return events_ingestion.json
 
