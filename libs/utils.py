@@ -31,7 +31,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.exceptions import InvalidTag
 
-from settings import RESOURCE_KEY
+from settings import RY_RES_KEY
 
 password_hasher: PasswordHasher = PasswordHasher()
 
@@ -326,7 +326,7 @@ def encrypt_aes256_gcm(plaintext: str) -> dict:
     # 生成随机盐
     salt = os.urandom(16)
     # 从密码派生密钥
-    key = derive_key(RESOURCE_KEY, salt)
+    key = derive_key(RY_RES_KEY, salt)
 
     # 生成随机nonce (12字节是GCM推荐长度)
     nonce = os.urandom(12)
@@ -355,7 +355,7 @@ def decrypt_aes256_gcm(encrypted_data: dict) -> str:
         tag = base64.b64decode(encrypted_data['tag'])
 
         # 派生密钥
-        key = derive_key(RESOURCE_KEY, salt)
+        key = derive_key(RY_RES_KEY, salt)
 
         # 创建解密器
         cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag), backend=default_backend())

@@ -33,9 +33,9 @@ async def aconsume(servers, topic, group_id, callback_func=None, consume_records
                 #         await callback_func(msg.value)
                 #     await consumer.commit()
             except KafkaConnectionError as err1:
-                logger.opt(exception=True).error(err1)
+                logger.error(err1)
                 await consumer.stop()
                 await consumer.start()
             except Exception as err2:
-                logger.opt(exception=True).error(err2)
+                logger.error(err2)
                 await consumer.commit()

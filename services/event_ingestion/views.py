@@ -146,7 +146,8 @@ async def creat_event_ingestion_dbdata(event_ingestion_name, event_ingestion_des
                                                     linked_execution=linked_execution,
                                                     syslog_config=syslog_config, vector_name=vector_name,
                                                     vector_config=vector_config,
-                                                    vector_config_raw=vector_config)
+                                                    vector_config_raw=vector_config,
+                                                    enabled_health_status = "healthy")
     logger.info(f"Client {client_ip} has added a new role {events_ingestion.id}.")
     return events_ingestion.json
 
@@ -438,6 +439,8 @@ async def update_event_ingestion(request):
             for event_related_script in event_related_scripts:
                 for script_id in event_related_script.script_id:
                     process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
+                    command = f"python start.py -m auto -f {script_id} -t {event_related_script.topic}"
+                    supervisor.add_process(process_name, command)
                     supervisor.start_process(process_name)
 
         event.linked_execution = linked_execution
@@ -499,14 +502,13 @@ async def get_event_ingestion_kafka_sample(request):
             event.enabled_health_status = "healthy"
         else:
             event.enabled_health_status = "unhealthy"
-
         if len(data.keys()) > 2:
             event.convert_health_status = "healthy"
         else:
             event.convert_health_status = "unhealthy"
 
         await event.save()
-
+    messages.reverse()
     return response_ok(messages)
 
 
@@ -535,7 +537,7 @@ async def binding_event_ingestion_script(request):
             ]
         目前支持的判断条件类型有：
             等于 == ，不等于!= ，大于 > ，小于 < ，大于等于 >= ，小于等于 <=
-            字段中存在字符串 contains ，字段中不包含字符串 !contains
+            字段中包含字符串 contains ，字段中不包含字符串 !contains
             字段中存在集合 includes ，字段中不存在集合 !includes     value为集合，如"[\"abc\",\"lmd\"]"
             字段存在 exists ，字段不存在 !exists        value为空
             字段为空 is_empty ，字段不为空 !is_empty    value为空
@@ -569,23 +571,30 @@ async def binding_event_ingestion_script(request):
         if conditions:
             conditional_statements = get_conditional_statements(conditions)
 
-        data.setdefault("transforms", {})[f"{topic}_transforms"] = {
-            "type": "filter",
-            "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [
-                event.vector_name],
-            "condition": conditional_statements
+            data.setdefault("transforms", {})[f"{topic}_transforms"] = {
+                "type": "filter",
+                "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [
+                 event.vector_name],
+                "condition": f"{conditional_statements}"
+            }
+        data.setdefault("transforms", {})[f"{topic}_kafka_transforms"] = {
+            "type": "remap",
+            "inputs": [f"{topic}_transforms"],
+            "source": """
+.aioe_event_id = uuid_v4()
+"""
         }
+
         if event_name == "default":
             event_name = '"{}" + "_" + to_string!(.datetime_str)'.format(event.event_ingestion_name)
         else:
             event_name = '"{}"'.format(event_name)
         data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
             "type": "remap",
-            "inputs": [f"{topic}_transforms"],
+            "inputs": [f"{topic}_kafka_transforms"],
             "source": """
 .log_data = to_string(encode_json(.))
-.event_id = uuid_v4()
-.id = .event_id
+.id = .aioe_event_id
 .ctime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
 .utime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
 .deleted = false
@@ -597,7 +606,7 @@ del(.datetime_str)
 """.format(event_name, event_ingestion_id)}
 
         data["sinks"][f"{topic}_sinks"] = {
-            "inputs": [f"{topic}_event_transforms"],
+            "inputs": [f"{topic}_kafka_transforms"],
             "type": "kafka",
             "bootstrap_servers": KAFKA_SERVERS,
             "topic": topic,
@@ -611,8 +620,14 @@ del(.datetime_str)
             "inputs": [f"{topic}_event_transforms"],
             "type": "postgres",
             "endpoint": endpoint,
-            "table": "events"
+            "table": "events",
+            "pool_size": 20
         }
+        # "buffer": {
+        #     "type": "memory",
+        #     "max_events": 5000,
+        #     "when_full": "block"
+        # }
         result = check_vector_config(data)
         if not result:
             raise CustomError(ErrorCode.ConfigFileGenerateError)
@@ -620,18 +635,10 @@ del(.datetime_str)
         data = data.copy()
 
         if script_ids:
-            for script_id in script_ids:
-                process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
-                command = f"python start.py -m auto -f {script_id} -t {topic}"
-                supervisor.add_process(process_name, command)
-
-                if event.linked_execution == 1:
-                    supervisor.start_process(process_name)
-
             await EventRelatedScript.create(condition=conditions,
                                             event_ingestion_id=event_ingestion_id,
                                             script_id=script_ids, topic=topic,
-                                            event_name=event_name)
+                                            event_name=event.event_ingestion_name)
 
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
@@ -674,6 +681,9 @@ async def unbundled_event_ingestion_script(request):
                 else:  # 剧本id小于等于1代表单个剧本绑定到同一个判断条件，需删除数据库数据和vector配置文件
                     if f"{ers.topic}_transforms" in data["transforms"]:
                         del data["transforms"][f"{ers.topic}_transforms"]
+
+                    if f"{ers.topic}_kafka_transforms" in data["transforms"]:
+                        del data["transforms"][f"{ers.topic}_kafka_transforms"]
 
                     if f"{ers.topic}_transforms" in data["transforms"]:
                         del data["transforms"][f"{ers.topic}_event_transforms"]
@@ -875,18 +885,21 @@ async def event_ingestion_config_list(request):
 
 def get_conditional_statements(conditions):
     conditional_statements = ""
-
     for index, condition in enumerate(conditions):
-        if bool(re.fullmatch(r"[^\w\s]+", condition["type"])):
+        if condition["type"] in ["==", "!="]:
             conditional_statements += f""".{condition["name"]} {condition['type']} "{condition['value']}" """
-        elif condition["type"] == "contains":
+        elif condition["type"] in [">", "<", ">=", "<="]:
+            conditional_statements += f"""(to_int(.{condition["name"]}) ?? 0) {condition['type']} {int(condition['value'])}"""
+        elif condition["type"] in ["!contains", "contains"]:
             conditional_statements += f"""{condition['type']}(string!(.{condition['name']}), "{condition['value']}")"""
         elif condition["type"] in ["includes", "!includes"]:
             conditional_statements += f"""{condition['type']}({condition['value']}, string!(.{condition['name']}))"""
-        elif condition["type"] in ["exists", "is_empty", "!exists", "!is_empty"]:
-            conditional_statements += f"""{condition['type']}(string!(.{condition['name']}))"""
+        elif condition["type"] in ["exists", "!exists"]:
+            conditional_statements += f"""{condition['type']}(.{condition['name']})"""
+        elif condition["type"] in ["is_empty", "!is_empty"]:
+            conditional_statements += f"""{condition['type']}(to_string!(.{condition['name']}))"""
         elif condition["type"] == "match":
-            conditional_statements += f"""match(string!(.{condition['name']}), "{condition['value']}")"""
+            conditional_statements += f"match(string!(.{condition['name']}), r'{condition['value']}')"
         else:
             raise CustomError(ErrorCode.ParameterError)
         connect_type = condition["connect_type"] if condition.get("connect_type") in ["&&", "||"] else None
@@ -907,7 +920,7 @@ def check_vector_config(vector_config):
         yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
         tmp_file.write(yaml_str)
         tmp_file.flush()
-
+        logger.info(yaml_str)
         tmp_path = tmp_file.name
 
         result = run_linux_command(f'vector validate --config-yaml {tmp_path}')

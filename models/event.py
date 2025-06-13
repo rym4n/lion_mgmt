@@ -12,7 +12,7 @@ class Events(BaseModel):
     事件列表
     """
 
-    event_name: str = fields.CharField(max_length=255, unique=True, description="事件名称")
+    event_name: str = fields.CharField(max_length=255, description="事件名称")
     event_process_status: str = fields.CharField(max_length=50, description="事件处理状态")
     event_source: str = fields.CharField(max_length=255, null=True, description="事件来源")
     owner: Dict[str, Any] = fields.JSONField(default=list, null=True, description="负责人（包括角色和用户）")
@@ -108,7 +108,7 @@ class EventRelatedScript(BaseModel):
     事件关联剧本表
     """
 
-    condition: str = fields.CharField(max_length=255, null=True, description="执行条件")
+    condition: str = fields.TextField(null=True, description="执行条件")
     event_ingestion_id: str = fields.CharField(max_length=255, null=True, description="事件接入id")
     topic: str = fields.CharField(max_length=255, null=True, description="主题名")
     script_id: list[str] = fields.JSONField(null=True, description="剧本id")
