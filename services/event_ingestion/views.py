@@ -632,11 +632,10 @@ del(.datetime_str)
 
         data = data.copy()
 
-        if script_ids:
-            await EventRelatedScript.create(condition=conditions,
-                                            event_ingestion_id=event_ingestion_id,
-                                            script_id=script_ids, topic=topic,
-                                            event_name=event_name)
+        await EventRelatedScript.create(condition=conditions,
+                                        event_ingestion_id=event_ingestion_id,
+                                        script_id=script_ids, topic=topic,
+                                        event_name=event_name)
 
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
