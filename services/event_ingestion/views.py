@@ -439,6 +439,8 @@ async def update_event_ingestion(request):
             for event_related_script in event_related_scripts:
                 for script_id in event_related_script.script_id:
                     process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
+                    command = f"python start.py -m auto -f {script_id} -t {event_related_script.topic}"
+                    supervisor.add_process(process_name, command)
                     supervisor.start_process(process_name)
 
         event.linked_execution = linked_execution
@@ -629,18 +631,10 @@ del(.datetime_str)
         data = data.copy()
 
         if script_ids:
-            for script_id in script_ids:
-                process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
-                command = f"python start.py -m auto -f {script_id} -t {topic}"
-                supervisor.add_process(process_name, command)
-
-                if event.linked_execution == 1:
-                    supervisor.start_process(process_name)
-
             await EventRelatedScript.create(condition=conditions,
                                             event_ingestion_id=event_ingestion_id,
                                             script_id=script_ids, topic=topic,
-                                            event_name=event_name)
+                                            event_name=event.event_ingestion_name)
 
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
