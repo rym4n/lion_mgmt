@@ -130,7 +130,7 @@ async def get_system_status(request):
 
     无需参数直接请求则返回全部系统状况数据
     """
-    name_map = {'lion-mgmt': 'Web控制台', 'lion-web': 'Nginx服务', 'lion-pg': 'Postgres数据库', 'lion-redis': 'Redis数据库', 'lion-ship': 'ETL服务', 'lion-job': '任务调度服务', 'lion-worker': '执行引擎', 'lion-kafka': 'Kafka消息队列'}
+    name_map = {'lion-mgmt': '控制台服务', 'lion-web': 'Web服务器', 'lion-pg': '数据库连接服务', 'lion-db': '数据库服务', 'lion-redis': '缓存数据库', 'lion-ship': 'ETL服务', 'lion-job': '任务调度服务', 'lion-worker': '执行引擎', 'lion-kafka': '消息队列'}
     # 获取文件的修改时间
     status_file = os.path.join(settings.BASE_DIR, "data/status.json")
     if not os.path.exists(status_file):
