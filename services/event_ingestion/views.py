@@ -613,7 +613,7 @@ del(.datetime_str)
             "encoding": {
                 "codec": "json"
             }}
-        endpoint = f'postgresql://{os.environ.get("RY_DB_USER")}:{os.environ.get("RY_DB_PASS")}@lion_pg:5432/lion_mgmt'
+        endpoint = f'postgresql://{os.environ.get("RY_DB_USER")}:{os.environ.get("RY_DB_PASS")}@lion-pg:5432/lion_mgmt'
         data["sinks"][f"{topic}_event_sinks"] = {
             "inputs": [f"{topic}_event_transforms"],
             "type": "postgres",
