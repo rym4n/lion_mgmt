@@ -108,7 +108,7 @@ class EventRelatedScript(BaseModel):
     事件关联剧本表
     """
 
-    condition: str = fields.CharField(max_length=255, null=True, description="执行条件")
+    condition: str = fields.TextField(null=True, description="执行条件")
     event_ingestion_id: str = fields.CharField(max_length=255, null=True, description="事件接入id")
     topic: str = fields.CharField(max_length=255, null=True, description="主题名")
     script_id: list[str] = fields.JSONField(null=True, description="剧本id")
