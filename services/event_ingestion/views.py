@@ -23,6 +23,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import get_client_ip, fetch_latest_messages, run_linux_command
+from models import PlaybookVersion
 from models.event import EventsIngestion, EventRelatedScript
 from services.event_ingestion import supervisor
 from settings import VECTOR_CFG, KAFKA_SERVERS
@@ -877,6 +878,13 @@ async def event_ingestion_config_list(request):
     for event in events:
         event_dict = event.json
         event_dict["condition"] = ast.literal_eval(event.condition)
+        playbooks = []
+        if event.script_id:
+            for script_id in event.script_id:
+                pv = await PlaybookVersion.get_or_none(script_id=script_id, deleted=False)
+                if pv:
+                    playbooks.append(pv.id)
+        event_dict["playbooks"] = playbooks
         config_list.append(event_dict)
 
     return response_ok(config_list)
