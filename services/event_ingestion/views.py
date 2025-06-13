@@ -887,29 +887,17 @@ def get_conditional_statements(conditions):
     conditional_statements = ""
     for index, condition in enumerate(conditions):
         if condition["type"] in ["==", "!="]:
-            conditional_statements += f"""
-.{condition["name"]} {condition['type']} "{condition['value']}"
-"""
+            conditional_statements += f""".{condition["name"]} {condition['type']} "{condition['value']}" """
         elif condition["type"] in [">", "<", ">=", "<="]:
-            conditional_statements += f"""
-(to_int(.{condition["name"]}) ?? 0) {condition['type']} {int(condition['value'])}
-"""
+            conditional_statements += f"""(to_int(.{condition["name"]}) ?? 0) {condition['type']} {int(condition['value'])}"""
         elif condition["type"] in ["!contains", "contains"]:
-            conditional_statements += f"""
-{condition['type']}(string!(.{condition['name']}), "{condition['value']}")
-"""
+            conditional_statements += f"""{condition['type']}(string!(.{condition['name']}), "{condition['value']}")"""
         elif condition["type"] in ["includes", "!includes"]:
-            conditional_statements += f"""
-{condition['type']}({condition['value']}, string!(.{condition['name']}))
-"""
+            conditional_statements += f"""{condition['type']}({condition['value']}, string!(.{condition['name']}))"""
         elif condition["type"] in ["exists", "!exists"]:
-            conditional_statements += f"""
-{condition['type']}(.{condition['name']})
-"""
+            conditional_statements += f"""{condition['type']}(.{condition['name']})"""
         elif condition["type"] in ["is_empty", "!is_empty"]:
-            conditional_statements += f"""
-{condition['type']}(to_string!(.{condition['name']}))
-"""
+            conditional_statements += f"""{condition['type']}(to_string!(.{condition['name']}))"""
         elif condition["type"] == "match":
             conditional_statements += f"match(string!(.{condition['name']}), r'{condition['value']}')"
         else:
