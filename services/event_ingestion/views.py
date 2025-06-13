@@ -499,7 +499,7 @@ async def get_event_ingestion_kafka_sample(request):
             event.enabled_health_status = "healthy"
         else:
             event.enabled_health_status = "unhealthy"
-
+        logger.info(data.keys(),len(data.keys()))
         if len(data.keys()) > 2:
             event.convert_health_status = "healthy"
         else:
@@ -507,7 +507,7 @@ async def get_event_ingestion_kafka_sample(request):
 
         await event.save()
 
-    return response_ok(messages)
+    return response_ok(messages.reverse())
 
 
 @event_ingestion_bp.post('/binding')

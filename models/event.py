@@ -12,7 +12,7 @@ class Events(BaseModel):
     事件列表
     """
 
-    event_name: str = fields.CharField(max_length=255, unique=True, description="事件名称")
+    event_name: str = fields.CharField(max_length=255, description="事件名称")
     event_process_status: str = fields.CharField(max_length=50, description="事件处理状态")
     event_source: str = fields.CharField(max_length=255, null=True, description="事件来源")
     owner: Dict[str, Any] = fields.JSONField(default=list, null=True, description="负责人（包括角色和用户）")
