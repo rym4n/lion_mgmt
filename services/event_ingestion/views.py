@@ -147,7 +147,7 @@ async def creat_event_ingestion_dbdata(event_ingestion_name, event_ingestion_des
                                                     syslog_config=syslog_config, vector_name=vector_name,
                                                     vector_config=vector_config,
                                                     vector_config_raw=vector_config,
-                                                    enabled_health_status = "healthy")
+                                                    enabled_health_status="healthy")
     logger.info(f"Client {client_ip} has added a new role {events_ingestion.id}.")
     return events_ingestion.json
 
@@ -636,7 +636,7 @@ del(.datetime_str)
             await EventRelatedScript.create(condition=conditions,
                                             event_ingestion_id=event_ingestion_id,
                                             script_id=script_ids, topic=topic,
-                                            event_name=event.event_ingestion_name)
+                                            event_name=event_name)
 
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
@@ -876,7 +876,9 @@ async def event_ingestion_config_list(request):
         return response_ok("当前未配置接入规则")
 
     for event in events:
-        config_list.append(event.json)
+        event_dict = event.json
+        event_dict["condition"] = ast.literal_eval(event.condition)
+        config_list.append(event_dict)
 
     return response_ok(config_list)
 
