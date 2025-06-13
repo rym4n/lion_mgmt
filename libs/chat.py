@@ -158,8 +158,6 @@ class ChatManager:
             event = await Events.get_or_none(room_id=room.id)
             if event:
                 log["event_id"] = event.id
-                print(1)
-            print(2)
         else:
             for k in self.run_connections:
                 if self.run_connections[k]['run_id'] == log.get('run_id'):
