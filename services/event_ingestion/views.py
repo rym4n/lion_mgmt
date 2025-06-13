@@ -606,7 +606,7 @@ del(.datetime_str)
             }}
         endpoint = "postgresql://{}:{}@{}:{}/{}".format(os.environ.get("RY_DB_USER"), os.environ.get("RY_DB_PASS"),
                                                         os.environ.get("RY_DB_HOST"), os.environ.get("RY_DB_PORT"),
-                                                        os.environ.get("RY_DB_NAME"))
+                                                        "lion_mgmt")
         data["sinks"][f"{topic}_event_sinks"] = {
             "inputs": [f"{topic}_event_transforms"],
             "type": "postgres",
