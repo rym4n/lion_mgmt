@@ -508,9 +508,7 @@ async def get_event_ingestion_kafka_sample(request):
             event.convert_health_status = "unhealthy"
 
         await event.save()
-    logger.info(messages)
     messages.reverse()
-    logger.info(messages)
     return response_ok(messages)
 
 
@@ -622,7 +620,8 @@ del(.datetime_str)
             "inputs": [f"{topic}_event_transforms"],
             "type": "postgres",
             "endpoint": endpoint,
-            "table": "events"
+            "table": "events",
+            "pool_size": 20
         }
         result = check_vector_config(data)
         if not result:
@@ -928,7 +927,7 @@ def check_vector_config(vector_config):
         yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
         tmp_file.write(yaml_str)
         tmp_file.flush()
-        logger.info(f"vector config: {yaml_str}")
+
         tmp_path = tmp_file.name
 
         result = run_linux_command(f'vector validate --config-yaml {tmp_path}')
