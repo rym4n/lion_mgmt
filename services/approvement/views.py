@@ -44,9 +44,9 @@ async def all_approvement(request):
     if status:
         condition = condition & Q(status=status)
     if expired:
-        condition = condition & Q(expire_time__lt=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        condition = condition & Q(expire_time__lt=datetime.now())
     else:
-        condition = condition & Q(expire_time__gt=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        condition = condition & Q(expire_time__gt=datetime.now())
 
     total = await Approvement.filter(condition).count()
     records = []
@@ -78,7 +78,7 @@ async def todo_approvement(request):
 
     user = request.ctx.session['account_info']
     # 查询 Approvement 表中 status 为 0 且 approvers 中包含当前用户 ID 的记录 且 expire_time 大于当前时间 且 processors 中不包含当前用户 ID
-    condition = Q(status=0, approvers__contains=[user.sub], expire_time__gt=datetime.now().strftime('%Y-%m-%d %H:%M:%S'), processors__not__contains=[user.sub])
+    condition = Q(status=0, approvers__contains=[user.sub], expire_time__gt=datetime.now(), processors__not__contains=[user.sub])
     total = await Approvement.filter(condition).count()
     records = await Approvement.filter(condition).offset((page - 1) * size).limit(size).all()
     return response_ok({
@@ -112,7 +112,7 @@ async def update_approvement(request):
     if not approvement_id or not isinstance(agree, bool):
         raise CustomError(ErrorCode.ParameterError)
 
-    record = await Approvement.get(id=approvement_id, status=0, expire_time__gt=datetime.now().strftime('%Y-%m-%d %H:%M:%S')).prefetch_related("approvers", "processors")
+    record = await Approvement.get(id=approvement_id, status=0, expire_time__gt=datetime.now()).prefetch_related("approvers", "processors")
     do_action = False
     record.processors.add(request.ctx.session['account_info'])
 
