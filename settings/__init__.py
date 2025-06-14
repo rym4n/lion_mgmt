@@ -50,7 +50,7 @@ BG_NAME = "bg-oEDCYcDF"
 KAFKA_SERVERS = os.environ.get("RY_KAFKA_SERVERS")
 
 # 定时任务发送主题
-TIMED_TASK_TOPIC = os.environ.get("RY_TASK_TOPIC")
+TASK_TOPIC = os.environ.get("RY_TASK_TOPIC")
 RUNLOG_TOPIC = os.environ.get("RY_RUNLOG_TOPIC")
 
 # 安全相关

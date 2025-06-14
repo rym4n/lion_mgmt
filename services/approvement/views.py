@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
+from datetime import datetime
 
 from sanic import Blueprint
 from tortoise.expressions import Q
@@ -7,8 +8,10 @@ from tortoise.expressions import Q
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from models import Approvement
+from settings import KAFKA_SERVERS, TASK_TOPIC
 
 approve_bp = Blueprint('approve', version=1, url_prefix='/approve')
 _all__ = ["approve_bp"]
@@ -24,19 +27,31 @@ async def all_approvement(request):
         page: 页码
         size: 每页数量
         keyword: 关键字，模糊搜索审核标题或者审核内容，可选参数
+        status: 处理状态，0代表待处理，1代表通过，2代表拒绝
+        expired: 布尔类型，True 代表已过期，False 代表未过期
     """
-    page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 10))
+    params = request.json
+    page = int(params.get("page", 1))
+    size = int(params.get("size", 10))
     offset = (page - 1) * size
     limit = size
     condition = Q()
-    keyword = request.json.get("keyword")
+    keyword = params.get("keyword")
+    status = params.get("status")
+    expired = params.get("expired")
     if keyword:
         condition = Q(title__icontains=keyword) | Q(content__icontains=keyword)
+    if status:
+        condition = condition & Q(status=status)
+    if expired:
+        condition = condition & Q(expire_time__lt=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    else:
+        condition = condition & Q(expire_time__gt=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+
     total = await Approvement.filter(condition).count()
     records = []
     if total > 0:
-        records = await Approvement.filter(condition).offset(offset).limit(limit).all().prefetch_related("processor")
+        records = await Approvement.filter(condition).offset(offset).limit(limit).all().prefetch_related("approvers", "processors")
     return response_ok({
         "total": total,
         "page": page,
@@ -62,9 +77,10 @@ async def todo_approvement(request):
     size = int(request.json.get("size", 10))
 
     user = request.ctx.session['account_info']
-    # 查询 Approvement 表中 status 为 0 且 approvers 中包含当前用户 ID 的记录
-    total = await Approvement.filter(status=0, approvers__contains=[user.sub]).count()
-    records = await Approvement.filter(status=0, approvers__contains=[user.sub]).offset((page - 1) * size).limit(size).all()
+    # 查询 Approvement 表中 status 为 0 且 approvers 中包含当前用户 ID 的记录 且 expire_time 大于当前时间 且 processors 中不包含当前用户 ID
+    condition = Q(status=0, approvers__contains=[user.sub], expire_time__gt=datetime.now().strftime('%Y-%m-%d %H:%M:%S'), processors__not__contains=[user.sub])
+    total = await Approvement.filter(condition).count()
+    records = await Approvement.filter(condition).offset((page - 1) * size).limit(size).all()
     return response_ok({
         "total": total,
         "page": page,
@@ -83,22 +99,46 @@ async def todo_approvement(request):
 @requires_permission("approve:u")
 async def update_approvement(request):
     """
-    更新全局变量（需要approve:u权限）
+    发送审核结果（需要approve:u权限）
 
     请求参数:
         id: 审核id，必填参数
-        agree: true/false，同意或拒绝，必填参数
+        agree: 布尔类型：True/False，同意或拒绝，必填参数
         remark: 审批备注信息
-        params: 自定义参数的内容信息, 例如 {"aaa": "bbb"}
+        params: 自定义参数的内容信息, 例如 {"key": "value"}
     """
     approvement_id = request.json.get("id")
     agree = request.json.get("agree")
-    if not approvement_id or not agree:
+    if not approvement_id or not isinstance(agree, bool):
         raise CustomError(ErrorCode.ParameterError)
 
-    agree = bool(agree)
-    record = await Approvement.get(id=approvement_id)
-    record.status = 1 if agree else 2
-    record.processor = request.ctx.session['account_info']
+    record = await Approvement.get(id=approvement_id, status=0, expire_time__gt=datetime.now().strftime('%Y-%m-%d %H:%M:%S')).prefetch_related("approvers", "processors")
+    do_action = False
+    record.processors.add(request.ctx.session['account_info'])
+
+    if agree is False:
+        record.status = 2
+        do_action = True
+    else:
+        if record.approve_type == 2:
+            # 如果是会签，只有所有审批人都同意了，才进行下一步
+            if len(record.approvers) == len(record.processors):
+                record.status = 1
+                do_action = True
+        else:
+            record.status = 1
+            do_action = True
+
     await record.save()
+
+    if do_action:
+        msg = {
+            "run_type": 'flow', "run_id": record.run_id,
+            "run_args": {
+                "flow_id": record.flow_id, "flow_input": "", "approval_node_id": record.audit_node, "next_node_id": record.next_node,
+                "approval_status": record.status, "executor": ",".join([p.id for p in record.processors])
+            }
+        }
+        await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+
     return response_ok(record.json)

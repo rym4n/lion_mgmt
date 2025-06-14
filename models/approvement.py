@@ -14,14 +14,15 @@ class Approvement(BaseModel):
     flow = fields.ForeignKeyField("models.PlaybookVersion", description="关联剧本")
     run_id = fields.CharField(max_length=50, description="关联运行ID")
     content = fields.TextField(description="审核描述内容")
-    status = fields.IntField(default=0, description="审核状态，0代表待审核，1代表审核通过，2代表审核拒绝，3代表审核过期")
+    status = fields.IntField(default=0, description="审核状态，0代表待处理，1代表通过，2代表拒绝")
+    approve_type = fields.IntField(default=0, description="审核类型，1代表或签，2代表会签")
     expire_time = fields.DatetimeField(description="审核过期时间")
     approvers = fields.ManyToManyField(model_name="models.Account", through="approve_accounts")
     audit_node = fields.CharField(max_length=50, description="审核节点ID")
     next_node = fields.CharField(max_length=50, description="下一个要执行的节点ID")
     created_at = fields.DatetimeField(description="审核触发的时间")
     params = fields.JSONField(default=[], description="自定义参数")
-    processor = fields.ForeignKeyField("models.Account", related_name="approve_processor", null=True, description="实际审核处理人")
+    processors = fields.ManyToManyField("models.Account", through="approve_processor", null=True, description="实际审核处理人")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -38,7 +39,7 @@ class Approvement(BaseModel):
             "expire_time": self.expire_time,
             "approvers": [{"username": i.username, "display_name": i.display_name} for i in self.approvers],
             "params": self.params,
-            "processor": {"username": self.processor.username, "display_name": self.processor.display_name} if self.processor else {},
+            "processors": [{"username": i.username, "display_name": i.display_name} for i in self.processors] if self.processors else [],
         }
 
     # 指定name+type作为唯一性约束
