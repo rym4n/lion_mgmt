@@ -21,7 +21,7 @@ from libs.utils import gen_order_version
 from models import Approvement, Events
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import SECRET, SESSION_ENCODING_ALGORITHM, KAFKA_SERVERS, TIMED_TASK_TOPIC
+from settings import SECRET, SESSION_ENCODING_ALGORITHM, KAFKA_SERVERS, TASK_TOPIC
 
 warroom_bp = Blueprint('warroom', version=1, url_prefix='/warroom')
 __all__ = ['warroom_bp']
@@ -576,6 +576,6 @@ async def run(request):
     room.run_id.append(msg["run_id"])
     await room.save()
     await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id)}, 3600)
-    await aproduce(KAFKA_SERVERS, TIMED_TASK_TOPIC, msg)
+    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
     return response_ok("运行成功")

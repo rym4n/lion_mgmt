@@ -20,12 +20,12 @@ from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
+from libs import supervisor
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import get_client_ip, fetch_latest_messages, run_linux_command
 from models import PlaybookVersion
 from models.event import EventsIngestion, EventRelatedScript
-from services.event_ingestion import supervisor
 from settings import VECTOR_CFG, KAFKA_SERVERS
 
 event_ingestion_bp = Blueprint('event_ingestion', version=1, url_prefix='/event/ingestion')
@@ -576,7 +576,7 @@ async def binding_event_ingestion_script(request):
             data.setdefault("transforms", {})[f"{topic}_transforms"] = {
                 "type": "filter",
                 "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [
-                 event.vector_name],
+                    event.vector_name],
                 "condition": f"{conditional_statements}"
             }
         data.setdefault("transforms", {})[f"{topic}_kafka_transforms"] = {

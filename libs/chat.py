@@ -13,7 +13,7 @@ from libs.utils import gen_order_version
 from models import Runlog, Approvement, Events
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import KAFKA_SERVERS, TIMED_TASK_TOPIC, CACHE, RUNLOG_TOPIC
+from settings import KAFKA_SERVERS, TASK_TOPIC, CACHE, RUNLOG_TOPIC
 
 
 # 获取或创建私聊作战室
@@ -166,7 +166,7 @@ class ChatManager:
         if log.get('type') == 'approval-info':
             approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'], content=log['content'],
                                                params=log['params'], status=log['status'], expire_time=log['expire_time'], created_at=log['created_at'],
-                                               audit_node=log['audit_app'], next_node=log['start_app'])
+                                               audit_node=log['audit_app'], next_node=log['start_app'], approve_type=int(log['approve_type']))
             if log.get('users'):
                 users = Account.filter(id__in=log['users']).all()
                 approve.approvers.add(*users)
@@ -209,7 +209,7 @@ class ChatManager:
                 params = data
                 params["executor"] = user.id
                 msg = {"run_type": message_type, "run_id": gen_order_version(length=6), "run_args": params}
-                await aproduce(KAFKA_SERVERS, TIMED_TASK_TOPIC, msg)
+                await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
                 self.run_connections[user.id]["run_id"] = msg["run_id"]
             else:
                 logger.error(f"{traceback.format_exc()}")
