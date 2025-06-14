@@ -166,7 +166,7 @@ class ChatManager:
         if log.get('type') == 'approval-info':
             approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'], content=log['content'],
                                                params=log['params'], status=log['status'], expire_time=log['expire_time'], created_at=log['created_at'],
-                                               audit_node_id=log['audit_app'], next_node_id=log['start_app'])
+                                               audit_node=log['audit_app'], next_node=log['start_app'])
             if log.get('users'):
                 users = Account.filter(id__in=log['users']).all()
                 approve.approvers.add(*users)
