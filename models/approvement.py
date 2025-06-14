@@ -11,13 +11,14 @@ class Approvement(BaseModel):
     字段：
     """
     title: str = fields.CharField(max_length=50, index=True, description="审核标题")
-    workflow_id = fields.ForeignKeyField("models.PlaybookVersion", description="关联剧本ID")
+    flow = fields.ForeignKeyField("models.PlaybookVersion", description="关联剧本")
     run_id = fields.CharField(max_length=50, description="关联运行ID")
     content = fields.TextField(description="审核描述内容")
     status = fields.IntField(default=0, description="审核状态，0代表待审核，1代表审核通过，2代表审核拒绝，3代表审核过期")
     expire_time = fields.DatetimeField(description="审核过期时间")
     approvers = fields.ManyToManyField(model_name="models.Account", through="approve_accounts")
-    audit_node_id = fields.CharField(max_length=50, description="审核节点ID")
+    audit_node = fields.CharField(max_length=50, description="审核节点ID")
+    next_node = fields.CharField(max_length=50, description="下一个要执行的节点ID")
     created_at = fields.DatetimeField(description="审核触发的时间")
     params = fields.JSONField(default=[], description="自定义参数")
     processor = fields.ForeignKeyField("models.Account", related_name="approve_processor", null=True, description="实际审核处理人")

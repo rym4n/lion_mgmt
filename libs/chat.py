@@ -10,7 +10,7 @@ from sanic.log import logger
 
 from libs.kafka import aproduce, aconsume
 from libs.utils import gen_order_version
-from models import Runlog, Approvement, Events, Timed
+from models import Runlog, Approvement, Events
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
 from settings import KAFKA_SERVERS, TIMED_TASK_TOPIC, CACHE, RUNLOG_TOPIC
@@ -164,8 +164,9 @@ class ChatManager:
                     await self.run_connections[k]['conn'].send(orjson.dumps({"data": log}).decode())
         # 处理审批消息
         if log.get('type') == 'approval-info':
-            approve = await Approvement.create(title=log['node_name'], workflow_id=log['flow_id'], run_id=log['run_id'], content=log['content'],
-                                               expire_time=log['expire_time'], created_at=log['created_at'], audit_node_id=log['audit_app'])
+            approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'], content=log['content'],
+                                               params=log['params'], status=log['status'], expire_time=log['expire_time'], created_at=log['created_at'],
+                                               audit_node=log['audit_app'], next_node=log['start_app'])
             if log.get('users'):
                 users = Account.filter(id__in=log['users']).all()
                 approve.approvers.add(*users)
@@ -174,8 +175,6 @@ class ChatManager:
                 approve.approvers.add(*users)
         else:
             try:
-                log["event_id"] = await Events.get_or_none(id=log["event_id"]) if log["event_id"] is not None else None
-                log["timer_id"] = await Timed.get_or_none(id=log["timer_id"]) if log["timer_id"] is not None else None
                 await Runlog.create(**log)
             except Exception as e:
                 logger.error(e)
