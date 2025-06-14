@@ -1,45 +1,19 @@
 # coding=utf-8
-from datetime import datetime, timedelta
-import pytz
+from datetime import datetime
 
+import pytz
 from sanic import Blueprint
-from tortoise.transactions import in_transaction
+from tortoise.expressions import Q
+from tortoise.functions import Count
+
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Events, Runlog, Room, Account, Role
-from tortoise.functions import Count
+from models import Events, Runlog
 
 dashboard_bp = Blueprint('dashboard', version=1, url_prefix='/dashboard')
 _all__ = ["dashboard_bp"]
-
-table_dict = {
-    "events": Events,
-    "runlog": Runlog
-}
-
-beijing = pytz.timezone("Asia/Shanghai")
-
-
-def parse_conditions(conditions: dict) -> dict:
-    parsed = {}
-    for key, value in conditions.items():
-        if value is None:
-            continue
-        if isinstance(value, str) and 'T' in value and ':' in value:
-            try:
-                dt = datetime.fromisoformat(value)
-                if dt.tzinfo is None:
-                    dt = beijing.localize(dt)
-                else:
-                    dt = dt.astimezone(beijing)
-                parsed[key] = dt
-                continue
-            except ValueError:
-                pass
-        parsed[key] = value
-    return parsed
 
 
 @dashboard_bp.post('/view')
@@ -53,16 +27,42 @@ async def view_dashboard(request):
         conditions: dict, 查询条件，必填值：
         static_type: str, 统计类型，选填值（group_by为空时必填）：count(数量), value(全部字段的值)
         group_by: str, 分组字段，选填值（static_type为空时必填）：event_name, event_process_status, event_source, owner, room, updator, creator
+        count_key: str, 分组统计的时候按什么字段做统计，group_by 不为空的时候必填
+        start_time: str, 统计的起始时间
+        end_time: str, 统计的结束时间
     """
-    conditions = parse_conditions(request.json.get("conditions"))
-    print(conditions)
-    if request.json.get("static_type") == "count":
-        result = await table_dict.get(request.json.get("table_name")).filter(**conditions).count()
-    elif request.json.get("static_type") == "value":
-        result = await table_dict.get(request.json.get("table_name")).filter(**conditions).values()
-    elif request.json.get("group_by"):
-        group_by = request.json.get("group_by")
-        result = await table_dict.get(request.json.get("table_name")).filter(**conditions).group_by(*group_by).annotate(count=Count("id")).values(*group_by, "count")
-        await table_dict.get(request.json.get("table_name")).filter(**conditions).count()
+    params = request.json
+    table_dict = {
+        "events": Events,
+        "runlog": Runlog
+    }
+    conditions = params.get("conditions")
+    start_time = params.get("start_time")
+    end_time = params.get("end_time")
+    table_name = params.get("table_name")
+    static_type = params.get("static_type")
+    group_by = params.get("group_by")
+    count_key = params.get("count_key")
+    if not start_time or not end_time or table_name not in table_dict or (not static_type and not group_by) or (group_by and not count_key):
+        raise CustomError(ErrorCode.ParameterError)
+
+    start_time = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
+    start_time = pytz.timezone("Asia/Shanghai").localize(start_time)
+    end_time = datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
+    end_time = pytz.timezone("Asia/Shanghai").localize(end_time)
+    result = None
+    q = Q(ctime__range=(start_time, end_time))
+
+    if conditions and isinstance(conditions, dict):
+        q &= Q(**conditions)
+
+    if static_type == "count":
+        result = await table_dict.get(table_name).filter(q).count()
+    elif static_type == "value":
+        result = await table_dict.get(table_name).filter(q).values()
+    elif group_by:
+        result = await table_dict.get(table_name).filter(q).annotate(
+            unique_runs=Count(count_key, distinct=True)
+        ).group_by(group_by).values(group_by, "counts")
 
     return response_ok(result)
