@@ -3,7 +3,7 @@ from datetime import datetime
 
 import pytz
 from sanic import Blueprint
-from tortoise.expressions import Q
+from tortoise.expressions import Q, RawSQL
 from tortoise.functions import Count
 
 from core.error_code import ErrorCode
@@ -61,8 +61,15 @@ async def view_dashboard(request):
     elif static_type == "value":
         result = await table_dict.get(table_name).filter(q).values()
     elif group_by:
-        result = await table_dict.get(table_name).filter(q).annotate(
-            counts=Count(count_key, distinct=True)
-        ).group_by(group_by).values(group_by, "counts")
+        if group_by == 'ctime':
+            result = await table_dict.get(table_name).filter(q).annotate(
+                day=RawSQL("TO_CHAR(DATE_TRUNC('day', ctime), 'YYYY-MM-DD')")
+            ).group_by('day').annotate(
+                counts=Count(count_key, distinct=True)
+            ).values("day", "counts")
+        else:
+            result = await table_dict.get(table_name).filter(q).annotate(
+                counts=Count(count_key, distinct=True)
+            ).group_by(group_by).values(group_by, "counts")
 
     return response_ok(result)
