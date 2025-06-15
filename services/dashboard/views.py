@@ -62,7 +62,7 @@ async def view_dashboard(request):
         result = await table_dict.get(table_name).filter(q).values()
     elif group_by:
         result = await table_dict.get(table_name).filter(q).annotate(
-            unique_runs=Count(count_key, distinct=True)
+            counts=Count(count_key, distinct=True)
         ).group_by(group_by).values(group_by, "counts")
 
     return response_ok(result)
