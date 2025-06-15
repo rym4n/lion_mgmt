@@ -28,7 +28,7 @@ async def all_approvement(request):
         size: 每页数量
         keyword: 关键字，模糊搜索审核标题或者审核内容，可选参数
         status: 处理状态，0代表待处理，1代表通过，2代表拒绝
-        expired: 布尔类型，True 代表已过期，False 代表未过期
+        expired: 布尔类型，True 代表查询包含已过期的结果，可选参数
     """
     params = request.json
     page = int(params.get("page", 1))
@@ -42,9 +42,7 @@ async def all_approvement(request):
         condition = Q(title__icontains=keyword) | Q(content__icontains=keyword)
     if status:
         condition = condition & Q(status=status)
-    if expired:
-        condition = condition & Q(expire_time__lt=datetime.now())
-    else:
+    if expired is not True:
         condition = condition & Q(expire_time__gt=datetime.now())
 
     total = await Approvement.filter(condition).count()
