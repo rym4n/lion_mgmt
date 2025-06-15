@@ -26,7 +26,7 @@ async def view_dashboard(request):
         table_name: str, 表名，必填值：events, runlog
         conditions: dict, 查询条件，必填值：
         static_type: str, 统计类型，选填值（group_by为空时必填）：count(数量), value(全部字段的值)
-        group_by: str, 分组字段，选填值（static_type为空时必填）：event_name, event_process_status, event_source, owner, room, updator, creator
+        group_by: str, 分组字段，选填值（static_type为空时必填）, events表可选字段：event_name, event_process_status, event_source, owner, room, updator, creator；runlog表可选字段：playbook_name
         count_key: str, 分组统计的时候按什么字段做统计，group_by 不为空的时候必填
         start_time: str, 统计的起始时间
         end_time: str, 统计的结束时间

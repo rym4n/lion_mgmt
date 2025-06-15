@@ -17,7 +17,7 @@ from settings import KAFKA_SERVERS, TASK_TOPIC, CACHE, RUNLOG_TOPIC
 
 
 # 获取或创建私聊作战室
-async def get_or_create_private_chat_room(cache_client, sender: Account, receiver: Account) -> Room:
+async def get_or_create_private_chat_room(cache_client, sender: Account, receiver: Account) -> dict:
     # 保证顺序
     key = f"{sender.id}&{receiver.id}"
     private_room_name = f"{sender.display_name}和{receiver.display_name}的私聊"

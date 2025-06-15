@@ -34,7 +34,6 @@ async def all_approvement(request):
     page = int(params.get("page", 1))
     size = int(params.get("size", 10))
     offset = (page - 1) * size
-    limit = size
     condition = Q()
     keyword = params.get("keyword")
     status = params.get("status")
@@ -51,7 +50,7 @@ async def all_approvement(request):
     total = await Approvement.filter(condition).count()
     records = []
     if total > 0:
-        records = await Approvement.filter(condition).offset(offset).limit(limit).all().prefetch_related("approvers", "processors")
+        records = await Approvement.filter(condition).offset(offset).limit(size).all().prefetch_related("approvers", "processors")
     return response_ok({
         "total": total,
         "page": page,

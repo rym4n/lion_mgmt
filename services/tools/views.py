@@ -592,7 +592,7 @@ async def add_tool_resource(request):
                                     creator=request.ctx.session['account_info'].username,
                                     updater=request.ctx.session['account_info'].username)
 
-    await request.ctx.cache_client.set("resource_"+tr.id, resources)
+    await request.ctx.cache_client.set("resource_" + tr.id, resources)
 
     return response_ok({"message": "工具资源新增成功", "id": tr.id})
 
@@ -660,7 +660,7 @@ async def update_tool_resource(request):
         tool_resource.engine = engine
     if resources:
         new_resources = encrypt_aes256_gcm(str(resources))
-        tool_resource.resources = new_resources
+        tool_resource.resources.append(new_resources)
         await request.ctx.cache_client.set("resource_" + tool_resource.id, resources)
 
     tool_resource.updater = request.ctx.session['account_info'].username

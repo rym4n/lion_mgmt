@@ -1,5 +1,5 @@
 # coding=utf-8
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 from tortoise import fields
 
@@ -39,7 +39,7 @@ class Events(BaseModel):
             "event_summary": self.event_summary,
             "log_data": self.log_data,
             "event_ingestion_id": self.event_ingestion_id,
-            "room": self.room.id if self.room else None,
+            "room": self.room_id,
             "creator": {"username": self.creator.username, "display_name": self.creator.display_name} if self.creator else None,
             "updator": {"username": self.updator.username, "display_name": self.updator.display_name} if self.updator else None
         }
@@ -87,7 +87,7 @@ class EventsIngestion(BaseModel):
             "transforms_type": self.transforms_type,
             "enabled_status": self.enabled_status,
             "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
-            "updator":  {"username": self.updator.username, "display_name": self.updator.display_name},
+            "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
             "file_path": self.file_path,
             "linked_execution": self.linked_execution,
             "syslog_config": self.syslog_config,
