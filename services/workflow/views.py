@@ -388,7 +388,7 @@ async def run_history(request):
 
     total = len(run_ids_query)
 
-    run_logs = await Runlog.filter(run_id__in=run_ids_query).order_by("-utime").prefetch_related("playbook_version")
+    run_logs = await Runlog.filter(run_id__in=run_ids_query).order_by("-utime").prefetch_related("flow")
 
     grouped_data = defaultdict(list)
     status_data = defaultdict(list)

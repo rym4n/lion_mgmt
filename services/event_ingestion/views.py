@@ -882,7 +882,7 @@ async def event_ingestion_config_list(request):
         playbooks = []
         if event.script_id:
             for script_id in event.script_id:
-                pv = await PlaybookVersion.get_or_none(script_id=script_id, deleted=False)
+                pv = await PlaybookVersion.get_or_none(id=script_id, deleted=False)
                 if pv:
                     playbooks.append(pv.id)
         event_dict["playbooks"] = playbooks
