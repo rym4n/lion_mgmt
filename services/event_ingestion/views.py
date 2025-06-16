@@ -693,8 +693,7 @@ async def unbundled_event_ingestion_script(request):
                     if f"{ers.topic}_event_sinks" in data["sinks"]:
                         del data["sinks"][f"{ers.topic}_event_sinks"]
 
-                    ers.deleted = True
-                    await ers.save()
+                    await ers.delete()
                     break
 
         process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
