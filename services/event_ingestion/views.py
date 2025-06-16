@@ -590,7 +590,7 @@ async def binding_event_ingestion_script(request):
         if event_name == "default":
             event_name = '"{}" + "_" + to_string!(.datetime_str)'.format(event.event_ingestion_name)
         else:
-            event_name = '"{}"'.format(event_name)
+            event_name = '{}'.format(event_name)
         data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
             "type": "remap",
             "inputs": [f"{topic}_kafka_transforms"],
@@ -884,7 +884,7 @@ async def event_ingestion_config_list(request):
             for script_id in event.script_id:
                 pv = await PlaybookVersion.get_or_none(id=script_id, deleted=False)
                 if pv:
-                    playbooks.append(pv.id)
+                    playbooks.append(pv.playbook_id)
         event_dict["playbooks"] = playbooks
         config_list.append(event_dict)
 
