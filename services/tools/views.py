@@ -17,7 +17,7 @@ import aiofile
 import orjson
 from aiocache import caches
 from sanic import Blueprint, response
-from tortoise.expressions import Q
+from tortoise.expressions import Q, RawSQL
 from tortoise.functions import Max
 from tortoise.transactions import in_transaction
 
@@ -328,7 +328,21 @@ async def all_tools(request):
 
     subquery = Tool.filter(deleted=False).annotate(max_version=Max("version")).group_by("name")
     if key:
-        subquery = subquery.filter(Q(name__icontains=key) | Q(description__icontains=key))
+
+        tool_actions = await ToolAction.raw(
+            f"""
+SELECT t.id
+FROM tool_action ta
+JOIN tool t
+  ON ta.tool_name = t.name AND ta.version_number = t.version
+WHERE ta.deleted = false
+  AND t.deleted = false
+  AND (
+    ta.action->>'func' ILIKE '%{key}%'
+    OR ta.action->>'name' ILIKE '%{key}%'
+  );""")
+        tool_ids = [t.id for t in tool_actions]
+        subquery = subquery.filter(Q(name__icontains=key) | Q(description__icontains=key) | Q(id__in=tool_ids))
     if request.json.get("tag"):
         subquery = subquery.filter(tag__contains=[request.json.get("tag")])
     subquery_results = await subquery.values("name", "max_version")
