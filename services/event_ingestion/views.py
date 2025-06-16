@@ -590,7 +590,7 @@ async def binding_event_ingestion_script(request):
         if event_name == "default":
             event_name = '"{}" + "_" + to_string!(.datetime_str)'.format(event.event_ingestion_name)
         else:
-            event_name = '"{}"'.format(event_name)
+            event_name = '{}'.format(event_name)
         data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
             "type": "remap",
             "inputs": [f"{topic}_kafka_transforms"],
@@ -693,8 +693,7 @@ async def unbundled_event_ingestion_script(request):
                     if f"{ers.topic}_event_sinks" in data["sinks"]:
                         del data["sinks"][f"{ers.topic}_event_sinks"]
 
-                    ers.deleted = True
-                    await ers.save()
+                    await ers.delete()
                     break
 
         process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
@@ -882,9 +881,9 @@ async def event_ingestion_config_list(request):
         playbooks = []
         if event.script_id:
             for script_id in event.script_id:
-                pv = await PlaybookVersion.get_or_none(script_id=script_id, deleted=False)
+                pv = await PlaybookVersion.get_or_none(id=script_id, deleted=False)
                 if pv:
-                    playbooks.append(pv.id)
+                    playbooks.append(pv.playbook_id)
         event_dict["playbooks"] = playbooks
         config_list.append(event_dict)
 

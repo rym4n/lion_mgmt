@@ -8,6 +8,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
+from libs.utils import gen_random_code
 from models import Events, Runlog, Room, Account, Role
 
 event_bp = Blueprint('event', version=1, url_prefix='/event')
@@ -130,17 +131,18 @@ async def get_event_detail(request):
         raise CustomError(ErrorCode.NotFound)
 
     if not event.room:
-        if await Room.filter(name=event.event_name, deleted=False).exists():
+        room_name = event.event_name + "_" + gen_random_code(6)
+        if await Room.filter(name=room_name, deleted=False).exists():
             raise CustomError(ErrorCode.RoomNameExists)
         creator = request.ctx.session['account_info']
-        room = await Room.create(name=event.event_name, creator=creator)
+        room = await Room.create(name=room_name, creator=creator)
         await room.users.add(creator)
         event.room = room
         await event.save()
 
     event_dict = {"created_name": request.ctx.session['account_info'].username}
 
-    run_logs = await Runlog.filter(event_id=event_id, deleted=False).all().prefetch_related("playbook_version")
+    run_logs = await Runlog.filter(event_id=event_id, deleted=False).all().prefetch_related("flow")
     run_logs_grouped = {}
     for runlog in run_logs:
         run_logs_grouped.setdefault(runlog.run_id, []).append(runlog.json)

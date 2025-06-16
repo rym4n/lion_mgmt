@@ -381,7 +381,7 @@ async def get_run_log(request):
     run_ids = await Runlog.filter(condition).distinct().order_by('run_id').offset((page - 1) * size).limit(size).values_list('run_id', flat=True)
 
     if run_ids:
-        all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).all().prefetch_related("event_id", "timer_id", "playbook_version")
+        all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).all().prefetch_related("event", "timer", "flow")
         logs_by_run_id = defaultdict(list)
         for log in all_logs:
             logs_by_run_id[log.run_id].append(log.json)
@@ -455,7 +455,9 @@ async def timer_success_rate(timed_id):
     else:
         recent_logs = await Runlog.filter(timer_id=timed_id, deleted=False).limit(10)
         success_quantity = sum(1 for log in recent_logs if log.status == 0)
-        timed.success_rate = str(round(success_quantity / len(recent_logs), 4) * 100) + "%"
+        if len(recent_logs) != 0:
+            timed.success_rate = str(round(success_quantity / len(recent_logs), 4) * 100) + "%"
     runlog = await Runlog.filter(timer_id=timed_id, deleted=False).first()
-    timed.result = "success" if runlog.status == 0 else "fail"
+    if runlog:
+        timed.result = "success" if runlog.status == 0 else "fail"
     await timed.save()
