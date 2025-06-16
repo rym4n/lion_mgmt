@@ -684,7 +684,7 @@ async def unbundled_event_ingestion_script(request):
                     if f"{ers.topic}_kafka_transforms" in data["transforms"]:
                         del data["transforms"][f"{ers.topic}_kafka_transforms"]
 
-                    if f"{ers.topic}_transforms" in data["transforms"]:
+                    if f"{ers.topic}_event_transforms" in data["transforms"]:
                         del data["transforms"][f"{ers.topic}_event_transforms"]
 
                     if f"{ers.topic}_sinks" in data["sinks"]:
