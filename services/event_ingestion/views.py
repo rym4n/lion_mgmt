@@ -561,7 +561,7 @@ async def binding_event_ingestion_script(request):
                 supervisor.remove_process(process_name)
         await event_related_script.delete()
 
-    data = copy.deepcopy(event.vector_config_raw)
+    data = orjson.loads(orjson.dumps(event.vector_config_raw))
     request_datas = request.json.get("binding_data")
     for request_data in request_datas:
         conditions = request_data.get('conditions')
@@ -631,8 +631,6 @@ del(.datetime_str)
         result = check_vector_config(data)
         if not result:
             raise CustomError(ErrorCode.ConfigFileGenerateError)
-
-        data = data.copy()
 
         await EventRelatedScript.create(condition=conditions,
                                         event_ingestion_id=event_ingestion_id,
