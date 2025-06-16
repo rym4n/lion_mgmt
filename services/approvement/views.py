@@ -75,7 +75,7 @@ async def todo_approvement(request):
 
     user = request.ctx.session['account_info']
     # 查询 Approvement 表中 status 为 0 且 approvers 中包含当前用户 ID 的记录 且 expire_time 大于当前时间 且 processors 中不包含当前用户 ID
-    condition = Q(status=0, approvers__contains=[user.sub], expire_time__gt=datetime.now(), processors__not__contains=[user.sub])
+    condition = Q(status=0, approvers__contains=[user.id], expire_time__gt=datetime.now(), processors__not__contains=[user.id])
     total = await Approvement.filter(condition).count()
     records = await Approvement.filter(condition).offset((page - 1) * size).limit(size).all()
     return response_ok({
