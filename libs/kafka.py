@@ -1,5 +1,6 @@
 # coding=utf-8
 # author=regulus.y
+import traceback
 
 import orjson
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
@@ -37,5 +38,5 @@ async def aconsume(servers, topic, group_id, callback_func=None, consume_records
                 await consumer.stop()
                 await consumer.start()
             except Exception as err2:
-                logger.error(err2)
+                logger.error(f"{err2} | {traceback.format_exc()}")
                 await consumer.commit()
