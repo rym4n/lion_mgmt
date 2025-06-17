@@ -32,7 +32,7 @@ from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPe
 from settings import TOOLS_DIR
 
 # 定义 Blueprint
-tools_bp = Blueprint("tools", version=1, url_prefix="/tools")
+tools_bp = Blueprint("tools", url_prefix="/tools")
 __all__ = ["tools_bp"]
 # 预期的文件结构
 EXPECTED_STRUCTURE = {

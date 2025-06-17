@@ -1,6 +1,5 @@
 # coding=utf-8
 import ast
-import copy
 import hashlib
 import io
 import os
@@ -28,7 +27,7 @@ from models import PlaybookVersion
 from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS
 
-event_ingestion_bp = Blueprint('event_ingestion', version=1, url_prefix='/event/ingestion')
+event_ingestion_bp = Blueprint('event_ingestion', url_prefix='/event/ingestion')
 _all__ = ["event_ingestion_bp"]
 
 # transforms配置

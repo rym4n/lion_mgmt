@@ -11,7 +11,7 @@ from libs.security.authorization import requires_permission
 from libs.utils import gen_random_code
 from models import Events, Runlog, Room, Account, Role
 
-event_bp = Blueprint('event', version=1, url_prefix='/event')
+event_bp = Blueprint('event', url_prefix='/event')
 _all__ = ["event_bp"]
 
 

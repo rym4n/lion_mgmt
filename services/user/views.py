@@ -19,7 +19,7 @@ from libs.utils import password_hasher, ip_in_list, get_client_ip, validate_ips
 from models import Account, Role
 from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS
 
-user_bp = Blueprint('user', version=1, url_prefix='/user')
+user_bp = Blueprint('user', url_prefix='/user')
 _all__ = ["user_bp"]
 
 

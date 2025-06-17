@@ -17,7 +17,7 @@ from libs.utils import verify_license
 from models import Tool, Playbook
 from settings import LICENSE_DIR
 
-license_bp = Blueprint('license', version=1, url_prefix='/license')
+license_bp = Blueprint('license', url_prefix='/license')
 _all__ = ["license_bp"]
 
 MENU_DICT = {

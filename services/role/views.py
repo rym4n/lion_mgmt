@@ -9,7 +9,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import Role, Account, PermissionsMenu
 
-role_bp = Blueprint('role', version=1, url_prefix='/role')
+role_bp = Blueprint('role', url_prefix='/role')
 _all__ = ["role_bp"]
 
 

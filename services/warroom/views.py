@@ -23,7 +23,7 @@ from models.user import Account
 from models.warroom import Room, Message, MessageAccount
 from settings import SECRET, SESSION_ENCODING_ALGORITHM, KAFKA_SERVERS, TASK_TOPIC
 
-warroom_bp = Blueprint('warroom', version=1, url_prefix='/warroom')
+warroom_bp = Blueprint('warroom', url_prefix='/warroom')
 __all__ = ['warroom_bp']
 
 

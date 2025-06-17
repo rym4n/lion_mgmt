@@ -12,7 +12,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import Events, Runlog
 
-dashboard_bp = Blueprint('dashboard', version=1, url_prefix='/dashboard')
+dashboard_bp = Blueprint('dashboard', url_prefix='/dashboard')
 _all__ = ["dashboard_bp"]
 
 

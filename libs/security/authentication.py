@@ -110,7 +110,7 @@ async def token_decode(request: Request) -> dict:
             token = token.split(":")[1]
             account = await request.ctx.cache_client.get(f"account_{user_id}")
             if not account:
-                account = await Account.get(id=user_id, deleted=False)
+                account = await Account.get(id=user_id, deleted=False).prefetch_related('roles')
                 await request.ctx.cache_client.set(f"account_{account.id}", account, 7 * 24 * 3600)
             payload = jwt.decode(token, account.password, SESSION_ENCODING_ALGORITHM)
         else:

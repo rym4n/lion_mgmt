@@ -16,7 +16,7 @@ from libs.utils import strip_timezone_to_seconds
 from models import SystemCustomConfiguration, AuditLog, Config
 from settings import UPLOAD_FOLDER, BG_NAME
 
-system_bp = Blueprint('system', version=1, url_prefix='/system')
+system_bp = Blueprint('system', url_prefix='/system')
 _all__ = ["system_bp"]
 
 
@@ -153,23 +153,59 @@ async def update_sso_config(request):
     更新SSO配置
 
     请求参数：
-        sso_url: SSO地址
-        sso_logout_url: SSO登出地址
-        sso_client_id: SSO客户端ID
-        sso_client_secret: SSO客户端密钥
-        sso_redirect_uri: SSO重定向地址
+        client_id: 客户端ID, 必填参数
+        client_secret: 客户端密钥, 必填参数
+        authorize_uri: 获取授权码的URI, 必填参数
+        token_uri: 获取Token的URI, 必填参数
+        token_path: Token的取值路径, 必填参数
+        user_info_uri: 获取用户信息的URI, 必填参数
+        user_id_path: 用户唯一标识的取值路径, 必填参数
+        refresh_token_uri: 刷新token的URI
+        revoke_token_uri: 撤销token的URI
+        scopes: 请求资源范围
     """
+    required_fields = ["client_id", "client_secret", "authorize_uri", "token_uri", "user_info_uri", "user_id_path", "token_path"]
+    optional_fields = ["refresh_token_uri", "revoke_token_uri", "scopes"]
+
     params = request.json
-    if not params.get("sso_url") or not params.get("sso_logout_url") or not params.get("sso_client_id") or not params.get("sso_client_secret") or not params.get("sso_redirect_uri"):
-        raise CustomError(ErrorCode.ParameterError)
-    # 配置不存在则创建，存在则更新
-    for key in ["sso_url", "sso_logout_url", "sso_client_id", "sso_client_secret", "sso_redirect_uri"]:
-        sso_config = await Config.get_or_none(key=key)
-        if sso_config:
-            sso_config.value = params.get(key)
-            await sso_config.save()
-        else:
-            await Config.create(key=key, value=params, module='sso')
+
+    # 校验必填字段是否为空或不存在
+    for field in required_fields:
+        if not params.get(field):
+            raise CustomError(ErrorCode.ParameterError)
+
+    # 收集所有要更新的键值对
+    all_keys = required_fields + optional_fields
+    updates = {key: params.get(key, '') for key in all_keys}
+
+    # 使用事务保证原子性
+    async with in_transaction():  # 假设 ORM 支持异步事务
+        # 批量获取现有配置
+        existing_configs = await Config.filter(key__in=updates.keys()).all()
+        existing_dict = {cfg.key: cfg for cfg in existing_configs}
+
+        # 准备批量更新和创建的数据
+        to_update = []
+        to_create = []
+
+        for key, value in updates.items():
+            if key in existing_dict:
+                config = existing_dict[key]
+                config.value = value
+                to_update.append(config)
+            else:
+                to_create.append(Config(key=key, value=value, module='sso'))
+
+        # 批量更新
+        if to_update:
+            await Config.bulk_update(to_update, fields=['value'])
+
+        # 批量创建
+        if to_create:
+            await Config.bulk_create(to_create)
+
+    request.app.m.restart(zero_downtime=True, all_workers=True)
+    return response_ok('success')
 
 
 @system_bp.post("/audit")

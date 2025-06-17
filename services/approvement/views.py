@@ -13,7 +13,7 @@ from libs.security.authorization import requires_permission
 from models import Approvement
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
-approve_bp = Blueprint('approve', version=1, url_prefix='/approve')
+approve_bp = Blueprint('approve', url_prefix='/approve')
 _all__ = ["approve_bp"]
 
 
