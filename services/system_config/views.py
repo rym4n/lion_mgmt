@@ -13,7 +13,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
-from models import SystemCustomConfiguration, AuditLog
+from models import SystemCustomConfiguration, AuditLog, Config
 from settings import UPLOAD_FOLDER, BG_NAME
 
 system_bp = Blueprint('system', version=1, url_prefix='/system')
@@ -144,6 +144,32 @@ async def get_system_status(request):
             item['start_time'] = strip_timezone_to_seconds(item['start_time'])
             item['check_time'] = modify_time
         return response_ok(data)
+
+
+@system_bp.post("/sso_config")
+@requires_permission("system:u")
+async def update_sso_config(request):
+    """
+    更新SSO配置
+
+    请求参数：
+        sso_url: SSO地址
+        sso_logout_url: SSO登出地址
+        sso_client_id: SSO客户端ID
+        sso_client_secret: SSO客户端密钥
+        sso_redirect_uri: SSO重定向地址
+    """
+    params = request.json
+    if not params.get("sso_url") or not params.get("sso_logout_url") or not params.get("sso_client_id") or not params.get("sso_client_secret") or not params.get("sso_redirect_uri"):
+        raise CustomError(ErrorCode.ParameterError)
+    # 配置不存在则创建，存在则更新
+    for key in ["sso_url", "sso_logout_url", "sso_client_id", "sso_client_secret", "sso_redirect_uri"]:
+        sso_config = await Config.get_or_none(key=key)
+        if sso_config:
+            sso_config.value = params.get(key)
+            await sso_config.save()
+        else:
+            await Config.create(key=key, value=params, module='sso')
 
 
 @system_bp.post("/audit")

@@ -24,7 +24,7 @@ from models import Account
 from settings import SESSION_ENCODING_ALGORITHM, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE, SESSION_DOMAIN, AUTHENTICATION_REFRESH_EXPIRATION, SECRET, OAUTH_REDIRECT
 
 
-async def oauth_callback(request: Request, client: BaseOAuth2, redirect_uri: str = OAUTH_REDIRECT, code_verifier: str = None, ) -> tuple[dict, str]:
+async def oauth_callback(request: Request, client: BaseOAuth2, redirect_uri: str, code_verifier: str = None, ) -> tuple[dict, str]:
     """
     Requests an access token using the authorization code obtained after the user has authorized the application.
     An account is retrieved if it already exists, created if it doesn't, and the user is logged in.
@@ -134,7 +134,7 @@ async def oauth_decode(request: Request, client: BaseOAuth2, refresh=True) -> di
         token_info
     """
     try:
-        token_info = jwt.decode(request.headers.get(f"aioe-oauth", ), SECRET, SESSION_ENCODING_ALGORITHM)
+        token_info = jwt.decode(request.headers.get(f"aioe-oauth"), SECRET, SESSION_ENCODING_ALGORITHM)
         if refresh and time.time() > token_info["expires_at"]:
             token_info = await client.refresh_token(token_info.get("refresh_token"))
             token_info["is_refresh"] = True

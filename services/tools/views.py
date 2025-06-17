@@ -15,9 +15,10 @@ from io import BytesIO
 
 import aiofile
 import orjson
+import ujson
 from aiocache import caches
 from sanic import Blueprint, response
-from tortoise.expressions import Q, RawSQL
+from tortoise.expressions import Q
 from tortoise.functions import Max
 from tortoise.transactions import in_transaction
 
@@ -1135,7 +1136,7 @@ async def health_check_config(request):
     config = await Config.get_or_none(key=key)
 
     if not config:
-        config = await Config.create(key=key, value={"cron": cron}, module=["tool"])
+        config = await Config.create(key=key, value=ujson.dumps({"cron": cron}), module=["tool"])
         config.deleted = (switch == "off")
     else:
         config.deleted = (switch == "off")
@@ -1158,7 +1159,7 @@ async def health_check_get(request):
     if not config:
         return response_ok({"switch": "off", "cron": None})
 
-    value = config.value
+    value = ujson.loads(config.value) if config.value else {}
 
     return response_ok({"switch": "on" if not config.deleted else "off", "cron": value.get("cron")})
 

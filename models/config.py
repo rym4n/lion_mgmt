@@ -12,8 +12,8 @@ class Config(BaseModel):
     """
 
     key: str = fields.CharField(max_length=255, unique=True, description="配置项")
-    value = fields.JSONField(description="配置值")
-    config_type: str = fields.CharField(max_length=255, null=True,description="配置状态")
+    value = fields.TextField(description="配置值")
+    type: str = fields.CharField(max_length=255, null=True, description="配置状态")
     module: str = fields.CharField(max_length=255, description="所属模块")
 
     def validate(self) -> None:
@@ -27,7 +27,7 @@ class Config(BaseModel):
             "utime": strip_timezone_to_seconds(self.utime),
             "key": self.key,
             "value": self.value,
-            "config_type": self.config_type,
+            "type": self.type,
             "module": self.module
         }
 

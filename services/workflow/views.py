@@ -184,7 +184,6 @@ async def edit_workflow(request):
         remark: 可选，备注
         scenes: 可选，关联场景名称，列表格式
         tags: 可选，标签名称，列表格式
-        tags: 可选，标签
     """
     params = request.json
     playbook = await Playbook.get(id=params.get("id")).prefetch_related("scenes", "tags")
@@ -192,9 +191,11 @@ async def edit_workflow(request):
         raise CustomError(ErrorCode.PlaybookNotFound)
 
     playbook.name = params.get("name")
-    playbook.remark = params.get("remark")
-    playbook.scenes = await Scene.filter(name__in=params.get("scenes")).all()
-    playbook.tags = await Tag.filter(name__in=params.get("tags")).all()
+    playbook.remark = params.get("remark", '')
+    if params.get("scenes"):
+        playbook.scenes = await Scene.filter(name__in=params.get("scenes")).all()
+    if params.get("tags"):
+        playbook.tags = await Tag.filter(name__in=params.get("tags")).all()
     playbook.updator = request.ctx.session['account_info']
     await playbook.save()
     return response_ok(playbook.json)

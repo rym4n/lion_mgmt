@@ -5,7 +5,6 @@ from libs.error_code.enum import BaseErrorCode, ErrorData
 
 class ErrorCode(BaseErrorCode):
     """错误码枚举类"""
-
     ServerError = ErrorData(5000, "服务异常，请稍后重试")
     ParameterError = ErrorData(4000, "参数错误")
     InvalidJsonError = ErrorData(4001, "请求体是无效的json格式")
@@ -97,3 +96,5 @@ class ErrorCode(BaseErrorCode):
     PlaybookInputError = ErrorData(4069, "缺少执行剧本必须参数")
     CronExpressionError = ErrorData(4070, "cron表达式错误")
     ConfigFileGenerateError = ErrorData(4071, "配置文件生成失败，请联系管理进行处理")
+
+    InvalidState = ErrorData(4072, "非法的state参数")

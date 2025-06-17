@@ -56,9 +56,6 @@ RUNLOG_TOPIC = os.environ.get("RY_RUNLOG_TOPIC")
 # 安全相关
 SECRET = os.environ.get("RY_SECRET_KEY", '5tdPY^zTX6I$akvNtLXey3y#gFEG@^46f!iLUdSy$Y')
 
-OAUTH_CLIENT: str = ''
-OAUTH_SECRET: str = ''
-OAUTH_REDIRECT: str = ''
 SESSION_SAMESITE = None
 SESSION_SECURE = True
 SESSION_HTTPONLY = True
@@ -78,7 +75,7 @@ ENABLE_CORS: bool = os.environ.get("RY_CORS", True)
 CORS_SUPPORTS_CREDENTIALS: bool = os.environ.get("RY_CORS_CREDENTIAL", True)
 
 # Websocket
-WEBSOCKET_MAX_SIZE = 2 ** 20 # 消息最大1MB
+WEBSOCKET_MAX_SIZE = 2 ** 20  # 消息最大1MB
 WEBSOCKET_PING_INTERVAL = 20
 WEBSOCKET_PING_TIMEOUT = 20
 

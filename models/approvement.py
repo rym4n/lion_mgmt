@@ -17,12 +17,12 @@ class Approvement(BaseModel):
     status = fields.IntField(default=0, description="审核状态，0代表待处理，1代表通过，2代表拒绝")
     approve_type = fields.IntField(default=0, description="审核类型，1代表或签，2代表会签")
     expire_time = fields.DatetimeField(description="审核过期时间")
-    approvers = fields.ManyToManyField(model_name="models.Account", related_name="approve_accounts")
+    approvers = fields.ManyToManyField(model_name="models.Account", related_name="approve_accounts", through="approve_accounts", description="审核人员")
     audit_node = fields.CharField(max_length=50, description="审核节点ID")
     next_node = fields.CharField(max_length=50, description="下一个要执行的节点ID")
     created_at = fields.DatetimeField(description="审核触发的时间")
     params = fields.JSONField(default=[], description="自定义参数")
-    processors = fields.ManyToManyField("models.Account", related_name="approve_processor", null=True, description="实际审核处理人")
+    processors = fields.ManyToManyField("models.Account", related_name="approve_processor", through="approve_processor", null=True, description="实际审核处理人")
 
     def validate(self) -> None:
         raise NotImplementedError
