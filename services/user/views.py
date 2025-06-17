@@ -17,7 +17,7 @@ from libs.security.authorization import requires_permission
 from libs.security.oauth import oauth_callback
 from libs.utils import password_hasher, ip_in_list, get_client_ip, validate_ips
 from models import Account, Role
-from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS, SSO_CONFIG
+from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS
 
 user_bp = Blueprint('user', version=1, url_prefix='/user')
 _all__ = ["user_bp"]
@@ -481,6 +481,7 @@ async def oauth2_login(request):
     auth_url = request.app.ctx.oauth2.get_authorization_url(state=str(uuid.uuid4()))
     return response.redirect(auth_url)
 
+
 @user_bp.get("/oauth/callback")
 async def oauth2_callback(request):
     """
@@ -490,7 +491,8 @@ async def oauth2_callback(request):
         code:
         redirect: 重定向地址
     """
-    code = request.json.get("code")
-    redirect_uri = request.json.get("redirect")
-    token = request.app.ctx.oauth2.get_access_token(code=code, redirect_uri=redirect_uri)
-    oauth_callback(request, request.app.ctx.oauth2, )
+    code = request.args.get("code")
+    redirect_uri = request.args.get("redirect")
+    user_info, token = await oauth_callback(request.app.ctx.oauth2, code, redirect_uri)
+    user_info['aioe-auth'] = token
+    return response_ok(user_info)

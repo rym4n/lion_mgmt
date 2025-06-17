@@ -24,7 +24,7 @@ from models import Account
 from settings import SESSION_ENCODING_ALGORITHM, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE, SESSION_DOMAIN, AUTHENTICATION_REFRESH_EXPIRATION, SECRET
 
 
-async def oauth_callback(request: Request, client: BaseOAuth2, redirect_uri: str, code_verifier: str = None, ) -> tuple[dict, str]:
+async def oauth_callback(client: BaseOAuth2, code: str, redirect_uri: str, code_verifier: str = None, ) -> tuple[dict, str]:
     """
     Requests an access token using the authorization code obtained after the user has authorized the application.
     An account is retrieved if it already exists, created if it doesn't, and the user is logged in.
@@ -40,7 +40,7 @@ async def oauth_callback(request: Request, client: BaseOAuth2, redirect_uri: str
     """
     try:
         token_info = await client.get_access_token(
-            request.args.get("code"),
+            code,
             redirect_uri,
             code_verifier,
         )
@@ -59,7 +59,7 @@ async def oauth_callback(request: Request, client: BaseOAuth2, redirect_uri: str
                 verified=True,
             )
         aioe_token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, oauth_id)
-        return token_info, aioe_token
+        return account.json, aioe_token
     except IntegrityError:
         raise CustomError(ErrorCode.CredentialsError)
     except GetAccessTokenError:
