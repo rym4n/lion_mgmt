@@ -12,19 +12,19 @@ from core.listeners import LISTENER_TUPLE, BaseListener
 from core.middlewares import MIDDLEWARE_TUPLE, BaseMiddleware
 from libs.security.authorization import load_license
 from services.approvement.views import approve_bp
+from services.dashboard.views import dashboard_bp
 from services.event.views import event_bp
 from services.event_ingestion.views import event_ingestion_bp
 from services.license.views import license_bp
 from services.role.views import role_bp
 from services.scene.views import scene_bp
-from services.system_configuration.views import system_bp
+from services.system_config.views import system_bp
 from services.timed.views import timed_bp
 from services.tools.views import tools_bp
 from services.user.views import user_bp
 from services.variables.views import var_bp
 from services.warroom.views import warroom_bp
 from services.workflow.views import workflow_bp
-from services.dashboard.views import dashboard_bp
 from settings import BASE_LOGGING, TORTOISE
 
 
@@ -33,6 +33,7 @@ def create_app() -> Sanic:
     app.config.update_config("settings/__init__.py")
     register_listener(app)
     register_tortoise(app, config=TORTOISE, generate_schemas=False)
+    # 从数据库读取SSO配置
     register_middleware(app)
     register_exception_handler(app)
     register_blueprints(app)

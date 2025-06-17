@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pyotp
 from argon2.exceptions import VerificationError, InvalidHashError
-from sanic import Blueprint
+from sanic import Blueprint, response
 from tortoise.exceptions import IntegrityError, DoesNotExist
 from tortoise.expressions import Q
 
@@ -14,9 +14,10 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authentication import validate_password, token_encode, refresh_token, validate_username
 from libs.security.authorization import requires_permission
+from libs.security.oauth import oauth_callback
 from libs.utils import password_hasher, ip_in_list, get_client_ip, validate_ips
 from models import Account, Role
-from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS
+from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS, SSO_CONFIG
 
 user_bp = Blueprint('user', version=1, url_prefix='/user')
 _all__ = ["user_bp"]
@@ -472,3 +473,24 @@ async def assign_role_to_user(request):
     await account.roles.clear()
     await account.roles.add(*roles)
     return response_ok("success")
+
+
+@user_bp.get("/oauth/login")
+async def oauth2_login(request):
+    """重定向用户到SSO登录页"""
+    auth_url = request.app.ctx.oauth2.get_authorization_url(state=str(uuid.uuid4()))
+    return response.redirect(auth_url)
+
+@user_bp.get("/oauth/callback")
+async def oauth2_callback(request):
+    """
+    SSO登录回调接口
+
+    请求参数：
+        code:
+        redirect: 重定向地址
+    """
+    code = request.json.get("code")
+    redirect_uri = request.json.get("redirect")
+    token = request.app.ctx.oauth2.get_access_token(code=code, redirect_uri=redirect_uri)
+    oauth_callback(request, request.app.ctx.oauth2, )

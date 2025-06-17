@@ -21,7 +21,7 @@ from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_encode
 from models import Account
-from settings import SESSION_ENCODING_ALGORITHM, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE, SESSION_DOMAIN, AUTHENTICATION_REFRESH_EXPIRATION, SECRET, OAUTH_REDIRECT
+from settings import SESSION_ENCODING_ALGORITHM, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE, SESSION_DOMAIN, AUTHENTICATION_REFRESH_EXPIRATION, SECRET
 
 
 async def oauth_callback(request: Request, client: BaseOAuth2, redirect_uri: str, code_verifier: str = None, ) -> tuple[dict, str]:
