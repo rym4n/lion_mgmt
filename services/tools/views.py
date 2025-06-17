@@ -1146,9 +1146,9 @@ async def health_check_get(request):
     请求参数：
         无
     """
-    switch = await Config.get_or_none(key="health_check_switch")
+    switch = await Config.get_or_none(key="health_check_switch").values("value")
     cron = await Config.get_or_none(key="health_check_cron")
-    return response_ok({"switch": switch.get("value") if switch else "off", "cron": cron.get("value") if cron else ""})
+    return response_ok({"switch": switch.value if switch else "off", "cron": cron.value if cron else ""})
 
 
 @tools_bp.post("/action/input")
