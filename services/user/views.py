@@ -6,6 +6,7 @@ from datetime import datetime
 import pyotp
 from argon2.exceptions import VerificationError, InvalidHashError
 from sanic import Blueprint, response
+from sanic.log import logger
 from tortoise.exceptions import IntegrityError, DoesNotExist
 from tortoise.expressions import Q
 
@@ -61,7 +62,8 @@ async def new_user(request):
         if request.json.get("role_names"):
             roles = await Role.filter(name__in=request.json.get("role_names")).all()
             await account.roles.add(*roles)
-        await account.fetch_related("roles")
+        else:
+            await account.fetch_related("roles")
         res = account.json
         if mfa_enable:
             res['mfa_uri'] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name='AIOE')
@@ -134,8 +136,7 @@ async def create_api_user(request):
         roles = await Role.filter(name__in=request.json.get("role_names")).all()
         await account.roles.add(*roles)
 
-    token_id = str(uuid.uuid4())
-    token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, token_id, request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION), account.password, permit_ip=account.permit_ip)
+    token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, str(uuid.uuid4()), request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION), account.password, permit_ip=account.permit_ip)
     await account.fetch_related("roles")
     await request.ctx.cache_client.set(f"account_{account.id}", account, 7 * 24 * 3600)
 
@@ -478,7 +479,8 @@ async def assign_role_to_user(request):
 @user_bp.get("/oauth/login")
 async def oauth2_login(request):
     """重定向用户到SSO登录页"""
-    auth_url = request.app.ctx.oauth2.get_authorization_url(state=str(uuid.uuid4()))
+    redirect_uri = request.args.get("redirect")
+    auth_url = await request.app.ctx.oauth2.get_authorization_url(redirect_uri, state=str(uuid.uuid4()))
     return response.redirect(auth_url)
 
 
@@ -493,6 +495,9 @@ async def oauth2_callback(request):
     """
     code = request.args.get("code")
     redirect_uri = request.args.get("redirect")
-    user_info, token = await oauth_callback(request.app.ctx.oauth2, code, redirect_uri)
+    logger.info(f"oauth2 callback: {code}")
+    logger.info(f"oauth2 callback: {redirect_uri}")
+    logger.info(f"oauth2 callback: {request.app.ctx.oauth_cfg}")
+    user_info, token = await oauth_callback(request.app.ctx.oauth2, code, redirect_uri, request.app.ctx.oauth_cfg)
     user_info['aioe-auth'] = token
     return response_ok(user_info)

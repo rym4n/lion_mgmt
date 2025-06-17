@@ -34,7 +34,7 @@ class ErrorCode(BaseErrorCode):
     SessionDeactivated = ErrorData(4020, "会话已注销")
 
     GetAccessTokenError = ErrorData(4021, "获取token失败")
-    GetIdEmailError = ErrorData(4022, "获取id和email失败")
+    GetUserInfoError = ErrorData(4022, "获取用户信息失败")
     RevokeTokenError = ErrorData(4023, "撤销token失败")
     RefreshTokenError = ErrorData(4024, "刷新token失败")
 

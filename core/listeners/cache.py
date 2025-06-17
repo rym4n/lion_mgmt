@@ -23,16 +23,16 @@ class CacheListener(BaseListener):
         logger.info("使用Redis作为缓存")
         logger.info("初始化SSO_CONFIG")
         records = await Config.filter(module='sso').all()
-        sso_config = {c.key: c.value for c in records}
-        if sso_config.get('use_oauth2') == 'true':
+        app.ctx.oauth_cfg = {c.key: c.value for c in records}
+        if app.ctx.oauth_cfg.get('use_oauth2') == 'true':
             app.ctx.oauth2 = OAuth2(
-                sso_config.get("client_id"),
-                sso_config.get("client_secret"),
-                sso_config.get("authorize_uri"),
-                sso_config.get("token_uri"),
-                refresh_token_endpoint=sso_config.get("refresh_token_uri"),
-                revoke_token_endpoint=sso_config.get("revoke_token_uri"),
-                base_scopes=sso_config.get("scopes").split(',')
+                app.ctx.oauth_cfg.get("client_id"),
+                app.ctx.oauth_cfg.get("client_secret"),
+                app.ctx.oauth_cfg.get("authorize_uri"),
+                app.ctx.oauth_cfg.get("token_uri"),
+                refresh_token_endpoint=app.ctx.oauth_cfg.get("refresh_token_uri") or None,
+                revoke_token_endpoint=app.ctx.oauth_cfg.get("revoke_token_uri") or None,
+                base_scopes=app.ctx.oauth_cfg.get("scopes").split(',')
             )
 
         app.add_task(chat_manager.msg_listener)

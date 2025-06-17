@@ -15,7 +15,6 @@ from io import BytesIO
 
 import aiofile
 import orjson
-import ujson
 from aiocache import caches
 from sanic import Blueprint, response
 from tortoise.expressions import Q
@@ -329,7 +328,6 @@ async def all_tools(request):
 
     subquery = Tool.filter(deleted=False).annotate(max_version=Max("version")).group_by("name")
     if key:
-
         tool_actions = await ToolAction.raw(
             f"""
 SELECT t.id
@@ -1126,22 +1124,15 @@ async def health_check_config(request):
         cron: 定时任务    str    格式：分 时 日 月 周，如：0 48 14 ? * 1 表示每周一的14点48分执行一次(多个小时段表示用逗号分隔，周也是如此)
     """
     switch = request.json.get("switch")
-    cron = (request.json.get("cron") or None)
+    cron = request.json.get("cron")
 
     # 参数验证
-    if not switch:
-        raise CustomError(ErrorCode.ParameterError)
+    if switch == 'on':
+        if not cron:
+            raise CustomError(ErrorCode.ParameterError)
+        await Config.update_or_create(key="health_check_cron", value=cron, module="tool")
 
-    key = "health_check_config"
-    config = await Config.get_or_none(key=key)
-
-    if not config:
-        config = await Config.create(key=key, value=ujson.dumps({"cron": cron}), module=["tool"])
-        config.deleted = (switch == "off")
-    else:
-        config.deleted = (switch == "off")
-        config.value = orjson.dumps({"cron": cron}).decode()
-    await config.save()
+    await Config.update_or_create(key="health_check_switch", value=switch, module="tool")
 
     return response_ok({"message": "资源健康检查配置修改成功"})
 
@@ -1155,13 +1146,9 @@ async def health_check_get(request):
     请求参数：
         无
     """
-    config = await Config.get_or_none(key="health_check_config")
-    if not config:
-        return response_ok({"switch": "off", "cron": None})
-
-    value = ujson.loads(config.value) if config.value else {}
-
-    return response_ok({"switch": "on" if not config.deleted else "off", "cron": value.get("cron")})
+    switch = await Config.get_or_none(key="health_check_switch")
+    cron = await Config.get_or_none(key="health_check_cron")
+    return response_ok({"switch": switch.get("value") if switch else "off", "cron": cron.get("value") if cron else ""})
 
 
 @tools_bp.post("/action/input")

@@ -146,13 +146,15 @@ async def get_system_status(request):
         return response_ok(data)
 
 
-@system_bp.post("/sso_config")
+@system_bp.post("/oauth/config")
 @requires_permission("system:u")
-async def update_sso_config(request):
+async def update_oauth_config(request):
     """
     更新SSO配置
 
     请求参数：
+        use_oauth2: 字符串类型, true 表示启用oauth认证, false 表示禁用, 必填参数
+        auto_create: 字符串类型, true 表示认证用户不存在的话自动新建, false 表示不新建, 必填参数
         client_id: 客户端ID, 必填参数
         client_secret: 客户端密钥, 必填参数
         authorize_uri: 获取授权码的URI, 必填参数
@@ -160,49 +162,58 @@ async def update_sso_config(request):
         token_path: Token的取值路径, 必填参数
         user_info_uri: 获取用户信息的URI, 必填参数
         user_id_path: 用户唯一标识的取值路径, 必填参数
-        refresh_token_uri: 刷新token的URI
-        revoke_token_uri: 撤销token的URI
-        scopes: 请求资源范围
+        display_name_path: 用户姓名的取值路径, 可选参数
+        email_path: 用户邮箱的取值路径, 可选参数
+        phone_path: 用户手机号的取值路径, 可选参数
+        refresh_token_uri: 刷新token的URI, 可选参数
+        revoke_token_uri: 撤销token的URI, 可选参数
+        scopes: 请求资源范围, 可选参数
     """
-    required_fields = ["client_id", "client_secret", "authorize_uri", "token_uri", "user_info_uri", "user_id_path", "token_path"]
-    optional_fields = ["refresh_token_uri", "revoke_token_uri", "scopes"]
-
     params = request.json
+    use_oauth2 = params.get("use_oauth2")
+    if use_oauth2 not in ('true', 'false'):
+        raise CustomError(ErrorCode.ParameterError)
 
-    # 校验必填字段是否为空或不存在
-    for field in required_fields:
-        if not params.get(field):
-            raise CustomError(ErrorCode.ParameterError)
+    if use_oauth2 == 'false':
+        await Config.update_or_create(key="use_oauth2", value="false", module="sso")
+    else:
+        required_fields = ["auto_create", "client_id", "client_secret", "authorize_uri", "token_uri", "user_info_uri", "user_id_path", "token_path"]
+        optional_fields = ["refresh_token_uri", "revoke_token_uri", "scopes"]
+        # 校验必填字段是否为空或不存在
+        for field in required_fields:
+            if not params.get(field):
+                raise CustomError(ErrorCode.ParameterError)
 
-    # 收集所有要更新的键值对
-    all_keys = required_fields + optional_fields
-    updates = {key: params.get(key, '') for key in all_keys}
+        # 收集所有要更新的键值对
+        all_keys = required_fields + optional_fields
+        updates = {key: params.get(key, '') for key in all_keys}
+        updates['use_oauth2'] = 'true'
 
-    # 使用事务保证原子性
-    async with in_transaction():  # 假设 ORM 支持异步事务
-        # 批量获取现有配置
-        existing_configs = await Config.filter(key__in=updates.keys()).all()
-        existing_dict = {cfg.key: cfg for cfg in existing_configs}
+        # 使用事务保证原子性
+        async with in_transaction():  # 假设 ORM 支持异步事务
+            # 批量获取现有配置
+            existing_configs = await Config.filter(key__in=updates.keys()).all()
+            existing_dict = {cfg.key: cfg for cfg in existing_configs}
 
-        # 准备批量更新和创建的数据
-        to_update = []
-        to_create = []
+            # 准备批量更新和创建的数据
+            to_update = []
+            to_create = []
 
-        for key, value in updates.items():
-            if key in existing_dict:
-                config = existing_dict[key]
-                config.value = value
-                to_update.append(config)
-            else:
-                to_create.append(Config(key=key, value=value, module='sso'))
+            for key, value in updates.items():
+                if key in existing_dict:
+                    config = existing_dict[key]
+                    config.value = value
+                    to_update.append(config)
+                else:
+                    to_create.append(Config(key=key, value=value, module='sso'))
 
-        # 批量更新
-        if to_update:
-            await Config.bulk_update(to_update, fields=['value'])
+            # 批量更新
+            if to_update:
+                await Config.bulk_update(to_update, fields=['value'])
 
-        # 批量创建
-        if to_create:
-            await Config.bulk_create(to_create)
+            # 批量创建
+            if to_create:
+                await Config.bulk_create(to_create)
 
     request.app.m.restart(zero_downtime=True, all_workers=True)
     return response_ok('success')

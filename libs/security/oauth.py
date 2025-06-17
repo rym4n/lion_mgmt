@@ -2,10 +2,10 @@
 
 import functools
 import time
+import uuid
 from contextlib import suppress
 
 import jwt
-from httpx_oauth.exceptions import GetIdEmailError
 from httpx_oauth.oauth2 import (
     BaseOAuth2,
     RefreshTokenError,
@@ -13,8 +13,10 @@ from httpx_oauth.oauth2 import (
     RevokeTokenNotSupportedError,
     GetAccessTokenError,
 )
+from jsonpath import jsonpath
 from jwt import DecodeError
 from sanic import Request, HTTPResponse, Sanic
+from sanic.log import logger
 from tortoise.exceptions import IntegrityError, DoesNotExist
 
 from core.error_code import ErrorCode
@@ -24,48 +26,52 @@ from models import Account
 from settings import SESSION_ENCODING_ALGORITHM, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE, SESSION_DOMAIN, AUTHENTICATION_REFRESH_EXPIRATION, SECRET
 
 
-async def oauth_callback(client: BaseOAuth2, code: str, redirect_uri: str, code_verifier: str = None, ) -> tuple[dict, str]:
-    """
-    Requests an access token using the authorization code obtained after the user has authorized the application.
-    An account is retrieved if it already exists, created if it doesn't, and the user is logged in.
-
-    Args:
-        request (Request): Sanic request parameter.
-        client (BaseOAuth2): OAuth provider.
-        redirect_uri (str): The URL where the user was redirected after authorization.
-        code_verifier (str): Optional code verifier used in the [PKCE](https://datatracker.ietf.org/doc/html/rfc7636) flow.
-
-    Returns:
-        token_info, authentication_session
-    """
+async def oauth_callback(client: BaseOAuth2, code: str, redirect_uri: str, oauth_cfg: dict, code_verifier: str = None) -> tuple[dict, str]:
     try:
         token_info = await client.get_access_token(
             code,
             redirect_uri,
             code_verifier,
         )
-        if "expires_at" not in token_info:
-            token_info["expires_at"] = time.time() + token_info["expires_in"]
-        oauth_id, email = await client.get_id_email(token_info["access_token"])
+        logger.info(f"token_info: {token_info}")
+        access_token = jsonpath(token_info, oauth_cfg['token_path'])
+        if not access_token:
+            raise GetAccessTokenError
+        user_info = await get_user_info(client, access_token[0], oauth_cfg['user_info_uri'])
+        logger.info(f"user_info: {user_info}")
+        username = jsonpath(user_info, oauth_cfg['user_id_path'])
+        if not username:
+            raise CustomError(ErrorCode.GetUserInfoError)
         try:
-            account = await Account.get(oauth_id=oauth_id)
+            account = await Account.get(username=username[0]).prefetch_related("roles")
         except DoesNotExist:
+            if oauth_cfg['auto_create'] != 'true':
+                raise CustomError(ErrorCode.AccountNotFound)
             # 不存在自动新建
             account = await Account.create(
-                email=email,
-                username=email.split("@")[0],
-                password="",
-                oauth_id=oauth_id,
-                verified=True,
+                username=username[0],
+                password='',
+                display_name=(jsonpath(user_info, oauth_cfg.get('display_name_path')) or [None])[0],
+                email=(jsonpath(user_info, oauth_cfg.get('email_path')) or [None])[0],
+                phone=(jsonpath(user_info, oauth_cfg.get('phone_path')) or [None])[0],
+                disabled=False,
+                mfa_enable=False,
+                mfa_key=None,
+                permit_ip=None
             )
-        aioe_token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, oauth_id)
+            await account.fetch_related("roles")
+        aioe_token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, str(uuid.uuid4()))
         return account.json, aioe_token
     except IntegrityError:
         raise CustomError(ErrorCode.CredentialsError)
     except GetAccessTokenError:
         raise CustomError(ErrorCode.GetAccessTokenError)
-    except GetIdEmailError as e:
-        raise CustomError(ErrorCode.GetIdEmailError)
+
+
+async def get_user_info(client, token, user_info_uri):
+    async with client.get_httpx_client() as c:
+        resp = await c.get(user_info_uri, headers={"Authorization": f"Bearer {token}"})
+        return resp.json()
 
 
 def oauth_encode(response: HTTPResponse, token_info: dict) -> None:
