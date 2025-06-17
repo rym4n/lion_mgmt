@@ -494,10 +494,9 @@ async def oauth2_callback(request):
         redirect: 重定向地址
     """
     code = request.args.get("code")
-    redirect_uri = request.args.get("redirect")
     logger.info(f"oauth2 callback: {code}")
-    logger.info(f"oauth2 callback: {redirect_uri}")
     logger.info(f"oauth2 callback: {request.app.ctx.oauth_cfg}")
-    user_info, token = await oauth_callback(request.app.ctx.oauth2, code, redirect_uri, request.app.ctx.oauth_cfg)
+    user_info, token = await oauth_callback(request.app.ctx.oauth2, code, request.app.ctx.oauth_cfg)
     user_info['aioe-auth'] = token
+    user_info['redirect'] = request.args.get("redirect")
     return response_ok(user_info)

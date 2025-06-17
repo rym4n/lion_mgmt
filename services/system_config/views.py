@@ -165,8 +165,7 @@ async def update_oauth_config(request):
         display_name_path: 用户姓名的取值路径, 可选参数
         email_path: 用户邮箱的取值路径, 可选参数
         phone_path: 用户手机号的取值路径, 可选参数
-        refresh_token_uri: 刷新token的URI, 可选参数
-        revoke_token_uri: 撤销token的URI, 可选参数
+        redirect_uri: 重定向URI, 有的SSO会在认证过程校验这个配置的合法性, 可选参数
         scopes: 请求资源范围, 可选参数
     """
     params = request.json
@@ -178,7 +177,7 @@ async def update_oauth_config(request):
         await Config.update_or_create(key="use_oauth2", value="false", module="sso")
     else:
         required_fields = ["auto_create", "client_id", "client_secret", "authorize_uri", "token_uri", "user_info_uri", "user_id_path", "token_path"]
-        optional_fields = ["refresh_token_uri", "revoke_token_uri", "scopes"]
+        optional_fields = ["display_name_path", "email_path", "phone_path", "redirect_uri", "scopes"]
         # 校验必填字段是否为空或不存在
         for field in required_fields:
             if not params.get(field):

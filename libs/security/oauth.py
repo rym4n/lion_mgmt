@@ -1,21 +1,12 @@
 # coding=utf-8
 
-import functools
-import time
 import uuid
-from contextlib import suppress
 
-import jwt
 from httpx_oauth.oauth2 import (
     BaseOAuth2,
-    RefreshTokenError,
-    RevokeTokenError,
-    RevokeTokenNotSupportedError,
     GetAccessTokenError,
 )
 from jsonpath import jsonpath
-from jwt import DecodeError
-from sanic import Request, HTTPResponse, Sanic
 from sanic.log import logger
 from tortoise.exceptions import IntegrityError, DoesNotExist
 
@@ -23,14 +14,13 @@ from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_encode
 from models import Account
-from settings import SESSION_ENCODING_ALGORITHM, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE, SESSION_DOMAIN, AUTHENTICATION_REFRESH_EXPIRATION, SECRET
 
 
-async def oauth_callback(client: BaseOAuth2, code: str, redirect_uri: str, oauth_cfg: dict, code_verifier: str = None) -> tuple[dict, str]:
+async def oauth_callback(client: BaseOAuth2, code: str, oauth_cfg: dict, code_verifier: str = None) -> tuple[dict, str]:
     try:
         token_info = await client.get_access_token(
             code,
-            redirect_uri,
+            oauth_cfg.get('redirect_uri'),
             code_verifier,
         )
         logger.info(f"token_info: {token_info}")
@@ -72,130 +62,3 @@ async def get_user_info(client, token, user_info_uri):
     async with client.get_httpx_client() as c:
         resp = await c.get(user_info_uri, headers={"Authorization": f"Bearer {token}"})
         return resp.json()
-
-
-def oauth_encode(response: HTTPResponse, token_info: dict) -> None:
-    """
-    Transforms access token into JWT and then is stored in a cookie.
-
-    Args:
-        response (HTTPResponse): Sanic response used to store JWT into a cookie on the client.
-        token_info (dict): OAuth access token.
-    """
-    response.cookies.add_cookie(
-        f"aioe_oauth",
-        str(
-            jwt.encode(
-                token_info,
-                SECRET,
-                SESSION_ENCODING_ALGORITHM,
-            ),
-        ),
-        httponly=SESSION_HTTPONLY,
-        samesite=SESSION_SAMESITE,
-        secure=SESSION_SECURE,
-        domain=SESSION_DOMAIN,
-        max_age=token_info["expires_in"] + AUTHENTICATION_REFRESH_EXPIRATION,
-    )
-
-
-# noinspection PyTypeChecker
-async def oauth_revoke(request: Request, client: BaseOAuth2) -> dict:
-    """
-    Revokes the client's access token.
-
-    Args:
-        request (Request): Sanic request parameter.
-        client (BaseOAuth2): OAuth provider.
-
-    Raises:
-        OAuthError
-    """
-    if request.headers.get(f"aioe-oauth"):
-        try:
-            token_info = await oauth_decode(request, client, False)
-            request.ctx.oauth["revoked"] = True
-            with suppress(RevokeTokenNotSupportedError):
-                await client.revoke_token(
-                    token_info.get("access_token"), "access_token"
-                )
-            return token_info
-        except RevokeTokenError as e:
-            raise CustomError(ErrorCode.RevokeTokenError)
-
-
-async def oauth_decode(request: Request, client: BaseOAuth2, refresh=True) -> dict:
-    """
-    Decodes JWT token from client cookie into an access token.
-
-    Args:
-        request (Request): Sanic request parameter.
-        client (BaseOAuth2): OAuth provider.
-        refresh (bool): Determines that the decoded access token is refreshed during expiration.
-
-    Raises:
-        OAuthError
-
-    Returns:
-        token_info
-    """
-    try:
-        token_info = jwt.decode(request.headers.get(f"aioe-oauth"), SECRET, SESSION_ENCODING_ALGORITHM)
-        if refresh and time.time() > token_info["expires_at"]:
-            token_info = await client.refresh_token(token_info.get("refresh_token"))
-            token_info["is_refresh"] = True
-            if "expires_at" not in token_info:
-                token_info["expires_at"] = time.time() + token_info["expires_in"]
-        request.ctx.oauth = token_info
-        return token_info
-    except RefreshTokenError as e:
-        raise CustomError(ErrorCode.RefreshTokenError)
-    except DecodeError:
-        raise CustomError(ErrorCode.SessionInvalid)
-
-
-def requires_oauth(client: BaseOAuth2):
-    """
-    Decodes JWT token from client cookie into an access token.
-
-    Args:
-        client (BaseOAuth2): OAuth provider.
-
-    Example:
-        This method is not called directly and instead used as a decorator:
-
-            @app.get('api/oauth')
-            @requires_oauth
-            async def on_oauth(request):
-                return text('Access token retrieved!')
-
-    Raises:
-        OAuthError
-    """
-
-    def decorator(func):
-        @functools.wraps(func)
-        async def wrapper(request, *args, **kwargs):
-            await oauth_decode(request, client)
-            return await func(request, *args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
-
-def initialize_oauth(app: Sanic) -> None:
-    """
-    Attaches session middleware.
-
-    Args:
-        app (Sanic): Sanic application instance.
-    """
-
-    @app.on_response
-    async def session_middleware(request, response):
-        if hasattr(request.ctx, "oauth"):
-            if request.ctx.oauth.get("is_refresh"):
-                oauth_encode(response, request.ctx.oauth)
-            elif request.ctx.oauth.get("revoked"):
-                response.delete_cookie(f"aioe_oauth")

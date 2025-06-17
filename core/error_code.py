@@ -13,7 +13,7 @@ class ErrorCode(BaseErrorCode):
     Unauthorized = ErrorData(4004, "权限不足")
     Forbidden = ErrorData(4005, "禁止访问")
 
-    WeakPassword = ErrorData(4006, "密码强度过低")
+    WeakPassword = ErrorData(4006, "密码强度过低,必须包含大小写字母、数字、特殊字符、长度不小于8")
 
     CredentialsError = ErrorData(4007, "用户名或密码错误")
     AccountDisabled = ErrorData(4008, "账号已禁用")
