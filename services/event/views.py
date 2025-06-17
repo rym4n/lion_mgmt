@@ -136,9 +136,12 @@ async def get_event_detail(request):
             raise CustomError(ErrorCode.RoomNameExists)
         creator = request.ctx.session['account_info']
         room = await Room.create(name=room_name, creator=creator)
-        await room.users.add(creator)
         event.room = room
         await event.save()
+    user = await Account.get_or_none(id=creator.id)
+    if user:
+        await user.star_rooms.add(event.room)
+    await event.room.users.add(creator)
 
     event_dict = {"created_name": request.ctx.session['account_info'].username}
 
