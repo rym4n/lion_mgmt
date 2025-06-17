@@ -40,7 +40,7 @@ async def create_workflow(request):
         remark: 备注，可选
         tags: 标签，列表格式，例如 ["aaa","bbb"]，可选
         scenes: 场景，列表格式，例如 ["aaa","bbb"]，可选
-        flow_json: 流程图具体内容, 可选
+        flow_json_list: 流程图具体内容, 列表格式, 列表的每个元素是一个独立的剧本json, 可选
     """
     data = request.json
     if not data.get("name"):
@@ -64,7 +64,8 @@ async def create_workflow(request):
     if await Playbook.filter(name=data.get("name"), deleted=False).exists():
         raise CustomError(ErrorCode.PlaybookNameExists)
 
-    flow_json = data.get("flow_json") or {}
+    flow_json_list = data.get("flow_json_list") or []
+
     async with in_transaction():
         playbook = await Playbook.create(
             name=data.get("name"),
@@ -79,21 +80,21 @@ async def create_workflow(request):
 
         await playbook.fetch_related('tags', 'scenes')
 
-        pv = await PlaybookVersion.create(
-            playbook=playbook,
-            version=gen_order_version(),
-            status=0,
-            change_desc=data.get("change_desc", ''),
-            flow_json=flow_json,
-            creator=request.ctx.session['account_info'],
-            updator=request.ctx.session['account_info']
-        )
+        for flow_json in flow_json_list:
+            pv = await PlaybookVersion.create(
+                playbook=playbook,
+                version=gen_order_version(),
+                status=0,
+                change_desc=data.get("change_desc", ''),
+                flow_json=flow_json,
+                creator=request.ctx.session['account_info'],
+                updator=request.ctx.session['account_info']
+            )
 
-        if flow_json:
             action_ids = await statistics_data(flow_json)
             await tool_action_update({pv.id: action_ids})
 
-        return response_ok(pv.json)
+    return response_ok('success')
 
 
 @workflow_bp.post("/list")
@@ -193,9 +194,13 @@ async def edit_workflow(request):
     playbook.name = params.get("name")
     playbook.remark = params.get("remark", '')
     if params.get("scenes"):
-        playbook.scenes = await Scene.filter(name__in=params.get("scenes")).all()
+        scenes = await Scene.filter(name__in=params.get("scenes")).all()
+        playbook.scenes.clear()
+        await playbook.scenes.add(*scenes)
     if params.get("tags"):
-        playbook.tags = await Tag.filter(name__in=params.get("tags")).all()
+        tags = await Tag.filter(name__in=params.get("tags")).all()
+        playbook.tags.clear()
+        await playbook.tags.add(*tags)
     playbook.updator = request.ctx.session['account_info']
     await playbook.save()
     return response_ok(playbook.json)
