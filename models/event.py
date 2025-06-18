@@ -22,6 +22,7 @@ class Events(BaseModel):
     room = fields.ForeignKeyField("models.Room", null=True, related_name="room_events", description="关联房间")
     updator = fields.ForeignKeyField("models.Account", null=True, related_name="updated_events", description="更新人")
     creator = fields.ForeignKeyField("models.Account", null=True, related_name="creator_events", description="创建人")
+    close_time = fields.DatetimeField(null=True, description="关闭时间")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -41,7 +42,8 @@ class Events(BaseModel):
             "event_ingestion_id": self.event_ingestion_id,
             "room": self.room_id,
             "creator": {"username": self.creator.username, "display_name": self.creator.display_name} if self.creator else None,
-            "updator": {"username": self.updator.username, "display_name": self.updator.display_name} if self.updator else None
+            "updator": {"username": self.updator.username, "display_name": self.updator.display_name} if self.updator else None,
+            "close_time": strip_timezone_to_seconds(self.close_time)
         }
 
     class Meta:
