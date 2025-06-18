@@ -1,9 +1,10 @@
 # coding=utf-8
 import time
 import traceback
-from datetime import datetime
-
 import orjson
+import pytz
+
+from datetime import datetime
 from aiocache import caches
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
@@ -149,6 +150,13 @@ class ChatManager:
             await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
             event = await Events.get_or_none(room_id=data["room_id"])
             if event:
+                if log.get("node_type") == "start_node":
+                    event.event_process_status = "处理中"
+                    await event.save()
+                elif log.get("node_type") == "end_node":
+                    event.event_process_status = "已处理"
+                    event.close_time = pytz.timezone("Asia/Shanghai").localize(datetime.now())
+                    await event.save()
                 log["event_id"] = event.id
 
         elif await Room.filter(run_id__contains=[key]).exists():
@@ -157,6 +165,13 @@ class ChatManager:
             await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
             event = await Events.get_or_none(room_id=room.id)
             if event:
+                if log.get("node_type") == "start_node":
+                    event.event_process_status = "处理中"
+                    await event.save()
+                elif log.get("node_type") == "end_node":
+                    event.event_process_status = "已处理"
+                    event.close_time = pytz.timezone("Asia/Shanghai").localize(datetime.now())
+                    await event.save()
                 log["event_id"] = event.id
         else:
             for k in self.run_connections:

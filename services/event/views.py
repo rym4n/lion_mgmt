@@ -138,7 +138,9 @@ async def get_event_detail(request):
             raise CustomError(ErrorCode.RoomNameExists)
         room = await Room.create(name=room_name, creator=creator)
         event.room = room
-        await event.save()
+    if event.event_process_status == "待处理":
+        event.event_process_status = "处理中"
+    await event.save()
     await creator.star_rooms.add(event.room)
     await event.room.users.add(creator)
 
