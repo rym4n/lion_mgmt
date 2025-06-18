@@ -146,7 +146,35 @@ async def get_system_status(request):
         return response_ok(data)
 
 
-@system_bp.post("/oauth/config")
+@system_bp.post("/oauth/status")
+@requires_permission("system:r")
+async def get_oauth_config(request):
+    """
+    获取SSO配置
+
+    无请求参数，直接调用，返回SSO配置
+    """
+    records = await Config.filter(module='sso').all()
+    oauth_config = {c.key: c.value for c in records}
+    return response_ok({
+        "use_oauth2": oauth_config.get("use_oauth2", "false"),
+        "auto_create": oauth_config.get("auto_create", "false"),
+        "client_id": oauth_config.get("client_id", ""),
+        "client_secret": oauth_config.get("client_secret", ""),
+        "authorize_uri": oauth_config.get("authorize_uri", ""),
+        "token_uri": oauth_config.get("token_uri", ""),
+        "token_path": oauth_config.get("token_path", ""),
+        "user_info_uri": oauth_config.get("user_info_uri", ""),
+        "user_id_path": oauth_config.get("user_id_path", ""),
+        "display_name_path": oauth_config.get("display_name_path", ""),
+        "email_path": oauth_config.get("email_path", ""),
+        "phone_path": oauth_config.get("phone_path", ""),
+        "redirect_uri": oauth_config.get("redirect_uri", ""),
+        "scopes": oauth_config.get("scopes", ""),
+    })
+
+
+@system_bp.post("/oauth/update")
 @requires_permission("system:u")
 async def update_oauth_config(request):
     """
