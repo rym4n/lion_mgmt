@@ -150,10 +150,10 @@ class ChatManager:
             await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
             event = await Events.get_or_none(room_id=data["room_id"])
             if event:
-                if log.get("node_type") == "start_node":
+                if log.get("node_type") == "start-node":
                     event.event_process_status = "处理中"
                     await event.save()
-                elif log.get("node_type") == "end_node":
+                elif log.get("node_type") == "end-node":
                     event.event_process_status = "已处理"
                     event.close_time = pytz.timezone("Asia/Shanghai").localize(datetime.now())
                     await event.save()
