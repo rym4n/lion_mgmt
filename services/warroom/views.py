@@ -141,6 +141,7 @@ async def quit_room(request: Request):
     if not is_member:
         return response_ok("用户并不在该作战室，无需退出")
     await room.users.remove(user)
+    await user.star_rooms.remove(room)
     return response_ok("成功退出作战室")
 
 
