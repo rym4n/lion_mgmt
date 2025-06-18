@@ -43,7 +43,7 @@ class Events(BaseModel):
             "room": self.room_id,
             "creator": {"username": self.creator.username, "display_name": self.creator.display_name} if self.creator else None,
             "updator": {"username": self.updator.username, "display_name": self.updator.display_name} if self.updator else None,
-            "close_time": strip_timezone_to_seconds(self.close_time)
+            "close_time": strip_timezone_to_seconds(self.close_time) if self.close_time else None
         }
 
     class Meta:
