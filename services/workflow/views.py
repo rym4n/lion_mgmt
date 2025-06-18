@@ -194,12 +194,12 @@ async def edit_workflow(request):
     playbook.name = params.get("name")
     playbook.remark = params.get("remark", '')
     if params.get("scenes"):
-        scenes = await Scene.filter(name__in=params.get("scenes")).all()
-        playbook.scenes.clear()
+        scenes = await Scene.filter(name__in=params.get("scenes"))
+        await playbook.scenes.clear()
         await playbook.scenes.add(*scenes)
     if params.get("tags"):
-        tags = await Tag.filter(name__in=params.get("tags")).all()
-        playbook.tags.clear()
+        tags = await Tag.filter(name__in=params.get("tags"))
+        await playbook.tags.clear()
         await playbook.tags.add(*tags)
     playbook.updator = request.ctx.session['account_info']
     await playbook.save()

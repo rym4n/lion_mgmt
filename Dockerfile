@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     libaio-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install uv==0.7.4 nuitka==2.7.2 -i https://mirrors.aliyun.com/pypi/simple
+RUN pip install uv==0.7.4 nuitka==2.7.7 -i https://mirrors.aliyun.com/pypi/simple
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
