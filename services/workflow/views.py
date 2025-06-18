@@ -447,7 +447,13 @@ async def input_data(request):
     请求参数：
         id: 剧本版本ID
     """
-    playbook = await PlaybookVersion.get_or_none(id=request.json.get("id"))
+    input_list = await get_playbook_input(request, request.json.get("id"))
+
+    return response_ok(input_list)
+
+
+async def get_playbook_input(request, playbook_id):
+    playbook = await PlaybookVersion.get_or_none(id=playbook_id)
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
@@ -491,8 +497,7 @@ async def input_data(request):
                                 content = await f.read()
                                 # 将config数据存入redis
                                 await request.ctx.cache_client.set(node["properties"]["app_name"] + "_" + node["properties"]["version"], content, ttl=2592000)
-
-    return response_ok(input_list)
+    return input_list
 
 
 async def statistics_data(flow_json):

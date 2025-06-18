@@ -1,8 +1,10 @@
 # coding=utf-8
 import time
+import pytz
 
 from sanic import Blueprint
 from tortoise.transactions import in_transaction
+from datetime import datetime
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -136,7 +138,9 @@ async def get_event_detail(request):
             raise CustomError(ErrorCode.RoomNameExists)
         room = await Room.create(name=room_name, creator=creator)
         event.room = room
-        await event.save()
+    if event.event_process_status == "待处理":
+        event.event_process_status = "处理中"
+    await event.save()
     await creator.star_rooms.add(event.room)
     await event.room.users.add(creator)
 
@@ -208,6 +212,9 @@ async def update_event(request):
 
     if status := params.get("event_process_status"):
         event.event_process_status = status
+        if status == "已处理":
+            event.close_time = pytz.timezone("Asia/Shanghai").localize(datetime.now())
+            update_fields.append("close_time")
         update_fields.append("event_process_status")
 
     if room_user_id := params.get("room_user_id"):

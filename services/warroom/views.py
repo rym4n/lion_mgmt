@@ -489,7 +489,7 @@ async def query_messages(request: Request):
 
 
 @warroom_bp.post("/get/list")
-@requires_permission("warroom_bp:r")
+@requires_permission("warroom:r")
 async def get_list(request):
     """
     获取待办和消息列表（需要作战室查看权限）
@@ -510,7 +510,7 @@ async def get_list(request):
 
 
 @warroom_bp.post("/up/status")
-@requires_permission("warroom_bp:u")
+@requires_permission("warroom:u")
 async def up_status(request):
     """
     更新消息阅读状态（需要作战室更新权限）
@@ -526,7 +526,7 @@ async def up_status(request):
 
 
 @warroom_bp.post("/run")
-@requires_permission("warroom_bp:c")
+@requires_permission("warroom:c")
 async def run(request):
     """
     运行剧本或动作（需要作战室创建权限）

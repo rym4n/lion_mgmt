@@ -712,7 +712,7 @@ async def unbundled_event_ingestion_script(request):
 
 
 @event_ingestion_bp.post('/export')
-@requires_permission('ingestion:r')
+@requires_permission('ingestion:a')
 async def export_event_ingestion_script(request):
     """
     导出事件接入(需要事件查看权限)
@@ -746,7 +746,7 @@ async def export_event_ingestion_script(request):
 
 
 @event_ingestion_bp.post('/import')
-@requires_permission('ingestion:r')
+@requires_permission('ingestion:a')
 async def import_event_ingestion_script(request):
     """
     导入事件

@@ -13,6 +13,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from models import Timed, Playbook, ToolAction, Runlog, PlaybookVersion
+from services.workflow.views import get_playbook_input
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
 timed_bp = Blueprint('timed', url_prefix='/timed')
@@ -194,12 +195,28 @@ async def get_all(request):
     start = (page - 1) * size
     end = start + size
     paged_items = filtered_items[start:end]
+    items = []
+    for item in paged_items:
+        data = item.json
+        if item.playbook_input:
+            input_args = await get_playbook_input(request, item.playbook_input["flow_id"])
+            data["input_args"] = input_args
+        if item.action_input:
+            actions = await ToolAction.filter(tool_name=item.action_input.get("app_name"), deleted=False, version_number=item.action_input.get("app_ver")).all()
+            for action in actions:
+                if action.action["func"] == item.action_input["action"]:
+                    input_args = []
+                    args = action.action["input"]
+                    for arg in args:
+                        input_args.append({arg["key"]:arg})
+                    data["input_args"] = input_args
+        items.append(data)
 
     return response_ok({
         "page": page,
         "size": size,
         "total": total,
-        "items": [item.json for item in paged_items]
+        "items": items
     })
 
 
