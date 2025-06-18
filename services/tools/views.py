@@ -645,7 +645,7 @@ async def update_tool_resource(request):
     query参数:
         - tool_name: 工具名称    str\
         - name: 资源名称    str  不可修改，修改其他值的凭证
-        - engine: 资源描述    str    可选
+        - engine: 资源执行引擎    str    可选
         - resources: 资源模板   dict    可选
                 {"Lizhu_username": {
                         "order": 0,
@@ -1146,7 +1146,7 @@ async def health_check_get(request):
     请求参数：
         无
     """
-    switch = await Config.get_or_none(key="health_check_switch").values("value")
+    switch = await Config.get_or_none(key="health_check_switch")
     cron = await Config.get_or_none(key="health_check_cron")
     return response_ok({"switch": switch.value if switch else "off", "cron": cron.value if cron else ""})
 

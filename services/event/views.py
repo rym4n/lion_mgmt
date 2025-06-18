@@ -129,18 +129,15 @@ async def get_event_detail(request):
     event = await Events.get(id=event_id, deleted=False).prefetch_related("room", "creator", "updator")
     if not event:
         raise CustomError(ErrorCode.NotFound)
-
+    creator = request.ctx.session['account_info']
     if not event.room:
         room_name = event.event_name + "_" + gen_random_code(6)
         if await Room.filter(name=room_name, deleted=False).exists():
             raise CustomError(ErrorCode.RoomNameExists)
-        creator = request.ctx.session['account_info']
         room = await Room.create(name=room_name, creator=creator)
         event.room = room
         await event.save()
-    user = await Account.get_or_none(id=creator.id)
-    if user:
-        await user.star_rooms.add(event.room)
+    await creator.star_rooms.add(event.room)
     await event.room.users.add(creator)
 
     event_dict = {"created_name": request.ctx.session['account_info'].username}
