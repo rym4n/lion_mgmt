@@ -84,7 +84,7 @@ async def creat_message(room_id, log):
     return message_data
 
 
-async def get_ai_config(cache_client: caches.RedisCache):
+async def get_ai_config(cache_client):
     ai_cfg = await cache_client.get('ai_config') or {}
     if not ai_cfg:
         records = await Config.filter(module='ai').values('key', 'value')

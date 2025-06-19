@@ -1,16 +1,19 @@
 # coding=utf-8
 from datetime import datetime
+from datetime import timedelta
 
 import pytz
 from sanic import Blueprint
+from tortoise.expressions import F
 from tortoise.expressions import Q, RawSQL
+from tortoise.functions import Avg
 from tortoise.functions import Count
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Events, Runlog
+from models import Events, Runlog, PlaybookVersion, ToolResources
 
 dashboard_bp = Blueprint('dashboard', url_prefix='/dashboard')
 _all__ = ["dashboard_bp"]
@@ -30,6 +33,7 @@ async def view_dashboard(request):
         count_key: str, 分组统计的时候按什么字段做统计，group_by 不为空的时候必填
         start_time: str, 统计的起始时间
         end_time: str, 统计的结束时间
+        time_calc: str, 时间差计算专用字段
     """
     params = request.json
     table_dict = {
@@ -43,6 +47,7 @@ async def view_dashboard(request):
     static_type = params.get("static_type")
     group_by = params.get("group_by")
     count_key = params.get("count_key")
+    time_calc = params.get("time_calc")
     if not start_time or not end_time or table_name not in table_dict or (not static_type and not group_by) or (group_by and not count_key):
         raise CustomError(ErrorCode.ParameterError)
 
@@ -62,14 +67,46 @@ async def view_dashboard(request):
         result = await table_dict.get(table_name).filter(q).values()
     elif group_by:
         if group_by == 'ctime':
-            result = await table_dict.get(table_name).filter(q).annotate(
-                day=RawSQL("TO_CHAR(DATE_TRUNC('day', ctime), 'YYYY-MM-DD')")
-            ).group_by('day').annotate(
-                counts=Count(count_key, distinct=True)
-            ).values("day", "counts")
+            if time_calc == 'mttr':
+                result = await table_dict.get(table_name).filter(q).annotate(
+                    day=RawSQL("TO_CHAR(DATE_TRUNC('day', ctime), 'YYYY-MM-DD')"),
+                    duration_seconds=(F("close_time") - F("ctime")) / timedelta(seconds=1)
+                ).group_by("day").annotate(
+                    avg_duration=Avg("duration_seconds")
+                ).values("day", "avg_time")
+            else:
+                result = await table_dict.get(table_name).filter(q).annotate(
+                    day=RawSQL("TO_CHAR(DATE_TRUNC('day', ctime), 'YYYY-MM-DD')")
+                ).group_by('day').annotate(
+                    counts=Count(count_key, distinct=True)
+                ).values("day", "counts")
         else:
             result = await table_dict.get(table_name).filter(q).annotate(
                 counts=Count(count_key, distinct=True)
             ).group_by(group_by).values(group_by, "counts")
 
+    return response_ok(result)
+
+
+@dashboard_bp.post('/playbooks')
+@requires_permission('dashboard:r')
+async def count_playbooks(request):
+    """
+    获取已发布的剧本数量
+    """
+    result = await PlaybookVersion.filter(status=1).annotate(
+        counts=Count('playbook_id', distinct=True)
+    ).values("counts")
+    return response_ok(result)
+
+
+@dashboard_bp.post('/apps')
+@requires_permission('dashboard:r')
+async def count_playbooks(request):
+    """
+    获取已配置资源的应用数量
+    """
+    result = await ToolResources.annotate(
+        counts=Count('tool_name', distinct=True)
+    ).values("counts")
     return response_ok(result)
