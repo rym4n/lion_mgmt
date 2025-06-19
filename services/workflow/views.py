@@ -21,7 +21,7 @@ from libs.chat import chat_manager
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_order_version
-from models import Playbook, Scene, ToolAction, Tool, Runlog, Tag, PlaybookVersion
+from models import Playbook, Scene, ToolAction, Tool, Runlog, Tag, PlaybookVersion, PlaybookPermissions
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import SECRET, SESSION_ENCODING_ALGORITHM
 
@@ -565,3 +565,76 @@ async def remove_tag(request):
     tag = await Tag.get(name=name, type=0)
     await tag.delete()
     return response_ok("标签删除成功")
+
+
+@workflow_bp.post("/permissions/add")
+@requires_permission("workflow:u")
+async def add_permission(request):
+    """
+    新增剧本权限（需要剧本更新权限）
+
+    query参数:
+        - playbook_id: 剧本id    str
+        - users_id: 用户ID列表    list
+        - roles_id: 角色ID列表    list
+    """
+    playbook_id = request.json.get("playbook_id")
+    users_id = list(set(request.json.get("users_id", [])))
+    roles_id = list(set(request.json.get("roles_id", [])))
+    if not playbook_id:
+        raise CustomError(ErrorCode.ParameterError)
+    if not isinstance(users_id, list) or not isinstance(roles_id, list):
+        raise CustomError(ErrorCode.ParameterError)
+
+    await PlaybookPermissions.update_or_create(pb_id=playbook_id, defaults={'users_id': users_id, 'roles_id': roles_id})
+
+    return response_ok("success")
+
+
+@workflow_bp.post("/permissions/select")
+@requires_permission("workflow:r")
+async def select_permission_all(request):
+    """
+    获取剧本权限（需要剧本查看权限）
+
+    query参数:
+        - playbook_id: 剧本id    str
+    """
+    playbook_id = request.json.get("playbook_id")
+    if not playbook_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    permission = await PlaybookPermissions.get_or_none(pb_id=playbook_id)
+
+    return response_ok(permission.json if permission else {})
+
+
+@workflow_bp.post("/permissions/judge")
+@requires_permission("workflow:r")
+async def judge_permission(request):
+    """
+    权限判断接口 (需要剧本查看权限)
+
+    请求体参数:
+        - playbook_id: 剧本id    str
+    """
+    playbook_id = request.json.get("playbook_id")
+    if not playbook_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    user = request.ctx.session.get('account_info')
+    if not user:
+        raise CustomError(ErrorCode.AccountNotFound)
+
+    user_id = str(user.id)
+    role_ids = {str(role.id) for role in user.roles}
+
+    permission = await PlaybookPermissions.get_or_none(pb_id=playbook_id)
+
+    if not permission:
+        return response_ok(False)
+
+    if user_id in permission.users_id or role_ids.intersection(permission.roles_id) or permission.users_id == ["*"] or permission.roles_id == ["*"]:
+        return response_ok(True)
+
+    return response_ok(False)

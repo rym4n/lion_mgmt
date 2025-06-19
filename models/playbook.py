@@ -104,7 +104,7 @@ class PlaybookPermissions(BaseModel):
     剧本权限表
     """
 
-    playbook = fields.ForeignKeyField("models.Playbook", related_name="playbook_permissions", description="剧本")
+    pb = fields.ForeignKeyField("models.Playbook", unique=True, related_name="playbook_permissions", description="剧本")
     roles_id: list[str] = fields.JSONField(default=[], description="有权限执行的角色")
     users_id: list[str] = fields.JSONField(default=[], description="有权限执行的用户")
 
