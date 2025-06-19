@@ -205,7 +205,12 @@ async def update_oauth_config(request):
         raise CustomError(ErrorCode.ParameterError)
 
     if use_oauth2 == 'false':
-        await Config.update_or_create(key="use_oauth2", value="false", module="sso")
+        old = await Config.get_or_none(key="use_oauth2")
+        if old:
+            old.value = "false"
+            await old.save()
+        else:
+            await Config.create(key="use_oauth2", value="false", module="sso")
     else:
         required_fields = ["auto_create", "client_id", "client_secret", "authorize_uri", "token_uri", "user_info_uri", "user_id_path", "token_path"]
         optional_fields = ["display_name_path", "email_path", "phone_path", "scopes", "client_id_alias", "client_secret_alias", "scopes_alias"]

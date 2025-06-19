@@ -2,10 +2,11 @@
 import asyncio
 import base64
 import datetime
-import os
 import ipaddress
+import os
 import os.path
 import random
+import secrets
 import subprocess
 import time
 import uuid
@@ -19,18 +20,16 @@ import jwt
 import psutil
 from aiokafka import AIOKafkaConsumer, TopicPartition
 from argon2 import PasswordHasher
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.exceptions import InvalidTag
-
 from settings import RY_RES_KEY
 
 password_hasher: PasswordHasher = PasswordHasher()
@@ -313,50 +312,41 @@ def derive_key(password: str, salt: bytes) -> bytes:
     """使用PBKDF2HMAC从密码派生密钥"""
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
-        length=32,  # 256-bit key
+        length=32,
         salt=salt,
-        iterations=100000,
+        iterations=5000,
         backend=default_backend()
     )
-    return kdf.derive(password.encode('utf-8'))
+    return kdf.derive(password.encode())
 
 
-def encrypt_aes256_gcm(plaintext: str) -> dict:
+def encrypt_aes256_gcm(plaintext: str) -> str:
     """AES-GCM加密返回字典格式结果"""
     # 生成随机盐
-    salt = os.urandom(16)
-    # 从密码派生密钥
-    key = derive_key(RY_RES_KEY, salt)
-
+    salt = secrets.token_bytes(16)
     # 生成随机nonce (12字节是GCM推荐长度)
-    nonce = os.urandom(12)
+    nonce = secrets.token_bytes(12)
+    key = derive_key(RY_RES_KEY, salt)
 
     # 创建加密器并加密数据
     cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend())
     encryptor = cipher.encryptor()
-    ciphertext = encryptor.update(plaintext.encode('utf-8')) + encryptor.finalize()
+    ciphertext = encryptor.update(plaintext.encode()) + encryptor.finalize()
+    logger.info(ciphertext + b'|||' + nonce + b'|||' + salt + b'|||' + encryptor.tag)
 
-    # 返回包含加密结果的字典
-    return {
-        'ciphertext': base64.b64encode(ciphertext).decode('utf-8'),
-        'nonce': base64.b64encode(nonce).decode('utf-8'),
-        'salt': base64.b64encode(salt).decode('utf-8'),
-        'tag': base64.b64encode(encryptor.tag).decode('utf-8')
-    }
+    return base64.b64encode(ciphertext + b'|||' + nonce + b'|||' + salt + b'|||' + encryptor.tag).decode()
 
 
-def decrypt_aes256_gcm(encrypted_data: dict) -> str:
+def decrypt_aes256_gcm(encrypted_data: str) -> str:
     """AES-GCM解密，输入为字典格式"""
     try:
-        # 从Base64解码各组件
-        ciphertext = base64.b64decode(encrypted_data['ciphertext'])
-        nonce = base64.b64decode(encrypted_data['nonce'])
-        salt = base64.b64decode(encrypted_data['salt'])
-        tag = base64.b64decode(encrypted_data['tag'])
+        logger.info(encrypted_data)
+        data = base64.b64decode(encrypted_data.encode())
+        if b'|||' not in data:
+            return data.decode()
+        ciphertext, nonce, salt, tag = data.split(b'|||')
 
-        # 派生密钥
         key = derive_key(RY_RES_KEY, salt)
-
         # 创建解密器
         cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag), backend=default_backend())
         decryptor = cipher.decryptor()
@@ -364,9 +354,8 @@ def decrypt_aes256_gcm(encrypted_data: dict) -> str:
         # 解密并返回UTF-8字符串
         decrypted = decryptor.update(ciphertext) + decryptor.finalize()
 
-        return decrypted.decode('utf-8')
+        return decrypted.decode()
 
     except (KeyError, InvalidTag, UnicodeDecodeError) as e:
         # 处理可能的错误：数据篡改、密码错误或格式错误
         raise ValueError("解密失败: 密码错误或数据损坏") from e
-

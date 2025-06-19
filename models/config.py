@@ -2,8 +2,25 @@
 
 from tortoise import fields
 
-from libs.utils import strip_timezone_to_seconds
+from libs.utils import strip_timezone_to_seconds, encrypt_aes256_gcm, decrypt_aes256_gcm
 from models.base import BaseModel
+
+
+class EncryptedCharField(fields.CharField):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def to_db_value(self, value, _):
+        if isinstance(value, str):
+            return encrypt_aes256_gcm(value)
+        else:
+            return value
+
+    def to_python_value(self, value):
+        if isinstance(value, bytes):
+            return decrypt_aes256_gcm(value)
+        else:
+            return value
 
 
 class Config(BaseModel):
@@ -12,7 +29,7 @@ class Config(BaseModel):
     """
 
     key: str = fields.CharField(max_length=255, unique=True, description="配置项")
-    value = fields.TextField(description="配置值")
+    value = EncryptedCharField(max_length=1000, null=False, description="配置值")
     type: str = fields.CharField(max_length=255, null=True, description="配置状态")
     module: str = fields.CharField(max_length=255, description="所属模块")
 
