@@ -26,7 +26,7 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
-from libs.utils import fix_zip_filename, encrypt_aes256_gcm, decrypt_aes256_gcm
+from libs.utils import fix_zip_filename, decrypt_aes256_gcm
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion
 from settings import TOOLS_DIR
 
@@ -591,17 +591,14 @@ async def add_tool_resource(request):
     name = request.json.get("name")
     engine = request.json.get("engine")
     resources = request.json.get("resources")
-    if tool_name is None or resources is None or name is None:
+    if not tool_name or not resources or not name:
         raise CustomError(ErrorCode.ParameterError)
 
     existing_resource = await ToolResources.get_or_none(name=name, deleted=False)
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
 
-    new_resources = encrypt_aes256_gcm(str(resources))
-
-    tr = await ToolResources.create(tool_name=tool_name, name=name, engine=engine,
-                                    resources=new_resources,
+    tr = await ToolResources.create(tool_name=tool_name, name=name, engine=engine, resources=resources,
                                     creator=request.ctx.session['account_info'].username,
                                     updater=request.ctx.session['account_info'].username)
 
@@ -659,8 +656,8 @@ async def update_tool_resource(request):
     """
     tool_name = request.json.get("tool_name")
     name = request.json.get("name")
-    engine = request.json.get("engine", None)
-    resources = request.json.get("resources", None)
+    engine = request.json.get("engine")
+    resources = request.json.get("resources") or {}
     if not tool_name or not name:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -671,9 +668,9 @@ async def update_tool_resource(request):
 
     if engine:
         tool_resource.engine = engine
+
     if resources:
-        new_resources = encrypt_aes256_gcm(str(resources))
-        tool_resource.resources.append(new_resources)
+        tool_resource.resources = resources
         await request.ctx.cache_client.set("resource_" + tool_resource.id, resources)
 
     tool_resource.updater = request.ctx.session['account_info'].username

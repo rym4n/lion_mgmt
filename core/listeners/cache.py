@@ -21,8 +21,10 @@ class CacheListener(BaseListener):
         caches.set_config(CACHE)
         app.ctx.cache_client = caches.get('redis_mgmt')
         logger.info("使用Redis作为缓存")
-        records = await Config.filter(module='sso').all()
-        app.ctx.oauth_cfg = {c.key: c.value for c in records}
+
+        records = await Config.filter(module='sso').values('key', 'value')
+        app.ctx.oauth_cfg = {c['key']: c['value'] for c in records}
+
         if app.ctx.oauth_cfg.get('use_oauth2') == 'true':
             logger.info("启用OAuth2认证")
             app.ctx.oauth2 = OAuth2(

@@ -5,6 +5,8 @@ import uuid
 
 from tortoise import Model, fields
 
+from libs.utils import encrypt_aes256_gcm, decrypt_aes256_gcm
+
 
 class BaseModel(Model):
     """
@@ -30,3 +32,19 @@ class BaseModel(Model):
 
     class Meta:
         abstract = True
+
+class EncryptedCharField(fields.CharField):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def to_db_value(self, value, _):
+        if isinstance(value, str):
+            return encrypt_aes256_gcm(value)
+        else:
+            return value
+
+    def to_python_value(self, value):
+        try:
+            return decrypt_aes256_gcm(value)
+        except:
+            return value

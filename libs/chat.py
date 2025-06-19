@@ -1,18 +1,17 @@
 # coding=utf-8
+import time
 import traceback
+from datetime import datetime
+
 import orjson
 import pytz
-import time
-
-from datetime import datetime
 from aiocache import caches
+from openai import OpenAI
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
 
-from openai import OpenAI
-
 from libs.kafka import aproduce, aconsume
-from libs.utils import gen_order_version, decrypt_aes256_gcm
+from libs.utils import gen_order_version
 from models import Runlog, Approvement, Events, Config
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
@@ -63,11 +62,11 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
 
 
 # 创建消息
-async def creat_message(room, log):
+async def creat_message(room_id, log):
     msg = await Message.create(
         type="public",
         sender=room.updator,
-        room=room,
+        room_id=room_id,
         content=str(log),
         image_content="",
         receiver=room.updator
@@ -85,6 +84,15 @@ async def creat_message(room, log):
     return message_data
 
 
+async def get_ai_config(cache_client: caches.RedisCache):
+    ai_cfg = await cache_client.get('ai_config') or {}
+    if not ai_cfg:
+        records = await Config.filter(module='ai').values('key', 'value')
+        ai_cfg = {c['key']: c['value'] for c in records}
+        await cache_client.set('ai_config', ai_cfg, ttl=60 * 60 * 24)
+    return ai_cfg
+
+
 class ChatManager:
     """
     Websocket连接管理器，处理所有连接和消息
@@ -98,32 +106,19 @@ class ChatManager:
         self.active_connections: dict[str, dict] = {}
         self.run_connections: dict[str, dict] = {}
 
-    async def get_decrypted_config(self, key_prefix: str):
-        ciphertext = await Config.get(key=f"{key_prefix}_ciphertext", module="ai")
-        nonce = await Config.get(key=f"{key_prefix}_nonce", module="ai")
-        salt = await Config.get(key=f"{key_prefix}_salt", module="ai")
-        tag = await Config.get(key=f"{key_prefix}_tag", module="ai")
-        return decrypt_aes256_gcm({
-            "ciphertext": ciphertext.value,
-            "nonce": nonce.value,
-            "salt": salt.value,
-            "tag": tag.value
-        })
-
     async def stream_chat_completion(self, prompt: str, message_data: dict):
         """
         流式生成对话响应
         """
-
-        host = await self.get_decrypted_config("host")
-
+        ai_cfg = await get_ai_config(self.redis)
+        host = ai_cfg.get('llm_host')
         if host is None:
             message_data["content"] = "当前未配置ai服务地址，请前往系统设置进行配置。"
             await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
             return None
 
-        api_key = await self.get_decrypted_config("api_key")
-        model = await self.get_decrypted_config("model")
+        api_key = ai_cfg.get('llm_api_key')
+        model = ai_cfg.get('llm_model')
         if model is None:
             message_data["content"] = "当前未配置ai服务模型，请前往系统设置进行配置。"
             await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
@@ -220,11 +215,14 @@ class ChatManager:
         await aconsume(KAFKA_SERVERS, RUNLOG_TOPIC, 'lion_mgmt_listener', self.handle_runlog, 50)
 
     async def handle_runlog(self, log):
+        """
+        专门处理 runlog
+        """
         logger.info(f"runlog消息：{log}")
-        key = str(log.get('run_id'))
+        key = log.get('run_id', '')
 
-        if await self.redis.exists(key):
-            data = await self.redis.get(key)
+        data = await self.redis.get(key)
+        if data:
             room = await Room.get_or_none(id=data["room_id"]).prefetch_related('updator')
             message_data = await creat_message(room, log)
             await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())

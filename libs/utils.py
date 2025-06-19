@@ -14,6 +14,7 @@ import zipfile
 from io import BytesIO
 from pathlib import Path, PurePath
 from string import ascii_uppercase, digits
+from typing import Optional
 
 import aiofile
 import jwt
@@ -320,7 +321,7 @@ def derive_key(password: str, salt: bytes) -> bytes:
     return kdf.derive(password.encode())
 
 
-def encrypt_aes256_gcm(plaintext: str) -> str:
+def encrypt_aes256_gcm(plaintext: Optional[str | bytes]) -> str:
     """AES-GCM加密返回字典格式结果"""
     # 生成随机盐
     salt = secrets.token_bytes(16)
@@ -328,10 +329,13 @@ def encrypt_aes256_gcm(plaintext: str) -> str:
     nonce = secrets.token_bytes(12)
     key = derive_key(RY_RES_KEY, salt)
 
+    if isinstance(plaintext, str):
+        plaintext = plaintext.encode()
+
     # 创建加密器并加密数据
     cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend())
     encryptor = cipher.encryptor()
-    ciphertext = encryptor.update(plaintext.encode()) + encryptor.finalize()
+    ciphertext = encryptor.update(plaintext) + encryptor.finalize()
 
     return base64.b64encode(ciphertext + b'.....' + nonce + b'.....' + salt + b'.....' + encryptor.tag).decode()
 
