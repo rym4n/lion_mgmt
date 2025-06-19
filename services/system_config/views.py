@@ -5,6 +5,7 @@ from datetime import datetime
 import aiofile
 import orjson
 from sanic import Blueprint
+from sanic.log import logger
 from tortoise.transactions import in_transaction
 
 import settings
@@ -154,8 +155,9 @@ async def get_oauth_config(request):
 
     无请求参数，直接调用，返回SSO配置
     """
-    records = await Config.filter(module='sso').all()
-    oauth_config = {c.key: c.value for c in records}
+    records = await Config.filter(module='sso').values('key', 'value')
+    logger.info(records)
+    oauth_config = {c['key']: c['value'] for c in records}
     return response_ok({
         "use_oauth2": oauth_config.get("use_oauth2", "false"),
         "auto_create": oauth_config.get("auto_create", "false"),

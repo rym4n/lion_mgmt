@@ -17,9 +17,9 @@ class EncryptedCharField(fields.CharField):
             return value
 
     def to_python_value(self, value):
-        if isinstance(value, bytes):
+        try:
             return decrypt_aes256_gcm(value)
-        else:
+        except:
             return value
 
 

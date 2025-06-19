@@ -332,19 +332,17 @@ def encrypt_aes256_gcm(plaintext: str) -> str:
     cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend())
     encryptor = cipher.encryptor()
     ciphertext = encryptor.update(plaintext.encode()) + encryptor.finalize()
-    logger.info(ciphertext + b'|||' + nonce + b'|||' + salt + b'|||' + encryptor.tag)
 
-    return base64.b64encode(ciphertext + b'|||' + nonce + b'|||' + salt + b'|||' + encryptor.tag).decode()
+    return base64.b64encode(ciphertext + b'.....' + nonce + b'.....' + salt + b'.....' + encryptor.tag).decode()
 
 
 def decrypt_aes256_gcm(encrypted_data: str) -> str:
     """AES-GCM解密，输入为字典格式"""
     try:
-        logger.info(encrypted_data)
         data = base64.b64decode(encrypted_data.encode())
-        if b'|||' not in data:
+        if b'.....' not in data:
             return data.decode()
-        ciphertext, nonce, salt, tag = data.split(b'|||')
+        ciphertext, nonce, salt, tag = data.split(b'.....')
 
         key = derive_key(RY_RES_KEY, salt)
         # 创建解密器
