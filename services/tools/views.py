@@ -1,5 +1,4 @@
 # coding=utf-8
-import ast
 import asyncio
 import base64
 import hashlib
@@ -539,7 +538,7 @@ async def delete_tool_all(request):
 
         await ToolAction.filter(tool_name=name, deleted=False).update(deleted=True)
         await ToolResourcesModel.filter(tool_name=name, deleted=False).update(deleted=True)
-        await ToolResources.filter(tool_name=name, deleted=False).update(deleted=True)
+        await ToolResources.filter(tool_name=name, deleted=False).delete()
         await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
         await Tool.filter(name=name, deleted=False).update(deleted=True)
 
@@ -598,7 +597,7 @@ async def add_tool_resource(request):
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
 
-    tr = await ToolResources.create(tool_name=tool_name, name=name, engine=engine, resources=resources,
+    tr = await ToolResources.create(tool_name=tool_name, name=name, engine=engine, resources=orjson.dumps(resources).decode("utf-8"),
                                     creator=request.ctx.session['account_info'].username,
                                     updater=request.ctx.session['account_info'].username)
 
@@ -620,17 +619,8 @@ async def tool_resources_detailed(request):
     if not tool_name:
         raise CustomError(ErrorCode.ParameterError)
 
-    resources = await ToolResources.filter(tool_name=tool_name, deleted=False).all().values()
-    if not resources:
-        return response_ok("工具资源不存在")
-
-    for resource in resources:
-        resource["resources"] = ast.literal_eval(decrypt_aes256_gcm(resource["resources"]))
-        for value in resource["resources"].values():
-            if value["data_type"] == "password":
-                value["value"] = "******"
-
-    return response_ok(resources)
+    resources = await ToolResources.filter(tool_name=tool_name, deleted=False).all()
+    return response_ok([r.json for r in resources])
 
 
 @tools_bp.post("/resource/update")
@@ -670,7 +660,7 @@ async def update_tool_resource(request):
         tool_resource.engine = engine
 
     if resources:
-        tool_resource.resources = resources
+        tool_resource.resources = orjson.dumps(resources).decode("utf-8")
         await request.ctx.cache_client.set("resource_" + tool_resource.id, resources)
 
     tool_resource.updater = request.ctx.session['account_info'].username
@@ -698,9 +688,7 @@ async def delete_tool_resource(request):
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
 
-    tool_resource.deleted = True
-    tool_resource.updater = request.ctx.session['account_info'].username
-    await tool_resource.save()
+    await tool_resource.delete()
 
     await request.ctx.cache_client.delete("resource_" + tool_resource.id)
 

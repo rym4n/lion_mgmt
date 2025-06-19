@@ -122,13 +122,18 @@ class ToolResources(BaseModel):
 
     @property
     def json(self) -> dict:
+        if self.resources:
+            self.resources = orjson.loads(self.resources)
+            for value in self.resources.values():
+                if value["data_type"] == "password":
+                    value["value"] = "******"
         return {
             "id": self.id,
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
             "tool_name": self.tool_name,
             "name": self.name,
-            "resources": orjson.loads(self.resources) if self.resources else None,
+            "resources": self.resources,
             "creator": self.creator,
             "updater": self.updater,
             "engine": self.engine

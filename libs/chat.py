@@ -62,24 +62,24 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
 
 
 # 创建消息
-async def creat_message(room_id, log):
+async def creat_message(room_id, log, user, sender):
     msg = await Message.create(
         type="public",
-        sender=room.updator,
+        sender=sender,
         room_id=room_id,
         content=str(log),
         image_content="",
-        receiver=room.updator
+        receiver=user
     )
     message_data = {
         "type": "public",
         "message_id": str(msg.id),
-        "sender_id": room.updator.id,
-        "sender_name": room.updator.username,
+        "sender_id": sender.id,
+        "sender_name": sender.username,
         "content": str(log),
         "image_content": "",
         "timestamp": str(msg.ctime),
-        "room_id": room.id
+        "room_id": room_id
     }
     return message_data
 
@@ -196,6 +196,8 @@ class ChatManager:
                     if message.get('type') != 'message':
                         continue
                     msg = orjson.loads(message['data'])
+                    if "log" in msg.keys():
+                        msg = await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["user"], sender=msg["sender"])
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
@@ -223,8 +225,8 @@ class ChatManager:
 
         data = await self.redis.get(key)
         if data:
-            room = await Room.get_or_none(id=data["room_id"]).prefetch_related('updator')
-            message_data = await creat_message(room, log)
+            data["log"] = log
+            message_data = data
             await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
             event = await Events.get_or_none(room_id=data["room_id"])
             if event:
@@ -232,21 +234,6 @@ class ChatManager:
                     event.event_process_status = "处理中"
                     await event.save()
                 elif log.get("node_type") == "end-node":
-                    event.event_process_status = "已处理"
-                    event.close_time = pytz.timezone("Asia/Shanghai").localize(datetime.now())
-                    await event.save()
-                log["event_id"] = event.id
-
-        elif await Room.filter(run_id__contains=[key]).exists():
-            room = await Room.filter(run_id__contains=[key]).first().prefetch_related('updator')
-            message_data = await creat_message(room, log)
-            await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
-            event = await Events.get_or_none(room_id=room.id)
-            if event:
-                if log.get("node_type") == "start_node":
-                    event.event_process_status = "处理中"
-                    await event.save()
-                elif log.get("node_type") == "end_node":
                     event.event_process_status = "已处理"
                     event.close_time = pytz.timezone("Asia/Shanghai").localize(datetime.now())
                     await event.save()
@@ -369,7 +356,7 @@ class ChatManager:
 
         if not content and not image_content:
             raise Exception("消息不能为空")
-
+        sender = await Account.get(username="system")
         # 保存消息到数据库
         message = await Message.create(
             type="public",
@@ -384,8 +371,8 @@ class ChatManager:
         message_data = {
             "type": "public",
             "message_id": str(message.id),
-            "sender_id": user.id,
-            "sender_name": user.username,
+            "sender_id": sender.id,
+            "sender_name": sender.username,
             "content": content,
             "image_content": image_content,
             "timestamp": str(message.ctime),
@@ -398,7 +385,7 @@ class ChatManager:
         if full_response:
             await Message.create(
                 type="public",
-                sender=user,
+                sender=sender,
                 room=room,
                 content=full_response,
                 image_content=image_content,

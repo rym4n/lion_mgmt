@@ -64,6 +64,7 @@ async def new_user(request):
             await account.roles.add(*roles)
         else:
             await account.fetch_related("roles")
+        await account.fetch_related('roles')
         res = account.json
         if mfa_enable:
             res['mfa_uri'] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name='AIOE')

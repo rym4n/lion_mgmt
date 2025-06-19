@@ -303,7 +303,7 @@ async def search_audit(request):
 @requires_permission("system:c")
 async def set_ai(request):
     """
-    设置AI参数（优化版）
+    设置AI参数
     请求参数：
         llm_host: 字符串类型, AI服务的Host（需带有协议，如 https://xxx.com）
         llm_api_key: 字符串类型, AI服务的API Key（可选，留空则不更新）
