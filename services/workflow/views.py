@@ -12,6 +12,7 @@ import orjson
 from sanic import Blueprint, Request, Websocket
 from sanic.log import logger
 from tortoise.expressions import Q
+from tortoise.functions import Count
 from tortoise.transactions import in_transaction
 from websockets import ConnectionClosed
 
@@ -123,19 +124,27 @@ async def list_workflow(request):
         condition = condition & (Q(name__icontains=keyword) | Q(remark__icontains=keyword))
     if request.json.get("scene"):
         scenes = await Scene.filter(name__in=request.json.get("scene")).all()
-        condition = condition & Q(scenes__in=scenes)
-    if request.json.get("status"):
-        condition = condition & Q(status=request.json.get("status"))
+        if scenes:
+            condition = condition & Q(scenes__in=scenes)
+    status = request.json.get("status")
+    if status:
+        condition = condition & Q(status=status)
     if request.json.get("tag"):
         tags = await Tag.filter(name__in=request.json.get("tag")).all()
-        condition = condition & Q(tags__in=tags)
+        if tags:
+            condition = condition & Q(tags__in=tags)
+
+    playbooks = await Playbook.filter(condition).annotate(
+        versions=Count("playbook_versions")
+    ).offset(offset).limit(limit).prefetch_related("scenes", "tags")
 
     total = await Playbook.filter(condition).count()
-    playbooks = await Playbook.filter(condition).offset(offset).limit(limit).all().prefetch_related("scenes", 'tags')
-    data = []
-    for p in playbooks:
-        versions = await PlaybookVersion.filter(playbook=p).count()
-        data.append({**p.json, "versions": versions})
+
+    data = [{
+        **p.json,
+        "versions": p.versions  # 直接使用 annotate 的结果
+    } for p in playbooks]
+
     return response_ok({
         "total": total,
         "page": page,

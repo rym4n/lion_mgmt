@@ -103,7 +103,7 @@ async def count_mttr(request):
             "WHERE close_time IS NOT NULL "
             "AND ctime >= $1 AND ctime <= $2 "
             "GROUP BY DATE(ctime) "
-            "ORDER BY date DESC",
+            "ORDER BY day DESC",
             (start_time, end_time)
         )
         return response_ok([
