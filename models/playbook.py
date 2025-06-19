@@ -97,3 +97,31 @@ class PlaybookVersion(BaseModel):
         ordering = ["-utime"]
 
         unique_together = (("playbook", "version"),)
+
+
+class PVPermissions(BaseModel):
+    """
+    剧本权限表
+    """
+
+    pv = fields.ForeignKeyField("models.PlaybookVersion", related_name="pv_permissions", description="剧本版本")
+    roles_id: list[str] = fields.JSONField(default=[], description="有权限执行的角色")
+    users_id: list[str] = fields.JSONField(default=[], description="有权限执行的用户")
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
+            "pv_id": self.pv_id,
+            "users_id": self.users_id,
+            "roles_id": self.roles_id,
+        }
+
+    class Meta:
+        table = "playbook_version_permissions"
+        ordering = ["-utime"]
