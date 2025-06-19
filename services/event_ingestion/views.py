@@ -441,7 +441,9 @@ async def update_event_ingestion(request):
                     process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
                     command = f"python start.py -m auto -f {script_id} -t {event_related_script.topic}"
                     supervisor.add_process(process_name, command)
-                    supervisor.start_process(process_name)
+                    result = supervisor.start_process(process_name)
+                    if result:
+                        event.execution_health_status = "healthy"
 
         event.linked_execution = linked_execution
 

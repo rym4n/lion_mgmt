@@ -50,6 +50,7 @@ def start_process(process_name):
         else:
             server.supervisor.startProcess(process_name)
             logging.info("进程 {} 启动成功".format(process_name))
+        return True
     except Fault as e:
         if "BAD_NAME" in e.faultString or "UNKNOWN" in e.faultString:
             logging.info("进程 {} 不存在，无法启动".format(process_name))
