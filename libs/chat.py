@@ -199,7 +199,7 @@ class ChatManager:
                         continue
                     msg = orjson.loads(message['data'])
                     if "log" in msg.keys():
-                        msg = await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"])
+                        message['data'] = await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"])
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
@@ -242,13 +242,8 @@ class ChatManager:
                     await event.save()
                 log["event_id"] = event.id
         else:
-            logger.info(1)
             for k in self.run_connections:
-                logger.info(self.run_connections)
-                logger.info(2)
-                logger.info(log.get('run_id'))
                 if self.run_connections[k]['run_id'] == log.get('run_id'):
-                    logger.info(3)
                     await self.run_connections[k]['conn'].send(orjson.dumps({"data": log}).decode())
         # 处理审批消息
         if log.get('type') == 'approval-info':
