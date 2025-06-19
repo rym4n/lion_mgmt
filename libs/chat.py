@@ -199,7 +199,7 @@ class ChatManager:
                         continue
                     msg = orjson.loads(message['data'])
                     if "log" in msg.keys():
-                        message['data'] = await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"])
+                        message['data'] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"]))
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
