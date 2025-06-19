@@ -199,7 +199,7 @@ class ChatManager:
                         continue
                     msg = orjson.loads(message['data'])
                     if "log" in msg.keys():
-                        msg = await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["user"])
+                        msg = await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"])
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
@@ -228,7 +228,7 @@ class ChatManager:
         data = await self.redis.get(key)
         if data:
             data["log"] = log
-            data["user"] = data["user"].id
+            data["updator"] = data["updator"].id
             message_data = data
             await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
             event = await Events.get_or_none(room_id=data["room_id"])

@@ -104,7 +104,7 @@ class PVPermissions(BaseModel):
     剧本权限表
     """
 
-    pv = fields.ForeignKeyField("models.PlaybookVersion", related_name="pv_permissions", description="剧本版本")
+    playbook = fields.ForeignKeyField("models.Playbook", related_name="playbook_permissions", description="剧本")
     roles_id: list[str] = fields.JSONField(default=[], description="有权限执行的角色")
     users_id: list[str] = fields.JSONField(default=[], description="有权限执行的用户")
 
@@ -117,7 +117,6 @@ class PVPermissions(BaseModel):
             "id": self.id,
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
-            "pv_id": self.pv_id,
             "users_id": self.users_id,
             "roles_id": self.roles_id,
         }
