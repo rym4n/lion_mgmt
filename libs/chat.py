@@ -242,8 +242,11 @@ class ChatManager:
                     await event.save()
                 log["event_id"] = event.id
         else:
+            logger.info(1)
             for k in self.run_connections:
+                logger.info(2)
                 if self.run_connections[k]['run_id'] == log.get('run_id'):
+                    logger.info(3)
                     await self.run_connections[k]['conn'].send(orjson.dumps({"data": log}).decode())
         # 处理审批消息
         if log.get('type') == 'approval-info':
