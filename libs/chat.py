@@ -179,7 +179,7 @@ class ChatManager:
             "online": True,
             "timestamp": str(datetime.now())
         }
-        await self.msg_pub.publish("wr_group_chat", orjson.dumps(status_message).decode())
+        await ws.send(orjson.dumps({"data": status_message}).decode())
 
     async def disconnect(self, user_id):
         """处理用户断开连接"""
