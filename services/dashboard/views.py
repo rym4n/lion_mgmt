@@ -96,7 +96,7 @@ async def count_mttr(request):
 
     async with in_transaction() as tconn:
         results = await tconn.execute_query_dict(
-            "SELECT DATE(ctime) AS date, "
+            "SELECT DATE(ctime) AS day, "
             "AVG(EXTRACT(EPOCH FROM (close_time - ctime))) AS avg_seconds, "
             "COUNT(id) AS event_count "
             "FROM events "
@@ -108,8 +108,8 @@ async def count_mttr(request):
         )
         return response_ok([
             {
-                "date": row["date"].strftime("%Y-%m-%d"),
-                "avg_hours": round((float(row["avg_seconds"]) or 0) / 3600, 2),
+                "day": row["day"].strftime("%Y-%m-%d"),
+                "counts": round((float(row["avg_seconds"]) or 0) / 3600, 2),
                 "event_count": row["event_count"]
             }
             for row in results
