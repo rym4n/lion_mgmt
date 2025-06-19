@@ -12,7 +12,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import strip_timezone_to_seconds
+from libs.utils import strip_timezone_to_seconds, encrypt_aes256_gcm
 from models import SystemCustomConfiguration, AuditLog, Config
 from settings import UPLOAD_FOLDER, BG_NAME
 
@@ -261,3 +261,45 @@ async def search_audit(request):
         "total_pages": (total + size - 1) // size,
         "data": [item.json for item in data]
     })
+
+
+@system_bp.post("/setAI")
+@requires_permission("system:c")
+async def set_ai(request):
+    """
+    设置AI参数（优化版）
+    请求参数：
+        host: 字符串类型, 必填参数，AI服务的Host（需HTTPS）
+        api_key: 字符串类型, AI服务的API Key（可选，留空则不更新）
+        model: 字符串类型, AI服务的模型名称（可选，留空则不更新）
+    """
+    host = request.json.get("host")
+    api_key = request.json.get("api_key")
+    model = request.json.get("model")
+    params_to_process = [
+        {"name": "host", "value": host, "required": True},
+        {"name": "api_key", "value": api_key, "required": False},
+        {"name": "model", "value": model, "required": False}
+    ]
+    updated_params = []
+    for param in params_to_process:
+        param_name = param["name"]
+        param_value = param["value"]
+        if not param["required"] and not param_value:
+            continue
+        encrypted_data = encrypt_aes256_gcm(param_value)
+        config_updates = {
+            f"{param_name}_ciphertext": encrypted_data["ciphertext"],
+            f"{param_name}_nonce": encrypted_data["nonce"],
+            f"{param_name}_salt": encrypted_data["salt"],
+            f"{param_name}_tag": encrypted_data["tag"]
+        }
+        for key, value in config_updates.items():
+            await Config.update_or_create(
+                key=key,
+                module="ai",
+                defaults={"value": value}
+            )
+        updated_params.append(param_name)
+
+    return response_ok({"message": "AI配置更新成功"})

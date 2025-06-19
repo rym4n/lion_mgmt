@@ -1,20 +1,39 @@
 # coding=utf-8
-import time
 import traceback
 import orjson
 import pytz
+import time
 
 from datetime import datetime
 from aiocache import caches
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
 
+from openai import OpenAI
+
 from libs.kafka import aproduce, aconsume
-from libs.utils import gen_order_version
-from models import Runlog, Approvement, Events
+from libs.utils import gen_order_version, decrypt_aes256_gcm
+from models import Runlog, Approvement, Events, Config
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
 from settings import KAFKA_SERVERS, TASK_TOPIC, CACHE, RUNLOG_TOPIC
+
+SYSTEM_PROMPT = """
+            你是一位智能安全专家助手，具有广泛的领域知识。
+
+            你的核心能力：
+            1. 安全专业知识：精通漏洞分析、威胁检测、安全审计、风险评估等
+            2. 技术解释能力：能用不同技术层次的表达解释复杂概念
+            3. 多领域知识：了解网络安全、云计算、密码学、应用开发等领域
+            4. 专业文档能力：能生成技术文档、配置说明、安全策略等专业内容
+
+            对话准则：
+            1. 用户问题优先原则：直接回答问题核心，无需不必要的开场白
+            2. 分层次解释：对复杂问题按技术深度分层次说明
+            3. 专业准确：对安全领域术语保持精准使用
+            4. 诚实守信：如不确定答案，应明确告知而非猜测
+            5. 场景化输出：根据不同问题场景调整输出格式（技术报告/操作步骤/概念解释）
+            """.strip().replace("        ", "")
 
 
 # 获取或创建私聊作战室
@@ -78,6 +97,67 @@ class ChatManager:
         self.msg_pub = self.cache_client.client
         self.active_connections: dict[str, dict] = {}
         self.run_connections: dict[str, dict] = {}
+
+    async def get_decrypted_config(self, key_prefix: str):
+        ciphertext = await Config.get(key=f"{key_prefix}_ciphertext", module="ai")
+        nonce = await Config.get(key=f"{key_prefix}_nonce", module="ai")
+        salt = await Config.get(key=f"{key_prefix}_salt", module="ai")
+        tag = await Config.get(key=f"{key_prefix}_tag", module="ai")
+        return decrypt_aes256_gcm({
+            "ciphertext": ciphertext.value,
+            "nonce": nonce.value,
+            "salt": salt.value,
+            "tag": tag.value
+        })
+
+    async def stream_chat_completion(self, prompt: str, message_data: dict):
+        """
+        流式生成对话响应
+        """
+
+        host = await self.get_decrypted_config("host")
+
+        if host is None:
+            message_data["content"] = "当前未配置ai服务地址，请前往系统设置进行配置。"
+            await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+            return None
+
+        api_key = await self.get_decrypted_config("api_key")
+        model = await self.get_decrypted_config("model")
+        if model is None:
+            message_data["content"] = "当前未配置ai服务模型，请前往系统设置进行配置。"
+            await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+            return None
+
+        client = OpenAI(
+            base_url=host,
+            api_key=api_key
+        )
+
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt}
+        ]
+
+        # 使用流式输出
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            stream=True,
+            max_tokens=4000,
+            temperature=0.7
+        )
+
+        full_response = ""
+
+        for chunk in response:
+            delta = chunk.choices[0].delta
+            if delta and hasattr(delta, "content") and delta.content:
+                message_data["content"] = delta.content
+                await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+                full_response += delta.content
+
+        return full_response
 
     async def connect(self, user: Account, ws):
         """处理用户连接"""
@@ -203,6 +283,8 @@ class ChatManager:
                 await self._handle_public_message(user, data)
             elif message_type == "private":
                 await self._handle_private_message(user, data)
+            elif message_type == "ai":
+                await self._handle_ai_message(user, data)
             elif message_type == "recall":
                 await self._handle_recall_message(user, data)
                 await ws.send(orjson.dumps({"type": "recall_success", "message_id": data.get("message_id")}).decode())
@@ -276,6 +358,54 @@ class ChatManager:
         }
 
         await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+
+    async def _handle_ai_message(self, user: Account, data: dict):
+        """处理发送ai消息"""
+        current_room_id = data.get("room_id")
+        room = await Room.filter(id=current_room_id).get()
+        if not room:
+            raise Exception("作战室不存在")
+
+        content = data.get("content", "")
+        image_content = data.get("image_content", "")
+
+        if not content and not image_content:
+            raise Exception("消息不能为空")
+
+        # 保存消息到数据库
+        message = await Message.create(
+            type="public",
+            sender=user,
+            room=room,
+            content=content,
+            image_content=image_content,
+            receiver=user  # 群聊消息设为发送者自己作为占位符
+        )
+
+        # 广播
+        message_data = {
+            "type": "public",
+            "message_id": str(message.id),
+            "sender_id": user.id,
+            "sender_name": user.username,
+            "content": content,
+            "image_content": image_content,
+            "timestamp": str(message.ctime),
+            "room_id": current_room_id
+        }
+
+        await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+        full_response = await self.stream_chat_completion(content, message_data)
+
+        if full_response:
+            await Message.create(
+                type="public",
+                sender=user,
+                room=room,
+                content=full_response,
+                image_content=image_content,
+                receiver=user  # 群聊消息设为发送者自己作为占位符
+            )
 
     async def _handle_private_message(self, user: Account, data: dict):
         """处理发送私聊消息"""
