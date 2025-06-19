@@ -62,7 +62,9 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
 
 
 # 创建消息
-async def creat_message(room_id, log, user, sender):
+async def creat_message(room_id, log, user):
+    sender = await Account.get(username="system")
+    user = await Account.get(id=user)
     msg = await Message.create(
         type="public",
         sender=sender,
@@ -197,7 +199,7 @@ class ChatManager:
                         continue
                     msg = orjson.loads(message['data'])
                     if "log" in msg.keys():
-                        msg = await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["user"], sender=msg["sender"])
+                        msg = await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["user"])
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
@@ -226,6 +228,7 @@ class ChatManager:
         data = await self.redis.get(key)
         if data:
             data["log"] = log
+            data["user"] = data["user"].id
             message_data = data
             await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
             event = await Events.get_or_none(room_id=data["room_id"])
