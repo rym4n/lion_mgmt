@@ -99,7 +99,7 @@ class PlaybookVersion(BaseModel):
         unique_together = (("playbook", "version"),)
 
 
-class PVPermissions(BaseModel):
+class PlaybookPermissions(BaseModel):
     """
     剧本权限表
     """
@@ -122,5 +122,5 @@ class PVPermissions(BaseModel):
         }
 
     class Meta:
-        table = "playbook_version_permissions"
+        table = "playbook_permissions"
         ordering = ["-utime"]
