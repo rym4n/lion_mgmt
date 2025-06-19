@@ -244,7 +244,9 @@ class ChatManager:
         else:
             logger.info(1)
             for k in self.run_connections:
+                logger.info(self.run_connections)
                 logger.info(2)
+                logger.info(log.get('run_id'))
                 if self.run_connections[k]['run_id'] == log.get('run_id'):
                     logger.info(3)
                     await self.run_connections[k]['conn'].send(orjson.dumps({"data": log}).decode())
