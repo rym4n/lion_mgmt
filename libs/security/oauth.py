@@ -20,7 +20,7 @@ async def oauth_callback(client: BaseOAuth2, code: str, oauth_cfg: dict, code_ve
     try:
         token_info = await client.get_access_token(
             code,
-            oauth_cfg.get('redirect_uri'),
+            None,
             code_verifier,
         )
         logger.info(f"token_info: {token_info}")

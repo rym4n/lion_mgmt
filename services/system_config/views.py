@@ -146,7 +146,36 @@ async def get_system_status(request):
         return response_ok(data)
 
 
-@system_bp.post("/oauth/config")
+@system_bp.post("/oauth/status")
+@requires_permission("system:r")
+async def get_oauth_config(request):
+    """
+    获取SSO配置
+
+    无请求参数，直接调用，返回SSO配置
+    """
+    records = await Config.filter(module='sso').all()
+    oauth_config = {c.key: c.value for c in records}
+    return response_ok({
+        "use_oauth2": oauth_config.get("use_oauth2", "false"),
+        "auto_create": oauth_config.get("auto_create", "false"),
+        "client_id": oauth_config.get("client_id", ""),
+        "client_id_alias": oauth_config.get("client_id_alias", ""),
+        "client_secret": oauth_config.get("client_secret", ""),
+        "client_secret_alias": oauth_config.get("client_secret_alias", ""),
+        "authorize_uri": oauth_config.get("authorize_uri", ""),
+        "token_uri": oauth_config.get("token_uri", ""),
+        "token_path": oauth_config.get("token_path", ""),
+        "user_info_uri": oauth_config.get("user_info_uri", ""),
+        "user_id_path": oauth_config.get("user_id_path", ""),
+        "display_name_path": oauth_config.get("display_name_path", ""),
+        "email_path": oauth_config.get("email_path", ""),
+        "phone_path": oauth_config.get("phone_path", ""),
+        "scopes": oauth_config.get("scopes", ""),
+    })
+
+
+@system_bp.post("/oauth/update")
 @requires_permission("system:u")
 async def update_oauth_config(request):
     """
@@ -156,7 +185,9 @@ async def update_oauth_config(request):
         use_oauth2: 字符串类型, true 表示启用oauth认证, false 表示禁用, 必填参数
         auto_create: 字符串类型, true 表示认证用户不存在的话自动新建, false 表示不新建, 必填参数
         client_id: 客户端ID, 必填参数
+        client_id_alias: 客户端ID的名称，某些SSO可能叫app_id，可选参数
         client_secret: 客户端密钥, 必填参数
+        client_secret_alias：客户端密钥的名称，某些SSO可能叫app_secret，可选参数
         authorize_uri: 获取授权码的URI, 必填参数
         token_uri: 获取Token的URI, 必填参数
         token_path: Token的取值路径, 必填参数
@@ -165,7 +196,7 @@ async def update_oauth_config(request):
         display_name_path: 用户姓名的取值路径, 可选参数
         email_path: 用户邮箱的取值路径, 可选参数
         phone_path: 用户手机号的取值路径, 可选参数
-        redirect_uri: 重定向URI, 有的SSO会在认证过程校验这个配置的合法性, 可选参数
+        scopes_alias: 请求资源范围的名称, 可选参数
         scopes: 请求资源范围, 可选参数
     """
     params = request.json
@@ -177,7 +208,7 @@ async def update_oauth_config(request):
         await Config.update_or_create(key="use_oauth2", value="false", module="sso")
     else:
         required_fields = ["auto_create", "client_id", "client_secret", "authorize_uri", "token_uri", "user_info_uri", "user_id_path", "token_path"]
-        optional_fields = ["display_name_path", "email_path", "phone_path", "redirect_uri", "scopes"]
+        optional_fields = ["display_name_path", "email_path", "phone_path", "scopes", "client_id_alias", "client_secret_alias", "scopes_alias"]
         # 校验必填字段是否为空或不存在
         for field in required_fields:
             if not params.get(field):
