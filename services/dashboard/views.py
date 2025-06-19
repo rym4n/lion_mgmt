@@ -102,7 +102,7 @@ async def count_playbooks(request):
 
 @dashboard_bp.post('/apps')
 @requires_permission('dashboard:r')
-async def count_playbooks(request):
+async def count_apps(request):
     """
     获取已配置资源的应用数量
     """
