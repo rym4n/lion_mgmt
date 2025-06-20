@@ -300,7 +300,7 @@ async def delete_workflow_version(request):
     return response_ok("删除成功")
 
 
-@workflow_bp.post("/run")
+@workflow_bp.post("/debug")
 @requires_permission("workflow:r")
 async def execute_action(request):
     """

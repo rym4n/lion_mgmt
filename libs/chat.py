@@ -125,17 +125,14 @@ class ChatManager:
             await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
             return None
 
-        logger.info(f"ai服务地址：{host}，api_key：{api_key}，model：{model}")
         client = OpenAI(
             base_url=host,
             api_key=api_key
         )
-
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt}
         ]
-
         # 使用流式输出
         response = client.chat.completions.create(
             model=model,
@@ -144,7 +141,6 @@ class ChatManager:
             max_tokens=4000,
             temperature=0.7
         )
-
         full_response = ""
 
         for chunk in response:
@@ -372,11 +368,12 @@ class ChatManager:
         # 在发送完用户消息后，切换系统回复AI消息
         message_data["sender_id"] = sender.id
         message_data["sender_name"] = sender.username
+        message_data["type"] = "ai"
         full_response = await self.stream_chat_completion(content, message_data)
 
         if full_response:
             await Message.create(
-                type="public",
+                type="ai",
                 sender=sender,
                 room=room,
                 content=full_response,
