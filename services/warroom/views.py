@@ -332,15 +332,15 @@ async def query_messages(request: Request):
     if query_type == "public_history":
         if not room_id:
             raise CustomError(ErrorCode.ParamValueError)
-        total_count = await Message.filter(type="public", room_id=room_id).count()
+        total_count = await Message.filter(type__in=["public", "ai", "runlog"], room_id=room_id).count()
         messages = await Message.filter(
-            type="public",
+            type__in=["public", "ai", "runlog"],
             room_id=room_id
         ).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
         message_list = []
         for msg in reversed(messages):
             message_list.append({
-                "type": "public",
+                "type": msg.type,
                 "message_id": str(msg.id),
                 "sender_id": str(msg.sender.id),
                 "sender_name": msg.sender.display_name,
@@ -371,14 +371,14 @@ async def query_messages(request: Request):
         chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
         condition = (Q(sender__id=user.id) & Q(receiver_id=partner_id)) | (Q(sender_id=partner_id) & Q(receiver_id=user.id))
         # 消息计数
-        total_count = await Message.filter(condition, type="private", room_id=chat_room['room_id']).count()
+        total_count = await Message.filter(condition, type__in=["private", "ai", "runlog"], room_id=chat_room['room_id']).count()
         # 分页处理
-        messages = await Message.filter(condition, type="private", room_id=chat_room['room_id']).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
+        messages = await Message.filter(condition, type__in=["private", "ai", "runlog"], room_id=chat_room['room_id']).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
         message_list = []
         if partner:
             for msg in reversed(messages):
                 message_list.append({
-                    "type": "private",
+                    "type": msg.type,
                     "message_id": msg.id,
                     "sender_id": msg.sender.id,
                     "sender_name": msg.sender.display_name,

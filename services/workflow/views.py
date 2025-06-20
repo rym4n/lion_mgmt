@@ -355,7 +355,8 @@ async def execute_action(request):
         for i in range(60):
             logs = await Runlog.filter(run_id=run_id).all()
             if logs:
-                await resp.send(log.json for log in logs)
+                for log in logs:
+                    await resp.send(f"data: {log.json}\n\n")
                 if any(log.node_type == "end-node" for log in logs):
                     break
             await asyncio.sleep(1)
