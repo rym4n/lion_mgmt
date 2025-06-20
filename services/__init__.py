@@ -1,6 +1,7 @@
 # coding=utf-8
 import time
 import traceback
+from multiprocessing import Manager
 
 import orjson
 from sanic import Sanic
@@ -37,7 +38,12 @@ def create_app() -> Sanic:
     register_middleware(app)
     register_exception_handler(app)
     register_blueprints(app)
+    app.main_process_start(init_shared_ctx)
     return app
+
+
+def init_shared_ctx(app: Sanic) -> None:
+    app.shared_ctx.connections = Manager().dict()
 
 
 def register_blueprints(app: Sanic) -> None:
