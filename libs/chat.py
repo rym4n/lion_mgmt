@@ -234,6 +234,7 @@ class ChatManager:
                     await event.save()
                 log["event_id"] = event.id
         else:
+            logger.info(self.conns)
             # 处理剧本调试的运行日志
             for k in self.conns:
                 if key in self.conns[k]['run_ids'] and self.conns[k]['ws']:
