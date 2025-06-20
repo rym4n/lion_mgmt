@@ -3,6 +3,8 @@
 import asyncio
 import os
 import time
+import datetime
+import pytz
 from collections import defaultdict
 
 import aiofile
@@ -353,7 +355,9 @@ async def execute_action(request):
         await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
         for i in range(60):
-            logs = await Runlog.filter(run_id=run_id).all()
+            beijing_tz = pytz.timezone("Asia/Shanghai")
+            now = datetime.datetime.now(beijing_tz)
+            logs = await Runlog.filter(run_id=run_id, utime__gte=now).all()
             if logs:
                 for log in logs:
                     await resp.send(f"data: {log.json}\n\n")
