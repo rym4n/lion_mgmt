@@ -346,7 +346,8 @@ async def execute_action(request):
             "Connection": "keep-alive",
         }
     )
-
+    beijing_tz = pytz.timezone("Asia/Shanghai")
+    utime = datetime.datetime.now(beijing_tz)
     message = request.json
     if message.get("type") in ('flow', 'action'):
         run_id = gen_order_version(length=6)
@@ -355,10 +356,9 @@ async def execute_action(request):
         await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
         for i in range(60):
-            beijing_tz = pytz.timezone("Asia/Shanghai")
-            now = datetime.datetime.now(beijing_tz)
-            logs = await Runlog.filter(run_id=run_id, utime__gte=now).all()
+            logs = await Runlog.filter(run_id=run_id, utime__gte=utime).all()
             if logs:
+                utime = logs[0].utime
                 for log in logs:
                     await resp.send(f"data: {log.json}\n\n")
                 if any(log.node_type == "end-node" for log in logs):
