@@ -44,7 +44,7 @@ RY_RES_KEY = os.environ.get("RY_RES_KEY")
 RY_JOB_SERVER = os.environ.get("RY_JOB_SERVER")
 
 # 系统背景图片名称配置
-BG_NAME = "bg-oEDCYcDF"
+BG_NAME = "bg-voGX3LAo"
 
 # kafka配置
 KAFKA_SERVERS = os.environ.get("RY_KAFKA_SERVERS")

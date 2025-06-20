@@ -25,7 +25,7 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
-from libs.utils import fix_zip_filename, decrypt_aes256_gcm
+from libs.utils import fix_zip_filename
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion
 from settings import TOOLS_DIR
 
@@ -346,7 +346,7 @@ WHERE ta.deleted = false
     subquery_results = await subquery.values("name", "max_version")
     if not subquery_results:
         return response_ok({
-            "events": [],
+            "tools": [],
             "total": 0,
             "page": page,
             "size": size,
@@ -368,7 +368,7 @@ WHERE ta.deleted = false
     total_count = await Tool.filter(condition).count()
 
     return response_ok({
-        "events": latest_tools,
+        "tools": latest_tools,
         "total": total_count,
         "page": page,
         "size": size,
