@@ -205,8 +205,8 @@ class ChatManager:
                     break
             await msg_sub.unsubscribe("wr_group_chat")
 
-    async def log_listener(self, app):
-        self.app = app
+    async def log_listener(self, conns: dict):
+        self.conns = conns
         await aconsume(KAFKA_SERVERS, RUNLOG_TOPIC, 'lion_mgmt_listener', self.handle_runlog, 50)
 
     async def handle_runlog(self, log):
@@ -235,9 +235,9 @@ class ChatManager:
                 log["event_id"] = event.id
         else:
             # 处理剧本调试的运行日志
-            for k in self.app.shared_ctx.connections:
-                if key in self.app.shared_ctx.connections[k]['run_ids'] and self.app.shared_ctx.connections[k]['ws']:
-                    await self.app.shared_ctx.connections[k]['ws'].send(orjson.dumps({"data": log}).decode())
+            for k in self.conns:
+                if key in self.conns[k]['run_ids'] and self.conns[k]['ws']:
+                    await self.conns[k]['ws'].send(orjson.dumps({"data": log}).decode())
         # 处理审批消息
         if log.get('type') == 'approval-info':
             approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'], content=log['content'],
