@@ -21,7 +21,7 @@ PERMISSION_DICT = {
     "event": "event_bp",
     "approve": "approve_bp",
     "tool": "tool_management_bp",
-    "flow": "workflow_bp",
+    "workflow": "workflow_bp",
     "system": "system_bp",
     "scene": "scene_bp",
     "timed": "timed_bp",

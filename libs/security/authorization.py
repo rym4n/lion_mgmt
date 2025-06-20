@@ -20,7 +20,9 @@ async def check_permissions(request: Request, *required_permissions: str) -> boo
     if not account:
         logger.warning("redis里已经没有account信息了")
         raise CustomError(ErrorCode.SessionInvalid)
+    logger.info(f"request.ctx type: {type(request.ctx)}, session: {getattr(request.ctx, 'session', 'N/A')}")
     request.ctx.session['account_info'] = account
+    logger.info(request.ctx.session['account_info'].id)
     # roles = await account.roles.filter(deleted=False).all()
     for role in account.roles:
         for role_permission in role.permissions:

@@ -3,30 +3,24 @@
 import asyncio
 import os
 import time
-import traceback
-import uuid
 from collections import defaultdict
 
 import aiofile
-import jwt
 import orjson
-from sanic import Blueprint, Request, Websocket
-from sanic.log import logger
+from sanic import Blueprint
 from tortoise.expressions import Q
 from tortoise.functions import Count
 from tortoise.transactions import in_transaction
-from websockets import ConnectionClosed
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authentication import validate_token
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_order_version
 from models import Playbook, Scene, ToolAction, Tool, Runlog, Tag, PlaybookVersion, PlaybookPermissions
 from services.tools.views import tool_action_update, tool_action_playbook_delete
-from settings import SECRET, SESSION_ENCODING_ALGORITHM, KAFKA_SERVERS, TASK_TOPIC
+from settings import KAFKA_SERVERS, TASK_TOPIC
 
 workflow_bp = Blueprint('workflow', url_prefix='/playbook')
 _all__ = ["workflow_bp"]
@@ -138,7 +132,7 @@ async def list_workflow(request):
 
     playbooks = await Playbook.filter(condition).annotate(
         versions=Count("playbook_versions")
-    ).offset(offset).limit(limit).prefetch_related("scenes", "tags")
+    ).offset(offset).limit(limit).order_by("-utime").prefetch_related("scenes", "tags")
 
     total = await Playbook.filter(condition).count()
 
@@ -354,7 +348,7 @@ async def execute_action(request):
     message = request.json
     if message.get("type") in ('flow', 'action'):
         run_id = gen_order_version(length=6)
-        message["executor"] = request.ctx.session.get('account_info').id
+        message["executor"] = request.ctx.session['account_info'].id
         msg = {"run_type": message['type'], "run_id": run_id, "run_args": message}
         await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 

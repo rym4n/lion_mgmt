@@ -125,6 +125,7 @@ class ChatManager:
             await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
             return None
 
+        logger.info(f"ai服务地址：{host}，api_key：{api_key}，model：{model}")
         client = OpenAI(
             base_url=host,
             api_key=api_key
