@@ -366,7 +366,7 @@ async def execute_action(request: Request, ws: Websocket):
                 message = orjson.loads(msg)
                 if message.get("type") in ('flow', 'action'):
                     run_id = gen_order_version(length=6)
-                    request.app.shared_ctx.connections[id(ws)]['run_ids'].append(run_id)
+                    request.app.shared_ctx.connections[ws_id]['run_ids'].append(run_id)
                     message["executor"] = payload['sub']
                     msg = {"run_type": message['type'], "run_id": gen_order_version(length=6), "run_args": message}
                     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
