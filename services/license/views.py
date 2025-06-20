@@ -12,31 +12,143 @@ from sanic.request import Request
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import verify_license
-from models import Tool, Playbook
+from models import Tool, Playbook, Account
 from settings import LICENSE_DIR
 
 license_bp = Blueprint('license', url_prefix='/license')
 _all__ = ["license_bp"]
 
 MENU_DICT = {
-    "role_bp": "role",
-    "user_bp": "user",
-    "event_bp": "event",
-    "event_ingestion_bp": "ingestion",
-    "var_bp": "var",
-    "approve_bp": "approve",
-    "tool_management_bp": "tool",
-    "workflow_bp": "flow",
-    "system_bp": "system",
-    "scene_bp": "scene",
-    "timed_bp": "timed",
-    "license_bp": "lic",
-    "warroom_bp": "warroom",
-    "dashboard_bp": "dashboard"
+    "role": {
+        "title": "系统设置",
+        "path": "/System",
+        "children": [{
+            "title": "角色管理",
+            "path": "/System/Role/Role"
+        }]
+    },
+    "user": {
+        "title": "系统设置",
+        "path": "/System",
+        "children": [{
+            "title": "账号管理",
+            "path": "/System/User/User"
+        }]
+    },
+    "event": {
+        "title": "事件管理",
+        "path": "/EventModule",
+        "children": [{
+            "title": "事件列表",
+            "path": "/EventModule/eventList"
+        }]
+    },
+    "ingestion": {
+        "title": "事件管理",
+        "path": "/EventModule",
+        "children": [{
+            "title": "事件接入",
+            "path": "/EventModule/eventIngestion"
+        }]
+    },
+    "var": {
+        "title": "全局变量",
+        "path": "/var",
+        "children": [{
+            "title": "全局变量",
+            "path": "/var/index"
+        }]
+    },
+    "approve": {
+        "title": "人工任务",
+        "path": "/approve",
+        "children": [{
+            "title": "人工任务",
+            "path": "/approve/index"
+        }]
+    },
+    "tool": {
+        "title": "应用市场",
+        "path": "/toolManagement",
+        "children": [{
+            "title": "应用市场",
+            "path": "/toolManagement/index"
+        }]
+    },
+    "workflow": {
+        "title": "剧本管理",
+        "path": "/playbook",
+        "children": [{
+            "title": "剧本管理",
+            "path": "/playbook/index"
+        }]
+    },
+    "system": {
+        "title": "系统设置",
+        "path": "/System",
+        "children": [
+            {
+                "title": "系统状态",
+                "path": "/System/Status/Status"
+            },
+            {
+                "title": "个性化设置",
+                "path": "/System/Set/Set"
+            },
+        ]
+    },
+    "scene": {
+        "title": "剧本管理",
+        "path": "/playbook",
+        "children": [{
+            "title": "场景管理",
+            "path": "/playbook/components/sceneView"
+        }]
+    },
+    "timed": {
+        "title": "定时任务",
+        "path": "/timerTasks",
+        "children": [{
+            "title": "定时任务",
+            "path": "/timerTasks/index"
+        }]
+    },
+    "lic": {
+        "title": "系统设置",
+        "path": "/System",
+        "children": [{
+            "title": "产品许可",
+            "path": "/System/license/index"
+        }]
+    },
+    "warroom": {
+        "title": "作战室",
+        "path": "/warroom",
+        "children": [{
+            "title": "作战室",
+            "path": "/warroom/index/:roomID?"
+        }]
+    },
+    "dashboard": {
+        "title": "仪表盘",
+        "path": "/",
+        "children": [{
+            "title": "仪表盘",
+            "path": "/welcome"
+        }]
+    },
+    "audit": {
+        "title": "系统设置",
+        "path": "/System",
+        "children": [{
+            "title": "审计日志",
+            "path": "/System/Audit/Audit"
+        }]
+    }
 }
-
 
 @license_bp.post("/verify")
 @requires_permission("lic:c")
@@ -71,34 +183,26 @@ async def verify_license_api(request: Request):
 
 
 @license_bp.post("/get")
-@requires_permission("lic:r")
 async def get_license(request: Request):
     """
-    获取许可文件权限，加载页面
+    根据权限加载页面
 
-    无需请求参数
+    请求参数
     """
-    menu_dict = {}
-    lic = load_license()
-    if not lic:
-        raise CustomError(ErrorCode.InvalidLicenseError)
-    for item in lic["moduleList"]:
-        module = item["module"]
-        auth = item["auth"]
+    payload = await token_decode(request)
+    user = await Account.get(id=payload["sub"]).prefetch_related("roles")
+    if not user:
+        raise CustomError(ErrorCode.AccountNotFound)
 
-        if module not in menu_dict:
-            menu_dict[module] = False
-        if auth and int(lic["grouplist"][item["group"]]["expireTime"]) > int(time.time() * 1000):
-            menu_dict[module] = True
-    menu_dict["license_bp"] = True
-    menu_dict["user_bp"] = True
+    menu_list = []
+    for role in user.roles:
+        if role.permissions:
+            if "*:*" in role.permissions:
+                return response_ok(list(MENU_DICT.values()))
+            for permission in role.permissions:
+                menu_list.append(MENU_DICT[permission.split(":")[0]])
 
-    new_menu_dict = {}
-    for key, value in menu_dict.items():
-        if key in MENU_DICT:
-            new_menu_dict[MENU_DICT[key]] = value
-
-    return response_ok(new_menu_dict)
+    return response_ok(menu_list)
 
 
 @license_bp.post("/show")
