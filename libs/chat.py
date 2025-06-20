@@ -169,17 +169,7 @@ class ChatManager:
         await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
         await self.msg_pub.publish("wr_group_chat", orjson.dumps(status_message).decode())
 
-    async def run_connect(self, user: Account, ws):
-        """处理运行连接"""
-        self.run_connections[user.id] = {"conn": ws, "run_id": None}
-        status_message = {
-            "type": "user_status",
-            "user_id": user.id,
-            "username": user.username,
-            "online": True,
-            "timestamp": str(datetime.now())
-        }
-        await ws.send(orjson.dumps({"data": status_message}).decode())
+
 
     async def disconnect(self, user_id):
         """处理用户断开连接"""
@@ -215,7 +205,8 @@ class ChatManager:
                     break
             await msg_sub.unsubscribe("wr_group_chat")
 
-    async def log_listener(self):
+    async def log_listener(self, app):
+        self.app = app
         await aconsume(KAFKA_SERVERS, RUNLOG_TOPIC, 'lion_mgmt_listener', self.handle_runlog, 50)
 
     async def handle_runlog(self, log):
@@ -227,6 +218,7 @@ class ChatManager:
 
         data = await self.redis.get(key)
         if data:
+            # 消费作战室的执行记录
             data["log"] = log
             data["updator"] = data["updator"].id
             message_data = data
@@ -242,9 +234,10 @@ class ChatManager:
                     await event.save()
                 log["event_id"] = event.id
         else:
-            for k in self.run_connections:
-                if self.run_connections[k]['run_id'] == log.get('run_id'):
-                    await self.run_connections[k]['conn'].send(orjson.dumps({"data": log}).decode())
+            # 处理剧本调试的运行日志
+            for k in self.app.shared_ctx.connections:
+                if key in self.app.shared_ctx.connections[k]['run_ids'] and self.app.shared_ctx.connections[k]['ws']:
+                    await self.app.shared_ctx.connections[k]['ws'].send(orjson.dumps({"data": log}).decode())
         # 处理审批消息
         if log.get('type') == 'approval-info':
             approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'], content=log['content'],
@@ -289,13 +282,6 @@ class ChatManager:
                 await ws.send(orjson.dumps({"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
             elif message_type == "heartbeat":
                 await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
-            elif message_type in ["action", "flow"]:
-                data.pop("type")
-                params = data
-                params["executor"] = user.id
-                msg = {"run_type": message_type, "run_id": gen_order_version(length=6), "run_args": params}
-                await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
-                self.run_connections[user.id]["run_id"] = msg["run_id"]
             else:
                 logger.error(f"{traceback.format_exc()}")
                 raise Exception("未知消息类型")
@@ -374,8 +360,8 @@ class ChatManager:
         message_data = {
             "type": "public",
             "message_id": str(message.id),
-            "sender_id": sender.id,
-            "sender_name": sender.username,
+            "sender_id": user.id,
+            "sender_name": user.username,
             "content": content,
             "image_content": image_content,
             "timestamp": str(message.ctime),
@@ -383,6 +369,9 @@ class ChatManager:
         }
 
         await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+        # 在发送完用户消息后，切换系统回复AI消息
+        message_data["sender_id"] = sender.id
+        message_data["sender_name"] = sender.username
         full_response = await self.stream_chat_completion(content, message_data)
 
         if full_response:

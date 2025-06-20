@@ -4,6 +4,7 @@ import asyncio
 import os
 import time
 import traceback
+import uuid
 from collections import defaultdict
 
 import aiofile
@@ -18,13 +19,14 @@ from websockets import ConnectionClosed
 
 from core.error_code import ErrorCode
 from core.response import response_ok
-from libs.chat import chat_manager
 from libs.error_code.exception import CustomError
+from libs.kafka import aproduce
+from libs.security.authentication import validate_token
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_order_version
 from models import Playbook, Scene, ToolAction, Tool, Runlog, Tag, PlaybookVersion, PlaybookPermissions
 from services.tools.views import tool_action_update, tool_action_playbook_delete
-from settings import SECRET, SESSION_ENCODING_ALGORITHM
+from settings import SECRET, SESSION_ENCODING_ALGORITHM, KAFKA_SERVERS, TASK_TOPIC
 
 workflow_bp = Blueprint('workflow', url_prefix='/playbook')
 _all__ = ["workflow_bp"]
@@ -163,7 +165,8 @@ async def list_workflow_versions(request):
     请求参数：
         id: 必填，剧本id
     """
-    pv = await PlaybookVersion.filter(playbook__id=request.json.get("id"), deleted=False).all().prefetch_related("playbook", "creator", "updator")
+    pv = await PlaybookVersion.filter(playbook__id=request.json.get("id"), deleted=False).all().prefetch_related(
+        "playbook", "creator", "updator")
     return response_ok([p.json for p in pv])
 
 
@@ -234,8 +237,10 @@ async def edit_workflow_flow(request):
     pv.updator = request.ctx.session['account_info']
     # 已发布的剧本是不允许修改的
     if pv.status == 1:
-        pv = await PlaybookVersion.create(playbook=pv.playbook, version=gen_order_version(), flow_json=pv.flow_json, change_desc=None, status=0,
-                                          creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
+        pv = await PlaybookVersion.create(playbook=pv.playbook, version=gen_order_version(), flow_json=pv.flow_json,
+                                          change_desc=None, status=0,
+                                          creator=request.ctx.session['account_info'],
+                                          updator=request.ctx.session['account_info'])
     else:
         await pv.save()
 
@@ -261,8 +266,11 @@ async def publish_workflow(request):
     """
     if not request.json.get("id") or not request.json.get("change_desc"):
         raise CustomError(ErrorCode.ParameterError)
-    await PlaybookVersion.filter(id=request.json.get("id"), status=0).update(status=1, updator=request.ctx.session['account_info'],
-                                                                             version=gen_order_version(), change_desc=request.json.get("change_desc"))
+    await PlaybookVersion.filter(id=request.json.get("id"), status=0).update(status=1, updator=request.ctx.session[
+        'account_info'],
+                                                                             version=gen_order_version(),
+                                                                             change_desc=request.json.get(
+                                                                                 "change_desc"))
     return response_ok("剧本发布成功")
 
 
@@ -335,27 +343,33 @@ async def execute_action(request: Request, ws: Websocket):
             }
     """
     # 先获取认证信息
-    account = None
+    ws_id = str(uuid.uuid4())
     try:
         # 先获取认证信息
         auth_data = await asyncio.wait_for(ws.recv(), timeout=15)
         auth_json = orjson.loads(auth_data)
         payload = jwt.decode(auth_json['auth'], SECRET, SESSION_ENCODING_ALGORITHM)
-        # validate_token(payload, request)
+        validate_token(payload, request)
 
-        account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
-        if not account:
-            logger.warning("redis里已经没有account信息了")
-            raise CustomError(ErrorCode.SessionInvalid)
-        # 建立连接
-        await chat_manager.run_connect(account, ws)
+        # account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
+        # if not account:
+        #     logger.warning("redis里已经没有account信息了")
+        #     raise CustomError(ErrorCode.SessionInvalid)
+
+        await ws.send(orjson.dumps({"data": 'success'}).decode())
+
+        request.app.shared_ctx.connections[ws_id] = {'run_ids': [], "ws": None}
+        request.app.shared_ctx.connections[ws_id]['ws'] = ws
         # 持续接收和处理消息
         async for msg in ws:
             try:
                 message = orjson.loads(msg)
-                await chat_manager.handle_message(account, ws, message)
-            except asyncio.TimeoutError:
-                await ws.send(orjson.dumps({"type": "heartbeat", "status": "ping"}).decode())
+                if message.get("type") in ('flow', 'action'):
+                    run_id = gen_order_version(length=6)
+                    request.app.shared_ctx.connections[id(ws)]['run_ids'].append(run_id)
+                    message["executor"] = payload['sub']
+                    msg = {"run_type": message['type'], "run_id": gen_order_version(length=6), "run_args": message}
+                    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
             except asyncio.CancelledError:
                 break
             except Exception as e1:
@@ -366,8 +380,7 @@ async def execute_action(request: Request, ws: Websocket):
         logger.error(f"{e} | {traceback.format_exc()}")
         await ws.send(orjson.dumps({"type": "error", "message": str(e)}).decode())
     finally:
-        if account:
-            await chat_manager.disconnect(account.id)
+        del request.app.shared_ctx.connections[ws_id]
         await ws.close()
 
 
@@ -393,7 +406,8 @@ async def run_history(request):
     offset = (page - 1) * size
     limit = size
 
-    all_run_ids = await Runlog.filter(playbook_id=playbook_id, deleted=False).order_by("-utime").values_list("run_id", "utime")
+    all_run_ids = await Runlog.filter(playbook_id=playbook_id, deleted=False).order_by("-utime").values_list("run_id",
+                                                                                                             "utime")
     seen = set()
     run_ids_query = []
     for run_id, utime in all_run_ids:
@@ -476,7 +490,8 @@ async def get_playbook_input(request, playbook_id):
                 continue
             for key, value in node["properties"]["input"].items():
                 if input_id in value:
-                    data = await request.ctx.cache_client.get(node["properties"]["app_name"] + "_" + node["properties"]["version"])
+                    data = await request.ctx.cache_client.get(
+                        node["properties"]["app_name"] + "_" + node["properties"]["version"])
                     if data:
                         if isinstance(data, (str, bytes)):
                             data = orjson.loads(data)
@@ -505,7 +520,9 @@ async def get_playbook_input(request, playbook_id):
                             async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
                                 content = await f.read()
                                 # 将config数据存入redis
-                                await request.ctx.cache_client.set(node["properties"]["app_name"] + "_" + node["properties"]["version"], content, ttl=2592000)
+                                await request.ctx.cache_client.set(
+                                    node["properties"]["app_name"] + "_" + node["properties"]["version"], content,
+                                    ttl=2592000)
     return input_list
 
 
@@ -643,7 +660,8 @@ async def judge_permission(request):
     if not permission:
         return response_ok(False)
 
-    if user_id in permission.users_id or role_ids.intersection(permission.roles_id) or permission.users_id == ["*"] or permission.roles_id == ["*"]:
+    if user_id in permission.users_id or role_ids.intersection(permission.roles_id) or permission.users_id == [
+        "*"] or permission.roles_id == ["*"]:
         return response_ok(True)
 
     return response_ok(False)
