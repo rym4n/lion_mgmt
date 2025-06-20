@@ -306,10 +306,11 @@ async def delete_workflow_version(request):
     return response_ok("删除成功")
 
 
-@workflow_bp.websocket('/run')
-async def execute_action(request: Request, ws: Websocket):
+@workflow_bp.post("/run")
+@requires_permission("workflow:r")
+async def execute_action(request):
     """
-        执行接口，websocket通信
+        执行接口
 
         请求参数：
             - playbook_input dict 剧本输入参数 当type为flow时必填      用websocket发送
@@ -342,46 +343,33 @@ async def execute_action(request: Request, ws: Websocket):
                 "timeout":300,               超时时间,单位秒
             }
     """
-    # 先获取认证信息
-    ws_id = str(uuid.uuid4())
-    try:
-        # 先获取认证信息
-        auth_data = await asyncio.wait_for(ws.recv(), timeout=15)
-        auth_json = orjson.loads(auth_data)
-        payload = jwt.decode(auth_json['auth'], SECRET, SESSION_ENCODING_ALGORITHM)
-        validate_token(payload, request)
+    resp = await request.respond(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
 
-        # account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
-        # if not account:
-        #     logger.warning("redis里已经没有account信息了")
-        #     raise CustomError(ErrorCode.SessionInvalid)
+    message = request.json
+    if message.get("type") in ('flow', 'action'):
+        run_id = gen_order_version(length=6)
+        message["executor"] = request.ctx.session.get('account_info').id
+        msg = {"run_type": message['type'], "run_id": run_id, "run_args": message}
+        await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
-        await ws.send(orjson.dumps({"data": 'success'}).decode())
+        for i in range(60):
+            logs = await Runlog.filter(run_id=run_id).all()
+            if logs:
+                await resp.send(log.json for log in logs)
+                if any(log.node_type == "end-node" for log in logs):
+                    break
+            await asyncio.sleep(1)
 
-        request.app.shared_ctx.connections[ws_id] = {'run_ids': [], "ws": None}
-        request.app.shared_ctx.connections[ws_id]['ws'] = ws
-        # 持续接收和处理消息
-        async for msg in ws:
-            try:
-                message = orjson.loads(msg)
-                if message.get("type") in ('flow', 'action'):
-                    run_id = gen_order_version(length=6)
-                    request.app.shared_ctx.connections[ws_id]['run_ids'].append(run_id)
-                    message["executor"] = payload['sub']
-                    msg = {"run_type": message['type'], "run_id": gen_order_version(length=6), "run_args": message}
-                    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
-            except asyncio.CancelledError:
-                break
-            except Exception as e1:
-                logger.error(f"{e1} | {traceback.format_exc()}")
-    except ConnectionClosed as e2:
-        logger.error(f"{e2} | {traceback.format_exc()}")
-    except Exception as e:
-        logger.error(f"{e} | {traceback.format_exc()}")
-        await ws.send(orjson.dumps({"type": "error", "message": str(e)}).decode())
-    finally:
-        del request.app.shared_ctx.connections[ws_id]
-        await ws.close()
+    if resp:
+        await resp.eof()
+
+    return resp
 
 
 @workflow_bp.post('/run/history')

@@ -10,12 +10,11 @@ from openai import OpenAI
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
 
-from libs.kafka import aproduce, aconsume
-from libs.utils import gen_order_version
+from libs.kafka import aconsume
 from models import Runlog, Approvement, Events, Config
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import KAFKA_SERVERS, TASK_TOPIC, CACHE, RUNLOG_TOPIC
+from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC
 
 SYSTEM_PROMPT = """
             你是一位智能安全专家助手，具有广泛的领域知识。
@@ -66,7 +65,7 @@ async def creat_message(room_id, log, user):
     sender = await Account.get(username="system")
     user = await Account.get(id=user)
     msg = await Message.create(
-        type="public",
+        type="runlog",
         sender=sender,
         room_id=room_id,
         content=str(log),
@@ -74,7 +73,7 @@ async def creat_message(room_id, log, user):
         receiver=user
     )
     message_data = {
-        "type": "public",
+        "type": "runlog",
         "message_id": str(msg.id),
         "sender_id": sender.id,
         "sender_name": sender.username,
@@ -169,8 +168,6 @@ class ChatManager:
         await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
         await self.msg_pub.publish("wr_group_chat", orjson.dumps(status_message).decode())
 
-
-
     async def disconnect(self, user_id):
         """处理用户断开连接"""
         if user_id in self.active_connections.keys():
@@ -189,7 +186,8 @@ class ChatManager:
                         continue
                     msg = orjson.loads(message['data'])
                     if "log" in msg.keys():
-                        message['data'] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"]))
+                        message['data'] = orjson.dumps(
+                            await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"]))
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
@@ -205,8 +203,7 @@ class ChatManager:
                     break
             await msg_sub.unsubscribe("wr_group_chat")
 
-    async def log_listener(self, conns: dict):
-        self.conns = conns
+    async def log_listener(self):
         await aconsume(KAFKA_SERVERS, RUNLOG_TOPIC, 'lion_mgmt_listener', self.handle_runlog, 50)
 
     async def handle_runlog(self, log):
@@ -233,17 +230,15 @@ class ChatManager:
                     event.close_time = pytz.timezone("Asia/Shanghai").localize(datetime.now())
                     await event.save()
                 log["event_id"] = event.id
-        else:
-            logger.info(self.conns)
-            # 处理剧本调试的运行日志
-            for k in self.conns:
-                if key in self.conns[k]['run_ids'] and self.conns[k]['ws']:
-                    await self.conns[k]['ws'].send(orjson.dumps({"data": log}).decode())
+
         # 处理审批消息
         if log.get('type') == 'approval-info':
-            approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'], content=log['content'],
-                                               params=log['params'], status=log['status'], expire_time=log['expire_time'], created_at=log['created_at'],
-                                               audit_node=log['audit_app'], next_node=log['start_app'], approve_type=int(log['approve_type']))
+            approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'],
+                                               content=log['content'],
+                                               params=log['params'], status=log['status'],
+                                               expire_time=log['expire_time'], created_at=log['created_at'],
+                                               audit_node=log['audit_app'], next_node=log['start_app'],
+                                               approve_type=int(log['approve_type']))
             if log.get('users'):
                 users = Account.filter(id__in=log['users']).all()
                 approve.approvers.add(*users)
@@ -275,12 +270,14 @@ class ChatManager:
             elif message_type == "delete_announcement":
                 await self._handle_delete_announcement(user, data)
                 # 通知删除成功
-                await ws.send(orjson.dumps({"type": "delete_announcement_success", "announcement_id": data.get("announcement_id")}).decode())
+                await ws.send(orjson.dumps(
+                    {"type": "delete_announcement_success", "announcement_id": data.get("announcement_id")}).decode())
             elif message_type == "request_online_users":
                 online_users = await self._handle_request_online_users(data)
                 self.active_connections[user.id]['current_room'] = data['room_id']
                 # 发送在线状态列表
-                await ws.send(orjson.dumps({"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
+                await ws.send(orjson.dumps(
+                    {"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
             elif message_type == "heartbeat":
                 await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
             else:
@@ -288,7 +285,8 @@ class ChatManager:
                 raise Exception("未知消息类型")
         except Exception as e:
             logger.info(e)
-            await ws.send(orjson.dumps({"type": "error", "message": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
+            await ws.send(orjson.dumps({"type": "error", "message": str(e),
+                                        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
 
     async def _handle_public_message(self, user: Account, data: dict):
         """处理发送群聊消息"""
@@ -507,7 +505,8 @@ class ChatManager:
         if not announcement_id:
             raise Exception("缺少公告ID")
 
-        announcement = await Message.filter(id=announcement_id, type="announcement").first().prefetch_related("sender", 'room')
+        announcement = await Message.filter(id=announcement_id, type="announcement").first().prefetch_related("sender",
+                                                                                                              'room')
         if not announcement:
             raise Exception("公告不存在")
 
@@ -545,7 +544,8 @@ class ChatManager:
 
             # 构建在线状态信息
             for user in room.users:
-                online_status.append({"user_id": user.id, "username": user.username, "online": await self.cache_client.exists(f"room_online_{user.id}")})
+                online_status.append({"user_id": user.id, "username": user.username,
+                                      "online": await self.cache_client.exists(f"room_online_{user.id}")})
 
             return online_status
         except Exception as e:

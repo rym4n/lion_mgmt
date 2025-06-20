@@ -1,7 +1,6 @@
 # coding=utf-8
 
 from asyncio.base_events import BaseEventLoop
-from functools import partial
 
 from aiocache import caches
 from httpx_oauth.oauth2 import OAuth2
@@ -36,9 +35,8 @@ class CacheListener(BaseListener):
                 base_scopes=app.ctx.oauth_cfg["scopes"].split(',') if app.ctx.oauth_cfg.get("scopes") else None
             )
 
-        logger.info(app.shared_ctx.connections)
         app.add_task(chat_manager.msg_listener)
-        app.add_task(partial(chat_manager.log_listener, app.shared_ctx.connections))
+        app.add_task(chat_manager.log_listener)
 
     async def before_server_stop(self, app: Sanic, loop: BaseEventLoop) -> None:
         """释放连接"""
