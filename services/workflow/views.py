@@ -354,13 +354,15 @@ async def execute_action(request):
         message["executor"] = request.ctx.session['account_info'].id
         msg = {"run_type": message['type'], "run_id": run_id, "run_args": message}
         await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
-
+        sent_id = []
         for i in range(60):
             logs = await Runlog.filter(run_id=run_id, utime__gte=utime).all()
             if logs:
                 utime = logs[0].utime
                 for log in logs:
-                    await resp.send(f"data: {log.json}\n\n")
+                    if log.id not in sent_id:
+                        sent_id.append(log.id)
+                        await resp.send(f"data: {log.json}\n\n")
                 if any(log.node_type == "end-node" for log in logs):
                     break
             await asyncio.sleep(1)
