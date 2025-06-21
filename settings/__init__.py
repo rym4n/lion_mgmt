@@ -181,7 +181,6 @@ CACHE = {
         'serializer': {
             'class': "aiocache.serializers.MsgPackSerializer"
         },
-        'namespace': 'lion_mgmt',
         'timeout': 2,
         'endpoint': os.environ.get('RY_REDIS_HOST'),
         'port': os.environ.get('RY_REDIS_PORT'),
