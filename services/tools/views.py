@@ -601,7 +601,8 @@ async def add_tool_resource(request):
                                     creator=request.ctx.session['account_info'].username,
                                     updater=request.ctx.session['account_info'].username)
 
-    await caches.get("redis_chat").set("resource_" + tr.id, resources)
+    r = {k: resources[k]['value'] or resources[k]['default_value'] for k in resources}
+    await caches.get("redis_chat").set("resource_" + tr.id, r)
 
     return response_ok({"message": "工具资源新增成功", "id": tr.id})
 
@@ -661,7 +662,8 @@ async def update_tool_resource(request):
 
     if resources:
         tool_resource.resources = orjson.dumps(resources).decode("utf-8")
-        await caches.get("redis_chat").set("resource_" + tool_resource.id, resources)
+        r = {k: resources[k]['value'] or resources[k]['default_value'] for k in resources}
+        await caches.get("redis_chat").set("resource_" + tool_resource.id, r)
 
     tool_resource.updater = request.ctx.session['account_info'].username
     await tool_resource.save()
