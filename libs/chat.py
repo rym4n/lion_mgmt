@@ -64,39 +64,12 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
 
 
 # 创建消息
-# async def creat_message(room_id, log, user):
-#     sender = await Account.get(username="system")
-#     user = await Account.get(id=user)
-#     msg = await Message.get_or_none(content=str(log))
-#     if not msg:
-#         msg = await Message.create(
-#             type="runlog",
-#             sender=sender,
-#             room_id=room_id,
-#             content=str(log),
-#             image_content="",
-#             receiver=user
-#         )
-#     message_data = {
-#         "type": "runlog",
-#         "message_id": str(msg.id),
-#         "sender_id": sender.id,
-#         "sender_name": sender.username,
-#         "content": str(log),
-#         "image_content": "",
-#         "timestamp": str(msg.ctime),
-#         "room_id": room_id
-#     }
-#     return message_data
-
-
 async def creat_message(room_id, log, user_id, redis):
     sender = await Account.get(username="system")
     receiver = await Account.get(id=user_id)
-    content_str = str(log)
 
     # 构造一个唯一 key（防止内容太长，建议 hash）
-    key_hash = hashlib.sha1(f"{room_id}:{receiver.id}:{content_str}".encode()).hexdigest()
+    key_hash = hashlib.sha1(f"{room_id}:{user_id}:{str(log)}".encode()).hexdigest()
     lock_key = f"create_message_lock:{key_hash}"
 
     # 尝试获取锁（60 秒自动过期）
@@ -108,7 +81,7 @@ async def creat_message(room_id, log, user_id, redis):
             type="runlog",
             sender=sender,
             room_id=room_id,
-            content=content_str,
+            content=str(log),
             image_content="",
             receiver=receiver
         )
@@ -116,7 +89,7 @@ async def creat_message(room_id, log, user_id, redis):
         # 其他执行引擎进入这里：稍等一下，再尝试获取已创建的记录
         for _ in range(10):
             msg = await Message.get_or_none(
-                content=content_str,
+                content=str(log),
                 room_id=room_id,
                 receiver=receiver
             )
@@ -129,11 +102,12 @@ async def creat_message(room_id, log, user_id, redis):
         "message_id": str(msg.id),
         "sender_id": sender.id,
         "sender_name": sender.username,
-        "content": content_str,
+        "content": str(log),
         "image_content": "",
         "timestamp": str(msg.ctime),
         "room_id": room_id
     }
+
     return message_data
 
 
@@ -233,12 +207,12 @@ class ChatManager:
                 try:
                     if message.get('type') != 'message':
                         continue
-                    msg = orjson.loads(message['data'])
                     if "log" in msg.keys():
-                        message['data'] = orjson.dumps(
-                            await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"]), redis = self.cache_client)
+                        message['data'] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"]), redis=self.cache_client)
+                    msg = orjson.loads(message['data'])
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
+                        logger.info(f"消息：{message['data'].decode()}")
                         if room_id and self.active_connections[k]['current_room'] == room_id:
                             await self.active_connections[k]['conn'].send(message['data'].decode())
                         elif room_id is None:
