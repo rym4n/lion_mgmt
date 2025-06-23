@@ -208,7 +208,7 @@ async def get_all(request):
                     input_args = []
                     args = action.action["input"]
                     for arg in args:
-                        input_args.append({arg["key"]:arg})
+                        input_args.append({arg["key"]: arg})
                     data["input_args"] = input_args
         items.append(data)
 
@@ -393,9 +393,9 @@ async def get_run_log(request):
     if status in [0, 1]:
         condition &= Q(status=int(status))
 
-    total = await Runlog.filter(condition).order_by('run_id').distinct().values_list('run_id', flat=True)
+    total = await Runlog.filter(condition).order_by('-run_id').distinct().values_list('run_id', flat=True)
 
-    run_ids = await Runlog.filter(condition).distinct().order_by('run_id').offset((page - 1) * size).limit(size).values_list('run_id', flat=True)
+    run_ids = await Runlog.filter(condition).distinct().order_by('-run_id').offset((page - 1) * size).limit(size).values_list('run_id', flat=True)
 
     if run_ids:
         all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).all().prefetch_related("event", "timer", "flow")

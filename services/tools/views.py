@@ -25,7 +25,7 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
-from libs.utils import fix_zip_filename, decrypt_aes256_gcm
+from libs.utils import fix_zip_filename
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion
 from settings import TOOLS_DIR
 
@@ -346,7 +346,7 @@ WHERE ta.deleted = false
     subquery_results = await subquery.values("name", "max_version")
     if not subquery_results:
         return response_ok({
-            "events": [],
+            "tools": [],
             "total": 0,
             "page": page,
             "size": size,
@@ -368,7 +368,7 @@ WHERE ta.deleted = false
     total_count = await Tool.filter(condition).count()
 
     return response_ok({
-        "events": latest_tools,
+        "tools": latest_tools,
         "total": total_count,
         "page": page,
         "size": size,
@@ -601,7 +601,9 @@ async def add_tool_resource(request):
                                     creator=request.ctx.session['account_info'].username,
                                     updater=request.ctx.session['account_info'].username)
 
-    await request.ctx.cache_client.set("resource_" + tr.id, resources)
+    r = {k: resources[k].get('value') or resources[k].get('default_value', '') for k in resources}
+    r[tr.id + "_name"] = name
+    await caches.get("redis_chat").set("resource_" + tr.id, r)
 
     return response_ok({"message": "工具资源新增成功", "id": tr.id})
 
@@ -661,7 +663,9 @@ async def update_tool_resource(request):
 
     if resources:
         tool_resource.resources = orjson.dumps(resources).decode("utf-8")
-        await request.ctx.cache_client.set("resource_" + tool_resource.id, resources)
+        r = {k: resources[k].get('value') or resources[k].get('default_value', '') for k in resources}
+        r[tool_resource.id + "_name"] = name
+        await caches.get("redis_chat").set("resource_" + tool_resource.id, r)
 
     tool_resource.updater = request.ctx.session['account_info'].username
     await tool_resource.save()
@@ -690,7 +694,7 @@ async def delete_tool_resource(request):
 
     await tool_resource.delete()
 
-    await request.ctx.cache_client.delete("resource_" + tool_resource.id)
+    await caches.get("redis_chat").delete("resource_" + tool_resource.id)
 
     return response_ok({"message": "工具资源删除成功"})
 
