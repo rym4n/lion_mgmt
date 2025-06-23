@@ -72,7 +72,7 @@ async def creat_message(room_id, log, user, redis):
     lock_key = f"create_message_lock:{key_hash}"
 
     # 尝试获取锁（60 秒自动过期）
-    got_lock = await redis.set(lock_key, "1", ex=5, nx=True)
+    got_lock = await redis.set(lock_key, "1", ttl=5, nx=True)
 
     if got_lock:
         # 当前是第一个拿到锁的人，创建记录
@@ -208,7 +208,7 @@ class ChatManager:
                         continue
                     msg = orjson.loads(message['data'])
                     if "log" in msg.keys():
-                        message['data'] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"], redis=self.cache_client))
+                        message['data'] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"], redis=self.redis))
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
