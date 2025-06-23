@@ -207,9 +207,9 @@ class ChatManager:
                 try:
                     if message.get('type') != 'message':
                         continue
+                    msg = orjson.loads(message['data'])
                     if "log" in msg.keys():
                         message['data'] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"]), redis=self.cache_client)
-                    msg = orjson.loads(message['data'])
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         logger.info(f"消息：{message['data'].decode()}")
