@@ -171,7 +171,6 @@ async def list_api_users(request):
     api_users = await Account.filter(condition).offset(offset).limit(limit).all().prefetch_related("roles")
     data = []
     for u in api_users:
-        print(u.expiration)
         data.append(u.api_json)
 
     return response_ok({
@@ -187,7 +186,7 @@ async def list_api_users(request):
 @requires_permission("user:u")
 async def update_api_user(request):
     """
-    更新API用户信息（需要user:u权限）
+    删除API用户信息（需要user:u权限）
 
     请求参数：
         id: 必填，API用户ID
@@ -195,6 +194,9 @@ async def update_api_user(request):
     api_user = await Account.get(id=request.json.get("id"), deleted=False)
     if not api_user:
         raise CustomError(ErrorCode.ApiUserNotFound)
+
+    if api_user.username == "system":
+        raise CustomError(ErrorCode.SystemUserCannotBeDeleted)
 
     await request.ctx.cache_client.delete(f"account_{api_user.id}")
 

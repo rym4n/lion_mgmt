@@ -98,3 +98,4 @@ class ErrorCode(BaseErrorCode):
     ConfigFileGenerateError = ErrorData(4071, "配置文件生成失败，请联系管理进行处理")
 
     InvalidState = ErrorData(4072, "非法的state参数")
+    SystemUserCannotBeDeleted = ErrorData(4073, "系统用户禁止删除")
