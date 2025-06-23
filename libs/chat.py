@@ -73,7 +73,7 @@ async def creat_message(room_id, log, user_id, redis):
     lock_key = f"create_message_lock:{key_hash}"
 
     # 尝试获取锁（60 秒自动过期）
-    got_lock = await redis.set(lock_key, "1", ex=60, nx=True)
+    got_lock = await redis.set(lock_key, "1", ex=5, nx=True)
 
     if got_lock:
         # 当前是第一个拿到锁的人，创建记录
@@ -87,7 +87,7 @@ async def creat_message(room_id, log, user_id, redis):
         )
     else:
         # 其他执行引擎进入这里：稍等一下，再尝试获取已创建的记录
-        for _ in range(10):
+        for i in range(5):
             msg = await Message.get_or_none(
                 content=str(log),
                 room_id=room_id,
@@ -95,7 +95,7 @@ async def creat_message(room_id, log, user_id, redis):
             )
             if msg:
                 break
-            await asyncio.sleep(0.1)  # 稍等一会（100ms），避免疯狂查询
+            await asyncio.sleep(0.01 * (i + 1))  # 指数轮询避免数据库压力过大
 
     message_data = {
         "type": "runlog",
