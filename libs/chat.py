@@ -64,12 +64,11 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
 
 
 # 创建消息
-async def creat_message(room_id, log, user_id, redis):
+async def creat_message(room_id, log, user, redis):
     sender = await Account.get(username="system")
-    receiver = await Account.get(id=user_id)
 
     # 构造一个唯一 key（防止内容太长，建议 hash）
-    key_hash = hashlib.sha1(f"{room_id}:{user_id}:{str(log)}".encode()).hexdigest()
+    key_hash = hashlib.sha1(f"{room_id}:{str(log)}".encode()).hexdigest()
     lock_key = f"create_message_lock:{key_hash}"
 
     # 尝试获取锁（60 秒自动过期）
@@ -83,7 +82,7 @@ async def creat_message(room_id, log, user_id, redis):
             room_id=room_id,
             content=str(log),
             image_content="",
-            receiver=receiver
+            receiver=user
         )
     else:
         # 其他执行引擎进入这里：稍等一下，再尝试获取已创建的记录
@@ -91,7 +90,7 @@ async def creat_message(room_id, log, user_id, redis):
             msg = await Message.get_or_none(
                 content=str(log),
                 room_id=room_id,
-                receiver=receiver
+                receiver=user
             )
             if msg:
                 break
