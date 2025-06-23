@@ -64,14 +64,16 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
 async def creat_message(room_id, log, user):
     sender = await Account.get(username="system")
     user = await Account.get(id=user)
-    msg = await Message.create(
-        type="runlog",
-        sender=sender,
-        room_id=room_id,
-        content=str(log),
-        image_content="",
-        receiver=user
-    )
+    msg = await Message.get_or_none(content=str(log))
+    if not msg:
+        msg = await Message.create(
+            type="runlog",
+            sender=sender,
+            room_id=room_id,
+            content=str(log),
+            image_content="",
+            receiver=user
+        )
     message_data = {
         "type": "runlog",
         "message_id": str(msg.id),
