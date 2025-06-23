@@ -344,6 +344,7 @@ async def update_event_ingestion(request):
         sasl_password: sasl密码 (str)   事件来源类型为kafka时才传，默认为None       非必填
         enabled_status: 上游接入(int) 启用为 1 ，禁用为 0      非必填
         linked_execution: 联动执行 (int) 启用为 1 ，禁用为 0      非必填
+        execution_id: 执行的配置id (str)  非必填 更新联动执行时必填
     """
     data = request.json  # 只解析一次
     event_id = data.get('id')
@@ -359,6 +360,7 @@ async def update_event_ingestion(request):
     sasl_password = data.get('sasl_password', None)
     enabled_status = data.get('enabled_status', None)
     linked_execution = data.get('linked_execution', None)
+    execution_id = data.get('execution_id', None)
     key_delimiter_value = data.get('key_delimiter_value', None)
     key_value_delimiter = data.get('key_value_delimiter', None)
     event = await EventsIngestion.get(id=event_id)
@@ -428,24 +430,21 @@ async def update_event_ingestion(request):
                 await f.write(yaml_str)
         event.enabled_status = enabled_status
     if linked_execution in [0, 1]:
+        event_related_script = await EventRelatedScript.get_or_none(id=execution_id)
         if linked_execution == 0:
-            event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_id).all()
-            for event_related_script in event_related_scripts:
-                for script_id in event_related_script.script_id:
-                    process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
-                    supervisor.stop_process(process_name)
+            for script_id in event_related_script.script_id:
+                process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
+                supervisor.stop_process(process_name)
         else:
-            event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_id).all()
-            for event_related_script in event_related_scripts:
-                for script_id in event_related_script.script_id:
-                    process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
-                    command = f"python start.py -m auto -f {script_id} -t {event_related_script.topic}"
-                    supervisor.add_process(process_name, command)
-                    result = supervisor.start_process(process_name)
-                    if result:
-                        event.execution_health_status = "healthy"
-
-        event.linked_execution = linked_execution
+            for script_id in event_related_script.script_id:
+                process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
+                command = f"python start.py -m auto -f {script_id} -t {event_related_script.topic}"
+                supervisor.add_process(process_name, command)
+                result = supervisor.start_process(process_name)
+                if result:
+                    event.execution_health_status = "healthy"
+        event_related_script.status = linked_execution
+        await event_related_script.save()
 
     event.updator = request.ctx.session["account_info"]
 
@@ -736,6 +735,7 @@ async def export_event_ingestion_script(request):
             event_data = event.json
             event_data["vector_config"] = str(event.vector_config)
             event_data.pop("file_path", None)
+            event_data["vector_config_raw"] = event.vector_config_raw
 
             filename = f"{sanitize_filename(event.event_ingestion_name or 'unnamed')}.json"
             zipf.writestr(filename, orjson.dumps(event_data))
@@ -743,7 +743,7 @@ async def export_event_ingestion_script(request):
     buffer.seek(0)
     return response.raw(buffer.read(), headers={
         "Content-Type": "application/zip",
-        "Content-Disposition": f"attachment; filename=event_configs.zip"
+        "Content-Disposition": f"attachment; filename=event_configs_{str(int(time.time()))}.zip"
     })
 
 
@@ -759,45 +759,56 @@ async def import_event_ingestion_script(request):
     if not files:
         raise CustomError(ErrorCode.ParameterError)
     file_results = []
+
     for file in files:
-        vector_config = orjson.loads(file.body.decode('utf-8'))
-        if await EventsIngestion.filter(event_ingestion_name=vector_config.get("event_ingestion_name"),
-                                        deleted=False).exists():
-            file_results.append({f"{vector_config['event_ingestion_name']}": "已存在相同名称的事件接入"})
-            continue
+        zip_data = io.BytesIO(file.body)
+        with zipfile.ZipFile(zip_data, 'r') as zf:
+            for name in zf.namelist():
+                if not name.endswith(".json"):
+                    continue
+                vector_config = orjson.loads(zf.read(name))
 
-        if await EventsIngestion.filter(syslog_config=vector_config.get("syslog_config"), deleted=False).exists():
-            file_results.append({f"{vector_config['event_ingestion_name']}": "当前已存在端口一致的事件接入了"})
-            continue
+                if await EventsIngestion.filter(event_ingestion_name=vector_config.get("event_ingestion_name"),
+                                                deleted=False).exists():
+                    file_results.append({f"{vector_config['event_ingestion_name']}": "已存在相同名称的事件接入"})
+                    continue
 
-        letters = string.ascii_letters  # 包含 a-zA-Z
-        vector_name = ''.join(random.choices(letters, k=12))
+                if await EventsIngestion.filter(syslog_config=vector_config.get("syslog_config"), deleted=False).exists():
+                    file_results.append({f"{vector_config['event_ingestion_name']}": "当前已存在端口一致的事件接入了"})
+                    continue
 
-        raw_config = vector_config["vector_config"]
-        if isinstance(raw_config, str):
-            raw_config_dict = ast.literal_eval(raw_config)
-        else:
-            raw_config_dict = raw_config
-        json_str = orjson.dumps(raw_config_dict).decode()
-        json_str = json_str.replace(vector_config["vector_name"], vector_name)
-        data = orjson.loads(json_str)
+                letters = string.ascii_letters  # 包含 a-zA-Z
+                vector_name = ''.join(random.choices(letters, k=12))
 
-        path = f"{VECTOR_CFG}/{vector_name}.yaml"
-        async with aiofile.AIOFile(path, 'w', encoding='utf-8') as f:
-            yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
-            await f.write(yaml_str)
+                raw_config = vector_config["vector_config"]
+                if isinstance(raw_config, str):
+                    raw_config_dict = ast.literal_eval(raw_config)
+                else:
+                    raw_config_dict = raw_config
+                json_str = orjson.dumps(raw_config_dict).decode()
+                json_str = json_str.replace(vector_config["vector_name"], vector_name)
+                data = orjson.loads(json_str)
 
-        await EventsIngestion.create(event_ingestion_name=vector_config.get("event_ingestion_name"),
-                                     event_ingestion_describe=vector_config.get("event_ingestion_describe"),
-                                     event_source_type=vector_config.get("event_source_type"),
-                                     transforms_type=vector_config.get("transforms_type"),
-                                     enabled_status=vector_config.get("enabled_status"),
-                                     creator=request.ctx.session['account_info'],
-                                     updator=request.ctx.session['account_info'], file_path=path,
-                                     linked_execution=vector_config.get("linked_execution"),
-                                     syslog_config=vector_config.get("syslog_config"), vector_name=vector_name)
+                path = f"{VECTOR_CFG}/{vector_name}.yaml"
+                async with aiofile.AIOFile(path, 'w', encoding='utf-8') as f:
+                    yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+                    await f.write(yaml_str)
 
-        file_results.append({f"{vector_config['event_ingestion_name']}": "上传成功"})
+                await EventsIngestion.create(event_ingestion_name=vector_config.get("event_ingestion_name"),
+                                             event_ingestion_describe=vector_config.get("event_ingestion_describe"),
+                                             event_source_type=vector_config.get("event_source_type"),
+                                             transforms_type=vector_config.get("transforms_type"),
+                                             enabled_status=vector_config.get("enabled_status"),
+                                             creator=request.ctx.session['account_info'],
+                                             updator=request.ctx.session['account_info'], file_path=path,
+                                             linked_execution=vector_config.get("linked_execution"),
+                                             syslog_config=vector_config.get("syslog_config"), vector_name=vector_name,
+                                             vector_config_raw=vector_config.get("vector_config_raw"),
+                                             vector_config=data, convert_health_status=vector_config.get("convert_health_status"),
+                                             enabled_health_status=vector_config.get("enabled_health_status"),
+                                             execution_health_status=vector_config.get("execution_health_status"))
+
+                file_results.append({f"{vector_config['event_ingestion_name']}": "上传成功"})
 
     return response_ok(file_results)
 
