@@ -31,9 +31,7 @@ class Playbook(BaseModel):
             "remark": self.remark,
             "tags": [tag.name for tag in self.tags] if self.tags else [],
             "scenes": [scene.name for scene in self.scenes] if self.scenes else [],
-            "internal": self.internal,
-            "users_id": [user.id for user in self.users] if self.users else [],
-            "roles_id": [role.id for role in self.roles] if self.roles else [],
+            "internal": self.internal
         }
 
     class Meta:
