@@ -105,8 +105,8 @@ class PlaybookPermissions(BaseModel):
     """
 
     pb = fields.ForeignKeyField("models.Playbook", unique=True, related_name="playbook_permissions", description="剧本")
-    roles_id: list[str] = fields.JSONField(default=[], description="有权限执行的角色")
-    users_id: list[str] = fields.JSONField(default=[], description="有权限执行的用户")
+    roles = fields.ManyToManyField("models.Role", through="pb_role", description="有权限执行的角色")
+    users = fields.ManyToManyField("models.Account", through="pb_user", description="有权限执行的用户")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -117,8 +117,8 @@ class PlaybookPermissions(BaseModel):
             "id": self.id,
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
-            "users_id": self.users_id,
-            "roles_id": self.roles_id,
+            "users_id": [user.id for user in self.users] if self.users else [],
+            "roles_id": [role.id for role in self.roles] if self.roles else [],
         }
 
     class Meta:
