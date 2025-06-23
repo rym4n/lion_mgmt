@@ -20,7 +20,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_order_version
-from models import Playbook, Scene, ToolAction, Tool, Runlog, Tag, PlaybookVersion, PlaybookPermissions
+from models import Playbook, Scene, ToolAction, Tool, Runlog, Tag, PlaybookVersion, Account, Role
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
@@ -596,12 +596,21 @@ async def add_permission(request):
     playbook_id = request.json.get("playbook_id")
     users_id = list(set(request.json.get("users_id", [])))
     roles_id = list(set(request.json.get("roles_id", [])))
-    if not playbook_id:
-        raise CustomError(ErrorCode.ParameterError)
-    if not isinstance(users_id, list) or not isinstance(roles_id, list):
+    if not playbook_id or not isinstance(users_id, list) or not isinstance(roles_id, list):
         raise CustomError(ErrorCode.ParameterError)
 
-    await PlaybookPermissions.update_or_create(pb_id=playbook_id, defaults={'users_id': users_id, 'roles_id': roles_id})
+    playbook, _ = await Playbook.get_or_create(id=playbook_id)
+
+    await playbook.users.clear()
+    await playbook.roles.clear()
+
+    users = await Account.filter(id__in=users_id).all()
+    if users:
+        await playbook.users.add(*users)
+
+    roles = await Role.filter(id__in=roles_id).all()
+    if roles:
+        await playbook.roles.add(*roles)
 
     return response_ok("success")
 
@@ -619,9 +628,9 @@ async def select_permission_all(request):
     if not playbook_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    permission = await PlaybookPermissions.get_or_none(pb_id=playbook_id)
+    playbook = await Playbook.get_or_none(id=playbook_id).prefetch_related("users", "roles")
 
-    return response_ok(permission.json if permission else {})
+    return response_ok({"users": [str(user.id) for user in playbook.users], "roles": [str(role.id) for role in playbook.roles]} if playbook else {})
 
 
 @workflow_bp.post("/permissions/judge")
@@ -644,13 +653,15 @@ async def judge_permission(request):
     user_id = str(user.id)
     role_ids = {str(role.id) for role in user.roles}
 
-    permission = await PlaybookPermissions.get_or_none(pb_id=playbook_id)
+    playbook = await Playbook.get_or_none(id=playbook_id).prefetch_related("users", "roles")
 
-    if not permission:
+    if not playbook:
         return response_ok(False)
 
-    if user_id in permission.users_id or role_ids.intersection(permission.roles_id) or permission.users_id == [
-        "*"] or permission.roles_id == ["*"]:
+    roles = [str(role.id) for role in playbook.roles]
+    users = [str(user.id) for user in playbook.users]
+
+    if user_id in users or role_ids.intersection(roles) or playbook.users == ["*"] or playbook.roles == ["*"]:
         return response_ok(True)
 
     return response_ok(False)
