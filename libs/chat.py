@@ -66,13 +66,17 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
 # 创建消息
 async def creat_message(room_id, log, user, redis):
     sender = await Account.get(username="system")
+    user = await Account.get(id=user)
 
     # 构造一个唯一 key（防止内容太长，建议 hash）
     key_hash = hashlib.sha1(f"{room_id}:{str(log)}".encode()).hexdigest()
     lock_key = f"create_message_lock:{key_hash}"
 
     # 尝试获取锁（5 秒自动过期）
-    got_lock = await redis.add(lock_key, "1", ttl=5)
+    try:
+        got_lock = await redis.add(lock_key, "1", ttl=5)
+    except ValueError:
+        got_lock = False  # key 已存在，没拿到锁
 
     if got_lock:
         # 当前是第一个拿到锁的人，创建记录
