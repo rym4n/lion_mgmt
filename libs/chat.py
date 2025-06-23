@@ -1,10 +1,13 @@
 # coding=utf-8
+import asyncio
 import time
 import traceback
 from datetime import datetime
 
 import orjson
 import pytz
+
+import hashlib
 from aiocache import caches
 from openai import OpenAI
 from sanic.exceptions import WebsocketClosed
@@ -61,25 +64,72 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
 
 
 # 创建消息
-async def creat_message(room_id, log, user):
+# async def creat_message(room_id, log, user):
+#     sender = await Account.get(username="system")
+#     user = await Account.get(id=user)
+#     msg = await Message.get_or_none(content=str(log))
+#     if not msg:
+#         msg = await Message.create(
+#             type="runlog",
+#             sender=sender,
+#             room_id=room_id,
+#             content=str(log),
+#             image_content="",
+#             receiver=user
+#         )
+#     message_data = {
+#         "type": "runlog",
+#         "message_id": str(msg.id),
+#         "sender_id": sender.id,
+#         "sender_name": sender.username,
+#         "content": str(log),
+#         "image_content": "",
+#         "timestamp": str(msg.ctime),
+#         "room_id": room_id
+#     }
+#     return message_data
+
+
+async def creat_message(room_id, log, user_id, redis):
     sender = await Account.get(username="system")
-    user = await Account.get(id=user)
-    msg = await Message.get_or_none(content=str(log))
-    if not msg:
+    receiver = await Account.get(id=user_id)
+    content_str = str(log)
+
+    # 构造一个唯一 key（防止内容太长，建议 hash）
+    key_hash = hashlib.sha1(f"{room_id}:{receiver.id}:{content_str}".encode()).hexdigest()
+    lock_key = f"create_message_lock:{key_hash}"
+
+    # 尝试获取锁（60 秒自动过期）
+    got_lock = await redis.set(lock_key, "1", ex=60, nx=True)
+
+    if got_lock:
+        # 当前是第一个拿到锁的人，创建记录
         msg = await Message.create(
             type="runlog",
             sender=sender,
             room_id=room_id,
-            content=str(log),
+            content=content_str,
             image_content="",
-            receiver=user
+            receiver=receiver
         )
+    else:
+        # 其他执行引擎进入这里：稍等一下，再尝试获取已创建的记录
+        for _ in range(10):
+            msg = await Message.get_or_none(
+                content=content_str,
+                room_id=room_id,
+                receiver=receiver
+            )
+            if msg:
+                break
+            await asyncio.sleep(0.1)  # 稍等一会（100ms），避免疯狂查询
+
     message_data = {
         "type": "runlog",
         "message_id": str(msg.id),
         "sender_id": sender.id,
         "sender_name": sender.username,
-        "content": str(log),
+        "content": content_str,
         "image_content": "",
         "timestamp": str(msg.ctime),
         "room_id": room_id
@@ -186,7 +236,7 @@ class ChatManager:
                     msg = orjson.loads(message['data'])
                     if "log" in msg.keys():
                         message['data'] = orjson.dumps(
-                            await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"]))
+                            await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"]), redis = self.cache_client)
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
