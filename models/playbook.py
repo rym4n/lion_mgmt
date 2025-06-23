@@ -15,6 +15,8 @@ class Playbook(BaseModel):
     tags = fields.ManyToManyField("models.Tag", null=True, through="playbook_tag")
     scenes = fields.ManyToManyField("models.Scene", null=True, through="playbook_scene")
     internal = fields.BooleanField(default=False, description="是否内置剧本")
+    roles = fields.ManyToManyField("models.Role", through="Playbook_role", description="有权限执行的角色")
+    users = fields.ManyToManyField("models.Account", through="Playbook_user", description="有权限执行的用户")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -29,7 +31,9 @@ class Playbook(BaseModel):
             "remark": self.remark,
             "tags": [tag.name for tag in self.tags] if self.tags else [],
             "scenes": [scene.name for scene in self.scenes] if self.scenes else [],
-            "internal": self.internal
+            "internal": self.internal,
+            "users_id": [user.id for user in self.users] if self.users else [],
+            "roles_id": [role.id for role in self.roles] if self.roles else [],
         }
 
     class Meta:
@@ -97,30 +101,3 @@ class PlaybookVersion(BaseModel):
         ordering = ["-utime"]
 
         unique_together = (("playbook", "version"),)
-
-
-class PlaybookPermissions(BaseModel):
-    """
-    剧本权限表
-    """
-
-    pb = fields.ForeignKeyField("models.Playbook", unique=True, related_name="playbook_permissions", description="剧本")
-    roles = fields.ManyToManyField("models.Role", through="pb_role", description="有权限执行的角色")
-    users = fields.ManyToManyField("models.Account", through="pb_user", description="有权限执行的用户")
-
-    def validate(self) -> None:
-        raise NotImplementedError
-
-    @property
-    def json(self) -> dict:
-        return {
-            "id": self.id,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-            "utime": strip_timezone_to_seconds(self.utime),
-            "users_id": [user.id for user in self.users] if self.users else [],
-            "roles_id": [role.id for role in self.roles] if self.roles else [],
-        }
-
-    class Meta:
-        table = "playbook_permissions"
-        ordering = ["-utime"]
