@@ -211,9 +211,6 @@ class ChatManager:
                         message['data'] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"]), redis=self.cache_client)
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
-                        logger.info(f"消息：{message['data'].decode()}")
-                        logger.info(f"room_id：{room_id}")
-                        logger.info(f"当前房间：{self.active_connections[k]['current_room']}")
                         if room_id and self.active_connections[k]['current_room'] == room_id:
                             await self.active_connections[k]['conn'].send(message['data'].decode())
                         elif room_id is None:
