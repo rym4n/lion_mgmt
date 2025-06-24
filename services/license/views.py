@@ -390,10 +390,10 @@ async def get_license(request: Request):
             if "*:*" in role.permissions:
                 role.permissions = MENU_DICT.keys()
             for permission in role.permissions:
-                if permission.split(":")[0] not in menu_dict.keys():
-                    menu_dict[permission.split(":")[0]] = MENU_DICT[permission.split(":")[0]]
+                if MENU_DICT[permission.split(":")[0]]["path"] not in menu_dict.keys():
+                    menu_dict[MENU_DICT[permission.split(":")[0]]["path"]] = MENU_DICT[permission.split(":")[0]]
                 else:
-                    menu_dict[permission.split(":")[0]]["children"].append(MENU_DICT[permission.split(":")[0]]["children"])
+                    menu_dict[MENU_DICT[permission.split(":")[0]]["path"]]["children"].append(MENU_DICT[permission.split(":")[0]]["children"])
 
     return response_ok(list(menu_dict.values()))
 
