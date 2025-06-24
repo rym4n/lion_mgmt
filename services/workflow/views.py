@@ -107,13 +107,11 @@ async def list_workflow(request):
         size: 可选，分页的大小，默认10
         keyword: 可选，搜索时使用，支持搜索名称或备注
         scene: 可选，搜索时使用，支持搜索场景
-        status: 可选，搜索时使用，支持搜索状态，0:草稿 1:已发布
         tag: 可选，搜索时使用，支持搜索标签 str
     """
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 10))
     scenes = request.json.get("scene", [])
-    status = request.json.get("status")
     tags = request.json.get("tag", [])
 
     offset = (page - 1) * size
@@ -131,8 +129,6 @@ async def list_workflow(request):
     if scenes:
         base_query = base_query.filter(scenes__name__in=scenes)
 
-    if status:
-        base_query = base_query.filter(status=int(status))
     if request.json.get("tag"):
         base_query = base_query.filter(tags__name__in=tags)
 
