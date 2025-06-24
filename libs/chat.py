@@ -1,10 +1,13 @@
 # coding=utf-8
+import asyncio
 import time
 import traceback
 from datetime import datetime
 
 import orjson
 import pytz
+
+import hashlib
 from aiocache import caches
 from openai import OpenAI
 from sanic.exceptions import WebsocketClosed
@@ -61,17 +64,43 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
 
 
 # 创建消息
-async def creat_message(room_id, log, user):
+async def creat_message(room_id, log, user, redis):
     sender = await Account.get(username="system")
     user = await Account.get(id=user)
-    msg = await Message.create(
-        type="runlog",
-        sender=sender,
-        room_id=room_id,
-        content=str(log),
-        image_content="",
-        receiver=user
-    )
+
+    # 构造一个唯一 key（防止内容太长，建议 hash）
+    key_hash = hashlib.sha1(f"{room_id}:{str(log)}".encode()).hexdigest()
+    lock_key = f"create_message_lock:{key_hash}"
+
+    # 尝试获取锁（5 秒自动过期）
+    try:
+        got_lock = await redis.add(lock_key, "1", ttl=5)
+    except ValueError:
+        got_lock = False  # key 已存在，没拿到锁
+
+    if got_lock:
+        # 当前是第一个拿到锁的人，创建记录
+        logger.info("1111111111111111111111")
+        msg = await Message.create(
+            type="runlog",
+            sender=sender,
+            room_id=room_id,
+            content=str(log),
+            image_content="",
+            receiver=user
+        )
+    else:
+        # 其他执行引擎进入这里：稍等一下，再尝试获取已创建的记录
+        for i in range(5):
+            msg = await Message.get_or_none(
+                content=str(log),
+                room_id=room_id,
+                receiver=user
+            )
+            if msg:
+                break
+            await asyncio.sleep(0.01 * (i + 1))  # 指数轮询避免数据库压力过大
+
     message_data = {
         "type": "runlog",
         "message_id": str(msg.id),
@@ -82,6 +111,7 @@ async def creat_message(room_id, log, user):
         "timestamp": str(msg.ctime),
         "room_id": room_id
     }
+
     return message_data
 
 
@@ -183,8 +213,7 @@ class ChatManager:
                         continue
                     msg = orjson.loads(message['data'])
                     if "log" in msg.keys():
-                        message['data'] = orjson.dumps(
-                            await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"]))
+                        message['data'] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"], redis=self.redis))
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
@@ -214,9 +243,7 @@ class ChatManager:
         if data:
             # 消费作战室的执行记录
             data["log"] = log
-            data["updator"] = data["updator"].id
-            message_data = data
-            await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+            await self.msg_pub.publish("wr_group_chat", orjson.dumps(data).decode())
             event = await Events.get_or_none(room_id=data["room_id"])
             if event:
                 if log.get("node_type") == "start-node":
@@ -300,6 +327,7 @@ class ChatManager:
             raise Exception("消息不能为空")
 
         # 保存消息到数据库
+        logger.info("22222222222222222222222")
         message = await Message.create(
             type="public",
             sender=user,
@@ -343,6 +371,7 @@ class ChatManager:
             raise Exception("消息不能为空")
         sender = await Account.get(username="system")
         # 保存消息到数据库
+        logger.info("333333333333333333")
         message = await Message.create(
             type="public",
             sender=user,
@@ -372,6 +401,7 @@ class ChatManager:
         full_response = await self.stream_chat_completion(content, message_data)
 
         if full_response:
+            logger.info("444444444444444444")
             await Message.create(
                 type="ai",
                 sender=sender,
@@ -398,7 +428,7 @@ class ChatManager:
 
             # 获取或创建私聊房间
             chat_room = await get_or_create_private_chat_room(self.redis, user, receiver)
-
+            logger.info("555555555555555555")
             message = await Message.create(
                 type="private",
                 sender=user,
@@ -473,7 +503,7 @@ class ChatManager:
         room = await Room.get_or_none(id=room_id)
         if not room:
             raise Exception("作战室不存在")
-
+        logger.info("666666666666666666666666")
         announcement = await Message.create(
             type="announcement",
             sender=user,

@@ -13,7 +13,7 @@ class ToolAction(BaseModel):
 
     tool_name: str = fields.CharField(max_length=255, null=True, description="工具名称")
     version_number: str = fields.CharField(max_length=50, null=True, description="版本号")
-    action: list[str] = fields.JSONField(null=True, description="动作")
+    action = fields.JSONField(null=True, description="动作")
     playbook: list[str] = fields.JSONField(null=True, description="绑定的剧本列表")
 
     def validate(self) -> None:
@@ -152,8 +152,8 @@ class ActionPermissions(BaseModel):
     action_name: str = fields.CharField(max_length=255, description="动作名称")
     action_description: str = fields.CharField(max_length=255, description="动作描述")
     tool_name: str = fields.CharField(max_length=255, description="工具名称")
-    roles_id: list[str] = fields.JSONField(default=[], description="有权限执行的角色")
-    users_id: list[str] = fields.JSONField(default=[], description="有权限执行的用户")
+    roles = fields.JSONField(default=[], description="有权限执行的角色")
+    users = fields.JSONField(default=[], description="有权限执行的用户")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -167,8 +167,8 @@ class ActionPermissions(BaseModel):
             "action_name": self.action_name,
             "action_description": self.action_description,
             "tool_name": self.tool_name,
-            "users_id": self.users_id,
-            "roles_id": self.roles_id,
+            "users_id": self.users,
+            "roles_id": self.roles,
         }
 
     class Meta:
