@@ -314,6 +314,6 @@ async def set_ai(request):
 
     for a in args:
         if params.get(a):
-            await Config.update_or_create(key=a, value=params[a], module="ai")
+            await Config.update_or_create(key=a, defaults={"value":params[a]}, module="ai")
 
     return response_ok('success')

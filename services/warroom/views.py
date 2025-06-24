@@ -339,12 +339,19 @@ async def query_messages(request: Request):
         ).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
         message_list = []
         for msg in reversed(messages):
+            if msg.type == "runlog":
+                if msg.is_recalled:
+                    content = "[已撤回]"
+                else:
+                    content = orjson.loads(msg.content)
+            else:
+                content = "[已撤回]" if msg.is_recalled else msg.content
             message_list.append({
                 "type": msg.type,
                 "message_id": str(msg.id),
                 "sender_id": str(msg.sender.id),
                 "sender_name": msg.sender.display_name,
-                "content": "[已撤回]" if msg.is_recalled else msg.content,
+                "content": content,
                 "image_content": msg.image_content,
                 "timestamp": str(msg.ctime),
                 "room_id": room_id,
