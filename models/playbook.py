@@ -1,6 +1,7 @@
 # coding=utf-8
 
 from tortoise import fields
+from tortoise.indexes import Index
 
 from libs.utils import strip_timezone_to_seconds
 from models.base import BaseModel
@@ -39,6 +40,15 @@ class Playbook(BaseModel):
         ordering = ["-utime"]
 
         unique_together = (("name", "deleted"),)
+        indexes = [
+            # 优化后的覆盖索引（合并过滤/排序/查询字段）
+            Index(
+                fields=["deleted", "status", "-utime", "name", "remark"]
+            ),
+            # 关联字段索引保持不变
+            Index(fields=["scenes__name"]),
+            Index(fields=["tags__name"])
+        ]
 
 
 class PlaybookVersion(BaseModel):

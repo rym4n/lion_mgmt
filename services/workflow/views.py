@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 # coding=utf-8
 import asyncio
+import datetime
 import os
 import time
-import datetime
-import pytz
 from collections import defaultdict
 
 import aiofile
 import orjson
+import pytz
 from sanic import Blueprint
-from tortoise.expressions import Q
+from tortoise.expressions import Q, RawSQL
 from tortoise.functions import Count
 from tortoise.transactions import in_transaction
 
@@ -112,44 +112,53 @@ async def list_workflow(request):
     """
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 10))
+    scenes = request.json.get("scene", [])
+    status = request.json.get("status")
+    tags = request.json.get("tag", [])
+
     offset = (page - 1) * size
     limit = size
     # 分页查询Account，返回总数和数据
-    condition = Q(deleted=False)
+    base_query = Playbook.filter(Q(deleted=False)).prefetch_related(
+        "scenes", "tags"
+    )
     if request.json.get("keyword"):
         # 模糊搜索name字段和remark字段
         keyword = request.json.get("keyword")
-        condition = condition & (Q(name__icontains=keyword) | Q(remark__icontains=keyword))
-    if request.json.get("scene"):
-        scenes = await Scene.filter(name__in=request.json.get("scene")).all()
-        if scenes:
-            condition = condition & Q(scenes__in=scenes)
-    status = request.json.get("status")
+        base_query = base_query.filter(
+            Q(name__icontains=keyword) | Q(remark__icontains=keyword)
+        )
+    if scenes:
+        base_query = base_query.filter(scenes__name__in=scenes)
+
     if status:
-        condition = condition & Q(status=status)
+        base_query = base_query.filter(status=int(status))
     if request.json.get("tag"):
-        tags = await Tag.filter(name__in=request.json.get("tag")).all()
-        if tags:
-            condition = condition & Q(tags__in=tags)
+        base_query = base_query.filter(tags__name__in=tags)
 
-    playbooks = await Playbook.filter(condition).annotate(
+    ordered_query = base_query.order_by("-utime").annotate(
+        row_number=RawSQL(f"ROW_NUMBER() OVER(ORDER BY utime DESC)")
+    )
+
+    paginated = await ordered_query.annotate(
         versions=Count("playbook_versions")
-    ).offset(offset).limit(limit).order_by("-utime").prefetch_related("scenes", "tags")
+    ).filter(
+        row_number__gte=offset + 1,
+        row_number__lte=offset + size
+    ).values(
+        "id", "name", "remark", "status", "utime", "versions"
+    )
 
-    total = await Playbook.filter(condition).count()
+    # 获取总数（复用基础查询）
+    total = await base_query.count()
 
-    data = [{
-        **p.json,
-        "versions": p.versions  # 直接使用 annotate 的结果
-    } for p in playbooks]
-
-    return response_ok({
+    return {
         "total": total,
         "page": page,
         "size": size,
         "total_pages": (total + size - 1) // size,
-        "data": data
-    })
+        "data": paginated
+    }
 
 
 @workflow_bp.post("/versions")

@@ -168,7 +168,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
         single_progress = single_progress / 10
 
         with zip_ref.open(config_path) as config_file:
-            config_data = orjson.loads(config_file.read().decode("utf-8"))
+            config_data = orjson.loads(config_file.read().decode())
 
         tool_name = config_data.get("name")
         pattern = r'^[A-Za-z][A-Za-z0-9_]*$'
@@ -261,7 +261,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
         await resp.send(f"data: 解压进度：{percent}%\n\n")
 
         with zip_ref.open(py_files_dict[py_file_name]) as py_file:
-            py_data = py_file.read().decode("utf-8")
+            py_data = py_file.read().decode()
 
         if any(f"def {class_name}(" not in py_data for class_name in class_name_list):
             return config_data, version, tool_name, "Python文件内容错误"
@@ -394,7 +394,7 @@ async def enrich_tool(tool, cache_client):
     if os.path.exists(logo_path):
         async with aiofile.AIOFile(logo_path, 'rb') as logo_file:
             logo_data = await logo_file.read()
-            tool["logo"] = base64.b64encode(logo_data).decode("utf-8")
+            tool["logo"] = base64.b64encode(logo_data).decode()
     tool.pop("path", None)
     return tool
 
@@ -597,7 +597,7 @@ async def add_tool_resource(request):
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
 
-    tr = await ToolResources.create(tool_name=tool_name, name=name, engine=engine, resources=orjson.dumps(resources).decode("utf-8"),
+    tr = await ToolResources.create(tool_name=tool_name, name=name, engine=engine, resources=orjson.dumps(resources).decode(),
                                     creator=request.ctx.session['account_info'].username,
                                     updater=request.ctx.session['account_info'].username)
 
@@ -662,7 +662,7 @@ async def update_tool_resource(request):
         tool_resource.engine = engine
 
     if resources:
-        tool_resource.resources = orjson.dumps(resources).decode("utf-8")
+        tool_resource.resources = orjson.dumps(resources).decode()
         r = {k: resources[k].get('value') or resources[k].get('default_value', '') for k in resources}
         r[tool_resource.id + "_name"] = name
         await caches.get("redis_chat").set("resource_" + tool_resource.id, r)
