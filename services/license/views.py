@@ -395,7 +395,7 @@ async def get_license(request: Request):
                 else:
                     menu_dict[permission.split(":")[0]]["children"].append(MENU_DICT[permission.split(":")[0]]["children"])
 
-    return response_ok(menu_dict.values())
+    return response_ok(list(menu_dict.values()))
 
 
 @license_bp.post("/show")
