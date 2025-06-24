@@ -142,7 +142,7 @@ async def list_workflow(request):
         row_number__gte=offset + 1,
         row_number__lte=offset + size
     ).values(
-        "id", "name", "remark", "status", "utime", "versions"
+        "id", "name", "remark", "utime", "versions"
     )
 
     # 获取总数（复用基础查询）
