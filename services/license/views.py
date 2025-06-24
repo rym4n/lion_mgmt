@@ -23,132 +23,322 @@ _all__ = ["license_bp"]
 
 MENU_DICT = {
     "role": {
-        "title": "系统设置",
         "path": "/System",
-        "children": [{
-            "title": "角色管理",
-            "path": "/System/Role/Role"
-        }]
-    },
-    "user": {
-        "title": "系统设置",
-        "path": "/System",
-        "children": [{
-            "title": "账号管理",
-            "path": "/System/User/User"
-        }]
-    },
-    "event": {
-        "title": "事件管理",
-        "path": "/EventModule",
-        "children": [{
-            "title": "事件列表",
-            "path": "/EventModule/eventList"
-        }]
-    },
-    "ingestion": {
-        "title": "事件管理",
-        "path": "/EventModule",
-        "children": [{
-            "title": "事件接入",
-            "path": "/EventModule/eventIngestion"
-        }]
-    },
-    "var": {
-        "title": "全局变量",
-        "path": "/var",
-        "children": [{
-            "title": "全局变量",
-            "path": "/var/index"
-        }]
-    },
-    "approve": {
-        "title": "人工任务",
-        "path": "/approve",
-        "children": [{
-            "title": "人工任务",
-            "path": "/approve/index"
-        }]
-    },
-    "tool": {
-        "title": "应用市场",
-        "path": "/toolManagement",
-        "children": [{
-            "title": "应用市场",
-            "path": "/toolManagement/index"
-        }]
-    },
-    "workflow": {
-        "title": "剧本管理",
-        "path": "/playbook",
-        "children": [{
-            "title": "剧本管理",
-            "path": "/playbook/index"
-        }]
-    },
-    "system": {
-        "title": "系统设置",
-        "path": "/System",
+        "meta": {
+            "requireRoot": True,
+            "icon": "material-symbols-light:settings",
+            "title": "系统设置",
+            "rank": 99
+        },
         "children": [
             {
-                "title": "系统状态",
-                "path": "/System/Status/Status"
+                "path": "/System/Role/Role",
+                "name": "Role",
+                "component": "views/System/Role/Role.vue",
+                "meta": {
+                    "icon": "mdi:account-group-outline",
+                    "title": "角色管理"
+                }
+            }
+        ]
+    },
+    "user": {
+        "path": "/System",
+        "meta": {
+            "requireRoot": True,
+            "icon": "material-symbols-light:settings",
+            "title": "系统设置",
+            "rank": 99
+        },
+        "children": [
+            {
+                "path": "/System/User/User",
+                "name": "User",
+                "component": "views/System/User/User.vue",
+                "meta": {
+                    "icon": "bxs:user",
+                    "title": "账号管理"
+                }
+            }
+        ]
+    },
+    "event": {
+        "path": "/EventModule",
+        "component": "layout/index.vue",
+        "meta": {
+            "icon": "ep:document",
+            "title": "事件管理",
+            "rank": 20
+        },
+        "children": [
+            {
+                "path": "/EventModule/eventList",
+                "name": "eventList",
+                "component": "views/eventModule/eventList/index.vue",
+                "meta": {
+                    "icon": "material-symbols:event-list-outline",
+                    "title": "事件列表"
+                }
+            }
+        ]
+    },
+    "ingestion": {
+        "path": "/EventModule",
+        "component": "layout/index.vue",
+        "meta": {
+            "icon": "ep:document",
+            "title": "事件管理",
+            "rank": 20
+        },
+        "children": [
+            {
+                "path": "/EventModule/eventIngestion",
+                "name": "eventIngestion",
+                "component": "views/eventModule/event_ingestion/index.vue",
+                "meta": {
+                    "icon": "tabler:timeline-event",
+                    "title": "事件接入"
+                }
+            }
+        ]
+    },
+    "var": {
+        "path": "/var",
+        "component": "layout/index.vue",
+        "redirect": "/var/index",
+        "meta": {
+            "icon": "codicon:variable-group",
+            "title": "全局变量",
+            "rank": 70
+        },
+        "children": [
+            {
+                "path": "/var/index",
+                "name": "varIndex",
+                "component": "views/var/index.vue",
+                "meta": {
+                    "title": "全局变量"
+                }
+            }
+        ]
+    },
+    "approve": {
+        "path": "/approve",
+        "component": "layout/index.vue",
+        "redirect": "/approve/index",
+        "meta": {
+            "icon": "carbon:customer-service",
+            "title": "人工任务",
+            "rank": 60
+        },
+        "children": [
+            {
+                "path": "/approve/index",
+                "name": "approveIndex",
+                "component": "views/approve/index.vue",
+                "meta": {
+                    "title": "人工任务"
+                }
+            }
+        ]
+    },
+    "tool": {
+        "path": "/toolManagement",
+        "component": "layout/index.vue",
+        "redirect": "/toolManagement/index",
+        "meta": {
+            "icon": "icon-park-solid:all-application",
+            "title": "应用市场",
+            "rank": 30
+        },
+        "children": [
+            {
+                "path": "/toolManagement/index",
+                "name": "index",
+                "component": "views/toolManagement/index.vue",
+                "meta": {
+                    "title": "应用市场"
+                }
+            }
+        ]
+    },
+    "workflow": {
+        "path": "/playbook",
+        "component": "layout/index.vue",
+        "redirect": "/playbook/index",
+        "meta": {
+            "icon": "mdi:script-text-outline",
+            "title": "剧本管理",
+            "rank": 40
+        },
+        "children": [
+            {
+                "path": "/playbook/index",
+                "name": "playbookIndex",
+                "component": "views/playbook/index.vue",
+                "meta": {
+                    "title": "剧本管理"
+                }
+            }
+        ]
+    },
+    "system": {
+        "path": "/System",
+        "meta": {
+            "requireRoot": True,
+            "icon": "material-symbols-light:settings",
+            "title": "系统设置",
+            "rank": 99
+        },
+        "children": [
+            {
+                "path": "/System/Status/Status",
+                "name": "Status",
+                "component": "views/System/Status/Status.vue",
+                "meta": {
+                    "icon": "mdi:server-outline",
+                    "title": "系统状态"
+                }
             },
             {
-                "title": "个性化设置",
-                "path": "/System/Set/Set"
-            },
+                "path": "/System/Set/Set",
+                "name": "Set",
+                "component": "views/System/Set/Set.vue",
+                "meta": {
+                    "icon": "mingcute:settings-6-line",
+                    "title": "个性化设置"
+                }
+            }
         ]
     },
     "scene": {
-        "title": "剧本管理",
         "path": "/playbook",
-        "children": [{
-            "title": "场景管理",
-            "path": "/playbook/components/sceneView"
-        }]
+        "component": "layout/index.vue",
+        "redirect": "/playbook/index",
+        "meta": {
+            "icon": "mdi:script-text-outline",
+            "title": "剧本管理",
+            "rank": 40
+        },
+        "children": [
+            {
+                "path": "/playbook/components/sceneView",
+                "name": "playbookSceneView",
+                "component": "views/playbook/components/sceneView.vue",
+                "meta": {
+                    "title": "场景管理",
+                    "showLink": False,
+                    "activePath": "/playbook/index"
+                }
+            }
+        ]
     },
     "timed": {
-        "title": "定时任务",
         "path": "/timerTasks",
-        "children": [{
+        "component": "layout/index.vue",
+        "redirect": "/timerTasks/index",
+        "meta": {
+            "icon": "mdi:clock-outline",
             "title": "定时任务",
-            "path": "/timerTasks/index"
-        }]
+            "rank": 50
+        },
+        "children": [
+            {
+                "path": "/timerTasks/index",
+                "name": "timerTasksIndex",
+                "component": "views/timerTasks/index.vue",
+                "meta": {
+                    "title": "定时任务"
+                }
+            }
+        ]
     },
     "lic": {
-        "title": "系统设置",
         "path": "/System",
-        "children": [{
-            "title": "产品许可",
-            "path": "/System/license/index"
-        }]
+        "meta": {
+            "requireRoot": True,
+            "icon": "material-symbols-light:settings",
+            "title": "系统设置",
+            "rank": 99
+        },
+        "children": [
+            {
+                "path": "/System/license/index",
+                "name": "license",
+                "component": "views/System/license/index.vue",
+                "meta": {
+                    "icon": "mdi:license",
+                    "title": "产品许可"
+                }
+            }
+        ]
     },
     "warroom": {
-        "title": "作战室",
         "path": "/warroom",
-        "children": [{
+        "component": "layout/index.vue",
+        "redirect": "/warroom/index",
+        "meta": {
+            "icon": "icon-park-outline:computer",
             "title": "作战室",
-            "path": "/warroom/index/:roomID?"
-        }]
+            "rank": 10
+        },
+        "children": [
+            {
+                "path": "/warroom/index/:roomId?",
+                "name": "warroom",
+                "component": "views/warroom/WarRoom.vue",
+                "meta": {
+                    "title": "作战室",
+                    "activePath": "/warroom/index/:roomId?"
+                },
+                "props": True
+            }
+        ]
     },
     "dashboard": {
-        "title": "仪表盘",
         "path": "/",
-        "children": [{
+        "name": "Home",
+        "component": "layout/index.vue",
+        "redirect": "/welcome",
+        "meta": {
+            "icon": "clarity:dashboard-line",
             "title": "仪表盘",
-            "path": "/welcome"
-        }]
+            "rank": 0
+        },
+        "children": [
+            {
+                "path": "/welcome",
+                "name": "Welcome",
+                "component": "views/welcome/index.vue",
+                "meta": {
+                    "title": "仪表盘",
+                    "showLink": True
+                }
+            }
+        ]
     },
     "audit": {
-        "title": "系统设置",
         "path": "/System",
-        "children": [{
-            "title": "审计日志",
-            "path": "/System/Audit/Audit"
-        }]
+        "meta": {
+            "requireRoot": True,
+            "icon": "material-symbols-light:settings",
+            "title": "系统设置",
+            "rank": 99
+        },
+        "children": [
+            {
+                "path": "/System/Audit/Audit",
+                "name": "Audit",
+                "component": "views/System/Audit/Audit.vue",
+                "meta": {
+                    "icon": "ix:log",
+                    "title": "审计日志"
+                }
+            }
+        ]
     }
 }
+
 
 @license_bp.post("/verify")
 @requires_permission("lic:c")
@@ -235,7 +425,7 @@ async def get_all_license(request: Request):
 
     for key, item in group_list.items():
         val = None
-        if key in ["剧本编排","应用集成"]:
+        if key in ["剧本编排", "应用集成"]:
             if int(item.get("value", 0)) == 99999:
                 val = "无限"
             else:

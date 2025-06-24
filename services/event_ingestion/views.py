@@ -545,6 +545,8 @@ async def binding_event_ingestion_script(request):
         script_ids: 剧本ID (list)
         event_name: 事件名称 (str)  用户选择的事件名称，传default
         自定义名称案例：to_string!(.name) + "_" + to_string(.datetime_str) + "234"
+        number: 去重条数 (int)  非必填，选择去重时才填写 默认5000, 最大10000
+        fields: 字段 (list)  非必填，选择去重时才填写
         }]
     """
     event_ingestion_id = request.json.get('event_ingestion_id')
@@ -569,18 +571,33 @@ async def binding_event_ingestion_script(request):
 
         timestamp_int = str(int(time.time() * 1000))
         topic = f"{event.vector_name}_{timestamp_int}"
+        # 如果选择去重则添加去重transforms
+        if request_data.get('fields') and request_data.get('number'):
+            data.setdefault("transforms", {})[f"{topic}_dedupe_transforms"] = {
+                "type": "dedupe",
+                # 如果之前配置了转换配置则用转换后的配置，否则用原始配置
+                "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [
+                        event.vector_name],
+                "cache": {
+                    "num_events": request_data.get('number')
+                },
+                "fields": {
+                    "match": request_data.get('fields')
+                }
+            }
+        # 如果配置了判断规则，则添加判断transforms
         if conditions:
             conditional_statements = get_conditional_statements(conditions)
 
             data.setdefault("transforms", {})[f"{topic}_transforms"] = {
                 "type": "filter",
-                "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [
-                    event.vector_name],
+                # 如果之前配置了去重则用去重后的配置，否则用原始配置
+                "inputs": [f"{topic}_dedupe_transforms"] if request_data.get('fields') and request_data.get('number') else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]),
                 "condition": f"{conditional_statements}"
             }
         data.setdefault("transforms", {})[f"{topic}_kafka_transforms"] = {
             "type": "remap",
-            "inputs": [f"{topic}_transforms"],
+            "inputs": [f"{topic}_transforms"] if conditions else ([f"{topic}_dedupe_transforms"] if request_data.get('fields') and request_data.get('number') else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])),
             "source": """
 .aioe_event_id = uuid_v4()
 """
@@ -634,7 +651,8 @@ del(.datetime_str)
         await EventRelatedScript.create(condition=conditions,
                                         event_ingestion_id=event_ingestion_id,
                                         script_id=script_ids, topic=topic,
-                                        event_name=event_name)
+                                        event_name=event_name, numbers=request_data.get('number'),
+                                        fields=request_data.get('fields'))
 
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
@@ -677,6 +695,9 @@ async def unbundled_event_ingestion_script(request):
                 else:  # 剧本id小于等于1代表单个剧本绑定到同一个判断条件，需删除数据库数据和vector配置文件
                     if f"{ers.topic}_transforms" in data["transforms"]:
                         del data["transforms"][f"{ers.topic}_transforms"]
+
+                    if f"{ers.topic}_dedupe_transforms" in data["transforms"]:
+                        del data["transforms"][f"{ers.topic}_dedupe_transforms"]
 
                     if f"{ers.topic}_kafka_transforms" in data["transforms"]:
                         del data["transforms"][f"{ers.topic}_kafka_transforms"]
