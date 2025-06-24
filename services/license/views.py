@@ -393,7 +393,8 @@ async def get_license(request: Request):
                 if MENU_DICT[permission.split(":")[0]]["path"] not in menu_dict.keys():
                     menu_dict[MENU_DICT[permission.split(":")[0]]["path"]] = MENU_DICT[permission.split(":")[0]]
                 else:
-                    menu_dict[MENU_DICT[permission.split(":")[0]]["path"]]["children"].append(children for children in MENU_DICT[permission.split(":")[0]]["children"])
+                    for children in MENU_DICT[permission.split(":")[0]]["children"]:
+                        menu_dict[MENU_DICT[permission.split(":")[0]]["path"]]["children"].append(children)
 
     return response_ok(list(menu_dict.values()))
 
