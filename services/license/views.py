@@ -297,7 +297,6 @@ MENU_DICT = {
     },
     "dashboard": {
         "path": "/",
-        "name": "Home",
         "component": "layout/index.vue",
         "redirect": "/welcome",
         "meta": {
