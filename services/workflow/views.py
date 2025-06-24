@@ -239,8 +239,7 @@ async def edit_workflow_flow(request):
     # 已发布的剧本是不允许修改的
     if pv.status == 1:
         pv = await PlaybookVersion.create(playbook=pv.playbook, version=gen_order_version(), flow_json=pv.flow_json,
-                                          change_desc=None, status=0,
-                                          creator=request.ctx.session['account_info'],
+                                          change_desc=None, status=0, creator=request.ctx.session['account_info'],
                                           updator=request.ctx.session['account_info'])
     else:
         await pv.save()
@@ -267,11 +266,7 @@ async def publish_workflow(request):
     """
     if not request.json.get("id") or not request.json.get("change_desc"):
         raise CustomError(ErrorCode.ParameterError)
-    await PlaybookVersion.filter(id=request.json.get("id"), status=0).update(status=1, updator=request.ctx.session[
-        'account_info'],
-                                                                             version=gen_order_version(),
-                                                                             change_desc=request.json.get(
-                                                                                 "change_desc"))
+    await PlaybookVersion.filter(id=request.json.get("id"), status=0).update(status=1, updator=request.ctx.session['account_info'], version=gen_order_version(), change_desc=request.json.get("change_desc"))
     return response_ok("剧本发布成功")
 
 

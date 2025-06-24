@@ -1121,9 +1121,9 @@ async def health_check_config(request):
     if switch == 'on':
         if not cron:
             raise CustomError(ErrorCode.ParameterError)
-        await Config.update_or_create(key="health_check_cron", value=cron, module="tool")
+        await Config.update_or_create(key="health_check_cron", defaults={'value': cron}, module="tool")
 
-    await Config.update_or_create(key="health_check_switch", value=switch, module="tool")
+    await Config.update_or_create(key="health_check_switch", defaults={'value': switch}, module="tool")
 
     return response_ok({"message": "资源健康检查配置修改成功"})
 
