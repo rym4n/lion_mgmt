@@ -384,15 +384,18 @@ async def get_license(request: Request):
     if not user:
         raise CustomError(ErrorCode.AccountNotFound)
 
-    menu_list = []
+    menu_dict = {}
     for role in user.roles:
         if role.permissions:
             if "*:*" in role.permissions:
                 return response_ok(list(MENU_DICT.values()))
             for permission in role.permissions:
-                menu_list.append(MENU_DICT[permission.split(":")[0]])
+                if permission.split(":")[0] not in menu_dict.keys():
+                    menu_dict[permission.split(":")[0]] = MENU_DICT[permission.split(":")[0]]
+                else:
+                    menu_dict[permission.split(":")[0]]["children"].append(MENU_DICT[permission.split(":")[0]]["children"])
 
-    return response_ok(menu_list)
+    return response_ok(menu_dict.values())
 
 
 @license_bp.post("/show")
