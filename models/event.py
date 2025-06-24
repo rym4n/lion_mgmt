@@ -116,6 +116,8 @@ class EventRelatedScript(BaseModel):
     script_id: list[str] = fields.JSONField(null=True, description="剧本id")
     event_name: str = fields.CharField(max_length=255, null=True, description="自定义事件名称")
     status: int = fields.IntField(max_length=50, default=0, description="是否开启联动执行")
+    numbers: int = fields.IntField(max_length=50, null=True, description="去重数量")
+    fields: list[str] = fields.JSONField(null=True, description="去重字段")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -131,7 +133,9 @@ class EventRelatedScript(BaseModel):
             "topic": self.topic,
             "script_id": self.script_id,
             "event_name": self.event_name,
-            "status": self.status
+            "status": self.status,
+            "numbers": self.numbers,
+            "fields": self.fields
         }
 
     class Meta:
