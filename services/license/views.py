@@ -179,7 +179,17 @@ MENU_DICT = {
                 "meta": {
                     "title": "剧本管理"
                 }
-            }
+            },
+            {
+                "path": "/playbook/index/:flow_id/:version_id/:status",
+                "name": "playbookEdit",
+                "component": "views/playbook/playbookEdit/index.vue",
+                "meta": {
+                    "showLink": False,
+                    "activePath": "/playbook/index",
+                    "title": "新建剧本"
+                }
+            },
         ]
     },
     "system": {
@@ -394,8 +404,11 @@ async def get_license(request: Request):
                 if MENU_DICT[permission.split(":")[0]]["path"] not in menu_dict.keys():
                     menu_dict[MENU_DICT[permission.split(":")[0]]["path"]] = MENU_DICT[permission.split(":")[0]]
                 else:
+                    existing_names = {c["path"] for c in menu_dict[MENU_DICT[permission.split(":")[0]]["path"]]["children"]}
                     for children in MENU_DICT[permission.split(":")[0]]["children"]:
-                        menu_dict[MENU_DICT[permission.split(":")[0]]["path"]]["children"].append(children)
+                        if children["path"] not in existing_names:
+                            existing_names.add(children["path"])
+                            menu_dict[MENU_DICT[permission.split(":")[0]]["path"]]["children"].append(children)
 
     return response_ok(list(menu_dict.values()))
 

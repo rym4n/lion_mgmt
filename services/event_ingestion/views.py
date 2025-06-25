@@ -513,7 +513,7 @@ async def get_event_ingestion_kafka_sample(request):
 
 
 @event_ingestion_bp.post('/binding')
-@requires_permission('ingestion:c')
+@requires_permission('ingestion:u')
 async def binding_event_ingestion_script(request):
     """
     绑定事件接入和剧本(需要事件创建权限)
@@ -734,7 +734,7 @@ async def unbundled_event_ingestion_script(request):
 
 
 @event_ingestion_bp.post('/export')
-@requires_permission('ingestion:a')
+@requires_permission('ingestion:r')
 async def export_event_ingestion_script(request):
     """
     导出事件接入(需要事件查看权限)
@@ -769,7 +769,7 @@ async def export_event_ingestion_script(request):
 
 
 @event_ingestion_bp.post('/import')
-@requires_permission('ingestion:a')
+@requires_permission('ingestion:c')
 async def import_event_ingestion_script(request):
     """
     导入事件
@@ -957,7 +957,7 @@ def check_vector_config(vector_config):
         yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
         tmp_file.write(yaml_str)
         tmp_file.flush()
-        logger.info(yaml_str)
+
         tmp_path = tmp_file.name
 
         result = run_linux_command(f'vector validate --config-yaml {tmp_path}')

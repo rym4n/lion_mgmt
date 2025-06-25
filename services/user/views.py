@@ -183,10 +183,10 @@ async def list_api_users(request):
 
 
 @user_bp.post("/del-token")
-@requires_permission("user:u")
+@requires_permission("user:d")
 async def update_api_user(request):
     """
-    删除API用户信息（需要user:u权限）
+    删除API用户信息（需要user:d权限）
 
     请求参数：
         id: 必填，API用户ID
@@ -368,10 +368,10 @@ async def update_user(request):
 
 
 @user_bp.post("/edit")
-@requires_permission("user:a")
+@requires_permission("user:u")
 async def edit_user(request):
     """
-    修改任意用户信息（需要user:a权限）
+    修改任意用户信息（需要user:u权限）
 
     请求参数：
         username: 必填，用户名
@@ -420,10 +420,10 @@ async def edit_user(request):
 
 
 @user_bp.post("/del")
-@requires_permission("user:a")
+@requires_permission("user:d")
 async def delelte_user(request):
     """
-    删除用户（需要user:a权限）
+    删除用户（需要user:d权限）
 
     请求参数：
         username: 用户名
@@ -433,10 +433,10 @@ async def delelte_user(request):
 
 
 @user_bp.post("/reset-mfa-key")
-@requires_permission("user:a")
+@requires_permission("user:u")
 async def refresh_mfa_key(request):
     """
-    重置MFA密钥（需要user:a权限）
+    重置MFA密钥（需要user:u权限）
 
     请求参数：
         username: 用户名
@@ -452,10 +452,10 @@ async def refresh_mfa_key(request):
 
 
 @user_bp.post("/set-user-role")
-@requires_permission("user:a")
+@requires_permission("user:u")
 async def assign_role_to_user(request):
     """
-    给账号分配角色（需要user:a权限）
+    给账号分配角色（需要user:u权限）
 
     请求参数：
         username: 用户名
@@ -503,3 +503,14 @@ async def oauth2_callback(request):
     user_info['aioe-auth'] = token
     user_info['redirect'] = request.args.get("redirect")
     return response_ok(user_info)
+
+
+@user_bp.post("role-list")
+async def role_list(request):
+    """
+    获取角色名称列表
+
+    无请求参数
+    """
+    roles = await Role.filter(deleted=False).all().values_list("name")
+    return response_ok([role[0] for role in roles])

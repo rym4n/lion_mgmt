@@ -31,6 +31,7 @@ PERMISSION_DICT = {
     "warroom": "warroom_bp"
 }
 
+
 @role_bp.post("/add")
 @requires_permission('role:c')
 async def add_role(request):
