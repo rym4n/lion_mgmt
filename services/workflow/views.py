@@ -657,3 +657,14 @@ async def judge_permission(request):
         return response_ok(True)
 
     return response_ok(False)
+
+
+@workflow_bp.post("/init")
+async def init_workflow_list(request):
+    """
+    获取当前场景名称，获取用户id、名称，获取角色名称、id
+    """
+    scene_name = await Scene.get_or_none(deleted=False, status=1).values("name")
+    users = await Account.filter(deleted=False).all().values_list("id", "username","display_name")
+    roles = await Role.filter(deleted=False).all().values_list("id", "name")
+    return response_ok({"scene": scene_name["name"], "users": [{"id": user[0], "username": user[1], "display_name": user[2]} for user in users], "roles": [{"id": role[0], "name": role[1]} for role in roles]})

@@ -8,10 +8,29 @@ from sanic.log import logger
 from sanic.request import Request
 
 from core.error_code import ErrorCode
+from libs.error_code.enum import ErrorData
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.utils import verify_license
 from settings import LICENSE_DIR
+
+MODEL_DICT = {
+    "role": "角色管理",
+    "user": "账号管理",
+    "event": "事件列表",
+    "ingestion": "事件接入",
+    "var": "全局变量",
+    "approve": "人工任务",
+    "tool": "应用市场",
+    "workflow": "剧本管理",
+    "system": "系统设置",
+    "scene": "场景管理",
+    "timed": "定时任务",
+    "lic": "产品许可",
+    "warroom": "作战室",
+    "dashboard": "仪表盘",
+    "audit": "审计日志"
+}
 
 
 async def check_permissions(request: Request, *required_permissions: str) -> bool:
@@ -27,7 +46,8 @@ async def check_permissions(request: Request, *required_permissions: str) -> boo
             for required_permission in required_permissions:
                 if check_wildcard(role_permission, required_permission):
                     return True
-    raise CustomError(ErrorCode.Unauthorized)
+    model = MODEL_DICT[request.name.split(".")[1]]
+    raise CustomError(ErrorData(4004, f"缺少{model}模块的操作权限"))
 
 
 def check_wildcard(wildcard: str, pattern: str):
