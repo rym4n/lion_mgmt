@@ -426,6 +426,8 @@ class ChatManager:
             # 获取或创建私聊房间
             chat_room = await get_or_create_private_chat_room(self.redis, user, receiver)
 
+            chat_room = await Room.get_or_none(id=chat_room["room_id"])
+
             message = await Message.create(
                 type="private",
                 sender=user,

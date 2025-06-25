@@ -21,7 +21,7 @@ _all__ = ["system_bp"]
 
 
 @system_bp.post("/upload")
-@requires_permission("system:u,c")
+@requires_permission("system:c")
 async def upload_image(request):
     """
     保存系统定制配置（如果 system_version 存在则更新，否则创建）  需要系统配置新增和修改权限

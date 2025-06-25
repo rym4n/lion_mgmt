@@ -1105,7 +1105,7 @@ async def delete_tag(request):
 
 
 @tools_bp.post("/health/check/config")
-@requires_permission("tool:u")
+@requires_permission("tool:c")
 async def health_check_config(request):
     """
     修改工具健康检查配置信息（需要工具更新权限）

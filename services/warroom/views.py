@@ -250,7 +250,7 @@ async def star_room(request: Request):
 
 
 @warroom_bp.post("/unstar_room")
-@requires_permission('warroom:r')
+@requires_permission('warroom:u')
 async def unstar_room(request: Request):
     """
     取消关注指定作战室
@@ -530,7 +530,7 @@ async def up_status(request):
 
 
 @warroom_bp.post("/run")
-@requires_permission("warroom:c")
+@requires_permission("warroom:r")
 async def run(request):
     """
     运行剧本或动作（需要作战室创建权限）

@@ -247,7 +247,7 @@ async def edit_workflow_flow(request):
 
 
 @workflow_bp.post("/publish")
-@requires_permission("workflow:p")
+@requires_permission("workflow:u")
 async def publish_workflow(request):
     """
     发布剧本
