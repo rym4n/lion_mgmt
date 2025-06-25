@@ -23,7 +23,7 @@ from libs import supervisor
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import get_client_ip, fetch_latest_messages, run_linux_command
-from models import PlaybookVersion
+from models import PlaybookVersion, Playbook
 from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS
 
@@ -343,8 +343,6 @@ async def update_event_ingestion(request):
         sasl_username: sasl用户名 (str)   事件来源类型为kafka时才传，默认为None       非必填
         sasl_password: sasl密码 (str)   事件来源类型为kafka时才传，默认为None       非必填
         enabled_status: 上游接入(int) 启用为 1 ，禁用为 0      非必填
-        linked_execution: 联动执行 (int) 启用为 1 ，禁用为 0      非必填
-        execution_id: 执行的配置id (str)  非必填 更新联动执行时必填
     """
     data = request.json  # 只解析一次
     event_id = data.get('id')
@@ -359,8 +357,6 @@ async def update_event_ingestion(request):
     sasl_username = data.get('sasl_username', None)
     sasl_password = data.get('sasl_password', None)
     enabled_status = data.get('enabled_status', None)
-    linked_execution = data.get('linked_execution', None)
-    execution_id = data.get('execution_id', None)
     key_delimiter_value = data.get('key_delimiter_value', None)
     key_value_delimiter = data.get('key_value_delimiter', None)
     event = await EventsIngestion.get(id=event_id)
@@ -429,22 +425,6 @@ async def update_event_ingestion(request):
                 yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
                 await f.write(yaml_str)
         event.enabled_status = enabled_status
-    if linked_execution in [0, 1]:
-        event_related_script = await EventRelatedScript.get_or_none(id=execution_id)
-        if linked_execution == 0:
-            for script_id in event_related_script.script_id:
-                process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
-                supervisor.stop_process(process_name)
-        else:
-            for script_id in event_related_script.script_id:
-                process_name = hashlib.md5(f"{event_id}_{script_id}".encode()).hexdigest()
-                command = f"python start.py -m auto -f {script_id} -t {event_related_script.topic}"
-                supervisor.add_process(process_name, command)
-                result = supervisor.start_process(process_name)
-                if result:
-                    event.execution_health_status = "healthy"
-        event_related_script.status = linked_execution
-        await event_related_script.save()
 
     event.updator = request.ctx.session["account_info"]
 
@@ -542,7 +522,8 @@ async def binding_event_ingestion_script(request):
             字段存在 exists ，字段不存在 !exists        value为空
             字段为空 is_empty ，字段不为空 !is_empty    value为空
             正则表达式 match  字段匹配正则表达式       value为正则表达式，如"^abc.*$"
-        script_ids: 剧本ID (list)
+        linked_execution: 联动执行 (int) 启用为 1 ，禁用为 0      非必填
+        script_ids: 剧本ID (list)      非必填，选择联动执行时必填
         event_name: 事件名称 (str)  用户选择的事件名称，传default
         自定义名称案例：to_string!(.name) + "_" + to_string(.datetime_str) + "234"
         number: 去重条数 (int)  非必填，选择去重时才填写 默认5000, 最大10000
@@ -568,6 +549,7 @@ async def binding_event_ingestion_script(request):
         conditions = request_data.get('conditions')
         script_ids = request_data.get('script_ids')
         event_name = request_data.get('event_name')
+        linked_execution = request_data.get('linked_execution')
 
         timestamp_int = str(int(time.time() * 1000))
         topic = f"{event.vector_name}_{timestamp_int}"
@@ -648,11 +630,27 @@ del(.datetime_str)
         if not result:
             raise CustomError(ErrorCode.ConfigFileGenerateError)
 
-        await EventRelatedScript.create(condition=conditions,
+        event_related_script = await EventRelatedScript.create(condition=conditions,
                                         event_ingestion_id=event_ingestion_id,
                                         script_id=script_ids, topic=topic,
                                         event_name=event_name, numbers=request_data.get('number'),
                                         fields=request_data.get('fields'))
+
+        if linked_execution in [0, 1]:
+            if linked_execution == 0:
+                for script_id in script_ids:
+                    process_name = hashlib.md5(f"{event.id}_{script_id}".encode()).hexdigest()
+                    supervisor.stop_process(process_name)
+            else:
+                for script_id in script_ids:
+                    process_name = hashlib.md5(f"{event.id}_{script_id}".encode()).hexdigest()
+                    command = f"python start.py -m auto -f {script_id} -t {topic}"
+                    supervisor.add_process(process_name, command)
+                    result = supervisor.start_process(process_name)
+                    if result:
+                        event.execution_health_status = "healthy"
+            event_related_script.status = linked_execution
+            await event_related_script.save()
 
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
@@ -969,3 +967,15 @@ def check_vector_config(vector_config):
             return True
     finally:
         os.unlink(tmp_path)
+
+
+@event_ingestion_bp.post('/playbook-list')
+async def playbook_list(request):
+    """
+    获取playbook名称和id列表
+
+    无请求参数
+    """
+    playbooks = await Playbook.filter(deleted=False).all().values_list("id", "name")
+
+    return response_ok([{"id": playbook[0], "name": playbook[1]} for playbook in playbooks])
