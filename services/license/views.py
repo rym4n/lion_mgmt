@@ -295,27 +295,27 @@ MENU_DICT = {
             }
         ]
     },
-    "dashboard": {
-        "path": "/",
-        "component": "layout/index.vue",
-        "redirect": "/welcome",
-        "meta": {
-            "icon": "clarity:dashboard-line",
-            "title": "仪表盘",
-            "rank": 0
-        },
-        "children": [
-            {
-                "path": "/welcome",
-                "name": "Welcome",
-                "component": "views/welcome/index.vue",
-                "meta": {
-                    "title": "仪表盘",
-                    "showLink": True
-                }
-            }
-        ]
-    },
+    # "dashboard": {
+    #     "path": "/",
+    #     "component": "layout/index.vue",
+    #     "redirect": "/welcome",
+    #     "meta": {
+    #         "icon": "clarity:dashboard-line",
+    #         "title": "仪表盘",
+    #         "rank": 0
+    #     },
+    #     "children": [
+    #         {
+    #             "path": "/welcome",
+    #             "name": "Welcome",
+    #             "component": "views/welcome/index.vue",
+    #             "meta": {
+    #                 "title": "仪表盘",
+    #                 "showLink": True
+    #             }
+    #         }
+    #     ]
+    # },
     "audit": {
         "path": "/System",
         "meta": {
@@ -389,6 +389,8 @@ async def get_license(request: Request):
             if "*:*" in role.permissions:
                 role.permissions = MENU_DICT.keys()
             for permission in role.permissions:
+                if permission.split(":")[0] == "dashboard":
+                    continue
                 if MENU_DICT[permission.split(":")[0]]["path"] not in menu_dict.keys():
                     menu_dict[MENU_DICT[permission.split(":")[0]]["path"]] = MENU_DICT[permission.split(":")[0]]
                 else:
