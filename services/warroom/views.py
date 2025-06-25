@@ -211,6 +211,9 @@ async def get_private_room(request: Request):
         raise CustomError(ErrorCode.AccountNotFound)
     # 先获取私聊作战室
     room_info = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
+    room = await Room.get_or_none(id=room_info['room_id'])
+    await user.star_rooms.add(room)
+    await partner.star_rooms.add(room)
     return response_ok(room_info)
 
 

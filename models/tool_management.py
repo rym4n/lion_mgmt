@@ -86,6 +86,7 @@ class ToolResourcesModel(BaseModel):
 
     tool_name: str = fields.CharField(max_length=255, description="工具名称")
     resources: list[str] = fields.JSONField(description="资源模板")
+    status: int = fields.IntField(default=0, description="是否必填 1:必填 0:非必填")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -98,6 +99,7 @@ class ToolResourcesModel(BaseModel):
             "utime": strip_timezone_to_seconds(self.utime),
             "tool_name": self.tool_name,
             "resources": self.resources,
+            "status": self.status
         }
 
     class Meta:
