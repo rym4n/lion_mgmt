@@ -559,7 +559,7 @@ async def binding_event_ingestion_script(request):
                 "type": "dedupe",
                 # 如果之前配置了转换配置则用转换后的配置，否则用原始配置
                 "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [
-                        event.vector_name],
+                    event.vector_name],
                 "cache": {
                     "num_events": request_data.get('number')
                 },
@@ -574,12 +574,16 @@ async def binding_event_ingestion_script(request):
             data.setdefault("transforms", {})[f"{topic}_transforms"] = {
                 "type": "filter",
                 # 如果之前配置了去重则用去重后的配置，否则用原始配置
-                "inputs": [f"{topic}_dedupe_transforms"] if request_data.get('fields') and request_data.get('number') else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]),
+                "inputs": [f"{topic}_dedupe_transforms"] if request_data.get('fields') and request_data.get(
+                    'number') else (
+                    [f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]),
                 "condition": f"{conditional_statements}"
             }
         data.setdefault("transforms", {})[f"{topic}_kafka_transforms"] = {
             "type": "remap",
-            "inputs": [f"{topic}_transforms"] if conditions else ([f"{topic}_dedupe_transforms"] if request_data.get('fields') and request_data.get('number') else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])),
+            "inputs": [f"{topic}_transforms"] if conditions else (
+                [f"{topic}_dedupe_transforms"] if request_data.get('fields') and request_data.get('number') else (
+                    [f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])),
             "source": """
 .aioe_event_id = uuid_v4()
 """
@@ -631,10 +635,11 @@ del(.datetime_str)
             raise CustomError(ErrorCode.ConfigFileGenerateError)
 
         event_related_script = await EventRelatedScript.create(condition=conditions,
-                                        event_ingestion_id=event_ingestion_id,
-                                        script_id=script_ids, topic=topic,
-                                        event_name=event_name, numbers=request_data.get('number'),
-                                        fields=request_data.get('fields'))
+                                                               event_ingestion_id=event_ingestion_id,
+                                                               script_id=script_ids, topic=topic,
+                                                               event_name=event_name,
+                                                               numbers=request_data.get('number'),
+                                                               fields=request_data.get('fields'))
 
         if linked_execution in [0, 1]:
             if linked_execution == 0:
@@ -792,7 +797,8 @@ async def import_event_ingestion_script(request):
                     file_results.append({f"{vector_config['event_ingestion_name']}": "已存在相同名称的事件接入"})
                     continue
 
-                if await EventsIngestion.filter(syslog_config=vector_config.get("syslog_config"), deleted=False).exists():
+                if await EventsIngestion.filter(syslog_config=vector_config.get("syslog_config"),
+                                                deleted=False).exists():
                     file_results.append({f"{vector_config['event_ingestion_name']}": "当前已存在端口一致的事件接入了"})
                     continue
 
@@ -823,7 +829,8 @@ async def import_event_ingestion_script(request):
                                              linked_execution=vector_config.get("linked_execution"),
                                              syslog_config=vector_config.get("syslog_config"), vector_name=vector_name,
                                              vector_config_raw=vector_config.get("vector_config_raw"),
-                                             vector_config=data, convert_health_status=vector_config.get("convert_health_status"),
+                                             vector_config=data,
+                                             convert_health_status=vector_config.get("convert_health_status"),
                                              enabled_health_status=vector_config.get("enabled_health_status"),
                                              execution_health_status=vector_config.get("execution_health_status"))
 
