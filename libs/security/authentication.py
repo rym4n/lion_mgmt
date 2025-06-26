@@ -16,7 +16,7 @@ from settings import SECRET, SESSION_ENCODING_ALGORITHM, AUTHENTICATION_SESSION_
 
 async def authenticate(request: Request):
     """
-    客户端身份验证会话和账户验证。 如果客户端身份验证会话在身份验证过程中过期，自动续期token。
+    客户端身份验证会话和账户验证
     """
     payload = await token_decode(request)
     validate_token(payload, request)
