@@ -103,10 +103,10 @@ async def upload_and_extract_zip(request):
             await resp.send(f"data: 解压进度：{percent}%\n\n")
             continue
 
-        config_data, version, tool, msg = await unzip(zip_file.body, creator, single_progress, resp,
+        config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, resp,
                                                            success_progress, request.ctx.cache_client)
         if msg != "success":
-            results.append({"tool": tool.name, "msg": msg})
+            results.append({"tool": tool_name, "msg": msg})
             data += 1
             percent = int((data * single_progress))
             success_progress = percent
@@ -116,7 +116,7 @@ async def upload_and_extract_zip(request):
         if "actions" in config_data.keys():
             action_key = "actions"
         else:
-            results.append({"tool": tool.name, "msg": "config文件内容错误，缺失actions字段"})
+            results.append({"tool": tool_name, "msg": "config文件内容错误，缺失actions字段"})
             data += 1
             percent = int((data * single_progress))
             success_progress = percent
@@ -124,18 +124,18 @@ async def upload_and_extract_zip(request):
         for action in config_data.get(action_key):
             await ToolAction.create(tool_name=config_data.get("name"), version_number=version,
                                     action=action)
-            actions = await ActionPermissions.filter(tool_name=tool.name, deleted=False).values("action_name")
+            actions = await ActionPermissions.filter(tool_name=tool_name, deleted=False).values("action_name")
             action_names = {action["action_name"] for action in actions}
 
             if action["func"] not in action_names:
-                await ActionPermissions.create(tool_name=tool.name, action_name=action["func"],
+                await ActionPermissions.create(tool_name=tool_name, action_name=action["func"],
                                                action_description=action.get("name") or "", roles=[],
                                                users=[])
-        configuration = await ToolResourcesModel.filter(tool_name=tool.name, deleted=False).first().values("resources")
+        configuration = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values("resources")
         if not configuration or configuration["resources"] != config_data.get("resource"):
-            await ToolResourcesModel.create(tool_name=tool.name, resources=config_data.get("resource") or {}, status=1 if (any(field.get("required") is True for field in config_data.get("resource").values())) else 0)
+            await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {}, status=1 if (any(field.get("required") is True for field in config_data.get("resource").values())) else 0)
 
-        results.append({"tool": tool.name, "msg": msg})
+        results.append({"tool": tool_name, "msg": msg})
 
         data += 1
         percent = int((data * single_progress))
@@ -306,7 +306,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
         # 将config数据存入redis
         await redis_client.set(name + "_" + version, config_data, ttl=2592000)
 
-        return config_data, version, tool, "success"
+        return config_data, version, tool.name, "success"
 
 
 @tools_bp.post("/all")
