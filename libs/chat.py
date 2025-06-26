@@ -264,11 +264,11 @@ class ChatManager:
                                                audit_node=log['audit_app'], next_node=log['start_app'],
                                                approve_type=int(log['approve_type']))
             if log.get('users'):
-                users = Account.filter(id__in=log['users']).all()
-                approve.approvers.add(*users)
+                users = await Account.filter(id__in=log['users'].split(',')).all()
+                await approve.approvers.add(*users)
             if log.get('roles'):
-                users = Account.filter(role_id__in=log['roles']).all()
-                approve.approvers.add(*users)
+                users = await Account.filter(role_id__in=log['roles'].split(',')).all()
+                await approve.approvers.add(*users)
         else:
             try:
                 await Runlog.create(**log)
