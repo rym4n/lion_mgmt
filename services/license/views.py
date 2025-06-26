@@ -18,7 +18,6 @@ from libs.utils import verify_license
 from models import Tool, Playbook, Account, PermissionsMenu
 from services.role.views import PERMISSION_DICT
 from settings import LICENSE_DIR
-from sanic.log import logger
 
 license_bp = Blueprint('license', url_prefix='/license')
 _all__ = ["license_bp"]
@@ -415,11 +414,10 @@ async def get_license(request: Request):
                 menu_dict["user_bp"] = True
                 permission_list = []
                 permissions = await PermissionsMenu.all().values()
-                for permission in permissions:
-                    if menu_dict[PERMISSION_DICT[permission["model"]]]:
-                        permission_list.append(permission["model"])
+                for permission_a in permissions:
+                    if menu_dict[PERMISSION_DICT[permission_a["model"]]]:
+                        permission_list.append(permission_a["model"])
                 role.permissions = permission_list
-                logger.info(permission_list)
             for permission in role.permissions:
                 if permission.split(":")[0] == "dashboard":
                     continue
