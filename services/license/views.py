@@ -86,8 +86,11 @@ async def get_license(request: Request):
                         if children["path"] not in existing_names:
                             existing_names.add(children["path"])
                             menu_dict[MENU_DICT[permission.split(":")[0]]["path"]]["children"].append(children)
+
     menus = list(menu_dict.values())
     for menu in menus:
+        if menu["children"][0]["meta"]["title"] in ["账号管理", "事件列表"]:
+            break
         menu["children"].reverse()
 
     return response_ok(menus)

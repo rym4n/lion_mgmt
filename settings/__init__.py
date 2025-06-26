@@ -204,26 +204,6 @@ CACHE = {
 }
 
 MENU_DICT = {
-    "role": {
-        "path": "/System",
-        "meta": {
-            "requireRoot": True,
-            "icon": "material-symbols-light:settings",
-            "title": "系统设置",
-            "rank": 99
-        },
-        "children": [
-            {
-                "path": "/System/Role/Role",
-                "name": "Role",
-                "component": "views/System/Role/Role.vue",
-                "meta": {
-                    "icon": "mdi:account-group-outline",
-                    "title": "角色管理"
-                }
-            }
-        ]
-    },
     "user": {
         "path": "/System",
         "meta": {
@@ -240,6 +220,26 @@ MENU_DICT = {
                 "meta": {
                     "icon": "bxs:user",
                     "title": "账号管理"
+                }
+            }
+        ]
+    },
+    "role": {
+        "path": "/System",
+        "meta": {
+            "requireRoot": True,
+            "icon": "material-symbols-light:settings",
+            "title": "系统设置",
+            "rank": 99
+        },
+        "children": [
+            {
+                "path": "/System/Role/Role",
+                "name": "Role",
+                "component": "views/System/Role/Role.vue",
+                "meta": {
+                    "icon": "mdi:account-group-outline",
+                    "title": "角色管理"
                 }
             }
         ]
