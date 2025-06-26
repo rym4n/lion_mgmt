@@ -202,3 +202,330 @@ CACHE = {
         'pool_max_size': 2
     }
 }
+
+MENU_DICT = {
+    "role": {
+        "path": "/System",
+        "meta": {
+            "requireRoot": True,
+            "icon": "material-symbols-light:settings",
+            "title": "系统设置",
+            "rank": 99
+        },
+        "children": [
+            {
+                "path": "/System/Role/Role",
+                "name": "Role",
+                "component": "views/System/Role/Role.vue",
+                "meta": {
+                    "icon": "mdi:account-group-outline",
+                    "title": "角色管理"
+                }
+            }
+        ]
+    },
+    "user": {
+        "path": "/System",
+        "meta": {
+            "requireRoot": True,
+            "icon": "material-symbols-light:settings",
+            "title": "系统设置",
+            "rank": 99
+        },
+        "children": [
+            {
+                "path": "/System/User/User",
+                "name": "User",
+                "component": "views/System/User/User.vue",
+                "meta": {
+                    "icon": "bxs:user",
+                    "title": "账号管理"
+                }
+            }
+        ]
+    },
+    "event": {
+        "path": "/EventModule",
+        "component": "layout/index.vue",
+        "meta": {
+            "icon": "ep:document",
+            "title": "事件管理",
+            "rank": 20
+        },
+        "children": [
+            {
+                "path": "/EventModule/eventList",
+                "name": "eventList",
+                "component": "views/eventModule/eventList/index.vue",
+                "meta": {
+                    "icon": "material-symbols:event-list-outline",
+                    "title": "事件列表"
+                }
+            }
+        ]
+    },
+    "ingestion": {
+        "path": "/EventModule",
+        "component": "layout/index.vue",
+        "meta": {
+            "icon": "ep:document",
+            "title": "事件管理",
+            "rank": 20
+        },
+        "children": [
+            {
+                "path": "/EventModule/eventIngestion",
+                "name": "eventIngestion",
+                "component": "views/eventModule/event_ingestion/index.vue",
+                "meta": {
+                    "icon": "tabler:timeline-event",
+                    "title": "事件接入"
+                }
+            }
+        ]
+    },
+    "var": {
+        "path": "/var",
+        "component": "layout/index.vue",
+        "redirect": "/var/index",
+        "meta": {
+            "icon": "codicon:variable-group",
+            "title": "全局变量",
+            "rank": 70
+        },
+        "children": [
+            {
+                "path": "/var/index",
+                "name": "varIndex",
+                "component": "views/var/index.vue",
+                "meta": {
+                    "title": "全局变量"
+                }
+            }
+        ]
+    },
+    "approve": {
+        "path": "/approve",
+        "component": "layout/index.vue",
+        "redirect": "/approve/index",
+        "meta": {
+            "icon": "carbon:customer-service",
+            "title": "人工任务",
+            "rank": 60
+        },
+        "children": [
+            {
+                "path": "/approve/index",
+                "name": "approveIndex",
+                "component": "views/approve/index.vue",
+                "meta": {
+                    "title": "人工任务"
+                }
+            }
+        ]
+    },
+    "tool": {
+        "path": "/toolManagement",
+        "component": "layout/index.vue",
+        "redirect": "/toolManagement/index",
+        "meta": {
+            "icon": "icon-park-solid:all-application",
+            "title": "应用市场",
+            "rank": 30
+        },
+        "children": [
+            {
+                "path": "/toolManagement/index",
+                "name": "index",
+                "component": "views/toolManagement/index.vue",
+                "meta": {
+                    "title": "应用市场"
+                }
+            }
+        ]
+    },
+    "workflow": {
+        "path": "/playbook",
+        "component": "layout/index.vue",
+        "redirect": "/playbook/index",
+        "meta": {
+            "icon": "mdi:script-text-outline",
+            "title": "剧本管理",
+            "rank": 40
+        },
+        "children": [
+            {
+                "path": "/playbook/index",
+                "name": "playbookIndex",
+                "component": "views/playbook/index.vue",
+                "meta": {
+                    "title": "剧本管理"
+                }
+            },
+            {
+                "path": "/playbook/index/:flow_id/:version_id/:status",
+                "name": "playbookEdit",
+                "component": "views/playbook/playbookEdit/index.vue",
+                "meta": {
+                    "showLink": False,
+                    "activePath": "/playbook/index",
+                    "title": "新建剧本"
+                }
+            },
+        ]
+    },
+    "system": {
+        "path": "/System",
+        "meta": {
+            "requireRoot": True,
+            "icon": "material-symbols-light:settings",
+            "title": "系统设置",
+            "rank": 99
+        },
+        "children": [
+            {
+                "path": "/System/Status/Status",
+                "name": "Status",
+                "component": "views/System/Status/Status.vue",
+                "meta": {
+                    "icon": "mdi:server-outline",
+                    "title": "系统状态"
+                }
+            },
+            {
+                "path": "/System/Set/Set",
+                "name": "Set",
+                "component": "views/System/Set/Set.vue",
+                "meta": {
+                    "icon": "mingcute:settings-6-line",
+                    "title": "个性化设置"
+                }
+            }
+        ]
+    },
+    "scene": {
+        "path": "/playbook",
+        "component": "layout/index.vue",
+        "redirect": "/playbook/index",
+        "meta": {
+            "icon": "mdi:script-text-outline",
+            "title": "剧本管理",
+            "rank": 40
+        },
+        "children": [
+            {
+                "path": "/playbook/components/sceneView",
+                "name": "playbookSceneView",
+                "component": "views/playbook/components/sceneView.vue",
+                "meta": {
+                    "title": "场景管理",
+                    "showLink": False,
+                    "activePath": "/playbook/index"
+                }
+            }
+        ]
+    },
+    "timed": {
+        "path": "/timerTasks",
+        "component": "layout/index.vue",
+        "redirect": "/timerTasks/index",
+        "meta": {
+            "icon": "mdi:clock-outline",
+            "title": "定时任务",
+            "rank": 50
+        },
+        "children": [
+            {
+                "path": "/timerTasks/index",
+                "name": "timerTasksIndex",
+                "component": "views/timerTasks/index.vue",
+                "meta": {
+                    "title": "定时任务"
+                }
+            }
+        ]
+    },
+    "lic": {
+        "path": "/System",
+        "meta": {
+            "requireRoot": True,
+            "icon": "material-symbols-light:settings",
+            "title": "系统设置",
+            "rank": 99
+        },
+        "children": [
+            {
+                "path": "/System/license/index",
+                "name": "license",
+                "component": "views/System/license/index.vue",
+                "meta": {
+                    "icon": "mdi:license",
+                    "title": "产品许可"
+                }
+            }
+        ]
+    },
+    "warroom": {
+        "path": "/warroom",
+        "component": "layout/index.vue",
+        "redirect": "/warroom/index",
+        "meta": {
+            "icon": "icon-park-outline:computer",
+            "title": "作战室",
+            "rank": 10
+        },
+        "children": [
+            {
+                "path": "/warroom/index/:roomId?",
+                "name": "warroom",
+                "component": "views/warroom/WarRoom.vue",
+                "meta": {
+                    "title": "作战室",
+                    "activePath": "/warroom/index/:roomId?"
+                },
+                "props": True
+            }
+        ]
+    },
+    # "dashboard": {
+    #     "path": "/",
+    #     "component": "layout/index.vue",
+    #     "redirect": "/welcome",
+    #     "meta": {
+    #         "icon": "clarity:dashboard-line",
+    #         "title": "仪表盘",
+    #         "rank": 0
+    #     },
+    #     "children": [
+    #         {
+    #             "path": "/welcome",
+    #             "name": "Welcome",
+    #             "component": "views/welcome/index.vue",
+    #             "meta": {
+    #                 "title": "仪表盘",
+    #                 "showLink": True
+    #             }
+    #         }
+    #     ]
+    # },
+    "audit": {
+        "path": "/System",
+        "meta": {
+            "requireRoot": True,
+            "icon": "material-symbols-light:settings",
+            "title": "系统设置",
+            "rank": 99
+        },
+        "children": [
+            {
+                "path": "/System/Audit/Audit",
+                "name": "Audit",
+                "component": "views/System/Audit/Audit.vue",
+                "meta": {
+                    "icon": "ix:log",
+                    "title": "审计日志"
+                }
+            }
+        ]
+    }
+}
