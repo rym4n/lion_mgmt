@@ -2,6 +2,8 @@
 from datetime import datetime
 
 import pytz
+from collections import defaultdict
+
 from sanic import Blueprint
 from tortoise.expressions import Q, RawSQL
 from tortoise.functions import Count
@@ -138,3 +140,52 @@ async def count_apps(request):
         counts=Count('tool_name', distinct=True)
     ).values("counts")
     return response_ok(result[0].get("counts"))
+
+
+@dashboard_bp.post('/success-rate')
+@requires_permission('dashboard:r')
+async def playbooks_success_rate(request):
+    """
+    获取剧本的成功率排行
+    """
+    processed_keys = set()
+    success_counter = defaultdict(lambda: {"success": 0, "fail": 0, "status": ""})
+
+    logs = await Runlog.filter(playbook_name__not="执行动作").all()
+
+    for log in logs:
+        key = (log.run_id, log.playbook_name)
+        if key not in processed_keys:
+            processed_keys.add(key)
+            if log.status == 0:
+                success_counter[log.playbook_name]["success"] += 1
+                success_counter[log.playbook_name]["status"] = "success"
+            else:
+                success_counter[log.playbook_name]["fail"] += 1
+                success_counter[log.playbook_name]["status"] = "fail"
+        else:
+            current = success_counter[log.playbook_name]
+            if log.status != 0:
+                if current["status"] == "fail":
+                    continue
+                current["fail"] += 1
+                current["success"] -= 1
+                current["status"] = "fail"
+            else:
+                if current["status"] == "success":
+                    continue
+                current["success"] += 1
+                current["fail"] -= 1
+                current["status"] = "success"
+
+    ranked_list = [
+        {
+            "playbook_name": name,
+            "success_rate": round(data["success"] / (data["success"] + data["fail"]) * 100, 2)
+        }
+        for name, data in success_counter.items()
+    ]
+
+    sorted_data = sorted(ranked_list, key=lambda x: x["success_rate"])
+    return response_ok(sorted_data)
+
