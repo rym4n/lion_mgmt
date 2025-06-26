@@ -446,7 +446,7 @@ async def query_messages(request: Request):
                 "receiver_id": msg.receiver.id,
                 "receiver_name": msg.receiver.display_name,
                 "is_recalled": msg.is_recalled,
-                "room_id": msg.room.id
+                "room_id": msg.room_id
             })
 
         return response_ok({
