@@ -131,7 +131,7 @@ async def list_workflow(request):
 
     playbooks = await Playbook.filter(condition).annotate(
         versions=Count("playbook_versions")
-    ).offset(offset).limit(limit).prefetch_related("scenes", "tags")
+    ).order_by("-utime").offset(offset).limit(limit).prefetch_related("scenes", "tags")
 
     total = await Playbook.filter(condition).count()
 

@@ -15,8 +15,10 @@ from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import verify_license
-from models import Tool, Playbook, Account
+from models import Tool, Playbook, Account, PermissionsMenu
+from services.role.views import PERMISSION_DICT
 from settings import LICENSE_DIR
+from sanic.log import logger
 
 license_bp = Blueprint('license', url_prefix='/license')
 _all__ = ["license_bp"]
@@ -397,7 +399,27 @@ async def get_license(request: Request):
     for role in user.roles:
         if role.permissions:
             if "*:*" in role.permissions:
-                role.permissions = MENU_DICT.keys()
+                menu_dict = {}
+                lic = load_license()
+                if not lic:
+                    raise CustomError(ErrorCode.InvalidLicenseError)
+                for item in lic["moduleList"]:
+                    module = item["module"]
+                    auth = item["auth"]
+
+                    if module not in menu_dict:
+                        menu_dict[module] = False
+                    if auth and int(lic["grouplist"][item["group"]]["expireTime"]) > int(time.time() * 1000):
+                        menu_dict[module] = True
+                menu_dict["license_bp"] = True
+                menu_dict["user_bp"] = True
+                permission_list = []
+                permissions = await PermissionsMenu.all().values()
+                for permission in permissions:
+                    if menu_dict[PERMISSION_DICT[permission["model"]]]:
+                        permission_list.append(permission["model"])
+                role.permissions = permission_list
+                logger.info(permission_list)
             for permission in role.permissions:
                 if permission.split(":")[0] == "dashboard":
                     continue
