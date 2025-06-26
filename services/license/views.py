@@ -429,8 +429,11 @@ async def get_license(request: Request):
                         if children["path"] not in existing_names:
                             existing_names.add(children["path"])
                             menu_dict[MENU_DICT[permission.split(":")[0]]["path"]]["children"].append(children)
+    menus = list(menu_dict.values())
+    for menu in menus:
+        menu["children"].reverse()
 
-    return response_ok(list(menu_dict.values()))
+    return response_ok(menus)
 
 
 @license_bp.post("/show")
