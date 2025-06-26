@@ -953,6 +953,7 @@ async def select_permission_all(request):
 
         permission_list.append({
             "name": permission.action_name,
+            "description": permission.action_description,
             "users_id": user_ids,
             "roles_id": role_ids
         })

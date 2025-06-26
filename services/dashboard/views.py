@@ -2,7 +2,7 @@
 from datetime import datetime
 
 import pytz
-from collections import defaultdict
+from tortoise import Tortoise
 
 from sanic import Blueprint
 from tortoise.expressions import Q, RawSQL
@@ -31,6 +31,7 @@ async def view_dashboard(request):
         static_type: str, 统计类型，选填值（group_by为空时必填）：count(数量), value(全部字段的值)
         group_by: str, 分组字段，选填值（static_type为空时必填）, events表可选字段：event_name, event_process_status, event_source, owner, room, updator, creator；runlog表可选字段：playbook_name
         count_key: str, 分组统计的时候按什么字段做统计，group_by 不为空的时候必填
+        count_distinct: bool, 是否统计数量的不同值，默认值：True
         start_time: str, 统计的起始时间
         end_time: str, 统计的结束时间
     """
@@ -69,12 +70,12 @@ async def view_dashboard(request):
             result = await table_dict.get(table_name).filter(q).annotate(
                 day=RawSQL("TO_CHAR(DATE_TRUNC('day', ctime), 'YYYY-MM-DD')")
             ).group_by('day').annotate(
-                counts=Count(count_key, distinct=True)
-            ).values("day", "counts")
+                counts=Count(count_key, distinct=params.get('count_distinct', True))
+            ).order_by("-counts").values("day", "counts")
         else:
             result = await table_dict.get(table_name).filter(q).annotate(
-                counts=Count(count_key, distinct=True)
-            ).group_by(group_by).values(group_by, "counts")
+                counts=Count(count_key, distinct=params.get('count_distinct', True))
+            ).group_by(group_by).order_by("-counts").values(group_by, "counts")
 
     return response_ok(result)
 
@@ -146,46 +147,26 @@ async def count_apps(request):
 @requires_permission('dashboard:r')
 async def playbooks_success_rate(request):
     """
-    获取剧本的成功率排行
+    获取剧本的成功率排行（修复成功率计算）
     """
-    processed_keys = set()
-    success_counter = defaultdict(lambda: {"success": 0, "fail": 0, "status": ""})
-
-    logs = await Runlog.filter(playbook_name__not="执行动作").all()
-
-    for log in logs:
-        key = (log.run_id, log.playbook_name)
-        if key not in processed_keys:
-            processed_keys.add(key)
-            if log.status == 0:
-                success_counter[log.playbook_name]["success"] += 1
-                success_counter[log.playbook_name]["status"] = "success"
-            else:
-                success_counter[log.playbook_name]["fail"] += 1
-                success_counter[log.playbook_name]["status"] = "fail"
-        else:
-            current = success_counter[log.playbook_name]
-            if log.status != 0:
-                if current["status"] == "fail":
-                    continue
-                current["fail"] += 1
-                current["success"] -= 1
-                current["status"] = "fail"
-            else:
-                if current["status"] == "success":
-                    continue
-                current["success"] += 1
-                current["fail"] -= 1
-                current["status"] = "success"
-
-    ranked_list = [
-        {
-            "playbook_name": name,
-            "success_rate": round(data["success"] / (data["success"] + data["fail"]) * 100, 2)
-        }
-        for name, data in success_counter.items()
-    ]
-
-    sorted_data = sorted(ranked_list, key=lambda x: x["success_rate"])
-    return response_ok(sorted_data)
-
+    sql = """
+        SELECT
+            playbook_name,
+            ROUND(SUM(CASE WHEN has_fail = 0 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 2) AS success_rate
+        FROM (
+            SELECT
+                run_id,
+                playbook_name,
+                MAX(CASE WHEN status != 0 THEN 1 ELSE 0 END) AS has_fail
+            FROM runlog
+            WHERE playbook_name != '执行动作'
+            GROUP BY run_id, playbook_name
+        ) AS deduplicated
+        GROUP BY playbook_name
+        ORDER BY success_rate;
+    """
+    async with in_transaction() as conn:
+        rows = await conn.execute_query_dict(sql)
+    for row in rows:
+        row["success_rate"] = float(row["success_rate"])
+    return response_ok(rows)
