@@ -74,7 +74,26 @@ async def get_license(request: Request):
     for role in user.roles:
         if role.permissions:
             if "*:*" in role.permissions:
-                role.permissions = MENU_DICT.keys()
+                menu_dict_a = {}
+                lic = load_license()
+                if not lic:
+                    raise CustomError(ErrorCode.InvalidLicenseError)
+                for item in lic["moduleList"]:
+                    module = item["module"]
+                    auth = item["auth"]
+
+                    if module not in menu_dict_a:
+                        menu_dict_a[module] = False
+                    if auth and int(lic["grouplist"][item["group"]]["expireTime"]) > int(time.time() * 1000):
+                        menu_dict_a[module] = True
+                menu_dict_a["license_bp"] = True
+                menu_dict_a["user_bp"] = True
+                permission_list = []
+                permissions = await PermissionsMenu.all().values()
+                for permission_a in permissions:
+                    if menu_dict_a[PERMISSION_DICT[permission_a["model"]]]:
+                        permission_list.append(permission_a["model"])
+                role.permissions = permission_list
             for permission in role.permissions:
                 if permission.split(":")[0] == "dashboard":
                     continue

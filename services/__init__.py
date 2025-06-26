@@ -49,6 +49,8 @@ def init_shared_ctx(app: Sanic) -> None:
 def register_blueprints(app: Sanic) -> None:
     app.blueprint(license_bp)
     app.blueprint(user_bp)
+    app.blueprint(scene_bp)
+    app.blueprint(dashboard_bp)
 
     try:
         bp_dict = {

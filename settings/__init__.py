@@ -221,7 +221,16 @@ MENU_DICT = {
                     "icon": "bxs:user",
                     "title": "账号管理"
                 }
-            }
+            },
+            {
+                "path": "/System/Oauth/Oauth",
+                "name": "Oauth",
+                "component": "views/System/Oauth/Oauth.vue",
+                "meta": {
+                    "icon": "tabler:brand-oauth",
+                    "title": "SSO集成"
+                }
+            },
         ]
     },
     "role": {
