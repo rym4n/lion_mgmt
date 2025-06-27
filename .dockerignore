@@ -45,5 +45,4 @@ __pycache__/
 logs/
 .onedev-buildspec.yml
 
-migrations/
 data/
