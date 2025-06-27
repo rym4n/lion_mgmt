@@ -11,12 +11,14 @@ from core.error_code import ErrorCode
 from libs.error_code.enum import ErrorData
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
-from libs.utils import verify_license
+from libs.utils import verify_license, get_client_ip
 from models import PermissionsMenu
 from settings import LICENSE_DIR
 
 
 async def check_permissions(request: Request, *required_permissions: str) -> bool:
+    if request.path == '/system/ai/update' and get_client_ip(request) == '127.0.0.1':
+        return True
     payload = await token_decode(request)
     account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
     if not account:

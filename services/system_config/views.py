@@ -305,7 +305,7 @@ async def search_audit(request):
 
 
 @system_bp.post("/ai/update")
-@requires_permission("system:c")
+@requires_permission("system:u")
 async def set_ai(request):
     """
     设置AI参数
