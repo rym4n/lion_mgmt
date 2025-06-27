@@ -13,24 +13,6 @@ from models import Role, Account, PermissionsMenu
 role_bp = Blueprint('role', url_prefix='/role')
 _all__ = ["role_bp"]
 
-PERMISSION_DICT = {
-    "user": "user_bp",
-    "audit": "system_bp",
-    "role": "role_bp",
-    "var": "var_bp",
-    "event": "event_bp",
-    "approve": "approve_bp",
-    "tool": "tool_management_bp",
-    "workflow": "workflow_bp",
-    "system": "system_bp",
-    "scene": "scene_bp",
-    "timed": "timed_bp",
-    "lic": "license_bp",
-    "ingestion": "event_ingestion_bp",
-    "dashboard": "dashboard_bp",
-    "warroom": "warroom_bp"
-}
-
 
 @role_bp.post("/add")
 @requires_permission('role:c')
@@ -168,7 +150,7 @@ async def all_permission(request):
     permission_list = []
     permissions = await PermissionsMenu.all().values()
     for permission in permissions:
-        if menu_dict[PERMISSION_DICT[permission["model"]]]:
+        if menu_dict[permission["bp"]]:
             permission_list.append(permission)
     return response_ok({
         'permissions': permission_list,

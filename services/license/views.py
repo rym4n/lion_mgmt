@@ -16,8 +16,7 @@ from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import verify_license
 from models import Tool, Playbook, Account, PermissionsMenu
-from services.role.views import PERMISSION_DICT
-from settings import LICENSE_DIR, MENU_DICT
+from settings import LICENSE_DIR
 
 license_bp = Blueprint('license', url_prefix='/license')
 _all__ = ["license_bp"]
@@ -62,55 +61,56 @@ async def get_license(request: Request):
 
     请求参数
     """
+    permissions = await PermissionsMenu.all().values()
     lic = load_license()
     if not lic:
-        return response_ok([MENU_DICT["lic"]])
+        return response_ok([p["url"] for p in permissions if p["model"] == "lic"])
+
     payload = await token_decode(request)
     user = await Account.get(id=payload["sub"]).prefetch_related("roles")
     if not user:
         raise CustomError(ErrorCode.AccountNotFound)
 
     menu_dict = {}
+
     for role in user.roles:
+        perm_models = set()
         if role.permissions:
+            # 超级权限处理
             if "*:*" in role.permissions:
-                menu_dict_a = {}
-                lic = load_license()
-                if not lic:
-                    raise CustomError(ErrorCode.InvalidLicenseError)
+                # 基于 license 构造权限列表
+                valid_modules = set()
                 for item in lic["moduleList"]:
                     module = item["module"]
-                    auth = item["auth"]
+                    group = item["group"]
+                    if int(lic["grouplist"][group]["expireTime"]) > int(time.time() * 1000):
+                        valid_modules.add(module)
+                valid_modules.update(["license_bp", "user_bp"])
+                perm_models.update(valid_modules)
+            else:
+                perm_models.update([p.split(":")[0] for p in role.permissions])
 
-                    if module not in menu_dict_a:
-                        menu_dict_a[module] = False
-                    if auth and int(lic["grouplist"][item["group"]]["expireTime"]) > int(time.time() * 1000):
-                        menu_dict_a[module] = True
-                menu_dict_a["license_bp"] = True
-                menu_dict_a["user_bp"] = True
-                permission_list = []
-                permissions = await PermissionsMenu.all().values()
-                for permission_a in permissions:
-                    if menu_dict_a[PERMISSION_DICT[permission_a["model"]]]:
-                        permission_list.append(permission_a["model"])
-                role.permissions = permission_list
-            for permission in role.permissions:
-                if permission.split(":")[0] == "dashboard":
-                    continue
-                if MENU_DICT[permission.split(":")[0]]["path"] not in menu_dict.keys():
-                    menu_dict[MENU_DICT[permission.split(":")[0]]["path"]] = MENU_DICT[permission.split(":")[0]]
-                else:
-                    existing_names = {c["path"] for c in menu_dict[MENU_DICT[permission.split(":")[0]]["path"]]["children"]}
-                    for children in MENU_DICT[permission.split(":")[0]]["children"]:
-                        if children["path"] not in existing_names:
-                            existing_names.add(children["path"])
-                            menu_dict[MENU_DICT[permission.split(":")[0]]["path"]]["children"].append(children)
+        for model in perm_models:
+            permission_data = next((p for p in permissions if p["model"] == model), None)
+            if not permission_data:
+                continue
 
+            key = permission_data["url"]["path"]
+            if key not in menu_dict:
+                menu_dict[key] = permission_data["url"]
+            else:
+                # 合并 children 去重
+                existing = {c["path"] for c in menu_dict[key]["children"]}
+                for child in permission_data["url"]["children"]:
+                    if child["path"] not in existing:
+                        menu_dict[key]["children"].append(child)
+                        existing.add(child["path"])
+
+    # 菜单处理排序逻辑
     menus = list(menu_dict.values())
     for menu in menus:
-        if menu["children"][0]["meta"]["title"] in ["账号管理", "事件列表"]:
-            break
-        menu["children"].reverse()
+        if menu["children"][0]["meta"]["title"] not in ["账号管理", "事件列表"]:
+            menu["children"].reverse()
 
     return response_ok(menus)
 

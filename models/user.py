@@ -125,7 +125,7 @@ class PermissionsMenu(BaseModel):
     description: str = fields.CharField(max_length=255, null=True)
     Permissions: list[str] = fields.JSONField(null=True)
     url = fields.JSONField(null=True)
-    dp = fields.CharField(max_length=32, null=True)
+    bp = fields.CharField(max_length=32, null=True)
 
     def validate(self) -> None:
         raise NotImplementedError

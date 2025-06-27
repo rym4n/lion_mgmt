@@ -124,7 +124,7 @@ async def get_latest_config(request):
 
 
 @system_bp.post("/status/all")
-@requires_permission("system:r")
+@requires_permission("status:r")
 @cached(timeout=120)
 async def get_system_status(request):
     """
@@ -152,7 +152,7 @@ async def get_system_status(request):
 
 
 @system_bp.post("/oauth/status")
-@requires_permission("system:r")
+@requires_permission("sso:r")
 async def get_oauth_config(request):
     """
     获取SSO配置
@@ -181,7 +181,7 @@ async def get_oauth_config(request):
 
 
 @system_bp.post("/oauth/update")
-@requires_permission("system:u")
+@requires_permission("sso:u")
 async def update_oauth_config(request):
     """
     更新SSO配置

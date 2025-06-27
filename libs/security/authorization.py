@@ -12,7 +12,8 @@ from libs.error_code.enum import ErrorData
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.utils import verify_license
-from settings import LICENSE_DIR, MENU_DICT
+from models import PermissionsMenu
+from settings import LICENSE_DIR
 
 
 async def check_permissions(request: Request, *required_permissions: str) -> bool:
@@ -28,7 +29,8 @@ async def check_permissions(request: Request, *required_permissions: str) -> boo
             for required_permission in required_permissions:
                 if check_wildcard(role_permission, required_permission):
                     return True
-    model = MENU_DICT[request.name.split(".")[1]]["children"][0]["meta"]["title"]
+    pm = await PermissionsMenu.filter(model=request.name.split(".")[1]).first().values("description")
+    model = pm.get("description")
     raise CustomError(ErrorData(4004, f"缺少{model}模块的操作权限"))
 
 
