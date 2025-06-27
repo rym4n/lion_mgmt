@@ -62,7 +62,7 @@ async def find_all(request):
 @requires_permission('role:r')
 async def find_role(request):
     """
-    查找具体角色信息    (需要角色查看权限)
+    查找具体角色信息（需要角色查看权限）
 
     请求参数：
         role_id：角色id
@@ -71,7 +71,43 @@ async def find_role(request):
     role = await Role.get_or_none(id=role_id, deleted=False)
     if not role:
         raise CustomError(ErrorCode.RoleNotFound)
-    return response_ok(role.json)
+
+    permissions_data = await PermissionsMenu.all().values()
+
+    permission_map = {
+        p["model"]: {
+            "description": p["description"],
+            "values": {perm["value"]: perm["label"] for perm in p.get("Permissions", [])}
+        }
+        for p in permissions_data
+    }
+
+    structured_permissions = []
+
+    for perm_str in role.permissions:
+        model, actions = perm_str.split(":")
+
+        perm_info = permission_map.get(model)
+        if not perm_info:
+            continue
+
+        action_labels = []
+        for action in actions:
+            label = perm_info["values"].get(action)
+            if label:
+                action_labels.append({
+                    action: label
+                })
+
+        structured_permissions.append({
+            "model": model,
+            "model_description": perm_info["description"],
+            "sp": action_labels
+        })
+
+    data = role.json
+    data["permissions"] = structured_permissions
+    return response_ok(data)
 
 
 @role_bp.post("/delete")
