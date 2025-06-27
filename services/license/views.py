@@ -88,7 +88,7 @@ async def get_license(request: Request):
                 valid_modules.update(["license_bp", "user_bp"])
                 perm_models.update([p["model"] for p in permissions if p["bp"] in valid_modules and p["model"] != "dashboard"])
             else:
-                perm_models.update([p.split(":")[0] for p in role.permissions])
+                perm_models.update([p.split(":")[0] for p in role.permissions if p.split(":")[0] != "dashboard"])
 
         for model in perm_models:
             permission_data = next((p for p in permissions if p["model"] == model), None)
