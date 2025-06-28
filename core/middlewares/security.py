@@ -14,7 +14,7 @@ class SecurityMiddleware(BaseMiddleware):
 
     async def before_request(self, request: Request) -> None:
         # 判断请求URI是否需要身份验证
-        white_urls = ["/user/login", "/health", "/playbook/run", "/warroom/ws", '/user/oauth/status', '/user/oauth/login', '/user/oauth/callback']
+        white_urls = ["/user/login", "/health", "/playbook/run", "/warroom/ws", '/system/oauth/status', '/user/oauth/login', '/user/oauth/callback']
         if os.environ.get("RY_ENV") != 'PROD':
             # 开发测试环境，放行docs文档页面路径
             white_urls.extend(["/docs", "/docs/openapi.json"])
