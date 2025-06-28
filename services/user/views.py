@@ -17,7 +17,7 @@ from libs.security.authentication import validate_password, token_encode, refres
 from libs.security.authorization import requires_permission
 from libs.security.oauth import oauth_callback
 from libs.utils import password_hasher, ip_in_list, get_client_ip, validate_ips
-from models import Account, Role
+from models import Account, Role, Scene
 from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS
 
 user_bp = Blueprint('user', url_prefix='/user')
@@ -505,12 +505,28 @@ async def oauth2_callback(request):
     return response_ok(user_info)
 
 
-@user_bp.post("role-list")
-async def role_list(request):
+@user_bp.post("/scene-list")
+async def init_scene_list(request):
     """
-    获取角色名称列表
+    获取当前场景名称
+    """
+    scene_name = await Scene.get_or_none(deleted=False, status=1).values("name")
+    return response_ok({"scene": scene_name["name"]})
 
-    无请求参数
+
+@user_bp.post("/account-list")
+async def init_account_list(request):
     """
-    roles = await Role.filter(deleted=False).all().values_list("name")
-    return response_ok([role[0] for role in roles])
+    获取角色名称、id
+    """
+    users = await Account.filter(deleted=False).all().values_list("id", "username", "display_name")
+    return response_ok({"users": [{"id": user[0], "username": user[1], "display_name": user[2]} for user in users]})
+
+
+@user_bp.post("/role-list")
+async def init_role_list(request):
+    """
+    获取角色名称、id
+    """
+    roles = await Role.filter(deleted=False).all().values_list("id", "name")
+    return response_ok({"roles": [{"id": role[0], "name": role[1]} for role in roles]})

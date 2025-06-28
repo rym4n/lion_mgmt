@@ -2,11 +2,10 @@
 # coding=utf-8
 import asyncio
 import datetime
-import os
+import re
 import time
 from collections import defaultdict
 
-import aiofile
 import orjson
 import pytz
 from sanic import Blueprint
@@ -20,7 +19,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_order_version
-from models import Playbook, Scene, ToolAction, Tool, Runlog, Tag, PlaybookVersion, Account, Role
+from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Account, Role
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
@@ -258,7 +257,8 @@ async def publish_workflow(request):
     """
     if not request.json.get("id") or not request.json.get("change_desc"):
         raise CustomError(ErrorCode.ParameterError)
-    await PlaybookVersion.filter(id=request.json.get("id"), status=0).update(status=1, updator=request.ctx.session['account_info'], version=gen_order_version(), change_desc=request.json.get("change_desc"))
+    await PlaybookVersion.filter(id=request.json.get("id"), status=0).update(status=1, updator=request.ctx.session[
+        'account_info'], version=gen_order_version(), change_desc=request.json.get("change_desc"))
     return response_ok("剧本发布成功")
 
 
@@ -354,7 +354,7 @@ async def execute_action(request):
                 for log in logs:
                     if log.id not in sent_id:
                         sent_id.append(log.id)
-                        await resp.send(f"data: {log.json}\n\n")
+                        await resp.send(f"data: {orjson.loads(orjson.dumps(log.json).decode())}\n\n")
                 if any(log.node_type == "end-node" for log in logs):
                     break
             await asyncio.sleep(1)
@@ -462,48 +462,29 @@ async def get_playbook_input(request, playbook_id):
         raise CustomError(ErrorCode.PlaybookNotFound)
 
     input_list = []
+
     if playbook.flow_json:
-        nodes = playbook.flow_json["nodes"]
+        nodes = playbook.flow_json.get("nodes", [])
+        if not nodes or "properties" not in nodes[0] or "start_params" not in nodes[0]["properties"]:
+            return input_list
+
         input_id = nodes[0]["id"]
+        start_params = nodes[0]["properties"]["start_params"]
 
-        for node in nodes[1:]:
-            if "input" not in node["properties"].keys():
-                continue
-            for key, value in node["properties"]["input"].items():
-                if input_id in value:
-                    data = await request.ctx.cache_client.get(
-                        node["properties"]["app_name"] + "_" + node["properties"]["version"])
-                    if data:
-                        if isinstance(data, (str, bytes)):
-                            data = orjson.loads(data)
-                        for action in (data.get('actions') or []):
-                            if node["properties"]["action"] in action.values():
-                                for item in action["input"]:
-                                    if key == item["key"]:
-                                        action["input"] = item
-                                        break
-                                input_list.append({value.split(".output.")[-1].rstrip("})"): action})
-                    else:
-                        actions = await ToolAction.filter(tool_name=node["properties"]["app_name"],
-                                                          version_number=node["properties"]["version"]).all()
-                        for action in actions:
-                            if node["properties"]["action"] == action.action["name"]:
-                                for item in action.action["input"]:
-                                    if key == item["key"]:
-                                        action.action["input"] = item
-                                        break
-                                input_list.append({value.split(".output.")[-1].rstrip("})"): action.action})
-                        tool = await Tool.filter(name=node["properties"]["app_name"],
-                                                 version=node["properties"]["version"]).first()
-                        if tool:
-                            config_path = os.path.abspath(os.path.join(tool.path, f"config.json"))
+        param_map = {param["name"]: {"type": param["type"], "description": param["desc"]} for param in start_params}
 
-                            async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
-                                content = await f.read()
-                                # 将config数据存入redis
-                                await request.ctx.cache_client.set(
-                                    node["properties"]["app_name"] + "_" + node["properties"]["version"], content,
-                                    ttl=2592000)
+        pattern = rf"{re.escape(input_id)}\.output\.([a-zA-Z0-9_]+)(?=[\)}}])"
+
+        matches = re.findall(pattern, str(playbook.flow_json))
+        unique_matches = list(set(matches))  # 去重
+        for param_key in unique_matches:
+            if param_key in param_map:
+                input_list.append({
+                    param_key: {
+                        "input": param_map[param_key]
+                    }
+                })
+
     return input_list
 
 
@@ -622,7 +603,8 @@ async def select_permission_all(request):
 
     playbook = await Playbook.get_or_none(id=playbook_id).prefetch_related("users", "roles")
 
-    return response_ok({"users": [str(user.id) for user in playbook.users], "roles": [str(role.id) for role in playbook.roles]} if playbook else {})
+    return response_ok({"users": [str(user.id) for user in playbook.users],
+                        "roles": [str(role.id) for role in playbook.roles]} if playbook else {})
 
 
 @workflow_bp.post("/permissions/judge")
@@ -657,14 +639,3 @@ async def judge_permission(request):
         return response_ok(True)
 
     return response_ok(False)
-
-
-@workflow_bp.post("/init")
-async def init_workflow_list(request):
-    """
-    获取当前场景名称，获取用户id、名称，获取角色名称、id
-    """
-    scene_name = await Scene.get_or_none(deleted=False, status=1).values("name")
-    users = await Account.filter(deleted=False).all().values_list("id", "username","display_name")
-    roles = await Role.filter(deleted=False).all().values_list("id", "name")
-    return response_ok({"scene": scene_name["name"], "users": [{"id": user[0], "username": user[1], "display_name": user[2]} for user in users], "roles": [{"id": role[0], "name": role[1]} for role in roles]})
