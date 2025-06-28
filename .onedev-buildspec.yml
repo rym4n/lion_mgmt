@@ -41,36 +41,8 @@ jobs:
     buildPath: '@project_path@'
     dockerfile: '@project_path@/Dockerfile'
     output: !RegistryOutput
-      tags: reg.hongcloud.net/lion_mgmt:@tag@-amd64
-    platforms: linux/amd64
-    condition: SUCCESSFUL
-    optional: false
-  triggers:
-  - !TagCreateTrigger
-    branches: master
-    projects: lion_mgmt
-  retryCondition: never
-  maxRetries: 3
-  retryDelay: 30
-  timeout: 14400
-- name: arm-ci
-  jobExecutor: arm-build
-  steps:
-  - !CheckoutStep
-    name: 拉取最新代码
-    cloneCredential: !DefaultCredential {}
-    withLfs: false
-    withSubmodules: false
-    checkoutPath: '@project_path@'
-    condition: SUCCESSFUL
-    optional: false
-  - !BuildImageStep
-    name: 构建镜像
-    buildPath: '@project_path@'
-    dockerfile: '@project_path@/Dockerfile'
-    output: !RegistryOutput
-      tags: reg.hongcloud.net/lion_mgmt:@tag@-arm64
-    platforms: linux/arm64
+      tags: reg.hongcloud.net/lion_mgmt:@tag@
+    platforms: linux/amd64,linux/arm64
     condition: SUCCESSFUL
     optional: false
   triggers:
