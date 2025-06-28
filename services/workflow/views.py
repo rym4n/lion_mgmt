@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 import os
+import re
 import time
 from collections import defaultdict
 
@@ -354,7 +355,7 @@ async def execute_action(request):
                 for log in logs:
                     if log.id not in sent_id:
                         sent_id.append(log.id)
-                        await resp.send(f"data: {log.json}\n\n")
+                        await resp.send(f"data: {orjson.loads(orjson.dumps(log.json).decode())}\n\n")
                 if any(log.node_type == "end-node" for log in logs):
                     break
             await asyncio.sleep(1)
@@ -462,7 +463,6 @@ async def get_playbook_input(request, playbook_id):
         raise CustomError(ErrorCode.PlaybookNotFound)
 
     input_list = []
-    seen_keys = set()
 
     if playbook.flow_json:
         nodes = playbook.flow_json.get("nodes", [])
@@ -474,18 +474,17 @@ async def get_playbook_input(request, playbook_id):
 
         param_map = {param["name"]: {"type": param["type"], "description": param["desc"]} for param in start_params}
 
-        for node in nodes[1:]:
-            node_input = node.get("properties", {}).get("input", {})
-            for _, value in node_input.items():
-                if input_id in value:
-                    param_key = value.split(".output.")[-1].rstrip("})")
-                    if param_key in param_map and param_key not in seen_keys:
-                        seen_keys.add(param_key)
-                        input_list.append({
-                            param_key: {
-                                "input": param_map[param_key]
-                            }
-                        })
+        pattern = rf"{re.escape(input_id)}\.output\.([a-zA-Z0-9_]+)"
+
+        matches = re.findall(pattern, str(playbook.flow_json))
+        unique_matches = list(set(matches))  # 去重
+        for param_key in unique_matches:
+            if param_key in param_map:
+                input_list.append({
+                    param_key: {
+                        "input": param_map[param_key]
+                    }
+                })
 
     return input_list
 
