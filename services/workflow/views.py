@@ -2,12 +2,10 @@
 # coding=utf-8
 import asyncio
 import datetime
-import os
 import re
 import time
 from collections import defaultdict
 
-import aiofile
 import orjson
 import pytz
 from sanic import Blueprint
@@ -21,7 +19,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_order_version
-from models import Playbook, Scene, ToolAction, Tool, Runlog, Tag, PlaybookVersion, Account, Role
+from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Account, Role
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
@@ -259,7 +257,8 @@ async def publish_workflow(request):
     """
     if not request.json.get("id") or not request.json.get("change_desc"):
         raise CustomError(ErrorCode.ParameterError)
-    await PlaybookVersion.filter(id=request.json.get("id"), status=0).update(status=1, updator=request.ctx.session['account_info'], version=gen_order_version(), change_desc=request.json.get("change_desc"))
+    await PlaybookVersion.filter(id=request.json.get("id"), status=0).update(status=1, updator=request.ctx.session[
+        'account_info'], version=gen_order_version(), change_desc=request.json.get("change_desc"))
     return response_ok("剧本发布成功")
 
 
@@ -489,7 +488,6 @@ async def get_playbook_input(request, playbook_id):
     return input_list
 
 
-
 async def statistics_data(flow_json):
     actions_list = []
     for node in flow_json["nodes"]:
@@ -605,7 +603,8 @@ async def select_permission_all(request):
 
     playbook = await Playbook.get_or_none(id=playbook_id).prefetch_related("users", "roles")
 
-    return response_ok({"users": [str(user.id) for user in playbook.users], "roles": [str(role.id) for role in playbook.roles]} if playbook else {})
+    return response_ok({"users": [str(user.id) for user in playbook.users],
+                        "roles": [str(role.id) for role in playbook.roles]} if playbook else {})
 
 
 @workflow_bp.post("/permissions/judge")
