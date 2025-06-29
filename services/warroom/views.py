@@ -187,6 +187,7 @@ async def acquire_members(request: Request):
         user_list.append({
             "id": str(user.id),
             "username": user.username,
+            "display_name": user.display_name,
             "roles": roles_list
         })
 
@@ -350,7 +351,8 @@ async def query_messages(request: Request):
                 "type": msg.type,
                 "message_id": str(msg.id),
                 "sender_id": str(msg.sender.id),
-                "sender_name": msg.sender.display_name,
+                "sender_name": msg.sender.username,
+                "sender_display_name": msg.sender.display_name,
                 "content": content,
                 "image_content": msg.image_content,
                 "timestamp": str(msg.ctime),
@@ -388,9 +390,11 @@ async def query_messages(request: Request):
                     "type": msg.type,
                     "message_id": msg.id,
                     "sender_id": msg.sender.id,
-                    "sender_name": msg.sender.display_name,
+                    "sender_name": msg.sender.username,
+                    "sender_display_name": msg.sender.display_name,
                     "receiver_id": partner.id,
-                    "receiver_name": partner.display_name,
+                    "receiver_name": partner.username,
+                    "receiver_display_name": partner.display_name,
                     "content": "[已撤回]" if msg.is_recalled else msg.content,
                     "image_content": msg.image_content,
                     "timestamp": str(msg.ctime),
@@ -442,9 +446,11 @@ async def query_messages(request: Request):
                 "image_content": msg.image_content,
                 "timestamp": str(msg.ctime),
                 "sender_id": msg.sender.id,
-                "sender_name": msg.sender.display_name,
+                "sender_name": msg.sender.username,
+                "sender_display_name": msg.sender.display_name,
                 "receiver_id": msg.receiver.id,
-                "receiver_name": msg.receiver.display_name,
+                "receiver_name": msg.receiver.username,
+                "receiver_display_name": msg.receiver.display_name,
                 "is_recalled": msg.is_recalled,
                 "room_id": msg.room_id
             })
@@ -480,7 +486,8 @@ async def query_messages(request: Request):
                 "content": msg.content,
                 "image_content": msg.image_content,
                 "timestamp": str(msg.ctime),
-                "sender_name": msg.sender.display_name,
+                "sender_name": msg.sender.username,
+                "sender_display_name": msg.sender.display_name,
                 "sender_id": msg.sender.id,
                 "room_id": room_id
             })
