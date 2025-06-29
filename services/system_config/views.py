@@ -152,6 +152,19 @@ async def get_system_status(request):
 
 
 @system_bp.post("/oauth/status")
+async def get_oauth_status(request):
+    """
+    获取SSO状态
+
+    无请求参数，直接调用，返回SSO状态
+    """
+    record = await Config.filter(module='sso', key='use_oauth2').get()
+    return response_ok({
+        "use_oauth2": record.value == 'true'
+    })
+
+
+@system_bp.post("/oauth/get")
 @requires_permission("sso:r")
 async def get_oauth_config(request):
     """
