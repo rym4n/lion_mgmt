@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     libaio-dev \
     ccache
 
-RUN pip install uv==0.7.4 nuitka==2.7.7 -i https://mirrors.aliyun.com/pypi/simple
+RUN pip install uv==0.7.4 nuitka==2.7.11 -i https://mirrors.aliyun.com/pypi/simple
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
@@ -30,10 +30,10 @@ COPY . ./
 
 RUN sed -i "s|AIOE_LICENSE_KEY|$(cat LICKEY | tr -d '\n')|g" libs/utils.py
 
-RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=8 --remove-output --no-pyi-file core/
-RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=8 --remove-output --no-pyi-file libs/
-RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=8 --remove-output --no-pyi-file models/
-RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=8 --remove-output --no-pyi-file services/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file core/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file libs/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file models/
+RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
 
 FROM timberio/vector:0.47.0-debian AS vector
 
