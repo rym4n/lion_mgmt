@@ -17,9 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH="/usr/lib/ccache:$PATH" \
-    CCACHE_DIR="/root/.ccache" \
-    CC="ccache gcc" \
-    CXX="ccache g++"
+    CCACHE_DIR="/root/.ccache"
 
 WORKDIR /app
 
