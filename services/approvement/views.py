@@ -27,34 +27,41 @@ async def all_approvement(request):
         page: 页码
         size: 每页数量
         keyword: 关键字，模糊搜索审核标题或者审核内容，可选参数
-        status: 处理状态，0代表待处理，1代表通过，2代表拒绝
-        expired: 布尔类型，True 代表查询包含已过期的结果，可选参数
+        status: 处理状态，list类型，支持同时过滤多个状态，0代表待处理，1代表通过，2代表拒绝，3代表已过期
     """
     params = request.json
     page = int(params.get("page", 1))
     size = int(params.get("size", 10))
     offset = (page - 1) * size
-    condition = Q()
+
+    user = request.ctx.session['account_info']
+    condition = Q(approvers__id=user.id)
     keyword = params.get("keyword")
     status = params.get("status")
-    expired = params.get("expired")
     if keyword:
         condition = Q(title__icontains=keyword) | Q(content__icontains=keyword)
     if status:
-        condition = condition & Q(status=status)
-    if expired is not True:
-        condition = condition & Q(expire_time__gt=datetime.now())
+        condition = condition & Q(status__in=status)
 
     total = await Approvement.filter(condition).count()
     records = []
     if total > 0:
         records = await Approvement.filter(condition).offset(offset).limit(size).prefetch_related("approvers", "processors").all()
+
+    data = list()
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for a in records:
+        tmp = a.json
+        if status and 3 not in status and tmp['expire_time'] < current_time:
+            continue
+        data.append(tmp)
+
     return response_ok({
         "total": total,
         "page": page,
         "size": size,
         "total_pages": (total + size - 1) // size,
-        "data": [a.json for a in records]
+        "data": data
     })
 
 
@@ -75,9 +82,13 @@ async def todo_approvement(request):
 
     user = request.ctx.session['account_info']
     # 查询 Approvement 表中 status 为 0 且 approvers 中包含当前用户 ID 的记录 且 expire_time 大于当前时间 且 processors 中不包含当前用户 ID
-    condition = Q(status=0, approve_accounts__contains=[user.id], expire_time__gt=datetime.now(), approve_processor__not__contains=[user.id])
+    condition = Q(status=0, approvers__id=user.id, expire_time__gt=datetime.now(), processors__id__not=user.id)
     total = await Approvement.filter(condition).count()
     records = await Approvement.filter(condition).offset((page - 1) * size).limit(size).all()
+
+    # 修改过期任务状态
+    await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
+
     return response_ok({
         "total": total,
         "page": page,

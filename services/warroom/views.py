@@ -329,18 +329,12 @@ async def query_messages(request: Request):
     limit = request.json.get("limit", 20)
     offset = request.json.get("offset", 0)
 
-    if not query_type:
-        raise CustomError(ErrorCode.ParamValueError)
-
     # 群聊历史. 先查询后创建消息发送
     if query_type == "public_history":
         if not room_id:
             raise CustomError(ErrorCode.ParamValueError)
         total_count = await Message.filter(type__in=["public", "ai", "runlog"], room_id=room_id).count()
-        messages = await Message.filter(
-            type__in=["public", "ai", "runlog"],
-            room_id=room_id
-        ).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
+        messages = await Message.filter(type__in=["public", "ai", "runlog"], room_id=room_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
         message_list = []
         for msg in reversed(messages):
             if msg.type == "runlog":
@@ -500,6 +494,8 @@ async def query_messages(request: Request):
                 "limit": limit
             }
         })
+    else:
+        raise CustomError(ErrorCode.ParamValueError)
 
 
 @warroom_bp.post("/get/list")
@@ -590,7 +586,7 @@ async def run(request):
     room.updator = user
     room.run_id.append(msg["run_id"])
     await room.save()
-    await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600*24*7)
+    await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
     return response_ok("运行成功")
