@@ -26,7 +26,7 @@ jobs:
   retryDelay: 30
   timeout: 14400
 - name: ci
-  jobExecutor: tgy-builder
+  jobExecutor: aioe-builder
   steps:
   - !CheckoutStep
     name: 拉取最新代码
