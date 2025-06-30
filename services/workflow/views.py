@@ -12,6 +12,7 @@ from sanic import Blueprint
 from tortoise.expressions import Q
 from tortoise.functions import Count
 from tortoise.transactions import in_transaction
+from sanic.log import logger
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -354,7 +355,7 @@ async def execute_action(request):
                 for log in logs:
                     if log.id not in sent_id:
                         sent_id.append(log.id)
-                        await resp.send(f"data: {orjson.loads(orjson.dumps(log.json).decode())}\n\n")
+                        await resp.send(f"data: {orjson.dumps(log.json).decode()}\n\n")
                 if any(log.node_type == "end-node" for log in logs):
                     break
             await asyncio.sleep(1)
