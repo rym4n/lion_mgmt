@@ -8,14 +8,18 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     make \
     libaio-dev \
-    && rm -rf /var/lib/apt/lists/*
+    ccache
 
 RUN pip install uv==0.7.4 nuitka==2.7.7 -i https://mirrors.aliyun.com/pypi/simple
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy
+    UV_LINK_MODE=copy \
+    PATH="/usr/lib/ccache:$PATH" \
+    CCACHE_DIR="$HOME/.ccache" \
+    CC="ccache gcc" \
+    CXX="ccache g++"
 
 WORKDIR /app
 
