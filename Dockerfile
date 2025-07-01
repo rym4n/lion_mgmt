@@ -2,7 +2,7 @@ FROM python:3.11-slim AS builder
 
 RUN sed -i 's/http:\/\/deb.debian.org/https:\/\/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 
-RUN apt-get update && apt-get install -y \
+RUN apt update -y && apt install -y \
     gcc \
     libc-dev \
     python3-dev \
@@ -17,7 +17,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH="/usr/lib/ccache:$PATH" \
-    CCACHE_DIR="/root/.ccache"
+    CCACHE_DIR="/root/.ccache" \
+    CFLAGS="-fPIC"
 
 WORKDIR /app
 
@@ -49,7 +50,10 @@ WORKDIR /app
 
 RUN sed -i 's/http:\/\/deb.debian.org/https:\/\/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 
-RUN apt-get update && apt-get install -y curl libc-dev python3-dev libaio-dev && rm -rf /var/lib/apt/lists/* && mkdir /var/lib/vector
+RUN apt update -y \
+    && apt install -y curl libc-dev python3-dev libaio-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir /var/lib/vector
 
 COPY --from=vector /usr/bin/vector /usr/bin/vector
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
