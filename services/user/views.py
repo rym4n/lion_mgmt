@@ -505,7 +505,7 @@ async def oauth2_callback(request):
     user_info['aioe-auth'] = token
     user_info['redirect'] = request.args.get("redirect")
     user_info_str = base64.urlsafe_b64encode(orjson.dumps(user_info)).decode()
-    return response.redirect(request.host + "#loading&" + user_info_str)
+    return response.redirect(request.host + "#/loading?" + user_info_str)
 
 
 @user_bp.post("/scene-list")
