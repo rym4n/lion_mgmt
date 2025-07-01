@@ -517,9 +517,9 @@ async def init_scene_list(request):
 @user_bp.post("/account-list")
 async def init_account_list(request):
     """
-    获取角色名称、id
+    获取用户名称、id
     """
-    users = await Account.filter(deleted=False).all().values_list("id", "username", "display_name")
+    users = await Account.filter(deleted=False, type="user").all().values_list("id", "username", "display_name")
     return response_ok({"users": [{"id": user[0], "username": user[1], "display_name": user[2]} for user in users]})
 
 
