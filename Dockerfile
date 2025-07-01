@@ -56,5 +56,3 @@ COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
 COPY settings ./settings
 COPY server.py ./
-
-ENTRYPOINT ["sanic", "server:app", "--host", "0.0.0.0", "--port", "8000", "-w", "4", "--no-access-logs", "--no-motd"]
