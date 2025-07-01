@@ -214,6 +214,8 @@ class ChatManager:
                         continue
                     msg = orjson.loads(message['data'])
                     if "log" in msg.keys():
+                        if msg["log"].get("type") == "approval-info":
+                            continue
                         message['data'] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"], redis=self.redis))
                     room_id = msg.get('room_id')
                     for k in self.active_connections:

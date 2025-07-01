@@ -107,10 +107,16 @@ async def get_license(request: Request):
                         existing.add(child["path"])
 
     # 菜单处理排序逻辑
+    system_dict = {"产品许可": 0, "账号管理": 1, "角色管理": 2, "SSO集成": 3, "审计日志": 4, "个性化设置": 5, "系统状态": 6}
+    event_dict = {"事件列表": 0, "事件接入": 1}
+
     menus = list(menu_dict.values())
     for menu in menus:
-        if menu["children"][0]["meta"]["title"] not in ["账号管理", "事件列表"]:
-            menu["children"].reverse()
+        children = menu["children"]
+        if menu["meta"]["title"] == "系统设置":
+            menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
+        elif menu["meta"]["title"] == "事件管理":
+            menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
 
     return response_ok(menus)
 
