@@ -1,8 +1,10 @@
 # coding=utf-8
+import base64
 import time
 import uuid
 from datetime import datetime
 
+import orjson
 import pyotp
 from argon2.exceptions import VerificationError, InvalidHashError
 from sanic import Blueprint, response
@@ -502,7 +504,8 @@ async def oauth2_callback(request):
     user_info, token = await oauth_callback(request.app.ctx.oauth2, code, request.app.ctx.oauth_cfg)
     user_info['aioe-auth'] = token
     user_info['redirect'] = request.args.get("redirect")
-    return response_ok(user_info)
+    user_info_str = base64.urlsafe_b64encode(orjson.dumps(user_info)).decode()
+    return response.redirect(request.host + "#loading&" + user_info_str)
 
 
 @user_bp.post("/scene-list")
