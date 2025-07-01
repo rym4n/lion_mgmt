@@ -1,6 +1,6 @@
 [project]
 name = "lion-mgmt"
-version = "0.1.0"
+version = "3.0.0"
 description = ""
 authors = [{ name = "regulus.y", email = "xy14qg@gmail.com" }]
 requires-python = ">=3.11,<4"
