@@ -78,6 +78,39 @@ async def get_all_events(request):
     })
 
 
+@event_bp.post('/artificial')
+@requires_permission('event:c')
+async def artificial_create_event(request):
+    """
+    人工创建事件（需要事件创建权限）
+
+    请求参数：
+        eventName: str 事件名称 (必填)
+        ownerId: long 事件责任人id (非必填)不填则为空
+        eventSummary: str 事件概要 (非必填)
+    """
+    event_name = request.json.get("eventName") + "_" + str(int(time.time() * 1000))
+    event_process_status = "待处理"
+    event_source = "人工"
+    owner = ({"role": [], "user": [request.json.get("ownerId") or ""]} or {})
+    user = request.ctx.session['account_info']
+    event_summary = (request.json.get("eventSummary") or "")
+    event_ingestion_id = ""
+    log_data = ""
+
+    if await Events.filter(event_name=event_name, deleted=False).exists():
+        raise CustomError(ErrorCode.EventNameExists)
+
+    async with in_transaction():
+        await Events.create(event_name=event_name, event_process_status=event_process_status,
+                                   event_source=event_source, owner=owner,
+                                   creator=user, event_summary=event_summary, updator=user,
+                                   event_ingestion_id=event_ingestion_id, log_data=log_data)
+
+    return response_ok("创建成功")
+
+
+
 @event_bp.post('/create')
 @requires_permission('event:c')
 async def create_event(request):
