@@ -49,7 +49,7 @@ jobs:
   - !TagCreateTrigger
     branches: master
     projects: lion_mgmt
-  retryCondition: '"Log" contains "failed"'
+  retryCondition: '"Log" contains "exit code: 1"'
   maxRetries: 3
   retryDelay: 30
   timeout: 14400
