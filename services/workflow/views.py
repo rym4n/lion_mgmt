@@ -12,7 +12,6 @@ from sanic import Blueprint
 from tortoise.expressions import Q
 from tortoise.functions import Count
 from tortoise.transactions import in_transaction
-from sanic.log import logger
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -21,7 +20,7 @@ from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license, playbook_permission, \
     check_playbook_permission
 from libs.utils import gen_order_version
-from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Account, Role, PlaybookPermissions
+from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Account, PlaybookPermissions
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import KAFKA_SERVERS, TASK_TOPIC
 

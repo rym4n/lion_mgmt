@@ -141,14 +141,26 @@ async def update_approvement(request):
     param = request.json
     approvement_id = param.get("id")
     agree = param.get("agree")
-    if not approvement_id or not isinstance(agree, bool):
+    remark = param.get("remark", "")
+    params = param.get("params", {})
+    if not approvement_id or not isinstance(agree, bool) or not isinstance(remark, str) or not isinstance(params, dict):
         raise CustomError(ErrorCode.ParameterError)
 
-    record = await ApprovementProcessor.create(approvement_id=approvement_id, processor=request.ctx.session['account_info'], agree=agree, remark=param.get("remark"), params=param.get("params"))
-    do_action = False
-    approve = await Approvement.get(id=approvement_id)
+    approve = await Approvement.filter(id=approvement_id).select_for_update().prefetch_related("approvers").first()
+    if not approve:
+        raise CustomError(ErrorCode.NotFound)
 
-    if agree is True:
+    account_info = request.ctx.session['account_info']
+    record = await ApprovementProcessor.create(
+        approvement_id=approvement_id,
+        processor=account_info,
+        agree=agree,
+        remark=remark,
+        params=params
+    )
+    do_action = False
+
+    if agree:
         if approve.approve_type == 2:
             approve.agree_count += 1
             # 如果是会签，只有所有审批人都同意了，才进行下一步
@@ -167,7 +179,7 @@ async def update_approvement(request):
         msg = {
             "run_type": 'flow', "run_id": approve.run_id,
             "run_args": {
-                "flow_id": approve.flow_id, "flow_input": param.get("params", ''), "approval_node_id": approve.audit_node, "next_node_id": approve.next_node, "approval_status": approve.status,
+                "flow_id": approve.flow_id, "flow_input": params, "approval_node_id": approve.audit_node, "next_node_id": approve.next_node, "approval_status": approve.status,
                 "executor": ",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session['account_info'].id
             }
         }
