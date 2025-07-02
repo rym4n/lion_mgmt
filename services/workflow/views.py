@@ -19,7 +19,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license, playbook_permission, \
-    check_playbook_permission
+    check_playbook_permission, playbook_version_permission
 from libs.utils import gen_order_version
 from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Account, Role, PlaybookPermissions
 from services.tools.views import tool_action_update, tool_action_playbook_delete
@@ -217,7 +217,7 @@ async def edit_workflow(request):
 
 @workflow_bp.post("/edit-flow")
 @requires_permission("workflow:u")
-@playbook_permission("u")
+@playbook_version_permission("u")
 async def edit_workflow_flow(request):
     """
     修改剧本流程图内容,修改已发布的剧本会自动生成一个新的版本
@@ -253,7 +253,7 @@ async def edit_workflow_flow(request):
 
 @workflow_bp.post("/publish")
 @requires_permission("workflow:u")
-@playbook_permission("u")
+@playbook_version_permission("u")
 async def publish_workflow(request):
     """
     发布剧本
@@ -287,7 +287,7 @@ async def delete_workflow(request):
 
 @workflow_bp.post("/del-version")
 @requires_permission("workflow:d")
-@playbook_permission("d")
+@playbook_version_permission("d")
 async def delete_workflow_version(request):
     """
     删除剧本版本
