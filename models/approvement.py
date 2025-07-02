@@ -63,7 +63,7 @@ class ApprovementProcessor(BaseModel):
             "id": self.id,
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
-            "opinion": self.opinion,
+            "agree": self.agree,
             "remark": self.remark,
             "processor": {"username": self.processor.username, "display_name": self.processor.display_name}
         }
