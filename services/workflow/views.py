@@ -18,7 +18,8 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import requires_permission, load_license, playbook_permission
+from libs.security.authorization import requires_permission, load_license, playbook_permission, \
+    check_playbook_permission
 from libs.utils import gen_order_version
 from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Account, Role, PlaybookPermissions
 from services.tools.views import tool_action_update, tool_action_playbook_delete
@@ -222,7 +223,6 @@ async def edit_workflow_flow(request):
     修改剧本流程图内容,修改已发布的剧本会自动生成一个新的版本
 
     请求参数:
-        playbook_id: 必填，剧本ID
         id: 必填，剧本版本ID
         flow_json: 必填，流程图布局信息
     """
@@ -259,7 +259,6 @@ async def publish_workflow(request):
     发布剧本
 
     请求参数：
-        playbook_id: 必填，剧本ID
         id: 必填，剧本版本ID
         change_desc: 必填, 版本变更说明
     """
@@ -294,7 +293,6 @@ async def delete_workflow_version(request):
     删除剧本版本
 
     请求参数：
-        playbook_id: 剧本ID
         id: 剧本版本ID
     """
     pv = await PlaybookVersion.get(id=request.json.get("id"))
@@ -307,13 +305,11 @@ async def delete_workflow_version(request):
 
 @workflow_bp.post("/debug")
 @requires_permission("workflow:r")
-@playbook_permission("e")
 async def execute_action(request):
     """
         执行接口
 
         请求参数：
-            - playbook_id str 剧本id
             - playbook_input dict 剧本输入参数 当type为flow时必填      用websocket发送
             示例如下：
             {
@@ -344,6 +340,16 @@ async def execute_action(request):
                 "timeout":300,               超时时间,单位秒
             }
     """
+    if request.json.get("type") == "flow":
+        pv = await PlaybookVersion.get_or_none(id=request.json.get("flow_id"))
+        playbook_id = pv.playbook_id
+        has_access = await check_playbook_permission(
+            request.ctx.session.get('account_info'),
+            playbook_id,
+            "e"
+        )
+        if not has_access:
+            raise CustomError(ErrorCode.Unauthorized)
     resp = await request.respond(
         content_type="text/event-stream",
         headers={

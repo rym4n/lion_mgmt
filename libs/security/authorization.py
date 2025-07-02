@@ -12,7 +12,7 @@ from libs.error_code.enum import ErrorData
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.utils import verify_license, get_client_ip
-from models import PermissionsMenu, PlaybookPermissions
+from models import PermissionsMenu, PlaybookPermissions, PlaybookVersion
 from settings import LICENSE_DIR
 
 
@@ -109,7 +109,11 @@ def playbook_permission(*required_permissions: str):
             # 获取剧本ID
             playbook_id = request.json.get("playbook_id")  # 从JSON body获取
             if not playbook_id:
-                raise CustomError(ErrorCode.ParameterError)
+                pv_id = request.json.get("id")
+                pv = await PlaybookVersion.get_or_none(id=pv_id)
+                playbook_id = pv.playbook_id
+                if not playbook_id:
+                    raise CustomError(ErrorCode.ParameterError)
 
             user = request.ctx.session.get('account_info')
             if not user:
