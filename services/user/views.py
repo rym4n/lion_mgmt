@@ -513,8 +513,8 @@ async def init_scene_list(request):
     """
     获取当前场景名称
     """
-    scene_name = await Scene.get_or_none(deleted=False, status=1).values("name")
-    return response_ok({"scene": scene_name["name"]})
+    s = await Scene.get_or_none(deleted=False, status=1)
+    return response_ok({"scene": s.name if s else ""})
 
 
 @user_bp.post("/account-list")
