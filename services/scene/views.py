@@ -70,7 +70,6 @@ async def update_scene(request):
 
 
 @scene_bp.post("/all")
-@requires_permission("scene:r")
 async def get_all_scene(request):
     """
     获取所有场景 (需要场景查看权限)
@@ -97,8 +96,7 @@ async def get_all_scene(request):
     total = await Scene.filter(condition).count()
     scenes = list()
     if total > 0:
-        scenes = await Scene.filter(condition).limit(page_size).offset((page - 1) * page_size).all().prefetch_related(
-            'creator', 'updator')
+        scenes = await Scene.filter(condition).limit(page_size).offset((page - 1) * page_size).all().prefetch_related('creator', 'updator')
 
     return response_ok({
         "scenes": [s.json for s in scenes],

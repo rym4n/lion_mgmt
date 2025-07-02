@@ -31,9 +31,8 @@ async def check_permissions(request: Request, *required_permissions: str) -> boo
             for required_permission in required_permissions:
                 if check_wildcard(role_permission, required_permission):
                     return True
-    pm = await PermissionsMenu.filter(model=request.name.split(".")[1]).first().values("description")
-    model = pm.get("description")
-    raise CustomError(ErrorData(4004, f"缺少{model}模块的操作权限"))
+    pm = await PermissionsMenu.filter(model=request.path.split("/")[1]).first().values("description")
+    raise CustomError(ErrorData(4004, f'缺少{pm.get("description")}模块的操作权限'))
 
 
 def check_wildcard(wildcard: str, pattern: str):
