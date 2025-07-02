@@ -12,7 +12,7 @@ from libs.error_code.enum import ErrorData
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.utils import verify_license, get_client_ip
-from models import PermissionsMenu
+from models import PermissionsMenu, PlaybookPermissions
 from settings import LICENSE_DIR
 
 
@@ -92,6 +92,66 @@ def requires_permission(*required_permissions: str):
         return wrapper
 
     return decorator
+
+
+def playbook_permission(*required_permissions: str):
+    """
+    剧本权限验证装饰器（支持多权限验证）
+
+    使用示例：
+    @playbook_permission('r')        # 需要读权限
+    @playbook_permission('u', 'd')   # 需要更新或删除权限
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(request, *args, **kwargs):
+            # 获取剧本ID
+            playbook_id = request.json.get("playbook_id")  # 从JSON body获取
+            if not playbook_id:
+                raise CustomError(ErrorCode.ParameterError)
+
+            user = request.ctx.session.get('account_info')
+            if not user:
+                raise CustomError(ErrorCode.AccountNotFound)
+
+            has_access = await check_playbook_permission(
+                user,
+                playbook_id,
+                required_permissions
+            )
+
+            if not has_access:
+                raise CustomError(ErrorCode.Unauthorized)
+
+            return await func(request, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+# 权限检查工具函数
+async def check_playbook_permission(user, playbook_id, required_perms):
+    """检查用户是否拥有剧本的指定权限"""
+    user_id = str(user.id)
+    role_ids = {str(role.id) for role in user.roles}
+    pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id)
+    if not pp:
+        return False
+    for perm_dict in pp.users:
+        if user_id in perm_dict:
+            user_perms = set(perm_dict[user_id])
+            if any(perm in user_perms for perm in required_perms):
+                return True
+    for perm_dict in pp.roles:
+        for role_id in role_ids:
+            if role_id in perm_dict:
+                role_perms = set(perm_dict[role_id])
+                if any(perm in role_perms for perm in required_perms):
+                    return True
+
+    return False
 
 
 def requires_role(*required_roles: str):

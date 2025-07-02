@@ -18,9 +18,9 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import requires_permission, load_license
+from libs.security.authorization import requires_permission, load_license, playbook_permission
 from libs.utils import gen_order_version
-from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Account, Role
+from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Account, Role, PlaybookPermissions
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
@@ -68,7 +68,8 @@ async def create_workflow(request):
     async with in_transaction():
         playbook = await Playbook.create(
             name=data.get("name"),
-            remark=data.get("remark", "")
+            remark=data.get("remark", ""),
+            creator=request.ctx.session['account_info']
         )
         if data.get('tags'):
             tags = await Tag.filter(name__in=data.get('tags')).all()
@@ -151,14 +152,15 @@ async def list_workflow(request):
 
 @workflow_bp.post("/versions")
 @requires_permission("workflow:r")
+@playbook_permission("r")
 async def list_workflow_versions(request):
     """
     获取剧本版本列表
 
     请求参数：
-        id: 必填，剧本id
+        playbook_id: 必填，剧本id
     """
-    pv = await PlaybookVersion.filter(playbook__id=request.json.get("id"), deleted=False).all().prefetch_related(
+    pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False).all().prefetch_related(
         "playbook", "creator", "updator")
     return response_ok([p.json for p in pv])
 
@@ -180,19 +182,20 @@ async def list_workflow_versions(request):
 
 @workflow_bp.post("/edit")
 @requires_permission("workflow:u")
+@playbook_permission("u")
 async def edit_workflow(request):
     """
     修改剧本的基本信息
 
     请求参数：
-        id: 必填，剧本ID
+        playbook_id: 必填，剧本ID
         name: 可选，剧本名
         remark: 可选，备注
         scenes: 可选，关联场景名称，列表格式
         tags: 可选，标签名称，列表格式
     """
     params = request.json
-    playbook = await Playbook.get(id=params.get("id")).prefetch_related("scenes", "tags")
+    playbook = await Playbook.get(id=params.get("playbook_id")).prefetch_related("scenes", "tags")
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
@@ -213,11 +216,13 @@ async def edit_workflow(request):
 
 @workflow_bp.post("/edit-flow")
 @requires_permission("workflow:u")
+@playbook_permission("u")
 async def edit_workflow_flow(request):
     """
     修改剧本流程图内容,修改已发布的剧本会自动生成一个新的版本
 
     请求参数:
+        playbook_id: 必填，剧本ID
         id: 必填，剧本版本ID
         flow_json: 必填，流程图布局信息
     """
@@ -248,11 +253,13 @@ async def edit_workflow_flow(request):
 
 @workflow_bp.post("/publish")
 @requires_permission("workflow:u")
+@playbook_permission("u")
 async def publish_workflow(request):
     """
     发布剧本
 
     请求参数：
+        playbook_id: 必填，剧本ID
         id: 必填，剧本版本ID
         change_desc: 必填, 版本变更说明
     """
@@ -265,14 +272,15 @@ async def publish_workflow(request):
 
 @workflow_bp.post("/del")
 @requires_permission("workflow:d")
+@playbook_permission("d")
 async def delete_workflow(request):
     """
     删除剧本
 
     请求参数：
-        id: 剧本ID
+        playbook_id: 剧本ID
     """
-    playbook = await Playbook.get(id=request.json.get("id"), internal=False)
+    playbook = await Playbook.get(id=request.json.get("playbook_id"), internal=False)
     playbook.deleted = True
     await playbook.save()
     return response_ok("剧本删除成功")
@@ -280,11 +288,13 @@ async def delete_workflow(request):
 
 @workflow_bp.post("/del-version")
 @requires_permission("workflow:d")
+@playbook_permission("d")
 async def delete_workflow_version(request):
     """
     删除剧本版本
 
     请求参数：
+        playbook_id: 剧本ID
         id: 剧本版本ID
     """
     pv = await PlaybookVersion.get(id=request.json.get("id"))
@@ -297,11 +307,13 @@ async def delete_workflow_version(request):
 
 @workflow_bp.post("/debug")
 @requires_permission("workflow:r")
+@playbook_permission("e")
 async def execute_action(request):
     """
         执行接口
 
         请求参数：
+            - playbook_id str 剧本id
             - playbook_input dict 剧本输入参数 当type为flow时必填      用websocket发送
             示例如下：
             {
@@ -558,39 +570,40 @@ async def remove_tag(request):
 
 @workflow_bp.post("/permissions/add")
 @requires_permission("workflow:u")
+@playbook_permission("p")
 async def add_permission(request):
     """
     新增剧本权限（需要剧本更新权限）
-
+        (r:查，u:改，d:删，e:执行,p:授权)
     query参数:
         - playbook_id: 剧本id    str
-        - users_id: 用户ID列表    list
-        - roles_id: 角色ID列表    list
+        - users: 用户列表    list   [{"id":["r","u","d","e","p"]}]
+        - roles: 角色列表    list   [{"id":["r","u","d","e","p"]}]
     """
     playbook_id = request.json.get("playbook_id")
-    users_id = list(set(request.json.get("users_id", [])))
-    roles_id = list(set(request.json.get("roles_id", [])))
-    if not playbook_id or not isinstance(users_id, list) or not isinstance(roles_id, list):
+    users = request.json.get("users")
+    roles = request.json.get("roles")
+    if not playbook_id or not isinstance(users, list) or not isinstance(roles, list):
         raise CustomError(ErrorCode.ParameterError)
 
-    playbook, _ = await Playbook.get_or_create(id=playbook_id)
+    pb = await Playbook.get_or_none(id=playbook_id)
+    pp, _ = await PlaybookPermissions.get_or_create(pb_id=playbook_id)
 
-    await playbook.users.clear()
-    await playbook.roles.clear()
+    admin = await Account.get_or_none(username="admin")
 
-    users = await Account.filter(id__in=users_id).all()
-    if users:
-        await playbook.users.add(*users)
+    users.append({admin.id: ["r", "u", "d", "e", "p"]})
+    users.append({pb.creator_id: ["r", "u", "d", "e", "p"]})
 
-    roles = await Role.filter(id__in=roles_id).all()
-    if roles:
-        await playbook.roles.add(*roles)
+    pp.users = users
+    pp.roles = roles
+    await pp.save()
 
     return response_ok("success")
 
 
 @workflow_bp.post("/permissions/select")
 @requires_permission("workflow:r")
+@playbook_permission("r")
 async def select_permission_all(request):
     """
     获取剧本权限（需要剧本查看权限）
@@ -602,41 +615,6 @@ async def select_permission_all(request):
     if not playbook_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    playbook = await Playbook.get_or_none(id=playbook_id).prefetch_related("users", "roles")
+    pb, _ = await PlaybookPermissions.get_or_create(pb_id=playbook_id)
 
-    return response_ok({"users": [str(user.id) for user in playbook.users],
-                        "roles": [str(role.id) for role in playbook.roles]} if playbook else {})
-
-
-@workflow_bp.post("/permissions/judge")
-@requires_permission("workflow:r")
-async def judge_permission(request):
-    """
-    权限判断接口 (需要剧本查看权限)
-
-    请求体参数:
-        - playbook_id: 剧本id    str
-    """
-    playbook_id = request.json.get("playbook_id")
-    if not playbook_id:
-        raise CustomError(ErrorCode.ParameterError)
-
-    user = request.ctx.session.get('account_info')
-    if not user:
-        raise CustomError(ErrorCode.AccountNotFound)
-
-    user_id = str(user.id)
-    role_ids = {str(role.id) for role in user.roles}
-
-    playbook = await Playbook.get_or_none(id=playbook_id).prefetch_related("users", "roles")
-
-    if not playbook:
-        return response_ok(False)
-
-    roles = [str(role.id) for role in playbook.roles]
-    users = [str(user.id) for user in playbook.users]
-
-    if user_id in users or role_ids.intersection(roles) or playbook.users == ["*"] or playbook.roles == ["*"]:
-        return response_ok(True)
-
-    return response_ok(False)
+    return response_ok(pb.json)
