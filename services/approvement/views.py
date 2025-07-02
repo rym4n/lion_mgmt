@@ -78,7 +78,7 @@ async def approvement_detail(request):
     if not approvement_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    record = await ApprovementProcessor.filter(approvement_id=approvement_id).prefetch_related("processors").all()
+    record = await ApprovementProcessor.filter(approvement_id=approvement_id).prefetch_related("processor").all()
     return response_ok([r.json for r in record])
 
 
@@ -144,12 +144,12 @@ async def update_approvement(request):
     if not approvement_id or not isinstance(agree, bool):
         raise CustomError(ErrorCode.ParameterError)
 
-    record = await ApprovementProcessor.create(approvement_id=approvement_id, processors=request.ctx.session['account_info'], agree=agree, remark=param.get("remark"), params=param.get("params"))
+    record = await ApprovementProcessor.create(approvement_id=approvement_id, processor=request.ctx.session['account_info'], agree=agree, remark=param.get("remark"), params=param.get("params"))
     do_action = False
     approve = await Approvement.get(id=approvement_id)
 
     if agree is True:
-        if record.approvement.approve_type == 2:
+        if approve.approve_type == 2:
             approve.agree_count += 1
             # 如果是会签，只有所有审批人都同意了，才进行下一步
             if approve.agree_count == len(approve.approvers):
