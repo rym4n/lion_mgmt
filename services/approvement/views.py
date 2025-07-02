@@ -144,7 +144,7 @@ async def update_approvement(request):
     if not approvement_id or not isinstance(agree, bool):
         raise CustomError(ErrorCode.ParameterError)
 
-    record = await ApprovementProcessor.create(approvement_id=approvement_id, processors=request.ctx.session['account_info'], agree=agree, remark=param.get("remark"), params=param.get("params"))
+    record = await ApprovementProcessor.create(approvement_id=approvement_id, processor=request.ctx.session['account_info'], agree=agree, remark=param.get("remark"), params=param.get("params"))
     do_action = False
     approve = await Approvement.get(id=approvement_id)
 
