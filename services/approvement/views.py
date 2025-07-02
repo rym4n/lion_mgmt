@@ -10,7 +10,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
-from models import Approvement
+from models import Approvement, ApprovementProcessor
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
 approve_bp = Blueprint('approve', url_prefix='/approve')
@@ -21,7 +21,7 @@ _all__ = ["approve_bp"]
 @requires_permission("approve:r")
 async def all_approvement(request):
     """
-    获取所有人工审批任务信息（需要approve:r权限）
+    获取审批人为当前用户的审批任务信息（需要approve:r权限）
     
     请求参数：
         page: 页码
@@ -34,10 +34,10 @@ async def all_approvement(request):
     size = int(params.get("size", 10))
     offset = (page - 1) * size
 
-    user = request.ctx.session['account_info']
-    condition = Q(approvers__id=user.id)
+    condition = Q(approvers=request.ctx.session['account_info'].id)
     keyword = params.get("keyword")
     status = params.get("status")
+
     if keyword:
         condition = Q(title__icontains=keyword) | Q(content__icontains=keyword)
     if status:
@@ -46,7 +46,7 @@ async def all_approvement(request):
     total = await Approvement.filter(condition).count()
     records = []
     if total > 0:
-        records = await Approvement.filter(condition).offset(offset).limit(size).prefetch_related("approvers", "processors").all()
+        records = await Approvement.filter(condition).offset(offset).limit(size).prefetch_related("approvers").all()
 
     data = list()
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -65,6 +65,23 @@ async def all_approvement(request):
     })
 
 
+@approve_bp.post("/detail")
+@requires_permission("approve:r")
+async def approvement_detail(request):
+    """
+    获取审批任务详情（需要approve:r权限）
+
+    请求参数：
+        id: 审批任务id，必填参数
+    """
+    approvement_id = request.json.get("id")
+    if not approvement_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    record = await ApprovementProcessor.filter(approvement_id=approvement_id).prefetch_related("processors").all()
+    return response_ok([r.json for r in record])
+
+
 @approve_bp.post("/todolist")
 @requires_permission("approve:r")
 async def todo_approvement(request):
@@ -75,18 +92,24 @@ async def todo_approvement(request):
     请求参数：
         page: 页码
         size: 每页数量
-        keyword: 关键字，模糊搜索审核标题或者审核内容，可选参数
     """
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 10))
 
     user = request.ctx.session['account_info']
-    # 查询 Approvement 表中 status 为 0 且 approvers 中包含当前用户 ID 的记录 且 expire_time 大于当前时间 且 processors 中不包含当前用户 ID
-    condition = Q(status=0, approvers__id=user.id, expire_time__gt=datetime.now(), processors__id__not=user.id)
-    total = await Approvement.filter(condition).count()
-    records = await Approvement.filter(condition).offset((page - 1) * size).limit(size).all()
+    # 查询 ApprovementProcessor 表中 approvement 记录的 status 为 0 且 approvers 中包含当前用户 ID 的记录 且 expire_time 大于当前时间 且 processors 中不包含当前用户 ID
+    condition = (
+            Q(approvement__status=0) &
+            Q(approvement__approvers=user.id) &
+            Q(approvement__expire_time__gt=datetime.now()) &
+            ~Q(processors=user.id)
+    )
+    records = []
+    total = await ApprovementProcessor.filter(condition).count()
+    if total > 0:
+        records = await ApprovementProcessor.filter(condition).offset((page - 1) * size).limit(size).prefetch_related("approvement").all()
 
-    # 修改过期任务状态
+    # 修改过期任务状态,后端就不做定时任务了
     await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
 
     return response_ok({
@@ -96,9 +119,9 @@ async def todo_approvement(request):
         "total_pages": (total + size - 1) // size,
         "data": [{
             "id": a.id,
-            "title": a.title,
-            "content": a.content,
-            "expire_time": a.expire_time
+            "title": a.approvement.title,
+            "content": a.approvement.content,
+            "expire_time": a.approvement.expire_time
         } for a in records]
     })
 
@@ -115,36 +138,37 @@ async def update_approvement(request):
         remark: 审批备注信息
         params: 自定义参数的内容信息, 例如 {"key": "value"}
     """
-    approvement_id = request.json.get("id")
-    agree = request.json.get("agree")
+    param = request.json
+    approvement_id = param.get("id")
+    agree = param.get("agree")
     if not approvement_id or not isinstance(agree, bool):
         raise CustomError(ErrorCode.ParameterError)
 
-    record = await Approvement.get(id=approvement_id, status=0, expire_time__gt=datetime.now()).prefetch_related("approvers", "processors")
+    record = await ApprovementProcessor.create(approvement_id=approvement_id, processors=request.ctx.session['account_info'], agree=agree, remark=param.get("remark"), params=param.get("params"))
     do_action = False
-    record.processors.add(request.ctx.session['account_info'])
+    approve = await Approvement.get(id=approvement_id)
 
-    if agree is False:
-        record.status = 2
-        do_action = True
-    else:
-        if record.approve_type == 2:
+    if agree is True:
+        if record.approvement.approve_type == 2:
+            approve.agree_count += 1
             # 如果是会签，只有所有审批人都同意了，才进行下一步
-            if len(record.approvers) == len(record.processors):
-                record.status = 1
+            if approve.agree_count == len(approve.approvers):
+                approve.status = 1
                 do_action = True
         else:
-            record.status = 1
+            record.opinion = 1
             do_action = True
+    else:
+        approve.status = 2
 
-    await record.save()
+    await approve.save()
 
     if do_action:
         msg = {
-            "run_type": 'flow', "run_id": record.run_id,
+            "run_type": 'flow', "run_id": approve.run_id,
             "run_args": {
-                "flow_id": record.flow_id, "flow_input": "", "approval_node_id": record.audit_node, "next_node_id": record.next_node,
-                "approval_status": record.status, "executor": ",".join([p.id for p in record.processors])
+                "flow_id": approve.flow_id, "flow_input": param.get("params", ''), "approval_node_id": approve.audit_node, "next_node_id": approve.next_node, "approval_status": approve.status,
+                "executor": ",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session['account_info'].id
             }
         }
         await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)

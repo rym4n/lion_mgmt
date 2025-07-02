@@ -1,13 +1,12 @@
 # coding=utf-8
 import asyncio
+import hashlib
 import time
 import traceback
 from datetime import datetime
 
 import orjson
 import pytz
-
-import hashlib
 from aiocache import caches
 from openai import OpenAI
 from sanic.exceptions import WebsocketClosed
@@ -261,8 +260,7 @@ class ChatManager:
         # 处理审批消息
         if log.get('type') == 'approval-info':
             approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'],
-                                               content=log['content'],
-                                               params=log['params'], status=log['status'],
+                                               content=log['content'], params=log['params'], status=log['status'],
                                                expire_time=log['expire_time'], created_at=log['created_at'],
                                                audit_node=log['audit_app'], next_node=log['start_app'],
                                                approve_type=int(log['approve_type']))
