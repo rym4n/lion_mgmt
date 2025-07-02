@@ -109,11 +109,7 @@ def playbook_permission(*required_permissions: str):
             # 获取剧本ID
             playbook_id = request.json.get("playbook_id")  # 从JSON body获取
             if not playbook_id:
-                pv_id = request.json.get("id")
-                pv = await PlaybookVersion.get_or_none(id=pv_id)
-                playbook_id = pv.playbook_id
-                if not playbook_id:
-                    raise CustomError(ErrorCode.ParameterError)
+                raise CustomError(ErrorCode.ParameterError)
 
             user = request.ctx.session.get('account_info')
             if not user:
@@ -133,6 +129,46 @@ def playbook_permission(*required_permissions: str):
         return wrapper
 
     return decorator
+
+
+def playbook_version_permission(*required_permissions: str):
+    """
+    剧本版本权限验证装饰器（支持多权限验证）
+
+    使用示例：
+    @playbook_permission('r')        # 需要读权限
+    @playbook_permission('u', 'd')   # 需要更新或删除权限
+    """
+
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(request, *args, **kwargs):
+            # 获取剧本ID
+            pv_id = request.json.get("id")
+            pv = await PlaybookVersion.get_or_none(id=pv_id)
+            playbook_id = pv.playbook_id
+            if not playbook_id:
+                raise CustomError(ErrorCode.ParameterError)
+
+            user = request.ctx.session.get('account_info')
+            if not user:
+                raise CustomError(ErrorCode.AccountNotFound)
+
+            has_access = await check_playbook_permission(
+                user,
+                playbook_id,
+                required_permissions
+            )
+
+            if not has_access:
+                raise CustomError(ErrorCode.Unauthorized)
+
+            return await func(request, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
 
 
 # 权限检查工具函数

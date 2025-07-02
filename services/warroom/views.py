@@ -16,9 +16,9 @@ from libs.chat import get_or_create_private_chat_room, chat_manager
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authentication import validate_token
-from libs.security.authorization import requires_permission
+from libs.security.authorization import requires_permission, check_playbook_permission
 from libs.utils import gen_order_version, gen_random_code
-from models import Approvement, Events, ToolAction, Tool, Runlog
+from models import Approvement, Events, ToolAction, Tool, Runlog, PlaybookVersion
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
 from settings import SECRET, SESSION_ENCODING_ALGORITHM, KAFKA_SERVERS, TASK_TOPIC
@@ -579,6 +579,16 @@ async def run(request):
     room_id = request.json.get("id")
     type = request.json.get("type")
     user = request.ctx.session['account_info']
+    if type == "flow":
+        pv = await PlaybookVersion.get_or_none(id=request.json.get("playbook_input").get("flow_id"))
+        playbook_id = pv.playbook_id
+        has_access = await check_playbook_permission(
+            request.ctx.session.get('account_info'),
+            playbook_id,
+            "e"
+        )
+        if not has_access:
+            raise CustomError(ErrorCode.Unauthorized)
     if not room_id or not type:
         raise CustomError(ErrorCode.ParamValueError)
     params = request.json.get("playbook_input") or request.json.get("action_input")
@@ -616,6 +626,16 @@ async def execution(request):
     executorParams = request.json.get("params")
     user = request.ctx.session['account_info']
     event = await (Events.get_or_none(id=eventId))
+    if executorInstanceType == "PLAYBOOK":
+        pv = await PlaybookVersion.get_or_none(id=executorInstanceId)
+        playbook_id = pv.playbook_id
+        has_access = await check_playbook_permission(
+            request.ctx.session.get('account_info'),
+            playbook_id,
+            "e"
+        )
+        if not has_access:
+            raise CustomError(ErrorCode.Unauthorized)
     if not event.room:
         room_name = event.event_name + "_" + gen_random_code(6)
         if await Room.filter(name=room_name, deleted=False).exists():
