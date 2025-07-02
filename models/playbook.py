@@ -15,6 +15,7 @@ class Playbook(BaseModel):
     tags = fields.ManyToManyField("models.Tag", null=True, through="playbook_tag")
     scenes = fields.ManyToManyField("models.Scene", null=True, through="playbook_scene")
     internal = fields.BooleanField(default=False, description="是否内置剧本")
+    creator = fields.ForeignKeyField("models.Account", null=True, related_name="created_playbook", description="创建人")
 
     def validate(self) -> None:
         raise NotImplementedError
