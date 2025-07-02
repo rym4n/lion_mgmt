@@ -149,7 +149,7 @@ async def update_approvement(request):
     approve = await Approvement.get(id=approvement_id)
 
     if agree is True:
-        if record.approvement.approve_type == 2:
+        if approve.approve_type == 2:
             approve.agree_count += 1
             # 如果是会签，只有所有审批人都同意了，才进行下一步
             if approve.agree_count == len(approve.approvers):
