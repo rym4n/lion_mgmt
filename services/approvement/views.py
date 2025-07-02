@@ -78,7 +78,7 @@ async def approvement_detail(request):
     if not approvement_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    record = await ApprovementProcessor.filter(approvement_id=approvement_id).prefetch_related("processors").all()
+    record = await ApprovementProcessor.filter(approvement_id=approvement_id).prefetch_related("processor").all()
     return response_ok([r.json for r in record])
 
 
