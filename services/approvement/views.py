@@ -3,7 +3,8 @@
 from datetime import datetime
 
 from sanic import Blueprint
-from tortoise.expressions import Q
+from sanic.log import logger
+from tortoise.expressions import Q, RawSQL
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -76,17 +77,16 @@ async def todo_approvement(request):
     # 修改过期任务状态,后端就不做定时任务了
     await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
 
-    # process_records 记录了处理记录 [{"username": "xxx", "display_name":"Tony", "agree":true, "remark": "xxx"}]
-    # 需要过滤出 approvers 包含当前用户ID，但是 process_records 中没有当前用户 username 的所有记录
-    condition = (
-            Q(approvers=user.id) &
-            Q(status=0) &
-            ~Q(process_records__username=user.username)
-    )
-    total = await Approvement.filter(condition).count()
+    # results 记录了处理记录 {"username_aaa": {"display_name":"Tony", "agree":true, "remark": "xxx"}}
+    # 需要过滤出 approvers 包含当前用户ID，但是 results 中没有当前用户 username 的所有记录
+    # condition = Q(approvers=user.id) & Q(status=0) & ~Q(where=[RawSQL(f"results ? {user.username}")])
+    query = Approvement.filter(approvers=user.id, status=0, results__contains=[user.id])
+    logger.info(query.sql())
+    # total = await Approvement.filter(condition).count()
+    total = await query.count()
     records = []
     if total > 0:
-        records = await Approvement.filter(condition).offset((page - 1) * size).limit(size).prefetch_related("approvers").all()
+        records = await query.offset((page - 1) * size).limit(size).prefetch_related("approvers").all()
     return response_ok({
         "total": total,
         "page": page,
@@ -121,7 +121,7 @@ async def update_approvement(request):
     if not approvement_id or not isinstance(agree, bool) or not isinstance(remark, str) or not isinstance(params, dict):
         raise CustomError(ErrorCode.ParameterError)
 
-    approve = await Approvement.filter(id=approvement_id).select_for_update().prefetch_related("approvers", 'process_record').first()
+    approve = await Approvement.filter(id=approvement_id).select_for_update().prefetch_related("approvers").first()
     if not approve:
         raise CustomError(ErrorCode.NotFound)
 
@@ -129,16 +129,16 @@ async def update_approvement(request):
         raise CustomError(ErrorCode.ApprovementStatusError)
 
     account_info = request.ctx.session['account_info']
-    record = await ProcessRecords.create(
-        approvement_id=approvement_id,
-        processor=account_info,
-        agree=agree,
-        remark=remark,
-        params=params
-    )
+    approve.results[account_info.id] = {
+        "username": account_info.username,
+        "display_name": account_info.display_name,
+        "agree": agree,
+        "remark": remark,
+        "params": params
+    }
     do_action = False
 
-    agree_count = len(approve.process_record)
+    agree_count = len(approve.results)
 
     if agree:
         if approve.approve_type == 2:
@@ -148,7 +148,7 @@ async def update_approvement(request):
                 approve.status = 1
                 do_action = True
         else:
-            record.opinion = 1
+            approve.results[account_info.id] = 1
             do_action = True
     else:
         approve.status = 2
@@ -165,4 +165,4 @@ async def update_approvement(request):
         }
         await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
-    return response_ok(record.json)
+    return response_ok('success')
