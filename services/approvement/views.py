@@ -10,7 +10,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
-from models import Approvement, ApprovementProcessor
+from models import Approvement, ProcessRecords
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
 approve_bp = Blueprint('approve', url_prefix='/approve')
@@ -71,7 +71,7 @@ async def approvement_detail(request):
     if not approvement_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    record = await ApprovementProcessor.filter(approvement_id=approvement_id).prefetch_related("processor").all()
+    record = await ProcessRecords.filter(approvement_id=approvement_id).prefetch_related("processor").all()
     return response_ok([r.json for r in record])
 
 
@@ -92,17 +92,16 @@ async def todo_approvement(request):
     user = request.ctx.session['account_info']
     # 修改过期任务状态,后端就不做定时任务了
     await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
-    # 查询 ApprovementProcessor 表中 approvement 记录的 status 为 0 且 approvers 中包含当前用户 ID 的记录 且 expire_time 大于当前时间 且 processors 中不包含当前用户 ID
-    condition = (
-            Q(approvement__status=0) &
-            Q(approvement__approvers=user.id) &
-            ~Q(processor=user.id)
-    )
-    records = []
-    total = await ApprovementProcessor.filter(condition).count()
-    if total > 0:
-        records = await ApprovementProcessor.filter(condition).offset((page - 1) * size).limit(size).prefetch_related("approvement").all()
 
+    condition = (
+        Q(approvers=user.id) &
+        Q(status=0) &
+        ~Q(approve_process_records__processor=user.id)
+    )
+    total = await Approvement.filter(condition).count()
+    records = []
+    if total > 0:
+        records = await Approvement.filter(condition).offset((page - 1) * size).limit(size).prefetch_related("approvers").all()
     return response_ok({
         "total": total,
         "page": page,
@@ -110,9 +109,9 @@ async def todo_approvement(request):
         "total_pages": (total + size - 1) // size,
         "data": [{
             "id": a.id,
-            "title": a.approvement.title,
-            "content": a.approvement.content,
-            "expire_time": a.approvement.expire_time
+            "title": a.title,
+            "content": a.content,
+            "expire_time": a.expire_time
         } for a in records]
     })
 
@@ -142,7 +141,7 @@ async def update_approvement(request):
         raise CustomError(ErrorCode.NotFound)
 
     account_info = request.ctx.session['account_info']
-    record = await ApprovementProcessor.create(
+    record = await ProcessRecords.create(
         approvement_id=approvement_id,
         processor=account_info,
         agree=agree,

@@ -22,7 +22,7 @@ class Approvement(BaseModel):
     next_node = fields.CharField(max_length=50, description="下一个要执行的节点ID")
     created_at = fields.DatetimeField(description="审核触发的时间")
     params = fields.JSONField(default=[], description="自定义参数")
-    agree_count = fields.IntField(default=0, description="审核通过数量")
+    process_record = fields.ManyToManyField("models.ProcessRecords", null=True, related_name="approve_records", description="审核处理记录")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -48,12 +48,11 @@ class Approvement(BaseModel):
         ordering = ["-utime"]
 
 
-class ApprovementProcessor(BaseModel):
+class ProcessRecords(BaseModel):
     """
     人工审核处理人模型
     字段：
     """
-    approvement = fields.ForeignKeyField("models.Approvement")
     processor = fields.ForeignKeyField("models.Account")
     agree = fields.BooleanField(null=False, description="审核意见，True代表通过，False代表拒绝")
     remark = fields.TextField(null=False, description="审核结果备注")
@@ -70,4 +69,4 @@ class ApprovementProcessor(BaseModel):
         }
 
     class Meta:
-        table = "approve_processor"
+        table = "process_records"
