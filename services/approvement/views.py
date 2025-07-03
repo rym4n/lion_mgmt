@@ -46,7 +46,7 @@ async def all_approvement(request):
     total = await Approvement.filter(condition).count()
     records = []
     if total > 0:
-        records = await Approvement.filter(condition).offset(offset).limit(size).prefetch_related("approvers").all()
+        records = await Approvement.filter(condition).offset(offset).limit(size).prefetch_related("flow", "approvers").all()
 
     data = list()
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
