@@ -90,20 +90,18 @@ async def todo_approvement(request):
     size = int(request.json.get("size", 10))
 
     user = request.ctx.session['account_info']
+    # 修改过期任务状态,后端就不做定时任务了
+    await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
     # 查询 ApprovementProcessor 表中 approvement 记录的 status 为 0 且 approvers 中包含当前用户 ID 的记录 且 expire_time 大于当前时间 且 processors 中不包含当前用户 ID
     condition = (
             Q(approvement__status=0) &
             Q(approvement__approvers=user.id) &
-            Q(approvement__expire_time__gt=datetime.now()) &
-            ~Q(processors=user.id)
+            ~Q(processor=user.id)
     )
     records = []
     total = await ApprovementProcessor.filter(condition).count()
     if total > 0:
         records = await ApprovementProcessor.filter(condition).offset((page - 1) * size).limit(size).prefetch_related("approvement").all()
-
-    # 修改过期任务状态,后端就不做定时任务了
-    await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
 
     return response_ok({
         "total": total,
