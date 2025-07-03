@@ -16,9 +16,9 @@ from libs.chat import get_or_create_private_chat_room, chat_manager
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authentication import validate_token
-from libs.security.authorization import requires_permission, check_playbook_permission
-from libs.utils import gen_order_version, gen_random_code
-from models import Approvement, Events, ToolAction, Tool, Runlog, PlaybookVersion
+from libs.security.authorization import requires_permission
+from libs.utils import gen_order_version
+from models import Approvement, Events
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
 from settings import SECRET, SESSION_ENCODING_ALGORITHM, KAFKA_SERVERS, TASK_TOPIC
@@ -26,10 +26,6 @@ from settings import SECRET, SESSION_ENCODING_ALGORITHM, KAFKA_SERVERS, TASK_TOP
 warroom_bp = Blueprint('warroom', url_prefix='/warroom')
 __all__ = ['warroom_bp']
 
-TYPE_DICT = {
-    "PLAYBOOK": "flow",
-    "ACTION": "action"
-}
 
 @warroom_bp.websocket('/ws')
 async def warroom_ws(request: Request, ws: Websocket):
@@ -579,16 +575,6 @@ async def run(request):
     room_id = request.json.get("id")
     type = request.json.get("type")
     user = request.ctx.session['account_info']
-    if type == "flow":
-        pv = await PlaybookVersion.get_or_none(id=request.json.get("playbook_input").get("flow_id"))
-        playbook_id = pv.playbook_id
-        has_access = await check_playbook_permission(
-            request.ctx.session.get('account_info'),
-            playbook_id,
-            "e"
-        )
-        if not has_access:
-            raise CustomError(ErrorCode.Unauthorized)
     if not room_id or not type:
         raise CustomError(ErrorCode.ParamValueError)
     params = request.json.get("playbook_input") or request.json.get("action_input")
@@ -604,97 +590,3 @@ async def run(request):
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
     return response_ok("运行成功")
-
-
-@warroom_bp.post("/execution")
-@requires_permission("warroom:r")
-async def execution(request):
-    """
-    运行剧本或动作（需要作战室创建权限）
-
-    请求参数：
-        eventId: 必填，事件ID
-        executorInstanceType: 必填，运行类型，PLAYBOOK/ACTION
-        executorInstanceId: 必填 实例ID(剧本版本id或动作id)
-        executorActionAssetId: 非必填 动作资源id
-        params: 非必填 运行参数 [{"key":"a","value":"b"},{"key":"c","value":"d"}]
-    """
-    eventId = request.json.get("eventId")
-    executorInstanceType = request.json.get("executorInstanceType")
-    executorInstanceId = request.json.get("executorInstanceId")
-    executorActionAssetId = request.json.get("executorActionAssetId")
-    executorParams = request.json.get("params")
-    user = request.ctx.session['account_info']
-    event = await (Events.get_or_none(id=eventId))
-    if executorInstanceType == "PLAYBOOK":
-        pv = await PlaybookVersion.get_or_none(id=executorInstanceId)
-        playbook_id = pv.playbook_id
-        has_access = await check_playbook_permission(
-            request.ctx.session.get('account_info'),
-            playbook_id,
-            "e"
-        )
-        if not has_access:
-            raise CustomError(ErrorCode.Unauthorized)
-    if not event.room:
-        room_name = event.event_name + "_" + gen_random_code(6)
-        if await Room.filter(name=room_name, deleted=False).exists():
-            raise CustomError(ErrorCode.RoomNameExists)
-        room = await Room.create(name=room_name, creator=user)
-        event.room = room
-    room_id = event.room_id
-    type = TYPE_DICT.get(executorInstanceType)
-    if not room_id or not type:
-        raise CustomError(ErrorCode.ParamValueError)
-    params = {}
-    input_data = {}
-    if type == "flow":
-        if executorParams:
-            for param in executorParams:
-                input_data[param["key"]] = param["value"]
-        params["flow_id"] = executorInstanceId
-        params["flow_input"] = input_data
-    elif type == "action":
-        action = await ToolAction.get_or_none(id=executorInstanceId, deleted=False)
-        tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False)
-        if executorParams:
-            for param in executorParams:
-                input_data[param["key"]] = param["value"]
-        params["app_name"] = tool.name
-        params["name"] = tool.description
-        params["app_ver"] = tool.version
-        params["main"] = tool.main
-        params["action_input"] = input_data
-        params["resource"] = executorActionAssetId
-        params["node_name"] = action.action["name"]
-        params["action"] = action.action["func"]
-        params["action_name"] = action.action["name"]
-        params["retry_times"] = 1
-        params["timeout"] = 300
-    params["executor"] = user.id
-    msg = {"run_type": type, "run_id": gen_order_version(length=6), "run_args": params}
-    room = await Room.get_or_none(id=room_id)
-    room.updator = user
-    room.run_id.append(msg["run_id"])
-    await room.save()
-    await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
-
-    return response_ok({"activityId": msg.get("run_id")})
-
-
-@warroom_bp.get("/activity/<activityId>")
-@requires_permission("warroom:r")
-async def activity(request, activityId):
-    """
-    获取执行记录
-
-    请求参数：
-        activityId: 必填，活动ID
-    """
-    if not activityId:
-        raise CustomError(ErrorCode.ParamValueError)
-    logs = await Runlog.filter(run_id=activityId, deleted=False).all()
-
-    return response_ok([orjson.dumps(log.json).decode() for log in logs])
-
