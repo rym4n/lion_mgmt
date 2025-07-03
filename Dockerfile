@@ -54,7 +54,7 @@ RUN apt update -y \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir /var/lib/vector
 
-RUN wget https://aioe.hongcloud.net/installer/$TARGETPLATFORM/juicefs \
+RUN curl https://aioe.hongcloud.net/installer/$TARGETPLATFORM/juicefs -o juicefs \
     && chmod +x juicefs \
     && mv juicefs /usr/local/bin/juicefs
 
