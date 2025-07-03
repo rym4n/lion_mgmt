@@ -43,25 +43,18 @@ async def all_approvement(request):
     if status:
         condition = condition & Q(status__in=status)
 
+    await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
     total = await Approvement.filter(condition).count()
     records = []
     if total > 0:
         records = await Approvement.filter(condition).offset(offset).limit(size).prefetch_related("flow", "approvers").all()
-
-    data = list()
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for a in records:
-        tmp = a.json
-        if status and 3 not in status and tmp['expire_time'] < current_time:
-            continue
-        data.append(tmp)
 
     return response_ok({
         "total": total,
         "page": page,
         "size": size,
         "total_pages": (total + size - 1) // size,
-        "data": data
+        "data": [r.json for r in records]
     })
 
 
