@@ -19,7 +19,7 @@ class SecurityMiddleware(BaseMiddleware):
             # 开发测试环境，放行docs文档页面路径
             white_urls.extend(["/docs", "/docs/openapi.json"])
 
-        if request.path == '/system/ai/update' and get_client_ip(request) == '127.0.0.1':
+        if request.path == '/license/ai/update' and get_client_ip(request) == '127.0.0.1':
             # AI更新接口，允许本地调用
             return
 
