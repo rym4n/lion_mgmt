@@ -54,9 +54,7 @@ RUN apt update -y \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir /var/lib/vector
 
-RUN curl "https://aioe.hongcloud.net/installer/$(uname -m)/juicefs" -o juicefs \
-    && chmod +x juicefs \
-    && mv juicefs /usr/local/bin/juicefs
+RUN curl -sSL https://d.juicefs.com/install | sh -
 
 COPY --from=vector /usr/bin/vector /usr/bin/vector
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
