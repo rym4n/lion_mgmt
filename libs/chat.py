@@ -239,23 +239,6 @@ class ChatManager:
         专门处理 runlog
         """
         logger.info(f"runlog消息：{log}")
-        key = log.get('run_id', '')
-
-        data = await self.redis.get(key)
-        if data:
-            # 消费作战室的执行记录
-            data["log"] = log
-            await self.msg_pub.publish("wr_group_chat", orjson.dumps(data).decode())
-            event = await Events.get_or_none(room_id=data["room_id"])
-            if event:
-                if log.get("node_type") == "start-node":
-                    event.event_process_status = "处理中"
-                    await event.save()
-                elif log.get("node_type") == "end-node":
-                    event.event_process_status = "已处理"
-                    event.close_time = pytz.timezone("Asia/Shanghai").localize(datetime.now())
-                    await event.save()
-                log["event_id"] = event.id
 
         # 处理审批消息
         if log.get('type') == 'approval-info':
@@ -271,6 +254,23 @@ class ChatManager:
                 users = await Account.filter(role_id__in=log['roles'].split(',')).all()
                 await approve.approvers.add(*users)
         else:
+            key = log.get('run_id', '')
+
+            data = await self.redis.get(key)
+            if data:
+                # 消费作战室的执行记录
+                data["log"] = log
+                await self.msg_pub.publish("wr_group_chat", orjson.dumps(data).decode())
+                event = await Events.get_or_none(room_id=data["room_id"])
+                if event:
+                    if log.get("node_type") == "start-node":
+                        event.event_process_status = "处理中"
+                        await event.save()
+                    elif log.get("node_type") == "end-node":
+                        event.event_process_status = "已处理"
+                        event.close_time = pytz.timezone("Asia/Shanghai").localize(datetime.now())
+                        await event.save()
+                    log["event_id"] = event.id
             try:
                 await Runlog.create(**log)
             except Exception as e:

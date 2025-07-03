@@ -4,7 +4,7 @@ from datetime import datetime
 
 from sanic import Blueprint
 from sanic.log import logger
-from tortoise.expressions import Q, RawSQL
+from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -138,13 +138,10 @@ async def update_approvement(request):
     }
     do_action = False
 
-    agree_count = len(approve.results)
-
     if agree:
         if approve.approve_type == 2:
-            agree_count += 1
             # 如果是会签，只有所有审批人都同意了，才进行下一步
-            if agree_count == len(approve.approvers):
+            if len(approve.results) == len(approve.approvers):
                 approve.status = 1
                 do_action = True
         else:
