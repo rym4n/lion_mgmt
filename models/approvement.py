@@ -22,7 +22,7 @@ class Approvement(BaseModel):
     next_node = fields.CharField(max_length=50, description="下一个要执行的节点ID")
     created_at = fields.DatetimeField(description="审核触发的时间")
     params = fields.JSONField(default=[], description="自定义参数")
-    process_record = fields.ManyToManyField("models.ProcessRecords", null=True, related_name="approve_records", description="审核处理记录")
+    process_records = fields.JSONField(default=[], description="处理记录")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -39,6 +39,7 @@ class Approvement(BaseModel):
             "expire_time": strip_timezone_to_seconds(self.expire_time),
             "approvers": [{"username": i.username, "display_name": i.display_name} for i in self.approvers],
             "approve_type": self.approve_type,
+            "process_records": self.process_records,
             "params": self.params,
         }
 
@@ -46,27 +47,3 @@ class Approvement(BaseModel):
     class Meta:
         table = "approvement"
         ordering = ["-utime"]
-
-
-class ProcessRecords(BaseModel):
-    """
-    人工审核处理人模型
-    字段：
-    """
-    processor = fields.ForeignKeyField("models.Account")
-    agree = fields.BooleanField(null=False, description="审核意见，True代表通过，False代表拒绝")
-    remark = fields.TextField(null=False, description="审核结果备注")
-
-    @property
-    def json(self) -> dict:
-        return {
-            "id": self.id,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-            "utime": strip_timezone_to_seconds(self.utime),
-            "agree": self.agree,
-            "remark": self.remark,
-            "processor": {"username": self.processor.username, "display_name": self.processor.display_name}
-        }
-
-    class Meta:
-        table = "process_records"

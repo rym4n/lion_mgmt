@@ -5,6 +5,7 @@ from libs.error_code.enum import BaseErrorCode, ErrorData
 
 class ErrorCode(BaseErrorCode):
     """错误码枚举类"""
+
     ServerError = ErrorData(5000, "服务异常，请稍后重试")
     ParameterError = ErrorData(4000, "参数错误")
     InvalidJsonError = ErrorData(4001, "请求体是无效的json格式")
@@ -99,3 +100,5 @@ class ErrorCode(BaseErrorCode):
 
     InvalidState = ErrorData(4072, "非法的state参数")
     SystemUserCannotBeDeleted = ErrorData(4073, "系统用户禁止删除")
+
+    ApprovementStatusError = (4074, "审核状态已经不是待处理了")

@@ -10,7 +10,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
-from models import Approvement, ProcessRecords
+from models import Approvement
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
 approve_bp = Blueprint('approve', url_prefix='/approve')
@@ -58,23 +58,6 @@ async def all_approvement(request):
     })
 
 
-@approve_bp.post("/detail")
-@requires_permission("approve:r")
-async def approvement_detail(request):
-    """
-    获取审批任务详情（需要approve:r权限）
-
-    请求参数：
-        id: 审批任务id，必填参数
-    """
-    approvement_id = request.json.get("id")
-    if not approvement_id:
-        raise CustomError(ErrorCode.ParameterError)
-
-    record = await ProcessRecords.filter(approvement_id=approvement_id).prefetch_related("processor").all()
-    return response_ok([r.json for r in record])
-
-
 @approve_bp.post("/todolist")
 @requires_permission("approve:r")
 async def todo_approvement(request):
@@ -93,10 +76,12 @@ async def todo_approvement(request):
     # 修改过期任务状态,后端就不做定时任务了
     await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
 
+    # process_records 记录了处理记录 [{"username": "xxx", "display_name":"Tony", "agree":true, "remark": "xxx"}]
+    # 需要过滤出 approvers 包含当前用户ID，但是 process_records 中没有当前用户 username 的所有记录
     condition = (
-        Q(approvers=user.id) &
-        Q(status=0) &
-        ~Q(approve_process_records__processor=user.id)
+            Q(approvers=user.id) &
+            Q(status=0) &
+            ~Q(process_records__username=user.username)
     )
     total = await Approvement.filter(condition).count()
     records = []
@@ -136,9 +121,12 @@ async def update_approvement(request):
     if not approvement_id or not isinstance(agree, bool) or not isinstance(remark, str) or not isinstance(params, dict):
         raise CustomError(ErrorCode.ParameterError)
 
-    approve = await Approvement.filter(id=approvement_id).select_for_update().prefetch_related("approvers").first()
+    approve = await Approvement.filter(id=approvement_id).select_for_update().prefetch_related("approvers", 'process_record').first()
     if not approve:
         raise CustomError(ErrorCode.NotFound)
+
+    if approve.status != 0:
+        raise CustomError(ErrorCode.ApprovementStatusError)
 
     account_info = request.ctx.session['account_info']
     record = await ProcessRecords.create(
@@ -150,11 +138,13 @@ async def update_approvement(request):
     )
     do_action = False
 
+    agree_count = len(approve.process_record)
+
     if agree:
         if approve.approve_type == 2:
-            approve.agree_count += 1
+            agree_count += 1
             # 如果是会签，只有所有审批人都同意了，才进行下一步
-            if approve.agree_count == len(approve.approvers):
+            if agree_count == len(approve.approvers):
                 approve.status = 1
                 do_action = True
         else:
