@@ -15,7 +15,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import verify_license
-from models import Tool, Playbook, Account, PermissionsMenu
+from models import Tool, Playbook, Account, PermissionsMenu, Config
 from settings import LICENSE_DIR
 
 license_bp = Blueprint('license', url_prefix='/license')
@@ -119,6 +119,29 @@ async def get_license(request: Request):
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
 
     return response_ok(menus)
+
+
+@license_bp.post("/ai/update")
+@requires_permission("system:u")
+async def set_ai(request):
+    """
+    设置AI参数
+    请求参数：
+        llm_host: 字符串类型, AI服务的Host（需带有协议，如 https://xxx.com）
+        llm_api_key: 字符串类型, AI服务的API Key（可选，留空则不更新，无密钥时传"EMPTY"）
+        llm_model: 字符串类型, AI服务的模型名称（可选，留空则不更新）
+    """
+    params = request.json
+    args = ["llm_host", "llm_api_key", "llm_model"]
+
+    for a in args:
+        if params.get(a):
+            await Config.update_or_create(key=a, defaults={"value": params[a]}, module="ai")
+    ai_cfg = {a: params[a] for a in args}
+    await request.ctx.cache_client.set('ai_config', ai_cfg, ttl=60 * 60 * 24)
+
+    return response_ok('success')
+
 
 
 @license_bp.post("/show")
