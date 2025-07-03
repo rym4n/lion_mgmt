@@ -17,9 +17,9 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import requires_permission, load_license
+from libs.security.authorization import requires_permission, load_license, playbook_permission
 from libs.utils import gen_order_version
-from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Account, Role
+from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Account, Role, PlaybookPermissions
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
@@ -63,12 +63,16 @@ async def create_workflow(request):
         raise CustomError(ErrorCode.PlaybookNameExists)
 
     flow_json_list = data.get("flow_json_list") or []
-
+    creator = request.ctx.session['account_info']
+    admin = await Role.get(id="111111")
     async with in_transaction():
         playbook = await Playbook.create(
             name=data.get("name"),
-            remark=data.get("remark", "")
+            remark=data.get("remark", ""),
+            creator=creator
         )
+        for perm in ["r", "u", "d", "e", "p"]:
+            await PlaybookPermissions.create(pb=playbook, permissions=perm, users=[creator], roles=[admin])
         if data.get('tags'):
             tags = await Tag.filter(name__in=data.get('tags')).all()
             await playbook.tags.add(*tags)
@@ -557,39 +561,113 @@ async def remove_tag(request):
 
 @workflow_bp.post("/permissions/add")
 @requires_permission("workflow:u")
+@playbook_permission("p")
 async def add_permission(request):
     """
     新增剧本权限（需要剧本更新权限）
-
+        (r:查, u:改, d:删, e:执行, p:授权)
     query参数:
         - playbook_id: 剧本id    str
-        - users_id: 用户ID列表    list
-        - roles_id: 角色ID列表    list
+        - params: 权限参数    list
+            [
+                {"r":{"user":[],"role":[]}},
+                {"u":{"user":[],"role":[]}},
+                {"d":{"user":[],"role":[]}},
+                {"e":{"user":[],"role":[]}},
+                {"p":{"user":[],"role":[]}}
+            ]
     """
     playbook_id = request.json.get("playbook_id")
-    users_id = list(set(request.json.get("users_id", [])))
-    roles_id = list(set(request.json.get("roles_id", [])))
-    if not playbook_id or not isinstance(users_id, list) or not isinstance(roles_id, list):
+    params = request.json.get("params")
+    if not playbook_id or not isinstance(params, list):
         raise CustomError(ErrorCode.ParameterError)
 
-    playbook, _ = await Playbook.get_or_create(id=playbook_id)
+    # 1. 获取剧本和必要实体
+    pb = await Playbook.get_or_none(id=playbook_id).prefetch_related("creator")
+    if not pb:
+        raise CustomError(ErrorCode.PlaybookNotFound)
 
-    await playbook.users.clear()
-    await playbook.roles.clear()
+    admin = await Role.get_or_none(id="111111")
+    creator = pb.creator
 
-    users = await Account.filter(id__in=users_id).all()
-    if users:
-        await playbook.users.add(*users)
+    # 2. 收集所有需要设置的用户和角色ID
+    all_user_ids = set()
+    all_role_ids = set()
+    permission_configs = []  # 存储权限配置
 
-    roles = await Role.filter(id__in=roles_id).all()
-    if roles:
-        await playbook.roles.add(*roles)
+    for param in params:
+        for perm_type, value in param.items():
+            if perm_type not in ["r", "u", "d", "e", "p"]:
+                raise CustomError(ErrorCode.ParameterError)
 
-    return response_ok("success")
+            users = value.get("user", [])
+            roles = value.get("role", [])
+
+            if not isinstance(users, list) or not isinstance(roles, list):
+                raise CustomError(ErrorCode.ParameterError)
+
+            # 添加用户和角色ID
+            all_user_ids.update(users)
+            all_role_ids.update(roles)
+
+            # 存储权限配置
+            permission_configs.append({
+                "type": perm_type,
+                "users": set(users),
+                "roles": set(roles)
+            })
+
+    # 添加创建者和管理员（如果存在）
+    if creator:
+        all_user_ids.add(creator.id)
+    if admin:
+        all_role_ids.add(admin.id)
+
+    # 3. 批量查询用户和角色
+    valid_users = {user.id: user for user in await Account.filter(id__in=list(all_user_ids))}
+    valid_roles = {role.id: role for role in await Role.filter(id__in=list(all_role_ids))}
+
+    async with in_transaction():
+        # 4. 清除该剧本的所有现有权限
+        await PlaybookPermissions.filter(pb=pb).delete()
+
+        # 5. 为每个权限配置创建一个新的权限实例，并逐个保存
+        for config in permission_configs:
+            # 创建权限对象
+            pp = PlaybookPermissions(pb=pb, permissions=config["type"])
+            # 先保存权限对象
+            await pp.save()
+
+            # 收集用户和角色对象
+            users_to_add = []
+            for user_id in config["users"]:
+                if user_id in valid_users:
+                    users_to_add.append(valid_users[user_id])
+            # 添加创建者
+            if creator and creator.id in valid_users:
+                if creator.id not in config["users"]:  # 避免重复添加
+                    users_to_add.append(valid_users[creator.id])
+
+            roles_to_add = []
+            for role_id in config["roles"]:
+                if role_id in valid_roles:
+                    roles_to_add.append(valid_roles[role_id])
+            # 添加管理员
+            if admin and admin.id not in config["roles"]:
+                roles_to_add.append(admin)
+
+            # 关联操作（必须在.save()之后）
+            await pp.users.add(*users_to_add)
+            await pp.roles.add(*roles_to_add)
+
+            await request.ctx.cache_client.set((playbook_id, config["type"]), {"user": [user.id for user in users_to_add], "role": [role.id for role in roles_to_add]}, ttl=2592000)
+
+    return response_ok("权限更新成功")
 
 
 @workflow_bp.post("/permissions/select")
 @requires_permission("workflow:r")
+@playbook_permission("r")
 async def select_permission_all(request):
     """
     获取剧本权限（需要剧本查看权限）
@@ -601,41 +679,6 @@ async def select_permission_all(request):
     if not playbook_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    playbook = await Playbook.get_or_none(id=playbook_id).prefetch_related("users", "roles")
+    pps = await PlaybookPermissions.filter(pb_id=playbook_id).all().prefetch_related("users", "roles")
 
-    return response_ok({"users": [str(user.id) for user in playbook.users],
-                        "roles": [str(role.id) for role in playbook.roles]} if playbook else {})
-
-
-@workflow_bp.post("/permissions/judge")
-@requires_permission("workflow:r")
-async def judge_permission(request):
-    """
-    权限判断接口 (需要剧本查看权限)
-
-    请求体参数:
-        - playbook_id: 剧本id    str
-    """
-    playbook_id = request.json.get("playbook_id")
-    if not playbook_id:
-        raise CustomError(ErrorCode.ParameterError)
-
-    user = request.ctx.session.get('account_info')
-    if not user:
-        raise CustomError(ErrorCode.AccountNotFound)
-
-    user_id = str(user.id)
-    role_ids = {str(role.id) for role in user.roles}
-
-    playbook = await Playbook.get_or_none(id=playbook_id).prefetch_related("users", "roles")
-
-    if not playbook:
-        return response_ok(False)
-
-    roles = [str(role.id) for role in playbook.roles]
-    users = [str(user.id) for user in playbook.users]
-
-    if user_id in users or role_ids.intersection(roles) or playbook.users == ["*"] or playbook.roles == ["*"]:
-        return response_ok(True)
-
-    return response_ok(False)
+    return response_ok([pp.json for pp in pps])
