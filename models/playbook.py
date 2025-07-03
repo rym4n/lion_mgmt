@@ -108,7 +108,7 @@ class PlaybookPermissions(BaseModel):
     pb = fields.ForeignKeyField("models.Playbook", unique=True, related_name="playbook_permissions", description="剧本")
     users = fields.ManyToManyField("models.Account", related_name="playbook_permissions_user", through="playbook_permissions_user")
     roles = fields.ManyToManyField("models.Role", related_name="playbook_permissions_role", through="playbook_permissions_role")
-    perms = fields.IntField(default=0, description="权限")
+    permissions = fields.CharField(max_length=30, description="剧本权限")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -121,7 +121,7 @@ class PlaybookPermissions(BaseModel):
             "utime": strip_timezone_to_seconds(self.utime),
             "users": [user.id for user in self.users],
             "roles": [role.id for role in self.roles],
-            "perms": self.perms
+            "permissions": self.permissions
         }
 
     class Meta:
