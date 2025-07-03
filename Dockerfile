@@ -54,9 +54,8 @@ RUN apt update -y \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir /var/lib/vector
 
-RUN curl -sSL https://d.juicefs.com/install | sh -
-
 COPY --from=vector /usr/bin/vector /usr/bin/vector
+RUN curl -sSL https://d.juicefs.com/install | sh -
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
 COPY pyproject.toml ./

@@ -112,23 +112,24 @@ async def list_workflow(request):
         scene: 可选，搜索时使用，支持搜索场景
         tag: 可选，搜索时使用，支持搜索标签 str
     """
-    page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 10))
+    json_params = request.json
+    page = int(json_params.get("page", 1))
+    size = int(json_params.get("size", 10))
     offset = (page - 1) * size
     limit = size
     # 分页查询Account，返回总数和数据
     condition = Q(deleted=False)
-    if request.json.get("keyword"):
+    if json_params.get("keyword"):
         # 模糊搜索name字段和remark字段
-        keyword = request.json.get("keyword")
+        keyword = json_params.get("keyword")
         condition = condition & (Q(name__icontains=keyword) | Q(remark__icontains=keyword))
-    if request.json.get("scene"):
-        scenes = await Scene.filter(name__in=request.json.get("scene")).all()
+    if json_params.get("scene"):
+        scenes = await Scene.filter(name__in=json_params.get("scene")).all()
         if scenes:
             condition = condition & Q(scenes__in=scenes)
 
-    if request.json.get("tag"):
-        tags = await Tag.filter(name__in=request.json.get("tag")).all()
+    if json_params.get("tag"):
+        tags = await Tag.filter(name__in=json_params.get("tag")).all()
         if tags:
             condition = condition & Q(tags__in=tags)
 
