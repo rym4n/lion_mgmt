@@ -101,4 +101,4 @@ class ErrorCode(BaseErrorCode):
     InvalidState = ErrorData(4072, "非法的state参数")
     SystemUserCannotBeDeleted = ErrorData(4073, "系统用户禁止删除")
 
-    ApprovementStatusError = (4074, "审核状态已经不是待处理了")
+    ApprovementStatusError = ErrorData(4074, "审核状态已经不是待处理了")

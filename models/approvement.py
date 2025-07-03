@@ -22,7 +22,7 @@ class Approvement(BaseModel):
     next_node = fields.CharField(max_length=50, description="下一个要执行的节点ID")
     created_at = fields.DatetimeField(description="审核触发的时间")
     params = fields.JSONField(default=[], description="自定义参数")
-    process_records = fields.JSONField(default=[], description="处理记录")
+    results = fields.JSONField(default={}, description="处理记录")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -39,7 +39,7 @@ class Approvement(BaseModel):
             "expire_time": strip_timezone_to_seconds(self.expire_time),
             "approvers": [{"username": i.username, "display_name": i.display_name} for i in self.approvers],
             "approve_type": self.approve_type,
-            "process_records": self.process_records,
+            "results": self.results,
             "params": self.params,
         }
 

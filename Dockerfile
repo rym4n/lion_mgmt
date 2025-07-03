@@ -54,9 +54,15 @@ RUN apt update -y \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir /var/lib/vector
 
+RUN wget https://aioe.hongcloud.net/installer/${uname -m}/juicefs \
+    && chmod +x juicefs \
+    && mv juicefs /usr/local/bin/juicefs
+
 COPY --from=vector /usr/bin/vector /usr/bin/vector
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
 COPY pyproject.toml ./
 COPY settings ./settings
 COPY server.py ./
+COPY start.sh ./
+RUN chmod +x start.sh
