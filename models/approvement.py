@@ -39,7 +39,7 @@ class Approvement(BaseModel):
             "expire_time": strip_timezone_to_seconds(self.expire_time),
             "approvers": [{"username": i.username, "display_name": i.display_name} for i in self.approvers],
             "approve_type": self.approve_type,
-            "process_records": self.process_records,
+            "results": self.results,
             "params": self.params,
         }
 
