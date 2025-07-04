@@ -102,3 +102,6 @@ class ErrorCode(BaseErrorCode):
     SystemUserCannotBeDeleted = ErrorData(4073, "系统用户禁止删除")
 
     ApprovementStatusError = ErrorData(4074, "审核状态已经不是待处理了")
+    CannotDeleteSelf = ErrorData(4075, "不允许删除自己")
+    CannotDisableSelf = ErrorData(4076, "不允许禁用自己")
+    CannotEditSensitiveAttribute = ErrorData(4077, "敏感属性不允许修改")

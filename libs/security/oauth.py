@@ -47,6 +47,7 @@ async def oauth_callback(client: BaseOAuth2, code: str, oauth_cfg: dict, code_ve
                 disabled=False,
                 mfa_enable=False,
                 mfa_key=None,
+                creator='auto',
                 permit_ip=None
             )
             await account.fetch_related("roles")

@@ -394,10 +394,10 @@ async def edit_user(request):
     for p in params:
         # 敏感属性不允许修改
         if p in ['id', 'ctime', 'utime', 'deleted', 'name', 'mfa_key', 'roles']:
-            continue
+            raise CustomError(ErrorCode.CannotEditSensitiveAttribute)
         # 不能禁用自己
         if p == 'disabled' and request.ctx.session['sub'] == user.id:
-            continue
+            raise CustomError(ErrorCode.CannotDisableSelf)
         need_update = True
         if p == 'password':
             user.password = password_hasher.hash(validate_password(request.json.get("password") or ''))
@@ -430,6 +430,8 @@ async def delelte_user(request):
     请求参数：
         username: 用户名
     """
+    if request.json.get("username") == request.ctx.session['account_info'].username:
+        raise CustomError(ErrorCode.CannotDeleteSelf)
     await Account.filter(username=request.json.get("username")).update(deleted=True)
     return response_ok("用户删除成功")
 
