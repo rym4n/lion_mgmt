@@ -2,7 +2,7 @@
 
 set -e
 
-export PATH="/bin:/usr/bin:/sbin:/usr/sbin"
+export PATH="/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin"
 
 juicefs status "redis://:${RY_REDIS_PASS}@${RY_REDIS_HOST}:${RY_REDIS_PORT}/10"
 if [[ $? -ne 0 ]]; then
