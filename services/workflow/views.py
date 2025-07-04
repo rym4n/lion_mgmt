@@ -72,7 +72,9 @@ async def create_workflow(request):
             creator=creator
         )
         for perm in ["r", "u", "d", "e", "p"]:
-            await PlaybookPermissions.create(pb=playbook, permissions=perm, users=[creator], roles=[admin])
+            permission = await PlaybookPermissions.create(pb=playbook, permissions=perm)
+            await permission.users.add(creator)
+            await permission.roles.add(admin)
         if data.get('tags'):
             tags = await Tag.filter(name__in=data.get('tags')).all()
             await playbook.tags.add(*tags)
