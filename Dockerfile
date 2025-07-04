@@ -52,7 +52,8 @@ RUN sed -i 's/http:\/\/deb.debian.org/https:\/\/mirrors.aliyun.com/g' /etc/apt/s
 RUN apt update -y \
     && apt install -y curl libc-dev python3-dev libaio-dev \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir /var/lib/vector
+    && mkdir /var/lib/vector \
+    && mkdir tools
 
 COPY --from=vector /usr/bin/vector /usr/bin/vector
 RUN curl -sSL https://d.juicefs.com/install | sh -
