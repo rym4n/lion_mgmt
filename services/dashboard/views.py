@@ -167,6 +167,6 @@ async def playbooks_success_rate(request):
     """
     async with in_transaction() as conn:
         rows = await conn.execute_query_dict(sql)
-    for row in rows:
-        row["success_rate"] = float(row["success_rate"])
-    return response_ok(rows)
+        for row in rows:
+            row["success_rate"] = float(row["success_rate"])
+        return response_ok(rows)

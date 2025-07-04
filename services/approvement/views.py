@@ -2,9 +2,10 @@
 # coding=utf-8
 from datetime import datetime
 
+import pytz
 from sanic import Blueprint
-from sanic.log import logger
 from tortoise.expressions import Q
+from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -60,45 +61,29 @@ async def all_approvement(request):
 
 
 @approve_bp.post("/todolist")
-@requires_permission("approve:r")
+@requires_permission("*:*")
 async def todo_approvement(request):
     """
     获取当前登录用户的待处理任务信息（需要approve:r权限）
     主要用于右上角的待办提醒
-
-    请求参数：
-        page: 页码
-        size: 每页数量
     """
-    page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 10))
-
     user = request.ctx.session['account_info']
     # 修改过期任务状态,后端就不做定时任务了
     await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
 
-    # results 记录了处理记录 {"username_aaa": {"display_name":"Tony", "agree":true, "remark": "xxx"}}
-    # 需要过滤出 approvers 包含当前用户ID，但是 results 中没有当前用户 username 的所有记录
-    # condition = Q(approvers=user.id) & Q(status=0) & ~Q(where=[RawSQL(f"results ? {user.username}")])
-    query = Approvement.filter(approvers=user.id, status=0, results__contains=[user.id])
-    logger.info(query.sql())
-    # total = await Approvement.filter(condition).count()
-    total = await query.count()
-    records = []
-    if total > 0:
-        records = await query.offset((page - 1) * size).limit(size).prefetch_related("approvers").all()
-    return response_ok({
-        "total": total,
-        "page": page,
-        "size": size,
-        "total_pages": (total + size - 1) // size,
-        "data": [{
-            "id": a.id,
-            "title": a.title,
-            "content": a.content,
-            "expire_time": a.expire_time
-        } for a in records]
-    })
+    # 将created_at从UTC时间转换为北京时间（UTC+8）
+    sql = f"""
+          SELECT a.title, a.content, a.expire_time, a.created_at, a.approve_type
+          FROM approvement a
+          JOIN approve_accounts b ON a.id = b.approvement_id AND b.account_id = '{user.id}'
+          WHERE a.status = 0 AND NOT a.results ? '{user.id}'
+        """
+    async with in_transaction() as conn:
+        rows = await conn.execute_query_dict(sql)
+        for row in rows:
+            row["created_at"] = row["created_at"].astimezone(pytz.timezone('Asia/Shanghai')).strftime("%Y-%m-%d %H:%M:%S")
+            row["expire_time"] = row["expire_time"].astimezone(pytz.timezone('Asia/Shanghai')).strftime("%Y-%m-%d %H:%M:%S")
+        return response_ok(rows)
 
 
 @approve_bp.post("/update")
@@ -128,6 +113,8 @@ async def update_approvement(request):
     if approve.status != 0:
         raise CustomError(ErrorCode.ApprovementStatusError)
 
+    if params:
+        approve.params = params
     account_info = request.ctx.session['account_info']
     approve.results = {
         **approve.results,
@@ -136,7 +123,7 @@ async def update_approvement(request):
             "display_name": account_info.display_name,
             "agree": agree,
             "remark": remark,
-            "params": params
+            "approve_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
     }
     do_action = False
