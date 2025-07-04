@@ -9,7 +9,7 @@ fi
 
 /usr/local/bin/juicefs info /app/tools
 if [[ $? -ne 0 ]]; then
-  /usr/local/bin/juicefs mount --max-uploads=50 --entry-cache 300 --attr-cache 300 -d "redis://:${RY_REDIS_PASS}@${RY_REDIS_HOST}:${RY_REDIS_PORT}/10" /app/tools
+  /usr/local/bin/juicefs mount --max-uploads=50 --cache-dir /fs_cache --cache-size 512 --entry-cache 300 --attr-cache 300 -d "redis://:${RY_REDIS_PASS}@${RY_REDIS_HOST}:${RY_REDIS_PORT}/10" /app/tools
 fi
 
 sanic server:app --host 0.0.0.0 --port 8000 -w 4 --no-access-logs --no-motd

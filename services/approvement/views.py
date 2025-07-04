@@ -129,12 +129,15 @@ async def update_approvement(request):
         raise CustomError(ErrorCode.ApprovementStatusError)
 
     account_info = request.ctx.session['account_info']
-    approve.results[account_info.id] = {
-        "username": account_info.username,
-        "display_name": account_info.display_name,
-        "agree": agree,
-        "remark": remark,
-        "params": params
+    approve.results = {
+        **approve.results,
+        account_info.id: {
+            "username": account_info.username,
+            "display_name": account_info.display_name,
+            "agree": agree,
+            "remark": remark,
+            "params": params
+        }
     }
     do_action = False
 
@@ -145,7 +148,7 @@ async def update_approvement(request):
                 approve.status = 1
                 do_action = True
         else:
-            approve.results[account_info.id] = 1
+            approve.status = 1
             do_action = True
     else:
         approve.status = 2
