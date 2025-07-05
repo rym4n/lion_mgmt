@@ -108,7 +108,7 @@ class PlaybookPermissions(BaseModel):
     pb = fields.ForeignKeyField("models.Playbook", unique=True, related_name="playbook_permissions", description="剧本")
     users = fields.ForeignKeyField("models.Account", related_name="playbook_permissions_user", description="角色")
     roles = fields.ForeignKeyField("models.Role", related_name="playbook_permissions_role", description="用户")
-    permissions = fields.CharField(max_length=30, description="剧本权限")
+    permissions = fields.JSONField(null=True)
 
     def validate(self) -> None:
         raise NotImplementedError
