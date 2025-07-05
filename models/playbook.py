@@ -106,8 +106,8 @@ class PlaybookPermissions(BaseModel):
     """
 
     pb = fields.ForeignKeyField("models.Playbook", unique=True, related_name="playbook_permissions", description="剧本")
-    users = fields.ManyToManyField("models.Account", related_name="playbook_permissions_user", through="playbook_permissions_user")
-    roles = fields.ManyToManyField("models.Role", related_name="playbook_permissions_role", through="playbook_permissions_role")
+    users = fields.ForeignKeyField("models.Account", related_name="playbook_permissions_user", description="角色")
+    roles = fields.ForeignKeyField("models.Role", related_name="playbook_permissions_role", description="用户")
     permissions = fields.CharField(max_length=30, description="剧本权限")
 
     def validate(self) -> None:
