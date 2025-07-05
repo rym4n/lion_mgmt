@@ -56,11 +56,8 @@ RUN apt update -y \
     && mkdir tools
 
 COPY --from=vector /usr/bin/vector /usr/bin/vector
-RUN curl -sSL https://d.juicefs.com/install | sh -
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
 COPY pyproject.toml ./
 COPY settings ./settings
 COPY server.py ./
-COPY start.sh ./
-RUN chmod +x start.sh
