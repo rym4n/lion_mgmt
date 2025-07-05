@@ -134,21 +134,30 @@ async def get_system_status(request):
     """
     name_map = {
         'lion-mgmt': '控制台服务', 'lion-web': 'Web服务器', 'lion-pg': '数据库连接服务', 'lion-db': '数据库服务', 'lion-redis': '缓存数据库',
-        'lion-ship': 'ETL服务', 'lion-job': '任务调度服务', 'lion-worker': '执行引擎', 'lion-kafka': '消息队列', 'lion-ai': 'AI服务'
+        'lion-ship': 'ETL服务', 'lion-job': '任务调度服务', 'lion-worker': '执行引擎', 'lion-kafka': '消息队列', 'lion-ai': 'AI服务',
+        'lion-fs': '文件存储服务'
     }
-    # 获取文件的修改时间
-    status_file = os.path.join(settings.BASE_DIR, "data/status.json")
-    if not os.path.exists(status_file):
+    # 遍历目录获取 status_ 开头的json文件
+    data_dir = os.path.join(settings.BASE_DIR, 'data')
+    status_files = [f for f in os.listdir(data_dir) if f.startswith('status_') and f.endswith('.json')]
+    if not status_files:
         raise CustomError(ErrorCode.CheckStatusNotFound)
-    modify_time = datetime.strftime(datetime.fromtimestamp(os.path.getmtime(status_file)), "%Y-%m-%d %H:%M:%S")
-    async with aiofile.AIOFile(status_file, 'r', encoding='utf-8') as f:
-        content = await f.read()
-        data = orjson.loads(content)
-        for item in data:
-            item['name'] = name_map.get(item['name'], item['name'])
-            item['start_time'] = strip_timezone_to_seconds(item['start_time'])
-            item['check_time'] = modify_time
-        return response_ok(data)
+    result = []
+    for file in status_files:
+        ip = file.split('_')[1].strip('.json')
+        file_path = os.path.join(data_dir, file)
+        modify_time = datetime.strftime(datetime.fromtimestamp(os.path.getmtime(file_path)), "%Y-%m-%d %H:%M:%S")
+        async with aiofile.AIOFile(file_path, 'r', encoding='utf-8') as f:
+            content = await f.read()
+            data = orjson.loads(content)
+            for item in data:
+                item['host'] = ip
+                item['name'] = name_map.get(item['name'], item['name'])
+                item['start_time'] = strip_timezone_to_seconds(item['start_time'])
+                item['check_time'] = modify_time
+                result.append(item)
+
+    return response_ok(result)
 
 
 @system_bp.post("/oauth/status")

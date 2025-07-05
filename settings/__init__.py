@@ -76,8 +76,8 @@ CORS_SUPPORTS_CREDENTIALS: bool = os.environ.get("RY_CORS_CREDENTIAL", True)
 
 # Websocket
 WEBSOCKET_MAX_SIZE = 2 ** 20  # 消息最大1MB
-WEBSOCKET_PING_INTERVAL = 20
-WEBSOCKET_PING_TIMEOUT = 20
+WEBSOCKET_PING_INTERVAL = 30
+WEBSOCKET_PING_TIMEOUT = 40
 
 # 日志配置
 BASE_LOGGING = {
@@ -133,8 +133,8 @@ TORTOISE = {
         "default": {
             "engine": "tortoise.backends.asyncpg",
             "credentials": {
-                "host": "lion-pg",
-                "port": 5432,
+                "host": os.environ.get("RY_DB_HOST", "lion-pg"),
+                "port": int(os.environ.get("RY_DB_PORT", 5432)),
                 "user": os.environ.get("RY_DB_USER"),
                 "password": os.environ.get("RY_DB_PASS"),
                 "database": "lion_mgmt",
