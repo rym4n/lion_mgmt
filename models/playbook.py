@@ -106,8 +106,8 @@ class PlaybookPermissions(BaseModel):
     """
 
     pb = fields.ForeignKeyField("models.Playbook", unique=True, related_name="playbook_permissions", description="剧本")
-    users = fields.ForeignKeyField("models.Account", related_name="playbook_permissions_user", description="角色")
-    roles = fields.ForeignKeyField("models.Role", related_name="playbook_permissions_role", description="用户")
+    users = fields.ForeignKeyField("models.Account", null=True, related_name="playbook_permissions_user", description="用户")
+    roles = fields.ForeignKeyField("models.Role", null=True, related_name="playbook_permissions_role", description="角色")
     permissions = fields.JSONField(null=True)
 
     def validate(self) -> None:
@@ -119,8 +119,8 @@ class PlaybookPermissions(BaseModel):
             "id": self.id,
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
-            "users": [user.id for user in self.users],
-            "roles": [role.id for role in self.roles],
+            "users": self.users_id if self.users else None,
+            "roles": self.roles_id if self.roles else None,
             "permissions": self.permissions
         }
 
