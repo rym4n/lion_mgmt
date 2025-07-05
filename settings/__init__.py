@@ -22,7 +22,7 @@ SUPERVISOR_PATH = "./data/action"
 os.makedirs(SUPERVISOR_PATH, exist_ok=True)
 
 # 存储上传文件的目录
-TOOLS_DIR = "./tools"
+TOOLS_DIR = "./data/tools"
 os.makedirs(TOOLS_DIR, exist_ok=True)
 
 # 存储许可文件的目录
