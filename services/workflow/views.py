@@ -71,10 +71,8 @@ async def create_workflow(request):
             remark=data.get("remark", ""),
             creator=creator
         )
-        for perm in ["r", "u", "d", "e", "p"]:
-            permission = await PlaybookPermissions.create(pb=playbook, permissions=perm)
-            await permission.users.add(creator)
-            await permission.roles.add(admin)
+        await PlaybookPermissions.create(pb=playbook, users=creator, roles=None, permissions=["r", "u", "d", "e", "p"])
+        await PlaybookPermissions.create(pb=playbook, users=None, roles=admin, permissions=["r", "u", "d", "e", "p"])
         if data.get('tags'):
             tags = await Tag.filter(name__in=data.get('tags')).all()
             await playbook.tags.add(*tags)
@@ -570,171 +568,47 @@ async def add_permission(request):
     新增剧本权限（需要剧本更新权限）
         (r:查, u:改, d:删, e:执行, p:授权)
     query参数:
-        - playbook_id: 剧本id    str
-        - params: 权限参数    list
-            [
-                {"r":{"user":[],"role":[]}},
-                {"u":{"user":[],"role":[]}},
-                {"d":{"user":[],"role":[]}},
-                {"e":{"user":[],"role":[]}},
-                {"p":{"user":[],"role":[]}}
-            ]
+        - playbook_id: 剧本id str
+        - users : 用户权限 [{"id":["r","u","d","e","p"]}]
+        - roles : 角色权限 [{"id":["r","u","d","e","p"]}]
     """
     playbook_id = request.json.get("playbook_id")
-    params = request.json.get("params")
+    users = request.json.get("users", [])
+    roles = request.json.get("roles", [])
 
-    if not playbook_id or not isinstance(params, list):
+    if not playbook_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    all_user_ids = set()
-    all_role_ids = set()
-    permission_map = {}
-
-    for param in params:
-        for perm_type, info in param.items():
-            if perm_type not in ["r", "u", "d", "e", "p"]:
-                raise CustomError(ErrorCode.ParameterError)
-            user_ids = set(info.get("user", []))
-            role_ids = set(r for r in info.get("role", []) if r != "111111")
-            all_user_ids.update(user_ids)
-            all_role_ids.update(role_ids)
-            permission_map[perm_type] = {
-                "user_ids": user_ids,
-                "role_ids": role_ids,
-            }
-
-    valid_users = {u.id: u async for u in Account.filter(id__in=list(all_user_ids))}
-    valid_roles = {r.id: r async for r in Role.filter(id__in=list(all_role_ids))}
-
-    async with in_transaction():
-        tasks = []
-        for perm_type, data in permission_map.items():
-            permission = await PlaybookPermissions.get_or_none(pb_id=playbook_id, permissions=perm_type)
-            if not permission:
-                permission = await PlaybookPermissions.create(pb_id=playbook_id, permissions=perm_type)
-
-            existing_user_ids = {u.id async for u in permission.users.all()}
-            existing_role_ids = {r.id async for r in permission.roles.all()}
-
-            new_users = [valid_users[uid] for uid in data["user_ids"] if
-                         uid in valid_users and uid not in existing_user_ids]
-            new_roles = [valid_roles[rid] for rid in data["role_ids"] if
-                         rid in valid_roles and rid not in existing_role_ids]
-
-            if new_users:
-                tasks.append(permission.users.add(*new_users))
-            if new_roles:
-                tasks.append(permission.roles.add(*new_roles))
-
-            # 合并后更新缓存
-            updated_user_ids = list(existing_user_ids.union(uid for uid in data["user_ids"] if uid in valid_users))
-            updated_role_ids = list(existing_role_ids.union(rid for rid in data["role_ids"] if rid in valid_roles))
-            if "111111" in all_role_ids:
-                updated_role_ids.append("111111")
-
-            tasks.append(
-                request.ctx.cache_client.set(
-                    (playbook_id, perm_type),
-                    {"user": updated_user_ids, "role": updated_role_ids},
-                    ttl=2592000
-                )
+    # 处理用户权限
+    for user in users:
+        for uid, perms in user.items():
+            await PlaybookPermissions.update_or_create(
+                pb_id=playbook_id,
+                users_id=uid,
+                defaults={"permissions": perms, "roles_id": None}
             )
-        if tasks:
-            await asyncio.gather(*tasks)
+            await request.ctx.cache_client.set(
+                (playbook_id, uid),
+                perms,
+                ttl=2592000
+            )
+
+    # 处理角色权限
+    for role in roles:
+        for rid, perms in role.items():
+            if rid != "111111":
+                await PlaybookPermissions.update_or_create(
+                    pb_id=playbook_id,
+                    roles_id=rid,
+                    defaults={"permissions": perms, "users_id": None}
+                )
+            await request.ctx.cache_client.set(
+                (playbook_id, rid),
+                perms,
+                ttl=2592000
+            )
 
     return response_ok("权限更新成功")
-
-
-@workflow_bp.post("/permissions/delete")
-@requires_permission("workflow:u")
-@playbook_permission("p")
-async def delete_permission(request):
-    """
-    删除剧本指定权限（需要剧本授权权限）
-    query参数:
-        - playbook_id: 剧本id    str
-        - params: 权限参数    list
-            [
-                {"r":{"user":[],"role":[]}},
-                {"u":{"user":[],"role":[]}},
-                {"d":{"user":[],"role":[]}},
-                {"e":{"user":[],"role":[]}},
-                {"p":{"user":[],"role":[]}}
-            ]
-    """
-    playbook_id = request.json.get("playbook_id")
-    params = request.json.get("params")
-
-    if not playbook_id or not isinstance(params, list):
-        raise CustomError(ErrorCode.ParameterError)
-
-    pb = await Playbook.get_or_none(id=playbook_id)
-    if not pb:
-        raise CustomError(ErrorCode.PlaybookNotFound)
-
-    all_user_ids = set()
-    all_role_ids = set()
-    permission_map = {}
-
-    for param in params:
-        for perm_type, info in param.items():
-            if perm_type not in ["r", "u", "d", "e", "p"]:
-                raise CustomError(ErrorCode.ParameterError)
-            user_ids = set(info.get("user", []))
-            role_ids = set(r for r in info.get("role", []) if r != "111111")
-            all_user_ids.update(user_ids)
-            all_role_ids.update(role_ids)
-            permission_map[perm_type] = {
-                "user_ids": user_ids,
-                "role_ids": role_ids,
-            }
-
-    valid_users = {u.id: u async for u in Account.filter(id__in=list(all_user_ids))}
-    valid_roles = {r.id: r async for r in Role.filter(id__in=list(all_role_ids))}
-
-    deleted_users_count = 0
-    deleted_roles_count = 0
-    updated_cache_keys = []
-
-    async with in_transaction():
-        tasks = []
-        for perm_type, data in permission_map.items():
-            permission = await PlaybookPermissions.get_or_none(pb_id=playbook_id, permissions=perm_type)
-            if not permission:
-                continue
-
-            users_to_remove = [valid_users[uid] for uid in data["user_ids"] if uid in valid_users]
-            roles_to_remove = [valid_roles[rid] for rid in data["role_ids"] if rid in valid_roles]
-
-            if users_to_remove:
-                tasks.append(permission.users.remove(*users_to_remove))
-                deleted_users_count += len(users_to_remove)
-            if roles_to_remove:
-                tasks.append(permission.roles.remove(*roles_to_remove))
-                deleted_roles_count += len(roles_to_remove)
-
-            cache_key = (playbook_id, perm_type)
-            cached = await request.ctx.cache_client.get(cache_key)
-            if cached:
-                cached_data = cached if isinstance(cached, dict) else {}
-                cached_users = set(cached_data.get("user", []))
-                cached_roles = set(cached_data.get("role", []))
-                cached_users -= data["user_ids"]
-                cached_roles -= data["role_ids"]
-                cached_roles.add("111111")
-
-                tasks.append(
-                    request.ctx.cache_client.set(
-                        cache_key,
-                        {"user": list(cached_users), "role": list(cached_roles)},
-                        ttl=2592000
-                    )
-                )
-                updated_cache_keys.append(cache_key)
-        if tasks:
-            await asyncio.gather(*tasks)
-
-    return response_ok("指定权限已删除")
 
 
 @workflow_bp.post("/permissions/select")

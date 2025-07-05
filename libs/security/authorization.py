@@ -114,18 +114,16 @@ def playbook_permission(*required_permissions: str):
             user = request.ctx.session.get('account_info')
             if not user:
                 raise CustomError(ErrorCode.AccountNotFound)
-            for parm in required_permissions:
-                data = await request.ctx.cache_client.get((playbook_id, parm))
-                if not data:
-                    pp = await PlaybookPermissions.get(pb_id=playbook_id, permissions=parm).prefetch_related("users", "roles")
-                    data = {"user": [user.id for user in pp.users], "role": [role.id for role in pp.roles]}
-                has_access = await check_playbook_permission(
-                    user,
-                    data
-                )
 
-                if not has_access:
-                    raise CustomError(ErrorCode.Unauthorized)
+            has_access = await check_playbook_permission(
+                request,
+                user,
+                playbook_id,
+                required_permissions
+            )
+
+            if not has_access:
+                raise CustomError(ErrorCode.Unauthorized)
 
             return await func(request, *args, **kwargs)
 
@@ -157,19 +155,15 @@ def playbook_version_permission(*required_permissions: str):
             if not user:
                 raise CustomError(ErrorCode.AccountNotFound)
 
-            for parm in required_permissions:
-                data = await request.ctx.cache_client.get((playbook_id, parm))
-                if not data:
-                    pp = await PlaybookPermissions.get(pb_id=playbook_id, permissions=parm).prefetch_related("users",
-                                                                                                             "roles")
-                    data = {"user": [user.id for user in pp.users], "role": [role.id for role in pp.roles]}
-                has_access = await check_playbook_permission(
-                    user,
-                    data
-                )
+            has_access = await check_playbook_permission(
+                request,
+                user,
+                playbook_id,
+                required_permissions
+            )
 
-                if not has_access:
-                    raise CustomError(ErrorCode.Unauthorized)
+            if not has_access:
+                raise CustomError(ErrorCode.Unauthorized)
 
             return await func(request, *args, **kwargs)
 
@@ -179,7 +173,7 @@ def playbook_version_permission(*required_permissions: str):
 
 
 # 权限检查工具函数
-async def check_playbook_permission(user, data):
+async def check_playbook_permission(request, user, playbook_id, required_permissions):
     """检查用户是否拥有剧本的指定权限
     :param user: 用户对象(需包含id和roles属性)
     :param data: 缓存中的权限数据(dict格式{"user":[...], "role":[...]})
@@ -187,13 +181,23 @@ async def check_playbook_permission(user, data):
     """
     user_id = str(user.id)
     user_roles = set(str(role.id) for role in user.roles)
-    perm_users = set(data.get("user") or [])
-    perm_roles = set(data.get("role") or [])
-
-    return (
-            user_id in perm_users or
-            any(role in perm_roles for role in user_roles)
-    )
+    data = await request.ctx.cache_client.get((playbook_id, user_id))
+    if not data:
+        pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id, users_id=user_id)
+        if pp:
+            data = pp.permissions
+    if data and all(perm in data for perm in required_permissions):
+        return True
+    else:
+        for role in user_roles:
+            data = await request.ctx.cache_client.get((playbook_id, role))
+            if not data:
+                pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id, roles_id=role)
+                if pp:
+                    data = pp.permissions
+                    if data and all(perm in data for perm in required_permissions):
+                        return True
+    return False
 
 
 def requires_role(*required_roles: str):

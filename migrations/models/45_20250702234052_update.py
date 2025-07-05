@@ -2,18 +2,14 @@ from tortoise import BaseDBAsyncClient
 
 
 async def upgrade(db: BaseDBAsyncClient) -> str:
-    return """
-        ALTER TABLE "playbook_permissions" ADD "perms" INT NOT NULL DEFAULT 0;
-        ALTER TABLE "playbook_permissions" DROP COLUMN "users";
-        ALTER TABLE "playbook_permissions" DROP COLUMN "roles";
-        CREATE TABLE "playbook_permissions_user" (
-    "account_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE,
-    "playbook_permissions_id" VARCHAR(36) NOT NULL REFERENCES "playbook_permissions" ("id") ON DELETE CASCADE
-);
-        CREATE TABLE "playbook_permissions_role" (
-    "role_id" VARCHAR(36) NOT NULL REFERENCES "role" ("id") ON DELETE CASCADE,
-    "playbook_permissions_id" VARCHAR(36) NOT NULL REFERENCES "playbook_permissions" ("id") ON DELETE CASCADE
-);"""
+    return """ALTER TABLE "playbook" DROP CONSTRAINT IF EXISTS "fk_playbook_account_48c30a25";
+        ALTER TABLE "playbook" DROP COLUMN "creator_id";
+                ALTER TABLE "playbook" ADD "creator_id" VARCHAR(36);
+                ALTER TABLE "playbook" ADD CONSTRAINT "fk_playbook_account_48c30a25" FOREIGN KEY ("creator_id") REFERENCES "account" ("id") ON DELETE CASCADE;
+                ALTER TABLE "playbook_permissions" ADD "users_id" VARCHAR(36);
+                ALTER TABLE "playbook_permissions" ADD "roles_id" VARCHAR(36);
+                ALTER TABLE "playbook_permissions" ADD CONSTRAINT "fk_playbook_role_1245ee4e" FOREIGN KEY ("roles_id") REFERENCES "role" ("id") ON DELETE CASCADE;
+                ALTER TABLE "playbook_permissions" ADD CONSTRAINT "fk_playbook_account_f271118a" FOREIGN KEY ("users_id") REFERENCES "account" ("id") ON DELETE CASCADE;"""
 
 
 async def downgrade(db: BaseDBAsyncClient) -> str:
