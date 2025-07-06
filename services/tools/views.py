@@ -1307,7 +1307,7 @@ async def engine_list(request):
     """
     c = caches.get("redis_action").client
     lion_keys = []
-    async for key in c.scan_iter(match="lion_engine_*", count=100):  # 每次迭代100个key
-        lion_keys.append(key.decode())  # 字节转字符串
+    async for key in c.scan_iter(match="lion_engine_*", count=100):
+        lion_keys.append(key.decode().replace("lion_engine_", ""))
 
     return response_ok(lion_keys)
