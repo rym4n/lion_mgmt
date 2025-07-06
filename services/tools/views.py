@@ -133,7 +133,7 @@ async def upload_and_extract_zip(request):
                                                users=[])
         configuration = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values("resources")
         if not configuration or configuration["resources"] != config_data.get("resource"):
-            await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {}, status=1 if (any(field.get("required") is True for field in config_data.get("resource").values())) else 0)
+            await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {}, status=1 if (config_data.get("resource") and any(field.get("required") is True for field in config_data.get("resource").values())) else 0)
 
         results.append({"tool": tool_name, "msg": msg})
 
