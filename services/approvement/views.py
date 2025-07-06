@@ -61,13 +61,11 @@ async def all_approvement(request):
 
 
 @approve_bp.post("/todolist")
-@requires_permission("*:*")
 async def todo_approvement(request):
     """
     获取当前登录用户的待处理任务信息（需要approve:r权限）
     主要用于右上角的待办提醒
     """
-    user = request.ctx.session['account_info']
     # 修改过期任务状态,后端就不做定时任务了
     await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
 
@@ -75,8 +73,8 @@ async def todo_approvement(request):
     sql = f"""
           SELECT a.title, a.content, a.expire_time, a.created_at, a.approve_type
           FROM approvement a
-          JOIN approve_accounts b ON a.id = b.approvement_id AND b.account_id = '{user.id}'
-          WHERE a.status = 0 AND NOT a.results ? '{user.id}'
+          JOIN approve_accounts b ON a.id = b.approvement_id AND b.account_id = '{request.ctx.session["sub"]}'
+          WHERE a.status = 0 AND NOT a.results ? '{request.ctx.session["sub"]}'
         """
     async with in_transaction() as conn:
         rows = await conn.execute_query_dict(sql)
