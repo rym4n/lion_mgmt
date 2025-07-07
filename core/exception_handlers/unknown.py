@@ -1,5 +1,6 @@
 # coding=utf-8
 import os
+import traceback
 
 from asyncpg.exceptions import UniqueViolationError
 from sanic import HTTPResponse, exceptions
@@ -29,4 +30,5 @@ class UnknownExcHandler(BaseExcHandler):
         elif isinstance(exception, IntegrityError) or isinstance(exception, UniqueViolationError):
             return response_fail(ErrorCode.DataAlreadyExists)
         else:
+            logger.error(f"{exception} | {traceback.format_exc()}")
             return response_fail(ErrorCode.ServerError, 500)

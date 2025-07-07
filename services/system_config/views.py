@@ -167,9 +167,9 @@ async def get_oauth_status(request):
 
     无请求参数，直接调用，返回SSO状态
     """
-    record = await Config.filter(module='sso', key='use_oauth2').get()
+    record = await Config.get_or_none(module='sso', key='use_oauth2')
     return response_ok({
-        "use_oauth2": record.value == 'true'
+        "use_oauth2": record.value == 'true' if record else False
     })
 
 
