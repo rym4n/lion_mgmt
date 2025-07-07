@@ -105,3 +105,4 @@ class ErrorCode(BaseErrorCode):
     CannotDeleteSelf = ErrorData(4075, "不允许删除自己")
     CannotDisableSelf = ErrorData(4076, "不允许禁用自己")
     CannotEditSensitiveAttribute = ErrorData(4077, "敏感属性不允许修改")
+    RequestTooManyError = ErrorData(4078, "请求数量不得超过50")

@@ -325,6 +325,9 @@ async def all_tools(request):
     size = int(request.json.get("size", 10))
     key = request.json.get("key", "").strip()
 
+    if size > 50:
+        raise CustomError(ErrorCode.RequestTooManyError)
+
     subquery = Tool.filter(deleted=False).annotate(max_version=Max("version")).group_by("name")
     if key:
         tool_actions = await ToolAction.filter(deleted=False).values("tool_name", "version_number", "action")
@@ -363,9 +366,7 @@ async def all_tools(request):
         .limit(size) \
         .values()
 
-    latest_tools = await asyncio.gather(*[
-        enrich_tool(tool, request.ctx.cache_client) for tool in latest_tools
-    ])
+    latest_tools = [await enrich_tool(tool, request.ctx.cache_client) for tool in latest_tools]
 
     total_count = await Tool.filter(condition).count()
 
