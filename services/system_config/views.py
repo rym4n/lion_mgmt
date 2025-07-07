@@ -306,9 +306,9 @@ async def search_audit(request):
     ip = request.json.get("ip")
     filters = {}
     if start_time:
-        filters["ctime__gte"] = start_time
+        filters["ctime__gte"] = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
     if end_time:
-        filters["ctime__lte"] = end_time
+        filters["ctime__lte"] = datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
     if ip:
         filters["client_ip"] = ip
     if username:
