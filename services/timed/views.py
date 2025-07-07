@@ -398,7 +398,7 @@ async def get_run_log(request):
     run_ids = await Runlog.filter(condition).distinct().order_by('-run_id').offset((page - 1) * size).limit(size).values_list('run_id', flat=True)
 
     if run_ids:
-        all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).all().prefetch_related("event", "timer", "flow")
+        all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).order_by('ctime').prefetch_related("event", "timer", "flow").all()
         logs_by_run_id = defaultdict(list)
         for log in all_logs:
             logs_by_run_id[log.run_id].append(log.json)
