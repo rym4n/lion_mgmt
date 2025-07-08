@@ -102,12 +102,12 @@ async def artificial_create_event(request):
         raise CustomError(ErrorCode.EventNameExists)
 
     async with in_transaction():
-        await Events.create(event_name=event_name, event_process_status=event_process_status,
+        event = await Events.create(event_name=event_name, event_process_status=event_process_status,
                                    event_source=event_source, owner=owner,
                                    creator=user, event_summary=event_summary, updator=user,
                                    event_ingestion_id=event_ingestion_id, log_data=log_data)
 
-    return response_ok("创建成功")
+    return response_ok({"id": event.id})
 
 
 
