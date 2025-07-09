@@ -17,6 +17,7 @@ from services.dashboard.views import dashboard_bp
 from services.event.views import event_bp
 from services.event_ingestion.views import event_ingestion_bp
 from services.license.views import license_bp
+from services.log_view.views import logs_bp
 from services.role.views import role_bp
 from services.scene.views import scene_bp
 from services.system_config.views import system_bp
@@ -66,6 +67,7 @@ def register_blueprints(app: Sanic) -> None:
             "warroom_bp": warroom_bp,
             "workflow_bp": workflow_bp,
             "dashboard_bp": dashboard_bp,
+            "logs_bp": logs_bp
         }
         license_data = load_license()
         if license_data and 'moduleList' in license_data:
