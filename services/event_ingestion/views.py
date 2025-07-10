@@ -108,14 +108,14 @@ async def build_kafka_file_configuration_file(output_path, sources, event_source
                 "type": "elasticsearch",
                 "inputs": [f"{topic}_remove_transforms"],
                 "api_version": "auto",
-                "compression": None,
+                "compression": "none",
                 "doc_type": "_doc",
                 "endpoints": [os.environ.get("RY_ES_HOST")],
                 "mode": "bulk",
                 "auth": {
                     "strategy": "basic",
                     "user": os.environ.get("RY_ES_USER"),
-                    "password": os.environ.get("RY_ES_PASSWORD")
+                    "password": os.environ.get("RY_ES_PASS")
                 }
             }
         },
@@ -481,7 +481,7 @@ async def get_event_ingestion_kafka_sample(request):
 
     es = Elasticsearch(
         os.environ.get("RY_ES_HOST"),
-        basic_auth=(os.environ.get("RY_ES_USER"), os.environ.get("RY_ES_PASSWORD")) if os.environ.get("RY_ES_USER") and os.environ.get("RY_ES_PASSWORD") else None,
+        basic_auth=(os.environ.get("RY_ES_USER"), os.environ.get("RY_ES_PASS")) if os.environ.get("RY_ES_USER") and os.environ.get("RY_ES_PASS") else None,
     )
     query = {
         "query": {
