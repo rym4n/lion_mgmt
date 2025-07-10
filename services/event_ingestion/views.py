@@ -118,7 +118,7 @@ async def build_kafka_file_configuration_file(output_path, sources, event_source
                     "password": ES_PASS
                 },
                 "bulk": {
-                    "index": topic
+                    "index": topic.lower()
                 }
             }
         },
@@ -482,10 +482,7 @@ async def get_event_ingestion_kafka_sample(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    async with AsyncElasticsearch(
-        ES_HOST,
-        http_auth=(ES_USER, ES_PASS),
-    ) as es:
+    async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS),) as es:
         query = {
             "query": {
                 "match_all": {}
@@ -495,13 +492,15 @@ async def get_event_ingestion_kafka_sample(request):
                 {"timestamp": "desc"}
             ]
         }
+        if not await es.indices.exists(index=event.vector_name.lower()):
+            return response_ok(messages)
 
-        result = await es.search(index=event.vector_name, body=query)
+        result = await es.search(index=event.vector_name.lower(), body=query)
 
         if result:
             for hit in result["hits"]["hits"]:
                 source = hit["_source"]
-                source.pop("timestamp", None)  # 移除 timestamp，如果存在
+                source.pop("timestamp", None)
                 messages.append(source)
 
     if messages:
