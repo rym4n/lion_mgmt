@@ -28,7 +28,7 @@ dependencies = [
     "pillow>=11.2.1",
     "jsonpath>=0.82.2",
     "openai>=1.88.0",
-    "elasticsearch[async]>=9.0.2",
+    "elasticsearch[async]==8.12.1",
     "aiohttp>=3.12.13",
 ]
 

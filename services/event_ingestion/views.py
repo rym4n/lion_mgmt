@@ -25,8 +25,8 @@ from libs.security.authorization import requires_permission
 from libs.utils import get_client_ip, run_linux_command
 from models import PlaybookVersion, Playbook
 from models.event import EventsIngestion, EventRelatedScript
-from settings import VECTOR_CFG, KAFKA_SERVERS
-from elasticsearch import Elasticsearch
+from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
+from elasticsearch import AsyncElasticsearch
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='/event/ingestion')
 _all__ = ["event_ingestion_bp"]
@@ -110,12 +110,12 @@ async def build_kafka_file_configuration_file(output_path, sources, event_source
                 "api_version": "auto",
                 "compression": "none",
                 "doc_type": "_doc",
-                "endpoints": [os.environ.get("RY_ES_HOST")],
+                "endpoints": [ES_HOST],
                 "mode": "bulk",
                 "auth": {
                     "strategy": "basic",
-                    "user": os.environ.get("RY_ES_USER"),
-                    "password": os.environ.get("RY_ES_PASS")
+                    "user": ES_USER,
+                    "password": ES_PASS
                 }
             }
         },
@@ -479,29 +479,30 @@ async def get_event_ingestion_kafka_sample(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    es = Elasticsearch(
-        os.environ.get("RY_ES_HOST"),
-        basic_auth=(os.environ.get("RY_ES_USER"), os.environ.get("RY_ES_PASS")) if os.environ.get("RY_ES_USER") and os.environ.get("RY_ES_PASS") else None,
-    )
-    query = {
-        "query": {
-            "match_all": {}
-        },
-        "size": size,
-        "sort": [
-            {"timestamp": "desc"}
-        ]
-    }
-    result = es.search(index="vector-*", body=query)
-    if result:
-        for hit in result["hits"]["hits"]:
-            if "timestamp" in hit["_source"]:
-                hit["_source"].pop("timestamp")
-                messages.append(hit["_source"])
-            else:
-                messages.append(hit["_source"])
+    async with AsyncElasticsearch(
+        ES_HOST,
+        http_auth=(ES_USER, ES_PASS),
+    ) as es:
+        query = {
+            "query": {
+                "match_all": {}
+            },
+            "size": size,
+            "sort": [
+                {"timestamp": "desc"}
+            ]
+        }
+
+        result = await es.search(index="vector-*", body=query)
+
+        if result:
+            for hit in result["hits"]["hits"]:
+                source = hit["_source"]
+                source.pop("timestamp", None)  # 移除 timestamp，如果存在
+                messages.append(source)
+
     if messages:
-        data = orjson.loads(messages[0])
+        data = messages[0]
 
         if "message" in data.keys():
             event.enabled_health_status = "healthy"
@@ -984,7 +985,7 @@ def check_vector_config(vector_config):
     ) as tmp_file:
 
         yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
-        logger.info(yaml_str)
+
         tmp_file.write(yaml_str)
         tmp_file.flush()
 
