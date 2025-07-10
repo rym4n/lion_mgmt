@@ -117,8 +117,18 @@ async def list_workflow(request):
     size = int(json_params.get("size", 10))
     offset = (page - 1) * size
     limit = size
+
+    user = request.ctx.session.get('account_info')
+    user_id = str(user.id)
+    user_roles = set(str(role.id) for role in user.roles)
+    permissions = await PlaybookPermissions.filter(
+        Q(users__id=user_id) | Q(roles__id__in=user_roles),
+        permissions__contains=['r']
+    ).values_list('pb_id', flat=True)
+    pb_ids = set(permissions)
+
     # 分页查询Account，返回总数和数据
-    condition = Q(deleted=False)
+    condition = Q(deleted=False, id__in=pb_ids)
     if json_params.get("keyword"):
         # 模糊搜索name字段和remark字段
         keyword = json_params.get("keyword")
