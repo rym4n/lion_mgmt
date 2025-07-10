@@ -569,8 +569,8 @@ async def add_permission(request):
         (r:查, u:改, d:删, e:执行, p:授权)
     query参数:
         - playbook_id: 剧本id str
-        - users : 用户权限 [{"id":["r","u","d","e","p"]}]
-        - roles : 角色权限 [{"id":["r","u","d","e","p"]}]
+        - users : 用户权限 {"id":["r","u","d","e","p"]}
+        - roles : 角色权限 {"id":["r","u","d","e","p"]}
     """
     playbook_id = request.json.get("playbook_id")
     users = request.json.get("users", [])
@@ -580,33 +580,31 @@ async def add_permission(request):
         raise CustomError(ErrorCode.ParameterError)
 
     # 处理用户权限
-    for user in users:
-        for uid, perms in user.items():
-            await PlaybookPermissions.update_or_create(
-                pb_id=playbook_id,
-                users_id=uid,
-                defaults={"permissions": perms, "roles_id": None}
-            )
-            await request.ctx.cache_client.set(
-                (playbook_id, uid),
-                perms,
-                ttl=2592000
-            )
+    for uid, perms in users.items():
+        await PlaybookPermissions.update_or_create(
+            pb_id=playbook_id,
+            users_id=uid,
+            defaults={"permissions": perms, "roles_id": None}
+        )
+        await request.ctx.cache_client.set(
+            (playbook_id, uid),
+            perms,
+            ttl=2592000
+        )
 
     # 处理角色权限
-    for role in roles:
-        for rid, perms in role.items():
-            if rid != "111111":
-                await PlaybookPermissions.update_or_create(
-                    pb_id=playbook_id,
-                    roles_id=rid,
-                    defaults={"permissions": perms, "users_id": None}
-                )
-            await request.ctx.cache_client.set(
-                (playbook_id, rid),
-                perms,
-                ttl=2592000
+    for rid, perms in roles.items():
+        if rid != "111111":
+            await PlaybookPermissions.update_or_create(
+                pb_id=playbook_id,
+                roles_id=rid,
+                defaults={"permissions": perms, "users_id": None}
             )
+        await request.ctx.cache_client.set(
+            (playbook_id, rid),
+            perms,
+            ttl=2592000
+        )
 
     return response_ok("权限更新成功")
 

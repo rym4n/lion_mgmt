@@ -22,10 +22,11 @@ from core.response import response_ok
 from libs import supervisor
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import get_client_ip, fetch_latest_messages, run_linux_command
+from libs.utils import get_client_ip, run_linux_command
 from models import PlaybookVersion, Playbook
 from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS
+from elasticsearch import Elasticsearch
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='/event/ingestion')
 _all__ = ["event_ingestion_bp"]
@@ -77,7 +78,6 @@ remove_data_config = {
 del(.host)
 del(.port)
 del(.source_type)
-del(.timestamp)
 ''',
     "kafka": r'''
 del(.headers)
@@ -85,7 +85,6 @@ del(.message_key)
 del(.offset)
 del(.partition)
 del(.source_type)
-del(.timestamp)
 del(.topic)
 ''',
 }
@@ -106,12 +105,17 @@ async def build_kafka_file_configuration_file(output_path, sources, event_source
         "sources": sources,
         "sinks": {
             f"{topic}_sample_sinks": {
-                "type": "kafka",
+                "type": "elasticsearch",
                 "inputs": [f"{topic}_remove_transforms"],
-                "bootstrap_servers": KAFKA_SERVERS,
-                "topic": topic,
-                "encoding": {
-                    "codec": "json"
+                "api_version": "auto",
+                "compression": None,
+                "doc_type": "_doc",
+                "endpoints": [os.environ.get("RY_ES_HOST")],
+                "mode": "bulk",
+                "auth": {
+                    "strategy": "basic",
+                    "user": os.environ.get("RY_ES_USER"),
+                    "password": os.environ.get("RY_ES_PASSWORD")
                 }
             }
         },
@@ -467,6 +471,7 @@ async def get_event_ingestion_kafka_sample(request):
     data = request.json
     event_id = data.get('id')
     size = data.get('size', 10)
+    messages = []
     if size < 1:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -474,8 +479,27 @@ async def get_event_ingestion_kafka_sample(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    messages = await fetch_latest_messages([KAFKA_SERVERS], event.vector_name, size)
-    messages.reverse()
+    es = Elasticsearch(
+        os.environ.get("RY_ES_HOST"),
+        basic_auth=(os.environ.get("RY_ES_USER"), os.environ.get("RY_ES_PASSWORD")) if os.environ.get("RY_ES_USER") and os.environ.get("RY_ES_PASSWORD") else None,
+    )
+    query = {
+        "query": {
+            "match_all": {}
+        },
+        "size": size,
+        "sort": [
+            {"timestamp": "desc"}
+        ]
+    }
+    result = es.search(index="vector-*", body=query)
+    if result:
+        for hit in result["hits"]["hits"]:
+            if "timestamp" in hit["_source"]:
+                hit["_source"].pop("timestamp")
+                messages.append(hit["_source"])
+            else:
+                messages.append(hit["_source"])
     if messages:
         data = orjson.loads(messages[0])
 
