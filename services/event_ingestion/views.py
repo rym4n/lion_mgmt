@@ -116,6 +116,9 @@ async def build_kafka_file_configuration_file(output_path, sources, event_source
                     "strategy": "basic",
                     "user": ES_USER,
                     "password": ES_PASS
+                },
+                "bulk": {
+                    "index": topic
                 }
             }
         },
@@ -493,7 +496,7 @@ async def get_event_ingestion_kafka_sample(request):
             ]
         }
 
-        result = await es.search(index="vector-*", body=query)
+        result = await es.search(index=event.vector_name, body=query)
 
         if result:
             for hit in result["hits"]["hits"]:
