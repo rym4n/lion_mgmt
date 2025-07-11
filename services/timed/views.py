@@ -258,8 +258,8 @@ async def update_timed(request):
     msg = {"run_type": "flow" if run_type == RUN_TYPE_FLOW else "action"}
 
     if run_type == RUN_TYPE_FLOW:
-        playbook_id = data.get("playbook_id", timed.playbook.id)
-        playbook_input = data.get("playbook_input", timed.playbook_input)
+        playbook_id = data.get("playbook_id")
+        playbook_input = data.get("playbook_input")
 
         if not playbook_id or not playbook_input:
             raise CustomError(ErrorCode.ParameterError)

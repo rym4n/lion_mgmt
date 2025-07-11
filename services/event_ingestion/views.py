@@ -990,7 +990,7 @@ def check_vector_config(vector_config):
     ) as tmp_file:
 
         yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
-
+        logger.info(yaml_str)
         tmp_file.write(yaml_str)
         tmp_file.flush()
 
