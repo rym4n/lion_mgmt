@@ -100,7 +100,7 @@ CEF_REGEX = re.compile(
 # 生成配置文件
 # noinspection PyTypeChecker
 async def build_kafka_file_configuration_file(output_path, sources, event_source_type,
-                                              source_id, topic):
+                                              source_id, topic, event_name):
     config = {
         "sources": sources,
         "sinks": {
@@ -118,7 +118,7 @@ async def build_kafka_file_configuration_file(output_path, sources, event_source
                     "password": ES_PASS
                 },
                 "bulk": {
-                    "index": topic.lower()
+                    "index": f"logs-{event_name}-%Y%m%d"
                 }
             }
         },
@@ -224,7 +224,7 @@ async def event_ingestion(request):
         vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
                                                                   source_id=vector_name,
                                                                   event_source_type=event_source_type,
-                                                                  topic=topic)
+                                                                  topic=topic, event_name=event_name)
     elif event_source_type == "kafka":
         if sasl_mechanism:
             sources = {vector_name: {
@@ -248,7 +248,7 @@ async def event_ingestion(request):
         vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
                                                                   source_id=vector_name,
                                                                   event_source_type=event_source_type,
-                                                                  topic=topic)
+                                                                  topic=topic, event_name=event_name)
     else:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -492,10 +492,11 @@ async def get_event_ingestion_kafka_sample(request):
                 {"timestamp": "desc"}
             ]
         }
-        if not await es.indices.exists(index=event.vector_name.lower()):
+        index = f"logs-{event.event_ingestion_name}-*"
+        if not await es.indices.exists(index=index):
             return response_ok(messages)
 
-        result = await es.search(index=event.vector_name.lower(), body=query)
+        result = await es.search(index=index, body=query)
 
         if result:
             for hit in result["hits"]["hits"]:

@@ -17,9 +17,10 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import requires_permission, load_license, playbook_permission
+from libs.security.authorization import requires_permission, load_license, playbook_permission, \
+    playbook_version_permission, check_playbook_permission
 from libs.utils import gen_order_version
-from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Account, Role, PlaybookPermissions
+from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
@@ -165,6 +166,7 @@ async def list_workflow(request):
 
 @workflow_bp.post("/versions")
 @requires_permission("workflow:r")
+@playbook_permission("r")
 async def list_workflow_versions(request):
     """
     获取剧本版本列表
@@ -194,6 +196,7 @@ async def list_workflow_versions(request):
 
 @workflow_bp.post("/edit")
 @requires_permission("workflow:u")
+@playbook_permission("u")
 async def edit_workflow(request):
     """
     修改剧本的基本信息
@@ -227,6 +230,7 @@ async def edit_workflow(request):
 
 @workflow_bp.post("/edit-flow")
 @requires_permission("workflow:u")
+@playbook_version_permission("u")
 async def edit_workflow_flow(request):
     """
     修改剧本流程图内容,修改已发布的剧本会自动生成一个新的版本
@@ -262,6 +266,7 @@ async def edit_workflow_flow(request):
 
 @workflow_bp.post("/publish")
 @requires_permission("workflow:u")
+@playbook_version_permission("u")
 async def publish_workflow(request):
     """
     发布剧本
@@ -279,6 +284,7 @@ async def publish_workflow(request):
 
 @workflow_bp.post("/del")
 @requires_permission("workflow:d")
+@playbook_permission("d")
 async def delete_workflow(request):
     """
     删除剧本
@@ -294,6 +300,7 @@ async def delete_workflow(request):
 
 @workflow_bp.post("/del-version")
 @requires_permission("workflow:d")
+@playbook_version_permission("d")
 async def delete_workflow_version(request):
     """
     删除剧本版本
@@ -357,6 +364,13 @@ async def execute_action(request):
     utime = datetime.datetime.now(beijing_tz)
     message = request.json
     if message.get("type") in ('flow', 'action'):
+        if message.get("type") == "flow":
+            has_access = await check_playbook_permission(request=request, user=request.ctx.session['account_info'],
+                                                         playbook_id=message.get("flow_id"), required_permissions=["e"])
+            if not has_access:
+                await resp.send(f"data: 缺少剧本执行权限，执行失败\n\n")
+                await resp.eof()
+                return
         run_id = gen_order_version(length=6)
         message["executor"] = request.ctx.session['account_info'].id
         msg = {"run_type": message['type'], "run_id": run_id, "run_args": message}
@@ -382,6 +396,7 @@ async def execute_action(request):
 
 @workflow_bp.post('/run/history')
 @requires_permission("workflow:r")
+@playbook_permission("r")
 async def run_history(request):
     """
     获取剧本执行历史
@@ -459,6 +474,7 @@ async def run_history(request):
 
 @workflow_bp.post('/input')
 @requires_permission("workflow:r")
+@playbook_version_permission("r")
 async def input_data(request):
     """
     获取指定剧本的输入参数
