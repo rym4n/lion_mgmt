@@ -22,7 +22,7 @@ from core.response import response_ok
 from libs import supervisor
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import get_client_ip, run_linux_command
+from libs.utils import get_client_ip, run_linux_command, setup_logs_template
 from models import PlaybookVersion, Playbook
 from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
@@ -213,6 +213,8 @@ async def event_ingestion(request):
     output_path = os.path.join(VECTOR_CFG, vector_name + ".yaml")
 
     topic = vector_name
+
+    await setup_logs_template(f"logs-{event_name}-*", f"logs-{event_name}")
 
     if event_source_type in ["syslog", "socket"]:
         sources = {vector_name: {
@@ -492,7 +494,7 @@ async def get_event_ingestion_kafka_sample(request):
                 {"timestamp": "desc"}
             ]
         }
-        index = f"logs-{event.event_ingestion_name}-*"
+        index = f"logs-{event.event_ingestion_name}"
         if not await es.indices.exists(index=index):
             return response_ok(messages)
 
@@ -988,7 +990,7 @@ def check_vector_config(vector_config):
     ) as tmp_file:
 
         yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
-
+        logger.info(yaml_str)
         tmp_file.write(yaml_str)
         tmp_file.flush()
 
