@@ -100,8 +100,11 @@ async def token_decode(request: Request) -> dict:
     """
     将token解码成数据字典
     """
-    token = request.headers.get("aioe-auth")
-    if not token:
+    if request.cookies.get("aioe-auth") and ':' not in request.cookies.get("aioe-auth"):
+        token = request.cookies.get("aioe-auth")
+    elif request.headers.get("aioe-auth") and ':' in request.headers.get("aioe-auth"):
+        token = request.headers.get("aioe-auth")
+    else:
         raise CustomError(ErrorCode.SessionInvalid)
 
     try:

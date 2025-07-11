@@ -18,9 +18,9 @@ from libs.error_code.exception import CustomError
 from libs.security.authentication import validate_password, token_encode, refresh_token, validate_username
 from libs.security.authorization import requires_permission
 from libs.security.oauth import oauth_callback
-from libs.utils import password_hasher, ip_in_list, get_client_ip, validate_ips
+from libs.utils import password_hasher, ip_in_list, get_client_ip, validate_ips, get_expiration_date
 from models import Account, Role, Scene
-from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS
+from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE
 
 user_bp = Blueprint('user', url_prefix='/user')
 _all__ = ["user_bp"]
@@ -255,26 +255,23 @@ async def login(request):
         token_id = str(uuid.uuid4())
         token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, token_id, ip=client_ip)
         await request.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
-        resp['aioe-auth'] = token
-        # response.cookies.add_cookie(
-        #     f"aioe_auth",
-        #     token,
-        #     httponly=SESSION_HTTPONLY,
-        #     samesite=SESSION_SAMESITE,
-        #     secure=SESSION_SECURE,
-        #     domain=SESSION_DOMAIN,
-        #     expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
-        # )
+        # resp['aioe-auth'] = token
         # 如果开启了MFA，缓存记录MFA密钥，便于mfa认证
         if account.mfa_enable and account.mfa_key:
-            await request.ctx.cache_client.set(f'mfa_key_{token_id}', account.mfa_key,
-                                               AUTHENTICATION_SESSION_EXPIRATION)
+            await request.ctx.cache_client.set(f'mfa_key_{token_id}', account.mfa_key, AUTHENTICATION_SESSION_EXPIRATION)
             # 如果是开启mfa之后的第一次登录，在mfa还没绑定的情况下，返回mfa_uri，供前端渲染二维码
             if not account.mfa_bind:
-                resp['mfa_uri'] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username,
-                                                                                    issuer_name='AIOE')
-
-        return response_ok(resp)
+                resp['mfa_uri'] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name='AIOE')
+        tmp_resp = response_ok(resp)
+        tmp_resp.cookies.add_cookie(
+            f"aioe-auth",
+            token,
+            httponly=SESSION_HTTPONLY,
+            samesite=SESSION_SAMESITE,
+            secure=SESSION_SECURE,
+            expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
+        )
+        return tmp_resp
     except DoesNotExist:
         raise CustomError(ErrorCode.CredentialsError)
     except (VerificationError, InvalidHashError):
@@ -290,14 +287,24 @@ async def refresh_session_token(request):
     """
     刷新token
     """
+    new_token = refresh_token(request.ctx.session)
     resp = {
-        "aioe-auth": refresh_token(request.ctx.session)
+        "aioe-auth": new_token
     }
     account = await request.ctx.cache_client.get(f"account_{request.ctx.session['sub']}")
     if not account:
         account = await Account.get(id=request.ctx.session["sub"]).prefetch_related('roles')
     await request.ctx.cache_client.set(f"account_{request.ctx.session['sub']}", account, AUTHENTICATION_SESSION_EXPIRATION)
-    return response_ok(resp)
+    resp_ok = response_ok(resp)
+    resp_ok.cookies.add_cookie(
+        f"aioe-auth",
+        new_token,
+        httponly=SESSION_HTTPONLY,
+        samesite=SESSION_SAMESITE,
+        secure=SESSION_SECURE,
+        expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
+    )
+    return resp_ok
 
 
 @user_bp.post("/logout")
@@ -331,18 +338,17 @@ async def mfa_auth(request):
     await Account.filter(id=request.ctx.session.get('sub')).update(mfa_bind=True)
     # 彻底刷新token，用新的token id
     new_token = refresh_token(request.ctx.session, id=str(uuid.uuid4()), mfa_auth=True)
-    response = response_ok({'aioe-token': new_token})
-    # response.cookies.add_cookie(
-    #     f"aioe_auth",
-    #     new_token,
-    #     httponly=SESSION_HTTPONLY,
-    #     samesite=SESSION_SAMESITE,
-    #     secure=SESSION_SECURE,
-    #     domain=SESSION_DOMAIN,
-    #     expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
-    # )
+    resp = response_ok({'aioe-token': new_token})
+    resp.cookies.add_cookie(
+        f"aioe-auth",
+        new_token,
+        httponly=SESSION_HTTPONLY,
+        samesite=SESSION_SAMESITE,
+        secure=SESSION_SECURE,
+        expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
+    )
     await request.ctx.cache_client.delete(f'mfa_key_{old_token_id}')
-    return response
+    return resp
 
 
 @user_bp.post("/update")
@@ -504,10 +510,20 @@ async def oauth2_callback(request):
     logger.info(f"oauth2 callback: {code}")
     logger.info(f"oauth2 callback: {request.app.ctx.oauth_cfg}")
     user_info, token = await oauth_callback(request.app.ctx.oauth2, code, request.app.ctx.oauth_cfg)
-    user_info['aioe-auth'] = token
+    # user_info['aioe-auth'] = token
     user_info['redirect'] = request.args.get("redirect")
     user_info_str = base64.urlsafe_b64encode(orjson.dumps(user_info)).decode()
-    return response.redirect("https://" + request.host + "#/loading?" + user_info_str)
+    # return response.redirect("https://" + request.host + "#/loading?" + user_info_str)
+    resp = response.redirect("https://" + request.host + "#/loading?" + user_info_str)
+    resp.cookies.add_cookie(
+        f"aioe-auth",
+        token,
+        httponly=SESSION_HTTPONLY,
+        samesite=SESSION_SAMESITE,
+        secure=SESSION_SECURE,
+        expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
+    )
+    return response.redirect(f"https://{request.host}#{request.args.get('redirect')}")
 
 
 @user_bp.post("/scene-list")
