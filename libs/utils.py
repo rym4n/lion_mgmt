@@ -303,9 +303,10 @@ def run_linux_command(command):
         stderr=subprocess.PIPE,
         text=True
     )
+    logger.info(result)
     return {
-        "stdout": result.stdout.strip(),
-        "stderr": result.stderr.strip(),
+        "stdout": result.stdout.strip() if result.stdout else "",
+        "stderr": result.stderr.strip() if result.stderr else "",
         "code": result.returncode
     }
 
