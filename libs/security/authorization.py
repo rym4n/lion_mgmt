@@ -109,7 +109,9 @@ def playbook_permission(*required_permissions: str):
             # 获取剧本ID
             playbook_id = request.json.get("playbook_id")  # 从JSON body获取
             if not playbook_id:
-                raise CustomError(ErrorCode.ParameterError)
+                playbook_id = request.json.get("id")  # 从URL参数获取
+                if not playbook_id:
+                    raise CustomError(ErrorCode.ParameterError)
 
             user = request.ctx.session.get('account_info')
             if not user:

@@ -22,10 +22,11 @@ from core.response import response_ok
 from libs import supervisor
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import get_client_ip, fetch_latest_messages, run_linux_command
+from libs.utils import get_client_ip, run_linux_command
 from models import PlaybookVersion, Playbook
 from models.event import EventsIngestion, EventRelatedScript
-from settings import VECTOR_CFG, KAFKA_SERVERS
+from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
+from elasticsearch import AsyncElasticsearch
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='/event/ingestion')
 _all__ = ["event_ingestion_bp"]
@@ -77,7 +78,6 @@ remove_data_config = {
 del(.host)
 del(.port)
 del(.source_type)
-del(.timestamp)
 ''',
     "kafka": r'''
 del(.headers)
@@ -85,7 +85,6 @@ del(.message_key)
 del(.offset)
 del(.partition)
 del(.source_type)
-del(.timestamp)
 del(.topic)
 ''',
 }
@@ -101,17 +100,25 @@ CEF_REGEX = re.compile(
 # 生成配置文件
 # noinspection PyTypeChecker
 async def build_kafka_file_configuration_file(output_path, sources, event_source_type,
-                                              source_id, topic):
+                                              source_id, topic, event_name):
     config = {
         "sources": sources,
         "sinks": {
             f"{topic}_sample_sinks": {
-                "type": "kafka",
+                "type": "elasticsearch",
                 "inputs": [f"{topic}_remove_transforms"],
-                "bootstrap_servers": KAFKA_SERVERS,
-                "topic": topic,
-                "encoding": {
-                    "codec": "json"
+                "api_version": "auto",
+                "compression": "none",
+                "doc_type": "_doc",
+                "endpoints": [ES_HOST],
+                "mode": "bulk",
+                "auth": {
+                    "strategy": "basic",
+                    "user": ES_USER,
+                    "password": ES_PASS
+                },
+                "bulk": {
+                    "index": f"logs-{event_name}-%Y%m%d"
                 }
             }
         },
@@ -217,7 +224,7 @@ async def event_ingestion(request):
         vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
                                                                   source_id=vector_name,
                                                                   event_source_type=event_source_type,
-                                                                  topic=topic)
+                                                                  topic=topic, event_name=event_name)
     elif event_source_type == "kafka":
         if sasl_mechanism:
             sources = {vector_name: {
@@ -241,7 +248,7 @@ async def event_ingestion(request):
         vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
                                                                   source_id=vector_name,
                                                                   event_source_type=event_source_type,
-                                                                  topic=topic)
+                                                                  topic=topic, event_name=event_name)
     else:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -467,6 +474,7 @@ async def get_event_ingestion_kafka_sample(request):
     data = request.json
     event_id = data.get('id')
     size = data.get('size', 10)
+    messages = []
     if size < 1:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -474,10 +482,30 @@ async def get_event_ingestion_kafka_sample(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    messages = await fetch_latest_messages([KAFKA_SERVERS], event.vector_name, size)
-    messages.reverse()
+    async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS),) as es:
+        query = {
+            "query": {
+                "match_all": {}
+            },
+            "size": size,
+            "sort": [
+                {"timestamp": "desc"}
+            ]
+        }
+        index = f"logs-{event.event_ingestion_name}-*"
+        if not await es.indices.exists(index=index):
+            return response_ok(messages)
+
+        result = await es.search(index=index, body=query)
+
+        if result:
+            for hit in result["hits"]["hits"]:
+                source = hit["_source"]
+                source.pop("timestamp", None)
+                messages.append(source)
+
     if messages:
-        data = orjson.loads(messages[0])
+        data = messages[0]
 
         if "message" in data.keys():
             event.enabled_health_status = "healthy"
@@ -960,6 +988,7 @@ def check_vector_config(vector_config):
     ) as tmp_file:
 
         yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
+
         tmp_file.write(yaml_str)
         tmp_file.flush()
 

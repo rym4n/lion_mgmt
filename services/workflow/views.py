@@ -17,9 +17,10 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import requires_permission, load_license, playbook_permission
+from libs.security.authorization import requires_permission, load_license, playbook_permission, \
+    playbook_version_permission, check_playbook_permission
 from libs.utils import gen_order_version
-from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Account, Role, PlaybookPermissions
+from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
@@ -117,8 +118,18 @@ async def list_workflow(request):
     size = int(json_params.get("size", 10))
     offset = (page - 1) * size
     limit = size
+
+    user = request.ctx.session.get('account_info')
+    user_id = str(user.id)
+    user_roles = set(str(role.id) for role in user.roles)
+    permissions = await PlaybookPermissions.filter(
+        Q(users__id=user_id) | Q(roles__id__in=user_roles),
+        permissions__contains=['r']
+    ).values_list('pb_id', flat=True)
+    pb_ids = set(permissions)
+
     # 分页查询Account，返回总数和数据
-    condition = Q(deleted=False)
+    condition = Q(deleted=False, id__in=pb_ids)
     if json_params.get("keyword"):
         # 模糊搜索name字段和remark字段
         keyword = json_params.get("keyword")
@@ -155,6 +166,7 @@ async def list_workflow(request):
 
 @workflow_bp.post("/versions")
 @requires_permission("workflow:r")
+@playbook_permission("r")
 async def list_workflow_versions(request):
     """
     获取剧本版本列表
@@ -184,6 +196,7 @@ async def list_workflow_versions(request):
 
 @workflow_bp.post("/edit")
 @requires_permission("workflow:u")
+@playbook_permission("u")
 async def edit_workflow(request):
     """
     修改剧本的基本信息
@@ -217,6 +230,7 @@ async def edit_workflow(request):
 
 @workflow_bp.post("/edit-flow")
 @requires_permission("workflow:u")
+@playbook_version_permission("u")
 async def edit_workflow_flow(request):
     """
     修改剧本流程图内容,修改已发布的剧本会自动生成一个新的版本
@@ -252,6 +266,7 @@ async def edit_workflow_flow(request):
 
 @workflow_bp.post("/publish")
 @requires_permission("workflow:u")
+@playbook_version_permission("u")
 async def publish_workflow(request):
     """
     发布剧本
@@ -269,6 +284,7 @@ async def publish_workflow(request):
 
 @workflow_bp.post("/del")
 @requires_permission("workflow:d")
+@playbook_permission("d")
 async def delete_workflow(request):
     """
     删除剧本
@@ -284,6 +300,7 @@ async def delete_workflow(request):
 
 @workflow_bp.post("/del-version")
 @requires_permission("workflow:d")
+@playbook_version_permission("d")
 async def delete_workflow_version(request):
     """
     删除剧本版本
@@ -347,6 +364,13 @@ async def execute_action(request):
     utime = datetime.datetime.now(beijing_tz)
     message = request.json
     if message.get("type") in ('flow', 'action'):
+        if message.get("type") == "flow":
+            has_access = await check_playbook_permission(request=request, user=request.ctx.session['account_info'],
+                                                         playbook_id=message.get("flow_id"), required_permissions=["e"])
+            if not has_access:
+                await resp.send(f"data: 缺少剧本执行权限，执行失败\n\n")
+                await resp.eof()
+                return
         run_id = gen_order_version(length=6)
         message["executor"] = request.ctx.session['account_info'].id
         msg = {"run_type": message['type'], "run_id": run_id, "run_args": message}
@@ -372,6 +396,7 @@ async def execute_action(request):
 
 @workflow_bp.post('/run/history')
 @requires_permission("workflow:r")
+@playbook_permission("r")
 async def run_history(request):
     """
     获取剧本执行历史
@@ -449,6 +474,7 @@ async def run_history(request):
 
 @workflow_bp.post('/input')
 @requires_permission("workflow:r")
+@playbook_version_permission("r")
 async def input_data(request):
     """
     获取指定剧本的输入参数
@@ -569,8 +595,8 @@ async def add_permission(request):
         (r:查, u:改, d:删, e:执行, p:授权)
     query参数:
         - playbook_id: 剧本id str
-        - users : 用户权限 [{"id":["r","u","d","e","p"]}]
-        - roles : 角色权限 [{"id":["r","u","d","e","p"]}]
+        - users : 用户权限 {"id":["r","u","d","e","p"]}
+        - roles : 角色权限 {"id":["r","u","d","e","p"]}
     """
     playbook_id = request.json.get("playbook_id")
     users = request.json.get("users", [])
@@ -580,33 +606,31 @@ async def add_permission(request):
         raise CustomError(ErrorCode.ParameterError)
 
     # 处理用户权限
-    for user in users:
-        for uid, perms in user.items():
-            await PlaybookPermissions.update_or_create(
-                pb_id=playbook_id,
-                users_id=uid,
-                defaults={"permissions": perms, "roles_id": None}
-            )
-            await request.ctx.cache_client.set(
-                (playbook_id, uid),
-                perms,
-                ttl=2592000
-            )
+    for uid, perms in users.items():
+        await PlaybookPermissions.update_or_create(
+            pb_id=playbook_id,
+            users_id=uid,
+            defaults={"permissions": perms, "roles_id": None}
+        )
+        await request.ctx.cache_client.set(
+            (playbook_id, uid),
+            perms,
+            ttl=2592000
+        )
 
     # 处理角色权限
-    for role in roles:
-        for rid, perms in role.items():
-            if rid != "111111":
-                await PlaybookPermissions.update_or_create(
-                    pb_id=playbook_id,
-                    roles_id=rid,
-                    defaults={"permissions": perms, "users_id": None}
-                )
-            await request.ctx.cache_client.set(
-                (playbook_id, rid),
-                perms,
-                ttl=2592000
+    for rid, perms in roles.items():
+        if rid != "111111":
+            await PlaybookPermissions.update_or_create(
+                pb_id=playbook_id,
+                roles_id=rid,
+                defaults={"permissions": perms, "users_id": None}
             )
+        await request.ctx.cache_client.set(
+            (playbook_id, rid),
+            perms,
+            ttl=2592000
+        )
 
     return response_ok("权限更新成功")
 
