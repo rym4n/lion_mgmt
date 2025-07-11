@@ -27,11 +27,12 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from elasticsearch import AsyncElasticsearch
 from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from settings import RY_RES_KEY
+from settings import RY_RES_KEY, ES_HOST, ES_USER, ES_PASS
 
 password_hasher: PasswordHasher = PasswordHasher()
 
@@ -361,3 +362,28 @@ def decrypt_aes256_gcm(encrypted_data: str) -> str:
     except (KeyError, InvalidTag, UnicodeDecodeError) as e:
         # 处理可能的错误：数据篡改、密码错误或格式错误
         raise ValueError("解密失败: 密码错误或数据损坏") from e
+
+
+async def setup_logs_template(pattern, alias_name):
+    async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS)) as es:
+        template = {
+            "index_patterns": [pattern],
+            "aliases": {alias_name: {}},
+            "priority": 200,
+            "template": {
+                "settings": {
+                    "number_of_shards": 1, "number_of_replicas": 0, "index.refresh_interval": "30s"
+                },
+                "mappings": {
+                    "dynamic_templates": [
+                        {"strings_as_keywords": {"match_mapping_type": "string", "mapping": {"type": "keyword"}}},
+                        {"longs_as_numbers": {"match_mapping_type": "long", "mapping": {"type": "long"}}}
+                    ],
+                    "properties": {
+                        "@timestamp": {"type": "date"},
+                        "log_from": {"type": "keyword"}
+                    }
+                }
+            }
+        }
+        es.indices.put_template(name=f"template-{alias_name}", body=template)
