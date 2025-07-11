@@ -365,8 +365,10 @@ async def execute_action(request):
     message = request.json
     if message.get("type") in ('flow', 'action'):
         if message.get("type") == "flow":
+            pv = await PlaybookVersion.get_or_none(id=message.get("flow_id"))
+            playbook_id = pv.playbook_id
             has_access = await check_playbook_permission(request=request, user=request.ctx.session['account_info'],
-                                                         playbook_id=message.get("flow_id"), required_permissions=["e"])
+                                                         playbook_id=playbook_id, required_permissions=["e"])
             if not has_access:
                 await resp.send(f"data: 缺少剧本执行权限，执行失败\n\n")
                 await resp.eof()
