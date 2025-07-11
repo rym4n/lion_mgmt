@@ -33,17 +33,19 @@ TYPE_DICT = {
 
 
 @warroom_bp.websocket('/ws')
+@requires_permission('warroom:r')
 async def warroom_ws(request: Request, ws: Websocket):
     """WebSocket连接处理"""
     account = None
     try:
         # 先获取认证信息
-        auth_data = await asyncio.wait_for(ws.recv(), timeout=15)
-        auth_json = orjson.loads(auth_data)
-        payload = jwt.decode(auth_json.get('auth', ''), SECRET, SESSION_ENCODING_ALGORITHM)
-        validate_token(payload, request)
+        # auth_data = await asyncio.wait_for(ws.recv(), timeout=15)
+        # auth_json = orjson.loads(auth_data)
+        # payload = jwt.decode(auth_json.get('auth', ''), SECRET, SESSION_ENCODING_ALGORITHM)
+        # validate_token(payload, request)
 
-        account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
+        # account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
+        account = await request.ctx.session.get('account_info')
         if not account:
             logger.warning("redis里已经没有account信息了")
             raise CustomError(ErrorCode.SessionInvalid)
