@@ -132,10 +132,10 @@ async def build_kafka_file_configuration_file(output_path, sources, event_source
     }
     yaml_str = yaml.dump(config, default_flow_style=False, allow_unicode=True)
 
-    # result = check_vector_config(config)
-    #
-    # if not result:
-    #     return None
+    result = check_vector_config(config)
+
+    if not result:
+        return None
 
     async with aiofile.AIOFile(output_path, mode='w', encoding='utf-8') as file:
         await file.write(yaml_str)
