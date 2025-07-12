@@ -3,7 +3,6 @@
 import asyncio
 import traceback
 
-import jwt
 import orjson
 from sanic import Blueprint, Request, Websocket
 from sanic.log import logger
@@ -15,13 +14,12 @@ from core.response import response_ok
 from libs.chat import get_or_create_private_chat_room, chat_manager
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authentication import validate_token
 from libs.security.authorization import requires_permission
 from libs.utils import gen_order_version, gen_random_code
 from models import Approvement, Events, ToolAction, Tool, Runlog
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import SECRET, SESSION_ENCODING_ALGORITHM, KAFKA_SERVERS, TASK_TOPIC
+from settings import KAFKA_SERVERS, TASK_TOPIC
 
 warroom_bp = Blueprint('warroom', url_prefix='/warroom')
 __all__ = ['warroom_bp']
