@@ -1,7 +1,6 @@
 # coding=utf-8
 import time
 import traceback
-from multiprocessing import Manager
 
 import orjson
 from sanic import Sanic
@@ -33,18 +32,12 @@ from settings import BASE_LOGGING, TORTOISE
 def create_app() -> Sanic:
     app: Sanic = Sanic(__name__, dumps=orjson.dumps, loads=orjson.loads, log_config=BASE_LOGGING)
     app.config.update_config("settings/__init__.py")
-    app.main_process_start(init_shared_ctx)
     register_listener(app)
     register_tortoise(app, config=TORTOISE, generate_schemas=False)
-    # 从数据库读取SSO配置
     register_middleware(app)
     register_exception_handler(app)
     register_blueprints(app)
     return app
-
-
-def init_shared_ctx(app: Sanic) -> None:
-    app.shared_ctx.connections = Manager().dict()
 
 
 def register_blueprints(app: Sanic) -> None:
