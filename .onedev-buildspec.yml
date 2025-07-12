@@ -42,7 +42,7 @@ jobs:
     dockerfile: '@project_path@/Dockerfile'
     output: !RegistryOutput
       tags: reg.hongcloud.net/lion_mgmt:@tag@
-    platforms: linux/amd64,linux/arm64
+    platforms: linux/amd64
     condition: SUCCESSFUL
     optional: false
   triggers:
