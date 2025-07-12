@@ -159,7 +159,7 @@ async def creat_event_ingestion_dbdata(event_ingestion_name, event_ingestion_des
     return events_ingestion.json
 
 
-@event_ingestion_bp.post('/')
+@event_ingestion_bp.post('/new')
 @requires_permission('ingestion:c')
 async def event_ingestion(request):
     """
