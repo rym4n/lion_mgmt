@@ -28,7 +28,7 @@ from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
 from elasticsearch import AsyncElasticsearch
 
-event_ingestion_bp = Blueprint('event_ingestion', url_prefix='/event/ingestion')
+event_ingestion_bp = Blueprint('event_ingestion', url_prefix='/event-ingestion')
 _all__ = ["event_ingestion_bp"]
 
 # transforms配置
