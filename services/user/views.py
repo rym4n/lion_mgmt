@@ -363,7 +363,7 @@ async def update_user(request):
         permit_ip: 可选，允许登录的IP地址，支持多个IP或CIDR格式（逗号分隔），例如 192.168.1.1,10.0.2.0/24
     """
     data = dict()
-    for field in ["email", "phone", "password"]:
+    for field in ["email", "phone", "password", "permit_ip"]:
         if field in request.json:
             if field == "password":
                 data['password'] = password_hasher.hash(validate_password(request.json.get("password") or ''))
