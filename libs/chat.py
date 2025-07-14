@@ -238,8 +238,6 @@ class ChatManager:
         """
         专门处理 runlog
         """
-        logger.info(f"runlog消息：{log}")
-
         # 处理审批消息
         if log.get('type') == 'approval-info':
             approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'],
@@ -274,7 +272,8 @@ class ChatManager:
             try:
                 await Runlog.create(**log)
             except Exception as e:
-                logger.error(e)
+                logger.info(f"runlog消息：{log}")
+                logger.error(f"{e} | {traceback.format_exc()}")
 
     async def handle_message(self, user: Account, ws, data: dict):
         """消息处理"""
@@ -305,13 +304,9 @@ class ChatManager:
                     {"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
             elif message_type == "heartbeat":
                 await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
-            else:
-                logger.error(f"{traceback.format_exc()}")
-                raise Exception("未知消息类型")
         except Exception as e:
-            logger.info(e)
-            await ws.send(orjson.dumps({"type": "error", "message": str(e),
-                                        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
+            logger.error(e)
+            await ws.send(orjson.dumps({"type": "error", "message": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
 
     async def _handle_public_message(self, user: Account, data: dict):
         """处理发送群聊消息"""

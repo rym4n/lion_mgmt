@@ -54,9 +54,9 @@ TASK_TOPIC = os.environ.get("RY_TASK_TOPIC")
 RUNLOG_TOPIC = os.environ.get("RY_RUNLOG_TOPIC")
 
 # ES配置
-ES_HOST = os.environ.get("RY_ES_HOST")
-ES_USER = os.environ.get("RY_ES_USER")
-ES_PASS = os.environ.get("RY_ES_PASS")
+ES_HOST = os.environ.get("ELASTIC_HOST")
+ES_USER = os.environ.get("ELASTIC_USER")
+ES_PASS = os.environ.get("ELASTIC_PASSWORD")
 
 # 安全相关
 SECRET = os.environ.get("RY_SECRET_KEY", '5tdPY^zTX6I$akvNtLXey3y#gFEG@^46f!iLUdSy$Y')

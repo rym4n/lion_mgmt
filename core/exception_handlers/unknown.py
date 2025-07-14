@@ -1,6 +1,4 @@
 # coding=utf-8
-import os
-import traceback
 
 from asyncpg.exceptions import UniqueViolationError
 from sanic import HTTPResponse, exceptions
@@ -20,9 +18,7 @@ class UnknownExcHandler(BaseExcHandler):
         return Exception
 
     def handle(self, request: Request, exception: Exception) -> HTTPResponse:
-        # todo: 开发环境打印异常，生产环境不打印
-        if os.environ.get("RY_ENV") != 'PROD':
-            logger.exception(exception)
+        logger.exception(exception)
         if isinstance(exception, exceptions.NotFound) or isinstance(exception, DoesNotExist):
             return response_fail(ErrorCode.NotFound)
         elif isinstance(exception, exceptions.BadRequest) or isinstance(exception, ValidationError) or isinstance(exception, ValueError) or isinstance(exception, TypeError) or isinstance(exception, KeyError) or isinstance(exception, FieldError):
@@ -30,5 +26,4 @@ class UnknownExcHandler(BaseExcHandler):
         elif isinstance(exception, IntegrityError) or isinstance(exception, UniqueViolationError):
             return response_fail(ErrorCode.DataAlreadyExists)
         else:
-            logger.error(f"{exception} | {traceback.format_exc()}")
             return response_fail(ErrorCode.ServerError, 500)
