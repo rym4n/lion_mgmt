@@ -1,4 +1,5 @@
 # coding=utf-8
+import asyncio
 import base64
 import datetime
 import ipaddress
@@ -18,6 +19,7 @@ from typing import Optional
 import aiofile
 import jwt
 import psutil
+from aiokafka import AIOKafkaConsumer, TopicPartition
 from argon2 import PasswordHasher
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.backends import default_backend
@@ -244,6 +246,49 @@ def generate_mac_uuid():
     return ''
 
 
+# 获取kafka指定主题最新消息
+async def fetch_latest_messages(bootstrap_servers, topic, num_messages=10):
+    consumer = AIOKafkaConsumer(
+        bootstrap_servers=bootstrap_servers,
+        group_id=None,
+        enable_auto_commit=False,
+        auto_offset_reset="latest"
+    )
+
+    try:
+        await consumer.start()
+
+        partitions = consumer.partitions_for_topic(topic)
+        if not partitions:
+            return f"主题 {topic} 不存在或无可访问分区"
+
+        tps = [TopicPartition(topic, p) for p in partitions]
+        consumer.assign(tps)
+
+        end_offsets = await consumer.end_offsets(tps)
+
+        for tp in tps:
+            latest_offset = end_offsets[tp]
+            seek_offset = max(0, latest_offset - num_messages)
+            consumer.seek(tp, seek_offset)
+
+        messages = []
+        batch = await consumer.getmany(max_records=num_messages, timeout_ms=1000)
+        for tp_msgs in batch.values():
+            for msg in tp_msgs:
+                messages.append(msg)
+                if len(messages) >= num_messages:
+                    break
+
+        return [m.value.decode(errors='ignore') for m in messages]
+
+    finally:
+        try:
+            await consumer.stop()
+        except asyncio.CancelledError:
+            logger.info("停止消费者时被取消")
+
+
 def run_linux_command(command):
     """
     在 Linux 上执行命令，并返回执行结果。
@@ -323,20 +368,24 @@ def decrypt_aes256_gcm(encrypted_data: str) -> str:
 async def setup_logs_template(pattern, alias_name):
     async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS)) as es:
         template = {
-            "settings": {
-                "number_of_shards": 1, "number_of_replicas": 0, "index.refresh_interval": "30s"
-            },
-            "mappings": {
-                "dynamic_templates": [
-                    {"strings_as_keywords": {"match_mapping_type": "string", "mapping": {"type": "keyword"}}},
-                    {"longs_as_numbers": {"match_mapping_type": "long", "mapping": {"type": "long"}}}
-                ],
-                "properties": {
-                    "@timestamp": {"type": "date"},
-                    "log_from": {"type": "keyword"}
+            "index_patterns": [pattern],
+            "data_stream": {"enabled": False},
+            "aliases": {alias_name: {}},
+            "priority": 200,
+            "template": {
+                "settings": {
+                    "number_of_shards": 1, "number_of_replicas": 0, "index.refresh_interval": "30s"
+                },
+                "mappings": {
+                    "dynamic_templates": [
+                        {"strings_as_keywords": {"match_mapping_type": "string", "mapping": {"type": "keyword"}}},
+                        {"longs_as_numbers": {"match_mapping_type": "long", "mapping": {"type": "long"}}}
+                    ],
+                    "properties": {
+                        "@timestamp": {"type": "date"},
+                        "log_from": {"type": "keyword"}
+                    }
                 }
             }
         }
-
-        es.indices.put_index_template(name=f"template-{alias_name}", index_patterns=[pattern], alias_name=alias_name,
-                                      priority=500, template=template, data_stream=None)
+        es.indices.put_template(name=f"template-{alias_name}", body=template)
