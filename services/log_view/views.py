@@ -37,8 +37,10 @@ async def get_index_list(request):
     获取索引列表
     """
     async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS)) as es:
-        resp = await es.cat.indices(index='logs-*', format='json')
-        return response_ok(resp.body)
+        resp = await es.cat.aliases(format='json')
+        result = [i['alias'] for i in resp.body if i.get('alias', '').startswith('logs-')]
+        # resp = await es.cat.indices(index='logs-*', format='json')
+        return response_ok(list(set(result)))
 
 
 def extract_fields(mapping, prefix=''):
