@@ -16,7 +16,7 @@ from libs.kafka import aconsume
 from models import Runlog, Approvement, Events, Config
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC
+from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC, WR_TOPIC
 
 SYSTEM_PROMPT = """
             你是一位智能安全专家助手，具有广泛的领域知识。
@@ -145,14 +145,14 @@ class ChatManager:
         host = ai_cfg.get('llm_host')
         if host is None:
             message_data["content"] = "当前未配置ai服务地址，请前往系统设置进行配置。"
-            await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
             return None
 
         api_key = ai_cfg.get('llm_api_key')
         model = ai_cfg.get('llm_model')
         if model is None:
             message_data["content"] = "当前未配置ai服务模型，请前往系统设置进行配置。"
-            await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
             return None
 
         client = OpenAI(
@@ -177,7 +177,7 @@ class ChatManager:
             delta = chunk.choices[0].delta
             if delta and hasattr(delta, "content") and delta.content:
                 message_data["content"] = delta.content
-                await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+                await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
                 full_response += delta.content
 
         return full_response
@@ -193,7 +193,7 @@ class ChatManager:
             "timestamp": str(datetime.now())
         }
         await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
-        await self.msg_pub.publish("wr_group_chat", orjson.dumps(status_message).decode())
+        await self.msg_pub.publish(WR_TOPIC, orjson.dumps(status_message).decode())
 
     async def disconnect(self, user_id):
         """处理用户断开连接"""
@@ -202,11 +202,11 @@ class ChatManager:
         if user_id in self.run_connections.keys():
             self.run_connections.pop(user_id, None)
         await self.cache_client.delete(f"room_online_{user_id}")
-        # await self.msg_pub.publish("wr_group_chat", orjson.dumps({"type": "system", "message": f"{user.username} 离开作战室"}).decode())
+        # await self.msg_pub.publish(WR_TOPIC, orjson.dumps({"type": "system", "message": f"{user.username} 离开作战室"}).decode())
 
     async def msg_listener(self):
         async with self.cache_client.client.pubsub() as msg_sub:
-            await msg_sub.subscribe("wr_group_chat")
+            await msg_sub.subscribe(WR_TOPIC)
             async for message in msg_sub.listen():
                 try:
                     if message.get('type') != 'message':
@@ -229,7 +229,7 @@ class ChatManager:
                 except Exception as e:
                     logger.error(f"{e} | {traceback.format_exc()}")
                     break
-            await msg_sub.unsubscribe("wr_group_chat")
+            await msg_sub.unsubscribe(WR_TOPIC)
 
     async def log_listener(self):
         await aconsume(KAFKA_SERVERS, RUNLOG_TOPIC, 'lion_mgmt_listener', self.handle_runlog, 50)
@@ -258,7 +258,7 @@ class ChatManager:
             if data:
                 # 消费作战室的执行记录
                 data["log"] = log
-                await self.msg_pub.publish("wr_group_chat", orjson.dumps(data).decode())
+                await self.msg_pub.publish(WR_TOPIC, orjson.dumps(data).decode())
                 event = await Events.get_or_none(room_id=data["room_id"])
                 if event:
                     if log.get("node_type") == "start-node":
@@ -351,7 +351,7 @@ class ChatManager:
             "room_id": current_room_id
         }
 
-        await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+        await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
     async def _handle_ai_message(self, user: Account, data: dict):
         """处理发送ai消息"""
@@ -389,7 +389,7 @@ class ChatManager:
             "room_id": current_room_id
         }
 
-        await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+        await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
         # 在发送完用户消息后，切换系统回复AI消息
         message_data["sender_id"] = sender.id
         message_data["sender_name"] = sender.username
@@ -453,7 +453,7 @@ class ChatManager:
                 "timestamp": str(message.ctime),
                 "room_id": chat_room.id
             }
-            await self.msg_pub.publish("wr_group_chat", orjson.dumps(message_data).decode())
+            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
             raise Exception("发送私聊消息失败")
@@ -488,7 +488,7 @@ class ChatManager:
             "room_id": message.room.id,
             "timestamp": str(now)
         }
-        await self.msg_pub.publish("wr_group_chat", orjson.dumps(recall_notice).decode())
+        await self.msg_pub.publish(WR_TOPIC, orjson.dumps(recall_notice).decode())
 
     async def _handle_announcement(self, user: Account, data: dict):
         """处理发布公告请求"""
@@ -513,7 +513,7 @@ class ChatManager:
 
         # 指定房间广播公告
         # await self._broadcast_to_room(room_id, )
-        await self.msg_pub.publish("wr_group_chat", orjson.dumps({
+        await self.msg_pub.publish(WR_TOPIC, orjson.dumps({
             "type": "new_announcement",
             "id": announcement.id,
             "content": announcement.content,
@@ -551,7 +551,7 @@ class ChatManager:
             "sender_id": user.id,
             "room_id": announcement.room.id,
         }
-        await self.msg_pub.publish("wr_group_chat", orjson.dumps(msg).decode())
+        await self.msg_pub.publish(WR_TOPIC, orjson.dumps(msg).decode())
 
     async def _handle_request_online_users(self, data: dict):
         """处理请求在线用户列表"""

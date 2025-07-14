@@ -1,10 +1,10 @@
 # coding=utf-8
 import time
-import pytz
+from datetime import datetime
 
+import pytz
 from sanic import Blueprint
 from tortoise.transactions import in_transaction
-from datetime import datetime
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -44,7 +44,8 @@ async def get_all_events(request):
     if request.json.get("event_source"):
         filters["event_source"] = request.json.get("event_source")
 
-    events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room", "creator", "updator")
+    events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room", "creator",
+                                                                                               "updator")
     total = await Events.filter(**filters).count()
 
     data = []
@@ -65,7 +66,7 @@ async def get_all_events(request):
 
         event_dict.update(event.json)
 
-        event_dict["owner"] = {"role": role_list , "user": user_list}
+        event_dict["owner"] = {"role": role_list, "user": user_list}
 
         data.append(event_dict)
 
@@ -103,12 +104,11 @@ async def artificial_create_event(request):
 
     async with in_transaction():
         event = await Events.create(event_name=event_name, event_process_status=event_process_status,
-                                   event_source=event_source, owner=owner,
-                                   creator=user, event_summary=event_summary, updator=user,
-                                   event_ingestion_id=event_ingestion_id, log_data=log_data)
+                                    event_source=event_source, owner=owner,
+                                    creator=user, event_summary=event_summary, updator=user,
+                                    event_ingestion_id=event_ingestion_id, log_data=log_data)
 
     return response_ok({"id": event.id})
-
 
 
 @event_bp.post('/create')
@@ -143,9 +143,9 @@ async def create_event(request):
 
     async with in_transaction():
         await Events.create(event_name=event_name, event_process_status=event_process_status,
-                                   event_source=event_source, owner=owner,
-                                   creator=user, event_summary=event_summary, updator=user,
-                                   event_ingestion_id=event_ingestion_id, log_data=log_data)
+                            event_source=event_source, owner=owner,
+                            creator=user, event_summary=event_summary, updator=user,
+                            event_ingestion_id=event_ingestion_id, log_data=log_data)
 
     return response_ok("创建成功")
 
