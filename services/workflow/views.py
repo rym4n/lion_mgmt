@@ -20,7 +20,8 @@ from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license, playbook_permission, \
     playbook_version_permission, check_playbook_permission
 from libs.utils import gen_order_version
-from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions
+from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, \
+    EventRelatedScript, Timed
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
@@ -293,6 +294,18 @@ async def delete_workflow(request):
         id: 剧本ID
     """
     playbook = await Playbook.get(id=request.json.get("id"), internal=False)
+    pvs = await PlaybookVersion.filter(playbook=playbook, deleted=False).all()
+    pv_ids = [pv.id for pv in pvs]
+    pv_versions = [pv.version for pv in pvs]
+    condition = Q()
+    for pv_id in pv_ids:
+        condition |= Q(script_id__contains=[pv_id])
+
+    if await EventRelatedScript.filter(condition).exists():
+        raise CustomError(ErrorCode.PlaybookUsedError)
+    if await Timed.filter(playbook=playbook, playbook_version__in=pv_versions).exists():
+        raise CustomError(ErrorCode.PlaybookUsedError)
+
     playbook.deleted = True
     await playbook.save()
     return response_ok("剧本删除成功")
@@ -309,6 +322,10 @@ async def delete_workflow_version(request):
         id: 剧本版本ID
     """
     pv = await PlaybookVersion.get(id=request.json.get("id"))
+    if await EventRelatedScript.filter(script_id__contains=[pv.id]).exists():
+        raise CustomError(ErrorCode.PlaybookUsedError)
+    if await Timed.filter(playbook_id=pv.playbook_id, playbook_version=pv.version).exists():
+        raise CustomError(ErrorCode.PlaybookUsedError)
     await pv.delete()
     if pv.flow_json:
         action_ids = await statistics_data(pv.flow_json)
