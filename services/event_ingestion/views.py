@@ -9,7 +9,7 @@ import string
 import tempfile
 import time
 import zipfile
-
+import urllib.parse
 import aiofile
 import orjson
 import yaml
@@ -115,7 +115,7 @@ async def build_kafka_file_configuration_file(output_path, sources, event_source
                 "auth": {
                     "strategy": "basic",
                     "user": ES_USER,
-                    "password": ES_PASS
+                    "password": urllib.parse.quote(ES_PASS)
                 },
                 "bulk": {
                     "index": f"logs-{event_name}-%Y%m%d"
@@ -238,7 +238,7 @@ async def event_ingestion(request):
                     "enabled": True,
                     "mechanism": sasl_mechanism,
                     "username": sasl_username,
-                    "password": sasl_password
+                    "password": urllib.parse.quote(sasl_password)
                 }}}
         else:
             sources = {vector_name: {
@@ -408,7 +408,7 @@ async def update_event_ingestion(request):
     if sasl_username:
         data["sources"][event.vector_name]["sasl"]["username"] = sasl_username
     if sasl_password:
-        data["sources"][event.vector_name]["sasl"]["password"] = sasl_password
+        data["sources"][event.vector_name]["sasl"]["password"] = urllib.parse.quote(sasl_password)
 
     result = check_vector_config(data)
     if not result:
@@ -647,7 +647,7 @@ del(.datetime_str)
             "encoding": {
                 "codec": "json"
             }}
-        endpoint = f'postgresql://{os.environ.get("RY_DB_USER")}:{os.environ.get("RY_DB_PASS")}@lion-pg:5432/lion_mgmt'
+        endpoint = f'postgresql://{os.environ.get("RY_DB_USER")}:{urllib.parse.quote(os.environ.get("RY_DB_PASS"))}@lion-pg:5432/lion_mgmt'
         data["sinks"][f"{topic}_event_sinks"] = {
             "inputs": [f"{topic}_event_transforms"],
             "type": "postgres",
