@@ -370,7 +370,7 @@ async def setup_logs_template(pattern, alias_name):
         template = {
             "aliases": {alias_name: {}},
             "settings": {
-                "number_of_shards": 1, "number_of_replicas": 0, "index.refresh_interval": "30s"
+                "number_of_shards": 1, "number_of_replicas": 0, "index.refresh_interval": "5s"
             },
             "mappings": {
                 "dynamic_templates": [
