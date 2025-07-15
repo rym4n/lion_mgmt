@@ -8,11 +8,13 @@ import re
 import string
 import tempfile
 import time
-import zipfile
 import urllib.parse
+import zipfile
+
 import aiofile
 import orjson
 import yaml
+from elasticsearch import AsyncElasticsearch
 from sanic import Blueprint, response
 from sanic.log import logger
 from tortoise.transactions import in_transaction
@@ -26,7 +28,6 @@ from libs.utils import get_client_ip, run_linux_command, setup_logs_template
 from models import PlaybookVersion, Playbook
 from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
-from elasticsearch import AsyncElasticsearch
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='/event-ingestion')
 _all__ = ["event_ingestion_bp"]
@@ -484,7 +485,7 @@ async def get_event_ingestion_kafka_sample(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS),) as es:
+    async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS), ) as es:
         query = {
             "query": {
                 "match_all": {}
@@ -647,7 +648,7 @@ del(.datetime_str)
             "encoding": {
                 "codec": "json"
             }}
-        endpoint = f'postgresql://{os.environ.get("RY_DB_USER")}:{urllib.parse.quote(os.environ.get("RY_DB_PASS"))}@lion-pg:5432/lion_mgmt'
+        endpoint = f'postgresql://{os.environ.get("RY_DB_USER")}:{urllib.parse.quote(os.environ.get("RY_DB_PASS"))}@lion-pg:5432/{os.environ.get("RY_DB_NAME")}'
         data["sinks"][f"{topic}_event_sinks"] = {
             "inputs": [f"{topic}_event_transforms"],
             "type": "postgres",
