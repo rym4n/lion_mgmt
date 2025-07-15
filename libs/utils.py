@@ -366,7 +366,7 @@ def decrypt_aes256_gcm(encrypted_data: str) -> str:
 
 
 async def setup_logs_template(pattern, alias_name):
-    async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS)) as es:
+    async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
         template = {
             "aliases": {alias_name: {}},
             "settings": {
@@ -384,5 +384,5 @@ async def setup_logs_template(pattern, alias_name):
                 }
             }
         }
-        es.indices.put_index_template(name=f"template-{alias_name}", index_patterns=[pattern], priority=500,
-                                      data_stream=None, template=template)
+        await es.indices.put_index_template(name=f"template-{alias_name}", index_patterns=[pattern], priority=500,
+                                            data_stream=None, template=template)
