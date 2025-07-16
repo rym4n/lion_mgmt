@@ -40,6 +40,7 @@ async def oauth_callback(client: BaseOAuth2, code: str, oauth_cfg: dict, code_ve
             # 不存在自动新建
             account = await Account.create(
                 username=username[0],
+                oauth_id=username[0],
                 password='',
                 display_name=(jsonpath(user_info, oauth_cfg.get('display_name_path')) or [None])[0],
                 email=(jsonpath(user_info, oauth_cfg.get('email_path')) or [None])[0],

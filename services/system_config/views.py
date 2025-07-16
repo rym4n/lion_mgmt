@@ -183,12 +183,13 @@ async def get_oauth_config(request):
     """
     records = await Config.filter(module='sso').values('key', 'value')
     oauth_config = {c['key']: c['value'] for c in records}
+    secret = oauth_config.get("client_secret", "")
     return response_ok({
         "use_oauth2": oauth_config.get("use_oauth2", "false"),
         "auto_create": oauth_config.get("auto_create", "false"),
         "client_id": oauth_config.get("client_id", ""),
         "client_id_alias": oauth_config.get("client_id_alias", ""),
-        "client_secret": oauth_config.get("client_secret", ""),
+        "client_secret": secret[:3] + "******" + secret[-3:] if secret else "",
         "client_secret_alias": oauth_config.get("client_secret_alias", ""),
         "authorize_uri": oauth_config.get("authorize_uri", ""),
         "token_uri": oauth_config.get("token_uri", ""),
