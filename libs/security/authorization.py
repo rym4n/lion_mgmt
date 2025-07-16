@@ -17,7 +17,7 @@ from settings import LICENSE_DIR
 
 
 async def check_permissions(request: Request, *required_permissions: str) -> bool:
-    if request.path == '/license/ai/update' and get_client_ip(request) == '127.0.0.1':
+    if request.path in ('/license/ai/update', '/scene/current') and get_client_ip(request) == '127.0.0.1':
         return True
     payload = await token_decode(request)
     account = await request.ctx.cache_client.get(f"account_{payload['sub']}")

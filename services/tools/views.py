@@ -1,5 +1,4 @@
 # coding=utf-8
-import asyncio
 import base64
 import hashlib
 import operator
@@ -31,7 +30,7 @@ from settings import TOOLS_DIR
 
 # 定义 Blueprint
 tools_bp = Blueprint("tools", url_prefix="/tools")
-__all__ = ["tools_bp"]
+__all__ = ["tools_bp", 'tool_action_update', 'tool_action_playbook_delete']
 # 预期的文件结构
 EXPECTED_STRUCTURE = {
     "required_files": ["config.json"]

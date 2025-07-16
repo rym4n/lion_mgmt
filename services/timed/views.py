@@ -199,7 +199,7 @@ async def get_all(request):
     for item in paged_items:
         data = item.json
         if item.playbook_input:
-            input_args = await get_playbook_input(request, item.playbook_input["flow_id"])
+            input_args = await get_playbook_input(item.playbook_input["flow_id"])
             data["input_args"] = input_args
         if item.action_input:
             actions = await ToolAction.filter(tool_name=item.action_input.get("app_name"), deleted=False, version_number=item.action_input.get("app_ver")).all()

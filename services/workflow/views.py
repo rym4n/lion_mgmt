@@ -8,6 +8,7 @@ from collections import defaultdict
 
 import orjson
 import pytz
+from aiocache import caches
 from sanic import Blueprint
 from tortoise.expressions import Q
 from tortoise.functions import Count
@@ -81,6 +82,7 @@ async def create_workflow(request):
         if data.get('scenes'):
             scenes = await Scene.filter(name__in=data.get('scenes')).all()
             await playbook.scenes.add(*scenes)
+            await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ','.join([s.id for s in scenes]))
 
         await playbook.fetch_related('tags', 'scenes')
 
@@ -220,6 +222,7 @@ async def edit_workflow(request):
         scenes = await Scene.filter(name__in=params.get("scenes"))
         await playbook.scenes.clear()
         await playbook.scenes.add(*scenes)
+        await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ','.join([s.id for s in scenes]))
     if params.get("tags"):
         tags = await Tag.filter(name__in=params.get("tags"))
         await playbook.tags.clear()
@@ -390,7 +393,7 @@ async def execute_action(request):
             if not has_access:
                 await resp.send(f"data: 缺少剧本执行权限，执行失败\n\n")
                 await resp.eof()
-                return
+                return resp
         run_id = gen_order_version(length=6)
         message["executor"] = request.ctx.session['account_info'].id
         msg = {"run_type": message['type'], "run_id": run_id, "run_args": message}
@@ -502,12 +505,12 @@ async def input_data(request):
     请求参数：
         id: 剧本版本ID
     """
-    input_list = await get_playbook_input(request, request.json.get("id"))
+    input_list = await get_playbook_input(request.json.get("id"))
 
     return response_ok(input_list)
 
 
-async def get_playbook_input(request, playbook_id):
+async def get_playbook_input(playbook_id):
     playbook = await PlaybookVersion.get_or_none(id=playbook_id)
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
