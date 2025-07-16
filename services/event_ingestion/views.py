@@ -648,7 +648,7 @@ del(.datetime_str)
             "encoding": {
                 "codec": "json"
             }}
-        endpoint = f'postgresql://{os.environ.get("RY_DB_USER")}:{urllib.parse.quote(os.environ.get("RY_DB_PASS"))}@lion-pg:5432/{os.environ.get("RY_DB_NAME")}'
+        endpoint = f'postgresql://{os.environ.get("RY_DB_USER")}:{urllib.parse.quote(os.environ.get("RY_DB_PASS"))}@{os.environ.get("RY_DB_HOST")}:{os.environ.get("RY_DB_PORT", 5432)}/{os.environ.get("RY_DB_NAME")}'
         data["sinks"][f"{topic}_event_sinks"] = {
             "inputs": [f"{topic}_event_transforms"],
             "type": "postgres",

@@ -133,9 +133,9 @@ async def get_system_status(request):
     无需参数直接请求则返回全部系统状况数据
     """
     name_map = {
-        'lion-mgmt': '控制台服务', 'lion-web': 'Web服务器', 'lion-pg': '数据库连接服务', 'lion-db': '关系数据库', 'lion-redis': '缓存数据库',
+        'lion-mgmt': '控制台服务', 'lion-web': 'Web服务器', 'lion-db': '数据库服务', 'lion-kb': '数据库服务', 'lion-redis': '缓存服务',
         'lion-ship': 'ETL服务', 'lion-job': '任务调度服务', 'lion-worker': '执行引擎', 'lion-kafka': '消息队列', 'lion-ai': 'AI服务',
-        'lion-fs': '文件存储服务', 'lion-es': 'ES存储服务', 'lion-kb': '关系数据库'
+        'lion-fs': '文件存储服务', 'lion-es': 'ES存储服务'
     }
     # 遍历目录获取 status_ 开头的json文件
     data_dir = os.path.join(settings.BASE_DIR, 'data')
