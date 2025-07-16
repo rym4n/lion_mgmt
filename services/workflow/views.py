@@ -655,6 +655,17 @@ async def add_permission(request):
     return response_ok("权限更新成功")
 
 
+@workflow_bp.post("/permissions/current")
+@requires_permission("workflow:r")
+async def select_my_permission(request):
+    """
+    获取当前用户所能查看的剧本的权限
+    """
+    pps = await PlaybookPermissions.filter(users__id=request.ctx.session['sub']).all()
+
+    return response_ok([{"id": pp.id, "permissions": pp.permissions} for pp in pps])
+
+
 @workflow_bp.post("/permissions/select")
 @requires_permission("workflow:r")
 @playbook_permission("r")
