@@ -1,3 +1,4 @@
+from aiocache import caches
 from sanic import Blueprint
 from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
@@ -126,6 +127,8 @@ async def set_current_scene(request):
     scene.status = 1
     scene.updator = request.ctx.session['account_info']
     await scene.save()
+
+    await caches.get("redis_chat").set("aioe_current_scene", scene.id)
 
     return response_ok("设置成功")
 
