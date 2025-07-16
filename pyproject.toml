@@ -30,7 +30,6 @@ dependencies = [
     "openai>=1.88.0",
     "elasticsearch[async]==8.18.1",
     "aiohttp>=3.12.13",
-    "asyncpg[gssauth]>=0.30.0",
 ]
 
 [build-system]
