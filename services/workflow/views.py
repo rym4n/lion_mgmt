@@ -302,12 +302,12 @@ async def delete_workflow(request):
         condition |= Q(script_id__contains=[pv_id])
 
     if await EventRelatedScript.filter(condition).exists():
-        raise CustomError(ErrorCode.PlaybookUsedError)
+        raise CustomError(ErrorCode.PlaybookUsedByEvent)
     if await Timed.filter(playbook=playbook, playbook_version__in=pv_versions).exists():
-        raise CustomError(ErrorCode.PlaybookUsedError)
+        raise CustomError(ErrorCode.PlaybookUsedByTimer)
 
-    playbook.deleted = True
-    await playbook.save()
+    await playbook.delete()
+
     return response_ok("剧本删除成功")
 
 
@@ -323,13 +323,14 @@ async def delete_workflow_version(request):
     """
     pv = await PlaybookVersion.get(id=request.json.get("id"))
     if await EventRelatedScript.filter(script_id__contains=[pv.id]).exists():
-        raise CustomError(ErrorCode.PlaybookUsedError)
+        raise CustomError(ErrorCode.PlaybookUsedByEvent)
     if await Timed.filter(playbook_id=pv.playbook_id, playbook_version=pv.version).exists():
-        raise CustomError(ErrorCode.PlaybookUsedError)
-    await pv.delete()
+        raise CustomError(ErrorCode.PlaybookUsedByTimer)
+
     if pv.flow_json:
         action_ids = await statistics_data(pv.flow_json)
         await tool_action_playbook_delete({pv.id: action_ids})
+    await pv.delete()
     return response_ok("删除成功")
 
 

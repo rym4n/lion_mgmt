@@ -106,4 +106,5 @@ class ErrorCode(BaseErrorCode):
     CannotDisableSelf = ErrorData(4076, "不允许禁用自己")
     CannotEditSensitiveAttribute = ErrorData(4077, "敏感属性不允许修改")
     RequestTooManyError = ErrorData(4078, "请求数量不得超过50")
-    PlaybookUsedError = ErrorData(4079, "剧本已被使用，禁止删除")
+    PlaybookUsedByEvent = ErrorData(4079, "剧本已绑定事件接入，请先解绑")
+    PlaybookUsedByTimer = ErrorData(4080, "剧本已绑定定时任务，请先修改定时任务")
