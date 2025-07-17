@@ -1,4 +1,3 @@
-import base64
 import os
 from datetime import datetime
 
@@ -7,6 +6,7 @@ import orjson
 from aiocache import cached
 from sanic import Blueprint
 from sanic import json
+from sanic import response
 from tortoise.transactions import in_transaction
 
 import settings
@@ -80,11 +80,22 @@ async def upload_image(request):
         }
         await Config.create(key="platform_config", module="system", value=orjson.dumps(default))
 
-    # 处理文件上传
-    for field in ["background", "webico", "logo"]:
-        file = request.files.get(field)
-        if file:
-            await Config.update_or_create(key=field, module="system", value=base64.b64encode(file.body))
+        # 处理文件上传
+        for field in ["background", "webico", "logo"]:
+            file = request.files.get(field)
+            filename = ''
+            if field == "background":
+                filename = f"bg.png"
+            elif field == "webico":
+                filename = f"favicon.ico"
+            elif field == "logo":
+                filename = f"logo.svg"
+            if file and filename:
+                file_path = os.path.join(settings.UPLOAD_DIR, filename)
+
+                with open(file_path, "wb") as f:
+                    f.write(file.body)
+                await Config.update_or_create(key=field, module="system", value=file_path)
 
     return response_ok("success")
 
@@ -101,7 +112,11 @@ async def get_bgpic(request):
     if pic_type not in ("background", "webico", "logo"):
         raise CustomError(ErrorCode.ParameterError)
     cfg = await Config.get_or_none(key=pic_type, module="system")
-    return response_ok(cfg.value)
+    if cfg:
+        async with aiofile.AIOFile(cfg.value, 'rb') as f:
+            content = await f.read()
+            return response.raw(content, content_type="image/" + cfg.value.split('.')[-1])
+    raise CustomError(ErrorCode.NotFound)
 
 
 @system_bp.get("/platform")

@@ -13,6 +13,10 @@ os.makedirs(LOG_PATH, exist_ok=True)
 VECTOR_CFG = "./data/ship"
 os.makedirs(VECTOR_CFG, exist_ok=True)
 
+# 文件上传的目录
+UPLOAD_DIR = "./data/upload"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 # 子进程配置文件输出目录
 SUPERVISOR_PATH = "./data/action"
 os.makedirs(SUPERVISOR_PATH, exist_ok=True)
