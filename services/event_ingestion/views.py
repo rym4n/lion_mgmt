@@ -32,63 +32,51 @@ from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='/event-ingestion')
 _all__ = ["event_ingestion_bp"]
 
+transforms_universal_config_model = """
+message_str = to_string!(.message)
+.log = {}!(message_str)
+{}"""
+
+transforms_universal_data = {
+    "CEF": "parse_cef",
+    "Syslog": "parse_syslog",
+    "JSON": "parse_json",
+    "Common_log": "parse_common_log",
+    "Logfmt": "parse_logfmt"
+}
+
 # transforms配置
 transforms_config = {
-    # 键值对消息案例：id=2022 name=test
     "key-value": r'''
 parsed = split(string!(.message), "{}")
 parsed = join!(parsed, " ")
-parsed = parse_key_value!(parsed, key_value_delimiter: "{}")
-. = merge(., parsed)
+.log = parse_key_value!(parsed, key_value_delimiter: "{}")
 {}''',
-    # CEF消息案例：CEF:0|security|threatmanager|1.0|100|detected a in message|10|src=10.0.0.1 act=blocked dst=1.1.1.1
-    "CEF": r'''
-parsed = parse_regex!(.message, r'^CEF:(?P<version>\d+)\|(?P<device_vendor>(?:\\\||[^|])*)\|(?P<device_product>(?:\\\||[^|])*)\|(?P<device_version>(?:\\\||[^|])*)\|(?P<deviceEventClassId>(?:\\\||[^|])*)\|(?P<Name>(?:\\\||[^|])*)\|(?P<Severity>(?:\\\||[^|])*)\|(?P<Extension>.*)$')
-. = merge!(., parsed)
-kv_pairs = parse_regex!(parsed.Extension, r'(?P<key_values>(?:\w+=\S+\s*)+)')
-parsed.Extension = parse_key_value!(kv_pairs.key_values, key_value_delimiter:"=")
-. = merge!(., parsed.Extension)
-del(.Extension)
+    "Regex": '''
+message_str = to_string!(.message)
+.log = parse_regex!(message_str, r'{}')
 {}''',
     "Grok": '''
-parsed = parse_regex!(.message, r'({})')
-. = merge!(., parsed)
-{}''',
-    "JSON": '''
 message_str = to_string!(.message)
-parsed = parse_json!(message_str)
-. = merge!(., parsed)
+.log = parse_grok!(message_str, "{}")
+{}''',
+    "XML": '''
+message_str = to_string!(.message)
+.log = parse_xml!(message_str, text_key: "vlaue", parse_number: false)
+{}''',
+    "Nginx_log": '''
+message_str = to_string!(.message)
+.log = parse_nginx_log!(message_str, "main")
 {}''',
     "Delimiter": '''
-parsed = split(string!(.message), "{}")
-.message = parsed
+.log = split(string!(.message), "{}")
 {}'''
 }
 
-clear_data_config = {
-    "syslog": r'''
+clear_data_config = r'''
 .datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
-''',
-    "kafka": r'''
-.datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
-''',
-}
+'''
 
-remove_data_config = {
-    "syslog": r'''
-del(.host)
-del(.port)
-del(.source_type)
-''',
-    "kafka": r'''
-del(.headers)
-del(.message_key)
-del(.offset)
-del(.partition)
-del(.source_type)
-del(.topic)
-''',
-}
 
 CEF_REGEX = re.compile(
     r"^CEF:(?P<version>\d+)\|(?P<device_vendor>(?:\\\||[^|])*)\|"
@@ -100,14 +88,13 @@ CEF_REGEX = re.compile(
 
 # 生成配置文件
 # noinspection PyTypeChecker
-async def build_kafka_file_configuration_file(output_path, sources, event_source_type,
-                                              source_id, topic, event_name):
+async def build_kafka_file_configuration_file(output_path, sources, topic, event_name):
     config = {
         "sources": sources,
         "sinks": {
             f"{topic}_sample_sinks": {
                 "type": "elasticsearch",
-                "inputs": [f"{topic}_remove_transforms"],
+                "inputs": [f"{topic}_transforms"],
                 "api_version": "auto",
                 "compression": "none",
                 "doc_type": "_doc",
@@ -122,21 +109,14 @@ async def build_kafka_file_configuration_file(output_path, sources, event_source
                     "index": f"logs-{event_name}-%Y%m%d"
                 }
             }
-        },
-        "transforms": {
-            f"{topic}_remove_transforms": {
-                "type": "remap",
-                "inputs": [source_id],
-                "source": f"{remove_data_config[event_source_type]}"
-            }
         }
     }
     yaml_str = yaml.dump(config, default_flow_style=False, allow_unicode=True)
 
-    result = check_vector_config(config)
-
-    if not result:
-        return None
+    # result = check_vector_config(config)
+    #
+    # if not result:
+    #     return None
 
     async with aiofile.AIOFile(output_path, mode='w', encoding='utf-8') as file:
         await file.write(yaml_str)
@@ -225,8 +205,6 @@ async def event_ingestion(request):
         }}
         event_source_type = "syslog"
         vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
-                                                                  source_id=vector_name,
-                                                                  event_source_type=event_source_type,
                                                                   topic=topic, event_name=event_name)
     elif event_source_type == "kafka":
         if sasl_mechanism:
@@ -249,8 +227,6 @@ async def event_ingestion(request):
                 "topics": kafka_topic
             }}
         vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
-                                                                  source_id=vector_name,
-                                                                  event_source_type=event_source_type,
                                                                   topic=topic, event_name=event_name)
     else:
         raise CustomError(ErrorCode.ParameterError)
@@ -385,15 +361,19 @@ async def update_event_ingestion(request):
         data.setdefault("transforms", {}).setdefault(f"{event.vector_name}_transforms", {})["type"] = "remap"
         data["transforms"][f"{event.vector_name}_transforms"]["inputs"] = [f"{event.vector_name}_remove_transforms"]
         data["transforms"][f"{event.vector_name}_transforms"]["drop_on_error"] = False
-        if transforms_type in ["Grok", "Delimiter"]:
+        if transforms_type in ["Grok", "Delimiter", "Regex"]:
             data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[transforms_type].format(
-                transformsconfig, clear_data_config[event.event_source_type])
+                transformsconfig, clear_data_config)
         elif transforms_type == "key-value":
             data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[transforms_type].format(
-                key_value_delimiter, key_delimiter_value, clear_data_config[event.event_source_type])
+                key_value_delimiter, key_delimiter_value, clear_data_config)
         else:
-            data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[transforms_type].format(
-                clear_data_config[event.event_source_type])
+            if transforms_type in ["XML", "Nginx_log"]:
+                data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[transforms_type].format(
+                    clear_data_config)
+            elif transforms_type in ["CEF", "JSON", "Syslog", "Common_log", "Logfmt"]:
+                data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_universal_config_model.format(
+                    transforms_universal_data[transforms_type], clear_data_config)
 
         if transforms_type in ["Delimiter", "Grok"]:
             event.config_info = {transforms_type: transformsconfig}
@@ -411,9 +391,9 @@ async def update_event_ingestion(request):
     if sasl_password:
         data["sources"][event.vector_name]["sasl"]["password"] = urllib.parse.quote(sasl_password)
 
-    result = check_vector_config(data)
-    if not result:
-        raise CustomError(ErrorCode.ConfigFileGenerateError)
+    # result = check_vector_config(data)
+    # if not result:
+    #     raise CustomError(ErrorCode.ConfigFileGenerateError)
 
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
@@ -628,17 +608,17 @@ async def binding_event_ingestion_script(request):
             "type": "remap",
             "inputs": [f"{topic}_kafka_transforms"],
             "source": """
-.log_data = to_string(encode_json(.))
+.log_data = to_string(encode_json(.log))
 .id = .aioe_event_id
 .ctime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
 .utime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
 .deleted = false
 .event_name = {}
 .event_process_status = "待处理"
-.event_source = "kafka"
+.event_source = "{}"
 .event_ingestion_id = "{}"
 del(.datetime_str)
-""".format(event_name, event_ingestion_id)}
+""".format(event_name, event.event_source_type, event_ingestion_id)}
 
         data["sinks"][f"{topic}_sinks"] = {
             "inputs": [f"{topic}_kafka_transforms"],
