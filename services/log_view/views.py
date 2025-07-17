@@ -4,7 +4,8 @@ from elasticsearch import AsyncElasticsearch
 from sanic import Blueprint
 
 from core.error_code import ErrorCode
-from core.response import response_ok, response_fail
+from core.response import response_ok
+from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from settings import ES_HOST, ES_PASS, ES_USER
 
@@ -23,7 +24,7 @@ async def get_logs_by_sql(request):
     """
     sql = request.json.get('sql')
     if not sql:
-        return response_fail(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.ParameterError)
 
     async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS)) as es:
         resp = await es.sql.query(body={"query": sql})
@@ -66,7 +67,7 @@ async def get_field_list(request):
     """
     index_name = request.json.get('index')
     if not index_name:
-        return response_fail(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.ParameterError)
     async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS)) as es:
         alias_info = await es.indices.get_alias(name=index_name)
         indices = list(alias_info.keys())  # 提取索引名列表

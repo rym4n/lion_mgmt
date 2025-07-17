@@ -9,10 +9,6 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_PATH = os.path.join(BASE_DIR, 'logs')
 os.makedirs(LOG_PATH, exist_ok=True)
 
-# 文件上传的保存路径
-UPLOAD_FOLDER = './data/uploads'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
 # vector配置目录
 VECTOR_CFG = "./data/ship"
 os.makedirs(VECTOR_CFG, exist_ok=True)
@@ -42,9 +38,6 @@ RY_RES_KEY = os.environ.get("RY_RES_KEY")
 
 # supervisord地址
 RY_JOB_SERVER = os.environ.get("RY_JOB_SERVER")
-
-# 系统背景图片名称配置
-BG_NAME = "bg-voGX3LAo"
 
 # kafka配置
 KAFKA_SERVERS = os.environ.get("RY_KAFKA_SERVERS")
@@ -83,7 +76,7 @@ CORS_SUPPORTS_CREDENTIALS: bool = os.environ.get("RY_CORS_CREDENTIAL", True)
 # Websocket
 WEBSOCKET_MAX_SIZE = 2 ** 20  # 消息最大1MB
 WEBSOCKET_PING_INTERVAL = 60
-WEBSOCKET_PING_TIMEOUT = 75
+WEBSOCKET_PING_TIMEOUT = 90
 
 # 日志配置
 BASE_LOGGING = {

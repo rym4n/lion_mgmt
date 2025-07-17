@@ -122,7 +122,7 @@ async def delete_role(request):
     role_id = request.json.get("role_id")
     exists = await Account.filter(roles__id=role_id).exists()
     if exists:
-        return response_fail(ErrorCode.RoleAlreadyUsed)
+        raise CustomError(ErrorCode.RoleAlreadyUsed)
     role = await Role.get_or_none(id=role_id, deleted=False)
     if not role:
         raise CustomError(ErrorCode.RoleNotFound)

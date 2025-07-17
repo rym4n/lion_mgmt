@@ -81,7 +81,6 @@ async def upload_image(request):
         await Config.create(key="platform_config", module="system", value=orjson.dumps(default))
 
     # 处理文件上传
-    file_paths = {}
     for field in ["background", "webico", "logo"]:
         file = request.files.get(field)
         if file:
@@ -90,8 +89,22 @@ async def upload_image(request):
     return response_ok("success")
 
 
+@system_bp.get("/picture")
+async def get_bgpic(request):
+    """
+    获取自定义图片
+
+    请求参数：
+        type: background, webico, logo
+    """
+    pic_type = request.args.get("type")
+    if pic_type not in ("background", "webico", "logo"):
+        raise CustomError(ErrorCode.ParameterError)
+    cfg = await Config.get_or_none(key=pic_type, module="system")
+    return response_ok(cfg.value)
+
+
 @system_bp.get("/platform")
-@requires_permission("system:r")
 async def get_platform_config(request):
     """
     获取platform-config
