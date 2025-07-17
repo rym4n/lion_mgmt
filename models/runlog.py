@@ -74,5 +74,5 @@ class Runlog(BaseModel):
         ordering = ["-ctime"]
 
         unique_together = (
-            ("run_id", "node_id")
+            ("run_id", "node_id", "node_name", "resource_name")
         )

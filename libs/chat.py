@@ -234,46 +234,50 @@ class ChatManager:
     async def log_listener(self):
         await aconsume(KAFKA_SERVERS, RUNLOG_TOPIC, 'lion_mgmt_listener', self.handle_runlog, 50)
 
-    async def handle_runlog(self, log):
+    async def handle_runlog(self, logs):
         """
         专门处理 runlog
         """
-        # 处理审批消息
-        if log.get('type') == 'approval-info':
-            approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'],
-                                               content=log['content'], params=log['params'], status=log['status'],
-                                               expire_time=log['expire_time'], created_at=log['created_at'],
-                                               audit_node=log['audit_app'], next_node=log['start_app'],
-                                               approve_type=int(log['approve_type']))
-            if log.get('users'):
-                users = await Account.filter(id__in=log['users'].split(',')).all()
-                await approve.approvers.add(*users)
-            if log.get('roles'):
-                users = await Account.filter(role_id__in=log['roles'].split(',')).all()
-                await approve.approvers.add(*users)
-        else:
-            key = log.get('run_id', '')
+        to_insert = []
+        for log in logs:
+            # 处理审批消息
+            if log.get('type') == 'approval-info':
+                approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'],
+                                                   content=log['content'], params=log['params'], status=log['status'],
+                                                   expire_time=log['expire_time'], created_at=log['created_at'],
+                                                   audit_node=log['audit_app'], next_node=log['start_app'],
+                                                   approve_type=int(log['approve_type']))
+                if log.get('users'):
+                    users = await Account.filter(id__in=log['users'].split(',')).all()
+                    await approve.approvers.add(*users)
+                if log.get('roles'):
+                    users = await Account.filter(role_id__in=log['roles'].split(',')).all()
+                    await approve.approvers.add(*users)
+            else:
+                key = log.get('run_id', '')
 
-            data = await self.redis.get(key)
-            if data:
-                # 消费作战室的执行记录
-                data["log"] = log
-                await self.msg_pub.publish(WR_TOPIC, orjson.dumps(data).decode())
-                event = await Events.get_or_none(room_id=data["room_id"])
-                if event:
-                    if log.get("node_type") == "start-node":
-                        event.event_process_status = "处理中"
-                        await event.save()
-                    elif log.get("node_type") == "end-node":
-                        event.event_process_status = "已处理"
-                        event.close_time = pytz.timezone("Asia/Shanghai").localize(datetime.now())
-                        await event.save()
-                    log["event_id"] = event.id
-            try:
-                await Runlog.create(**log)
-            except Exception as e:
-                logger.info(f"runlog消息：{log}")
-                logger.error(f"{e} | {traceback.format_exc()}")
+                data = await self.redis.get(key)
+                if data:
+                    # 消费作战室的执行记录
+                    data["log"] = log
+                    await self.msg_pub.publish(WR_TOPIC, orjson.dumps(data).decode())
+                    event = await Events.get_or_none(room_id=data["room_id"])
+                    if event:
+                        if log.get("node_type") == "start-node":
+                            event.event_process_status = "处理中"
+                            await event.save()
+                        elif log.get("node_type") == "end-node":
+                            event.event_process_status = "已处理"
+                            event.close_time = pytz.timezone("Asia/Shanghai").localize(datetime.now())
+                            await event.save()
+                        log["event_id"] = event.id
+
+                to_insert.append(Runlog(**log))
+        try:
+            await Runlog.bulk_create(to_insert, update_fields=["utime", "status", "end_time", "result"])
+        except Exception as e:
+            logger.info(f"runlog消息：{to_insert}")
+            logger.error(f"{e} | {traceback.format_exc()}")
 
     async def handle_message(self, user: Account, ws, data: dict):
         """消息处理"""

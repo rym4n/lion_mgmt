@@ -677,4 +677,4 @@ async def activity(request, activityId):
         raise CustomError(ErrorCode.ParamValueError)
     logs = await Runlog.filter(run_id=activityId, deleted=False).all()
 
-    return response_ok([orjson.dumps(log.json).decode() for log in logs])
+    return response_ok([log.json for log in logs])
