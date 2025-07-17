@@ -192,6 +192,7 @@ CREATE TABLE IF NOT EXISTS "playbook" (
     "name" VARCHAR(255) NOT NULL UNIQUE,
     "remark" TEXT NOT NULL,
     "internal" BOOL NOT NULL DEFAULT False,
+    "creator_id" VARCHAR(36) REFERENCES "account" ("id") ON DELETE CASCADE,
     CONSTRAINT "uid_playbook_name_1a146f" UNIQUE ("name", "deleted")
 );
 COMMENT ON COLUMN "playbook"."ctime" IS '创建时间';
@@ -200,6 +201,7 @@ COMMENT ON COLUMN "playbook"."deleted" IS '删除标识';
 COMMENT ON COLUMN "playbook"."name" IS '剧本名称';
 COMMENT ON COLUMN "playbook"."remark" IS '描述';
 COMMENT ON COLUMN "playbook"."internal" IS '是否内置剧本';
+COMMENT ON COLUMN "playbook"."creator_id" IS '创建人';
 COMMENT ON TABLE "playbook" IS '剧本模型';
 CREATE TABLE IF NOT EXISTS "playbook_version" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
@@ -240,6 +242,7 @@ CREATE TABLE IF NOT EXISTS "approvement" (
     "next_node" VARCHAR(50) NOT NULL,
     "created_at" TIMESTAMPTZ NOT NULL,
     "params" JSONB NOT NULL,
+    "results" JSONB NOT NULL,
     "flow_id" VARCHAR(36) NOT NULL REFERENCES "playbook_version" ("id") ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS "idx_approvement_title_2bd859" ON "approvement" ("title");
@@ -256,6 +259,7 @@ COMMENT ON COLUMN "approvement"."audit_node" IS '审核节点ID';
 COMMENT ON COLUMN "approvement"."next_node" IS '下一个要执行的节点ID';
 COMMENT ON COLUMN "approvement"."created_at" IS '审核触发的时间';
 COMMENT ON COLUMN "approvement"."params" IS '自定义参数';
+COMMENT ON COLUMN "approvement"."results" IS '处理记录';
 COMMENT ON COLUMN "approvement"."flow_id" IS '关联剧本';
 COMMENT ON TABLE "approvement" IS '人工审核模型';
 CREATE TABLE IF NOT EXISTS "role" (
@@ -271,6 +275,23 @@ COMMENT ON COLUMN "role"."ctime" IS '创建时间';
 COMMENT ON COLUMN "role"."utime" IS '更新时间';
 COMMENT ON COLUMN "role"."deleted" IS '删除标识';
 COMMENT ON TABLE "role" IS '角色权限';
+CREATE TABLE IF NOT EXISTS "playbook_permissions" (
+    "id" VARCHAR(36) NOT NULL PRIMARY KEY,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deleted" BOOL NOT NULL DEFAULT False,
+    "permissions" JSONB,
+    "pb_id" VARCHAR(36) NOT NULL REFERENCES "playbook" ("id") ON DELETE CASCADE,
+    "roles_id" VARCHAR(36) REFERENCES "role" ("id") ON DELETE CASCADE,
+    "users_id" VARCHAR(36) REFERENCES "account" ("id") ON DELETE CASCADE
+);
+COMMENT ON COLUMN "playbook_permissions"."ctime" IS '创建时间';
+COMMENT ON COLUMN "playbook_permissions"."utime" IS '更新时间';
+COMMENT ON COLUMN "playbook_permissions"."deleted" IS '删除标识';
+COMMENT ON COLUMN "playbook_permissions"."pb_id" IS '剧本';
+COMMENT ON COLUMN "playbook_permissions"."roles_id" IS '角色';
+COMMENT ON COLUMN "playbook_permissions"."users_id" IS '用户';
+COMMENT ON TABLE "playbook_permissions" IS '剧本权限表';
 CREATE TABLE IF NOT EXISTS "room" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
     "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -535,6 +556,7 @@ CREATE TABLE IF NOT EXISTS "runlog" (
     "flow_id" VARCHAR(36) REFERENCES "playbook_version" ("id") ON DELETE CASCADE,
     "timer_id" VARCHAR(36) REFERENCES "timed" ("id") ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS "idx_runlog_run_id_466a30" ON "runlog" ("run_id", "node_id");
 COMMENT ON COLUMN "runlog"."ctime" IS '创建时间';
 COMMENT ON COLUMN "runlog"."utime" IS '更新时间';
 COMMENT ON COLUMN "runlog"."deleted" IS '删除标识';
@@ -624,34 +646,16 @@ CREATE TABLE IF NOT EXISTS "account_star_room" (
     "room_id" VARCHAR(36) NOT NULL REFERENCES "room" ("id") ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uidx_account_sta_account_ed3ab3" ON "account_star_room" ("account_id", "room_id");
-CREATE TABLE IF NOT EXISTS "playbook_tag" (
-    "playbook_id" VARCHAR(36) NOT NULL REFERENCES "playbook" ("id") ON DELETE CASCADE,
-    "tag_id" VARCHAR(36) NOT NULL REFERENCES "tag" ("id") ON DELETE CASCADE
-);
-CREATE UNIQUE INDEX IF NOT EXISTS "uidx_playbook_ta_playboo_34329c" ON "playbook_tag" ("playbook_id", "tag_id");
 CREATE TABLE IF NOT EXISTS "playbook_scene" (
     "playbook_id" VARCHAR(36) NOT NULL REFERENCES "playbook" ("id") ON DELETE CASCADE,
     "scene_id" VARCHAR(36) NOT NULL REFERENCES "scene" ("id") ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uidx_playbook_sc_playboo_63ed52" ON "playbook_scene" ("playbook_id", "scene_id");
-CREATE TABLE IF NOT EXISTS "playbook_role" (
+CREATE TABLE IF NOT EXISTS "playbook_tag" (
     "playbook_id" VARCHAR(36) NOT NULL REFERENCES "playbook" ("id") ON DELETE CASCADE,
-    "role_id" VARCHAR(36) NOT NULL REFERENCES "role" ("id") ON DELETE CASCADE
+    "tag_id" VARCHAR(36) NOT NULL REFERENCES "tag" ("id") ON DELETE CASCADE
 );
-COMMENT ON TABLE "playbook_role" IS '有权限执行的角色';
-CREATE UNIQUE INDEX IF NOT EXISTS "uidx_playbook_ro_playboo_528ca6" ON "playbook_role" ("playbook_id", "role_id");
-CREATE TABLE IF NOT EXISTS "playbook_user" (
-    "playbook_id" VARCHAR(36) NOT NULL REFERENCES "playbook" ("id") ON DELETE CASCADE,
-    "account_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE
-);
-COMMENT ON TABLE "playbook_user" IS '有权限执行的用户';
-CREATE UNIQUE INDEX IF NOT EXISTS "uidx_playbook_us_playboo_3a44bb" ON "playbook_user" ("playbook_id", "account_id");
-CREATE TABLE IF NOT EXISTS "approve_processor" (
-    "approvement_id" VARCHAR(36) NOT NULL REFERENCES "approvement" ("id") ON DELETE CASCADE,
-    "account_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE
-);
-COMMENT ON TABLE "approve_processor" IS '实际审核处理人';
-CREATE UNIQUE INDEX IF NOT EXISTS "uidx_approve_pro_approve_4286da" ON "approve_processor" ("approvement_id", "account_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "uidx_playbook_ta_playboo_34329c" ON "playbook_tag" ("playbook_id", "tag_id");
 CREATE TABLE IF NOT EXISTS "approve_accounts" (
     "approvement_id" VARCHAR(36) NOT NULL REFERENCES "approvement" ("id") ON DELETE CASCADE,
     "account_id" VARCHAR(36) NOT NULL REFERENCES "account" ("id") ON DELETE CASCADE

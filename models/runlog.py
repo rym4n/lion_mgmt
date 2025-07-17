@@ -36,7 +36,8 @@ class Runlog(BaseModel):
     resource_name = fields.CharField(null=True, max_length=36, description="资源名称")
     playbook_name = fields.CharField(null=True, max_length=36, description="剧本名称")
 
-    flow = fields.ForeignKeyField("models.PlaybookVersion", null=True, related_name="playbook_runlog", description="关联剧本版本")
+    flow = fields.ForeignKeyField("models.PlaybookVersion", null=True, related_name="playbook_runlog",
+                                  description="关联剧本版本")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -72,4 +73,6 @@ class Runlog(BaseModel):
         table = "runlog"
         ordering = ["-ctime"]
 
-        # unique_together = (("run_id", "node_id"),)
+        unique_together = (
+            ("run_id", "node_id")
+        )
