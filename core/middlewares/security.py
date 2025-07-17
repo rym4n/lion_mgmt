@@ -13,7 +13,7 @@ class SecurityMiddleware(BaseMiddleware):
 
     async def before_request(self, request: Request) -> None:
         # 判断请求URI是否需要身份验证
-        white_urls = ["/user/login", "/health", '/system/oauth/status', '/system/platform', '/user/oauth/login', '/user/oauth/callback']
+        white_urls = ["/user/login", "/health", '/system/oauth/status', '/system/platform', '/system/picture', '/user/oauth/login', '/user/oauth/callback']
 
         if request.path == '/license/ai/update' and get_client_ip(request) == '127.0.0.1':
             # AI更新接口，允许本地调用
