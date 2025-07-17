@@ -49,7 +49,7 @@ async def upload_image(request):
         platform_config["Version"] = system_version
         platform_config["Content"] = copyright_text
         platform_config["Title"] = system_name
-        await Config.filter(key="platform_config", module="system").update(value=orjson.dumps(platform_config))
+        await Config.filter(key="platform_config", module="system").update(value=orjson.dumps(platform_config).decode())
     else:
         default = {
             "Version": system_version or "3.0.0",
@@ -78,7 +78,7 @@ async def upload_image(request):
             "ResponsiveStorageNameSpace": "responsive-",
             "MenuSearchHistory": 6
         }
-        await Config.create(key="platform_config", module="system", value=orjson.dumps(default))
+        await Config.create(key="platform_config", module="system", value=orjson.dumps(default).decode())
 
         # 处理文件上传
         for field in ["background", "webico", "logo"]:
