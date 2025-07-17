@@ -239,7 +239,8 @@ class ChatManager:
         专门处理 runlog
         """
         to_insert = []
-        for log in logs:
+        for msg in logs:
+            log = msg.value
             # 处理审批消息
             if log.get('type') == 'approval-info':
                 approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'],
