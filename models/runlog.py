@@ -1,6 +1,6 @@
 # coding=utf-8
 
-from tortoise import fields
+from tortoise import fields, indexes
 
 from libs.utils import strip_timezone_to_seconds
 from models.base import BaseModel
@@ -73,6 +73,10 @@ class Runlog(BaseModel):
         table = "runlog"
         ordering = ["-ctime"]
 
-        unique_together = (
-            ("run_id", "node_id", "node_name", "resource_name")
-        )
+        # unique_together = (
+        #     ("run_id", "node_id", "node_name", "resource_name")
+        # )
+
+        indexes = [
+            indexes.Index("run_id", "node_id", "node_name", "resource_name", name="uniq_runlog")
+        ]
