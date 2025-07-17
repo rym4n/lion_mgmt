@@ -116,7 +116,7 @@ async def get_bgpic(request):
         async with aiofile.AIOFile(cfg.value, 'rb') as f:
             content = await f.read()
             return response.raw(content, content_type="image/" + cfg.value.split('.')[-1])
-    raise CustomError(ErrorCode.NotFound)
+    return response.raw(b'', content_type="image/png")
 
 
 @system_bp.get("/platform")
