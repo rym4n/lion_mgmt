@@ -666,7 +666,7 @@ async def select_my_permission(request):
     """
     pps = await PlaybookPermissions.filter(users__id=request.ctx.session['sub']).all()
 
-    return response_ok([{"id": pp.id, "permissions": pp.permissions} for pp in pps])
+    return response_ok([{"id": pp.pb_id, "permissions": pp.permissions} for pp in pps])
 
 
 @workflow_bp.post("/permissions/select")
