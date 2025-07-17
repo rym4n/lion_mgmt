@@ -45,6 +45,7 @@ def register_blueprints(app: Sanic) -> None:
     app.blueprint(user_bp)
     app.blueprint(scene_bp)
     app.blueprint(dashboard_bp)
+    app.blueprint(system_bp)
 
     try:
         bp_dict = {
@@ -52,14 +53,11 @@ def register_blueprints(app: Sanic) -> None:
             "event_bp": event_bp,
             "event_ingestion_bp": event_ingestion_bp,
             "role_bp": role_bp,
-            "scene_bp": scene_bp,
-            "system_bp": system_bp,
             "timed_bp": timed_bp,
             "tool_management_bp": tools_bp,
             "var_bp": var_bp,
             "warroom_bp": warroom_bp,
             "workflow_bp": workflow_bp,
-            "dashboard_bp": dashboard_bp,
             "logs_bp": logs_bp
         }
         license_data = load_license()

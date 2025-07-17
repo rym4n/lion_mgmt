@@ -7,7 +7,6 @@ from .event import *
 from .playbook import *
 from .runlog import *
 from .scene import *
-from .system_configuration import *
 from .tag import *
 from .timed import *
 from .tool_management import *

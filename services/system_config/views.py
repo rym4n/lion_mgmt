@@ -1,4 +1,4 @@
-import json
+import base64
 import os
 from datetime import datetime
 
@@ -6,6 +6,7 @@ import aiofile
 import orjson
 from aiocache import cached
 from sanic import Blueprint
+from sanic import json
 from tortoise.transactions import in_transaction
 
 import settings
@@ -14,8 +15,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
-from models import SystemCustomConfiguration, AuditLog, Config
-from settings import UPLOAD_FOLDER, BG_NAME
+from models import AuditLog, Config
 
 system_bp = Blueprint('system', url_prefix='/system')
 _all__ = ["system_bp"]
@@ -42,85 +42,95 @@ async def upload_image(request):
     if not system_version:
         raise CustomError(ErrorCode.ParameterError)
 
-    config_path = os.path.join(UPLOAD_FOLDER, "platform-config.json")
+    cfg = await Config.get_or_none(key="platform_config", module="system")
+    if cfg:
+        platform_config = orjson.loads(cfg.value)
 
-    async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
-        content = await f.read()
-    content = json.loads(content)
-    content["Version"] = system_version
-    content["Content"] = copyright_text
-    content["Title"] = system_name
-
-    async with aiofile.AIOFile(config_path, 'w', encoding='utf-8') as f:
-        await f.write(json.dumps(content, ensure_ascii=False, indent=2))
+        platform_config["Version"] = system_version
+        platform_config["Content"] = copyright_text
+        platform_config["Title"] = system_name
+        await Config.filter(key="platform_config", module="system").update(value=orjson.dumps(platform_config))
+    else:
+        default = {
+            "Version": system_version or "3.0.0",
+            "Title": system_name or "AIOE智能运营与自动化系统",
+            "Content": copyright_text or "Copyright © 2025 虹云数据",
+            "FixedHeader": True,
+            "HiddenSideBar": False,
+            "MultiTagsCache": False,
+            "KeepAlive": True,
+            "Layout": "horizontal",
+            "Theme": "default",
+            "DarkMode": False,
+            "OverallStyle": "default",
+            "Grey": False,
+            "Weak": False,
+            "HideTabs": True,
+            "HideFooter": False,
+            "Stretch": False,
+            "SidebarStatus": True,
+            "EpThemeColor": "#2c7fe4",
+            "ShowLogo": True,
+            "ShowModel": "smart",
+            "MenuArrowIconNoTransition": False,
+            "CachingAsyncRoutes": False,
+            "TooltipEffect": "default",
+            "ResponsiveStorageNameSpace": "responsive-",
+            "MenuSearchHistory": 6
+        }
+        await Config.create(key="platform_config", module="system", value=orjson.dumps(default))
 
     # 处理文件上传
     file_paths = {}
     for field in ["background", "webico", "logo"]:
         file = request.files.get(field)
-        filename = ''
-        if field == "background":
-            filename = f"{BG_NAME}.png"
-        elif field == "webico":
-            filename = f"favicon.ico"
-        elif field == "logo":
-            filename = f"logo.svg"
-        if file and filename:
-            file_path = os.path.join(UPLOAD_FOLDER, filename)
+        if file:
+            await Config.update_or_create(key=field, module="system", value=base64.b64encode(file.body))
 
-            with open(file_path, "wb") as f:
-                f.write(file.body)
-            file_path = file_path.replace("\\", "/")
-            file_paths[field] = file_path
-        else:
-            file_paths[field] = None  # 如果文件未上传，则存 None
-
-    async with in_transaction():
-        # 先查询是否已存在相同 system_version 的记录
-        existing_config = await SystemCustomConfiguration.get_or_none(system_version=system_version)
-
-        if existing_config:
-            # 存在则更新
-            update_fields = {
-                "copyright": copyright_text,
-                "system_name": system_name
-            }
-            for field in ["background", "webico", "logo"]:
-                if file_paths[field]:  # 只更新上传了的文件
-                    update_fields[field] = file_paths[field]
-
-            await SystemCustomConfiguration.filter(system_version=system_version).update(**update_fields)
-
-            return response_ok({"message": "Configuration updated successfully", "id": existing_config.id})
-
-        else:
-            # 不存在则创建
-            system_config = await SystemCustomConfiguration.create(
-                background=file_paths["background"],
-                webico=file_paths["webico"],
-                logo=file_paths["logo"],
-                copyright=copyright_text,
-                system_name=system_name,
-                system_version=system_version
-            )
-
-            return response_ok({"message": "Configuration created successfully", "id": system_config.id})
+    return response_ok("success")
 
 
-@system_bp.post("/latest")
+@system_bp.get("/platform")
 @requires_permission("system:r")
-async def get_latest_config(request):
+async def get_platform_config(request):
     """
-    获取最新的系统定制配置   需要系统配置查看权限
+    获取platform-config
 
-    无请求参数，直接调用，返回最新的系统定制配置
+    无请求参数，直接调用
     """
-    latest_config = await SystemCustomConfiguration.all().order_by("-utime").first()
+    cfg = await Config.get_or_none(key="platform_config", module="system")
+    default = {
+        "Version": "3.0.0",
+        "Title": "AIOE智能运营与自动化系统",
+        "Content": "Copyright © 2025 虹云数据",
+        "FixedHeader": True,
+        "HiddenSideBar": False,
+        "MultiTagsCache": False,
+        "KeepAlive": True,
+        "Layout": "horizontal",
+        "Theme": "default",
+        "DarkMode": False,
+        "OverallStyle": "default",
+        "Grey": False,
+        "Weak": False,
+        "HideTabs": True,
+        "HideFooter": False,
+        "Stretch": False,
+        "SidebarStatus": True,
+        "EpThemeColor": "#2c7fe4",
+        "ShowLogo": True,
+        "ShowModel": "smart",
+        "MenuArrowIconNoTransition": False,
+        "CachingAsyncRoutes": False,
+        "TooltipEffect": "default",
+        "ResponsiveStorageNameSpace": "responsive-",
+        "MenuSearchHistory": 6
+    }
 
-    if latest_config:
-        return response_ok(latest_config.json)
+    if cfg:
+        return json(orjson.loads(cfg.value), dumps=orjson.dumps)
     else:
-        raise CustomError(ErrorCode.SystemDataNotFound)
+        return json(default, dumps=orjson.dumps)
 
 
 @system_bp.post("/status/all")
