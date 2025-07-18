@@ -20,7 +20,7 @@ async def aconsume(servers, topic, group_id, callback_func=None, consume_records
     async with AIOKafkaConsumer(topic, bootstrap_servers=servers.split(','), group_id=group_id, enable_auto_commit=False, max_poll_interval_ms=60000, value_deserializer=orjson.loads) as consumer:
         while True:
             try:
-                msg_set = await consumer.getmany(timeout_ms=1000, max_records=int(consume_records))
+                msg_set = await consumer.getmany(max_records=int(consume_records))
                 for _, msgs in msg_set.items():
                     if callback_func:
                         await callback_func(msgs)
