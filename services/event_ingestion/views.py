@@ -375,7 +375,7 @@ async def update_event_ingestion(request):
                 data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_universal_config_model.format(
                     transforms_universal_data[transforms_type], clear_data_config)
 
-        if transforms_type in ["Delimiter", "Grok"]:
+        if transforms_type in ["Grok", "Delimiter", "Regex"]:
             event.config_info = {transforms_type: transformsconfig}
         elif transforms_type == "key-value":
             event.config_info = {transforms_type: key_value_delimiter + "_" + key_delimiter_value}
@@ -618,7 +618,7 @@ async def binding_event_ingestion_script(request):
 .event_source = "{}"
 .event_ingestion_id = "{}"
 del(.datetime_str)
-""".format(event_name, event.event_source_type, event_ingestion_id)}
+""".format(event_name, event.event_ingestion_name, event_ingestion_id)}
 
         data["sinks"][f"{topic}_sinks"] = {
             "inputs": [f"{topic}_kafka_transforms"],
