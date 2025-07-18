@@ -238,6 +238,7 @@ class ChatManager:
         """
         专门处理 runlog
         """
+        logger.info("开始处理runlog消息")
         to_insert = []
         for msg in logs:
             log = msg.value
