@@ -238,11 +238,9 @@ class ChatManager:
         """
         专门处理 runlog
         """
-        logger.info("开始处理runlog消息")
         to_insert = []
         for msg in logs:
             log = msg.value
-            logger.info(f"runlog消息：{log}")
             # 处理审批消息
             if log.get('type') == 'approval-info':
                 approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'],
@@ -277,7 +275,7 @@ class ChatManager:
 
                 to_insert.append(Runlog(**log))
         try:
-            await Runlog.bulk_create(to_insert, update_fields=["utime", "status", "end_time", "result"], on_conflict=["uniq_runlog"])
+            await Runlog.bulk_create(to_insert, update_fields=["utime", "status", "end_time", "result"], on_conflict=["run_id", "node_id", "node_name", "resource_name"])
         except Exception as e:
             logger.info(f"runlog消息：{to_insert}")
             logger.error(f"{e} | {traceback.format_exc()}")

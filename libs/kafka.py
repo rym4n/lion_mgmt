@@ -22,7 +22,6 @@ async def aconsume(servers, topic, group_id, callback_func=None, consume_records
             try:
                 msg_set = await consumer.getmany(max_records=int(consume_records))
                 for _, msgs in msg_set.items():
-                    logger.info(f"Received {len(msgs)} messages from {topic}")
                     if callback_func:
                         await callback_func(msgs)
                 await consumer.commit()
