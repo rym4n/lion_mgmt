@@ -61,10 +61,9 @@ async def build_kafka_file_configuration_file(output_path, sources, topic, event
             f"{topic}_date_transforms": {
                 "type": "remap",
                 "inputs": [f"{topic}"],
-                "source": {r'''
+                "source": r'''
 .datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
 '''
-                }
             }
         }
     }
