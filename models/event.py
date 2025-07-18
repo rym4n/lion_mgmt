@@ -16,6 +16,7 @@ class Events(BaseModel):
     event_process_status: str = fields.CharField(max_length=50, description="事件处理状态")
     event_source: str = fields.CharField(max_length=255, null=True, description="事件来源")
     owner: Dict[str, Any] = fields.JSONField(default=list, null=True, description="负责人（包括角色和用户）")
+    scene = fields.ForeignKeyField("models.Scene", null=True, related_name="scene_events", description="关联场景")
     event_summary: str = fields.TextField(null=True, description="事件概要")
     log_data: str = fields.TextField(default=dict, description="日志数据")
     event_ingestion_id: str = fields.CharField(max_length=255, null=True, description="事件接入id，管理事件接入表")
