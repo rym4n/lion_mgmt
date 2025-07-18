@@ -160,6 +160,7 @@ async def remove_scene(request):
         for playbook in playbooks:
             await playbook.scenes.remove(scene)
 
-        await scene.delete()
+        scene.deleted = True
+        await scene.save()
 
     return response_ok("删除成功")
