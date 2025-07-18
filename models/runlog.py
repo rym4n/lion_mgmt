@@ -73,10 +73,10 @@ class Runlog(BaseModel):
         table = "runlog"
         ordering = ["-ctime"]
 
-        # unique_together = (
-        #     ("run_id", "node_id", "node_name", "resource_name")
-        # )
+        unique_together = (
+            ("run_id", "node_id", "node_name", "resource_name")
+        )
 
-        indexes = [
-            indexes.Index("run_id", "node_id", "node_name", "resource_name", name="uniq_runlog")
-        ]
+        # indexes = [
+        #     indexes.Index("run_id", "node_id", "node_name", "resource_name", name="uniq_runlog")
+        # ]
