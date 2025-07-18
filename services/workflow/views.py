@@ -309,6 +309,11 @@ async def delete_workflow(request):
     if await Timed.filter(playbook=playbook, playbook_version__in=pv_versions).exists():
         raise CustomError(ErrorCode.PlaybookUsedByTimer)
 
+    for pv in pvs:
+        if pv.flow_json:
+            action_ids = await statistics_data(pv.flow_json)
+            await tool_action_playbook_delete({pv.id: action_ids})
+
     await playbook.delete()
 
     return response_ok("剧本删除成功")
