@@ -24,7 +24,7 @@ from core.response import response_ok
 from libs import supervisor
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import get_client_ip, run_linux_command, setup_logs_template
+from libs.utils import get_client_ip, run_linux_command, setup_logs_template, decrypt_aes256_gcm
 from models import PlaybookVersion, Playbook, Config
 from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
@@ -976,7 +976,7 @@ async def transforms_update(request):
     无请求参数
     """
     await Config.update_or_create(key=request.json.get("key"),
-                                  defaults={"value": request.json.get("key"), "type": request.json.get("type")},
+                                  defaults={"value": request.json.get("value"), "type": request.json.get("type")},
                                   module="transforms")
 
     return response_ok("添加成功")
