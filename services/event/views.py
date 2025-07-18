@@ -131,7 +131,7 @@ async def create_event(request):
     """
     event_name = request.json.get("event_name") + "_" + str(int(time.time() * 1000))
     event_process_status = "待处理"
-    event_source = request.json.get("event_source")
+    event_source = "人工"
     owner = (request.json.get("owner") or {})
     user = request.ctx.session['account_info']
     event_summary = (request.json.get("event_summary") or "")

@@ -4,7 +4,6 @@ import hashlib
 import io
 import os
 import random
-import re
 import string
 import tempfile
 import time
@@ -14,6 +13,7 @@ import zipfile
 import aiofile
 import orjson
 import yaml
+import subprocess
 from elasticsearch import AsyncElasticsearch
 from sanic import Blueprint, response
 from sanic.log import logger
@@ -25,65 +25,12 @@ from libs import supervisor
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import get_client_ip, run_linux_command, setup_logs_template
-from models import PlaybookVersion, Playbook
+from models import PlaybookVersion, Playbook, Config
 from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='/event-ingestion')
 _all__ = ["event_ingestion_bp"]
-
-transforms_universal_config_model = """
-message_str = to_string!(.message)
-.log = {}!(message_str)
-{}"""
-
-transforms_universal_data = {
-    "CEF": "parse_cef",
-    "Syslog": "parse_syslog",
-    "JSON": "parse_json",
-    "Common_log": "parse_common_log",
-    "Logfmt": "parse_logfmt"
-}
-
-# transforms配置
-transforms_config = {
-    "key-value": r'''
-parsed = split(string!(.message), "{}")
-parsed = join!(parsed, " ")
-.log = parse_key_value!(parsed, key_value_delimiter: "{}")
-{}''',
-    "Regex": '''
-message_str = to_string!(.message)
-.log = parse_regex!(message_str, r'{}')
-{}''',
-    "Grok": '''
-message_str = to_string!(.message)
-.log = parse_grok!(message_str, "{}")
-{}''',
-    "XML": '''
-message_str = to_string!(.message)
-.log = parse_xml!(message_str, text_key: "vlaue", parse_number: false)
-{}''',
-    "Nginx_log": '''
-message_str = to_string!(.message)
-.log = parse_nginx_log!(message_str, "main")
-{}''',
-    "Delimiter": '''
-.log = split(string!(.message), "{}")
-{}'''
-}
-
-clear_data_config = r'''
-.datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
-'''
-
-
-CEF_REGEX = re.compile(
-    r"^CEF:(?P<version>\d+)\|(?P<device_vendor>(?:\\\||[^|])*)\|"
-    r"(?P<device_product>(?:\\\||[^|])*)\|(?P<device_version>(?:\\\||[^|])*)\|"
-    r"(?P<deviceEventClassId>(?:\\\||[^|])*)\|(?P<Name>(?:\\\||[^|])*)\|"
-    r"(?P<Severity>(?:\\\||[^|])*)\|(?P<Extension>.*)$"
-)
 
 
 # 生成配置文件
@@ -94,7 +41,7 @@ async def build_kafka_file_configuration_file(output_path, sources, topic, event
         "sinks": {
             f"{topic}_sample_sinks": {
                 "type": "elasticsearch",
-                "inputs": [f"{topic}_transforms"],
+                "inputs": [f"{topic}_date_transforms"],
                 "api_version": "auto",
                 "compression": "none",
                 "doc_type": "_doc",
@@ -109,14 +56,24 @@ async def build_kafka_file_configuration_file(output_path, sources, topic, event
                     "index": f"logs-{event_name}-%Y%m%d"
                 }
             }
+        },
+        "transforms": {
+            f"{topic}_date_transforms": {
+                "type": "remap",
+                "inputs": [f"{topic}"],
+                "source": {r'''
+.datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
+'''
+                }
+            }
         }
     }
     yaml_str = yaml.dump(config, default_flow_style=False, allow_unicode=True)
 
-    # result = check_vector_config(config)
-    #
-    # if not result:
-    #     return None
+    result = check_vector_config(config)
+
+    if not result:
+        return None
 
     async with aiofile.AIOFile(output_path, mode='w', encoding='utf-8') as file:
         await file.write(yaml_str)
@@ -356,29 +313,26 @@ async def update_event_ingestion(request):
     if kafka_group_id:
         data["sources"][event.vector_name]["group_id"] = kafka_group_id
     if transforms_type:
-        data["sinks"][f"{event.vector_name}_sample_sinks"]["inputs"] = [
-            f"{event.vector_name}_transforms"]
-        data.setdefault("transforms", {}).setdefault(f"{event.vector_name}_transforms", {})["type"] = "remap"
-        data["transforms"][f"{event.vector_name}_transforms"]["inputs"] = [f"{event.vector_name}_remove_transforms"]
-        data["transforms"][f"{event.vector_name}_transforms"]["drop_on_error"] = False
-        if transforms_type in ["Grok", "Delimiter", "Regex"]:
-            data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[transforms_type].format(
-                transformsconfig, clear_data_config)
-        elif transforms_type == "key-value":
-            data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[transforms_type].format(
-                key_value_delimiter, key_delimiter_value, clear_data_config)
-        else:
-            if transforms_type in ["XML", "Nginx_log"]:
-                data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_config[transforms_type].format(
-                    clear_data_config)
-            elif transforms_type in ["CEF", "JSON", "Syslog", "Common_log", "Logfmt"]:
-                data["transforms"][f"{event.vector_name}_transforms"]["source"] = transforms_universal_config_model.format(
-                    transforms_universal_data[transforms_type], clear_data_config)
+        first_transform = f"{event.vector_name}_transforms"
+        data["sinks"][f"{event.vector_name}_sample_sinks"]["inputs"] = [first_transform]
+        data.setdefault("transforms", {}).setdefault(first_transform, {})["type"] = "remap"
+        data["transforms"][first_transform]["inputs"] = [f"{event.vector_name}_date_transforms"]
+        data["transforms"][first_transform]["drop_on_error"] = False
 
-        if transforms_type in ["Grok", "Delimiter", "Regex"]:
-            event.config_info = {transforms_type: transformsconfig}
-        elif transforms_type == "key-value":
-            event.config_info = {transforms_type: key_value_delimiter + "_" + key_delimiter_value}
+        config = await Config.get_or_none(key=transforms_type, module="transforms")
+        if not config:
+            raise CustomError(ErrorCode.TypeNotSupportedError)
+        args = {
+            "transformsconfig": transformsconfig,
+            "key_value_delimiter": key_value_delimiter,
+            "key_delimiter_value": key_delimiter_value
+        }
+        value = config.value
+        if '{' in value:
+            value = value.format(**args)
+
+        data["transforms"][first_transform]["source"] = value
+        event.config_info = {transforms_type: args}
 
     if syslog_port:
         data["sources"][event.vector_name]["address"] = f"0.0.0.0:{syslog_port}"
@@ -391,9 +345,9 @@ async def update_event_ingestion(request):
     if sasl_password:
         data["sources"][event.vector_name]["sasl"]["password"] = urllib.parse.quote(sasl_password)
 
-    # result = check_vector_config(data)
-    # if not result:
-    #     raise CustomError(ErrorCode.ConfigFileGenerateError)
+    result = check_vector_config(data)
+    if not result:
+        raise CustomError(ErrorCode.ConfigFileGenerateError)
 
     async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
@@ -857,51 +811,52 @@ async def parse_log(request):
     解析日志（需要事件查看权限）
 
     请求参数:
+        id: 事件接入id (str)
         msg: 日志内容 (str)
-        type: 解析类型 (str): JSON、key-value、CEF、Grok、Delimiter
-        value: 附加参数 (str)
-            - key-value: 格式 "=,:", 代表键值对与键值之间的分隔符
-            - Grok: Grok 正则
-            - Delimiter: 分隔符
     """
-    msg = request.json.get('msg')
-    parse_type = request.json.get('type')
-    value = request.json.get('value', None)
-    if not msg or not parse_type:
-        return response_ok("参数错误")
+    event = await EventsIngestion.get_or_none(id=request.json.get('id'), deleted=False)
+    data = orjson.loads(orjson.dumps(event.vector_config))
+    tmp_data = {
+        "sources": {event.vector_name: {"type": "stdin"}},
+        "sinks": {
+            "tmp_sink": {
+                "encoding": {"codec": "json"},
+                "type": "console",
+                "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]
+            }
+        }
+    }
+    if event.transforms_type:
+        tmp_data["transforms"] = data["transforms"]
 
-    if parse_type == "JSON":
-        return response_ok(orjson.loads(msg))
-    elif parse_type == "key-value":
-        if not value or "," not in value:
-            raise CustomError(ErrorCode.ParameterError)
-        key_value_list = msg.split(value.split(",")[0])
-        result = {}
-        for kv in key_value_list:
-            if not kv:
-                continue
-            key_value = kv.split(value.split(",")[1])
-            if len(key_value) == 2:
-                result[key_value[0]] = key_value[1]
-        return response_ok(result)
-    elif parse_type == "CEF":
-        new_msg = CEF_REGEX.match(msg)
-        if not new_msg:
-            return response_ok("解析失败，请检查日志是否符合CEF标准")
-        return response_ok(new_msg.groupdict())
-    elif parse_type == "Grok":
-        if not value:
-            return response_ok("解析失败，请检查是否存在正则表达式")
-        new_msg = re.match(value, msg)
-        if not new_msg:
-            return response_ok("解析失败，请检查日志是否符合Grok的正则表达式")
-        return response_ok(new_msg.groupdict())
-    elif parse_type == "Delimiter":
-        if not value:
-            raise CustomError(ErrorCode.ParameterError)
-        if value not in msg:
-            return response_ok("解析失败，请检查日志是否包含分隔符")
-        return response_ok(msg.split(value))
+    result = check_vector_config(tmp_data)
+    if not result:
+        raise CustomError(ErrorCode.LogParseError)
+
+    try:
+        with tempfile.NamedTemporaryFile(
+                mode='w',
+                suffix='.yaml',
+                encoding='utf-8',
+                delete=False
+        ) as tmp_file:
+
+            yaml_str = yaml.dump(tmp_data, default_flow_style=False, allow_unicode=True)
+            tmp_file.write(yaml_str)
+            tmp_file.flush()
+
+            tmp_path = tmp_file.name
+
+            proc = subprocess.Popen(["vector", "--config", tmp_path], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+            proc.stdin.write((request.json.get('msg') + "\n").encode())
+            proc.stdin.flush()
+
+            output = proc.stdout.readline().strip()
+    finally:
+        os.unlink(tmp_path)
+
+    return response_ok(orjson.loads(output)["log"])
 
 
 @event_ingestion_bp.post('/config/list')
@@ -998,3 +953,31 @@ async def playbook_list(request):
     playbooks = await Playbook.filter(deleted=False).all().values_list("id", "name")
 
     return response_ok([{"id": playbook[0], "name": playbook[1]} for playbook in playbooks])
+
+
+@event_ingestion_bp.post('/transforms-list')
+async def transforms_list(request):
+    """
+    获取transforms列表
+
+    无请求参数
+    """
+    transforms = await Config.filter(deleted=False, module="transforms").all()
+
+    return response_ok([{"key": transform.key, "type": transform.type} for transform in transforms])
+
+
+@event_ingestion_bp.post('/transforms-update')
+async def transforms_update(request):
+    """
+    更新transforms模型
+        key:  转换类型名称
+        value:  转换配置内容
+        type:  转换类型描述
+    无请求参数
+    """
+    await Config.update_or_create(key=request.json.get("key"),
+                                  defaults={"value": request.json.get("key"), "type": request.json.get("type")},
+                                  module="transforms")
+
+    return response_ok("添加成功")
