@@ -414,6 +414,8 @@ async def execute_action(request):
                         await resp.send(f"data: {orjson.dumps(log.json).decode()}\n\n")
                 if any(log.node_type == "end-node" for log in logs):
                     break
+                if any(log.status in [-1, 2] for log in logs):
+                    break
             await asyncio.sleep(1)
 
     if resp:
