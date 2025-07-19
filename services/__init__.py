@@ -46,6 +46,7 @@ def register_blueprints(app: Sanic) -> None:
     app.blueprint(scene_bp)
     app.blueprint(dashboard_bp)
     app.blueprint(system_bp)
+    app.blueprint(warroom_bp)
 
     try:
         bp_dict = {
@@ -56,7 +57,6 @@ def register_blueprints(app: Sanic) -> None:
             "timed_bp": timed_bp,
             "tool_management_bp": tools_bp,
             "var_bp": var_bp,
-            "warroom_bp": warroom_bp,
             "workflow_bp": workflow_bp,
             "logs_bp": logs_bp
         }
