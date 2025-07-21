@@ -1,5 +1,5 @@
 # coding=utf-8
-
+import elasticsearch
 from asyncpg.exceptions import UniqueViolationError
 from sanic import HTTPResponse, exceptions
 from sanic.log import logger
@@ -25,5 +25,7 @@ class UnknownExcHandler(BaseExcHandler):
             return response_fail(ErrorCode.ParameterError)
         elif isinstance(exception, IntegrityError) or isinstance(exception, UniqueViolationError):
             return response_fail(ErrorCode.DataAlreadyExists)
+        elif isinstance(exception, elasticsearch.BadRequestError):
+            return response_fail(ErrorCode.ESQueryError)
         else:
             return response_fail(ErrorCode.ServerError, 500)

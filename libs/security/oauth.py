@@ -2,10 +2,7 @@
 
 import uuid
 
-from httpx_oauth.oauth2 import (
-    BaseOAuth2,
-    GetAccessTokenError,
-)
+from httpx_oauth.oauth2 import BaseOAuth2
 from jsonpath import jsonpath
 from sanic.log import logger
 from tortoise.exceptions import IntegrityError, DoesNotExist
@@ -16,17 +13,17 @@ from libs.security.authentication import token_encode
 from models import Account
 
 
-async def oauth_callback(client: BaseOAuth2, code: str, oauth_cfg: dict, code_verifier: str = None) -> tuple[dict, str]:
+async def oauth_callback(client: BaseOAuth2, code: str, redirect_url: str, oauth_cfg: dict, code_verifier: str = None) -> tuple[dict, str]:
     try:
         token_info = await client.get_access_token(
             code,
-            None,
+            redirect_url,
             code_verifier,
         )
         logger.info(f"token_info: {token_info}")
         access_token = jsonpath(token_info, oauth_cfg['token_path'])
         if not access_token:
-            raise GetAccessTokenError
+            raise CustomError(ErrorCode.GetAccessTokenError)
         user_info = await get_user_info(client, access_token[0], oauth_cfg['user_info_uri'])
         logger.info(f"user_info: {user_info}")
         username = jsonpath(user_info, oauth_cfg['user_id_path'])
@@ -56,8 +53,6 @@ async def oauth_callback(client: BaseOAuth2, code: str, oauth_cfg: dict, code_ve
         return account.json, aioe_token
     except IntegrityError:
         raise CustomError(ErrorCode.CredentialsError)
-    except GetAccessTokenError:
-        raise CustomError(ErrorCode.GetAccessTokenError)
 
 
 async def get_user_info(client, token, user_info_uri):

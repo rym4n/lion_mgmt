@@ -3,7 +3,6 @@
 from sanic import Request, HTTPResponse
 
 from libs.security.authentication import authenticate
-from libs.utils import get_client_ip
 from models import AuditLog
 from .base import BaseMiddleware
 
@@ -13,12 +12,10 @@ class SecurityMiddleware(BaseMiddleware):
 
     async def before_request(self, request: Request) -> None:
         # 判断请求URI是否需要身份验证
-        white_urls = ["/user/login", "/health", '/system/oauth/status', '/system/platform', '/system/picture', '/user/oauth/login', '/user/oauth/callback']
-
-        if request.path == '/license/ai/update' and get_client_ip(request) == '127.0.0.1':
-            # AI更新接口，允许本地调用
-            return
-
+        white_urls = [
+            "/user/login", "/health", '/system/oauth/status', '/system/platform', '/system/picture',
+            '/user/oauth/login', '/user/oauth/callback'
+        ]
         if request.path not in white_urls:
             await authenticate(request)
 

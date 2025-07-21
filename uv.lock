@@ -391,6 +391,19 @@ wheels = [
 ]
 
 [[package]]
+name = "croniter"
+version = "6.0.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+    { name = "pytz" },
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/ad/2f/44d1ae153a0e27be56be43465e5cb39b9650c781e001e7864389deb25090/croniter-6.0.0.tar.gz", hash = "sha256:37c504b313956114a983ece2c2b07790b1f1094fe9d81cc94739214748255577" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/07/4b/290b4c3efd6417a8b0c284896de19b1d5855e6dbdb97d2a35e68fa42de85/croniter-6.0.0-py2.py3-none-any.whl", hash = "sha256:2f878c3856f17896979b2a4379ba1f09c83e374931ea15cc835c5dd2eee9b368" },
+]
+
+[[package]]
 name = "cryptography"
 version = "45.0.5"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
@@ -800,6 +813,7 @@ dependencies = [
     { name = "aiokafka" },
     { name = "argon2-cffi" },
     { name = "caio" },
+    { name = "croniter" },
     { name = "cryptography" },
     { name = "elasticsearch", extra = ["async"] },
     { name = "gmssl-python" },
@@ -835,6 +849,7 @@ requires-dist = [
     { name = "aiokafka", specifier = ">=0.12.0" },
     { name = "argon2-cffi", specifier = ">=23.1.0" },
     { name = "caio", specifier = "==0.9.21" },
+    { name = "croniter", specifier = ">=6.0.0" },
     { name = "cryptography", specifier = ">=44.0.2" },
     { name = "elasticsearch", extras = ["async"], specifier = "==8.18.1" },
     { name = "gmssl-python", specifier = ">=2.2.2" },

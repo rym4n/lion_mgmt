@@ -509,9 +509,10 @@ async def oauth2_callback(request):
     code = request.args.get("code")
     logger.info(f"oauth2 callback: {code}")
     logger.info(f"oauth2 callback: {request.app.ctx.oauth_cfg}")
-    user_info, token = await oauth_callback(request.app.ctx.oauth2, code, request.app.ctx.oauth_cfg)
+    redirect_url = request.args.get("redirect")
+    user_info, token = await oauth_callback(request.app.ctx.oauth2, code, redirect_url, request.app.ctx.oauth_cfg)
     # user_info['aioe-auth'] = token
-    user_info['redirect'] = request.args.get("redirect")
+    user_info['redirect'] = redirect_url
     user_info_str = base64.urlsafe_b64encode(orjson.dumps(user_info)).decode()
     # return response.redirect("https://" + request.host + "#/loading?" + user_info_str)
     resp = response.redirect("https://" + request.host + "#/loading?" + user_info_str)

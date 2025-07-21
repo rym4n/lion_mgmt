@@ -1,8 +1,8 @@
 import datetime
-import re
 from collections import defaultdict
 
 import pytz
+from croniter import croniter
 from sanic import Blueprint
 from sanic.log import logger
 from tortoise.expressions import Q
@@ -118,7 +118,7 @@ async def add_timed(request):
         elif status == 1:
             msg["timer"] = "cron"
             timer_rule["end_date"] = end_time
-            if not is_valid_crontab(tactics):
+            if not croniter.is_valid(tactics):
                 logger.info(f"定时任务{name}的执行策略{tactics}不符合crontab格式，创建失败")
                 raise CustomError(ErrorCode.CronExpressionError)
             timer_rule["crontab"] = tactics
@@ -139,7 +139,7 @@ async def add_timed(request):
         elif status == 1:
             msg["timer"] = "cron"
             timer_rule["end_date"] = end_time
-            if not is_valid_crontab(tactics):
+            if not croniter.is_valid(tactics):
                 logger.info(f"定时任务{name}的执行策略{tactics}不符合crontab格式，创建失败")
                 raise CustomError(ErrorCode.CronExpressionError)
             timer_rule["crontab"] = tactics
@@ -304,7 +304,7 @@ async def update_timed(request):
         msg["timer_rule"] = {}
     else:
         if status == EXEC_TYPE_CRON:
-            if not is_valid_crontab(tactics):
+            if not croniter.is_valid(tactics):
                 logger.info(f"定时任务{timed.name}的执行策略{tactics}不符合crontab格式，更新失败")
                 raise CustomError(ErrorCode.CronExpressionError)
         timer_info = build_timer_rule(status, tactics, end_time)
@@ -415,41 +415,6 @@ async def get_run_log(request):
         "total": len(total),
         "data": run_logs
     })
-
-
-def is_valid_crontab(expr):
-    parts = expr.strip().split()
-    if len(parts) != 5:
-        return False
-
-    ranges = [
-        (0, 59), (0, 23), (1, 31), (1, 12), (0, 7)
-    ]
-
-    pattern = r'^\*(\/\d+)?$|^\d+(-\d+)?(\/\d+)?$'
-    segment_re = re.compile(pattern)
-
-    for i, part in enumerate(parts):
-        min_val, max_val = ranges[i]
-        for segment in part.split(','):
-            if not segment_re.match(segment):
-                return False
-
-            if '/' in segment:
-                base, step_str = segment.split('/', 1)
-                if not step_str.isdigit() or (step := int(step_str)) < 1:
-                    return False
-                segment = base
-
-            if '-' in segment:
-                start, end = map(int, segment.split('-'))
-                if not (min_val <= start <= end <= max_val):
-                    return False
-            elif segment != '*':
-                if not segment.isdigit() or not (min_val <= (num := int(segment)) <= max_val):
-                    return False
-
-    return True
 
 
 async def timer_success_rate(timed_id):
