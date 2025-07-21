@@ -80,22 +80,20 @@ async def upload_image(request):
         }
         await Config.create(key="platform_config", module="system", value=orjson.dumps(default).decode())
 
-        # 处理文件上传
-        for field in ["background", "webico", "logo"]:
-            file = request.files.get(field)
-            filename = ''
-            if field == "background":
-                filename = f"bg.png"
-            elif field == "webico":
-                filename = f"favicon.ico"
-            elif field == "logo":
-                filename = f"logo.svg"
-            if file and filename:
-                file_path = os.path.join(settings.UPLOAD_DIR, filename)
+    # 处理文件上传
+    for field in ["background", "logo"]:
+        file = request.files.get(field)
+        filename = ''
+        if field == "background":
+            filename = f"bg.png"
+        elif field == "logo":
+            filename = f"logo.svg"
+        if file and filename:
+            file_path = os.path.join(settings.UPLOAD_DIR, filename)
 
-                with open(file_path, "wb") as f:
-                    f.write(file.body)
-                await Config.update_or_create(key=field, module="system", value=file_path)
+            with open(file_path, "wb") as f:
+                f.write(file.body)
+            await Config.update_or_create(key=field, module="system", value=file_path)
 
     return response_ok("success")
 
