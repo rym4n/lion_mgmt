@@ -9,6 +9,7 @@ import tempfile
 import time
 import urllib.parse
 import zipfile
+import re
 
 import aiofile
 import orjson
@@ -394,7 +395,7 @@ async def get_event_ingestion_detail(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    return response_ok({"config_data": event.vector_config, "event": event.json})
+    return response_ok({"event": event.json})
 
 
 # noinspection PyTypeChecker
@@ -966,7 +967,7 @@ async def transforms_list(request):
     """
     transforms = await Config.filter(deleted=False, module="transforms").all()
 
-    return response_ok([{"key": transform.key, "type": transform.type} for transform in transforms])
+    return response_ok([{"key": transform.key, "type": transform.type, "params": re.findall(r"{(.*?)}", transform.value)} for transform in transforms])
 
 
 @event_ingestion_bp.post('/transforms-update')
