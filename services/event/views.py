@@ -102,7 +102,7 @@ async def artificial_create_event(request):
         ownerId: long 事件责任人id (非必填)不填则为空
         eventSummary: str 事件概要 (非必填)
     """
-    event_name = request.json.get("eventName") + "_" + str(int(time.time() * 1000))
+    event_name = request.json.get("eventName")
     event_process_status = "待处理"
     event_source = "人工"
     owner = ({"role": [], "user": [request.json.get("ownerId") or ""]} or {})
@@ -141,7 +141,7 @@ async def create_event(request):
         event_ingestion_id: str 事件接入id   (人工创建时不传此参数)
         log_data: str 日志数据 (非必填)    (人工创建时不传此参数)
     """
-    event_name = request.json.get("event_name") + "_" + str(int(time.time() * 1000))
+    event_name = request.json.get("event_name")
     event_process_status = "待处理"
     event_source = "人工"
     owner = (request.json.get("owner") or {})
