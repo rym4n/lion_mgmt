@@ -241,6 +241,7 @@ class ChatManager:
         to_insert = []
         for msg in logs:
             log = msg.value
+            logger.info(log)
             # 处理审批消息
             if log.get('type') == 'approval-info':
                 approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'],
@@ -285,7 +286,7 @@ class ChatManager:
         try:
             message_type = data.get("type")
             # 按消息类型调用处理方法 (前端发送)
-            if message_type == "public":
+            if message_type in ["public", "runlog"]:
                 await self._handle_public_message(user, data)
             elif message_type == "private":
                 await self._handle_private_message(user, data)
@@ -310,7 +311,7 @@ class ChatManager:
             elif message_type == "heartbeat":
                 await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
         except Exception as e:
-            logger.error(e)
+            logger.error(f"{e} | {traceback.format_exc()}")
             await ws.send(orjson.dumps({"type": "error", "message": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
 
     async def _handle_public_message(self, user: Account, data: dict):
