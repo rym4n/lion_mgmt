@@ -644,7 +644,7 @@ async def unbundled_event_ingestion_script(request):
 
     event = await EventsIngestion.get_or_none(id=event_ingestion_id)
     if not event:
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NoEventAccess)
 
     data = event.vector_config
 
@@ -851,13 +851,14 @@ async def parse_log(request):
     finally:
         os.unlink(tmp_path)
 
-    if orjson.loads(output)["log"]:
+    if orjson.loads(output).get("log"):
         event.convert_health_status = "healthy"
+        await event.save()
+        log = orjson.loads(output).get("log")
     else:
-        event.convert_health_status = "unhealthy"
-    await event.save()
+        log = "日志解析失败，请修改解析类型"
 
-    return response_ok(orjson.loads(output)["log"])
+    return response_ok(log)
 
 
 @event_ingestion_bp.post('/config/list')
