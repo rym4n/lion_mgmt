@@ -11,7 +11,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import gen_random_code
-from models import Events, Runlog, Room, Account, Role
+from models import Events, Runlog, Room, Account, Role, EventsIngestion
 
 event_bp = Blueprint('event', url_prefix='/event')
 _all__ = ["event_bp"]
@@ -40,12 +40,12 @@ async def get_all_events(request):
     if request.json.get("event_name"):
         filters["event_name__icontains"] = request.json.get("event_name")
     if request.json.get("event_process_status"):
-        filters["event_process_status"] = request.json.get("event_process_status")
+        filters["event_process_status__in"] = request.json.get("event_process_status")
     if request.json.get("event_source"):
         filters["event_source"] = request.json.get("event_source")
 
     events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room", "creator",
-                                                                                               "updator")
+                                                                                               "updator", "scene")
     total = await Events.filter(**filters).count()
 
     data = []
@@ -67,6 +67,18 @@ async def get_all_events(request):
         event_dict.update(event.json)
 
         event_dict["owner"] = {"role": role_list, "user": user_list}
+        event_dict["scene"] = event.scene.name if event.scene else ""
+
+        event_ingestion = await EventsIngestion.get_or_none(event_ingestion_name=event.event_source, deleted=False).prefetch_related("creator")
+        if event_ingestion:
+            event_dict["event_source"] = {
+                "name":event_ingestion.event_ingestion_name,
+                "describe": event_ingestion.event_ingestion_describe,
+                "transforms_type": event_ingestion.transforms_type,
+                "enabled": event_ingestion.enabled_status,
+                "ctime": event_ingestion.ctime.astimezone(pytz.timezone('Asia/Shanghai')).strftime("%Y-%m-%d %H:%M:%S"),
+                "creator_id": {"username":event_ingestion.creator.username, "display_name": event_ingestion.creator.display_name} if event_ingestion.creator else {},
+            }
 
         data.append(event_dict)
 

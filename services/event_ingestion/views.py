@@ -973,7 +973,6 @@ async def transforms_update(request):
         key:  转换类型名称
         value:  转换配置内容
         type:  转换类型描述
-    无请求参数
     """
     await Config.update_or_create(key=request.json.get("key"),
                                   defaults={"value": request.json.get("value"), "type": request.json.get("type")},
