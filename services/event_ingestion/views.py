@@ -447,10 +447,6 @@ async def get_event_ingestion_kafka_sample(request):
             event.enabled_health_status = "healthy"
         else:
             event.enabled_health_status = "unhealthy"
-        if len(data.keys()) > 2:
-            event.convert_health_status = "healthy"
-        else:
-            event.convert_health_status = "unhealthy"
 
         await event.save()
     return response_ok(messages)
@@ -855,6 +851,12 @@ async def parse_log(request):
     finally:
         os.unlink(tmp_path)
 
+    if orjson.loads(output)["log"]:
+        event.convert_health_status = "healthy"
+    else:
+        event.convert_health_status = "unhealthy"
+    await event.save()
+
     return response_ok(orjson.loads(output)["log"])
 
 
@@ -973,7 +975,6 @@ async def transforms_update(request):
         key:  转换类型名称
         value:  转换配置内容
         type:  转换类型描述
-    无请求参数
     """
     await Config.update_or_create(key=request.json.get("key"),
                                   defaults={"value": request.json.get("value"), "type": request.json.get("type")},
