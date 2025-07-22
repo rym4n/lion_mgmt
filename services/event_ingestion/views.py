@@ -15,6 +15,7 @@ import aiofile
 import orjson
 import yaml
 from elasticsearch import AsyncElasticsearch
+from openai import OpenAI
 from sanic import Blueprint, response
 from sanic.log import logger
 from tortoise.transactions import in_transaction
@@ -22,6 +23,7 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs import supervisor
+from libs.chat import get_ai_config
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import get_client_ip, run_linux_command, setup_logs_template
@@ -550,9 +552,9 @@ async def binding_event_ingestion_script(request):
         }
 
         if event_name == "default":
-            event_name = '"{}" + "_" + to_string!(.datetime_str)'.format(event.event_ingestion_name)
+            event_new_name = '"{}" + "_" + to_string!(.datetime_str)'.format(event.event_ingestion_name)
         else:
-            event_name = '{}'.format(event_name)
+            event_new_name = '{}'.format(event_name)
         data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
             "type": "remap",
             "inputs": [f"{topic}_kafka_transforms"],
@@ -567,7 +569,7 @@ async def binding_event_ingestion_script(request):
 .event_source = "{}"
 .event_ingestion_id = "{}"
 del(.datetime_str)
-""".format(event_name, event.event_ingestion_name, event_ingestion_id)}
+""".format(event_new_name, event.event_ingestion_name, event_ingestion_id)}
 
         data["sinks"][f"{topic}_sinks"] = {
             "inputs": [f"{topic}_kafka_transforms"],
@@ -874,7 +876,8 @@ async def parse_log(request):
         os.unlink(tmp_path)
 
     if orjson.loads(output).get("log"):
-        await EventsIngestion.update_or_create(id=request.json.get('id'), deleted=False, defaults={"convert_health_status": "healthy"})
+        await EventsIngestion.update_or_create(id=request.json.get('id'), deleted=False,
+                                               defaults={"convert_health_status": "healthy"})
         log = orjson.loads(output).get("log")
     else:
         await EventsIngestion.update_or_create(id=request.json.get('id'), deleted=False,
@@ -1005,3 +1008,64 @@ async def transforms_update(request):
                                   module="transforms")
 
     return response_ok("添加成功")
+
+
+@event_ingestion_bp.post('/grok-ai')
+async def grok_ai(request):
+    """
+    使用ai进行日志解析生成grok表达式并返回
+
+    请求参数:
+        log: 日志内容 (str)
+    """
+    log = request.json.get('log')
+    SYSTEM_PROMPT = """
+    你是一位日志解析专家，专注于根据提供的日志样例生成 *单个* Grok 表达式。
+
+    目标：只返回最终 Grok 表达式字符串（单行）。不得输出除表达式本身以外的任何内容：不得有说明、注释、Markdown、代码块、前缀、后缀、空行或其它字符。
+
+    生成规则：
+    1. 基于我提供的日志样例自动识别固定文本、字段边界与字段类型。
+    2. 优先使用 Logstash 官方内置模式（如 TIMESTAMP_ISO8601、IPV4、NUMBER、WORD、DATA、GREEDYDATA 等）。
+    3. 为重要字段命名语义化标签（如 timestamp、src_ip、dst_ip、user、msg 等；用小写+下划线）。
+    4. 保留日志中的实际分隔符（空格、冒号、方括号等）以确保匹配准确。
+    5. 尽量精简，避免过度捕获；若格式不稳定，可在不影响关键字段的前提下放宽非关键部分到 DATA/GREEDYDATA。
+    6. 如果日志格式完全无法判定，最后退化为 `%{GREEDYDATA:message}`。
+
+    输出格式（严格）：
+    仅输出 Grok 表达式本身（单行）。不要包裹引号，不要回显“grok”字样，不要多余换行。
+
+    示例（说明用，真实输出时不含此类内容）：
+    %{TIMESTAMP_ISO8601:timestamp} %{IPV4:src}:%{NUMBER:src_port:int} -> %{IPV4:dst}:%{NUMBER:dst_port:int} %{WORD:action}
+
+    现在等待日志样例。当我提供样例后，你输出唯一的 Grok 表达式。
+    """
+
+    ai_cfg = await get_ai_config(request.ctx.cache_client)
+    host = ai_cfg.get('llm_host')
+    if host is None:
+        return response_ok("当前未配置ai服务模型，请前往系统设置进行配置。")
+
+    api_key = ai_cfg.get('llm_api_key')
+    model = ai_cfg.get('llm_model')
+    if model is None:
+        return response_ok("当前未配置ai服务模型，请前往系统设置进行配置。")
+
+    client = OpenAI(
+        base_url=host,
+        api_key=api_key
+    )
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": log}
+    ]
+    response = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        max_tokens=4000,
+        temperature=0.7
+    )
+
+    full_response = response.choices[0].message.content if response.choices else ""
+
+    return full_response
