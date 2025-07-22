@@ -816,12 +816,12 @@ async def parse_log(request):
         id: 事件接入id (str)
         msg: 日志内容 (str)
         transforms_type: 转换类型 (str)
-        transformsconfig: 转换配置 (str)
+        transforms_config: 转换配置 (str)
         key_value_delimiter: 键值对分隔符 (str)
         key_delimiter_value: 键值分隔符 (str)
     """
     transforms_type = request.json.get('transforms_type')
-    transformsconfig = request.json.get('transformsconfig')
+    transformsconfig = request.json.get('transforms_config')
     key_value_delimiter = request.json.get('key_value_delimiter')
     key_delimiter_value = request.json.get('key_delimiter_value')
     tmp_data = {
