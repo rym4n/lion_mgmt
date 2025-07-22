@@ -34,8 +34,9 @@ from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='/event-ingestion')
 _all__ = ["event_ingestion_bp"]
 
+
 async def get_event_ingestion_list(size, index):
-    messages =  []
+    messages = []
     async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS), ) as es:
         query = {
             "query": {
@@ -48,7 +49,7 @@ async def get_event_ingestion_list(size, index):
         }
         index = index
         if not await es.indices.exists(index=index):
-            return response_ok(messages)
+            return False
 
         result = await es.search(index=index, body=query)
 
@@ -356,6 +357,7 @@ async def update_event_ingestion(request):
         syslog_port: 日志端口 (int) 端口范围500-2000  事件来源类型为syslog时才传，默认为None       非必填
         communication_type: 通信类型 (str)   事件来源类型为syslog时才传，默认为None       非必填
         kafka_group_id: kafka消费组ID (str)   事件来源类型为kafka时才传，默认为None      非必填
+        kafka_topic: kafka主题 (list)   事件来源类型为kafka时才传，默认为None      非必填
         transforms_type: 转换类型 (str) 目前支持Grok、CEF、key-value、JSON、Delimiter(分割符)       非必填
         transforms_config: 转换配置 (str) 只有Grok时需要填写，默认情况下为None       非必填
         key_value_delimiter: 键值对分隔符 (str) 只有key-value时需要填写，默认情况下为None       非必填
@@ -380,10 +382,13 @@ async def update_event_ingestion(request):
     enabled_status = data.get('enabled_status', None)
     key_delimiter_value = data.get('key_delimiter_value', None)
     key_value_delimiter = data.get('key_value_delimiter', None)
+    kafka_topic = data.get('kafka_topic', [])
     event = await EventsIngestion.get(id=event_id)
 
     data = event.vector_config
 
+    if kafka_topic:
+        data["sources"][event.vector_name]["topics"] = kafka_topic
     if event_source_address:
         data["sources"][event.vector_name]["bootstrap_servers"] = ",".join(event_source_address)
     if communication_type:
@@ -497,6 +502,9 @@ async def get_event_ingestion_kafka_sample(request):
         raise CustomError(ErrorCode.NoEventAccess)
 
     messages = await get_event_ingestion_list(size, f"logs-{event.event_ingestion_name}")
+
+    if not messages:
+        return response_ok("当前不存在日志")
 
     if messages:
         data = messages[0]
@@ -915,6 +923,9 @@ async def parse_log(request):
 
     messages = await get_event_ingestion_list(1, f"logs-{event.event_ingestion_name}")
 
+    if not messages:
+        return response_ok("当前不存在日志")
+
     try:
         with tempfile.NamedTemporaryFile(
                 mode='w',
@@ -980,7 +991,6 @@ async def event_ingestion_config_list(request):
         config_list.append(event_dict)
 
     return response_ok(config_list)
-
 
 
 @event_ingestion_bp.post('/playbook-list')
