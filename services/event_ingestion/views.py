@@ -5,6 +5,7 @@ import io
 import os
 import random
 import string
+import subprocess
 import tempfile
 import time
 import urllib.parse
@@ -13,7 +14,6 @@ import zipfile
 import aiofile
 import orjson
 import yaml
-import subprocess
 from elasticsearch import AsyncElasticsearch
 from sanic import Blueprint, response
 from sanic.log import logger
@@ -24,7 +24,7 @@ from core.response import response_ok
 from libs import supervisor
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import get_client_ip, run_linux_command, setup_logs_template, decrypt_aes256_gcm
+from libs.utils import get_client_ip, run_linux_command, setup_logs_template
 from models import PlaybookVersion, Playbook, Config
 from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
@@ -394,7 +394,7 @@ async def get_event_ingestion_detail(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    return response_ok({"config_data": event.vector_config, "event": event.json})
+    return response_ok({"event": event.json})
 
 
 # noinspection PyTypeChecker
@@ -808,21 +808,43 @@ async def parse_log(request):
     请求参数:
         id: 事件接入id (str)
         msg: 日志内容 (str)
+        transforms_type: 转换类型 (str)
+        transformsconfig: 转换配置 (str)
+        key_value_delimiter: 键值对分隔符 (str)
+        key_delimiter_value: 键值分隔符 (str)
     """
-    event = await EventsIngestion.get_or_none(id=request.json.get('id'), deleted=False)
-    data = orjson.loads(orjson.dumps(event.vector_config))
+    transforms_type = request.json.get('transforms_type')
+    transformsconfig = request.json.get('transformsconfig')
+    key_value_delimiter = request.json.get('key_value_delimiter')
+    key_delimiter_value = request.json.get('key_delimiter_value')
     tmp_data = {
-        "sources": {event.vector_name: {"type": "stdin"}},
+        "sources": {"tmp": {"type": "stdin"}},
         "sinks": {
             "tmp_sink": {
                 "encoding": {"codec": "json"},
                 "type": "console",
-                "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]
+                "inputs": ["tmp_transforms"]
             }
         }
     }
-    if event.transforms_type:
-        tmp_data["transforms"] = data["transforms"]
+
+    tmp_data.setdefault("transforms", {}).setdefault("tmp_transforms", {})["type"] = "remap"
+    tmp_data["transforms"]["tmp_transforms"]["inputs"] = ["tmp"]
+    tmp_data["transforms"]["tmp_transforms"]["drop_on_error"] = False
+
+    config = await Config.get_or_none(key=transforms_type, module="transforms")
+    if not config:
+        raise CustomError(ErrorCode.TypeNotSupportedError)
+    args = {
+        "transformsconfig": transformsconfig,
+        "key_value_delimiter": key_value_delimiter,
+        "key_delimiter_value": key_delimiter_value
+    }
+    value = config.value
+    if '{' in value:
+        value = value.format(**args)
+
+    tmp_data["transforms"]["tmp_transforms"]["source"] = value
 
     result = check_vector_config(tmp_data)
     if not result:
@@ -852,10 +874,11 @@ async def parse_log(request):
         os.unlink(tmp_path)
 
     if orjson.loads(output).get("log"):
-        event.convert_health_status = "healthy"
-        await event.save()
+        await EventsIngestion.update_or_create(id=request.json.get('id'), deleted=False, defaults={"convert_health_status": "healthy"})
         log = orjson.loads(output).get("log")
     else:
+        await EventsIngestion.update_or_create(id=request.json.get('id'), deleted=False,
+                                               defaults={"convert_health_status": "unhealthy"})
         log = "日志解析失败，请修改解析类型"
 
     return response_ok(log)
