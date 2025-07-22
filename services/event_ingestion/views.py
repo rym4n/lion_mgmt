@@ -396,7 +396,7 @@ async def get_event_ingestion_detail(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    return response_ok({"event": event.json})
+    return response_ok({"event": event.json, "sources": event.vector_config.get("sources", {})})
 
 
 # noinspection PyTypeChecker
