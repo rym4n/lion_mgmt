@@ -597,7 +597,7 @@ async def add_tool_resource(request):
     if not tool_name or resources is None or not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    existing_resource = await ToolResources.get_or_none(name=name, deleted=False)
+    existing_resource = await ToolResources.get_or_none(name=name, deleted=False, tool_name=tool_name)
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
 
