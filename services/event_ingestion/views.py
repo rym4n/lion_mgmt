@@ -928,19 +928,19 @@ def get_conditional_statements(conditions):
     conditional_statements = ""
     for index, condition in enumerate(conditions):
         if condition["type"] in ["==", "!="]:
-            conditional_statements += f""".{condition["name"]} {condition['type']} "{condition['value']}" """
+            conditional_statements += f""".log.{condition["name"]} {condition['type']} "{condition['value']}" """
         elif condition["type"] in [">", "<", ">=", "<="]:
-            conditional_statements += f"""(to_int(.{condition["name"]}) ?? 0) {condition['type']} {int(condition['value'])}"""
+            conditional_statements += f"""(to_int(.log.{condition["name"]}) ?? 0) {condition['type']} {int(condition['value'])}"""
         elif condition["type"] in ["!contains", "contains"]:
-            conditional_statements += f"""{condition['type']}(string!(.{condition['name']}), "{condition['value']}")"""
+            conditional_statements += f"""{condition['type']}(string!(.log.{condition['name']}), "{condition['value']}")"""
         elif condition["type"] in ["includes", "!includes"]:
-            conditional_statements += f"""{condition['type']}({condition['value']}, string!(.{condition['name']}))"""
+            conditional_statements += f"""{condition['type']}({condition['value']}, string!(.log.{condition['name']}))"""
         elif condition["type"] in ["exists", "!exists"]:
-            conditional_statements += f"""{condition['type']}(.{condition['name']})"""
+            conditional_statements += f"""{condition['type']}(.log.{condition['name']})"""
         elif condition["type"] in ["is_empty", "!is_empty"]:
-            conditional_statements += f"""{condition['type']}(to_string!(.{condition['name']}))"""
+            conditional_statements += f"""{condition['type']}(to_string!(.log.{condition['name']}))"""
         elif condition["type"] == "match":
-            conditional_statements += f"match(string!(.{condition['name']}), r'{condition['value']}')"
+            conditional_statements += f"match(string!(.log.{condition['name']}), r'{condition['value']}')"
         else:
             raise CustomError(ErrorCode.ParameterError)
         connect_type = condition["connect_type"] if condition.get("connect_type") in ["&&", "||"] else None
@@ -998,21 +998,6 @@ async def transforms_list(request):
     transforms = await Config.filter(deleted=False, module="transforms").all()
 
     return response_ok([{"key": transform.key, "type": transform.type} for transform in transforms])
-
-
-@event_ingestion_bp.post('/transforms-update')
-async def transforms_update(request):
-    """
-    更新transforms模型
-        key:  转换类型名称
-        value:  转换配置内容
-        type:  转换类型描述
-    """
-    await Config.update_or_create(key=request.json.get("key"),
-                                  defaults={"value": request.json.get("value"), "type": request.json.get("type")},
-                                  module="transforms")
-
-    return response_ok("添加成功")
 
 
 @event_ingestion_bp.post('/grok-ai')
