@@ -34,6 +34,83 @@ from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='/event-ingestion')
 _all__ = ["event_ingestion_bp"]
 
+async def get_event_ingestion_list(size, index):
+    messages =  []
+    async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS), ) as es:
+        query = {
+            "query": {
+                "match_all": {}
+            },
+            "size": size,
+            "sort": [
+                {"timestamp": "desc"}
+            ]
+        }
+        index = index
+        if not await es.indices.exists(index=index):
+            return response_ok(messages)
+
+        result = await es.search(index=index, body=query)
+
+        if result:
+            for hit in result["hits"]["hits"]:
+                source = hit["_source"]
+                source.pop("timestamp", None)
+                messages.append(source)
+    return messages
+
+
+def get_conditional_statements(conditions):
+    conditional_statements = ""
+    for index, condition in enumerate(conditions):
+        if condition["type"] in ["==", "!="]:
+            conditional_statements += f""".log.{condition["name"]} {condition['type']} "{condition['value']}" """
+        elif condition["type"] in [">", "<", ">=", "<="]:
+            conditional_statements += f"""(to_int(.log.{condition["name"]}) ?? 0) {condition['type']} {int(condition['value'])}"""
+        elif condition["type"] in ["!contains", "contains"]:
+            conditional_statements += f"""{condition['type']}(string!(.log.{condition['name']}), "{condition['value']}")"""
+        elif condition["type"] in ["includes", "!includes"]:
+            conditional_statements += f"""{condition['type']}({condition['value']}, string!(.log.{condition['name']}))"""
+        elif condition["type"] in ["exists", "!exists"]:
+            conditional_statements += f"""{condition['type']}(.log.{condition['name']})"""
+        elif condition["type"] in ["is_empty", "!is_empty"]:
+            conditional_statements += f"""{condition['type']}(to_string!(.log.{condition['name']}))"""
+        elif condition["type"] == "match":
+            conditional_statements += f"match(string!(.log.{condition['name']}), r'{condition['value']}')"
+        else:
+            raise CustomError(ErrorCode.ParameterError)
+        connect_type = condition["connect_type"] if condition.get("connect_type") in ["&&", "||"] else None
+        if connect_type:
+            conditional_statements += f" {connect_type} "
+
+    return conditional_statements
+
+
+def check_vector_config(vector_config):
+    with tempfile.NamedTemporaryFile(
+            mode='w',
+            suffix='.yaml',
+            encoding='utf-8',
+            delete=False
+    ) as tmp_file:
+
+        yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
+        logger.info(yaml_str)
+        tmp_file.write(yaml_str)
+        tmp_file.flush()
+
+        tmp_path = tmp_file.name
+
+        result = run_linux_command(f'vector validate --config-yaml {tmp_path}')
+
+    try:
+        if result["code"] != 0:
+            return False
+        else:
+            return True
+    finally:
+        os.unlink(tmp_path)
+
 
 # 生成配置文件
 # noinspection PyTypeChecker
@@ -412,7 +489,6 @@ async def get_event_ingestion_kafka_sample(request):
     data = request.json
     event_id = data.get('id')
     size = data.get('size', 10)
-    messages = []
     if size < 1:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -420,27 +496,7 @@ async def get_event_ingestion_kafka_sample(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS), ) as es:
-        query = {
-            "query": {
-                "match_all": {}
-            },
-            "size": size,
-            "sort": [
-                {"timestamp": "desc"}
-            ]
-        }
-        index = f"logs-{event.event_ingestion_name}"
-        if not await es.indices.exists(index=index):
-            return response_ok(messages)
-
-        result = await es.search(index=index, body=query)
-
-        if result:
-            for hit in result["hits"]["hits"]:
-                source = hit["_source"]
-                source.pop("timestamp", None)
-                messages.append(source)
+    messages = await get_event_ingestion_list(size, f"logs-{event.event_ingestion_name}")
 
     if messages:
         data = messages[0]
@@ -814,7 +870,6 @@ async def parse_log(request):
 
     请求参数:
         id: 事件接入id (str)
-        msg: 日志内容 (str)
         transforms_type: 转换类型 (str)
         transforms_config: 转换配置 (str)
         key_value_delimiter: 键值对分隔符 (str)
@@ -842,6 +897,7 @@ async def parse_log(request):
     config = await Config.get_or_none(key=transforms_type, module="transforms")
     if not config:
         raise CustomError(ErrorCode.TypeNotSupportedError)
+    event = await EventsIngestion.get_or_none(id=request.json.get('id'), deleted=False)
     args = {
         "transformsconfig": transformsconfig,
         "key_value_delimiter": key_value_delimiter,
@@ -856,6 +912,8 @@ async def parse_log(request):
     result = check_vector_config(tmp_data)
     if not result:
         raise CustomError(ErrorCode.LogParseError)
+
+    messages = await get_event_ingestion_list(1, f"logs-{event.event_ingestion_name}")
 
     try:
         with tempfile.NamedTemporaryFile(
@@ -873,7 +931,7 @@ async def parse_log(request):
 
             proc = subprocess.Popen(["vector", "--config", tmp_path], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 
-            proc.stdin.write((request.json.get('msg') + "\n").encode())
+            proc.stdin.write((messages[0].get("message") + "\n").encode())
             proc.stdin.flush()
 
             output = proc.stdout.readline().strip()
@@ -923,57 +981,6 @@ async def event_ingestion_config_list(request):
 
     return response_ok(config_list)
 
-
-def get_conditional_statements(conditions):
-    conditional_statements = ""
-    for index, condition in enumerate(conditions):
-        if condition["type"] in ["==", "!="]:
-            conditional_statements += f""".log.{condition["name"]} {condition['type']} "{condition['value']}" """
-        elif condition["type"] in [">", "<", ">=", "<="]:
-            conditional_statements += f"""(to_int(.log.{condition["name"]}) ?? 0) {condition['type']} {int(condition['value'])}"""
-        elif condition["type"] in ["!contains", "contains"]:
-            conditional_statements += f"""{condition['type']}(string!(.log.{condition['name']}), "{condition['value']}")"""
-        elif condition["type"] in ["includes", "!includes"]:
-            conditional_statements += f"""{condition['type']}({condition['value']}, string!(.log.{condition['name']}))"""
-        elif condition["type"] in ["exists", "!exists"]:
-            conditional_statements += f"""{condition['type']}(.log.{condition['name']})"""
-        elif condition["type"] in ["is_empty", "!is_empty"]:
-            conditional_statements += f"""{condition['type']}(to_string!(.log.{condition['name']}))"""
-        elif condition["type"] == "match":
-            conditional_statements += f"match(string!(.log.{condition['name']}), r'{condition['value']}')"
-        else:
-            raise CustomError(ErrorCode.ParameterError)
-        connect_type = condition["connect_type"] if condition.get("connect_type") in ["&&", "||"] else None
-        if connect_type:
-            conditional_statements += f" {connect_type} "
-
-    return conditional_statements
-
-
-def check_vector_config(vector_config):
-    with tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='.yaml',
-            encoding='utf-8',
-            delete=False
-    ) as tmp_file:
-
-        yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
-        logger.info(yaml_str)
-        tmp_file.write(yaml_str)
-        tmp_file.flush()
-
-        tmp_path = tmp_file.name
-
-        result = run_linux_command(f'vector validate --config-yaml {tmp_path}')
-
-    try:
-        if result["code"] != 0:
-            return False
-        else:
-            return True
-    finally:
-        os.unlink(tmp_path)
 
 
 @event_ingestion_bp.post('/playbook-list')
