@@ -342,8 +342,23 @@ async def delete_workflow_version(request):
     return response_ok("删除成功")
 
 
+@workflow_bp.post("/stop")
+@requires_permission("workflow:u")
+async def stop_workflow(request):
+    """
+    停止执行
+
+    请求参数：
+        run_id: 必填，运行ID
+    """
+    run_id = request.json.get("run_id")
+    msg = {"run_type": 'kill', "run_id": run_id, "run_args": {'executor': request.ctx.session['account_info'].id}}
+    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    return response_ok("success")
+
+
 @workflow_bp.post("/debug")
-@requires_permission("workflow:r")
+@requires_permission("workflow:u")
 async def execute_action(request):
     """
         执行接口
@@ -447,8 +462,7 @@ async def run_history(request):
     offset = (page - 1) * size
     limit = size
 
-    all_run_ids = await Runlog.filter(playbook_id=playbook_id, deleted=False).order_by("-utime").values_list("run_id",
-                                                                                                             "utime")
+    all_run_ids = await Runlog.filter(playbook_id=playbook_id, deleted=False).order_by("-utime").values_list("run_id", "utime")
     seen = set()
     run_ids_query = []
     for run_id, utime in all_run_ids:
