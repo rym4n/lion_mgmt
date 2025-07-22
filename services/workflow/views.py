@@ -19,7 +19,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license, playbook_permission, \
-    playbook_version_permission, check_playbook_permission
+    check_playbook_permission
 from libs.utils import gen_order_version
 from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, \
     EventRelatedScript, Timed
@@ -175,9 +175,9 @@ async def list_workflow_versions(request):
     获取剧本版本列表
 
     请求参数：
-        id: 必填，剧本id
+        playbook_id: 必填，剧本id
     """
-    pv = await PlaybookVersion.filter(playbook__id=request.json.get("id"), deleted=False).all().prefetch_related(
+    pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False).all().prefetch_related(
         "playbook", "creator", "updator")
     return response_ok([p.json for p in pv])
 
@@ -205,14 +205,14 @@ async def edit_workflow(request):
     修改剧本的基本信息
 
     请求参数：
-        id: 必填，剧本ID
+        playbook_id: 必填，剧本ID
         name: 可选，剧本名
         remark: 可选，备注
         scenes: 可选，关联场景名称，列表格式
         tags: 可选，标签名称，列表格式
     """
     params = request.json
-    playbook = await Playbook.get(id=params.get("id")).prefetch_related("scenes", "tags")
+    playbook = await Playbook.get(id=params.get("playbook_id")).prefetch_related("scenes", "tags")
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
@@ -234,19 +234,19 @@ async def edit_workflow(request):
 
 @workflow_bp.post("/edit-flow")
 @requires_permission("workflow:u")
-@playbook_version_permission("u")
+@playbook_permission("u")
 async def edit_workflow_flow(request):
     """
     修改剧本流程图内容,修改已发布的剧本会自动生成一个新的版本
 
     请求参数:
-        id: 必填，剧本版本ID
+        flow_id: 必填，剧本版本ID
         flow_json: 必填，流程图布局信息
     """
-    if not request.json.get("id") or not request.json.get("flow_json"):
+    if not request.json.get("flow_id") or not request.json.get("flow_json"):
         raise CustomError(ErrorCode.ParameterError)
 
-    pv = await PlaybookVersion.get(id=request.json.get("id")).prefetch_related("playbook", "creator", "updator")
+    pv = await PlaybookVersion.get(id=request.json.get("flow_id")).prefetch_related("playbook", "creator", "updator")
     old_data = pv.flow_json
     pv.flow_json = request.json.get("flow_json")
     pv.updator = request.ctx.session['account_info']
@@ -270,18 +270,18 @@ async def edit_workflow_flow(request):
 
 @workflow_bp.post("/publish")
 @requires_permission("workflow:u")
-@playbook_version_permission("u")
+@playbook_permission("u")
 async def publish_workflow(request):
     """
     发布剧本
 
     请求参数：
-        id: 必填，剧本版本ID
+        flow_id: 必填，剧本版本ID
         change_desc: 必填, 版本变更说明
     """
-    if not request.json.get("id") or not request.json.get("change_desc"):
+    if not request.json.get("flow_id") or not request.json.get("change_desc"):
         raise CustomError(ErrorCode.ParameterError)
-    await PlaybookVersion.filter(id=request.json.get("id"), status=0).update(status=1, updator=request.ctx.session[
+    await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0).update(status=1, updator=request.ctx.session[
         'account_info'], version=gen_order_version(), change_desc=request.json.get("change_desc"))
     return response_ok("剧本发布成功")
 
@@ -294,9 +294,9 @@ async def delete_workflow(request):
     删除剧本
 
     请求参数：
-        id: 剧本ID
+        playbook_id: 剧本ID
     """
-    playbook = await Playbook.get(id=request.json.get("id"), internal=False)
+    playbook = await Playbook.get(id=request.json.get("playbook_id"), internal=False)
     pvs = await PlaybookVersion.filter(playbook=playbook, deleted=False).all()
     pv_ids = [pv.id for pv in pvs]
     pv_versions = [pv.version for pv in pvs]
@@ -321,15 +321,15 @@ async def delete_workflow(request):
 
 @workflow_bp.post("/del-version")
 @requires_permission("workflow:d")
-@playbook_version_permission("d")
+@playbook_permission("d")
 async def delete_workflow_version(request):
     """
     删除剧本版本
 
     请求参数：
-        id: 剧本版本ID
+        flow_id: 剧本版本ID
     """
-    pv = await PlaybookVersion.get(id=request.json.get("id"))
+    pv = await PlaybookVersion.get(id=request.json.get("flow_id"))
     if await EventRelatedScript.filter(script_id__contains=[pv.id]).exists():
         raise CustomError(ErrorCode.PlaybookUsedByEvent)
     if await Timed.filter(playbook_id=pv.playbook_id, playbook_version=pv.version).exists():
@@ -504,15 +504,15 @@ async def run_history(request):
 
 @workflow_bp.post('/input')
 @requires_permission("workflow:r")
-@playbook_version_permission("r")
+@playbook_permission("r")
 async def input_data(request):
     """
     获取指定剧本的输入参数
 
     请求参数：
-        id: 剧本版本ID
+        flow_id: 剧本版本ID
     """
-    input_list = await get_playbook_input(request.json.get("id"))
+    input_list = await get_playbook_input(request.json.get("flow_id"))
 
     return response_ok(input_list)
 

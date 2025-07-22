@@ -11,7 +11,7 @@ from core.error_code import ErrorCode
 from libs.error_code.enum import ErrorData
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
-from libs.utils import verify_license, get_client_ip
+from libs.utils import verify_license
 from models import PermissionsMenu, PlaybookPermissions, PlaybookVersion
 from settings import LICENSE_DIR
 
@@ -104,52 +104,11 @@ def playbook_permission(*required_permissions: str):
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(request, *args, **kwargs):
-            # 获取剧本ID
-            playbook_id = request.json.get("playbook_id")  # 从JSON body获取
+            playbook_id = request.json.get("playbook_id")  # 获取剧本id
             if not playbook_id:
-                playbook_id = request.json.get("id")  # 从URL参数获取
+                playbook_id = request.json.get("flow_id")  # 获取剧本版本id
                 if not playbook_id:
                     raise CustomError(ErrorCode.ParameterError)
-
-            user = request.ctx.session.get('account_info')
-            if not user:
-                raise CustomError(ErrorCode.AccountNotFound)
-
-            has_access = await check_playbook_permission(
-                request,
-                user,
-                playbook_id,
-                required_permissions
-            )
-
-            if not has_access:
-                raise CustomError(ErrorCode.Unauthorized)
-
-            return await func(request, *args, **kwargs)
-
-        return wrapper
-
-    return decorator
-
-
-def playbook_version_permission(*required_permissions: str):
-    """
-    剧本版本权限验证装饰器（支持多权限验证）
-
-    使用示例：
-    @playbook_permission('r')        # 需要读权限
-    @playbook_permission('u', 'd')   # 需要更新或删除权限
-    """
-
-    def decorator(func):
-        @functools.wraps(func)
-        async def wrapper(request, *args, **kwargs):
-            # 获取剧本ID
-            pv_id = request.json.get("id")
-            pv = await PlaybookVersion.get_or_none(id=pv_id)
-            playbook_id = pv.playbook_id
-            if not playbook_id:
-                raise CustomError(ErrorCode.ParameterError)
 
             user = request.ctx.session.get('account_info')
             if not user:
@@ -186,6 +145,11 @@ async def check_playbook_permission(request, user, playbook_id, required_permiss
         pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id, users_id=user_id)
         if pp:
             data = pp.permissions
+        else:
+            pv = await PlaybookVersion.get_or_none(id=playbook_id)
+            pp = await PlaybookPermissions.get_or_none(pb_id=pv.playbook_id, users_id=user_id)
+            if pp:
+                data = pp.permissions
     if data and all(perm in data for perm in required_permissions):
         return True
     else:
@@ -195,8 +159,13 @@ async def check_playbook_permission(request, user, playbook_id, required_permiss
                 pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id, roles_id=role)
                 if pp:
                     data = pp.permissions
-                    if data and all(perm in data for perm in required_permissions):
-                        return True
+                else:
+                    pv = await PlaybookVersion.get_or_none(id=playbook_id)
+                    pp = await PlaybookPermissions.get_or_none(pb_id=pv.playbook_id, roles_id=role)
+                    if pp:
+                        data = pp.permissions
+                if data and all(perm in data for perm in required_permissions):
+                    return True
     return False
 
 
