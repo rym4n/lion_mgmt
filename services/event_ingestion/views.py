@@ -610,15 +610,6 @@ async def binding_event_ingestion_script(request):
                     [f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]),
                 "condition": f"{conditional_statements}"
             }
-        data.setdefault("transforms", {})[f"{topic}_kafka_transforms"] = {
-            "type": "remap",
-            "inputs": [f"{topic}_transforms"] if conditions else (
-                [f"{topic}_dedupe_transforms"] if request_data.get('fields') and request_data.get('number') else (
-                    [f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])),
-            "source": """
-.aioe_event_id = uuid_v4()
-"""
-        }
 
         if event_name == "default":
             event_new_name = '"{}" + "_" + to_string!(.datetime_str)'.format(event.event_ingestion_name)
@@ -626,8 +617,11 @@ async def binding_event_ingestion_script(request):
             event_new_name = '{}'.format(event_name)
         data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
             "type": "remap",
-            "inputs": [f"{topic}_kafka_transforms"],
+            "inputs": [f"{topic}_transforms"] if conditions else (
+                [f"{topic}_dedupe_transforms"] if request_data.get('fields') and request_data.get('number') else (
+                    [f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])),
             "source": """
+.aioe_event_id = uuid_v4()
 .log_data = to_string(encode_json(.log))
 .id = .aioe_event_id
 .ctime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
@@ -641,7 +635,7 @@ del(.datetime_str)
 """.format(event_new_name, event.event_ingestion_name, event_ingestion_id)}
 
         data["sinks"][f"{topic}_sinks"] = {
-            "inputs": [f"{topic}_kafka_transforms"],
+            "inputs": [f"{topic}_event_transforms"],
             "type": "kafka",
             "bootstrap_servers": KAFKA_SERVERS,
             "topic": topic,
@@ -732,9 +726,6 @@ async def unbundled_event_ingestion_script(request):
 
                     if f"{ers.topic}_dedupe_transforms" in data["transforms"]:
                         del data["transforms"][f"{ers.topic}_dedupe_transforms"]
-
-                    if f"{ers.topic}_kafka_transforms" in data["transforms"]:
-                        del data["transforms"][f"{ers.topic}_kafka_transforms"]
 
                     if f"{ers.topic}_event_transforms" in data["transforms"]:
                         del data["transforms"][f"{ers.topic}_event_transforms"]

@@ -273,7 +273,11 @@ class ChatManager:
                             event.close_time = pytz.timezone("Asia/Shanghai").localize(datetime.now())
                             await event.save()
                         log["event_id"] = event.id
-
+                if "event_id" in log:
+                    for _ in range(5):
+                        if await Events.exists(id=log["event_id"]):
+                            break
+                        await asyncio.sleep(0.2)
                 to_insert.append(Runlog(**log))
         try:
             await Runlog.bulk_create(to_insert, update_fields=["status", "end_time", "result"], on_conflict=["run_id", "node_id", "node_name", "resource_name"])
