@@ -610,11 +610,6 @@ async def binding_event_ingestion_script(request):
                     [f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]),
                 "condition": f"{conditional_statements}"
             }
-
-        if event_name == "default":
-            event_new_name = '"{}" + "_" + to_string!(.datetime_str)'.format(event.event_ingestion_name)
-        else:
-            event_new_name = '{}'.format(event_name)
         data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
             "type": "remap",
             "inputs": [f"{topic}_transforms"] if conditions else (
@@ -632,7 +627,7 @@ async def binding_event_ingestion_script(request):
 .event_source = "{}"
 .event_ingestion_id = "{}"
 del(.datetime_str)
-""".format(event_new_name, event.event_ingestion_name, event_ingestion_id)}
+""".format(event_name, event.event_ingestion_name, event_ingestion_id)}
 
         data["sinks"][f"{topic}_sinks"] = {
             "inputs": [f"{topic}_event_transforms"],
@@ -1018,25 +1013,23 @@ async def grok_ai(request):
     """
     log = request.json.get('log')
     SYSTEM_PROMPT = """
-    你是一位日志解析专家，专注于根据提供的日志样例生成 *单个* Grok 表达式。
+# 角色
+你是一位日志解析专家，擅长使用vecotr工具,能够根据提供的日志样例生成 *单个* Grok 表达式。
 
-    目标：只返回最终 Grok 表达式字符串（单行）。不得输出除表达式本身以外的任何内容：不得有说明、注释、Markdown、代码块、前缀、后缀、空行或其它字符。
+# 目标
+只返回最终 Grok 表达式字符串（单行）,不得输出除表达式本身以外的任何内容
 
-    生成规则：
-    1. 基于我提供的日志样例自动识别固定文本、字段边界与字段类型。
-    2. 优先使用 Logstash 官方内置模式（如 TIMESTAMP_ISO8601、IPV4、NUMBER、WORD、DATA、GREEDYDATA 等）。
-    3. 为重要字段命名语义化标签（如 timestamp、src_ip、dst_ip、user、msg 等；用小写+下划线）。
-    4. 保留日志中的实际分隔符（空格、冒号、方括号等）以确保匹配准确。
-    5. 尽量精简，避免过度捕获；若格式不稳定，可在不影响关键字段的前提下放宽非关键部分到 DATA/GREEDYDATA。
-    6. 如果日志格式完全无法判定，最后退化为 `%{GREEDYDATA:message}`。
+# 规则
+1. 基于我提供的日志样例自动识别固定文本、字段边界与字段类型
+2. 优先使用内置模式: USERNAME, USER, EMAILLOCALPART, EMAILADDRESS, INT, BASE10NUM, NUMBER, BASE16NUM, BASE16FLOAT, WORD, NOTSPACE, SPACE, DATA, GREEDYDATA, QUOTEDSTRING, UUID, MAC, IPV6, IPV4, IP, HOSTNAME, IPORHOST, HOSTPORT, YEAR, HOUR, MINUTE, SECOND, TIME, DATE_US, DATE_EU, ISO8601_TIMEZONE, ISO8601_SECOND, TIMESTAMP_ISO8601, DATE, DATESTAMP, TZ, DATESTAMP_RFC822, DATESTAMP_RFC2822, DATESTAMP_OTHER, DATESTAMP_EVENTLOG, SYSLOGTIMESTAMP
+3. 尽量精简,避免过度捕获；不需要刻意区分 DATA/GREEDYDATA
 
-    输出格式（严格）：
-    仅输出 Grok 表达式本身（单行）。不要包裹引号，不要回显“grok”字样，不要多余换行。
+# 输出格式（严格）：
+仅输出 Grok 表达式本身（单行）。不要包裹引号,不要回显“grok”字样,不要多余换行。
 
-    示例（说明用，真实输出时不含此类内容）：
-    %{TIMESTAMP_ISO8601:timestamp} %{IPV4:src}:%{NUMBER:src_port:int} -> %{IPV4:dst}:%{NUMBER:dst_port:int} %{WORD:action}
-
-    现在等待日志样例。当我提供样例后，你输出唯一的 Grok 表达式。
+# 示例（仅供参考，真实输出时不含此类内容）：
+日志样例：2020-10-02T23:22:12.223222Z info Hello world
+输出结果：%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:level} %{GREEDYDATA:message}
     """
 
     ai_cfg = await get_ai_config(request.ctx.cache_client)
@@ -1055,7 +1048,7 @@ async def grok_ai(request):
     )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": log}
+        {"role": "user", "content": f"提供给你的日志样例是：{log}"}
     ]
     response = client.chat.completions.create(
         model=model,

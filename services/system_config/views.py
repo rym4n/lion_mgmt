@@ -340,6 +340,20 @@ async def set_ai(request):
     return response_ok('success')
 
 
+@system_bp.post('/transforms-update')
+async def transforms_update(request):
+    """
+    更新transforms模型
+        data:[{"key":"", "value":"", "type":""}]
+    """
+    for item in request.json.get("data"):
+        await Config.update_or_create(key=item.get("key"),
+                                      defaults={"value": item.get("value"), "type": item.get("type")},
+                                      module="transforms")
+
+    return response_ok("添加成功")
+
+
 @system_bp.post("/audit")
 @requires_permission("audit:r")
 async def search_audit(request):
