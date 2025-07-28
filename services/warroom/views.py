@@ -343,7 +343,9 @@ async def query_messages(request: Request):
         message_list = []
         for msg in reversed(messages):
             if msg.type == "runlog":
-                runlog = await Runlog.get(id=msg.content)
+                run_id = msg.content.split(":")[0]
+                node_id = msg.content.split(":")[1]
+                runlog = await Runlog.get(run_id=run_id, node_id=node_id)
                 content = "[已撤回]" if msg.is_recalled else runlog.json
             else:
                 content = "[已撤回]" if msg.is_recalled else msg.content
