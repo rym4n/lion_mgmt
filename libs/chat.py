@@ -277,7 +277,7 @@ class ChatManager:
                         log["event_id"] = event.id
                 to_insert.append(Runlog(**log))
         try:
-            await Runlog.bulk_create(to_insert, update_fields=["status", "end_time", "result", "utime"], on_conflict=["run_id", "node_id", "node_name", "resource_name"])
+            await Runlog.bulk_create(to_insert, update_fields=["status", "end_time", "result", "utime", "id"], on_conflict=["run_id", "node_id", "node_name", "resource_name"])
         except Exception as e:
             logger.info(f"runlog消息：{to_insert}")
             logger.error(f"{e} | {traceback.format_exc()}")
