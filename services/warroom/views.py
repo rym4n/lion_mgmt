@@ -343,7 +343,8 @@ async def query_messages(request: Request):
         message_list = []
         for msg in reversed(messages):
             if msg.type == "runlog":
-                content = "[已撤回]" if msg.is_recalled else orjson.loads(msg.content)
+                runlog = await Runlog.get(id=msg.content)
+                content = "[已撤回]" if msg.is_recalled else runlog.json
             else:
                 content = "[已撤回]" if msg.is_recalled else msg.content
             message_list.append({
