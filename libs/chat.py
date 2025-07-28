@@ -80,13 +80,15 @@ async def creat_message(room_id, log, user, redis):
     content = log.get("run_id") + ":" + log.get("node_id")
     if got_lock:
         # 当前是第一个拿到锁的人，创建记录
-        msg = await Message.update_or_create(
+        msg, _ = await Message.update_or_create(
             type="runlog",
             sender=sender,
             room_id=room_id,
             content=content,
-            image_content="",
-            receiver=user
+            receiver=user,
+            defaults={
+                "image_content": ""
+            }
         )
     else:
         # 其他执行引擎进入这里：稍等一下，再尝试获取已创建的记录
