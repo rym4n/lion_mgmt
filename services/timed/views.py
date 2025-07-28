@@ -197,6 +197,7 @@ async def get_all(request):
     paged_items = filtered_items[start:end]
     items = []
     for item in paged_items:
+        await timer_success_rate(item.id)
         data = item.json
         if item.playbook_input:
             input_args = await get_playbook_input(item.playbook_input["flow_id"])
@@ -406,8 +407,6 @@ async def get_run_log(request):
         run_logs = [logs_by_run_id[run_id] for run_id in run_ids]
     else:
         run_logs = []
-
-    await timer_success_rate(timed_id)
 
     return response_ok({
         "page": page,
