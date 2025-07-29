@@ -2,6 +2,7 @@
 # coding=utf-8
 import asyncio
 import datetime
+import os
 import re
 import time
 from collections import defaultdict
@@ -9,13 +10,13 @@ from collections import defaultdict
 import orjson
 import pytz
 from aiocache import caches
-from sanic import Blueprint
+from sanic import Blueprint, response
 from tortoise.expressions import Q
 from tortoise.functions import Count
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
-from core.response import response_ok
+from core.response import response_ok, response_fail
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license, playbook_permission, \
@@ -24,7 +25,7 @@ from libs.utils import gen_order_version
 from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, \
     EventRelatedScript, Timed
 from services.tools.views import tool_action_update, tool_action_playbook_delete
-from settings import KAFKA_SERVERS, TASK_TOPIC
+from settings import KAFKA_SERVERS, TASK_TOPIC, DOWNLOAD_DIR
 
 workflow_bp = Blueprint('workflow', url_prefix='/playbook')
 _all__ = ["workflow_bp"]
@@ -707,3 +708,20 @@ async def select_permission_all(request):
     pps = await PlaybookPermissions.filter(pb_id=playbook_id).all().prefetch_related("users", "roles")
 
     return response_ok([pp.json for pp in pps])
+
+
+@workflow_bp.get("/file/download")
+async def download_file(request):
+    """
+    下载文件
+    """
+    file_name = request.args.get("filename")
+    if not file_name:
+        return response_fail(ErrorCode.ParameterError)
+
+    fname = os.path.split(file_name)[1]
+    file_path = os.path.join(DOWNLOAD_DIR, fname)
+    if not os.path.exists(file_path):
+        return response_fail(ErrorCode.FileNotFound)
+
+    return await response.file(file_path, filename=fname)
