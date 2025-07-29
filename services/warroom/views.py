@@ -694,8 +694,14 @@ async def activity(request, activityId):
     if not activityId:
         raise CustomError(ErrorCode.ParamValueError)
     logs = await Runlog.filter(run_id=activityId, deleted=False).all()
-
-    return response_ok([log.json for log in logs])
+    result = {}
+    for log in logs:
+        result["id"] = log.id
+    return response.json({
+        "code": 0,
+        "data": [log.json for log in logs],
+        "result": result
+    })
 
 
 @warroom_bp.post("/send")
@@ -705,12 +711,24 @@ async def send_message(request):
     给作战室发送消息
 
     {"type":"public","content":"你好","image_content":"","room_id":"9930a0b7-4545-45a6-9827-3e973b03a5ff"}
-    room_id: 必填，作战室ID
+    event_id: 必填，事件ID
     msg: 消息内容
     """
-    data = {"type": "public", "content": request.json.get("msg"), "image_content": "", "room_id": request.json.get("room_id")}
+    event = await Events.get(id=request.json.get("event_id"), deleted=False).prefetch_related("room", "creator", "updator")
+    if not event:
+        raise CustomError(ErrorCode.NotFound)
+    creator = request.ctx.session['account_info']
+    if not event.room:
+        room_name = event.event_name + "_" + gen_random_code(6)
+        if await Room.filter(name=room_name, deleted=False).exists():
+            raise CustomError(ErrorCode.RoomNameExists)
+        room = await Room.create(name=room_name, creator=creator)
+        event.room = room
+    await event.save()
+    await creator.star_rooms.add(event.room)
+    await event.room.users.add(creator)
+    data = {"type": "public", "content": request.json.get("msg"), "image_content": "", "room_id": event.room_id}
 
-    user = request.ctx.session['account_info']
     current_room_id = data.get("room_id")
     room = await Room.filter(id=current_room_id).get()
     if not room:
@@ -721,19 +739,19 @@ async def send_message(request):
 
     message = await Message.create(
         type="public",
-        sender=user,
+        sender=creator,
         room=room,
         content=content,
         image_content=image_content,
-        receiver=user
+        receiver=creator
     )
 
     message_data = {
         "type": "public",
         "message_id": str(message.id),
-        "sender_id": user.id,
-        "sender_name": user.username,
-        "sender_display_name": user.display_name,
+        "sender_id": creator.id,
+        "sender_name": creator.username,
+        "sender_display_name": creator.display_name,
         "content": content,
         "image_content": image_content,
         "timestamp": str(message.ctime),
