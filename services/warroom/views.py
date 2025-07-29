@@ -711,52 +711,46 @@ async def send_message(request):
     给作战室发送消息
 
     {"type":"public","content":"你好","image_content":"","room_id":"9930a0b7-4545-45a6-9827-3e973b03a5ff"}
-    event_id: 必填，事件ID
+    username: 必填，用户名
     msg: 消息内容
     """
-    logger.info(request.json.get("event_id"))
-    event = await Events.get_or_none(id=request.json.get("event_id"), deleted=False).prefetch_related("room", "creator", "updator")
-    if not event:
-        raise CustomError(ErrorCode.NotFound)
-    creator = request.ctx.session['account_info']
-    if not event.room:
-        room_name = event.event_name + "_" + gen_random_code(6)
-        if await Room.filter(name=room_name, deleted=False).exists():
-            raise CustomError(ErrorCode.RoomNameExists)
-        room = await Room.create(name=room_name, creator=creator)
-        event.room = room
-    await event.save()
-    await creator.star_rooms.add(event.room)
-    await event.room.users.add(creator)
-    data = {"type": "public", "content": request.json.get("msg"), "image_content": "", "room_id": event.room_id}
+    username = request.json.get('username')
+    partner = await Account.get(username=username)
+    sender = await Account.get(username="system", type="api")
+    if partner is None:
+        raise CustomError(ErrorCode.AccountNotFound)
 
-    current_room_id = data.get("room_id")
-    room = await Room.filter(id=current_room_id).get()
-    if not room:
-        raise Exception("作战室不存在")
+    room_info = await get_or_create_private_chat_room(request.ctx.cache_client, sender, partner)
+    room = await Room.get_or_none(id=room_info['room_id'])
+    await sender.star_rooms.add(room)
+    await partner.star_rooms.add(room)
+
+    data = {"type": "public", "content": request.json.get("msg"), "image_content": "", "room_id": room.id}
 
     content = data.get("content", "")
     image_content = data.get("image_content", "")
 
     message = await Message.create(
-        type="public",
-        sender=creator,
+        type="private",
+        sender=sender,
         room=room,
         content=content,
         image_content=image_content,
-        receiver=creator
+        receiver=partner
     )
 
+    await MessageAccount.create(message=message, account_id=partner.id)
+
     message_data = {
-        "type": "public",
+        "type": "private",
         "message_id": str(message.id),
-        "sender_id": creator.id,
-        "sender_name": creator.username,
-        "sender_display_name": creator.display_name,
+        "sender_id": sender.id,
+        "sender_name": sender.username,
+        "sender_display_name": sender.display_name,
         "content": content,
         "image_content": image_content,
         "timestamp": str(message.ctime),
-        "room_id": current_room_id
+        "room_id": room.id
     }
     caches.set_config(CACHE)
     await caches.get("redis_chat").client.publish(WR_TOPIC, orjson.dumps(message_data).decode())
