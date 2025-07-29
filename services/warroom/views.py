@@ -714,7 +714,8 @@ async def send_message(request):
     event_id: 必填，事件ID
     msg: 消息内容
     """
-    event = await Events.get(id=request.json.get("event_id"), deleted=False).prefetch_related("room", "creator", "updator")
+    logger.info(request.json.get("event_id"))
+    event = await Events.get_or_none(id=request.json.get("event_id"), deleted=False).prefetch_related("room", "creator", "updator")
     if not event:
         raise CustomError(ErrorCode.NotFound)
     creator = request.ctx.session['account_info']
