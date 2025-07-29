@@ -6,6 +6,7 @@ from libs.error_code.enum import BaseErrorCode, ErrorData
 class ErrorCode(BaseErrorCode):
     """错误码枚举类"""
 
+
     ServerError = ErrorData(5000, "服务异常，请稍后重试")
     ParameterError = ErrorData(4000, "参数错误")
     InvalidJsonError = ErrorData(4001, "请求体是无效的json格式")
@@ -112,3 +113,4 @@ class ErrorCode(BaseErrorCode):
     TypeNotSupportedError = ErrorData(4082, "当前转换类型不支持，请联系管理员")
 
     ESQueryError = ErrorData(4083, "ES查询参数错误")
+    FileNotFound = ErrorData(4084, "文件不存在")
