@@ -113,6 +113,27 @@ async def create_room(request: Request):
     })
 
 
+@warroom_bp.post("/invite")
+@requires_permission('warroom:u')
+async def invite_members(request: Request):
+    """
+    邀请成员加入作战室
+
+    请求参数：
+        id: 必填， 作战室id
+        members: 必填， 邀请用户ID列表
+    """
+    room = await Room.get_or_none(id=request.json.get("id"))
+    accounts = await Account.filter(id__in=request.json.get("members")).all()
+    for account in accounts:
+        if await room.users.filter(id=account.id).exists():
+            continue
+        await room.users.add(account)
+        await account.star_rooms.add(room)
+
+    return response_ok("邀请成功")
+
+
 @warroom_bp.post("/join")
 @requires_permission('warroom:u')
 async def join_room(request: Request):
