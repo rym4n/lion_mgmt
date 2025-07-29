@@ -6,6 +6,7 @@ import traceback
 import orjson
 from sanic import Blueprint, Request, Websocket
 from sanic.log import logger
+from sanic import response
 from tortoise.expressions import Q
 from websockets import ConnectionClosed
 
@@ -19,7 +20,7 @@ from libs.utils import gen_order_version, gen_random_code
 from models import Approvement, Events, ToolAction, Tool, Runlog
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import KAFKA_SERVERS, TASK_TOPIC
+from settings import KAFKA_SERVERS, TASK_TOPIC, WR_TOPIC
 
 warroom_bp = Blueprint('warroom', url_prefix='/warroom')
 __all__ = ['warroom_bp']
@@ -608,15 +609,17 @@ async def execution(request):
 
     请求参数：
         eventId: 必填，事件ID
-        executorInstanceType: 必填，运行类型，PLAYBOOK/ACTION
         executorInstanceId: 必填 实例ID(剧本版本id或动作id)
-        executorActionAssetId: 非必填 动作资源id
+        executorInstanceName: 非必填 执行实例名称(剧本或者动作名字)
+        executorInstanceType: 必填，运行类型，PLAYBOOK/ACTION
+        execMode: 非必填，执行模式，NORMAL 正常模式
+        executorActionAssetIds: 非必填 动作资源id,多个资源用,分割
         params: 非必填 运行参数 [{"key":"a","value":"b"},{"key":"c","value":"d"}]
     """
     eventId = request.json.get("eventId")
     executorInstanceType = request.json.get("executorInstanceType")
     executorInstanceId = request.json.get("executorInstanceId")
-    executorActionAssetId = request.json.get("executorActionAssetId")
+    executorActionAssetIds = request.json.get("executorActionAssetIds")
     executorParams = request.json.get("params")
     user = request.ctx.session['account_info']
     event = await (Events.get_or_none(id=eventId))
@@ -631,6 +634,7 @@ async def execution(request):
     if not room_id or not type:
         raise CustomError(ErrorCode.ParamValueError)
     params = {}
+    data = []
     input_data = {}
     if type == "flow":
         if executorParams:
@@ -649,22 +653,32 @@ async def execution(request):
         params["app_ver"] = tool.version
         params["main"] = tool.main
         params["action_input"] = input_data
-        params["resource"] = executorActionAssetId
         params["node_name"] = action.action["name"]
         params["action"] = action.action["func"]
         params["action_name"] = action.action["name"]
         params["retry_times"] = 1
         params["timeout"] = 300
     params["executor"] = user.id
-    msg = {"run_type": type, "run_id": gen_order_version(length=6), "run_args": params}
-    room = await Room.get_or_none(id=room_id)
-    room.updator = user
-    room.run_id.append(msg["run_id"])
-    await room.save()
-    await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    if executorActionAssetIds and type == "action":
+        for executorActionAssetId in executorActionAssetIds.split(","):
+            params["resource"] = executorActionAssetId
+            data.append(params)
+    else:
+        data.append(params)
+    for params in data:
+        run_id = gen_order_version(length=6)
+        msg = {"run_type": type, "run_id": run_id, "run_args": params}
+        room = await Room.get_or_none(id=room_id)
+        room.updator = user
+        room.run_id.append(msg["run_id"])
+        await room.save()
+        await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
+        await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
-    return response_ok({"activityId": msg.get("run_id")})
+    return response.json({
+        "code": 0,
+        "result": str(run_id)
+    })
 
 
 @warroom_bp.get("/activity/<activityId>")
@@ -681,3 +695,50 @@ async def activity(request, activityId):
     logs = await Runlog.filter(run_id=activityId, deleted=False).all()
 
     return response_ok([log.json for log in logs])
+
+
+@warroom_bp.get("/send")
+@requires_permission("warroom:r")
+async def send_message(request):
+    """
+    给作战室发送消息
+
+    {"type":"public","content":"你好","image_content":"","room_id":"9930a0b7-4545-45a6-9827-3e973b03a5ff"}
+    room_id: 必填，作战室ID
+    msg: 消息内容
+    """
+    data = {"type": "public", "content": request.json.get("msg"), "image_content": "", "room_id": request.json.get("room_id")}
+
+    user = request.ctx.session['account_info']
+    current_room_id = data.get("room_id")
+    room = await Room.filter(id=current_room_id).get()
+    if not room:
+        raise Exception("作战室不存在")
+
+    content = data.get("content", "")
+    image_content = data.get("image_content", "")
+
+    message = await Message.create(
+        type="public",
+        sender=user,
+        room=room,
+        content=content,
+        image_content=image_content,
+        receiver=user
+    )
+
+    message_data = {
+        "type": "public",
+        "message_id": str(message.id),
+        "sender_id": user.id,
+        "sender_name": user.username,
+        "sender_display_name": user.display_name,
+        "content": content,
+        "image_content": image_content,
+        "timestamp": str(message.ctime),
+        "room_id": current_room_id
+    }
+
+    await request.ctx.cache_client.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+
+    return response_ok("发送成功")

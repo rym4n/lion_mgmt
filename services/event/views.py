@@ -1,6 +1,7 @@
 # coding=utf-8
 import time
 from datetime import datetime
+from sanic import response
 
 import pytz
 from sanic import Blueprint
@@ -15,6 +16,18 @@ from models import Events, Runlog, Room, Account, Role, EventsIngestion
 
 event_bp = Blueprint('event', url_prefix='/event')
 _all__ = ["event_bp"]
+
+PROCESSSTATUS = {
+    "已处理": "POCESSED",
+    "处理中": "PROCESSING",
+    "待处理": "OPENED",
+}
+
+STATUS = {
+    "已处理": "RESOLVED",
+    "处理中": "OPEN",
+    "待处理": "NEW",
+}
 
 
 @event_bp.post('/list')
@@ -105,7 +118,7 @@ async def artificial_create_event(request):
     event_name = request.json.get("eventName")
     event_process_status = "待处理"
     event_source = "人工"
-    owner = ({"role": [], "user": [request.json.get("ownerId") or ""]} or {})
+    owner = ({"role": [], "user": [request.ctx.session['account_info'].id or ""]} or {})
     user = request.ctx.session['account_info']
     event_summary = (request.json.get("eventSummary") or "")
     event_ingestion_id = ""
@@ -119,8 +132,54 @@ async def artificial_create_event(request):
                                     event_source=event_source, owner=owner,
                                     creator=user, event_summary=event_summary, updator=user,
                                     event_ingestion_id=event_ingestion_id, log_data=log_data)
+        await event.fetch_related("scene")
+        run_log = await Runlog.filter(event_id=event.id, deleted=False).first()
 
-    return response_ok({"id": event.id})
+        user_ids = event.owner["user"]
+
+        user_objs = await Account.filter(id__in=user_ids)
+
+        members = [{"eventId": event.id, "userId": u.id, "username": u.username, "eventName": event.event_name, "follow": True} for u in user_objs]
+    return response.json({
+        "code": 0,
+        "data": {
+            "id": event.id,
+        },
+        "result": {
+            "id": event.id,
+            "eventName": event.event_name,
+            "categoryName": "",
+            "categoryId": 0,
+            "ownerId": request.ctx.session['account_info'].id,
+            "eventSummary": event.event_summary,
+            "eventStatus": STATUS[event.event_process_status],
+            "eventProcessStatus": PROCESSSTATUS[event.event_process_status],
+            "sceneName": event.scene.name if event.scene else "",
+            "sceneDisplay": event.scene.remark if event.scene else "",
+            "logId": run_log.id if run_log else "",
+            "relationEventId": 0,
+            "relationType": "UNKNOWN",
+            "eventSource": "MANUAL",
+            "bizName": "",
+            "openTime": None,
+            "resolvedTime": event.close_time,
+            "categoryDisplayName": None,
+            "resolvedBy": "",
+            "preBizModel": None,
+            "logModel": None,
+            "permissions": [
+                {
+                    "id": None,
+                    "eventId": event.id,
+                    "ownerType": None,
+                    "ownerId": request.ctx.session['account_info'].id,
+                    "permissionBy": "EVENT_OWNER",
+                    "relationId": None
+                }
+            ],
+            "members": members
+        }
+    })
 
 
 @event_bp.post('/create')
