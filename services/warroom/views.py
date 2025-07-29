@@ -697,7 +697,7 @@ async def activity(request, activityId):
     return response_ok([log.json for log in logs])
 
 
-@warroom_bp.get("/send")
+@warroom_bp.post("/send")
 @requires_permission("warroom:r")
 async def send_message(request):
     """
