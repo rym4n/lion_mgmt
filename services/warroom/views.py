@@ -9,6 +9,7 @@ from sanic.log import logger
 from sanic import response
 from tortoise.expressions import Q
 from websockets import ConnectionClosed
+from aiocache import caches
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -20,7 +21,7 @@ from libs.utils import gen_order_version, gen_random_code
 from models import Approvement, Events, ToolAction, Tool, Runlog
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import KAFKA_SERVERS, TASK_TOPIC, WR_TOPIC
+from settings import KAFKA_SERVERS, TASK_TOPIC, WR_TOPIC, CACHE
 
 warroom_bp = Blueprint('warroom', url_prefix='/warroom')
 __all__ = ['warroom_bp']
@@ -738,7 +739,7 @@ async def send_message(request):
         "timestamp": str(message.ctime),
         "room_id": current_room_id
     }
-
-    await request.ctx.cache_client.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+    caches.set_config(CACHE)
+    await caches.get("redis_chat").client.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
     return response_ok("发送成功")
