@@ -343,8 +343,7 @@ async def query_messages(request: Request):
             "private_history" - 获取私聊历史
             "search_messages" - 搜索消息
             "announcements" - 获取公告列表
-        room_id: 除了私聊以外必填，作战室ID
-        partner_id: 私聊必填，私聊对象ID
+        room_id: 作战室ID
         keyword: 搜索必填，搜索关键词
         limit: 可选，每页条数，默认20
         offset: 可选，偏移量，默认0
@@ -352,13 +351,12 @@ async def query_messages(request: Request):
     user = request.ctx.session['account_info']
     query_type = request.json.get("query_type")
     room_id = request.json.get("room_id")
-    partner_id = request.json.get("partner_id")
     keyword = request.json.get("keyword", "")
     limit = request.json.get("limit", 20)
     offset = request.json.get("offset", 0)
 
     # 群聊历史. 先查询后创建消息发送
-    if query_type == "public_history":
+    if query_type == "public_history" and keyword in ["", None]:
         if not room_id:
             raise CustomError(ErrorCode.ParamValueError)
         total_count = await Message.filter(type__in=["public", "ai", "runlog"], room_id=room_id).count()
@@ -394,38 +392,28 @@ async def query_messages(request: Request):
         })
 
     # 私聊历史
-    elif query_type == "private_history":
-        if not partner_id:
-            raise CustomError(ErrorCode.ParamValueError)
-
-        partner = await Account.get(id=partner_id)
-        if partner is None:
-            raise CustomError(ErrorCode.AccountNotFound)
-        # 先获取私聊作战室
-        chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
-        condition = (Q(sender__id=user.id) & Q(receiver_id=partner_id)) | (Q(sender_id=partner_id) & Q(receiver_id=user.id))
+    elif query_type == "private_history" and keyword in ["", None]:
         # 消息计数
-        total_count = await Message.filter(condition, type__in=["private", "ai", "runlog"], room_id=chat_room['room_id']).count()
+        total_count = await Message.filter(type__in=["private", "ai", "runlog"], room_id=room_id).count()
         # 分页处理
-        messages = await Message.filter(condition, type__in=["private", "ai", "runlog"], room_id=chat_room['room_id']).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
+        messages = await Message.filter(type__in=["private", "ai", "runlog"], room_id=room_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender', 'receiver')
         message_list = []
-        if partner:
-            for msg in reversed(messages):
-                message_list.append({
-                    "type": msg.type,
-                    "message_id": msg.id,
-                    "sender_id": msg.sender.id,
-                    "sender_name": msg.sender.username,
-                    "sender_display_name": msg.sender.display_name,
-                    "receiver_id": partner.id,
-                    "receiver_name": partner.username,
-                    "receiver_display_name": partner.display_name,
-                    "content": "[已撤回]" if msg.is_recalled else msg.content,
-                    "image_content": msg.image_content,
-                    "timestamp": str(msg.ctime),
-                    "is_recalled": msg.is_recalled,
-                    "room_id": chat_room['room_id']
-                })
+        for msg in reversed(messages):
+            message_list.append({
+                "type": msg.type,
+                "message_id": msg.id,
+                "sender_id": msg.sender.id,
+                "sender_name": msg.sender.username,
+                "sender_display_name": msg.sender.display_name,
+                "receiver_id": msg.receiver.id,
+                "receiver_name": msg.receiver.username,
+                "receiver_display_name": msg.receiver.display_name,
+                "content": "[已撤回]" if msg.is_recalled else msg.content,
+                "image_content": msg.image_content,
+                "timestamp": str(msg.ctime),
+                "is_recalled": msg.is_recalled,
+                "room_id": room_id
+            })
 
         return response_ok({
             "messages": message_list,
@@ -437,11 +425,8 @@ async def query_messages(request: Request):
         })
 
     # 搜索消息
-    elif query_type == "search_messages":
-        if not keyword:
-            raise CustomError(ErrorCode.ParamValueError)
-        # 传入作战室ID, 搜索作战室群聊记录
-        if room_id:
+    elif keyword:
+        if query_type == "public_history":
             query = Message.filter(
                 type="public",
                 room_id=room_id,
@@ -449,14 +434,8 @@ async def query_messages(request: Request):
                 is_recalled=False,
             )
         # 传入私聊用户ID, 搜索私聊历史记录
-        elif partner_id:
-            partner = await Account.get(id=partner_id)
-            if partner is None:
-                raise CustomError(ErrorCode.AccountNotFound)
-            # 先获取私聊作战室
-            chat_room = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
-            # 筛消息发送/接收包含私聊双方的，建议改造创建私聊作战室逻辑，直接按作战室号筛就得了
-            query = Message.filter((Q(sender_id=user.id) & Q(receiver_id=partner_id)) | (Q(sender_id=partner_id) & Q(receiver_id=user.id)), type="private", room_id=chat_room['room_id'], content__contains=keyword, is_recalled=False)
+        elif query_type == "private_history":
+            query = Message.filter(type="private", room_id=room_id, content__contains=keyword, is_recalled=False)
         else:
             raise CustomError(ErrorCode.ParamValueError)
 
