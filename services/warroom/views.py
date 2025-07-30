@@ -399,6 +399,13 @@ async def query_messages(request: Request):
         messages = await Message.filter(type__in=["private", "ai", "runlog"], room_id=room_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender', 'receiver')
         message_list = []
         for msg in reversed(messages):
+            if msg.type == "runlog":
+                run_id = msg.content.split(":")[0]
+                node_id = msg.content.split(":")[1]
+                runlog = await Runlog.get(run_id=run_id, node_id=node_id)
+                content = "[已撤回]" if msg.is_recalled else runlog.json
+            else:
+                content = "[已撤回]" if msg.is_recalled else msg.content
             message_list.append({
                 "type": msg.type,
                 "message_id": msg.id,
@@ -408,7 +415,7 @@ async def query_messages(request: Request):
                 "receiver_id": msg.receiver.id,
                 "receiver_name": msg.receiver.username,
                 "receiver_display_name": msg.receiver.display_name,
-                "content": "[已撤回]" if msg.is_recalled else msg.content,
+                "content": content,
                 "image_content": msg.image_content,
                 "timestamp": str(msg.ctime),
                 "is_recalled": msg.is_recalled,
@@ -695,8 +702,40 @@ async def activity(request, activityId):
         raise CustomError(ErrorCode.ParamValueError)
     logs = await Runlog.filter(run_id=activityId, deleted=False).all()
     result = {}
+    if logs[0].playbook_name != "执行动作":
+        executorInstanceId = logs[0].playbook_version_id
+        executorInstanceName = logs[0].playbook_name
+        executorInstanceType = "PLAYBOOK"
+    else:
+        actions = await ToolAction.filter(tool_name=logs[0].tool_name,version_number=logs[0].tool_version, deleted=False).all()
+        for action in actions:
+            if action.action["func"] == logs[0].action_name and action.action["name"] == logs[0].action_display_name:
+                executorInstanceId = action.id
+                executorInstanceName = logs[0].action_display_name
+                executorInstanceType = "ACTION"
+                break
+    result["id"] = logs[0].id
+    result["activityId"] = logs[0].run_id
+    result["eventId"] = logs[0].event_id
+    result["executorInstanceId"] = executorInstanceId
+    result["executorInstanceName"] = executorInstanceName
+    result["executorInstanceType"] = executorInstanceType
+    result["execMode"] = None
+    result["postStatus"] = None
+    result["postCode"] = None
+    result["postMsg"] = None
+    status = []
     for log in logs:
-        result["id"] = log.id
+        status.append(log.status)
+    if 1 in status:
+        result["excuteStatus"] = "RUNNING"
+    elif 2 in status:
+        result["excuteStatus"] = "WAITING_APPROVE"
+    elif -1 in status:
+        result["excuteStatus"] = "FAIL"
+    else:
+        result["excuteStatus"] = "SUCCESS"
+
     return response.json({
         "code": 0,
         "data": [log.json for log in logs],
