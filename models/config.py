@@ -12,7 +12,7 @@ class Config(BaseModel):
     """
 
     key: str = fields.CharField(max_length=255, unique=True, description="配置项")
-    value = EncryptedCharField(max_length=1000, null=False, description="配置值")
+    value = EncryptedCharField(max_length=4000, null=False, description="配置值")
     type: str = fields.CharField(max_length=255, null=True, description="配置状态")
     module: str = fields.CharField(max_length=255, description="所属模块")
 
