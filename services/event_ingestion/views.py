@@ -298,7 +298,7 @@ async def get_all_events_ingestion(request):
         name: 事件名称 (str) 非必填
     """
     page = request.json.get('page', 1)
-    size = request.json.get('size', 10)
+    size = request.json.get("size", 15)
     offset = (page - 1) * size
     limit = size
 
@@ -493,7 +493,7 @@ async def get_event_ingestion_kafka_sample(request):
     """
     data = request.json
     event_id = data.get('id')
-    size = data.get('size', 10)
+    size = data.get("size", 15)
     if size < 1:
         raise CustomError(ErrorCode.ParameterError)
 

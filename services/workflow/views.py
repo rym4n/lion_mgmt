@@ -119,7 +119,7 @@ async def list_workflow(request):
     """
     json_params = request.json
     page = int(json_params.get("page", 1))
-    size = int(json_params.get("size", 10))
+    size = int(json_params.get("size", 15))
     offset = (page - 1) * size
     limit = size
 
@@ -455,7 +455,7 @@ async def run_history(request):
     body = request.json
     playbook_id = body.get("playbook_id")
     page = int(body.get("page", 1))
-    size = int(body.get("size", 10))
+    size = int(body.get("size", 15))
 
     if not playbook_id or page < 1 or size < 1:
         raise CustomError(ErrorCode.ParameterError)

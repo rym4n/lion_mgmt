@@ -45,7 +45,7 @@ async def all_variables(request):
         keyword: 可选参数，变量名 或 变量值（元素要完全匹配）
     """
     page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 10))
+    size = int(request.json.get("size", 15))
     offset = (page - 1) * size
     limit = size
     condition = Q()

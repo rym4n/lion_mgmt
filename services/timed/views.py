@@ -165,7 +165,7 @@ async def get_all(request):
         - keyword str 搜索关键字  可选 目前支持任务名称，动作名称，剧本名称搜索
     """
     page = int(request.json.get("page") or 1)
-    size = int(request.json.get("size") or 10)
+    size = int(request.json.get("size") or 15)
     keyword = request.json.get("keyword", "").strip()
 
     # 获取全部（后续在 Python 层过滤）
@@ -373,7 +373,7 @@ async def get_run_log(request):
     """
     timed_id = request.json.get("id")
     page = int(request.json.get("page") or 1)
-    size = int(request.json.get("size") or 10)
+    size = int(request.json.get("size") or 15)
     start_time = request.json.get("start_time")
     end_time = request.json.get("end_time")
     status = request.json.get("status")

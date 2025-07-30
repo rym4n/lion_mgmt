@@ -87,7 +87,7 @@ async def all_users(request):
         username: 可选，用户名，搜索时使用
     """
     page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 10))
+    size = int(request.json.get("size", 15))
     offset = (page - 1) * size
     limit = size
     # 分页查询Account，返回总数和数据
@@ -160,7 +160,7 @@ async def list_api_users(request):
         keyword: 可选，搜索时使用
     """
     page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 10))
+    size = int(request.json.get("size", 15))
     offset = (page - 1) * size
     limit = size
     # 分页查询ApiUserToken，返回总数和数据

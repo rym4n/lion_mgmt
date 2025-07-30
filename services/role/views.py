@@ -44,7 +44,7 @@ async def find_all(request):
         size:页容量
     """
     page = int(request.json.get('page', 1))
-    size = int(request.json.get('size', 10))
+    size = int(request.json.get("size", 15))
     offset = (page - 1) * size
     limit = size
     roles = await Role.filter(deleted=False).offset(offset).limit(limit).values()

@@ -33,7 +33,7 @@ async def all_approvement(request):
     """
     params = request.json
     page = int(params.get("page", 1))
-    size = int(params.get("size", 10))
+    size = int(params.get("size", 15))
     offset = (page - 1) * size
 
     condition = Q(approvers=request.ctx.session['account_info'].id)

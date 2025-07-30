@@ -1,10 +1,9 @@
 # coding=utf-8
-import time
 from datetime import datetime
-from sanic import response
 
 import pytz
 from sanic import Blueprint
+from sanic import response
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
@@ -45,7 +44,7 @@ async def get_all_events(request):
     """
 
     page = int(request.json.get('page', 1))
-    size = int(request.json.get('size', 10))
+    size = int(request.json.get('size', 15))
     offset = (page - 1) * size
     limit = size
 
@@ -57,8 +56,7 @@ async def get_all_events(request):
     if request.json.get("event_source"):
         filters["event_source"] = request.json.get("event_source")
 
-    events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room", "creator",
-                                                                                               "updator", "scene")
+    events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room", "creator", "updator", "scene")
     total = await Events.filter(**filters).count()
 
     data = []
@@ -85,12 +83,12 @@ async def get_all_events(request):
         event_ingestion = await EventsIngestion.get_or_none(event_ingestion_name=event.event_source, deleted=False).prefetch_related("creator")
         if event_ingestion:
             event_dict["event_source"] = {
-                "name":event_ingestion.event_ingestion_name,
+                "name": event_ingestion.event_ingestion_name,
                 "describe": event_ingestion.event_ingestion_describe,
                 "transforms_type": event_ingestion.transforms_type,
                 "enabled": event_ingestion.enabled_status,
                 "ctime": event_ingestion.ctime.astimezone(pytz.timezone('Asia/Shanghai')).strftime("%Y-%m-%d %H:%M:%S"),
-                "creator_id": {"username":event_ingestion.creator.username, "display_name": event_ingestion.creator.display_name} if event_ingestion.creator else {},
+                "creator_id": {"username": event_ingestion.creator.username, "display_name": event_ingestion.creator.display_name} if event_ingestion.creator else {},
             }
 
         data.append(event_dict)

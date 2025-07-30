@@ -369,7 +369,7 @@ async def search_audit(request):
         size: 每页条数
     """
     page = int(request.json.get('page', 1))
-    size = int(request.json.get('size', 10))
+    size = int(request.json.get("size", 15))
     offset = (page - 1) * size
     limit = size
 

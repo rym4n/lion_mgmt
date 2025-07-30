@@ -321,7 +321,7 @@ async def all_tools(request):
         - tag: 标签名称（可选，精确搜索）   str
     """
     page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 10))
+    size = int(request.json.get("size", 15))
     key = request.json.get("key", "").strip()
 
     if size > 50:
