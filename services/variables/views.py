@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
-
+from aiocache import caches
 from sanic import Blueprint
 from tortoise.expressions import Q
 
@@ -30,6 +30,7 @@ async def new_variable(request):
         raise CustomError(ErrorCode.ParameterError)
 
     var = await Variables.create(name=request.json["name"], value=value, updator=request.ctx.session['account_info'])
+    await caches.get("redis_chat").set(f"global_{var.name}", value)
     return response_ok(var.json)
 
 
@@ -71,6 +72,7 @@ async def delelte_variable(request):
     var = await Variables.get_or_none(name=request.json.get("name"))
     if not var:
         raise CustomError(ErrorCode.NotFound)
+    await caches.get("redis_chat").delete(f"global_{var.name}")
     await var.delete()
     return response_ok("success")
 
@@ -91,4 +93,5 @@ async def update_variable(request):
     var.value = value
     var.updator = request.ctx.session['account_info']
     await var.save()
+    await caches.get("redis_chat").set(f"global_{var.name}", value)
     return response_ok("success")
