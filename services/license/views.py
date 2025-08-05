@@ -13,7 +13,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
-from libs.security.authorization import requires_permission, load_license
+from libs.security.authorization import requires_permission, load_license, get_license_sha256
 from libs.utils import verify_license
 from models import Tool, Playbook, Account, PermissionsMenu
 from settings import LICENSE_DIR
@@ -161,6 +161,8 @@ async def get_all_license(request: Request):
         menu_entry["auth"] = True if int(item.get("expireTime")) > int(time.time() * 1000) else False
         menu_entry["description"] = item.get("description")
         menu_entry["expireTime"] = fmt_time(int(item.get("expireTime")))
+
+    menu_dict["serial_number"] = get_license_sha256()
 
     return response_ok(menu_dict)
 

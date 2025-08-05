@@ -201,3 +201,16 @@ def load_license():
                     except Exception as e:
                         logger.error(f"License无效: {e}")
     return None
+
+
+# 计算lic文件的sha256值
+def get_license_sha256():
+    for root, dirs, files in os.walk(LICENSE_DIR):
+        for file in files:
+            filename, ext = os.path.splitext(file)
+            full_path = os.path.join(root, file)
+            with open(full_path, "rb") as f:
+                raw_data = f.read()
+                if filename == hashlib.md5(raw_data).hexdigest():
+                    return hashlib.sha256(raw_data).hexdigest()
+    return None
