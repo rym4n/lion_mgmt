@@ -10,8 +10,8 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import gen_random_code
-from models import Events, Runlog, Room, Account, Role, EventsIngestion
+from libs.utils import gen_random_code, strip_timezone_to_seconds
+from models import Events, Runlog, Room, Account, Role, EventsIngestion, ToolAction, ToolResources
 
 event_bp = Blueprint('event', url_prefix='/event')
 _all__ = ["event_bp"]
@@ -26,6 +26,16 @@ STATUS = {
     "已处理": "RESOLVED",
     "处理中": "OPEN",
     "待处理": "NEW",
+}
+
+# 将aioe的节点状态映射成雾帜的节点状态
+NODE_TYPE = {
+    "start-node": "START",
+    "end-node": "END",
+    "judge-node": "RULE",
+    "action-node": "ACTION",
+    "approval-node": "APPROVE",
+    "subscript-node": "PLAYBOOK"
 }
 
 
@@ -56,7 +66,8 @@ async def get_all_events(request):
     if request.json.get("event_source"):
         filters["event_source"] = request.json.get("event_source")
 
-    events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room", "creator", "updator", "scene")
+    events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room", "creator",
+                                                                                               "updator", "scene")
     total = await Events.filter(**filters).count()
 
     data = []
@@ -80,7 +91,8 @@ async def get_all_events(request):
         event_dict["owner"] = {"role": role_list, "user": user_list}
         event_dict["scene"] = event.scene.name if event.scene else ""
 
-        event_ingestion = await EventsIngestion.get_or_none(event_ingestion_name=event.event_source, deleted=False).prefetch_related("creator")
+        event_ingestion = await EventsIngestion.get_or_none(event_ingestion_name=event.event_source,
+                                                            deleted=False).prefetch_related("creator")
         if event_ingestion:
             event_dict["event_source"] = {
                 "name": event_ingestion.event_ingestion_name,
@@ -88,7 +100,8 @@ async def get_all_events(request):
                 "transforms_type": event_ingestion.transforms_type,
                 "enabled": event_ingestion.enabled_status,
                 "ctime": event_ingestion.ctime.astimezone(pytz.timezone('Asia/Shanghai')).strftime("%Y-%m-%d %H:%M:%S"),
-                "creator_id": {"username": event_ingestion.creator.username, "display_name": event_ingestion.creator.display_name} if event_ingestion.creator else {},
+                "creator_id": {"username": event_ingestion.creator.username,
+                               "display_name": event_ingestion.creator.display_name} if event_ingestion.creator else {},
             }
 
         data.append(event_dict)
@@ -106,7 +119,7 @@ async def get_all_events(request):
 @requires_permission('event:c')
 async def artificial_create_event(request):
     """
-    人工创建事件（需要事件创建权限）
+    人工创建事件（需要事件创建权限） （wuzhi）
 
     请求参数：
         eventName: str 事件名称 (必填)
@@ -137,7 +150,9 @@ async def artificial_create_event(request):
 
         user_objs = await Account.filter(id__in=user_ids)
 
-        members = [{"eventId": event.id, "userId": u.id, "username": u.username, "eventName": event.event_name, "follow": True} for u in user_objs]
+        members = [
+            {"eventId": event.id, "userId": u.id, "username": u.username, "eventName": event.event_name, "follow": True}
+            for u in user_objs]
     return response.json({
         "code": 0,
         "data": {
@@ -176,6 +191,159 @@ async def artificial_create_event(request):
                 }
             ],
             "members": members
+        }
+    })
+
+
+@event_bp.get('/activity/<activityId>')
+@requires_permission('event:r')
+async def get_activity_result(request, activityId):
+    """
+    获取剧本或动作的执行结果（需要事件查看权限） （wuzhi）
+
+    请求参数：
+        activityId: str 活动id (必填)
+    """
+    if not activityId:
+        raise CustomError(ErrorCode.ParamValueError)
+    logs = await Runlog.filter(run_id=activityId, deleted=False).all()
+    activity = {}
+    if logs[0].playbook_name != "执行动作":
+        executorInstanceId = logs[0].playbook_version_id
+        executorInstanceName = logs[0].playbook_name
+    else:
+        actions = await ToolAction.filter(tool_name=logs[0].tool_name, version_number=logs[0].tool_version).all()
+        for action in actions:
+            if action.action["func"] == logs[0].action_name and action.action["name"] == logs[0].action_display_name:
+                executorInstanceId = action.id
+                executorInstanceName = logs[0].action_display_name
+                break
+    executorActionParams = logs[0].args
+    start_time = strip_timezone_to_seconds(logs[0].start_time)
+    finish_time = strip_timezone_to_seconds(logs[0].end_time)
+    for log in logs:
+        if log.node_type == "start-node":
+            start_time = strip_timezone_to_seconds(log.start_time)
+            executorActionParams = str(log.args)
+        if log.node_type == "end-node":
+            finish_time = strip_timezone_to_seconds(log.end_time)
+    activity["eventId"] = logs[0].event_id
+    activity["executorInstanceId"] = executorInstanceId
+    activity["executorActionParams"] = executorActionParams
+    activity["execMode"] = None
+    activity["displayName"] = executorInstanceName
+    activity["code"] = 200
+    activity["msg"] = "执行成功"
+    activity["messageId"] = None
+    activity["startTime"] = start_time
+    activity["finishTime"] = finish_time
+    status = []
+    for log in logs:
+        status.append(log.status)
+    if 1 in status:
+        activity["excuteStatus"] = "RUNNING"
+    elif 2 in status:
+        activity["excuteStatus"] = "WAITING_APPROVE"
+    elif -1 in status:
+        activity["excuteStatus"] = "FAIL"
+    else:
+        activity["excuteStatus"] = "SUCCESS"
+    node_ids = []
+    nodeResults = []
+    for log in logs:
+        if log.node_id in node_ids:
+            break
+        node_ids.append(log.node_id)
+        tool_action = await ToolAction.filter(
+            tool_name=log.tool_name,
+            version_number=log.tool_version,
+            deleted=False
+        ).first()
+        action_id = (
+            tool_action.id
+            if tool_action and tool_action.action.get("func") == log.action_name
+            else None
+        )
+
+        nodes = await Runlog.filter(run_id=log.run_id, node_id=log.node_id, deleted=False).all()
+
+        status = []
+        for node in nodes:
+            status.append(node.status)
+        if 1 in status:
+            executeStatus = "RUNNING"
+        elif 2 in status:
+            executeStatus = "WAITING_APPROVE"
+        elif -1 in status and 0 in status:
+            executeStatus = "FAIL_PARTLY"
+        elif -1 in status and 0 not in status:
+            executeStatus = "FAIL"
+        else:
+            executeStatus = "SUCCESS"
+
+        nodeResults.append({
+            "nodeResultModel": {
+                "pnodeResultId": 0,
+                "mnodeResultId": 0,
+                "playbookId": executorInstanceId if log.playbook_name != "执行动作" else None,
+                "playbookName": executorInstanceName if log.playbook_name != "执行动作" else None,
+                "nodeId": log.node_id,
+                "nodeName": log.node_name,
+                "actionId": action_id,
+                "actionName": log.action_display_name,
+                "code": 200,
+                "msg": None,
+                "displayName": log.node_name,
+                "nodeType": NODE_TYPE[log.node_type],
+                "executeStatus": executeStatus,
+                "pname": "",
+                "accasion": None,
+                "loopType": "NO",
+                "levelType": "ROOT" if log.node_type == "start-node" else "SUB",
+            },
+            "assetResultModels": []
+        })
+        if log.resource_name:
+            for node in nodes:
+                resources = await ToolResources.get_or_none(tool_name=node.tool_name, name=node.resource_name,
+                                                            deleted=False)
+                nodeResults[-1]["assetResultModels"].append({
+                    "nodeResultId": node.id,
+                    "assetId": resources.id if resources else None,
+                    "assetName": node.resource_name,
+                    "code": 200,
+                    "msg": None,
+                    "displayName": node.resource_name,
+                    "detailSize": 1,
+                    "prettyResult": None,
+                    "fileData": False,
+                    "detailModels": [
+                        {
+                            "nodeResultId": node.id,
+                            "assetResultId": node.id,
+                            "playbookId": executorInstanceId if log.playbook_name != "执行动作" else None,
+                            "playbookName": executorInstanceName if log.playbook_name != "执行动作" else None,
+                            "nodeId": node.node_id,
+                            "nodeName": node.node_name,
+                            "nodeDisplay": node.node_name,
+                            "actionId": action_id,
+                            "actionName": log.action_display_name,
+                            "assetId": resources.id if resources else None,
+                            "assetName": node.resource_name,
+                            "extend": None,
+                            "startTime": strip_timezone_to_seconds(node.start_time),
+                            "finishTime": strip_timezone_to_seconds(node.end_time),
+                            "jsonData": node.result
+                        }
+                    ]
+                })
+        else:
+            nodeResults[-1]["assetResultModels"].append(None)
+    return response.json({
+        "code": 0,
+        "result": {
+            "activity": activity,
+            "nodeResults": nodeResults,
         }
     })
 

@@ -424,6 +424,143 @@ async def all_versions(request):
     return response_ok(tools)
 
 
+@tools_bp.post("/apps")
+@requires_permission("tool:r")
+async def all_apps(request):
+    """
+    查询所有可用的动作（需要工具查看权限）（wuzhi）
+
+    query参数:
+        - page: 页码    int
+        - size: 每页数量    int
+    """
+    page = int(request.args.get("page", 1))
+    size = int(request.args.get("size", 10))
+    offset = (page - 1) * size
+    limit = size
+
+    tools = await Tool.filter(deleted=False).offset(offset).limit(limit)
+    content = []
+    for tool in tools:
+        actions = await ToolAction.filter(tool_name=tool.name, version_number=tool.version, deleted=False).all()
+        resource_model = await ToolResourcesModel.get(tool_name=tool.name, deleted=False)
+        resources = await ToolResources.filter(tool_name=tool.name, deleted=False).all()
+        data = {
+            "id": tool.id,
+            "name": tool.name,
+            "description": tool.description,
+            "displayName": tool.description,
+            "version": tool.version,
+            "readMePath": None,
+            "iconfilePath": None,
+            "os": None,
+            "logicLanguage": "Python",
+            "logicLanguageVersion": "",
+            "category": tool.tag,
+            "assetVariableList": [
+                {
+                    "name": key,
+                    "required": True if value.get("required") else False,
+                    "type": value.get("data_type"),
+                    "description": value.get("description"),
+                    "lable": key,
+                    "defaultValue": None,
+                    "optionsList": None,
+                    "multiSelected": False,
+                    "concat": None,
+                    "order": value.get("order"),
+                    "array": False
+                }for key, value in resource_model.resources.items()
+            ],
+            "appActionList": [
+                {
+                    "id": action.id,
+                    "appId": tool.id,
+                    "name": action.action.get("func"),
+                    "actionType": action.action.get("classify"),
+                    "readonly": False if action.action.get("classify") == "write" else True,
+                    "description": action.action.get("name"),
+                    "displayName": action.action.get("name"),
+                    "classify": action.action.get("classify"),
+                    "os": None,
+                    "logicLanguage": "Python",
+                    "logic": None,
+                    "retryTimes": 0,
+                    "sleepSeconds": 0,
+                    "quartzEtl": "",
+                    "parameterVariableList": [
+                        {
+                            "name": param.get("key"),
+                            "required": True if param.get("required") else False,
+                            "type": param.get("type"),
+                            "description": param.get("description"),
+                            "lable": param.get("key"),
+                            "defaultValue": None,
+                            "optionsList": None,
+                            "multiSelected": False,
+                            "concat": None,
+                            "order": None,
+                            "array": False
+                        }
+                        for param in action.action.get("input")
+                    ],
+                    "resultVariableList": [
+                        {
+                            "description": None,
+                            "valueType": None,
+                            "dataPath": None,
+                            "exampleValues": None
+                        }
+                    ],
+                    "isTest": False,
+                    "resultDisplayTmptType": None,
+                    "quartz": False
+                }
+                for action in actions
+            ],
+            "appAssetList": [
+                {
+                    "id": resource.id,
+                    "appid": tool.id,
+                    "name": resource.name,
+                    "description": None,
+                    "productVendor": None,
+                    "productName": None,
+                    "assetSettingList": [
+                        {
+                            "name": key,
+                            "value": value.get("value"),
+                            "type": value.get("data_type"),
+                        }
+                        for key, value in orjson.loads(resource.resources).items()
+                    ],
+                    "actionPermissionMap": {},
+                    "lastHealthCheckTime": None,
+                    "healthStatus": None,
+                    "actionEngineType": resource.engine
+                }
+                for resource in resources
+            ],
+            "logicContent": None,
+            "requireAsset": True if resource_model.status == 1 else False,
+            "actionEngineType": None
+        }
+        content.append(data)
+    total = await Tool.filter(deleted=False).count()
+    return response.json({
+        "code": 0,
+        "result": {
+            "content": content,
+            "page": page,
+            "first": True if page == 1 else False,
+            "last": True if page * size >= total else False,
+            "size": size,
+            "totalElements": total,
+            "empty": False if content else True
+        }
+    })
+
+
 @tools_bp.post("/actions")
 @requires_permission("tool:r")
 async def tool_actions(request):
@@ -514,6 +651,7 @@ async def delete_tool(request):
 
         tool.deleted = True
         tool.updater = request.ctx.session['account_info'].username
+        await ToolAction.filter(tool_name=name, version_number=version, deleted=False).update(deleted=True)
         await tool.save()
 
     return response_ok({"message": "工具删除成功"})

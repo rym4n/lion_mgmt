@@ -710,6 +710,70 @@ async def select_permission_all(request):
     return response_ok([pp.json for pp in pps])
 
 
+@workflow_bp.post("/playbooks")
+@requires_permission("workflow:r")
+async def playbook_list(request):
+    """
+    获取剧本版本列表（兼容雾帜接口，aioe请勿使用）（wuzhi）
+
+    query参数:
+        - page: 页码    int
+        - size: 每页数量    int
+        - publishStatus: 剧本发布状态（当该参数的值为ONLINE时，即可查询可用的剧本）    str
+    """
+    page = int(request.args.get("page", 1))
+    size = int(request.args.get("size", 10))
+    offset = (page - 1) * size
+    limit = size
+
+    pvs = await PlaybookVersion.filter(deleted=False).offset(offset).limit(limit).prefetch_related("playbook", "creator", "updator", "playbook__scenes", "playbook__tags")
+
+    content = []
+    for pv in pvs:
+        data = {
+            "id": pv.id,
+            "name": pv.playbook.name,
+            "drawJson": pv.flow_json,
+            "description": pv.playbook.remark,
+            "displayName": pv.playbook.name,
+            "publishStatus": "ONLINE",
+            "grade": None,
+            "playbookCategory": "COMMONEVENT",
+            "sceneList": [
+                {
+                    "id": scene.id,
+                    "name": scene.name,
+                    "display": scene.remark,
+                    "severity": str(scene.status),
+                    "effective": True if scene.status == 1 else False
+                }
+                for scene in pv.playbook.scenes
+            ],
+            "labelList": [
+                {
+                    "id": tag.id,
+                    "name": tag.name
+                }
+                for tag in pv.playbook.tags
+            ]
+        }
+        content.append(data)
+    total = await PlaybookVersion.filter(deleted=False).count()
+
+    return response.json({
+        "code": 0,
+        "result": {
+            "content": content,
+            "page": page,
+            "first": True if page == 1 else False,
+            "last": True if page * size >= total else False,
+            "size": size,
+            "totalElements": total,
+            "empty": False if content else True
+        }
+    })
+
+
 @workflow_bp.get("/file/download")
 async def download_file(request):
     """
