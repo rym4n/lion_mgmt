@@ -341,6 +341,7 @@ async def execution(request):
         params["timeout"] = 300
     params["executor"] = user.id
     if executorActionAssetIds and type == "action":
+        params["resource"] = ""
         for executorActionAssetId in executorActionAssetIds.split(","):
             params["resource"] = executorActionAssetId
             data.append(params)
