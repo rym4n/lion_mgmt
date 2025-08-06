@@ -685,6 +685,9 @@ async def execution(request):
 
     return response.json({
         "code": 0,
+        "data": {
+            "activityId": str(run_id)
+        },
         "result": str(run_id)
     })
 
@@ -707,7 +710,7 @@ async def activity(request, activityId):
         executorInstanceName = logs[0].playbook_name
         executorInstanceType = "PLAYBOOK"
     else:
-        actions = await ToolAction.filter(tool_name=logs[0].tool_name,version_number=logs[0].tool_version, deleted=False).all()
+        actions = await ToolAction.filter(tool_name=logs[0].tool_name,version_number=logs[0].tool_version).all()
         for action in actions:
             if action.action["func"] == logs[0].action_name and action.action["name"] == logs[0].action_display_name:
                 executorInstanceId = action.id

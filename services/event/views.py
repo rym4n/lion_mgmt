@@ -9,9 +9,16 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
-from libs.utils import gen_random_code, strip_timezone_to_seconds
-from models import Events, Runlog, Room, Account, Role, EventsIngestion, ToolAction, ToolResources
+from libs.utils import gen_random_code, strip_timezone_to_seconds, gen_order_version
+from models import Events, Runlog, Room, Account, Role, EventsIngestion, ToolAction, ToolResources, Tool
+from settings import KAFKA_SERVERS, TASK_TOPIC
+
+TYPE_DICT = {
+    "PLAYBOOK": "flow",
+    "ACTION": "action"
+}
 
 event_bp = Blueprint('event', url_prefix='/event')
 _all__ = ["event_bp"]
@@ -192,6 +199,169 @@ async def artificial_create_event(request):
             ],
             "members": members
         }
+    })
+
+
+@event_bp.post('/')
+@requires_permission('event:c')
+async def artificial_create_event_wuzhi(request):
+    """
+    人工创建事件（需要事件创建权限） （wuzhi）
+
+    请求参数：
+        eventName: str 事件名称 (必填)
+        ownerId: long 事件责任人id (非必填)不填则为空
+        eventSummary: str 事件概要 (非必填)
+    """
+    event_name = request.json.get("eventName")
+    event_process_status = "待处理"
+    event_source = "人工"
+    owner = ({"role": [], "user": [request.ctx.session['account_info'].id or ""]} or {})
+    user = request.ctx.session['account_info']
+    event_summary = (request.json.get("eventSummary") or "")
+    event_ingestion_id = ""
+    log_data = ""
+
+    if await Events.filter(event_name=event_name, deleted=False).exists():
+        raise CustomError(ErrorCode.EventNameExists)
+
+    async with in_transaction():
+        event = await Events.create(event_name=event_name, event_process_status=event_process_status,
+                                    event_source=event_source, owner=owner,
+                                    creator=user, event_summary=event_summary, updator=user,
+                                    event_ingestion_id=event_ingestion_id, log_data=log_data)
+        await event.fetch_related("scene")
+        run_log = await Runlog.filter(event_id=event.id, deleted=False).first()
+
+        user_ids = event.owner["user"]
+
+        user_objs = await Account.filter(id__in=user_ids)
+
+        members = [
+            {"eventId": event.id, "userId": u.id, "username": u.username, "eventName": event.event_name, "follow": True}
+            for u in user_objs]
+    return response.json({
+        "code": 0,
+        "data": {
+            "id": event.id,
+        },
+        "result": {
+            "id": event.id,
+            "eventName": event.event_name,
+            "categoryName": "",
+            "categoryId": 0,
+            "ownerId": request.ctx.session['account_info'].id,
+            "eventSummary": event.event_summary,
+            "eventStatus": STATUS[event.event_process_status],
+            "eventProcessStatus": PROCESSSTATUS[event.event_process_status],
+            "sceneName": event.scene.name if event.scene else "",
+            "sceneDisplay": event.scene.remark if event.scene else "",
+            "logId": run_log.id if run_log else "",
+            "relationEventId": 0,
+            "relationType": "UNKNOWN",
+            "eventSource": "MANUAL",
+            "bizName": "",
+            "openTime": None,
+            "resolvedTime": event.close_time,
+            "categoryDisplayName": None,
+            "resolvedBy": "",
+            "preBizModel": None,
+            "logModel": None,
+            "permissions": [
+                {
+                    "id": None,
+                    "eventId": event.id,
+                    "ownerType": None,
+                    "ownerId": request.ctx.session['account_info'].id,
+                    "permissionBy": "EVENT_OWNER",
+                    "relationId": None
+                }
+            ],
+            "members": members
+        }
+    })
+
+
+@event_bp.post("/execution")
+@requires_permission("event:r")
+async def execution(request):
+    """
+    运行剧本或动作（需要作战室创建权限） （wuzhi）
+
+    请求参数：
+        eventId: 必填，事件ID
+        executorInstanceId: 必填 实例ID(剧本版本id或动作id)
+        executorInstanceName: 非必填 执行实例名称(剧本或者动作名字)
+        executorInstanceType: 必填，运行类型，PLAYBOOK/ACTION
+        execMode: 非必填，执行模式，NORMAL 正常模式
+        executorActionAssetIds: 非必填 动作资源id,多个资源用,分割
+        params: 非必填 运行参数 [{"key":"a","value":"b"},{"key":"c","value":"d"}]
+    """
+    eventId = request.json.get("eventId")
+    executorInstanceType = request.json.get("executorInstanceType")
+    executorInstanceId = request.json.get("executorInstanceId")
+    executorActionAssetIds = request.json.get("executorActionAssetIds")
+    executorParams = request.json.get("params")
+    user = request.ctx.session['account_info']
+    event = await (Events.get_or_none(id=eventId))
+    if not event.room:
+        room_name = event.event_name + "_" + gen_random_code(6)
+        if await Room.filter(name=room_name, deleted=False).exists():
+            raise CustomError(ErrorCode.RoomNameExists)
+        room = await Room.create(name=room_name, creator=user)
+        event.room = room
+    room_id = event.room_id
+    type = TYPE_DICT.get(executorInstanceType)
+    if not room_id or not type:
+        raise CustomError(ErrorCode.ParamValueError)
+    params = {}
+    data = []
+    input_data = {}
+    if type == "flow":
+        if executorParams:
+            for param in executorParams:
+                input_data[param["key"]] = param["value"]
+        params["flow_id"] = executorInstanceId
+        params["flow_input"] = input_data
+    elif type == "action":
+        action = await ToolAction.get_or_none(id=executorInstanceId, deleted=False)
+        tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False)
+        if executorParams:
+            for param in executorParams:
+                input_data[param["key"]] = param["value"]
+        params["app_name"] = tool.name
+        params["name"] = tool.description
+        params["app_ver"] = tool.version
+        params["main"] = tool.main
+        params["action_input"] = input_data
+        params["node_name"] = action.action["name"]
+        params["action"] = action.action["func"]
+        params["action_name"] = action.action["name"]
+        params["retry_times"] = 1
+        params["timeout"] = 300
+    params["executor"] = user.id
+    if executorActionAssetIds and type == "action":
+        for executorActionAssetId in executorActionAssetIds.split(","):
+            params["resource"] = executorActionAssetId
+            data.append(params)
+    else:
+        data.append(params)
+    for params in data:
+        run_id = gen_order_version(length=6)
+        msg = {"run_type": type, "run_id": run_id, "run_args": params}
+        room = await Room.get_or_none(id=room_id)
+        room.updator = user
+        room.run_id.append(msg["run_id"])
+        await room.save()
+        await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
+        await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+
+    return response.json({
+        "code": 0,
+        "data": {
+            "activityId": str(run_id)
+        },
+        "result": str(run_id)
     })
 
 

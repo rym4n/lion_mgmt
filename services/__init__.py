@@ -26,6 +26,7 @@ from services.user.views import user_bp
 from services.variables.views import var_bp
 from services.warroom.views import warroom_bp
 from services.workflow.views import workflow_bp
+from services.wuzhi.views import activity, playbook_list, all_apps
 from settings import BASE_LOGGING, TORTOISE
 
 
@@ -41,6 +42,9 @@ def create_app() -> Sanic:
 
 
 def register_blueprints(app: Sanic) -> None:
+    app.add_route(activity, '/activity/<activityId>')
+    app.add_route(playbook_list, '/playbooks', methods=['POST'])
+    app.add_route(all_apps, '/apps', methods=['POST'])
     app.blueprint(license_bp)
     app.blueprint(user_bp)
     app.blueprint(scene_bp)
