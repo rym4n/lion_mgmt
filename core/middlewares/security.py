@@ -30,3 +30,17 @@ class SecurityMiddleware(BaseMiddleware):
             await AuditLog.create(username=request.ctx.session['name'], display_name=request.ctx.session['display_name'], client_ip=request.ctx.session['ip'],
                                   result="成功" if response.status == 200 else "失败", uri=request.path, client_ua=request.headers.get('User-Agent', ''),
                                   request_data=request.json if 'multipart' not in request.content_type else None)
+        elif request.path == '/user/login':
+            params = request.json
+            if params:
+                params['password'] = '******'
+            await AuditLog.create(username=request.json.get('username', ''), display_name=request.json.get('username', ''), client_ip=request.ip,
+                                  result="成功" if response.status == 200 else "失败", uri=request.path, client_ua=request.headers.get('User-Agent', ''),
+                                  request_data=params)
+        elif request.path == '/user/oauth/callback':
+            params = request.args
+            if params:
+                params['code'] = '******'
+            await AuditLog.create(username=request.ctx.session['name'], display_name=request.ctx.session['display_name'], client_ip=request.ctx.session['ip'],
+                                  result="成功" if response.status == 200 else "失败", uri=request.path, client_ua=request.headers.get('User-Agent', ''),
+                                  request_data=params)
