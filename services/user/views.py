@@ -450,6 +450,8 @@ async def delelte_user(request):
     """
     if request.json.get("username") == request.ctx.session['account_info'].username:
         raise CustomError(ErrorCode.CannotDeleteSelf)
+    if request.json.get("username") == 'admin':
+        raise CustomError(ErrorCode.CannotDeleteAdmin)
     await Account.filter(username=request.json.get("username")).update(deleted=True)
     return response_ok("用户删除成功")
 

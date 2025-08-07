@@ -41,6 +41,9 @@ if os.environ.get("RY_ENV") == 'DEV':
     except:
         pass
 
+# 透传真实客户端IP的请求头
+REAL_IP_HEADER = os.environ.get("RY_REAL_IP_HEADER") or 'x-real-ip'
+
 # 应用资源配置加密密钥
 RY_RES_KEY = os.environ.get("RY_RES_KEY")
 
