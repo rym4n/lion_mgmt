@@ -32,42 +32,17 @@ from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from settings import RY_RES_KEY, ES_HOST, ES_USER, ES_PASS
+from settings import RY_RES_KEY, ES_HOST, ES_USER, ES_PASS, REAL_IP_HEADER
 
 password_hasher: PasswordHasher = PasswordHasher()
 
 
-def clean_ip(ip_str: str) -> str:
-    # 去除方括号、引号及前后空白
-    return ip_str.strip().strip('"').strip("[]")
-
-
 def get_client_ip(request) -> str:
-    """
-    从 Sanic Request 中提取真实客户端 IP，支持 IPv4/IPv6 和多级代理。
-
-    优先级：
-      1. X-Forwarded-For（取第一个）
-      2. X-Real-IP
-      3. request.remote_addr
-
-    会自动去除方括号 []、引号 " 以及多余空白。
-    """
-
-    # 1. 多级代理时的原始客户端 IP
-    xff = request.headers.get('x-forwarded-for')
-    if xff:
-        # 可能形如 "203.0.113.5, 2001:db8::1"
-        first = xff.split(',')[0]
-        return clean_ip(first)
-
-    # 2. 单级代理时 Nginx 设的真实 IP
-    xri = request.headers.get('x-real-ip')
+    xri = request.headers.get(REAL_IP_HEADER)
     if xri:
-        return clean_ip(xri)
-
-    # 3. 回退到 request.remote_addr（通常是 Nginx 的 IP）
-    return clean_ip(request.client_ip)
+        return xri
+    else:
+        return request.ip
 
 
 def gen_random_code(digits_only: bool = True, length=6) -> str:

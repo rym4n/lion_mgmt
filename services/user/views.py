@@ -282,6 +282,18 @@ async def login(request):
         raise CustomError(ErrorCode.CredentialsError)
 
 
+@user_bp.post("/local-auth")
+async def local_auth(request):
+    """
+    本地认证
+    """
+    if request.ip != "127.0.0.1":
+        raise CustomError(ErrorCode.IpForbidden)
+
+    account = await Account.get(username=request.json.get("username", ''))
+    token = token_encode(account.id, account.username, account.display_name, False, str(uuid.uuid4()), AUTHENTICATION_SESSION_EXPIRATION, account.password)
+    return response_ok({"token": account.id + ":" + token})
+
 @user_bp.post("/refresh-token")
 async def refresh_session_token(request):
     """
@@ -438,6 +450,8 @@ async def delelte_user(request):
     """
     if request.json.get("username") == request.ctx.session['account_info'].username:
         raise CustomError(ErrorCode.CannotDeleteSelf)
+    if request.json.get("username") == 'admin':
+        raise CustomError(ErrorCode.CannotDeleteAdmin)
     await Account.filter(username=request.json.get("username")).update(deleted=True)
     return response_ok("用户删除成功")
 

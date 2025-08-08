@@ -1,12 +1,12 @@
+# coding=utf-8
+
 import orjson
+from sanic import response
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Events, Runlog, Account, ToolAction, PlaybookVersion, Tool, ToolResourcesModel, ToolResources
-
-from tortoise.transactions import in_transaction
-from sanic import response
+from models import Runlog, ToolAction, PlaybookVersion, Tool, ToolResourcesModel, ToolResources
 
 
 @requires_permission("warroom:r")
@@ -26,7 +26,7 @@ async def activity(request, activityId):
         executorInstanceName = logs[0].playbook_name
         executorInstanceType = "PLAYBOOK"
     else:
-        actions = await ToolAction.filter(tool_name=logs[0].tool_name,version_number=logs[0].tool_version).all()
+        actions = await ToolAction.filter(tool_name=logs[0].tool_name, version_number=logs[0].tool_version).all()
         for action in actions:
             if action.action["func"] == logs[0].action_name and action.action["name"] == logs[0].action_display_name:
                 executorInstanceId = action.id
@@ -170,7 +170,7 @@ async def all_apps(request):
                     "concat": None,
                     "order": value.get("order"),
                     "array": False
-                }for key, value in resource_model.resources.items()
+                } for key, value in resource_model.resources.items()
             ],
             "appActionList": [
                 {
