@@ -549,7 +549,7 @@ async def get_playbook_input(playbook_id):
 
         param_map = {param["name"]: {"type": param["type"], "description": param["desc"]} for param in start_params}
 
-        pattern = rf"{re.escape(input_id)}\.output\.([a-zA-Z0-9_]+)(?=[\)}}])"
+        pattern = rf"{re.escape(input_id)}\.output\.([a-zA-Z0-9_\u4e00-\u9fff]+)(?=[\)}}])"
 
         matches = re.findall(pattern, str(playbook.flow_json))
         unique_matches = list(set(matches))  # 去重
