@@ -612,7 +612,7 @@ async def binding_event_ingestion_script(request):
                 "type": "filter",
                 # 如果之前配置了去重则用去重后的配置，否则用原始配置
                 "inputs": [f"{topic}_dedupe_transforms"] if request_data.get('fields') and request_data.get(
-                    'number') else (
+                    'numbers') else (
                     [f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]),
                 "condition": f"{conditional_statements}"
             }
