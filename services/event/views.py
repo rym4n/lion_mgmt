@@ -591,6 +591,8 @@ async def get_event_detail(request):
     run_logs_grouped = {}
     for runlog in run_logs:
         run_logs_grouped.setdefault(runlog.run_id, []).append(runlog.json)
+    for key in run_logs_grouped.keys():
+        run_logs_grouped[key].reverse()
     event_dict["run_logs"] = run_logs_grouped
 
     event_dict["room_users"] = [user.username if user else "" for user in await event.room.users.all()]
