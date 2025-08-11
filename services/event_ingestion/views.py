@@ -330,6 +330,12 @@ async def delete_event_ingestion(request):
     """
     event_id = request.json.get('id')
     event = await EventsIngestion.get(id=event_id)
+    es = await EventRelatedScript.get_or_none(event_ingestion_id=event_id)
+    if es:
+        for script_id in es.script_id:
+            process_name = hashlib.md5(f"{es.event_ingestion_id}_{script_id}".encode()).hexdigest()
+            supervisor.stop_process(process_name)
+        await es.delete()
     if not event:
         raise CustomError(ErrorCode.NotFound)
     if event.enabled_status == 1:
@@ -557,7 +563,7 @@ async def binding_event_ingestion_script(request):
         script_ids: 剧本ID (list)      非必填，选择联动执行时必填
         event_name: 事件名称 (str)  用户选择的事件名称，传default
         自定义名称案例：to_string!(.name) + "_" + to_string(.datetime_str) + "234"
-        number: 去重条数 (int)  非必填，选择去重时才填写 默认5000, 最大10000
+        numbers: 去重条数 (int)  非必填，选择去重时才填写 默认5000, 最大10000
         fields: 字段 (list)  非必填，选择去重时才填写
         }]
     """
@@ -585,14 +591,14 @@ async def binding_event_ingestion_script(request):
         timestamp_int = str(int(time.time() * 1000))
         topic = f"{event.vector_name}_{timestamp_int}"
         # 如果选择去重则添加去重transforms
-        if request_data.get('fields') and request_data.get('number'):
+        if request_data.get('fields') and request_data.get('numbers'):
             data.setdefault("transforms", {})[f"{topic}_dedupe_transforms"] = {
                 "type": "dedupe",
                 # 如果之前配置了转换配置则用转换后的配置，否则用原始配置
                 "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [
                     event.vector_name],
                 "cache": {
-                    "num_events": request_data.get('number')
+                    "num_events": request_data.get('numbers')
                 },
                 "fields": {
                     "match": request_data.get('fields')
@@ -613,7 +619,7 @@ async def binding_event_ingestion_script(request):
         data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
             "type": "remap",
             "inputs": [f"{topic}_transforms"] if conditions else (
-                [f"{topic}_dedupe_transforms"] if request_data.get('fields') and request_data.get('number') else (
+                [f"{topic}_dedupe_transforms"] if request_data.get('fields') and request_data.get('numbers') else (
                     [f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])),
             "source": """
 .aioe_event_id = uuid_v4()
@@ -658,7 +664,7 @@ del(.datetime_str)
                                                                event_ingestion_id=event_ingestion_id,
                                                                script_id=script_ids, topic=topic,
                                                                event_name=event_name,
-                                                               numbers=request_data.get('number'),
+                                                               numbers=request_data.get('numbers'),
                                                                fields=request_data.get('fields'))
 
         if linked_execution in [0, 1]:
