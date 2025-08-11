@@ -120,7 +120,10 @@ async def upload_and_extract_zip(request):
             percent = int((data * single_progress))
             success_progress = percent
             continue
+        health_check = 0
         for action in config_data.get(action_key):
+            if "health_check" == action.get("func"):
+                health_check = 1
             await ToolAction.create(tool_name=config_data.get("name"), version_number=version,
                                     action=action)
             actions = await ActionPermissions.filter(tool_name=tool_name, deleted=False).values("action_name")
@@ -130,9 +133,13 @@ async def upload_and_extract_zip(request):
                 await ActionPermissions.create(tool_name=tool_name, action_name=action["func"],
                                                action_description=action.get("name") or "", roles=[],
                                                users=[])
-        configuration = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values("resources")
-        if not configuration or configuration["resources"] != config_data.get("resource"):
-            await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {}, status=1 if (config_data.get("resource") and any(field.get("required") is True for field in config_data.get("resource").values())) else 0)
+        configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False)
+        if not configuration or configuration.resources != config_data.get("resource"):
+            await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {}, status=1 if (config_data.get("resource") and any(field.get("required") is True for field in config_data.get("resource").values())) else 0, health_check=health_check)
+        else:
+            if configuration.health_check != 1:
+                configuration.health_check = health_check
+                await configuration.save()
 
         results.append({"tool": tool_name, "msg": msg})
 

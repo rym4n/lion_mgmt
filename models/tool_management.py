@@ -87,6 +87,7 @@ class ToolResourcesModel(BaseModel):
     tool_name: str = fields.CharField(max_length=255, description="工具名称")
     resources: list[str] = fields.JSONField(description="资源模板")
     status: int = fields.IntField(default=0, description="是否必填 1:必填 0:非必填")
+    health_check: int = fields.IntField(default=0, description="是否支持健康检查 1:支持 0:不支持")
 
     def validate(self) -> None:
         raise NotImplementedError
