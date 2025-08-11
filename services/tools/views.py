@@ -135,10 +135,14 @@ async def upload_and_extract_zip(request):
                                                users=[])
         configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False)
         if not configuration or configuration.resources != config_data.get("resource"):
-            await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {}, status=1 if (config_data.get("resource") and any(field.get("required") is True for field in config_data.get("resource").values())) else 0, health_check=health_check)
+            trm = await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {}, status=1 if (config_data.get("resource") and any(field.get("required") is True for field in config_data.get("resource").values())) else 0, health_check=health_check)
+            if health_check == 1:
+                trm.version = version
+                await trm.save()
         else:
-            if configuration.health_check != 1:
+            if configuration.health_check != 1 and health_check == 1:
                 configuration.health_check = health_check
+                configuration.version = version
                 await configuration.save()
 
         results.append({"tool": tool_name, "msg": msg})
@@ -405,8 +409,11 @@ async def enrich_tool(tool, cache_client):
             logo_data = await logo_file.read()
             tool["logo"] = base64.b64encode(logo_data).decode()
     tool.pop("path", None)
-    status = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"]).values("status")
-    tool["required"] = status["status"]
+    trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"])
+    if trm:
+        tool["required"] = trm.status
+        tool["health_check"] = trm.health_check
+        tool["health_check_version"] = trm.version
     return tool
 
 
