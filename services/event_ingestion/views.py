@@ -904,7 +904,7 @@ async def parse_log(request):
         "key_delimiter_value": key_delimiter_value
     }
     value = config.value
-    if any(key in value for key in ['transformsconfig', 'key_value_delimiter', 'key_delimiter_value']):
+    if any(key in value for key in ['{transformsconfig}', '{key_value_delimiter}', '{key_delimiter_value}']):
         value = value.format(**args)
 
     tmp_data["transforms"]["tmp_transforms"]["source"] = value
