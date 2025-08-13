@@ -519,7 +519,7 @@ async def query_messages(request: Request):
 @requires_permission("warroom:r")
 async def get_list(request):
     """
-    获取待办和消息列表（需要作战室查看权限）
+    消息列表（需要作战室查看权限）
 
     请求参数：
         无
