@@ -100,7 +100,7 @@ async def update_approvement(request):
     approvement_id = param.get("id")
     agree = param.get("agree")
     remark = param.get("remark", "")
-    params = param.get("params", {})
+    params = param.get("params", [])
     if not approvement_id or not isinstance(agree, bool) or not isinstance(remark, str) or not isinstance(params, list):
         raise CustomError(ErrorCode.ParameterError)
 
