@@ -524,16 +524,12 @@ async def get_list(request):
     请求参数：
         无
     """
-    to_do_list = []
     message_list = []
     account = request.ctx.session['account_info']
-    approvements = await Approvement.filter(approvers=account.id, status=0).all()
-    for approvement in approvements:
-        to_do_list.append(approvement.json)
     messages = await MessageAccount.filter(account_id=account.id, status=0).all().prefetch_related("message__sender")
     for message in messages:
         message_list.append(message.json)
-    return response_ok({"to_do_list": to_do_list, "message_list": message_list})
+    return response_ok({"message_list": message_list})
 
 
 @warroom_bp.post("/up/status")
