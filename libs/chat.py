@@ -324,7 +324,7 @@ class ChatManager:
 
         content = data.get("content", "")
         image_content = data.get("image_content", "")
-        specify_user = data.get("specify_user", "")
+        specify_users = data.get("specify_user", "")
 
         if not content and not image_content:
             raise Exception("消息不能为空")
@@ -339,11 +339,12 @@ class ChatManager:
             receiver=user  # 群聊消息设为发送者自己作为占位符
         )
 
-        if specify_user:
-            # 指定用户发送消息
-            user = await Account.filter(id=specify_user).first()
-            await MessageAccount.create(message=message, account_id=specify_user)
-            await user.star_rooms.add(room)
+        if specify_users:
+            for specify_user in specify_users:
+                # 指定用户发送消息
+                user = await Account.filter(id=specify_user).first()
+                await MessageAccount.create(message=message, account_id=specify_user)
+                await user.star_rooms.add(room)
 
         # 广播
         message_data = {
@@ -426,7 +427,7 @@ class ChatManager:
 
             content = data.get("content", "")
             image_content = data.get("image_content", "")
-            specify_user = data.get("specify_user", "")
+            specify_users = data.get("specify_user", "")
 
             # 获取或创建私聊房间
             chat_room = await get_or_create_private_chat_room(self.redis, user, receiver)
@@ -442,9 +443,10 @@ class ChatManager:
                 room=chat_room
             )
 
-            if specify_user:
+            if specify_users:
                 # 指定用户发送消息
-                await MessageAccount.create(message=message, account_id=specify_user)
+                for specify_user in specify_users:
+                    await MessageAccount.create(message=message, account_id=specify_user)
 
             # 构建消息数据
             message_data = {

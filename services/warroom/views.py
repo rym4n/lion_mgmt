@@ -543,13 +543,13 @@ async def up_status(request):
     更新消息阅读状态（需要作战室更新权限）
 
     请求参数：
-        id: 必填，消息ID
+        ids: 必填，未读消息ID
     """
-    id = request.json.get("id")
-    if not id:
+    ids = request.json.get("ids")
+    if not ids:
         raise CustomError(ErrorCode.ParamValueError)
-    await MessageAccount.filter(id=id).update(status=1)
-    return response_ok("")
+    await MessageAccount.filter(id__in=ids).update(status=1)
+    return response_ok(True)
 
 
 @warroom_bp.post("/run")
