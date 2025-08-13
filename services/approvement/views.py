@@ -101,7 +101,7 @@ async def update_approvement(request):
     agree = param.get("agree")
     remark = param.get("remark", "")
     params = param.get("params", {})
-    if not approvement_id or not isinstance(agree, bool) or not isinstance(remark, str) or not isinstance(params, dict):
+    if not approvement_id or not isinstance(agree, bool) or not isinstance(remark, str) or not isinstance(params, list):
         raise CustomError(ErrorCode.ParameterError)
 
     approve = await Approvement.filter(id=approvement_id).select_for_update().prefetch_related("approvers").first()
