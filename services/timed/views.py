@@ -154,7 +154,7 @@ async def add_timed(request):
                         "executor", "retry_times", "timeout"]):
                     raise CustomError(ErrorCode.ActionInputError)
                 msg["run_type"] = "action"
-                msg["run_args"] = action_input
+                msg["run_args"] = action_input.copy()
                 if status == 0:
                     msg["timer"] = "once"
                     timer_rule["run_date"] = tactics
@@ -176,7 +176,7 @@ async def add_timed(request):
                     "executor", "retry_times", "timeout"]):
                 raise CustomError(ErrorCode.ActionInputError)
             msg["run_type"] = "action"
-            msg["run_args"] = action_input
+            msg["run_args"] = action_input.copy()
             if status == 0:
                 msg["timer"] = "once"
                 timer_rule["run_date"] = tactics
@@ -380,8 +380,7 @@ async def update_timed(request):
 
     await timed.save()
     for msg in msgs:
-        print(msg)
-        # await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+        await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
     return response_ok(timed.json)
 
 
