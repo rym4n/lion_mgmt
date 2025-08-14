@@ -339,7 +339,10 @@ async def delete_workflow_version(request):
     if pv.flow_json:
         action_ids = await statistics_data(pv.flow_json)
         await tool_action_playbook_delete({pv.id: action_ids})
-    await pv.delete()
+    if await PlaybookVersion.filter(playbook_id=pv.playbook_id).count() == 1:
+        await Playbook.filter(id=pv.playbook_id).delete()
+    else:
+        await pv.delete()
     return response_ok("删除成功")
 
 
