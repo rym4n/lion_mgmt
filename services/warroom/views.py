@@ -366,8 +366,8 @@ async def query_messages(request: Request):
             if msg.type == "runlog":
                 run_id = msg.content.split(":")[0]
                 node_id = msg.content.split(":")[1]
-                runlog = await Runlog.get(run_id=run_id, node_id=node_id)
-                content = "[已撤回]" if msg.is_recalled else runlog.json
+                runlogs = await Runlog.filter(run_id=run_id, node_id=node_id).all()
+                content = "[已撤回]" if msg.is_recalled else [runlog.json for runlog in runlogs]
             else:
                 content = "[已撤回]" if msg.is_recalled else msg.content
             message_list.append({
@@ -402,8 +402,8 @@ async def query_messages(request: Request):
             if msg.type == "runlog":
                 run_id = msg.content.split(":")[0]
                 node_id = msg.content.split(":")[1]
-                runlog = await Runlog.get(run_id=run_id, node_id=node_id)
-                content = "[已撤回]" if msg.is_recalled else runlog.json
+                runlogs = await Runlog.filter(run_id=run_id, node_id=node_id).all()
+                content = "[已撤回]" if msg.is_recalled else [runlog.json for runlog in runlogs]
             else:
                 content = "[已撤回]" if msg.is_recalled else msg.content
             message_list.append({
