@@ -557,6 +557,7 @@ async def run(request):
     请求参数：
         id: 必填，作战室ID
         type: 必填，运行类型，flow/action
+        resource: 执行动作时必填，资源ID list
         -playbook_input dict 剧本输入参数 当type为flow时必填
             示例如下：
             {
@@ -577,7 +578,6 @@ async def run(request):
                     "clients":"abcd",             动作输入参数
                     "groups":"123456789"          动作输入参数
                 },
-                "resource": "abc",               资源名称
                 "node_name":"自定义扫描",    节点名称，定时任务模块中取动作描述
                 "action":"custom_scan",     动作名称 英文标识
                 "action_name":"自定义扫描",    动作名称 中文名称
@@ -587,20 +587,32 @@ async def run(request):
     """
     room_id = request.json.get("id")
     type = request.json.get("type")
+    resources = request.json.get("resource", [])
     user = request.ctx.session['account_info']
+    data = []
     if not room_id or not type:
         raise CustomError(ErrorCode.ParamValueError)
     params = request.json.get("playbook_input") or request.json.get("action_input")
     if not params:
         raise CustomError(ErrorCode.ParamValueError)
     params["executor"] = user.id
-    msg = {"run_type": type, "run_id": gen_order_version(length=6), "run_args": params}
-    room = await Room.get_or_none(id=room_id)
-    room.updator = user
-    room.run_id.append(msg["run_id"])
-    await room.save()
-    await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    if type == "action" and resources:
+        for resource in resources:
+            params["resource"] = resource
+            data.append(params)
+    elif type == "flow":
+        data.append(params)
+    else:
+        params["resource"] = ""
+        data.append(params)
+    for a in data:
+        msg = {"run_type": type, "run_id": gen_order_version(length=6), "run_args": a}
+        room = await Room.get_or_none(id=room_id)
+        room.updator = user
+        room.run_id.append(msg["run_id"])
+        await room.save()
+        await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
+        await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
     return response_ok("运行成功")
 
