@@ -1,12 +1,16 @@
 # coding=utf-8
+import asyncio
 import base64
+import datetime
 import hashlib
 import operator
 import os
 import re
 import shutil
 import time
+import uuid
 import zipfile
+import pytz
 from collections import defaultdict
 from functools import reduce
 from io import BytesIO
@@ -23,10 +27,12 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
+from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license
-from libs.utils import fix_zip_filename
-from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion
-from settings import TOOLS_DIR
+from libs.utils import fix_zip_filename, gen_order_version
+from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion, \
+    Runlog
+from settings import TOOLS_DIR, KAFKA_SERVERS, TASK_TOPIC
 
 # 定义 Blueprint
 tools_bp = Blueprint("tools", url_prefix="/tools")
@@ -1326,3 +1332,66 @@ async def engine_list(request):
         lion_keys.append(key.decode().replace("lion_engine_", ""))
 
     return response_ok(lion_keys)
+
+
+@tools_bp.post("/health-check")
+@requires_permission("tool:r")
+async def health_check(request):
+    """
+    进行资源健康检查（需要工具查看权限）
+
+    请求参数：
+        - action_input dict 动作输入参数 当type为action时必填      用websocket发送
+            示例如下：
+            {
+                "type": "action",
+                "app_name":"huorong_edr",         应用名称，英文标识
+                "name": "中文名称",               应用中文名称
+                "app_ver":"v1746495758839",      应用版本号
+                "main":"huorong_edr.py",          主程序文件名  获取工具版本时会传
+                "action_input":{},
+                "node_name":"健康检查",    节点名称，定时任务模块中取动作描述
+                "action":"health_check",     动作名称 英文标识
+                "action_name":"健康检查",    动作名称 中文名称
+                "retry_times":1,             重试次数
+                "timeout":300,               超时时间,单位秒
+            }
+        - name: 资源名称    str 必填
+        - resources: 资源列表    dict 必填
+    """
+    name = request.json.get("name")
+    resources = request.json.get("resources")
+    id = str(uuid.uuid4())
+    r = {k: resources[k].get('value') or resources[k].get('default_value', '') for k in resources}
+    r[id + "_name"] = name
+    await caches.get("redis_chat").set("resource_" + id, r, ttl=300)
+    resp = await request.respond(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+    beijing_tz = pytz.timezone("Asia/Shanghai")
+    utime = datetime.datetime.now(beijing_tz)
+    message = request.json
+    if message.get("type") in ('flow', 'action'):
+        run_id = gen_order_version(length=6)
+        message["executor"] = request.ctx.session['account_info'].id
+        message["resource"] = id
+        msg = {"run_type": message['type'], "run_id": run_id, "run_args": message}
+        await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+        sent_id = []
+        for i in range(60):
+            log = await Runlog.get_or_none(run_id=run_id, utime__gte=utime)
+            if log:
+                if log.id not in sent_id:
+                    sent_id.append(log.id)
+                    await resp.send(f"data: {orjson.dumps(log.json).decode()}\n\n")
+                    break
+            await asyncio.sleep(1)
+
+    if resp:
+        await resp.eof()
+
+    return resp
