@@ -599,7 +599,7 @@ async def run(request):
     if type == "action" and resources:
         for resource in resources:
             params["resource"] = resource
-            data.append(params)
+            data.append(params.copy())
     elif type == "flow":
         data.append(params)
     else:
@@ -678,7 +678,7 @@ async def execution(request):
     if executorActionAssetIds and type == "action":
         for executorActionAssetId in executorActionAssetIds.split(","):
             params["resource"] = executorActionAssetId
-            data.append(params)
+            data.append(params.copy())
     else:
         data.append(params)
     for params in data:

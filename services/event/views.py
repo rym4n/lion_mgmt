@@ -344,7 +344,7 @@ async def execution(request):
     if executorActionAssetIds and type == "action":
         for executorActionAssetId in executorActionAssetIds.split(","):
             params["resource"] = executorActionAssetId
-            data.append(params)
+            data.append(params.copy())
     else:
         data.append(params)
     for params in data:
