@@ -274,6 +274,7 @@ async def update_timed(request):
        - type int 执行操作类型  非必填  0为执行剧本， 1为执行动作
        - playbook_id str 剧本id 当type为0时必填
        - playbook_input dict 剧本输入参数 当type为0时必填
+       - resource: ["a","b"]  动作资源id 当type为1时必填
        - action_id str 动作id 当type为1时必填
        - action_input dict 动作输入参数 当type为1时必填
        - status int 执行类型  非必填  0为单次执行，1为周期执行
@@ -299,6 +300,19 @@ async def update_timed(request):
     end_time = data.get("end_time", timed.end_time)
 
     msg = {"run_type": "flow" if run_type == RUN_TYPE_FLOW else "action"}
+    msgs = []
+
+    if enable == DISABLED:
+        msg["timer"] = "remove"
+        msg["timer_rule"] = {}
+    else:
+        if status == EXEC_TYPE_CRON:
+            if not croniter.is_valid(tactics):
+                logger.info(f"定时任务{timed.name}的执行策略{tactics}不符合crontab格式，更新失败")
+                raise CustomError(ErrorCode.CronExpressionError)
+        timer_info = build_timer_rule(status, tactics, end_time)
+        msg.update(timer_info)
+    msg["timer_id"] = timed.id
 
     if run_type == RUN_TYPE_FLOW:
         playbook_id = data.get("playbook_id")
@@ -319,40 +333,43 @@ async def update_timed(request):
         timed.playbook_input = playbook_input
         timed.action = None
         timed.action_input = {}
+        timed.action_resource = []
         msg["run_args"] = playbook_input
-
+        msgs.append(msg.copy())
     else:
         if not timed.action and not data.get("action_id"):
             raise CustomError(ErrorCode.ParameterError)
 
         action_id = data.get("action_id", timed.action.id if timed.action else None)
         action_input = data.get("action_input", timed.action_input)
-
-        timed.action = await ToolAction.get_or_none(id=action_id, deleted=False)
-
-        action_input["executor"] = request.ctx.session.get("account_info").id
-        if any(key not in action_input for key in
-               ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name", "action",
-                "executor", "retry_times", "timeout"]):
-            raise CustomError(ErrorCode.ActionInputError)
-
+        resources = data.get("resource", timed.action_resource)
         timed.action_input = action_input
+        timed.action_resource = resources
         timed.playbook = None
         timed.playbook_version = None
         timed.playbook_input = {}
-        msg["run_args"] = action_input
+        timed.action = await ToolAction.get_or_none(id=action_id, deleted=False)
 
-    if enable == DISABLED:
-        msg["timer"] = "remove"
-        msg["timer_rule"] = {}
-    else:
-        if status == EXEC_TYPE_CRON:
-            if not croniter.is_valid(tactics):
-                logger.info(f"定时任务{timed.name}的执行策略{tactics}不符合crontab格式，更新失败")
-                raise CustomError(ErrorCode.CronExpressionError)
-        timer_info = build_timer_rule(status, tactics, end_time)
-        msg.update(timer_info)
-    msg["timer_id"] = timed.id
+        action_input["executor"] = request.ctx.session.get("account_info").id
+        if resources:
+            for resource in resources:
+                action_input["resource"] = resource
+                if any(key not in action_input for key in
+                       ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name",
+                        "action",
+                        "executor", "retry_times", "timeout"]):
+                    raise CustomError(ErrorCode.ActionInputError)
+                msg["run_args"] = action_input
+                msgs.append(msg.copy())
+        else:
+            action_input["resource"] = ""
+            if any(key not in action_input for key in
+                   ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name",
+                    "action",
+                    "executor", "retry_times", "timeout"]):
+                raise CustomError(ErrorCode.ActionInputError)
+            msg["run_args"] = action_input
+            msgs.append(msg.copy())
 
     timed.enable = enable
     timed.status = status
@@ -362,7 +379,8 @@ async def update_timed(request):
     timed.updator = request.ctx.session.get("account_info")
 
     await timed.save()
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    for msg in msgs:
+        await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
     return response_ok(timed.json)
 
 

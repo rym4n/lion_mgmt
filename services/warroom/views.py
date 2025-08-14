@@ -605,8 +605,9 @@ async def run(request):
     else:
         params["resource"] = ""
         data.append(params)
+    run_id = gen_order_version(length=6)
     for a in data:
-        msg = {"run_type": type, "run_id": gen_order_version(length=6), "run_args": a}
+        msg = {"run_type": type, "run_id": run_id, "run_args": a}
         room = await Room.get_or_none(id=room_id)
         room.updator = user
         room.run_id.append(msg["run_id"])
