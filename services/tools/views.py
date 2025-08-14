@@ -1374,7 +1374,7 @@ async def health_check(request):
     )
     beijing_tz = pytz.timezone("Asia/Shanghai")
     utime = datetime.datetime.now(beijing_tz)
-    message = request.json
+    message = request.json.get("action_input", {})
     if message.get("type") in ('flow', 'action'):
         run_id = gen_order_version(length=6)
         message["executor"] = request.ctx.session['account_info'].id
