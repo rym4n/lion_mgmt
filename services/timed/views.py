@@ -402,7 +402,7 @@ async def get_run_log(request):
         all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).order_by('ctime').prefetch_related("timer", "playbook_version").all()
         logs_by_run_id = defaultdict(list)
         for log in all_logs:
-            logs_by_run_id[log.run_id].append(log.json)
+            logs_by_run_id[log.run_id].append([log.json])
 
         run_logs = [logs_by_run_id[run_id] for run_id in run_ids]
     else:

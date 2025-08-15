@@ -45,7 +45,7 @@ async def create_workflow(request):
         flow_json_list: 流程图具体内容, 列表格式, 列表的每个元素是一个独立的剧本json, 可选
     """
     data = request.json
-    if not data.get("name"):
+    if not data.get("name") or not data.get("flow_json_list"):
         raise CustomError(ErrorCode.ParameterError)
 
     total_up_value = 0
@@ -375,13 +375,13 @@ async def delete_workflow(request):
     pv_ids = [pv.id for pv in pvs]
     pv_versions = [pv.version for pv in pvs]
     condition = Q()
-    for pv_id in pv_ids:
-        condition |= Q(script_id__contains=[pv_id])
-
-    if await EventRelatedScript.filter(condition).exists():
-        raise CustomError(ErrorCode.PlaybookUsedByEvent)
-    if await Timed.filter(playbook=playbook, playbook_version__in=pv_versions, deleted=False).exists():
-        raise CustomError(ErrorCode.PlaybookUsedByTimer)
+    if pv_ids:
+        for pv_id in pv_ids:
+            condition |= Q(script_id__contains=[pv_id])
+        if await EventRelatedScript.filter(condition).exists():
+            raise CustomError(ErrorCode.PlaybookUsedByEvent)
+        if await Timed.filter(playbook=playbook, playbook_version__in=pv_versions, deleted=False).exists():
+            raise CustomError(ErrorCode.PlaybookUsedByTimer)
 
     for pv in pvs:
         if pv.flow_json:
@@ -503,7 +503,7 @@ async def execute_action(request):
                 for log in logs:
                     if log.id not in sent_id:
                         sent_id.append(log.id)
-                        await resp.send(f"data: {orjson.dumps(log.json).decode()}\n\n")
+                        await resp.send(f"data: [{orjson.dumps(log.json).decode()}]\n\n")
                 if any(log.node_type == "end-node" for log in logs):
                     break
                 if any(log.status in [-1, 2] for log in logs):
