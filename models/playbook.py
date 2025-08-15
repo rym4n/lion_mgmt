@@ -56,30 +56,10 @@ class PlaybookVersion(BaseModel):
         raise NotImplementedError
 
     @property
-    def full_json(self) -> dict:
-        return {
-            "flow_id": self.playbook.id,
-            "version_id": self.id,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-            "utime": strip_timezone_to_seconds(self.utime),
-            "name": self.playbook.name,
-            "remark": self.playbook.remark,
-            "change_desc": self.change_desc,
-            "status": self.status,
-            "tags": [tag.name for tag in self.playbook.tags] if self.playbook.tags else [],
-            "scenes": [scene.name for scene in self.playbook.scenes] if self.playbook.scenes else [],
-            "flow_json": self.flow_json,
-            "version": self.version,
-            "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
-            "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
-            "internal": self.playbook.internal
-        }
-
-    @property
     def json(self) -> dict:
         return {
-            "flow_id": self.playbook.id,
-            "version_id": self.id,
+            "playbook_id": self.playbook.id,
+            "flow_id": self.id,
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
             "name": self.playbook.name,

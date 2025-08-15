@@ -21,7 +21,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license, playbook_permission, \
     check_playbook_permission
-from libs.utils import gen_order_version
+from libs.utils import gen_order_version, strip_timezone_to_seconds
 from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, \
     EventRelatedScript, Timed
 from services.tools.views import tool_action_update, tool_action_playbook_delete
@@ -178,15 +178,60 @@ async def list_workflow_versions(request):
     请求参数：
         playbook_id: 必填，剧本id
     """
-    pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False).all().prefetch_related(
+    pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False).only(
+        "id", "ctime", "utime", "playbook_id",
+        "change_desc", "status", "version",
+        "creator_id", "updator_id"
+    ).all().prefetch_related(
         "playbook", "creator", "updator")
-    datas = []
-    for p in pv:
-        data = p.json
-        data.pop("flow_json")
-        datas.append(data)
-    return response_ok(datas)
+    result = [
+        {
+            "playbook_id": p.playbook_id,
+            "flow_id": p.id,
+            "ctime": strip_timezone_to_seconds(p.ctime),
+            "utime": strip_timezone_to_seconds(p.utime),
+            "name": p.playbook.name,
+            "remark": p.playbook.remark,
+            "change_desc": p.change_desc,
+            "status": p.status,
+            "version": p.version,
+            "creator": {"username": p.creator.username, "display_name": p.creator.display_name},
+            "updator": {"username": p.updator.username, "display_name": p.updator.display_name},
+            "internal": p.playbook.internal
+        }
+        for p in pv
+    ]
+    return response_ok(result)
 
+
+@workflow_bp.post("/export")
+@requires_permission("workflow:r")
+@playbook_permission("r")
+async def export_workflow(request):
+    """
+    获取剧本版本列表
+
+    请求参数：
+        playbook_id: 必填，剧本id
+    """
+    pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False).all().prefetch_related("playbook")
+    result = [
+        {
+            "playbook_id": p.playbook_id,
+            "flow_id": p.id,
+            "ctime": strip_timezone_to_seconds(p.ctime),
+            "utime": strip_timezone_to_seconds(p.utime),
+            "name": p.playbook.name,
+            "remark": p.playbook.remark,
+            "change_desc": p.change_desc,
+            "status": p.status,
+            "version": p.version,
+            "flow_json": p.flow_json,
+            "internal": p.playbook.internal
+        }
+        for p in pv
+    ]
+    return response_ok(result)
 
 @workflow_bp.post("/flow-json")
 @requires_permission("workflow:r")
@@ -197,9 +242,18 @@ async def get_flow_json(request):
 
     请求参数：
         flow_id: 必填，剧本版本id
+        playbook_id: 必填，剧本ID
     """
+    data = None
     pv = await PlaybookVersion.get_or_none(id=request.json.get("flow_id")).prefetch_related("playbook", "creator", "updator")
-    return response_ok(pv.flow_json if pv else None)
+    if pv:
+        data = pv.json
+    else:
+        pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False).order_by(
+            "-version").first().prefetch_related("playbook", "creator", "updator")
+        if pv:
+            data = pv.json
+    return response_ok(data)
 
 
 # @workflow_bp.post("/detail")
