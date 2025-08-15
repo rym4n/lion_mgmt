@@ -312,7 +312,7 @@ class ChatManager:
                     {"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
             elif message_type == "heartbeat":
                 await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
-                await ws.send(orjson.dumps({"type": "heartbeat_response", "status": "pong"}))
+                await ws.send(orjson.dumps({"type": "heartbeat_response"}).decode())
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
             await ws.send(orjson.dumps({"type": "error", "message": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
