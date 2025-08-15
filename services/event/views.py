@@ -315,7 +315,6 @@ async def execution(request):
     if not room_id or not type:
         raise CustomError(ErrorCode.ParamValueError)
     params = {}
-    data = []
     input_data = {}
     if type == "flow":
         if executorParams:
@@ -342,20 +341,15 @@ async def execution(request):
         params["resource"] = ""
     params["executor"] = user.id
     if executorActionAssetIds and type == "action":
-        for executorActionAssetId in executorActionAssetIds.split(","):
-            params["resource"] = executorActionAssetId
-            data.append(params.copy())
-    else:
-        data.append(params)
-    for params in data:
-        run_id = gen_order_version(length=6)
-        msg = {"run_type": type, "run_id": run_id, "run_args": params}
-        room = await Room.get_or_none(id=room_id)
-        room.updator = user
-        room.run_id.append(msg["run_id"])
-        await room.save()
-        await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
-        await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+        params["resource"] = executorActionAssetIds
+    run_id = gen_order_version(length=6)
+    msg = {"run_type": type, "run_id": run_id, "run_args": params}
+    room = await Room.get_or_none(id=room_id)
+    room.updator = user
+    room.run_id.append(msg["run_id"])
+    await room.save()
+    await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
+    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
     return response.json({
         "code": 0,

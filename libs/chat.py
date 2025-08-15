@@ -108,7 +108,7 @@ async def creat_message(room_id, log, user, redis):
         "sender_id": sender.id,
         "sender_name": sender.username,
         "sender_display_name": sender.display_name,
-        "content": log,
+        "content": [log],
         "image_content": "",
         "timestamp": str(msg.ctime),
         "room_id": room_id
