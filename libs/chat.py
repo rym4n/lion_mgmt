@@ -204,6 +204,7 @@ class ChatManager:
         if user_id in self.run_connections.keys():
             self.run_connections.pop(user_id, None)
         await self.cache_client.delete(f"room_online_{user_id}")
+        logger.info(f"用户 {user_id} 断开连接")
         # await self.msg_pub.publish(WR_TOPIC, orjson.dumps({"type": "system", "message": f"{user.username} 离开作战室"}).decode())
 
     async def msg_listener(self):

@@ -58,8 +58,6 @@ async def warroom_ws(request: Request, ws: Websocket):
                 await chat_manager.handle_message(account, ws, message)
             except asyncio.TimeoutError:
                 await ws.send(orjson.dumps({"type": "heartbeat", "status": "ping"}).decode())
-            except asyncio.CancelledError:
-                break
             except Exception as e1:
                 logger.error(f"{e1} | {traceback.format_exc()}")
     except ConnectionClosed as e2:
