@@ -180,7 +180,26 @@ async def list_workflow_versions(request):
     """
     pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False).all().prefetch_related(
         "playbook", "creator", "updator")
-    return response_ok([p.json for p in pv])
+    datas = []
+    for p in pv:
+        data = p.json
+        data.pop("flow_json")
+        datas.append(data)
+    return response_ok(datas)
+
+
+@workflow_bp.post("/flow-json")
+@requires_permission("workflow:r")
+@playbook_permission("r")
+async def get_flow_json(request):
+    """
+    获取剧本版本的flow_json
+
+    请求参数：
+        flow_id: 必填，剧本版本id
+    """
+    pv = await PlaybookVersion.get_or_none(id=request.json.get("flow_id")).prefetch_related("playbook", "creator", "updator")
+    return response_ok(pv.flow_json if pv else None)
 
 
 # @workflow_bp.post("/detail")
