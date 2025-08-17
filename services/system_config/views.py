@@ -335,7 +335,7 @@ async def set_ai(request):
         if params.get(a):
             await Config.update_or_create(key=a, defaults={"value": params[a]}, module="ai")
     ai_cfg = {a: params[a] for a in args}
-    await request.ctx.cache_client.set('ai_config', ai_cfg, ttl=60 * 60 * 24)
+    await request.ctx.cache_client.set('ai_config', ai_cfg, 60 * 60 * 24)
 
     return response_ok('success')
 

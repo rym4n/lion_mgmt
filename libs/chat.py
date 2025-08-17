@@ -16,7 +16,7 @@ from libs.kafka import aconsume
 from models import Runlog, Approvement, Events, Config
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC, WR_TOPIC
+from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC, WR_TOPIC, AUTHENTICATION_SESSION_EXPIRATION
 
 SYSTEM_PROMPT = """
             你是一位智能安全专家助手，具有广泛的领域知识。
@@ -56,7 +56,7 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
         data = {"room_id": room.id, "name": room.name}
         user_private_chat_rooms[key] = data
         logger.info(user_private_chat_rooms)
-        await cache_client.set("user_private_chat_rooms", user_private_chat_rooms, ttl=60 * 60 * 24)
+        await cache_client.set("user_private_chat_rooms", user_private_chat_rooms, 60 * 60 * 24)
         return data
     else:
         return user_private_chat_rooms[key]
@@ -194,7 +194,7 @@ class ChatManager:
             "online": True,
             "timestamp": str(datetime.now())
         }
-        await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
+        await self.cache_client.set(f"room_online_{user.id}", int(time.time()), AUTHENTICATION_SESSION_EXPIRATION)
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(status_message).decode())
 
     async def disconnect(self, user_id):
@@ -309,7 +309,7 @@ class ChatManager:
                 # 发送在线状态列表
                 await ws.send(orjson.dumps({"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
             elif message_type == "ping":
-                await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
+                await self.cache_client.set(f"room_online_{user.id}", int(time.time()), AUTHENTICATION_SESSION_EXPIRATION)
                 await ws.send(orjson.dumps({"type": "pong"}).decode())
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")

@@ -10,13 +10,13 @@ import shutil
 import time
 import uuid
 import zipfile
-import pytz
 from collections import defaultdict
 from functools import reduce
 from io import BytesIO
 
 import aiofile
 import orjson
+import pytz
 from aiocache import caches
 from sanic import Blueprint, response
 from tortoise.expressions import Q
@@ -32,7 +32,7 @@ from libs.security.authorization import requires_permission, load_license
 from libs.utils import fix_zip_filename, gen_order_version
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion, \
     Runlog
-from settings import TOOLS_DIR, KAFKA_SERVERS, TASK_TOPIC
+from settings import TOOLS_DIR, KAFKA_SERVERS, TASK_TOPIC, AUTHENTICATION_SESSION_EXPIRATION
 
 # 定义 Blueprint
 tools_bp = Blueprint("tools", url_prefix="/tools")
@@ -320,7 +320,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
         )
 
         # 将config数据存入redis
-        await redis_client.set(name + "_" + version, config_data, ttl=2592000)
+        await redis_client.set(name + "_" + version, config_data, 2592000)
 
         return config_data, version, tool.name, "success"
 
@@ -403,7 +403,7 @@ async def enrich_tool(tool, cache_client):
         config_path = os.path.join(tool["path"], "config.json")
         async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
             data = await f.read()
-            await cache_client.set(cache_key, data, ttl=2592000)
+            await cache_client.set(cache_key, data, 2592000)
         data = orjson.loads(data)
     else:
         if isinstance(data, (str, bytes)):
@@ -1364,7 +1364,7 @@ async def health_check(request):
     id = str(uuid.uuid4())
     r = {k: resources[k].get('value') or resources[k].get('default_value', '') for k in resources}
     r[id + "_name"] = name
-    await caches.get("redis_chat").set("resource_" + id, r, ttl=300)
+    await caches.get("redis_chat").set("resource_" + id, r, AUTHENTICATION_SESSION_EXPIRATION)
     resp = await request.respond(
         content_type="text/event-stream",
         headers={
