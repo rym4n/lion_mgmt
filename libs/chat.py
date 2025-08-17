@@ -577,8 +577,9 @@ class ChatManager:
             online_users = [u.id for u in room.users]
 
             async for key in self.msg_pub.scan_iter(match="room_online_*", count=100):
-                if key.decode().split("_")[2] in online_users:
-                    online_status.append({"user_id": key.decode().split("_")[2], "username": key.decode().split("_")[3], "online": True})
+                user_id = key.decode().split("_")[2]
+                if user_id in online_users:
+                    online_status.append({"user_id": user_id, "online": True})
 
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
