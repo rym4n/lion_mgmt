@@ -302,17 +302,15 @@ class ChatManager:
             elif message_type == "delete_announcement":
                 await self._handle_delete_announcement(user, data)
                 # 通知删除成功
-                await ws.send(orjson.dumps(
-                    {"type": "delete_announcement_success", "announcement_id": data.get("announcement_id")}).decode())
+                await ws.send(orjson.dumps({"type": "delete_announcement_success", "announcement_id": data.get("announcement_id")}).decode())
             elif message_type == "request_online_users":
                 online_users = await self._handle_request_online_users(data)
                 self.active_connections[user.id]['current_room'] = data['room_id']
                 # 发送在线状态列表
-                await ws.send(orjson.dumps(
-                    {"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
-            elif message_type == "heartbeat":
+                await ws.send(orjson.dumps({"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
+            elif message_type == "ping":
                 await self.cache_client.set(f"room_online_{user.id}", int(time.time()), ttl=60)
-                await ws.send(orjson.dumps({"type": "heartbeat_response"}).decode())
+                await ws.send(orjson.dumps({"type": "pong"}).decode())
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
             await ws.send(orjson.dumps({"type": "error", "message": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
@@ -541,8 +539,7 @@ class ChatManager:
         if not announcement_id:
             raise Exception("缺少公告ID")
 
-        announcement = await Message.filter(id=announcement_id, type="announcement").first().prefetch_related("sender",
-                                                                                                              'room')
+        announcement = await Message.filter(id=announcement_id, type="announcement").first().prefetch_related("sender", 'room')
         if not announcement:
             raise Exception("公告不存在")
 
@@ -566,27 +563,27 @@ class ChatManager:
 
     async def _handle_request_online_users(self, data: dict):
         """处理请求在线用户列表"""
+        online_status = []
         try:
             room_id = data.get("room_id")
             if not room_id:
                 raise Exception("缺少房间ID")
 
             # 获取指定房间的所有用户
-            room = await Room.filter(id=room_id).first().prefetch_related("users")
+            room = await Room.get(id=room_id).prefetch_related("users")
             if not room:
                 raise Exception("找不到作战室")
 
-            online_status = []
+            online_users = [u.id for u in room.users]
 
-            # 构建在线状态信息
-            for user in room.users:
-                online_status.append({"user_id": user.id, "username": user.username,
-                                      "online": await self.cache_client.exists(f"room_online_{user.id}")})
+            async for key in self.msg_pub.scan_iter(match="room_online_*", count=100):
+                if key.decode().split("_")[2] in online_users:
+                    online_status.append({"user_id": key.decode().split("_")[2], "username": key.decode().split("_")[3], "online": True})
 
-            return online_status
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
             raise Exception("获取在线用户列表失败")
+        return online_status
 
 
 chat_manager = ChatManager()
