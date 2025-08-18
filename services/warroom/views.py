@@ -173,7 +173,7 @@ async def quit_room(request: Request):
 @requires_permission('warroom:r')
 async def get_room_list(request: Request):
     """
-    获取所有作战室列表
+    获取当前用户所有作战室列表
 
     请求参数：
         keyword: 可选，搜索作战室
@@ -185,6 +185,33 @@ async def get_room_list(request: Request):
 
     # 前端是先获取再查询, 没有使用到这里的查询参数
     rooms = await Room.filter(condition).order_by('-ctime').prefetch_related('creator', 'users')
+    return response_ok({
+        "rooms": [r.json for r in rooms]
+    })
+
+
+@warroom_bp.post("/all-rooms")
+@requires_permission('warroom:r')
+async def get_all_rooms(request: Request):
+    """
+    获取所有作战室列表(用于aioe-lion_mgmt使用)
+
+    请求参数：
+        page: 页码
+        size: 页大小
+        keyword: 可选，搜索作战室
+    """
+    page = request.json.get("page", 1)
+    size = request.json.get("size", 10)
+    offset = (page - 1) * size
+    limit = size
+    condition = Q()
+    keyword = request.json.get("keyword")
+    if keyword:
+        condition = condition & Q(name__icontains=keyword)
+
+    # 前端是先获取再查询, 没有使用到这里的查询参数
+    rooms = await Room.filter(condition).offset(offset).limit(limit).order_by('-ctime').prefetch_related('creator', 'users')
     return response_ok({
         "rooms": [r.json for r in rooms]
     })
