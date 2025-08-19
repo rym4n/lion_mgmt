@@ -126,7 +126,7 @@ async def get_all_events(request):
 @requires_permission('event:c')
 async def artificial_create_event(request):
     """
-    人工创建事件（需要事件创建权限） （wuzhi）
+    人工创建事件（需要事件创建权限）（兼容老接口，请勿使用）
 
     请求参数：
         eventName: str 事件名称 (必填)
@@ -206,7 +206,7 @@ async def artificial_create_event(request):
 @requires_permission('event:c')
 async def artificial_create_event_wuzhi(request):
     """
-    人工创建事件（需要事件创建权限） （wuzhi）
+    人工创建事件（需要事件创建权限） （兼容老接口，请勿使用）
 
     请求参数：
         eventName: str 事件名称 (必填)
@@ -286,7 +286,7 @@ async def artificial_create_event_wuzhi(request):
 @requires_permission("event:r")
 async def execution(request):
     """
-    运行剧本或动作（需要作战室创建权限） （wuzhi）
+    运行剧本或动作（需要作战室创建权限）（兼容老接口，请勿使用）
 
     请求参数：
         eventId: 必填，事件ID
@@ -364,7 +364,7 @@ async def execution(request):
 @requires_permission('event:r')
 async def get_activity_result(request, activityId):
     """
-    获取剧本或动作的执行结果（需要事件查看权限） （wuzhi）
+    获取剧本或动作的执行结果（需要事件查看权限）（兼容老接口，请勿使用）
 
     请求参数：
         activityId: str 活动id (必填)
