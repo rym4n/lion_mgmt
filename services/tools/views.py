@@ -1341,7 +1341,7 @@ async def health_check(request):
     进行资源健康检查（需要工具查看权限）
 
     请求参数：
-        - action_input dict 动作输入参数 当type为action时必填      用websocket发送
+        - action_input dict 动作输入参数 当type为action时必填
             示例如下：
             {
                 "type": "action",
