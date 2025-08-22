@@ -12,7 +12,7 @@ from models import Runlog, ToolAction, PlaybookVersion, Tool, ToolResourcesModel
 @requires_permission("warroom:r")
 async def activity(request, activityId):
     """
-    获取执行记录 （externality）
+    获取执行记录 （兼容老接口，请勿使用）
 
     请求参数：
         activityId: 必填，活动ID
@@ -65,7 +65,7 @@ async def activity(request, activityId):
 @requires_permission("workflow:r")
 async def playbook_list(request):
     """
-    获取剧本版本列表（兼容雾帜接口，aioe请勿使用）（externality）
+    获取剧本版本列表（兼容老接口，请勿使用）
 
     query参数:
         - page: 页码    int
@@ -128,7 +128,7 @@ async def playbook_list(request):
 @requires_permission("tool:r")
 async def all_apps(request):
     """
-    查询所有可用的动作（需要工具查看权限）（externality）
+    查询所有可用的动作（需要工具查看权限）（兼容老接口，请勿使用）
 
     query参数:
         - page: 页码    int

@@ -233,6 +233,7 @@ async def export_workflow(request):
     ]
     return response_ok(result)
 
+
 @workflow_bp.post("/flow-json")
 @requires_permission("workflow:r")
 @playbook_permission("r")
@@ -441,7 +442,7 @@ async def execute_action(request):
         执行接口
 
         请求参数：
-            - playbook_input dict 剧本输入参数 当type为flow时必填      用websocket发送
+            - playbook_input dict 剧本输入参数 当type为flow时必填
             示例如下：
             {
                 "type": "flow",
@@ -451,7 +452,7 @@ async def execute_action(request):
                     "c":"123456789"         剧本输入参数
                 }
             }
-            - action_input dict 动作输入参数 当type为action时必填      用websocket发送
+            - action_input dict 动作输入参数 当type为action时必填
             示例如下：
             {
                 "type": "action",
@@ -504,7 +505,9 @@ async def execute_action(request):
                     if log.id not in sent_id:
                         sent_id.append(log.id)
                         await resp.send(f"data: [{orjson.dumps(log.json).decode()}]\n\n")
-                if any(log.node_type == "end-node" for log in logs):
+                if message.get("type") == "action" and len(sent_id) >= len(message.get('resource', '').split()):
+                    break
+                if message.get("type") == "flow" and any(log.node_type == "end-node" for log in logs):
                     break
                 if any(log.status in [-1, 2] for log in logs):
                     break

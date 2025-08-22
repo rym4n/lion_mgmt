@@ -632,7 +632,7 @@ async def run(request):
 @requires_permission("warroom:r")
 async def execution(request):
     """
-    运行剧本或动作（需要作战室创建权限） （externality）
+    运行剧本或动作（需要作战室创建权限）（兼容老接口，请勿使用）
 
     请求参数：
         eventId: 必填，事件ID
@@ -710,7 +710,7 @@ async def execution(request):
 @requires_permission("warroom:r")
 async def activity(request, activityId):
     """
-    获取执行记录 （externality）
+    获取执行记录（兼容老接口，请勿使用）
 
     请求参数：
         activityId: 必填，活动ID
