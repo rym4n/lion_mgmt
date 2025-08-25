@@ -1,6 +1,6 @@
 # coding=utf-8
 
-from tortoise import fields, indexes
+from tortoise import fields
 
 from libs.utils import strip_timezone_to_seconds
 from models.base import BaseModel
@@ -37,7 +37,7 @@ class Runlog(BaseModel):
     playbook_name = fields.CharField(null=True, max_length=36, description="剧本名称")
 
     playbook_version = fields.ForeignKeyField("models.PlaybookVersion", null=True, related_name="playbook_runlog",
-                                  description="关联剧本版本", on_delete=fields.SET_NULL)
+                                              description="关联剧本版本", on_delete=fields.SET_NULL)
 
     def validate(self) -> None:
         raise NotImplementedError
