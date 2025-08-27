@@ -1,7 +1,7 @@
 # coding=utf-8
 import elasticsearch
 from asyncpg.exceptions import UniqueViolationError
-from sanic import HTTPResponse, exceptions
+from sanic import HTTPResponse, exceptions, MethodNotAllowed
 from sanic.log import logger
 from sanic.request import Request
 from tortoise.exceptions import ValidationError, IntegrityError, FieldError, DoesNotExist
@@ -18,7 +18,6 @@ class UnknownExcHandler(BaseExcHandler):
         return Exception
 
     def handle(self, request: Request, exception: Exception) -> HTTPResponse:
-        logger.exception(exception)
         if isinstance(exception, exceptions.NotFound) or isinstance(exception, DoesNotExist):
             return response_fail(ErrorCode.NotFound)
         elif isinstance(exception, exceptions.BadRequest) or isinstance(exception, ValidationError) or isinstance(exception, ValueError) or isinstance(exception, TypeError) or isinstance(exception, KeyError) or isinstance(exception, FieldError):
@@ -27,5 +26,8 @@ class UnknownExcHandler(BaseExcHandler):
             return response_fail(ErrorCode.DataAlreadyExists)
         elif isinstance(exception, elasticsearch.BadRequestError):
             return response_fail(ErrorCode.ESQueryError)
+        elif isinstance(exception, MethodNotAllowed):
+            return response_fail(ErrorCode.MethodNotAllowed)
         else:
+            logger.exception(exception)
             return response_fail(ErrorCode.ServerError, 500)

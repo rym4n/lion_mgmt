@@ -31,7 +31,7 @@ class SecurityMiddleware(BaseMiddleware):
             await AuditLog.create(username=request.ctx.session['name'], display_name=request.ctx.session['display_name'], client_ip=request.ctx.session['ip'],
                                   result="成功" if response.status == 200 else "失败", uri=request.path, client_ua=request.headers.get('User-Agent', ''),
                                   request_data=request.json if 'multipart' not in request.content_type else None)
-        elif request.path == '/user/login':
+        elif request.path == '/user/login' and request.method == 'POST':
             params = request.json
             if params:
                 params['password'] = '******'
