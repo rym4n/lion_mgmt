@@ -63,10 +63,10 @@ ES_HOST = os.environ.get("ELASTIC_HOST")
 ES_USER = os.environ.get("ELASTIC_USER")
 ES_PASS = os.environ.get("ELASTIC_PASSWORD")
 
-OAS_UI_DEFAULT = "swagger"
+OAS_UI_DEFAULT = "redoc"
 OAS_PATH_TO_SWAGGER_HTML = os.path.join(BASE_DIR, 'settings', 'apidoc.html')
-OAS_UI_REDOC = False
-OAS_UI_SWAGGER = True
+OAS_UI_REDOC = True
+OAS_UI_SWAGGER = False
 
 # 安全相关
 SECRET = os.environ.get("RY_SECRET_KEY", '5tdPY^zTX6I$akvNtLXey3y#gFEG@^46f!iLUdSy$Y')
