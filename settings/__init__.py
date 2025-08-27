@@ -64,7 +64,7 @@ ES_USER = os.environ.get("ELASTIC_USER")
 ES_PASS = os.environ.get("ELASTIC_PASSWORD")
 
 OAS_UI_DEFAULT = "redoc"
-OAS_PATH_TO_SWAGGER_HTML = os.path.join(BASE_DIR, 'settings', 'apidoc.html')
+OAS_PATH_TO_REDOC_HTML = os.path.join(BASE_DIR, 'settings', 'apidoc.html')
 OAS_UI_REDOC = True
 OAS_UI_SWAGGER = False
 
