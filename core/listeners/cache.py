@@ -16,18 +16,12 @@ from .base import BaseListener
 class CacheListener(BaseListener):
     """缓存服务监听"""
 
-    async def before_server_start(self, app: Sanic, loop: BaseEventLoop) -> None:
-        """初始化缓存"""
-        try:
-            caches.set_config(CACHE)
-            app.ctx.cache_client = caches.get('redis_mgmt')
-            logger.info("使用Redis作为缓存")
-        except Exception as e:
-            logger.error(f"缓存初始化失败: {e}")
-            raise
-
     async def after_server_start(self, app: Sanic, loop: BaseEventLoop) -> None:
         """app绑定内存/Redis"""
+        caches.set_config(CACHE)
+        app.ctx.cache_client = caches.get('redis_mgmt')
+        logger.info("使用Redis作为缓存")
+
         records = await Config.filter(module='sso').values('key', 'value')
         app.ctx.oauth_cfg = {c['key']: c['value'] for c in records}
 
@@ -65,10 +59,3 @@ class CacheListener(BaseListener):
                 logger.info("Redis closed.")
             except Exception as e:
                 logger.warning(f"关闭 Redis 连接时出错: {e}")
-
-    async def _safe_task(self, coro):
-        """包装任务以捕获异常"""
-        try:
-            await coro()
-        except Exception as e:
-            logger.exception(f"后台任务执行异常: {e}")
