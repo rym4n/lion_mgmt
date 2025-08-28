@@ -17,7 +17,7 @@ async def aproduce(servers, topic, value, key=None, partition=None, max_request_
 
 
 async def aconsume(servers, topic, group_id, callback_func=None, consume_records=500):
-    async with AIOKafkaConsumer(topic, bootstrap_servers=servers.split(','), group_id=group_id, enable_auto_commit=True,
+    async with AIOKafkaConsumer(topic, bootstrap_servers=servers.split(','), group_id=group_id, enable_auto_commit=False,
                                 max_poll_interval_ms=60000, value_deserializer=orjson.loads) as consumer:
         while True:
             try:
@@ -25,7 +25,7 @@ async def aconsume(servers, topic, group_id, callback_func=None, consume_records
                 for _, msgs in msg_set.items():
                     if callback_func:
                         await callback_func(msgs)
-                # await consumer.commit()
+                await consumer.commit()
                 # Consume messages
                 # async for msg in consumer:
                 #     # print(msg.value)
@@ -38,4 +38,4 @@ async def aconsume(servers, topic, group_id, callback_func=None, consume_records
                 await consumer.start()
             except Exception as err2:
                 logger.error(f"{err2} | {traceback.format_exc()}")
-                # await consumer.commit()
+                await consumer.commit()
