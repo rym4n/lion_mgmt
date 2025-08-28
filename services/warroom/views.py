@@ -679,10 +679,10 @@ async def execution(request):
         params["app_ver"] = tool.version
         params["main"] = tool.main
         params["action_input"] = input_data
-        params["node_name"] = action.action["name"]
+        params["node_name"] = tool.description
         params["action"] = action.action["func"]
         params["action_name"] = action.action["name"]
-        params["retry_times"] = 1
+        params["retry_times"] = 0
         params["timeout"] = 300
         params["resource"] = ""
     params["executor"] = user.id
