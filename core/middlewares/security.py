@@ -66,8 +66,9 @@ class SecurityMiddleware(BaseMiddleware):
                 "client_ua": request.headers.get('User-Agent', ''),
                 "request_data": params
             }
-        if data:
+        if data is not None:
             data["ctime"] = get_time()
             data["utime"] = get_time()
             data["id"] = str(uuid.uuid4())
+            data["deleted"] = False
             await aproduce(KAFKA_SERVERS, AUDIT_TOPIC, data)
