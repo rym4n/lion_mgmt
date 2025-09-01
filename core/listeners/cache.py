@@ -27,12 +27,24 @@ class CacheListener(BaseListener):
 
         if app.ctx.oauth_cfg.get('use_oauth2') == 'true':
             logger.info("启用OAuth2认证")
+            client_id = app.ctx.oauth_cfg.get("client_id")
+            client_secret = app.ctx.oauth_cfg.get("client_secret")
+            authorize_uri = app.ctx.oauth_cfg.get("authorize_uri")
+            token_uri = app.ctx.oauth_cfg.get("token_uri")
+
+            if not all([client_id, client_secret, authorize_uri, token_uri]):
+                logger.warning("OAuth2 配置缺失，请检查数据库中 sso 模块相关配置")
+                return
+
+            scopes = app.ctx.oauth_cfg.get("scopes")
+            base_scopes = scopes.split(',') if scopes else None
+
             app.ctx.oauth2 = OAuth2(
-                app.ctx.oauth_cfg.get("client_id"),
-                app.ctx.oauth_cfg.get("client_secret"),
-                app.ctx.oauth_cfg.get("authorize_uri"),
-                app.ctx.oauth_cfg.get("token_uri"),
-                base_scopes=app.ctx.oauth_cfg["scopes"].split(',') if app.ctx.oauth_cfg.get("scopes") else None
+                client_id,
+                client_secret,
+                authorize_uri,
+                token_uri,
+                base_scopes=base_scopes
             )
 
         app.add_task(chat_manager.msg_listener)
@@ -40,5 +52,10 @@ class CacheListener(BaseListener):
 
     async def before_server_stop(self, app: Sanic, loop: BaseEventLoop) -> None:
         """释放连接"""
-        await app.ctx.cache_client.close()
-        logger.info("Redis closed.")
+        cache_client = getattr(app.ctx, 'cache_client', None)
+        if cache_client:
+            try:
+                await cache_client.close()
+                logger.info("Redis closed.")
+            except Exception as e:
+                logger.warning(f"关闭 Redis 连接时出错: {e}")

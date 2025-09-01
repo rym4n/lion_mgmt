@@ -17,7 +17,8 @@ async def aproduce(servers, topic, value, key=None, partition=None, max_request_
 
 
 async def aconsume(servers, topic, group_id, callback_func=None, consume_records=500):
-    async with AIOKafkaConsumer(topic, bootstrap_servers=servers.split(','), group_id=group_id, enable_auto_commit=False, max_poll_interval_ms=60000, value_deserializer=orjson.loads) as consumer:
+    async with AIOKafkaConsumer(topic, bootstrap_servers=servers.split(','), group_id=group_id, enable_auto_commit=False,
+                                max_poll_interval_ms=60000, value_deserializer=orjson.loads) as consumer:
         while True:
             try:
                 msg_set = await consumer.getmany(max_records=int(consume_records))
