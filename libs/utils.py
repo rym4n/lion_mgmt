@@ -19,6 +19,7 @@ from typing import Optional
 import aiofile
 import jwt
 import psutil
+import pytz
 from aiokafka import AIOKafkaConsumer, TopicPartition
 from argon2 import PasswordHasher
 from cryptography.exceptions import InvalidTag
@@ -361,3 +362,12 @@ async def setup_logs_template(pattern, alias_name):
         }
         await es.indices.put_index_template(name=f"template-{alias_name}", index_patterns=[pattern], priority=500,
                                             data_stream=None, template=template)
+
+
+def get_time():
+    try:
+        tz = pytz.timezone("Asia/Shanghai")
+        now = datetime.datetime.now(tz)
+        return now.strftime("%Y-%m-%dT%H:%M:%S%z")  # 带 +0800
+    except Exception:
+        return "1970-01-01T00:00:00+08:00"

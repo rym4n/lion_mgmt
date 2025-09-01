@@ -1,10 +1,11 @@
 # coding=utf-8
+import uuid
 
 from sanic import Request, HTTPResponse
 
 from libs.kafka import aproduce
 from libs.security.authentication import authenticate
-from libs.utils import get_client_ip
+from libs.utils import get_client_ip, get_time
 from settings import KAFKA_SERVERS, AUDIT_TOPIC
 from .base import BaseMiddleware
 
@@ -66,5 +67,7 @@ class SecurityMiddleware(BaseMiddleware):
                 "request_data": params
             }
         if data:
-            print(data)
+            data["ctime"] = get_time()
+            data["utime"] = get_time()
+            data["id"] = str(uuid.uuid4())
             await aproduce(KAFKA_SERVERS, AUDIT_TOPIC, data)
