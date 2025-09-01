@@ -57,6 +57,7 @@ KAFKA_SERVERS = os.environ.get("RY_KAFKA_SERVERS")
 TASK_TOPIC = os.environ.get("RY_TASK_TOPIC")
 RUNLOG_TOPIC = os.environ.get("RY_RUNLOG_TOPIC")
 WR_TOPIC = os.environ.get("RY_WR_TOPIC")
+AUDIT_TOPIC = os.environ.get("RY_AUDIT_TOPIC")
 
 # ES配置
 ES_HOST = os.environ.get("ELASTIC_HOST")

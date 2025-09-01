@@ -3,6 +3,7 @@ from datetime import datetime
 
 import aiofile
 import orjson
+import yaml
 from aiocache import cached
 from sanic import Blueprint
 from sanic import json
@@ -16,6 +17,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
 from models import AuditLog, Config
+from services.event_ingestion.views import check_vector_config
 
 system_bp = Blueprint('system', url_prefix='/system')
 _all__ = ["system_bp"]
@@ -169,8 +171,10 @@ async def get_system_status(request):
     无需参数直接请求则返回全部系统状况数据
     """
     name_map = {
-        'lion-mgmt': '控制台服务', 'lion-web': 'Web服务器', 'lion-db': '数据库服务', 'lion-kb': '数据库服务', 'lion-redis': '缓存服务',
-        'lion-ship': 'ETL服务', 'lion-job': '任务调度服务', 'lion-worker': '执行引擎', 'lion-kafka': '消息队列', 'lion-ai': 'AI服务',
+        'lion-mgmt': '控制台服务', 'lion-web': 'Web服务器', 'lion-db': '数据库服务', 'lion-kb': '数据库服务',
+        'lion-redis': '缓存服务',
+        'lion-ship': 'ETL服务', 'lion-job': '任务调度服务', 'lion-worker': '执行引擎', 'lion-kafka': '消息队列',
+        'lion-ai': 'AI服务',
         'lion-fs': '文件存储服务', 'lion-es': 'ES存储服务'
     }
     # 遍历目录获取 status_ 开头的json文件
@@ -276,8 +280,10 @@ async def update_oauth_config(request):
         else:
             await Config.create(key="use_oauth2", value="false", module="sso")
     else:
-        required_fields = ["auto_create", "client_id", "client_secret", "authorize_uri", "token_uri", "user_info_uri", "user_id_path", "token_path"]
-        optional_fields = ["display_name_path", "email_path", "phone_path", "scopes", "client_id_alias", "client_secret_alias", "scopes_alias"]
+        required_fields = ["auto_create", "client_id", "client_secret", "authorize_uri", "token_uri", "user_info_uri",
+                           "user_id_path", "token_path"]
+        optional_fields = ["display_name_path", "email_path", "phone_path", "scopes", "client_id_alias",
+                           "client_secret_alias", "scopes_alias"]
         # 校验必填字段是否为空或不存在
         for field in required_fields:
             if not params.get(field):
@@ -397,3 +403,77 @@ async def search_audit(request):
         "total_pages": (total + size - 1) // size,
         "data": [item.json for item in data]
     })
+
+
+@system_bp.post("/outgoing")
+@requires_permission("audit:r")
+async def outgoing(request):
+    """
+    查询审计日志
+
+    请求参数：
+        kafka: {
+            "servers": ["kafka服务器地址"],
+            "topic": "kafka主题名称",
+            "mechanism": "SASL机制", 启用SASL时必填
+            "username": "SASL用户名", 启用SASL时必填
+            "password": "SASL密码" 启用SASL时必填
+        }
+        syslog: {
+            "server": "syslog服务器地址",
+            "mode": tcp或udp,
+        }
+    """
+    yaml_file = os.path.join(settings.VECTOR_CFG, "AuditLog.yaml")
+    with open(yaml_file, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)  # 转换成 Python 对象
+
+    kafka = request.json.get("kafka")
+    syslog = request.json.get("syslog")
+    if not kafka and not syslog:
+        raise CustomError(ErrorCode.ParameterError)
+
+    if kafka:
+        servers = kafka.get("servers")
+        topic = kafka.get("topic")
+        mechanism = kafka.get("mechanism")
+        username = kafka.get("username")
+        password = kafka.get("password")
+        if not servers or not topic:
+            raise CustomError(ErrorCode.ParameterError)
+        data["sinks"]["kafka_sinks"] = {
+            "type": "kafka",
+            "inputs": ["AuditLog"],
+            "bootstrap_servers": ",".join(servers),
+            "topic": topic,
+        }
+        if mechanism:
+            data["sinks"]["kafka_sinks"]["sasl"] = {
+                "enabled": True,
+                "mechanism": mechanism,
+                "username": username,
+                "password": password
+            }
+    if syslog:
+        server = syslog.get("server")
+        mode = syslog.get("mode")
+        if not server or not mode:
+            raise CustomError(ErrorCode.ParameterError)
+        data["sinks"]["syslog_sinks"] = {
+            "type": "socket",
+            "inputs": ["AuditLog"],
+            "address": server,
+            "mode": mode
+        }
+
+    yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True)
+
+    result = check_vector_config(data)
+
+    if not result:
+        return response_ok("failed")
+
+    async with aiofile.AIOFile(yaml_file, mode='w', encoding='utf-8') as file:
+        await file.write(yaml_str)
+
+    return response_ok("success")
