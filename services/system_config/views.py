@@ -446,6 +446,9 @@ async def outgoing(request):
             "inputs": ["aioe_kafka_audit"],
             "bootstrap_servers": ",".join(servers),
             "topic": topic,
+            "encoding": {
+                "codec": "json"
+            }
         }
         if mechanism:
             data["sinks"]["kafka_sinks"]["sasl"] = {
@@ -463,7 +466,10 @@ async def outgoing(request):
             "type": "socket",
             "inputs": ["aioe_kafka_audit"],
             "address": server,
-            "mode": mode
+            "mode": mode,
+            "encoding": {
+                "codec": "json"
+            }
         }
 
     class QuotedString(str):
