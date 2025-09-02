@@ -445,8 +445,13 @@ async def outgoing(request):
             raise CustomError(ErrorCode.ParameterError)
 
         sink_address = sink_address.split(",")
+        if len(sink_address) > 1 and sink_type == "syslog":
+            raise CustomError(ErrorCode.MultipleSyslogAddressNotSupported)
 
         for a in sink_address:
+            if int(a.split(":")[-1]) < 1 or int(a.split(":")[-1]) > 65535:
+                raise CustomError(ErrorCode.InvalidPortError)
+
             if a not in address_sum:
                 address_sum.append(a)
             else:
@@ -479,9 +484,8 @@ async def outgoing(request):
             mode = item.get("sink_protocol")
             if not mode:
                 raise CustomError(ErrorCode.ParameterError)
-            n = 0
             for address in sink_address:
-                data["sinks"]["syslog_sinks_" + str(m) + "_" + str(n)] = {
+                data["sinks"]["syslog_sinks_" + str(m)] = {
                     "type": "socket",
                     "inputs": ["aioe_kafka_audit"],
                     "address": address,
@@ -490,7 +494,6 @@ async def outgoing(request):
                         "codec": "json"
                     }
                 }
-                n += 1
         m += 1
 
     class QuotedString(str):
