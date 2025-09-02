@@ -87,15 +87,17 @@ def get_conditional_statements(conditions):
     return conditional_statements
 
 
-def check_vector_config(vector_config):
+def check_vector_config(vector_config, vector_config_yaml=None):
     with tempfile.NamedTemporaryFile(
             mode='w',
             suffix='.yaml',
             encoding='utf-8',
             delete=False
     ) as tmp_file:
-
-        yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
+        if vector_config_yaml:
+            yaml_str = vector_config_yaml
+        else:
+            yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
         logger.info(yaml_str)
         tmp_file.write(yaml_str)
         tmp_file.flush()

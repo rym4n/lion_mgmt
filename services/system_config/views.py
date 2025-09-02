@@ -466,9 +466,21 @@ async def outgoing(request):
             "mode": mode
         }
 
-    yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True)
+    class QuotedString(str):
+        pass
 
-    result = check_vector_config(data)
+    def quoted_presenter(dumper, data):
+        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='"')
+
+    yaml.add_representer(QuotedString, quoted_presenter)
+
+    data['sinks']['AuditLog_sinks']['endpoint'] = QuotedString(
+        data['sinks']['AuditLog_sinks']['endpoint']
+    )
+
+    yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    result = check_vector_config(data, vector_config_yaml=yaml_str)
 
     if not result:
         return response_ok("failed")
