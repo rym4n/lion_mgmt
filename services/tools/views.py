@@ -1395,3 +1395,64 @@ async def health_check(request):
         await resp.eof()
 
     return resp
+
+
+@tools_bp.post("/debug")
+@requires_permission("tool:r")
+async def tool_debug(request):
+    """
+    debug工具 用于工具开发时调试使用（需要工具查看权限）
+
+    请求参数：
+        data: python脚本代码   str 必填
+    """
+    resp = await request.respond(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+    data = request.json.get("data")
+    if not data:
+        raise CustomError(ErrorCode.ParameterError)
+
+    tool = await Tool.filter(name="lion_mgmt", deleted=False).order_by("-ctime").first()
+    if not tool:
+        return response_ok("工具开发运行APP缺失，请联系管理员处理")
+
+    resource = await ToolResources.filter(tool_name="lion_mgmt", deleted=False).order_by("-ctime").first()
+    if not resource:
+        raise response_ok("工具开发运行资源不存在，请联系管理员处理")
+
+    user = request.ctx.session['account_info']
+    params = {"resource": resource.id, "node_name": tool.description,
+              "action": "run_python_script", "action_name": "执行python脚本", "app_name": "lion_mgmt",
+              "name": tool.description, "app_ver": tool.version, "main": tool.main, "action_input": {"data": data},
+              "retry_times": 0, "timeout": 300,
+              "executor": user.id}
+    run_id = gen_order_version(length=6)
+    msg = {"run_type": "action", "run_id": run_id, "run_args": params}
+    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    sent_id = []
+    for i in range(60):
+        logs = await Runlog.filter(run_id=run_id).all()
+        if logs:
+            for log in logs:
+                if log.id not in sent_id:
+                    sent_id.append(log.id)
+                    result = orjson.loads(log.result)
+                    data = result.get("data")
+                    if data:
+                        await resp.send(f"data: {orjson.dumps(data).decode()}\n\n")
+                    else:
+                        await resp.send(f"data: {orjson.dumps(result).decode()}\n\n")
+            if any(log.status in [-1, 2] for log in logs):
+                break
+            break
+        await asyncio.sleep(1)
+
+    if resp:
+        await resp.eof()
+
+    return resp
