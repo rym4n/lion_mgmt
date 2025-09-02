@@ -1413,15 +1413,17 @@ async def tool_debug(request):
             "Connection": "keep-alive",
         }
     )
+    beijing_tz = pytz.timezone("Asia/Shanghai")
+    utime = datetime.datetime.now(beijing_tz)
     data = request.json.get("data")
     if not data:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool = await Tool.get_or_none(name="lion_mgmt", deleted=False)
+    tool = await Tool.filter(name="lion_mgmt", deleted=False).order_by("-ctime").first()
     if not tool:
         return response_ok("工具开发运行APP缺失，请联系管理员处理")
 
-    resource = await ToolResources.get_or_none(tool_name="lion_mgmt", deleted=False)
+    resource = await ToolResources.filter(tool_name="lion_mgmt", deleted=False).order_by("-ctime").first()
     if not resource:
         raise response_ok("工具开发运行资源不存在，请联系管理员处理")
 
@@ -1442,7 +1444,12 @@ async def tool_debug(request):
             for log in logs:
                 if log.id not in sent_id:
                     sent_id.append(log.id)
-                    await resp.send(f"data: [{orjson.dumps(log.json).decode()}]\n\n")
+                    result = orjson.loads(log.result)
+                    data = result.get("data")
+                    if data:
+                        await resp.send(f"data: {orjson.dumps(data).decode()}\n\n")
+                    else:
+                        await resp.send(f"data: {orjson.dumps(result).decode()}\n\n")
             if any(log.status in [-1, 2] for log in logs):
                 break
         await asyncio.sleep(1)
