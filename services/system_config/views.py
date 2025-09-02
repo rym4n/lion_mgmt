@@ -421,7 +421,7 @@ async def outgoing(request):
         sasl_password: SASL密码，可选
     """
     data = {}
-    yaml_file = os.path.join(settings.VECTOR_CFG, "AuditLog.yaml")
+    yaml_file = os.path.join(settings.VECTOR_CFG, "aioe_audit.yaml")
     with open(yaml_file, "r", encoding="utf-8") as f:
         old_data = yaml.safe_load(f)  # 转换成 Python 对象
 
