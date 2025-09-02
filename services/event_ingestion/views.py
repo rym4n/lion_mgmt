@@ -597,13 +597,9 @@ async def binding_event_ingestion_script(request):
             data.setdefault("transforms", {})[f"{topic}_dedupe_transforms"] = {
                 "type": "dedupe",
                 # 如果之前配置了转换配置则用转换后的配置，否则用原始配置
-                "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [
-                    event.vector_name],
+                "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name],
                 "cache": {
                     "num_events": int(request_data['numbers'])
-                },
-                "time_settings": {
-                    "max_age_ms": int(request_data['time_window'])
                 },
                 "fields": {
                     "match": request_data.get('fields')
