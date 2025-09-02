@@ -409,42 +409,43 @@ async def search_audit(request):
 @requires_permission("audit:r")
 async def outgoing(request):
     """
-    查询审计日志
+    审计日志外发配置
 
     请求参数：
-        kafka: {
-            "servers": ["kafka服务器地址"],
-            "topic": "kafka主题名称",
-            "mechanism": "SASL机制", 启用SASL时必填
-            "username": "SASL用户名", 启用SASL时必填
-            "password": "SASL密码" 启用SASL时必填
-        }
-        syslog: {
-            "server": "syslog服务器地址",
-            "mode": tcp或udp,
-        }
+        sink_type: 外发类型，可选kafka或syslog
+        sink_address: 外发地址，包括端口，多个地址用,分隔
+        sink_protocol: 外发协议，可选tcp或udp
+        kafka_topic: kafka主题名称，可选
+        sasl_mechanism: SASL机制，可选
+        sasl_username: SASL用户名，可选
+        sasl_password: SASL密码，可选
     """
+    data = {}
     yaml_file = os.path.join(settings.VECTOR_CFG, "AuditLog.yaml")
     with open(yaml_file, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)  # 转换成 Python 对象
+        old_data = yaml.safe_load(f)  # 转换成 Python 对象
 
-    kafka = request.json.get("kafka")
-    syslog = request.json.get("syslog")
-    if not kafka and not syslog:
+    data["sources"] = old_data["sources"]
+    data.setdefault("sinks", {})["aioe_pg_audit"] = old_data["sinks"]["aioe_pg_audit"]
+
+    sink_type = request.json.get("sink_type")
+    sink_address = request.json.get("sink_address")
+    if not sink_address and not sink_type:
         raise CustomError(ErrorCode.ParameterError)
 
-    if kafka:
-        servers = kafka.get("servers")
-        topic = kafka.get("topic")
-        mechanism = kafka.get("mechanism")
-        username = kafka.get("username")
-        password = kafka.get("password")
-        if not servers or not topic:
+    sink_address = sink_address.split(",")
+
+    if sink_type == "kafka":
+        topic = request.json.get("kafka_topic")
+        mechanism = request.json.get("sasl_mechanism")
+        username = request.json.get("sasl_username")
+        password = request.json.get("sasl_password")
+        if not topic:
             raise CustomError(ErrorCode.ParameterError)
         data["sinks"]["kafka_sinks"] = {
             "type": "kafka",
             "inputs": ["aioe_kafka_audit"],
-            "bootstrap_servers": ",".join(servers),
+            "bootstrap_servers": ",".join(sink_address),
             "topic": topic,
             "encoding": {
                 "codec": "json"
@@ -457,20 +458,22 @@ async def outgoing(request):
                 "username": username,
                 "password": password
             }
-    if syslog:
-        server = syslog.get("server")
-        mode = syslog.get("mode")
-        if not server or not mode:
+    if sink_type == "syslog":
+        mode = request.json.get("sink_protocol")
+        if not mode:
             raise CustomError(ErrorCode.ParameterError)
-        data["sinks"]["syslog_sinks"] = {
-            "type": "socket",
-            "inputs": ["aioe_kafka_audit"],
-            "address": server,
-            "mode": mode,
-            "encoding": {
-                "codec": "json"
+        n = 0
+        for address in sink_address:
+            data["sinks"]["syslog_sinks_" + str(n)] = {
+                "type": "socket",
+                "inputs": ["aioe_kafka_audit"],
+                "address": address,
+                "mode": mode,
+                "encoding": {
+                    "codec": "json"
+                }
             }
-        }
+            n += 1
 
     class QuotedString(str):
         pass
