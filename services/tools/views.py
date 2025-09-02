@@ -1413,8 +1413,6 @@ async def tool_debug(request):
             "Connection": "keep-alive",
         }
     )
-    beijing_tz = pytz.timezone("Asia/Shanghai")
-    utime = datetime.datetime.now(beijing_tz)
     data = request.json.get("data")
     if not data:
         raise CustomError(ErrorCode.ParameterError)
@@ -1438,9 +1436,8 @@ async def tool_debug(request):
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
     sent_id = []
     for i in range(60):
-        logs = await Runlog.filter(run_id=run_id, utime__gte=utime).all()
+        logs = await Runlog.filter(run_id=run_id).all()
         if logs:
-            utime = logs[0].utime
             for log in logs:
                 if log.id not in sent_id:
                     sent_id.append(log.id)
