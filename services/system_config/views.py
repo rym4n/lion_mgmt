@@ -1,3 +1,4 @@
+import ast
 import os
 from datetime import datetime
 
@@ -412,13 +413,17 @@ async def outgoing(request):
     审计日志外发配置
 
     请求参数：
-        sink_type: 外发类型，可选kafka或syslog
-        sink_address: 外发地址，包括端口，多个地址用,分隔
-        sink_protocol: 外发协议，可选tcp或udp
-        kafka_topic: kafka主题名称，可选
-        sasl_mechanism: SASL机制，可选
-        sasl_username: SASL用户名，可选
-        sasl_password: SASL密码，可选
+        [
+            {
+                sink_type: 外发类型，可选kafka或syslog
+                sink_address: 外发地址，包括端口，多个地址用,分隔
+                sink_protocol: 外发协议，可选tcp或udp
+                kafka_topic: kafka主题名称，可选
+                sasl_mechanism: SASL机制，可选
+                sasl_username: SASL用户名，可选
+                sasl_password: SASL密码，可选
+            }
+        ]
     """
     data = {}
     yaml_file = os.path.join(settings.VECTOR_CFG, "aioe_audit.yaml")
@@ -428,52 +433,65 @@ async def outgoing(request):
     data["sources"] = old_data["sources"]
     data.setdefault("sinks", {})["aioe_pg_audit"] = old_data["sinks"]["aioe_pg_audit"]
 
-    sink_type = request.json.get("sink_type")
-    sink_address = request.json.get("sink_address")
-    if not sink_address and not sink_type:
-        raise CustomError(ErrorCode.ParameterError)
-
-    sink_address = sink_address.split(",")
-
-    if sink_type == "kafka":
-        topic = request.json.get("kafka_topic")
-        mechanism = request.json.get("sasl_mechanism")
-        username = request.json.get("sasl_username")
-        password = request.json.get("sasl_password")
-        if not topic:
+    # 校验重复项
+    address_sum = []
+    # 避免重名
+    m = 0
+    json_data = request.json
+    for item in json_data:
+        sink_type = item.get("sink_type")
+        sink_address = item.get("sink_address")
+        if not sink_address and not sink_type:
             raise CustomError(ErrorCode.ParameterError)
-        data["sinks"]["kafka_sinks"] = {
-            "type": "kafka",
-            "inputs": ["aioe_kafka_audit"],
-            "bootstrap_servers": ",".join(sink_address),
-            "topic": topic,
-            "encoding": {
-                "codec": "json"
-            }
-        }
-        if mechanism:
-            data["sinks"]["kafka_sinks"]["sasl"] = {
-                "enabled": True,
-                "mechanism": mechanism,
-                "username": username,
-                "password": password
-            }
-    if sink_type == "syslog":
-        mode = request.json.get("sink_protocol")
-        if not mode:
-            raise CustomError(ErrorCode.ParameterError)
-        n = 0
-        for address in sink_address:
-            data["sinks"]["syslog_sinks_" + str(n)] = {
-                "type": "socket",
+
+        sink_address = sink_address.split(",")
+
+        for a in sink_address:
+            if a not in address_sum:
+                address_sum.append(a)
+            else:
+                raise CustomError(ErrorCode.OutboundAddressCanNotBeRepeated)
+
+        if sink_type == "kafka":
+            topic = item.get("kafka_topic")
+            mechanism = item.get("sasl_mechanism")
+            username = item.get("sasl_username")
+            password = item.get("sasl_password")
+            if not topic:
+                raise CustomError(ErrorCode.ParameterError)
+            data["sinks"]["kafka_sinks_"+str(m)] = {
+                "type": "kafka",
                 "inputs": ["aioe_kafka_audit"],
-                "address": address,
-                "mode": mode,
+                "bootstrap_servers": ",".join(sink_address),
+                "topic": topic,
                 "encoding": {
                     "codec": "json"
                 }
             }
-            n += 1
+            if mechanism:
+                data["sinks"]["kafka_sinks"]["sasl"] = {
+                    "enabled": True,
+                    "mechanism": mechanism,
+                    "username": username,
+                    "password": password
+                }
+        if sink_type == "syslog":
+            mode = item.get("sink_protocol")
+            if not mode:
+                raise CustomError(ErrorCode.ParameterError)
+            n = 0
+            for address in sink_address:
+                data["sinks"]["syslog_sinks_" + str(m) + "_" + str(n)] = {
+                    "type": "socket",
+                    "inputs": ["aioe_kafka_audit"],
+                    "address": address,
+                    "mode": mode,
+                    "encoding": {
+                        "codec": "json"
+                    }
+                }
+                n += 1
+        m += 1
 
     class QuotedString(str):
         pass
@@ -492,9 +510,28 @@ async def outgoing(request):
     result = check_vector_config(data, vector_config_yaml=yaml_str)
 
     if not result:
-        return response_ok("failed")
+        raise CustomError(ErrorCode.OutboundFileConfigurationFailed)
 
     async with aiofile.AIOFile(yaml_file, mode='w', encoding='utf-8') as file:
         await file.write(yaml_str)
 
-    return response_ok("success")
+    await Config.update_or_create(key="outgoing_audit_log", module="audit_log", defaults={"value": str(json_data)})
+
+    return response_ok("保存成功")
+
+
+@system_bp.post("/outgoing-config")
+@requires_permission("audit:r")
+async def get_outgoing_config(request):
+    """
+    获取审计日志外发配置
+
+    请求参数：
+        无
+    """
+    config = await Config.get_or_none(key="outgoing_audit_log", module="audit_log")
+    if not config:
+        return response_ok([])
+
+    python_list = ast.literal_eval(config.value)
+    return response_ok(python_list)

@@ -115,3 +115,5 @@ class ErrorCode(BaseErrorCode):
     FileNotFound = ErrorData(4084, "文件不存在")
 
     CannotDeleteAdmin = ErrorData(4085, "不允许删除内置管理员账号")
+    OutboundAddressCanNotBeRepeated = ErrorData(4086, "外发地址不可重复")
+    OutboundFileConfigurationFailed = ErrorData(4087, "外发文件配置失败，请检查配置")
