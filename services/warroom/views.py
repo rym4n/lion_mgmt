@@ -21,6 +21,7 @@ from libs.utils import gen_order_version, gen_random_code
 from models import Approvement, Events, ToolAction, Tool, Runlog
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
+from services.timed.views import runlog_list
 from settings import KAFKA_SERVERS, TASK_TOPIC, WR_TOPIC, CACHE
 
 warroom_bp = Blueprint('warroom', url_prefix='/warroom')
@@ -385,12 +386,15 @@ async def query_messages(request: Request):
         total_count = await Message.filter(type__in=["public", "ai", "runlog"], room_id=room_id).count()
         messages = await Message.filter(type__in=["public", "ai", "runlog"], room_id=room_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
         message_list = []
+        run_id_list = []
         for msg in reversed(messages):
             if msg.type == "runlog":
                 run_id = msg.content.split(":")[0]
-                node_id = msg.content.split(":")[1]
-                runlogs = await Runlog.filter(run_id=run_id, node_id=node_id).all()
-                content = "[已撤回]" if msg.is_recalled else [runlog.json for runlog in runlogs]
+                if run_id not in run_id_list:
+                    run_id_list.append(run_id)
+                    runlogs = await Runlog.filter(run_id=run_id, deleted=False).order_by('ctime').all()
+                    run_logs = runlog_list(runlogs)
+                    content = "[已撤回]" if msg.is_recalled else run_logs
             else:
                 content = "[已撤回]" if msg.is_recalled else msg.content
             message_list.append({

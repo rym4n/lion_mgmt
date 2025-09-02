@@ -397,16 +397,11 @@ async def get_run_log(request):
     total = await Runlog.filter(condition).order_by('-run_id').distinct().values_list('run_id', flat=True)
 
     run_ids = await Runlog.filter(condition).distinct().order_by('-run_id').offset((page - 1) * size).limit(size).values_list('run_id', flat=True)
-
+    run_logs = []
     if run_ids:
-        all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).order_by('ctime').prefetch_related("timer", "playbook_version").all()
-        logs_by_run_id = defaultdict(list)
-        for log in all_logs:
-            logs_by_run_id[log.run_id].append(log.json)
 
-        run_logs = [value for value in logs_by_run_id.values()]
-    else:
-        run_logs = []
+        all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).order_by('ctime').prefetch_related("timer", "playbook_version").all()
+        run_logs = runlog_list(all_logs)
 
     return response_ok({
         "page": page,
@@ -414,6 +409,25 @@ async def get_run_log(request):
         "total": len(total),
         "data": run_logs
     })
+
+
+# 用于统一处理runlog返回格式
+def runlog_list(all_logs):
+    run_logs = []
+    logs_by_run_id = {}
+    for log in all_logs:
+        if (log.run_id, log.node_id) not in logs_by_run_id.setdefault(log.run_id, {}).keys():
+            logs_by_run_id[log.run_id][(log.run_id, log.node_id)] = [log.json]
+        else:
+            logs_by_run_id[log.run_id][(log.run_id, log.node_id)].append(log.json)
+
+    for value in logs_by_run_id.values():
+        data = []
+        for son_value in value.values():
+            data.append(son_value)
+        run_logs.append(data)
+
+    return run_logs
 
 
 async def timer_success_rate(timed_id):
