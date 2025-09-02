@@ -1452,6 +1452,7 @@ async def tool_debug(request):
                         await resp.send(f"data: {orjson.dumps(result).decode()}\n\n")
             if any(log.status in [-1, 2] for log in logs):
                 break
+            break
         await asyncio.sleep(1)
 
     if resp:
