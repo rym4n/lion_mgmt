@@ -443,7 +443,7 @@ async def outgoing(request):
             raise CustomError(ErrorCode.ParameterError)
         data["sinks"]["kafka_sinks"] = {
             "type": "kafka",
-            "inputs": ["AuditLog"],
+            "inputs": ["aioe_kafka_audit"],
             "bootstrap_servers": ",".join(servers),
             "topic": topic,
         }
@@ -461,7 +461,7 @@ async def outgoing(request):
             raise CustomError(ErrorCode.ParameterError)
         data["sinks"]["syslog_sinks"] = {
             "type": "socket",
-            "inputs": ["AuditLog"],
+            "inputs": ["aioe_kafka_audit"],
             "address": server,
             "mode": mode
         }
@@ -474,8 +474,8 @@ async def outgoing(request):
 
     yaml.add_representer(QuotedString, quoted_presenter)
 
-    data['sinks']['AuditLog_sinks']['endpoint'] = QuotedString(
-        data['sinks']['AuditLog_sinks']['endpoint']
+    data['sinks']['aioe_pg_audit']['endpoint'] = QuotedString(
+        data['sinks']['aioe_pg_audit']['endpoint']
     )
 
     yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
