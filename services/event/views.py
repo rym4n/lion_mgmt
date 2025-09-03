@@ -584,7 +584,7 @@ async def get_event_detail(request):
 
     run_logs = await Runlog.filter(event_id=event_id, deleted=False).all().prefetch_related("playbook_version")
     run_logs_grouped = runlog_list(run_logs)
-    event_dict["run_logs"] = run_logs_grouped
+    event_dict["data"] = run_logs_grouped
 
     event_dict["room_users"] = [user.username if user else "" for user in await event.room.users.all()]
     role_list = []
