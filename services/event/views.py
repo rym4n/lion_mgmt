@@ -13,6 +13,7 @@ from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import gen_random_code, strip_timezone_to_seconds, gen_order_version
 from models import Events, Runlog, Room, Account, Role, EventsIngestion, ToolAction, ToolResources, Tool
+from services.timed.views import runlog_list
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
 TYPE_DICT = {
@@ -582,11 +583,7 @@ async def get_event_detail(request):
     event_dict = {"created_name": request.ctx.session['account_info'].username}
 
     run_logs = await Runlog.filter(event_id=event_id, deleted=False).all().prefetch_related("playbook_version")
-    run_logs_grouped = {}
-    for runlog in run_logs:
-        run_logs_grouped.setdefault(runlog.run_id, []).append(runlog.json)
-    for key in run_logs_grouped.keys():
-        run_logs_grouped[key].reverse()
+    run_logs_grouped = runlog_list(run_logs)
     event_dict["run_logs"] = run_logs_grouped
 
     event_dict["room_users"] = [user.username if user else "" for user in await event.room.users.all()]

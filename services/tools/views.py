@@ -1444,9 +1444,7 @@ async def tool_debug(request):
                     result = orjson.loads(log.result)
                     data = result.get("data")
                     if data:
-                        await resp.send(f"data: {orjson.dumps(data).decode()}\n\n")
-                    else:
-                        await resp.send(f"data: {orjson.dumps(result).decode()}\n\n")
+                        await resp.send(f"data: {data}\n\n")
             if any(log.status in [-1, 2] for log in logs):
                 break
             break
