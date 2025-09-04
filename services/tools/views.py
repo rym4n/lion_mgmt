@@ -44,6 +44,8 @@ EXPECTED_STRUCTURE = {
 
 connected_clients = {}
 
+sem = asyncio.Semaphore(10)  # 限制最大并发数为 10
+
 
 def check_file_size(file_obj, max_size_kb=5):
     current_pos = file_obj.tell()
@@ -382,7 +384,12 @@ async def all_tools(request):
         .limit(size) \
         .values()
 
-    latest_tools = [await enrich_tool(tool, request.ctx.cache_client) for tool in latest_tools]
+    # latest_tools = [await enrich_tool(tool, request.ctx.cache_client) for tool in latest_tools]
+
+    latest_tools = await asyncio.gather(
+        *[limited_enrich_tool(tool, request.ctx.cache_client) for tool in latest_tools]
+    )
+
 
     total_count = await Tool.filter(condition).count()
 
@@ -393,6 +400,11 @@ async def all_tools(request):
         "size": size,
         "total_pages": (total_count + size - 1) // size
     })
+
+
+async def limited_enrich_tool(tool, cache_client):
+    async with sem:  # 同时只能有 10 个协程在运行
+        return await enrich_tool(tool, cache_client)
 
 
 async def enrich_tool(tool, cache_client):

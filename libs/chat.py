@@ -13,27 +13,99 @@ from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
 
 from libs.kafka import aconsume
-from models import Runlog, Approvement, Events, Config
+from models import Runlog, Approvement, Events, Config, ToolAction, ToolResourcesModel, ToolResources, Tool
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
 from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC, WR_TOPIC, AUTHENTICATION_SESSION_EXPIRATION
+from tortoise.functions import Max
+from tortoise.expressions import Q
 
-SYSTEM_PROMPT = """
-            你是一位智能安全专家助手，具有广泛的领域知识。
 
-            你的核心能力：
-            1. 安全专业知识：精通漏洞分析、威胁检测、安全审计、风险评估等
-            2. 技术解释能力：能用不同技术层次的表达解释复杂概念
-            3. 多领域知识：了解网络安全、云计算、密码学、应用开发等领域
-            4. 专业文档能力：能生成技术文档、配置说明、安全策略等专业内容
+async def get_prompt_words():
+    tool_names = []
+    actions = await ToolResourcesModel.filter(deleted=False, status=0).all().values("tool_name")
+    for action in actions:
+        if action["tool_name"] not in tool_names:
+            tool_names.append(action["tool_name"])
+    tools = await ToolResources.filter(deleted=False).all().values("tool_name")
+    for tool in tools:
+        if tool["tool_name"] not in tool_names:
+            tool_names.append(tool["tool_name"])
+    tool_names.remove("lion_mgmt")
 
-            对话准则：
-            1. 用户问题优先原则：直接回答问题核心，无需不必要的开场白
-            2. 分层次解释：对复杂问题按技术深度分层次说明
-            3. 专业准确：对安全领域术语保持精准使用
-            4. 诚实守信：如不确定答案，应明确告知而非猜测
-            5. 场景化输出：根据不同问题场景调整输出格式（技术报告/操作步骤/概念解释）
-            """.strip().replace("        ", "")
+    latest_versions = await ToolAction.filter(
+        deleted=False, tool_name__in=tool_names
+    ).annotate(
+        latest_version=Max("version_number")
+    ).group_by("tool_name").values("tool_name", "latest_version")
+
+    pairs = [(row["tool_name"], row["latest_version"]) for row in latest_versions]
+
+    cond = Q()
+    for name, ver in pairs:
+        cond |= Q(tool_name=name, version_number=ver)
+
+    actions = await ToolAction.filter(deleted=False).filter(cond).order_by("-ctime").all()
+
+    actions_desc = {}
+    actions_dict = {}
+    n = 0
+    for action in actions:
+        name = action.action["name"].replace("\\", "/")
+        if name not in actions_desc.values():
+            actions_desc[str(n)] = name
+            n += 1
+        if name not in actions_dict:
+            actions_dict[name] = [action.id]
+        else:
+            actions_dict[name].append(action.id)
+    prompt_word = """
+# 角色
+你是一位智能安全专家助手，能够根据用户输入的内容，判断是否可以通过执行以下某个动作来解决问题，如果可以则返回动作id以及输入参数（支持返回多个动作id，根据适配度排序），返回JSON格式，示例：[{"action":"xxx","params":{"key1":"value1","key2":"value2"}}]
+如果动作列表中没有合适选项，则尝试直接解答用户问题。
+
+# 动作列表
+"""
+    for k, v in actions_desc.items():
+        prompt_word += f"{k}:{v}\n"
+    return prompt_word, actions_dict, actions_desc
+
+
+async def get_action_inputs(data):
+    actions = await ToolAction.filter(id__in=data, deleted=False).all()
+    actions_input = ""
+    for action in actions:
+        action_input = action.action["input"]
+        actions_input += f"{action.tool_name}:{action_input}"
+    return actions_input
+
+
+async def get_action_details(data, params):
+    actions = await ToolAction.filter(id__in=data, deleted=False).all()
+    recommended_action_list = []
+    for action in actions:
+        tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False)
+        if not tool:
+            continue
+        resource = await ToolResources.filter(tool_name=action.tool_name, deleted=False).order_by("-ctime").first()
+        recommended_action_list.append({
+            "type": "action",
+            "action_input": {
+                "app_name": action.tool_name,
+                "app_ver": action.version_number,
+                "resource": resource.id if resource else "",
+                "node_name": tool.description,
+                "name": tool.description,
+                "main": tool.main,
+                "action": action.action["func"],
+                "action_name": action.action["name"],
+                "input": action.action["input"],
+                "params": params.get(action.tool_name),
+                "timeout": 300
+            }
+        })
+
+    return recommended_action_list
 
 
 # 获取或创建私聊作战室
@@ -161,28 +233,63 @@ class ChatManager:
             base_url=host,
             api_key=api_key
         )
+        system_prompt, actions_dict, actions_desc = await get_prompt_words()
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
         ]
-        # 使用流式输出
+        # 使用阻碍式输出
         response = client.chat.completions.create(
             model=model,
             messages=messages,
-            stream=True,
-            max_tokens=4000,
-            temperature=0.7
+            max_tokens=8000,
+            temperature=0.75
         )
-        full_response = ""
+        full_response = response.choices[0].message.content if response.choices else ""
 
-        for chunk in response:
-            delta = chunk.choices[0].delta
-            if delta and hasattr(delta, "content") and delta.content:
-                message_data["content"] = delta.content
-                await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
-                full_response += delta.content
+        action_list = []
 
-        return full_response
+        if "params" in full_response:
+            message_data["type"] = "execute"
+            actions = orjson.loads(full_response)
+            actions_input = ""
+            for action in actions:
+                data = actions_dict.get(actions_desc.get(action["action"]))
+                if not data:
+                    continue
+
+                # 获取动作输入参数列表
+                action_input = await get_action_inputs(data)
+                actions_input += action_input
+                prompt_word = """
+            # 角色
+            你是一位智能安全专家助手，能够根据用户输入的内容，按照不同动作的输入参数提取参数，参数数量不得超过动作输入参数的数量（注意：每个动作都要返回，如果动作输入参数为空则直接返回空，最终返回结果每个动作只存在一个），返回格式为JSON格式，示例：{"ip_query":{},"a":{"ip":"1.1.1.1","prot":""}}。
+
+            # 动作输入参数列表
+            """ + actions_input
+
+                # 再次进行AI生成，进行输入参数值确认
+                messages = [
+                    {"role": "system", "content": prompt_word},
+                    {"role": "user", "content": prompt}
+                ]
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    max_tokens=8000,
+                    temperature=0.75
+                )
+                full_response = response.choices[0].message.content if response.choices else ""
+                if full_response:
+                    inputs = orjson.loads(full_response)
+                    recommended_action_list = await get_action_details(data, inputs)
+                    action_list.append(recommended_action_list)
+                message_data["content"] = action_list
+        else:
+            message_data["content"] = full_response
+        await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+
+        return message_data
 
     async def connect(self, user: Account, ws):
         """处理用户连接"""
@@ -218,7 +325,9 @@ class ChatManager:
                     if "log" in msg.keys():
                         if msg["log"].get("type") == "approval-info":
                             continue
-                        message['data'] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"], redis=self.redis))
+                        message['data'] = orjson.dumps(
+                            await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"],
+                                                redis=self.redis))
                     room_id = msg.get('room_id')
                     for k in self.active_connections:
                         if room_id and self.active_connections[k]['current_room'] == room_id:
@@ -278,7 +387,8 @@ class ChatManager:
                         log["event_id"] = event.id
                 to_insert.append(Runlog(**log))
         try:
-            await Runlog.bulk_create(to_insert, update_fields=["status", "end_time", "result", "utime", "id"], on_conflict=["run_id", "node_id", "node_name", "resource_name"])
+            await Runlog.bulk_create(to_insert, update_fields=["status", "end_time", "result", "utime", "id"],
+                                     on_conflict=["run_id", "node_id", "node_name", "resource_name"])
         except Exception as e:
             logger.info(f"runlog消息：{to_insert}")
             logger.error(f"{e} | {traceback.format_exc()}")
@@ -302,18 +412,22 @@ class ChatManager:
             elif message_type == "delete_announcement":
                 await self._handle_delete_announcement(user, data)
                 # 通知删除成功
-                await ws.send(orjson.dumps({"type": "delete_announcement_success", "announcement_id": data.get("announcement_id")}).decode())
+                await ws.send(orjson.dumps(
+                    {"type": "delete_announcement_success", "announcement_id": data.get("announcement_id")}).decode())
             elif message_type == "request_online_users":
                 online_users = await self._handle_request_online_users(data)
                 self.active_connections[user.id]['current_room'] = data['room_id']
                 # 发送在线状态列表
-                await ws.send(orjson.dumps({"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
+                await ws.send(orjson.dumps(
+                    {"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
             elif message_type == "ping":
-                await self.cache_client.set(f"room_online_{user.id}", int(time.time()), AUTHENTICATION_SESSION_EXPIRATION)
+                await self.cache_client.set(f"room_online_{user.id}", int(time.time()),
+                                            AUTHENTICATION_SESSION_EXPIRATION)
                 await ws.send(orjson.dumps({"type": "pong"}).decode())
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
-            await ws.send(orjson.dumps({"type": "error", "message": str(e), "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
+            await ws.send(orjson.dumps({"type": "error", "message": str(e),
+                                        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
 
     async def _handle_public_message(self, user: Account, data: dict):
         """处理发送群聊消息"""
@@ -402,14 +516,14 @@ class ChatManager:
         message_data["sender_id"] = sender.id
         message_data["sender_name"] = sender.username
         message_data["type"] = "ai"
-        full_response = await self.stream_chat_completion(content, message_data)
+        message_data = await self.stream_chat_completion(content, message_data)
 
-        if full_response:
+        if message_data.get("content"):
             await Message.create(
-                type="ai",
+                type=message_data.get("type"),
                 sender=sender,
                 room=room,
-                content=full_response,
+                content=message_data.get("content"),
                 image_content=image_content,
                 receiver=user  # 群聊消息设为发送者自己作为占位符
             )
@@ -539,7 +653,8 @@ class ChatManager:
         if not announcement_id:
             raise Exception("缺少公告ID")
 
-        announcement = await Message.filter(id=announcement_id, type="announcement").first().prefetch_related("sender", 'room')
+        announcement = await Message.filter(id=announcement_id, type="announcement").first().prefetch_related("sender",
+                                                                                                              'room')
         if not announcement:
             raise Exception("公告不存在")
 
