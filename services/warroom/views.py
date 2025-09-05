@@ -45,7 +45,7 @@ async def warroom_ws(request: Request, ws: Websocket):
         # payload = jwt.decode(auth_json.get('auth', ''), SECRET, SESSION_ENCODING_ALGORITHM)
         # validate_token(payload, request)
 
-        # account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
+        # account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
         account = await request.ctx.session.get('account_info')
         if not account:
             logger.warning("redis里已经没有account信息了")
@@ -263,7 +263,7 @@ async def get_private_room(request: Request):
     if partner is None:
         raise CustomError(ErrorCode.AccountNotFound)
     # 先获取私聊作战室
-    room_info = await get_or_create_private_chat_room(request.ctx.cache_client, user, partner)
+    room_info = await get_or_create_private_chat_room(request.app.ctx.cache_client, user, partner)
     room = await Room.get_or_none(id=room_info['room_id'])
     await user.star_rooms.add(room)
     await partner.star_rooms.add(room)
@@ -628,7 +628,7 @@ async def run(request):
     room.updator = user
     room.run_id.append(msg["run_id"])
     await room.save()
-    await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
+    await request.app.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
     return response_ok("运行成功")
@@ -700,7 +700,7 @@ async def execution(request):
     room.updator = user
     room.run_id.append(msg["run_id"])
     await room.save()
-    await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
+    await request.app.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
     return response.json({
@@ -782,7 +782,7 @@ async def send_message(request):
     if partner is None:
         raise CustomError(ErrorCode.AccountNotFound)
 
-    room_info = await get_or_create_private_chat_room(request.ctx.cache_client, sender, partner)
+    room_info = await get_or_create_private_chat_room(request.app.ctx.cache_client, sender, partner)
     room = await Room.get_or_none(id=room_info['room_id'])
     await sender.star_rooms.add(room)
     await partner.star_rooms.add(room)

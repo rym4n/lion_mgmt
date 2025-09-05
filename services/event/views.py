@@ -349,7 +349,7 @@ async def execution(request):
     room.updator = user
     room.run_id.append(msg["run_id"])
     await room.save()
-    await request.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
+    await request.app.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
     return response.json({
