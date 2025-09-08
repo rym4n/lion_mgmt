@@ -500,7 +500,7 @@ class ChatManager:
 
         # 广播
         message_data = {
-            "type": "public",
+            "type": "ai-question",
             "message_id": str(message.id),
             "sender_id": user.id,
             "sender_name": user.username,
