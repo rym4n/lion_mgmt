@@ -31,7 +31,7 @@ from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import fix_zip_filename, gen_order_version
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion, \
-    Runlog
+    Runlog, Timed
 from settings import TOOLS_DIR, KAFKA_SERVERS, TASK_TOPIC, AUTHENTICATION_SESSION_EXPIRATION
 
 # 定义 Blueprint
@@ -728,6 +728,29 @@ async def delete_tool_resource(request):
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
+
+    playbooks = await ToolAction.filter(tool_name=tool_name, deleted=False).all().values("playbook")
+
+    playbook_ids = []
+    for playbook in playbooks:
+        playbook_ids += playbook["playbook"]
+
+    playbooks = await PlaybookVersion.filter(id__in=playbook_ids, deleted=False).all().prefetch_related("playbook")
+
+    for playbook in playbooks:
+        if playbook.flow_json:
+            if tool_resource.id in str(playbook.flow_json):
+                return response_ok(f"当前资源已被剧本{playbook.playbook.name}使用，请仔细检查后再删除！")
+
+    timeds = await Timed.filter(deleted=False).all()
+
+    for timed in timeds:
+        if timed.type == 0:
+            if timed.playbook_input and timed.playbook_input["flow_id"] in playbook_ids:
+                return response_ok(f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！")
+        else:
+            if timed.action_input and timed.action_input["resource"] == tool_resource.id:
+                return response_ok(f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！")
 
     await tool_resource.delete()
 
