@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import time
 from collections import defaultdict
@@ -28,6 +29,12 @@ EXEC_TYPE_ONCE = 0
 EXEC_TYPE_CRON = 1
 DISABLED = 0
 ENABLED = 1
+
+sem = asyncio.Semaphore(10)  # 限制最大并发数为 10
+
+async def limited_enrich_tool(timed):
+    async with sem:  # 同时只能有 10 个协程在运行
+        return await timer_success_rate(timed)
 
 
 def build_timer_rule(status, tactics, end_time):
@@ -197,26 +204,13 @@ async def get_all(request):
     start = (page - 1) * size
     end = start + size
     paged_items = filtered_items[start:end]
-    items = []
-    for item in paged_items:
-        await timer_success_rate(item.id)
-        items.append({
-            "id": item.id,
-            "ctime": strip_timezone_to_seconds(item.ctime),
-            "utime": strip_timezone_to_seconds(item.utime),
-            "name": item.name,
-            "type": item.type,
-            "status": item.status,
-            "tactics": item.tactics,
-            "result": item.result,
-            "success_rate": item.success_rate,
-            "playbook_remark": item.playbook.name if item.playbook else "",
-            "action": item.action.action["name"] if item.action else "",
-            "enable": item.enable,
-            "end_time": item.end_time,
-            "creator": {"username": item.creator.username, "display_name": item.creator.display_name},
-            "updator": {"username": item.updator.username, "display_name": item.updator.display_name},
-        })
+    # 采用协程并发的方式进行成功率的同步计算
+    items = await asyncio.gather(
+        *[
+            limited_enrich_tool(item)
+            for item in paged_items
+        ]
+    )
 
     return response_ok({
         "page": page,
@@ -470,12 +464,8 @@ def runlog_list(all_logs):
     return run_logs
 
 
-async def timer_success_rate(timed_id: str):
+async def timer_success_rate(timed: str):
     """计算定时任务的成功率和最近一次执行结果"""
-    timed = await Timed.get_or_none(id=timed_id, deleted=False)
-    if not timed:
-        return None
-
     beijing_tz = pytz.timezone("Asia/Shanghai")
     now = datetime.datetime.now(beijing_tz)
 
@@ -484,7 +474,7 @@ async def timer_success_rate(timed_id: str):
 
     # 查询当天执行记录
     today_logs = await Runlog.filter(
-        timer_id=timed_id,
+        timer_id=timed.id,
         start_time__gte=start_of_day,
         start_time__lt=end_of_day,
         deleted=False
@@ -494,7 +484,7 @@ async def timer_success_rate(timed_id: str):
         logs = today_logs
     else:
         # 取最近 10 条
-        logs = await Runlog.filter(timer_id=timed_id, deleted=False).order_by("-start_time").limit(10)
+        logs = await Runlog.filter(timer_id=timed.id, deleted=False).order_by("-start_time").limit(10)
 
     # 计算成功率
     if logs:
@@ -507,5 +497,28 @@ async def timer_success_rate(timed_id: str):
         timed.result = None
 
     await timed.save()
-    return timed
+
+    return {
+        "id": timed.id,
+        "ctime": strip_timezone_to_seconds(timed.ctime),
+        "utime": strip_timezone_to_seconds(timed.utime),
+        "name": timed.name,
+        "type": timed.type,
+        "status": timed.status,
+        "tactics": timed.tactics,
+        "result": timed.result,
+        "success_rate": timed.success_rate,
+        "playbook_remark": timed.playbook.name if timed.playbook else "",
+        "action": timed.action.action["name"] if timed.action else "",
+        "enable": timed.enable,
+        "end_time": timed.end_time,
+        "creator": {
+            "username": timed.creator.username,
+            "display_name": timed.creator.display_name,
+        },
+        "updator": {
+            "username": timed.updator.username,
+            "display_name": timed.updator.display_name,
+        },
+    }
 
