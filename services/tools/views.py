@@ -740,17 +740,17 @@ async def delete_tool_resource(request):
     for playbook in playbooks:
         if playbook.flow_json:
             if tool_resource.id in str(playbook.flow_json):
-                return response_ok(f"当前资源已被剧本{playbook.playbook.name}使用，请仔细检查后再删除！")
+                return response_ok({"message": f"当前资源已被剧本{playbook.playbook.name}使用，请仔细检查后再删除！"})
 
     timeds = await Timed.filter(deleted=False).all()
 
     for timed in timeds:
         if timed.type == 0:
             if timed.playbook_input and timed.playbook_input["flow_id"] in playbook_ids:
-                return response_ok(f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！")
+                return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
         else:
             if timed.action_input and timed.action_input["resource"] == tool_resource.id:
-                return response_ok(f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！")
+                return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
 
     await tool_resource.delete()
 
