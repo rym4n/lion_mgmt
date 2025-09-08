@@ -210,6 +210,8 @@ async def get_all(request):
             "tactics": item.tactics,
             "result": item.result,
             "success_rate": item.success_rate,
+            "playbook_remark": item.playbook.remark if item.playbook else "",
+            "action": item.action.action["name"] if item.action else "",
             "enable": item.enable,
             "end_time": item.end_time,
             "creator": {"username": item.creator.username, "display_name": item.creator.display_name},
