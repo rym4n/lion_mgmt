@@ -490,7 +490,7 @@ class ChatManager:
         sender = await Account.get(username="system")
         # 保存消息到数据库
         message = await Message.create(
-            type="public",
+            type="ai-question",
             sender=user,
             room=room,
             content=content,
