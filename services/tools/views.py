@@ -111,7 +111,7 @@ async def upload_and_extract_zip(request):
             continue
 
         config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, resp,
-                                                           success_progress, request.ctx.cache_client)
+                                                           success_progress, request.app.ctx.cache_client)
         if msg != "success":
             results.append({"tool": tool_name, "msg": msg})
             data += 1
@@ -384,10 +384,10 @@ async def all_tools(request):
         .limit(size) \
         .values()
 
-    # latest_tools = [await enrich_tool(tool, request.ctx.cache_client) for tool in latest_tools]
+    # latest_tools = [await enrich_tool(tool, request.app.ctx.cache_client) for tool in latest_tools]
 
     latest_tools = await asyncio.gather(
-        *[limited_enrich_tool(tool, request.ctx.cache_client) for tool in latest_tools]
+        *[limited_enrich_tool(tool, request.app.ctx.cache_client) for tool in latest_tools]
     )
 
 

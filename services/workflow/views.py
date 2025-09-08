@@ -736,7 +736,7 @@ async def add_permission(request):
             users_id=uid,
             defaults={"permissions": perms, "roles_id": None}
         )
-        await request.ctx.cache_client.set(
+        await request.app.ctx.cache_client.set(
             (playbook_id, uid),
             perms,
             ttl=2592000
@@ -750,7 +750,7 @@ async def add_permission(request):
                 roles_id=rid,
                 defaults={"permissions": perms, "users_id": None}
             )
-        await request.ctx.cache_client.set(
+        await request.app.ctx.cache_client.set(
             (playbook_id, rid),
             perms,
             ttl=2592000

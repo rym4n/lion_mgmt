@@ -18,7 +18,7 @@ from settings import LICENSE_DIR
 
 async def check_permissions(request: Request, *required_permissions: str) -> bool:
     payload = await token_decode(request)
-    account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
+    account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
     if not account:
         logger.warning("redis里已经没有account信息了")
         raise CustomError(ErrorCode.SessionInvalid)
@@ -60,7 +60,7 @@ def check_wildcard(wildcard: str, pattern: str):
 
 async def check_roles(request: Request, *required_roles: str) -> bool:
     payload = await token_decode(request)
-    account = await request.ctx.cache_client.get(f"account_{payload['sub']}")
+    account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
     if not account:
         logger.warning("redis里已经没有account信息了")
         raise CustomError(ErrorCode.SessionInvalid)
@@ -140,7 +140,7 @@ async def check_playbook_permission(request, user, playbook_id, required_permiss
     """
     user_id = str(user.id)
     user_roles = set(str(role.id) for role in user.roles)
-    data = await request.ctx.cache_client.get((playbook_id, user_id))
+    data = await request.app.ctx.cache_client.get((playbook_id, user_id))
     if not data:
         pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id, users_id=user_id)
         if pp:
@@ -155,7 +155,7 @@ async def check_playbook_permission(request, user, playbook_id, required_permiss
         return True
     else:
         for role in user_roles:
-            data = await request.ctx.cache_client.get((playbook_id, role))
+            data = await request.app.ctx.cache_client.get((playbook_id, role))
             if not data:
                 pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id, roles_id=role)
                 if pp:

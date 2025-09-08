@@ -141,7 +141,7 @@ async def create_api_user(request):
 
     token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, str(uuid.uuid4()), request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION), account.password, permit_ip=account.permit_ip)
     await account.fetch_related("roles")
-    await request.ctx.cache_client.set(f"account_{account.id}", account, 7 * 24 * 3600)
+    await request.app.ctx.cache_client.set(f"account_{account.id}", account, 7 * 24 * 3600)
 
     data_json = account.api_json
     data_json['token'] = account.id + ":" + token
@@ -200,7 +200,7 @@ async def update_api_user(request):
     if api_user.username == "system":
         raise CustomError(ErrorCode.SystemUserCannotBeDeleted)
 
-    await request.ctx.cache_client.delete(f"account_{api_user.id}")
+    await request.app.ctx.cache_client.delete(f"account_{api_user.id}")
 
     api_user.deleted = True
     await api_user.save(update_fields=["deleted"])
@@ -223,7 +223,7 @@ async def login(request):
         raise CustomError(ErrorCode.CredentialsError)
 
     # 防止暴力破解
-    user_attempts = await request.ctx.cache_client.get(f"{username}_login_attempts")
+    user_attempts = await request.app.ctx.cache_client.get(f"{username}_login_attempts")
     if user_attempts is None:
         user_attempts = 0
     if user_attempts > MAX_CHALLENGE_ATTEMPTS:
@@ -232,7 +232,7 @@ async def login(request):
     client_ip = get_client_ip(request)
 
     # 防止暴力破解/撞库
-    ip_attempts = await request.ctx.cache_client.get(f"{client_ip}_login_attempts")
+    ip_attempts = await request.app.ctx.cache_client.get(f"{client_ip}_login_attempts")
     if ip_attempts is None:
         ip_attempts = 0
     if ip_attempts > MAX_CHALLENGE_ATTEMPTS:
@@ -254,11 +254,11 @@ async def login(request):
         resp = account.json
         token_id = str(uuid.uuid4())
         token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, token_id, ip=client_ip)
-        await request.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
+        await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
         # resp['aioe-auth'] = token
         # 如果开启了MFA，缓存记录MFA密钥，便于mfa认证
         if account.mfa_enable and account.mfa_key:
-            await request.ctx.cache_client.set(f'mfa_key_{token_id}', account.mfa_key, AUTHENTICATION_SESSION_EXPIRATION)
+            await request.app.ctx.cache_client.set(f'mfa_key_{token_id}', account.mfa_key, AUTHENTICATION_SESSION_EXPIRATION)
             # 如果是开启mfa之后的第一次登录，在mfa还没绑定的情况下，返回mfa_uri，供前端渲染二维码
             if not account.mfa_bind:
                 resp['mfa_uri'] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name='AIOE')
@@ -275,10 +275,10 @@ async def login(request):
     except DoesNotExist:
         raise CustomError(ErrorCode.CredentialsError)
     except (VerificationError, InvalidHashError):
-        await request.ctx.cache_client.set(f"{username}_login_attempts", user_attempts + 1, 60 * 5)
-        await request.ctx.cache_client.set(f"{client_ip}_login_attempts", ip_attempts + 1, 60 * 5)
-        # await request.ctx.cache_client.expire(f"{username}_login_attempts", 60 * 5)
-        # await request.ctx.cache_client.expire(f"{client_ip}_login_attempts", 60 * 5)
+        await request.app.ctx.cache_client.set(f"{username}_login_attempts", user_attempts + 1, 60 * 5)
+        await request.app.ctx.cache_client.set(f"{client_ip}_login_attempts", ip_attempts + 1, 60 * 5)
+        # await request.app.ctx.cache_client.expire(f"{username}_login_attempts", 60 * 5)
+        # await request.app.ctx.cache_client.expire(f"{client_ip}_login_attempts", 60 * 5)
         raise CustomError(ErrorCode.CredentialsError)
 
 
@@ -303,10 +303,10 @@ async def refresh_session_token(request):
     resp = {
         "aioe-auth": new_token
     }
-    account = await request.ctx.cache_client.get(f"account_{request.ctx.session['sub']}")
+    account = await request.app.ctx.cache_client.get(f"account_{request.ctx.session['sub']}")
     if not account:
         account = await Account.get(id=request.ctx.session["sub"]).prefetch_related('roles')
-    await request.ctx.cache_client.set(f"account_{request.ctx.session['sub']}", account, AUTHENTICATION_SESSION_EXPIRATION)
+    await request.app.ctx.cache_client.set(f"account_{request.ctx.session['sub']}", account, AUTHENTICATION_SESSION_EXPIRATION)
     resp_ok = response_ok(resp)
     resp_ok.cookies.add_cookie(
         f"aioe-auth",
@@ -326,7 +326,7 @@ async def logout(request):
     """
     # todo: oauth凭据销毁
     # token_info = await oauth_revoke(request, google_oauth)
-    await request.ctx.cache_client.delete(f"account_{request.ctx.session['sub']}")
+    await request.app.ctx.cache_client.delete(f"account_{request.ctx.session['sub']}")
     return response_ok("登出成功")
 
 
@@ -341,7 +341,7 @@ async def mfa_auth(request):
     if request.ctx.session.get('mfa_enable') is not True:
         raise CustomError(ErrorCode.NONEEDMFA)
     old_token_id = request.ctx.session.get("id", "")
-    mfa_key = await request.ctx.cache_client.get(f'mfa_key_{old_token_id}')
+    mfa_key = await request.app.ctx.cache_client.get(f'mfa_key_{old_token_id}')
     totp = pyotp.TOTP(mfa_key)
     code = request.json.get('code')
     if not code or not mfa_key or not totp.verify(code):
@@ -359,7 +359,7 @@ async def mfa_auth(request):
         secure=SESSION_SECURE,
         expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
     )
-    await request.ctx.cache_client.delete(f'mfa_key_{old_token_id}')
+    await request.app.ctx.cache_client.delete(f'mfa_key_{old_token_id}')
     return resp
 
 
