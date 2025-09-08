@@ -593,7 +593,7 @@ async def binding_event_ingestion_script(request):
         timestamp_int = str(int(time.time() * 1000))
         topic = f"{event.vector_name}_{timestamp_int}"
         # 如果选择去重则添加去重transforms
-        if request_data.get('fields') and request_data.get('numbers') and request_data.get('time_window'):
+        if request_data.get('fields') and request_data.get('numbers'):
             data.setdefault("transforms", {})[f"{topic}_dedupe_transforms"] = {
                 "type": "dedupe",
                 # 如果之前配置了转换配置则用转换后的配置，否则用原始配置
