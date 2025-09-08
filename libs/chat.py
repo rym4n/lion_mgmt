@@ -61,8 +61,8 @@ async def get_prompt_words():
             actions_dict[name].append(action.id)
     prompt_word = """
 # 角色
-你是一位智能安全专家助手，能够根据用户输入的内容，判断是否可以通过执行以下某个动作来解决问题，如果可以则返回动作id以及输入参数（支持返回多个动作id，根据适配度排序），返回JSON格式，示例：[{"action":"xxx","params":{"key1":"value1","key2":"value2"}}]
-如果动作列表中没有合适选项，则尝试直接解答用户问题。
+你是一位智能安全专家助手，能够根据用户输入的内容，判断是否可以通过执行动作列表中的某个动作来解决问题，如果可以则返回动作id以及输入参数（支持返回多个动作id，根据适配度排序），返回JSON格式，示例：[{"action":"xxx","params":{"key1":"value1","key2":"value2"}}]
+如果动作列表中没有合适选项，则直接解答用户问题。
 
 # 动作列表
 """
@@ -213,7 +213,7 @@ class ChatManager:
 
     async def stream_chat_completion(self, prompt: str, message_data: dict):
         """
-        流式生成对话响应
+        阻碍式对话响应
         """
         ai_cfg = await get_ai_config(self.redis)
         host = ai_cfg.get('llm_host')
@@ -250,7 +250,6 @@ class ChatManager:
         action_list = []
 
         if "params" in full_response:
-            message_data["type"] = "execute"
             actions = orjson.loads(full_response)
             actions_input = ""
             for action in actions:
@@ -262,10 +261,10 @@ class ChatManager:
                 action_input = await get_action_inputs(data)
                 actions_input += action_input
                 prompt_word = """
-            # 角色
-            你是一位智能安全专家助手，能够根据用户输入的内容，按照不同动作的输入参数提取参数，参数数量不得超过动作输入参数的数量（注意：每个动作都要返回，如果动作输入参数为空则直接返回空，最终返回结果每个动作只存在一个），返回格式为JSON格式，示例：{"ip_query":{},"a":{"ip":"1.1.1.1","prot":""}}。
+# 角色
+你是一位智能安全专家助手，能够根据用户输入的内容，按照不同动作的输入参数提取参数，参数数量不得超过动作输入参数的数量（注意：每个动作都要返回，如果动作输入参数为空则直接返回空，最终返回结果每个动作只存在一个），返回格式为JSON格式，示例：{"ip_query":{},"a":{"ip":"1.1.1.1","prot":""}}。
 
-            # 动作输入参数列表
+# 动作输入参数列表
             """ + actions_input
 
                 # 再次进行AI生成，进行输入参数值确认
@@ -281,6 +280,7 @@ class ChatManager:
                 )
                 full_response = response.choices[0].message.content if response.choices else ""
                 if full_response:
+                    message_data["type"] = "execute"
                     inputs = orjson.loads(full_response)
                     recommended_action_list = await get_action_details(data, inputs)
                     action_list.append(recommended_action_list)
