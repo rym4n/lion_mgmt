@@ -30,10 +30,11 @@ EXEC_TYPE_CRON = 1
 DISABLED = 0
 ENABLED = 1
 
-sem = asyncio.Semaphore(10)  # 限制最大并发数为 10
+sem = asyncio.Semaphore(20)  # 限制最大并发数
+
 
 async def limited_enrich_tool(timed):
-    async with sem:  # 同时只能有 10 个协程在运行
+    async with sem:
         return await timer_success_rate(timed)
 
 
@@ -466,25 +467,7 @@ def runlog_list(all_logs):
 
 async def timer_success_rate(timed: str):
     """计算定时任务的成功率和最近一次执行结果"""
-    beijing_tz = pytz.timezone("Asia/Shanghai")
-    now = datetime.datetime.now(beijing_tz)
-
-    start_of_day = beijing_tz.localize(datetime.datetime.combine(now.date(), datetime.time.min))
-    end_of_day = start_of_day + datetime.timedelta(days=1)
-
-    # 查询当天执行记录
-    today_logs = await Runlog.filter(
-        timer_id=timed.id,
-        start_time__gte=start_of_day,
-        start_time__lt=end_of_day,
-        deleted=False
-    ).order_by("-start_time")
-
-    if today_logs and len(today_logs) > 10:
-        logs = today_logs
-    else:
-        # 取最近 10 条
-        logs = await Runlog.filter(timer_id=timed.id, deleted=False).order_by("-start_time").limit(10)
+    logs = await Runlog.filter(timer_id=timed.id, deleted=False).order_by("-start_time").limit(10)
 
     # 计算成功率
     if logs:
