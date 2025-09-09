@@ -13,6 +13,8 @@ class Timed(BaseModel):
 
     name = fields.CharField(description="任务名称", max_length=255)
     type = fields.IntField(max_length=1, description="执行类型，0为执行剧本，1为执行动作")
+    execute_num = fields.IntField(max_length=10, null=True, description="执行次数")
+    success_num = fields.IntField(max_length=10, null=True, description="成功次数")
     playbook = fields.ForeignKeyField("models.Playbook", null=True, related_name="playbook_timed", description="关联剧本")
     playbook_version = fields.CharField(max_length=50, null=True, description="剧本版本")
     playbook_input = fields.JSONField(null=True, description="剧本输入参数")
