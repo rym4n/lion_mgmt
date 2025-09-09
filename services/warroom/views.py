@@ -396,7 +396,7 @@ async def query_messages(request: Request):
                     run_logs = runlog_list(runlogs)
                     content = "[已撤回]" if msg.is_recalled else run_logs
                 else:
-                    break
+                    continue
             else:
                 content = "[已撤回]" if msg.is_recalled else msg.content
             message_list.append({
