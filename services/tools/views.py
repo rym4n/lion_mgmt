@@ -44,8 +44,6 @@ EXPECTED_STRUCTURE = {
 
 connected_clients = {}
 
-sem = asyncio.Semaphore(20)  # 限制最大并发数
-
 
 def check_file_size(file_obj, max_size_kb=5):
     current_pos = file_obj.tell()
@@ -340,7 +338,6 @@ async def all_tools(request):
         - tag: 标签名称（可选，精确搜索）   str
         - logo: 是否需要logo数据 0为不需要，1为需要  int
     """
-    start_time = time.time()
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 15))
     key = request.json.get("key", "").strip()
@@ -385,14 +382,18 @@ async def all_tools(request):
         .offset((page - 1) * size) \
         .limit(size) \
         .values()
+    for tool in latest_tools:
+        if int(request.json.get("logo", 1)) == 1:
+            tool["logo"] = await enrich_tool(tool, request.app.ctx.cache_client)
+        tool.pop("path", None)
+        trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"])
+        if trm:
+            tool["required"] = trm.status
+            tool["health_check"] = trm.health_check
+            tool["health_check_version"] = trm.version
 
-    # latest_tools = [await enrich_tool(tool, request.app.ctx.cache_client) for tool in latest_tools]
-
-    latest_tools = await asyncio.gather(
-        *[limited_enrich_tool(tool, request.app.ctx.cache_client, int(request.json.get("logo", 1))) for tool in latest_tools]
-    )
     total_count = await Tool.filter(condition).count()
-    print(time.time() - start_time)
+
     return response_ok({
         "tools": latest_tools,
         "total": total_count,
@@ -402,38 +403,27 @@ async def all_tools(request):
     })
 
 
-async def limited_enrich_tool(tool, cache_client, logo):
-    async with sem:
-        return await enrich_tool(tool, cache_client, logo)
+async def enrich_tool(tool, cache_client):
+    cache_key = f"{tool['name']}_{tool['version']}"
+    data = await cache_client.get(cache_key)
 
-
-async def enrich_tool(tool, cache_client, logo):
-    if logo == 1:
-        cache_key = f"{tool['name']}_{tool['version']}"
-        data = await cache_client.get(cache_key)
-
-        if not data:
-            config_path = os.path.join(tool["path"], "config.json")
-            async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
-                data = await f.read()
-                await cache_client.set(cache_key, data, 2592000)
+    if not data:
+        config_path = os.path.join(tool["path"], "config.json")
+        async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
+            data = await f.read()
+            await cache_client.set(cache_key, data, 2592000)
+        data = orjson.loads(data)
+    else:
+        if isinstance(data, (str, bytes)):
             data = orjson.loads(data)
-        else:
-            if isinstance(data, (str, bytes)):
-                data = orjson.loads(data)
 
-        logo_path = os.path.join(tool["path"], data.get("logo"))
-        if os.path.exists(logo_path):
-            async with aiofile.AIOFile(logo_path, 'rb') as logo_file:
-                logo_data = await logo_file.read()
-                tool["logo"] = base64.b64encode(logo_data).decode()
-    tool.pop("path", None)
-    trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"])
-    if trm:
-        tool["required"] = trm.status
-        tool["health_check"] = trm.health_check
-        tool["health_check_version"] = trm.version
-    return tool
+    logo_path = os.path.join(tool["path"], data.get("logo"))
+    if os.path.exists(logo_path):
+        async with aiofile.AIOFile(logo_path, 'rb') as logo_file:
+            logo_data = await logo_file.read()
+            return base64.b64encode(logo_data).decode()
+    else:
+        return None
 
 
 @tools_bp.post("/versions")

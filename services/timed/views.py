@@ -30,13 +30,6 @@ EXEC_TYPE_CRON = 1
 DISABLED = 0
 ENABLED = 1
 
-sem = asyncio.Semaphore(20)  # 限制最大并发数
-
-
-async def limited_enrich_tool(timed):
-    async with sem:
-        return await timer_success_rate(timed)
-
 
 def build_timer_rule(status, tactics, end_time):
     if status == EXEC_TYPE_ONCE:
@@ -205,13 +198,31 @@ async def get_all(request):
     start = (page - 1) * size
     end = start + size
     paged_items = filtered_items[start:end]
-    # 采用协程并发的方式进行成功率的同步计算
-    items = await asyncio.gather(
-        *[
-            limited_enrich_tool(item)
+
+    items = [{
+                "id": item.id,
+                "ctime": strip_timezone_to_seconds(item.ctime),
+                "utime": strip_timezone_to_seconds(item.utime),
+                "name": item.name,
+                "type": item.type,
+                "status": item.status,
+                "tactics": item.tactics,
+                "result": item.result,
+                "playbook_remark": item.playbook.name if item.playbook else "",
+                "action": item.action.action["name"] if item.action else "",
+                "enable": item.enable,
+                "end_time": item.end_time,
+                "creator": {
+                    "username": item.creator.username,
+                    "display_name": item.creator.display_name,
+                },
+                "updator": {
+                    "username": item.updator.username,
+                    "display_name": item.updator.display_name,
+                },
+            }
             for item in paged_items
         ]
-    )
 
     return response_ok({
         "page": page,
@@ -219,6 +230,19 @@ async def get_all(request):
         "total": total,
         "items": items
     })
+
+
+@timed_bp.post("/success")
+@requires_permission("timed:r")
+async def get_success_rate(request):
+    """
+    获取定时任务成功率 (需要定时任务查看权限)
+
+    请求参数：
+        - ids 定时任务的id列表 list
+    """
+    items = await Timed.filter(id__in=request.json.get("ids"), deleted=False).all()
+    return response_ok([await timer_success_rate(item) for item in items])
 
 
 @timed_bp.post("/detail")
@@ -483,25 +507,7 @@ async def timer_success_rate(timed: str):
 
     return {
         "id": timed.id,
-        "ctime": strip_timezone_to_seconds(timed.ctime),
-        "utime": strip_timezone_to_seconds(timed.utime),
-        "name": timed.name,
-        "type": timed.type,
-        "status": timed.status,
-        "tactics": timed.tactics,
         "result": timed.result,
         "success_rate": timed.success_rate,
-        "playbook_remark": timed.playbook.name if timed.playbook else "",
-        "action": timed.action.action["name"] if timed.action else "",
-        "enable": timed.enable,
-        "end_time": timed.end_time,
-        "creator": {
-            "username": timed.creator.username,
-            "display_name": timed.creator.display_name,
-        },
-        "updator": {
-            "username": timed.updator.username,
-            "display_name": timed.updator.display_name,
-        },
     }
 
