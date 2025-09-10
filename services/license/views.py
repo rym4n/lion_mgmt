@@ -17,6 +17,7 @@ from libs.security.authorization import requires_permission, load_license, get_l
 from libs.utils import verify_license
 from models import Tool, Playbook, Account, PermissionsMenu
 from settings import LICENSE_DIR
+from sanic.log import logger
 
 license_bp = Blueprint('license', url_prefix='/license')
 _all__ = ["license_bp"]
@@ -151,7 +152,8 @@ async def get_license(request: Request):
             menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
         elif menu["meta"]["title"] == "事件管理":
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
-
+    logger.info(ai_type)
+    logger.info(Prompt_Word_Dict.get(ai_type))
     await request.app.ctx.cache_client.set("PROMPT_WORD", Prompt_Word_Dict.get(ai_type), 3600 * 24 * 7)
 
     return response_ok(menus)
