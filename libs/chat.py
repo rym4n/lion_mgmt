@@ -7,6 +7,7 @@ from datetime import datetime
 
 import orjson
 import pytz
+import services.license.views as lic
 from aiocache import caches
 from openai import OpenAI
 from sanic.exceptions import WebsocketClosed
@@ -16,7 +17,6 @@ from libs.kafka import aconsume
 from models import Runlog, Approvement, Events, Config, ToolAction, ToolResourcesModel, ToolResources, Tool
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from services.license.views import PROMPT_WORD
 from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC, WR_TOPIC, AUTHENTICATION_SESSION_EXPIRATION
 from tortoise.functions import Max
 from tortoise.expressions import Q
@@ -60,7 +60,7 @@ async def get_prompt_words():
             actions_dict[name] = [action.id]
         else:
             actions_dict[name].append(action.id)
-    prompt_word = PROMPT_WORD
+    prompt_word = lic.PROMPT_WORD
     for k, v in actions_desc.items():
         prompt_word += f"{k}:{v}\n"
     return prompt_word, actions_dict, actions_desc
