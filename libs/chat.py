@@ -399,8 +399,6 @@ class ChatManager:
                 await self._handle_public_message(user, data)
             elif message_type == "private":
                 await self._handle_private_message(user, data)
-            elif message_type == "ai":
-                await self._handle_ai_message(user, data)
             elif message_type == "recall":
                 await self._handle_recall_message(user, data)
                 await ws.send(orjson.dumps({"type": "recall_success", "message_id": data.get("message_id")}).decode())

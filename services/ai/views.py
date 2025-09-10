@@ -1,4 +1,5 @@
 # coding=utf-8
+import asyncio
 
 from sanic import Blueprint
 
@@ -35,9 +36,6 @@ async def ai_question(request):
         "image_content": "",
         "room_id": room_id
     }
-    data = await chat_manager.handle_ai_message(user, message)
-
-    if data:
-        return response_ok(data)
+    asyncio.create_task(chat_manager.handle_ai_message(user, message))
 
     return response_ok("运行成功")
