@@ -1,5 +1,5 @@
 # coding=utf-8
-
+import ast
 import asyncio
 import traceback
 
@@ -397,6 +397,8 @@ async def query_messages(request: Request):
                     content = "[已撤回]" if msg.is_recalled else run_logs
                 else:
                     continue
+            elif msg.type == "execute":
+                content = "[已撤回]" if msg.is_recalled else ast.literal_eval(msg.content)
             else:
                 content = "[已撤回]" if msg.is_recalled else msg.content
             message_list.append({
@@ -433,6 +435,8 @@ async def query_messages(request: Request):
                 node_id = msg.content.split(":")[1]
                 runlogs = await Runlog.filter(run_id=run_id, node_id=node_id).all()
                 content = "[已撤回]" if msg.is_recalled else [runlog.json for runlog in runlogs]
+            elif msg.type == "execute":
+                content = "[已撤回]" if msg.is_recalled else ast.literal_eval(msg.content)
             else:
                 content = "[已撤回]" if msg.is_recalled else msg.content
             message_list.append({
