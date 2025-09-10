@@ -107,7 +107,7 @@ async def get_license(request: Request):
                     module = item["module"]
                     if module == "ai_bp":
                         if item["auth"] and int(lic["grouplist"][item["group"]]["expireTime"]) > int(time.time() * 1000):
-                            if item["name"] == "ai智能问答":
+                            if item["name"] == "AI智能问答":
                                 ai_type += 1
                             else:
                                 ai_type += 2
