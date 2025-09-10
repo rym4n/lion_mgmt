@@ -426,23 +426,17 @@ class ChatManager:
             await ws.send(orjson.dumps({"type": "error", "message": str(e),
                                         "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
 
-    async def handle_ai_message(self, user: Account, ws, data: dict):
+    async def handle_ai_message(self, user: Account, data: dict):
         """消息处理"""
         try:
             message_type = data.get("type")
             # 按消息类型调用处理方法 (前端发送)
             if message_type == "ai":
                 await self._handle_ai_message(user, data)
-            elif message_type == "request_online_users":
-                online_users = await self._handle_request_online_users(data)
-                self.active_connections[str(user.id) + "_ai"]['current_room'] = data['room_id']
-                # 发送在线状态列表
-                await ws.send(orjson.dumps(
-                    {"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
+            return None
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
-            await ws.send(orjson.dumps({"type": "error", "message": str(e),
-                                        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
+            return {"type": "error", "message": str(e)}
 
     async def _handle_public_message(self, user: Account, data: dict):
         """处理发送群聊消息"""
