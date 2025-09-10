@@ -21,6 +21,30 @@ from settings import LICENSE_DIR
 license_bp = Blueprint('license', url_prefix='/license')
 _all__ = ["license_bp"]
 
+PROMPT_WORD = None
+
+Prompt_Word_Dict = {
+    # ai基础问答提示词
+    1: """
+# 角色
+你是一位智能安全专家助手，能够根据用户输入的内容来尝试回答用户问题（注意：回答时不要用markdown格式）。
+""",
+    # ai动作指令提示词
+    2: """
+# 角色
+你是一位智能安全专家助手，能够根据用户输入的内容来判断是否可以通过动作列表中的某个动作来实现，如果可以则返回动作id以及输入参数（支持返回多个动作id，根据适配度排序），返回JSON格式，示例：[{"action":"xxx","params":{"key1":"value1","key2":"value2"}}]，如果动作列表中实在找不出合适选项实现，则返回“暂无支持的动作”。
+
+# 动作列表
+""",
+    # ai动作指令和基础问答提示词
+    3: """
+# 角色
+你是一位智能安全专家助手，能够根据用户输入的内容来判断是否可以通过动作列表中的某个动作来实现，如果可以则返回动作id以及输入参数（支持返回多个动作id，根据适配度排序），返回JSON格式，示例：[{"action":"xxx","params":{"key1":"value1","key2":"value2"}}, {"action":"xxx","params":{"key1":"value1","key2":"value2"}}]，如果动作列表中实在找不出合适选项实现，则再去尝试回答用户问题（注意：回答时不要用markdown格式）。
+
+# 动作列表
+"""
+}
+
 
 @license_bp.post("/verify")
 @requires_permission("lic:c")
@@ -72,7 +96,7 @@ async def get_license(request: Request):
         raise CustomError(ErrorCode.AccountNotFound)
 
     menu_dict = {}
-
+    ai_type = 0
     for role in user.roles:
         perm_models = set()
         if role.permissions:
@@ -82,6 +106,13 @@ async def get_license(request: Request):
                 valid_modules = set()
                 for item in lic["moduleList"]:
                     module = item["module"]
+                    if module == "ai_bp":
+                        if item["auth"] and int(lic["grouplist"][item["group"]]["expireTime"]) > int(time.time() * 1000):
+                            if item["name"] == "ai智能问答":
+                                ai_type += 1
+                            else:
+                                ai_type += 2
+                        continue
                     group = item["group"]
                     if int(lic["grouplist"][group]["expireTime"]) > int(time.time() * 1000):
                         valid_modules.add(module)
@@ -105,6 +136,11 @@ async def get_license(request: Request):
                     if child["path"] not in existing:
                         menu_dict[key]["children"].append(child)
                         existing.add(child["path"])
+            if model == "warroom":
+                if ai_type == 0:
+                    menu_dict[key]["ai"] = False
+                else:
+                    menu_dict[key]["ai"] = True
 
     # 菜单处理排序逻辑
     system_dict = {"产品许可": 0, "账号管理": 1, "角色管理": 2, "SSO集成": 3, "审计日志": 4, "个性化设置": 5, "系统状态": 6}
@@ -117,6 +153,9 @@ async def get_license(request: Request):
             menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
         elif menu["meta"]["title"] == "事件管理":
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
+
+    global PROMPT_WORD
+    PROMPT_WORD = Prompt_Word_Dict.get(ai_type)
 
     return response_ok(menus)
 

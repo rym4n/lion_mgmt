@@ -16,6 +16,7 @@ from libs.kafka import aconsume
 from models import Runlog, Approvement, Events, Config, ToolAction, ToolResourcesModel, ToolResources, Tool
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
+from services.license.views import PROMPT_WORD
 from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC, WR_TOPIC, AUTHENTICATION_SESSION_EXPIRATION
 from tortoise.functions import Max
 from tortoise.expressions import Q
@@ -59,12 +60,7 @@ async def get_prompt_words():
             actions_dict[name] = [action.id]
         else:
             actions_dict[name].append(action.id)
-    prompt_word = """
-# 角色
-你是一位智能安全专家助手，能够根据用户输入的内容来判断是否可以通过动作列表中的某个动作来实现，如果可以则返回动作id以及输入参数（支持返回多个动作id，根据适配度排序），返回JSON格式，示例：[{"action":"xxx","params":{"key1":"value1","key2":"value2"}}]，如果动作列表中实在找不出合适选项实现，则再去尝试回答用户问题（注意：回答时不要用markdown格式）。
-
-# 动作列表
-"""
+    prompt_word = PROMPT_WORD
     for k, v in actions_desc.items():
         prompt_word += f"{k}:{v}\n"
     return prompt_word, actions_dict, actions_desc
@@ -86,13 +82,13 @@ async def get_action_details(data, params):
         tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False)
         if not tool:
             continue
-        resource = await ToolResources.filter(tool_name=action.tool_name, deleted=False).order_by("-ctime").first()
+        resource = await ToolResourcesModel.get_or_none(tool_name=action.tool_name, deleted=False)
         recommended_action_list.append({
             "type": "action",
             "action_input": {
                 "app_name": action.tool_name,
                 "app_ver": action.version_number,
-                "resource": resource.id if resource else "",
+                "resource": resource.status if resource else 0,
                 "node_name": tool.description,
                 "name": tool.description,
                 "main": tool.main,
@@ -290,9 +286,11 @@ class ChatManager:
 
         return message_data
 
-    async def connect(self, user: Account, ws):
+    async def connect(self, user: Account, ws, ws_type=None):
         """处理用户连接"""
-        self.active_connections[user.id] = {"conn": ws, "current_room": None, "run_id": None}
+        if not ws_type:
+            self.active_connections[user.id] = {"conn": ws, "current_room": None, "run_id": None}
+        self.active_connections[str(user.id) + "_ai"] = {"conn": ws, "current_room": None, "run_id": None}
         status_message = {
             "type": "user_status",
             "user_id": user.id,
@@ -423,6 +421,24 @@ class ChatManager:
                 await self.cache_client.set(f"room_online_{user.id}", int(time.time()),
                                             AUTHENTICATION_SESSION_EXPIRATION)
                 await ws.send(orjson.dumps({"type": "pong"}).decode())
+        except Exception as e:
+            logger.error(f"{e} | {traceback.format_exc()}")
+            await ws.send(orjson.dumps({"type": "error", "message": str(e),
+                                        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
+
+    async def handle_ai_message(self, user: Account, ws, data: dict):
+        """消息处理"""
+        try:
+            message_type = data.get("type")
+            # 按消息类型调用处理方法 (前端发送)
+            if message_type == "ai":
+                await self._handle_ai_message(user, data)
+            elif message_type == "request_online_users":
+                online_users = await self._handle_request_online_users(data)
+                self.active_connections[str(user.id) + "_ai"]['current_room'] = data['room_id']
+                # 发送在线状态列表
+                await ws.send(orjson.dumps(
+                    {"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
             await ws.send(orjson.dumps({"type": "error", "message": str(e),
