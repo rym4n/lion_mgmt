@@ -1,10 +1,6 @@
 # coding=utf-8
-import traceback
 
-import orjson
-from sanic import Blueprint, Request, Websocket
-from sanic.log import logger
-from websockets import ConnectionClosed
+from sanic import Blueprint
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -45,4 +41,3 @@ async def ai_question(request):
         return response_ok(data)
 
     return response_ok("运行成功")
-
