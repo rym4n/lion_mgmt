@@ -7,7 +7,6 @@ from datetime import datetime
 
 import orjson
 import pytz
-import services.license.views as lic
 from aiocache import caches
 from openai import OpenAI
 from sanic.exceptions import WebsocketClosed
@@ -22,7 +21,7 @@ from tortoise.functions import Max
 from tortoise.expressions import Q
 
 
-async def get_prompt_words():
+async def get_prompt_words(redis):
     tool_names = []
     actions = await ToolResourcesModel.filter(deleted=False, status=0).all().values("tool_name")
     for action in actions:
@@ -60,7 +59,7 @@ async def get_prompt_words():
             actions_dict[name] = [action.id]
         else:
             actions_dict[name].append(action.id)
-    logger.info(f"lic动态生成的提示词：{lic.PROMPT_WORD}")
+    logger.info(await redis.get("PROMPT_WORD"))
     prompt_word = """
 # 角色
 你是一位智能安全专家助手，能够根据用户输入的内容来判断是否可以通过动作列表中的某个动作来实现，如果可以则返回动作id以及输入参数（支持返回多个动作id，根据适配度排序），返回JSON格式，示例：[{"action":"xxx","params":{"key1":"value1","key2":"value2"}}, {"action":"xxx","params":{"key1":"value1","key2":"value2"}}]，如果动作列表中实在找不出合适选项实现，则再去尝试回答用户问题（注意：回答时不要用markdown格式）。
@@ -234,7 +233,7 @@ class ChatManager:
             base_url=host,
             api_key=api_key
         )
-        system_prompt, actions_dict, actions_desc = await get_prompt_words()
+        system_prompt, actions_dict, actions_desc = await get_prompt_words(self.redis)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}

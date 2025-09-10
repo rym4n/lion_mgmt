@@ -21,8 +21,6 @@ from settings import LICENSE_DIR
 license_bp = Blueprint('license', url_prefix='/license')
 _all__ = ["license_bp"]
 
-PROMPT_WORD = None
-
 Prompt_Word_Dict = {
     # ai基础问答提示词
     1: """
@@ -154,8 +152,7 @@ async def get_license(request: Request):
         elif menu["meta"]["title"] == "事件管理":
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
 
-    global PROMPT_WORD
-    PROMPT_WORD = Prompt_Word_Dict.get(ai_type)
+    await request.app.ctx.cache_client.set("PROMPT_WORD", Prompt_Word_Dict.get(ai_type), 3600 * 24 * 7)
 
     return response_ok(menus)
 
