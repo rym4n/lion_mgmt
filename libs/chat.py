@@ -223,7 +223,9 @@ class ChatManager:
             message_data["content"] = "当前未配置ai服务模型，请前往系统设置进行配置。"
             await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
             return None
-
+        logger.info(host)
+        logger.info(api_key)
+        logger.info(model)
         client = OpenAI(
             base_url=host,
             api_key=api_key

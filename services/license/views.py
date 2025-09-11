@@ -152,8 +152,6 @@ async def get_license(request: Request):
             menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
         elif menu["meta"]["title"] == "事件管理":
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
-    logger.info(ai_type)
-    logger.info(Prompt_Word_Dict.get(ai_type))
     await request.app.ctx.cache_client.set("PROMPT_WORD", Prompt_Word_Dict.get(ai_type), 3600 * 24 * 7)
 
     return response_ok(menus)
