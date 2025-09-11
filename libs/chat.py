@@ -60,7 +60,6 @@ async def get_prompt_words(redis):
         else:
             actions_dict[name].append(action.id)
     prompt_word = await redis.get("PROMPT_WORD")
-    logger.info(prompt_word)
     for k, v in actions_desc.items():
         prompt_word += f"{k}:{v}\n"
     return prompt_word, actions_dict, actions_desc
@@ -245,7 +244,7 @@ class ChatManager:
         full_response = response.choices[0].message.content if response.choices else ""
 
         action_list = []
-
+        logger.info(full_response)
         if "params" in full_response:
             actions = orjson.loads(full_response)
             actions_input = ""
@@ -276,6 +275,7 @@ class ChatManager:
                     temperature=0.75
                 )
                 full_response = response.choices[0].message.content if response.choices else ""
+                logger.info(full_response)
                 if full_response:
                     message_data["type"] = "execute"
                     inputs = orjson.loads(full_response)
