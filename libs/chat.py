@@ -230,6 +230,7 @@ class ChatManager:
             api_key=api_key
         )
         system_prompt, actions_dict, actions_desc = await get_prompt_words(self.redis)
+        logger.info(system_prompt)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
