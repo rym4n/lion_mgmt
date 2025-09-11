@@ -245,7 +245,7 @@ class ChatManager:
 
         action_list = []
         logger.info(full_response)
-        if "params" in full_response:
+        if "action" in full_response:
             actions = orjson.loads(full_response)
             actions_input = ""
             for action in actions:
