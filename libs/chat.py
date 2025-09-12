@@ -283,10 +283,10 @@ class ChatManager:
                             result = match.group(1).strip()
                             inputs = orjson.loads(result)
                             recommended_action_list = await get_action_details(tool_action.id, inputs)
-                            action_list.append(recommended_action_list)
+                            action_list.append(recommended_action for recommended_action in recommended_action_list)
                     else:
                         recommended_action_list = await get_action_details(tool_action.id, {})
-                        action_list.append(recommended_action_list)
+                        action_list.append(recommended_action for recommended_action in recommended_action_list)
             message_data["content"] = action_list
         else:
             match = re.search(r"</think>\s*(.*)", full_response, re.S)
