@@ -247,12 +247,12 @@ class ChatManager:
 
         action_list = []
         logger.info(full_response)
-        if "action" in full_response:
+        if "[" in full_response:
             match = re.search(r'\[(.*?)]', full_response, re.S)  # 非贪婪匹配
             actions = orjson.loads(match.group(0))
             actions_input = ""
             for action in actions:
-                data = actions_dict.get(actions_desc.get(action["action"]))
+                data = actions_dict.get(actions_desc.get(action))
                 if not data:
                     continue
 
@@ -261,9 +261,9 @@ class ChatManager:
                 actions_input += action_input
                 prompt_word = """
 # 角色
-请根据用户输入的内容，按照不同动作需要的输入参数来进行参数提取，参数数量不得超过动作输入参数的数量（注意：每个动作都要返回，如果动作输入参数为空则直接返回空，最终返回结果每个动作只存在一个），返回格式为JSON格式，返回示例：{"动作a":{},"动作b":{"IP":"1.1.1.1"}}。
+根据用户输入内容按照动作列表提取输入参数，提取参数数量不得超过当前动作的输入参数的数量，并且动作列表中每个值都要提取一次（注意：如果动作的输入参数为空则无需提取参数），在最终返回结果中，每个动作id都要存在并且只存在一个，返回格式中的所有内容都要根据实际情况进行替换，返回格式：'''{"动作id": {},"动作id": {"输入参数的key":"根据用户输入内容提取的值"}}'''。
 
-# 动作输入参数列表
+# 动作列表（动作id:输入参数）
 """ + actions_input
                 logger.info(prompt_word)
                 # 再次进行AI生成，进行输入参数值确认
