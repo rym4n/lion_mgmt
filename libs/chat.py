@@ -238,7 +238,7 @@ class ChatManager:
 
         action_list = []
         logger.info(full_response)
-        if "[" in full_response:
+        if "暂无支持的动作" not in full_response and "[" in full_response:
             match = re.search(r"</think>\s*(.*)", full_response, re.S)
             actions = match.group(1).strip()
             actions = orjson.loads(actions)
@@ -289,7 +289,9 @@ class ChatManager:
                         action_list.append(recommended_action_list)
             message_data["content"] = action_list
         else:
-            message_data["content"] = full_response
+            match = re.search(r"</think>\s*(.*)", full_response, re.S)
+            result = match.group(1).strip()
+            message_data["content"] = result
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
         return message_data
