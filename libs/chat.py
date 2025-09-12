@@ -264,7 +264,7 @@ class ChatManager:
 
                 # 获取动作输入参数列表
                 action_input, result_id, alternative_id = await get_action_inputs(data)
-                recommended_action_list = await get_action_details(data, None)
+                recommended_action_list = await get_action_details(data, {})
                 action_list.append(recommended_action_list)
                 actions_input += action_input
                 prompt_word = """
