@@ -256,6 +256,7 @@ class ChatManager:
         if "[" in full_response:
             match = re.search(r"</think>\s*(.*)", full_response, re.S)
             actions = match.group(1).strip()
+            actions = orjson.loads(actions)
             actions_input = ""
             for action in actions:
                 data = actions_dict.get(actions_desc.get(action))
