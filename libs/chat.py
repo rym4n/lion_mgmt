@@ -66,23 +66,8 @@ async def get_prompt_words(redis):
     return prompt_word, actions_dict, actions_desc
 
 
-async def get_action_inputs(data):
-    actions = await ToolAction.filter(id__in=data, deleted=False).all()
-    result_id = []
-    alternative_id = []
-    actions_input = ""
-    for action in actions:
-        if action.action["input"]:
-            action_input = action.action["input"]
-            actions_input += f"{action.tool_name}:{action_input}\n"
-            alternative_id.append(action.id)
-        else:
-            result_id.append(action.id)
-    return actions_input, result_id, alternative_id
-
-
 async def get_action_details(data, params):
-    actions = await ToolAction.filter(id__in=data, deleted=False).all()
+    actions = await ToolAction.filter(id=data, deleted=False).all()
     recommended_action_list = []
     for action in actions:
         tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False)
@@ -101,7 +86,7 @@ async def get_action_details(data, params):
                 "action": action.action["func"],
                 "action_name": action.action["name"],
                 "input": action.action["input"],
-                "params": params.get(action.tool_name),
+                "params": params,
                 "timeout": 300
             }
         })
@@ -266,37 +251,41 @@ class ChatManager:
                     continue
 
                 # 获取动作输入参数列表
-                action_input, result_id, alternative_id = await get_action_inputs(data)
-                recommended_action_list = await get_action_details(result_id, {})
-                action_list.append(recommended_action_list)
-                actions_input += action_input
-                prompt_word = """
-# 角色
-请按照动作列表从用户输入中提取参数，确保每个动作ID在返回的JSON对象中只出现一次，并为有输入参数的动作添加键值对，无参数则返回空对象，最终格式为JSON：{"动作id": {},"动作id": {"参数键":"提取值"}}
+                actions = await ToolAction.filter(id__in=data, deleted=False).all()
+                for action in actions:
+                    if action.action["input"]:
+                        action_input = action.action["input"]
+                        actions_input += "{}:{}\n".format(action_input["key"], action_input["description"])
+                        prompt_word = """
+                        # 角色
+                        请根据动作的参数描述从用户输入中提取合适参数，严格按照JSON格式输出文本，不要用markdown格式。示例：{"key": "value"}。
 
-# 动作列表（动作id:输入参数）
-""" + actions_input
-                logger.info(prompt_word)
-                # 再次进行AI生成，进行输入参数值确认
-                messages = [
-                    {"role": "system", "content": prompt_word},
-                    {"role": "user", "content": prompt}
-                ]
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    max_tokens=8000,
-                    temperature=0.75
-                )
-                full_response = response.choices[0].message.content if response.choices else ""
-                logger.info(full_response)
-                if full_response:
-                    message_data["type"] = "execute"
-                    match = re.search(r"</think>\s*(.*)", full_response, re.S)
-                    result = match.group(1).strip()
-                    inputs = orjson.loads(result)
-                    recommended_action_list = await get_action_details(alternative_id, inputs)
-                    action_list.append(recommended_action_list)
+                        # 动作参数描述
+                        """ + actions_input
+                        logger.info(prompt_word)
+                        # 再次进行AI生成，进行输入参数值确认
+                        messages = [
+                            {"role": "system", "content": prompt_word},
+                            {"role": "user", "content": prompt}
+                        ]
+                        response = client.chat.completions.create(
+                            model=model,
+                            messages=messages,
+                            max_tokens=8000,
+                            temperature=0.75
+                        )
+                        full_response = response.choices[0].message.content if response.choices else ""
+                        logger.info(full_response)
+                        if full_response:
+                            message_data["type"] = "execute"
+                            match = re.search(r"</think>\s*(.*)", full_response, re.S)
+                            result = match.group(1).strip()
+                            inputs = orjson.loads(result)
+                            recommended_action_list = await get_action_details(action.id, inputs)
+                            action_list.append(recommended_action_list)
+                    else:
+                        recommended_action_list = await get_action_details(action.id, {})
+                        action_list.append(recommended_action_list)
             message_data["content"] = action_list
         else:
             message_data["content"] = full_response
