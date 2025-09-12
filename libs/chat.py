@@ -393,7 +393,7 @@ class ChatManager:
                     users = await Account.filter(id__in=log['users'].split(',')).all()
                     await approve.approvers.add(*users)
                 if log.get('roles'):
-                    users = await Account.filter(role__id__in=log['roles'].split(',')).all()
+                    users = await Account.filter(roles_id__in=log['roles'].split(',')).all()
                     await approve.approvers.add(*users)
             else:
                 key = log.get('run_id', '')
