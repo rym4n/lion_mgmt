@@ -1,6 +1,7 @@
 # coding=utf-8
 import asyncio
 import hashlib
+import re
 import time
 import traceback
 from datetime import datetime
@@ -247,7 +248,7 @@ class ChatManager:
         action_list = []
         logger.info(full_response)
         if "action" in full_response:
-            actions = orjson.loads(full_response)
+            actions = orjson.loads(re.search(r'\[(.*)]', full_response))
             actions_input = ""
             for action in actions:
                 data = actions_dict.get(actions_desc.get(action["action"]))
@@ -263,7 +264,7 @@ class ChatManager:
 
 # 动作输入参数列表
             """ + actions_input
-
+                logger.info(prompt_word)
                 # 再次进行AI生成，进行输入参数值确认
                 messages = [
                     {"role": "system", "content": prompt_word},
