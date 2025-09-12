@@ -251,10 +251,10 @@ class ChatManager:
                     continue
 
                 # 获取动作输入参数列表
-                actions = await ToolAction.filter(id__in=data, deleted=False).all()
-                for action in actions:
-                    if action.action["input"]:
-                        action_input = action.action["input"]
+                tool_actions = await ToolAction.filter(id__in=data, deleted=False).all()
+                for tool_action in tool_actions:
+                    if tool_action.action["input"]:
+                        action_input = tool_action.action["input"]
                         actions_input += "{}:{}\n".format(action_input["key"], action_input["description"])
                         prompt_word = """
                         # 角色
