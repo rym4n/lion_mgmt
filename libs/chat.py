@@ -74,7 +74,7 @@ async def get_action_inputs(data):
     for action in actions:
         if action.action["input"]:
             action_input = action.action["input"]
-            actions_input += f"{action.tool_name}:{action_input}"
+            actions_input += f"{action.tool_name}:{action_input}\n"
             alternative_id.append(action.id)
         else:
             result_id.append(action.id)
@@ -272,7 +272,7 @@ class ChatManager:
                 actions_input += action_input
                 prompt_word = """
 # 角色
-请按照动作列表从用户输入中提取参数，确保每个动作ID在返回的JSON对象中只出现一次，并为有输入参数的动作添加键值对，无参数则返回空对象，最终格式为：{"动作id": {},"动作id": {"参数键":"提取值"}}
+请按照动作列表从用户输入中提取参数，确保每个动作ID在返回的JSON对象中只出现一次，并为有输入参数的动作添加键值对，无参数则返回空对象，最终格式为JSON：{"动作id": {},"动作id": {"参数键":"提取值"}}
 
 # 动作列表（动作id:输入参数）
 """ + actions_input
