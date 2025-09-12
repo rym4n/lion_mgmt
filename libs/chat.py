@@ -255,8 +255,8 @@ class ChatManager:
                     if tool_action.action["input"]:
                         action_inputs = tool_action.action["input"]
                         actions_input = ""
-                        for action_input in action_inputs:
-                            actions_input += "- {}:{}\n".format(action_input["key"], action_input["description"])
+                        for a_input in action_inputs:
+                            actions_input += "- {}:{}\n".format(a_input["key"], a_input["description"])
                         prompt_word = """
 # 角色
 请根据动作的参数描述从用户输入中提取合适参数，严格按照JSON格式输出文本，不要用markdown格式。示例：{"key": "value"}。
