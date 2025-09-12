@@ -68,11 +68,17 @@ async def get_prompt_words(redis):
 
 async def get_action_inputs(data):
     actions = await ToolAction.filter(id__in=data, deleted=False).all()
+    result_id = []
+    alternative_id = []
     actions_input = ""
     for action in actions:
-        action_input = action.action["input"]
-        actions_input += f"{action.tool_name}:{action_input}"
-    return actions_input
+        if action.action["input"]:
+            action_input = action.action["input"]
+            actions_input += f"{action.tool_name}:{action_input}"
+            alternative_id.append(action.id)
+        else:
+            result_id.append(action.id)
+    return actions_input, result_id, alternative_id
 
 
 async def get_action_details(data, params):
@@ -248,8 +254,8 @@ class ChatManager:
         action_list = []
         logger.info(full_response)
         if "[" in full_response:
-            match = re.search(r'\[(.*?)]', full_response, re.S)  # 非贪婪匹配
-            actions = orjson.loads(match.group(0))
+            match = re.search(r"</think>\s*(.*)", full_response, re.S)
+            actions = match.group(1).strip()
             actions_input = ""
             for action in actions:
                 data = actions_dict.get(actions_desc.get(action))
@@ -257,11 +263,13 @@ class ChatManager:
                     continue
 
                 # 获取动作输入参数列表
-                action_input = await get_action_inputs(data)
+                action_input, result_id, alternative_id = await get_action_inputs(data)
+                recommended_action_list = await get_action_details(data, None)
+                action_list.append(recommended_action_list)
                 actions_input += action_input
                 prompt_word = """
 # 角色
-根据用户输入内容按照动作列表提取输入参数，提取参数数量不得超过当前动作的输入参数的数量，并且动作列表中每个值都要提取一次（注意：如果动作的输入参数为空则无需提取参数），在最终返回结果中，每个动作id都要存在并且只存在一个，返回格式中的所有内容都要根据实际情况进行替换，返回格式：'''{"动作id": {},"动作id": {"输入参数的key":"根据用户输入内容提取的值"}}'''。
+请按照动作列表从用户输入中提取参数，确保每个动作ID在返回的JSON对象中只出现一次，并为有输入参数的动作添加键值对，无参数则返回空对象，最终格式为：{"动作id": {},"动作id": {"参数键":"提取值"}}
 
 # 动作列表（动作id:输入参数）
 """ + actions_input
@@ -281,9 +289,9 @@ class ChatManager:
                 logger.info(full_response)
                 if full_response:
                     message_data["type"] = "execute"
-                    match = re.search(r'\{(.*?)}', full_response, re.S)  # 非贪婪匹配
-                    actions = orjson.loads(match.group(0))
-                    inputs = orjson.loads(full_response)
+                    match = re.search(r"</think>\s*(.*)", full_response, re.S)
+                    result = match.group(1).strip()
+                    inputs = orjson.loads(result)
                     recommended_action_list = await get_action_details(data, inputs)
                     action_list.append(recommended_action_list)
                 message_data["content"] = action_list
