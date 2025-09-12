@@ -36,6 +36,6 @@ async def ai_question(request):
         "image_content": "",
         "room_id": room_id
     }
-    await asyncio.create_task(chat_manager.handle_ai_message(user, message))
+    asyncio.create_task(chat_manager.handle_ai_message(user, message))
 
     return response_ok("运行成功")

@@ -259,13 +259,15 @@ class ChatManager:
             actions = orjson.loads(actions)
             actions_input = ""
             for action in actions:
+                logger.info(action)
                 data = actions_dict.get(actions_desc.get(action))
+                logger.info(data)
                 if not data:
                     continue
 
                 # 获取动作输入参数列表
                 action_input, result_id, alternative_id = await get_action_inputs(data)
-                recommended_action_list = await get_action_details(data, {})
+                recommended_action_list = await get_action_details(result_id, {})
                 action_list.append(recommended_action_list)
                 actions_input += action_input
                 prompt_word = """
@@ -293,7 +295,7 @@ class ChatManager:
                     match = re.search(r"</think>\s*(.*)", full_response, re.S)
                     result = match.group(1).strip()
                     inputs = orjson.loads(result)
-                    recommended_action_list = await get_action_details(data, inputs)
+                    recommended_action_list = await get_action_details(alternative_id, inputs)
                     action_list.append(recommended_action_list)
                 message_data["content"] = action_list
         else:
