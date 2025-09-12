@@ -248,7 +248,8 @@ class ChatManager:
         action_list = []
         logger.info(full_response)
         if "action" in full_response:
-            actions = orjson.loads(re.search(r'\[(.*)]', full_response))
+            match = re.search(r'\[(.*?)]', full_response, re.S)  # 非贪婪匹配
+            actions = orjson.loads(match.group(0))
             actions_input = ""
             for action in actions:
                 data = actions_dict.get(actions_desc.get(action["action"]))
@@ -280,6 +281,8 @@ class ChatManager:
                 logger.info(full_response)
                 if full_response:
                     message_data["type"] = "execute"
+                    match = re.search(r'\{(.*?)}', full_response, re.S)  # 非贪婪匹配
+                    actions = orjson.loads(match.group(0))
                     inputs = orjson.loads(full_response)
                     recommended_action_list = await get_action_details(data, inputs)
                     action_list.append(recommended_action_list)
