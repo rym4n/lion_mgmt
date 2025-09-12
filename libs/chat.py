@@ -70,26 +70,8 @@ async def get_action_details(data, params):
     actions = await ToolAction.filter(id=data, deleted=False).all()
     recommended_action_list = []
     for action in actions:
-        tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False)
-        if not tool:
-            continue
-        resource = await ToolResourcesModel.get_or_none(tool_name=action.tool_name, deleted=False)
-        recommended_action_list.append({
-            "type": "action",
-            "action_input": {
-                "app_name": action.tool_name,
-                "app_ver": action.version_number,
-                "resource": resource.status if resource else 0,
-                "node_name": tool.description,
-                "name": tool.description,
-                "main": tool.main,
-                "action": action.action["func"],
-                "action_name": action.action["name"],
-                "input": action.action["input"],
-                "params": params,
-                "timeout": 300
-            }
-        })
+
+        recommended_action_list.append()
 
     return recommended_action_list
 
@@ -253,6 +235,7 @@ class ChatManager:
                 # 获取动作输入参数列表
                 tool_actions = await ToolAction.filter(id__in=data, deleted=False).all()
                 for tool_action in tool_actions:
+                    # 这里处理请求参数的动作
                     if tool_action.action["input"]:
                         action_inputs = tool_action.action["input"]
                         actions_input = ""
@@ -282,15 +265,51 @@ class ChatManager:
                             match = re.search(r"</think>\s*(.*)", full_response, re.S)
                             result = match.group(1).strip()
                             inputs = orjson.loads(result)
-                            recommended_action_list = await get_action_details(tool_action.id, inputs)
-                            for recommended_action in recommended_action_list:
-                                action_list.append(recommended_action)
-                    else:
-                        recommended_action_list = await get_action_details(tool_action.id, {})
-                        for recommended_action in recommended_action_list:
-                            action_list.append(recommended_action)
+                            tool = await Tool.get_or_none(name=tool_action.tool_name, version=tool_action.version_number,
+                                                          deleted=False)
+                            if not tool:
+                                continue
+                            resource = await ToolResourcesModel.get_or_none(tool_name=tool_action.tool_name, deleted=False)
+                            action_list.append({
+                                "type": "action",
+                                "action_input": {
+                                    "app_name": tool_action.tool_name,
+                                    "app_ver": tool_action.version_number,
+                                    "resource": resource.status if resource else 0,
+                                    "node_name": tool.description,
+                                    "name": tool.description,
+                                    "main": tool.main,
+                                    "action": tool_action.action["func"],
+                                    "action_name": tool_action.action["name"],
+                                    "input": tool_action.action["input"],
+                                    "params": inputs,
+                                    "timeout": 300
+                                }
+                            })
+                    else:       # 这里处理无请求参数的动作
+                        tool = await Tool.get_or_none(name=tool_action.tool_name, version=tool_action.version_number,
+                                                      deleted=False)
+                        if not tool:
+                            continue
+                        resource = await ToolResourcesModel.get_or_none(tool_name=tool_action.tool_name, deleted=False)
+                        action_list.append({
+                            "type": "action",
+                            "action_input": {
+                                "app_name": tool_action.tool_name,
+                                "app_ver": tool_action.version_number,
+                                "resource": resource.status if resource else 0,
+                                "node_name": tool.description,
+                                "name": tool.description,
+                                "main": tool.main,
+                                "action": tool_action.action["func"],
+                                "action_name": tool_action.action["name"],
+                                "input": tool_action.action["input"],
+                                "params": {},
+                                "timeout": 300
+                            }
+                        })
             message_data["content"] = action_list
-        else:
+        else:       # 这里处理ai问答内容
             match = re.search(r"</think>\s*(.*)", full_response, re.S)
             result = match.group(1).strip()
             message_data["content"] = result
