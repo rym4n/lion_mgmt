@@ -225,7 +225,7 @@ class ChatManager:
         logger.info(system_prompt)
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
+            {"role": "user", "content": "用户输入的是: " + prompt}
         ]
         # 使用阻碍式输出
         response = client.chat.completions.create(
@@ -267,7 +267,7 @@ class ChatManager:
                         # 再次进行AI生成，进行输入参数值确认
                         messages = [
                             {"role": "system", "content": prompt_word},
-                            {"role": "user", "content": prompt}
+                            {"role": "user", "content": "用户输入的是: " + prompt}
                         ]
                         response = client.chat.completions.create(
                             model=model,
@@ -282,10 +282,10 @@ class ChatManager:
                             match = re.search(r"</think>\s*(.*)", full_response, re.S)
                             result = match.group(1).strip()
                             inputs = orjson.loads(result)
-                            recommended_action_list = await get_action_details(action.id, inputs)
+                            recommended_action_list = await get_action_details(tool_action.id, inputs)
                             action_list.append(recommended_action_list)
                     else:
-                        recommended_action_list = await get_action_details(action.id, {})
+                        recommended_action_list = await get_action_details(tool_action.id, {})
                         action_list.append(recommended_action_list)
             message_data["content"] = action_list
         else:
