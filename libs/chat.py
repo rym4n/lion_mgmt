@@ -242,7 +242,6 @@ class ChatManager:
             match = re.search(r"</think>\s*(.*)", full_response, re.S)
             actions = match.group(1).strip()
             actions = orjson.loads(actions)
-            actions_input = ""
             for action in actions:
                 logger.info(action)
                 data = actions_dict.get(actions_desc.get(action))
@@ -254,14 +253,16 @@ class ChatManager:
                 tool_actions = await ToolAction.filter(id__in=data, deleted=False).all()
                 for tool_action in tool_actions:
                     if tool_action.action["input"]:
-                        action_input = tool_action.action["input"]
-                        actions_input += "{}:{}\n".format(action_input["key"], action_input["description"])
+                        action_inputs = tool_action.action["input"]
+                        actions_input = ""
+                        for action_input in action_inputs:
+                            actions_input += "- {}:{}\n".format(action_input["key"], action_input["description"])
                         prompt_word = """
-                        # 角色
-                        请根据动作的参数描述从用户输入中提取合适参数，严格按照JSON格式输出文本，不要用markdown格式。示例：{"key": "value"}。
+# 角色
+请根据动作的参数描述从用户输入中提取合适参数，严格按照JSON格式输出文本，不要用markdown格式。示例：{"key": "value"}。
 
-                        # 动作参数描述
-                        """ + actions_input
+# 动作参数描述
+""" + actions_input
                         logger.info(prompt_word)
                         # 再次进行AI生成，进行输入参数值确认
                         messages = [
