@@ -297,7 +297,7 @@ class ChatManager:
                     inputs = orjson.loads(result)
                     recommended_action_list = await get_action_details(alternative_id, inputs)
                     action_list.append(recommended_action_list)
-                message_data["content"] = action_list
+            message_data["content"] = action_list
         else:
             message_data["content"] = full_response
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
