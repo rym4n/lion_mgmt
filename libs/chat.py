@@ -239,6 +239,7 @@ class ChatManager:
         action_list = []
         logger.info(full_response)
         if "暂无支持的动作" not in full_response and "[" in full_response:
+            message_data["type"] = "execute"
             match = re.search(r"</think>\s*(.*)", full_response, re.S)
             actions = match.group(1).strip()
             actions = orjson.loads(actions)
@@ -278,7 +279,6 @@ class ChatManager:
                         full_response = response.choices[0].message.content if response.choices else ""
                         logger.info(full_response)
                         if full_response:
-                            message_data["type"] = "execute"
                             match = re.search(r"</think>\s*(.*)", full_response, re.S)
                             result = match.group(1).strip()
                             inputs = orjson.loads(result)
