@@ -19,7 +19,6 @@ class Approvement(BaseModel):
     expire_time = fields.DatetimeField(description="审核过期时间")
     approvers = fields.ManyToManyField(model_name="models.Account", related_name="approvers", through="approve_accounts", description="审核人员")
     audit_node = fields.CharField(max_length=50, description="审核节点ID")
-    next_node = fields.CharField(max_length=50, description="下一个要执行的节点ID")
     created_at = fields.DatetimeField(description="审核触发的时间")
     params = fields.JSONField(default=[], description="自定义参数")
     results = fields.JSONField(default={}, description="处理记录")
