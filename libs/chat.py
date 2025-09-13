@@ -387,8 +387,7 @@ class ChatManager:
                 approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'],
                                                    content=log['content'], params=log['params'], status=log['status'],
                                                    expire_time=log['expire_time'], created_at=log['created_at'],
-                                                   audit_node=log['audit_app'], next_node=log['start_app'],
-                                                   approve_type=int(log['approve_type']))
+                                                   audit_node=log['audit_app'], approve_type=int(log['approve_type']))
                 if log.get('users'):
                     users = await Account.filter(id__in=log['users'].split(',')).all()
                     await approve.approvers.add(*users)
