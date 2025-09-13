@@ -1,5 +1,5 @@
 # coding=utf-8
-
+import ast
 import asyncio
 import traceback
 
@@ -383,8 +383,8 @@ async def query_messages(request: Request):
     if query_type == "public_history" and keyword in ["", None]:
         if not room_id:
             raise CustomError(ErrorCode.ParamValueError)
-        total_count = await Message.filter(type__in=["public", "ai", "runlog", "execute"], room_id=room_id).count()
-        messages = await Message.filter(type__in=["public", "ai", "runlog", "execute"], room_id=room_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
+        total_count = await Message.filter(type__in=["public", "ai", "runlog", "execute", "ai-question"], room_id=room_id).count()
+        messages = await Message.filter(type__in=["public", "ai", "runlog", "execute", "ai-question"], room_id=room_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender')
         message_list = []
         run_id_list = []
         for msg in reversed(messages):
@@ -396,7 +396,9 @@ async def query_messages(request: Request):
                     run_logs = runlog_list(runlogs)
                     content = "[已撤回]" if msg.is_recalled else run_logs
                 else:
-                    break
+                    continue
+            elif msg.type == "execute":
+                content = "[已撤回]" if msg.is_recalled else ast.literal_eval(msg.content)
             else:
                 content = "[已撤回]" if msg.is_recalled else msg.content
             message_list.append({
@@ -423,9 +425,9 @@ async def query_messages(request: Request):
     # 私聊历史
     elif query_type == "private_history" and keyword in ["", None]:
         # 消息计数
-        total_count = await Message.filter(type__in=["private", "ai", "runlog", "execute"], room_id=room_id).count()
+        total_count = await Message.filter(type__in=["private", "ai", "runlog", "execute", "ai-question"], room_id=room_id).count()
         # 分页处理
-        messages = await Message.filter(type__in=["private", "ai", "runlog", "execute"], room_id=room_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender', 'receiver')
+        messages = await Message.filter(type__in=["private", "ai", "runlog", "execute", "ai-question"], room_id=room_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related('sender', 'receiver')
         message_list = []
         for msg in reversed(messages):
             if msg.type == "runlog":
@@ -433,6 +435,8 @@ async def query_messages(request: Request):
                 node_id = msg.content.split(":")[1]
                 runlogs = await Runlog.filter(run_id=run_id, node_id=node_id).all()
                 content = "[已撤回]" if msg.is_recalled else [runlog.json for runlog in runlogs]
+            elif msg.type == "execute":
+                content = "[已撤回]" if msg.is_recalled else ast.literal_eval(msg.content)
             else:
                 content = "[已撤回]" if msg.is_recalled else msg.content
             message_list.append({

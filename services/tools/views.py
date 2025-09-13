@@ -31,7 +31,7 @@ from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import fix_zip_filename, gen_order_version
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion, \
-    Runlog
+    Runlog, Timed
 from settings import TOOLS_DIR, KAFKA_SERVERS, TASK_TOPIC, AUTHENTICATION_SESSION_EXPIRATION
 
 # 定义 Blueprint
@@ -43,8 +43,6 @@ EXPECTED_STRUCTURE = {
 }
 
 connected_clients = {}
-
-sem = asyncio.Semaphore(10)  # 限制最大并发数为 10
 
 
 def check_file_size(file_obj, max_size_kb=5):
@@ -338,6 +336,7 @@ async def all_tools(request):
         - size: 每页数量（默认10）     int
         - key: 名称和描述的搜索（可选，模糊搜索）   str
         - tag: 标签名称（可选，精确搜索）   str
+        - logo: 是否需要logo数据 0为不需要，1为需要  int
     """
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 15))
@@ -383,13 +382,15 @@ async def all_tools(request):
         .offset((page - 1) * size) \
         .limit(size) \
         .values()
-
-    # latest_tools = [await enrich_tool(tool, request.app.ctx.cache_client) for tool in latest_tools]
-
-    latest_tools = await asyncio.gather(
-        *[limited_enrich_tool(tool, request.app.ctx.cache_client) for tool in latest_tools]
-    )
-
+    for tool in latest_tools:
+        if int(request.json.get("logo", 1)) == 1:
+            tool["logo"] = await enrich_tool(tool, request.app.ctx.cache_client)
+        tool.pop("path", None)
+        trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"])
+        if trm:
+            tool["required"] = trm.status
+            tool["health_check"] = trm.health_check
+            tool["health_check_version"] = trm.version
 
     total_count = await Tool.filter(condition).count()
 
@@ -400,11 +401,6 @@ async def all_tools(request):
         "size": size,
         "total_pages": (total_count + size - 1) // size
     })
-
-
-async def limited_enrich_tool(tool, cache_client):
-    async with sem:  # 同时只能有 10 个协程在运行
-        return await enrich_tool(tool, cache_client)
 
 
 async def enrich_tool(tool, cache_client):
@@ -425,14 +421,9 @@ async def enrich_tool(tool, cache_client):
     if os.path.exists(logo_path):
         async with aiofile.AIOFile(logo_path, 'rb') as logo_file:
             logo_data = await logo_file.read()
-            tool["logo"] = base64.b64encode(logo_data).decode()
-    tool.pop("path", None)
-    trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"])
-    if trm:
-        tool["required"] = trm.status
-        tool["health_check"] = trm.health_check
-        tool["health_check_version"] = trm.version
-    return tool
+            return base64.b64encode(logo_data).decode()
+    else:
+        return None
 
 
 @tools_bp.post("/versions")
@@ -728,6 +719,29 @@ async def delete_tool_resource(request):
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
+
+    playbooks = await ToolAction.filter(tool_name=tool_name, deleted=False).all().values("playbook")
+
+    playbook_ids = []
+    for playbook in playbooks:
+        playbook_ids += playbook["playbook"]
+
+    playbooks = await PlaybookVersion.filter(id__in=playbook_ids, deleted=False).all().prefetch_related("playbook")
+
+    for playbook in playbooks:
+        if playbook.flow_json:
+            if tool_resource.id in str(playbook.flow_json):
+                return response_ok({"message": f"当前资源已被剧本{playbook.playbook.name}使用，请仔细检查后再删除！"})
+
+    timeds = await Timed.filter(deleted=False).all()
+
+    for timed in timeds:
+        if timed.type == 0:
+            if timed.playbook_input and timed.playbook_input["flow_id"] in playbook_ids:
+                return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
+        else:
+            if timed.action_input and timed.action_input["resource"] == tool_resource.id:
+                return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
 
     await tool_resource.delete()
 

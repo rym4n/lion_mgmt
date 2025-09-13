@@ -166,8 +166,8 @@ async def check_playbook_permission(request, user, playbook_id, required_permiss
                         pp = await PlaybookPermissions.get_or_none(pb_id=pv.playbook_id, roles_id=role)
                         if pp:
                             data = pp.permissions
-                if data and all(perm in data for perm in required_permissions):
-                    return True
+            if data and all(perm in data for perm in required_permissions):
+                return True
     return False
 
 

@@ -1,6 +1,7 @@
 # coding=utf-8
 import asyncio
 import hashlib
+import re
 import time
 import traceback
 from datetime import datetime
@@ -21,7 +22,7 @@ from tortoise.functions import Max
 from tortoise.expressions import Q
 
 
-async def get_prompt_words():
+async def get_prompt_words(redis):
     tool_names = []
     actions = await ToolResourcesModel.filter(deleted=False, status=0).all().values("tool_name")
     for action in actions:
@@ -59,51 +60,18 @@ async def get_prompt_words():
             actions_dict[name] = [action.id]
         else:
             actions_dict[name].append(action.id)
-    prompt_word = """
-# 角色
-你是一位智能安全专家助手，能够根据用户输入的内容，判断是否可以通过执行以下某个动作来解决问题，如果可以则返回动作id以及输入参数（支持返回多个动作id，根据适配度排序），返回JSON格式，示例：[{"action":"xxx","params":{"key1":"value1","key2":"value2"}}]
-如果动作列表中没有合适选项，则尝试直接解答用户问题。
-
-# 动作列表
-"""
+    prompt_word = await redis.get("PROMPT_WORD")
     for k, v in actions_desc.items():
         prompt_word += f"{k}:{v}\n"
     return prompt_word, actions_dict, actions_desc
 
 
-async def get_action_inputs(data):
-    actions = await ToolAction.filter(id__in=data, deleted=False).all()
-    actions_input = ""
-    for action in actions:
-        action_input = action.action["input"]
-        actions_input += f"{action.tool_name}:{action_input}"
-    return actions_input
-
-
 async def get_action_details(data, params):
-    actions = await ToolAction.filter(id__in=data, deleted=False).all()
+    actions = await ToolAction.filter(id=data, deleted=False).all()
     recommended_action_list = []
     for action in actions:
-        tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False)
-        if not tool:
-            continue
-        resource = await ToolResources.filter(tool_name=action.tool_name, deleted=False).order_by("-ctime").first()
-        recommended_action_list.append({
-            "type": "action",
-            "action_input": {
-                "app_name": action.tool_name,
-                "app_ver": action.version_number,
-                "resource": resource.id if resource else "",
-                "node_name": tool.description,
-                "name": tool.description,
-                "main": tool.main,
-                "action": action.action["func"],
-                "action_name": action.action["name"],
-                "input": action.action["input"],
-                "params": params.get(action.tool_name),
-                "timeout": 300
-            }
-        })
+
+        recommended_action_list.append()
 
     return recommended_action_list
 
@@ -213,7 +181,7 @@ class ChatManager:
 
     async def stream_chat_completion(self, prompt: str, message_data: dict):
         """
-        流式生成对话响应
+        阻碍式对话响应
         """
         ai_cfg = await get_ai_config(self.redis)
         host = ai_cfg.get('llm_host')
@@ -228,15 +196,18 @@ class ChatManager:
             message_data["content"] = "当前未配置ai服务模型，请前往系统设置进行配置。"
             await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
             return None
-
+        logger.info(host)
+        logger.info(api_key)
+        logger.info(model)
         client = OpenAI(
             base_url=host,
             api_key=api_key
         )
-        system_prompt, actions_dict, actions_desc = await get_prompt_words()
+        system_prompt, actions_dict, actions_desc = await get_prompt_words(self.redis)
+        logger.info(system_prompt)
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
+            {"role": "user", "content": "用户输入的是: " + prompt}
         ]
         # 使用阻碍式输出
         response = client.chat.completions.create(
@@ -248,52 +219,109 @@ class ChatManager:
         full_response = response.choices[0].message.content if response.choices else ""
 
         action_list = []
-
-        if "params" in full_response:
+        logger.info(full_response)
+        if "暂无支持的动作" not in full_response and "[" in full_response:
             message_data["type"] = "execute"
-            actions = orjson.loads(full_response)
-            actions_input = ""
+            match = re.search(r"</think>\s*(.*)", full_response, re.S)
+            actions = match.group(1).strip()
+            actions = orjson.loads(actions)
             for action in actions:
-                data = actions_dict.get(actions_desc.get(action["action"]))
+                logger.info(action)
+                data = actions_dict.get(actions_desc.get(action))
+                logger.info(data)
                 if not data:
                     continue
 
                 # 获取动作输入参数列表
-                action_input = await get_action_inputs(data)
-                actions_input += action_input
-                prompt_word = """
-            # 角色
-            你是一位智能安全专家助手，能够根据用户输入的内容，按照不同动作的输入参数提取参数，参数数量不得超过动作输入参数的数量（注意：每个动作都要返回，如果动作输入参数为空则直接返回空，最终返回结果每个动作只存在一个），返回格式为JSON格式，示例：{"ip_query":{},"a":{"ip":"1.1.1.1","prot":""}}。
+                tool_actions = await ToolAction.filter(id__in=data, deleted=False).all()
+                for tool_action in tool_actions:
+                    # 这里处理请求参数的动作
+                    if tool_action.action["input"]:
+                        action_inputs = tool_action.action["input"]
+                        actions_input = ""
+                        for a_input in action_inputs:
+                            actions_input += "- {}:{}\n".format(a_input["key"], a_input["description"])
+                        prompt_word = """
+# 角色
+请根据动作的参数描述从用户输入中提取合适参数，严格按照JSON格式输出文本，不要用markdown格式。示例：{"key": "value"}。
 
-            # 动作输入参数列表
-            """ + actions_input
-
-                # 再次进行AI生成，进行输入参数值确认
-                messages = [
-                    {"role": "system", "content": prompt_word},
-                    {"role": "user", "content": prompt}
-                ]
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    max_tokens=8000,
-                    temperature=0.75
-                )
-                full_response = response.choices[0].message.content if response.choices else ""
-                if full_response:
-                    inputs = orjson.loads(full_response)
-                    recommended_action_list = await get_action_details(data, inputs)
-                    action_list.append(recommended_action_list)
-                message_data["content"] = action_list
-        else:
-            message_data["content"] = full_response
+# 动作参数描述
+""" + actions_input
+                        logger.info(prompt_word)
+                        # 再次进行AI生成，进行输入参数值确认
+                        messages = [
+                            {"role": "system", "content": prompt_word},
+                            {"role": "user", "content": "用户输入的是: " + prompt}
+                        ]
+                        response = client.chat.completions.create(
+                            model=model,
+                            messages=messages,
+                            max_tokens=8000,
+                            temperature=0.75
+                        )
+                        full_response = response.choices[0].message.content if response.choices else ""
+                        logger.info(full_response)
+                        if full_response:
+                            match = re.search(r"</think>\s*(.*)", full_response, re.S)
+                            result = match.group(1).strip()
+                            inputs = orjson.loads(result)
+                            tool = await Tool.get_or_none(name=tool_action.tool_name, version=tool_action.version_number,
+                                                          deleted=False)
+                            if not tool:
+                                continue
+                            resource = await ToolResourcesModel.get_or_none(tool_name=tool_action.tool_name, deleted=False)
+                            action_list.append({
+                                "type": "action",
+                                "action_input": {
+                                    "app_name": tool_action.tool_name,
+                                    "app_ver": tool_action.version_number,
+                                    "resource": resource.status if resource else 0,
+                                    "node_name": tool.description,
+                                    "name": tool.description,
+                                    "main": tool.main,
+                                    "action": tool_action.action["func"],
+                                    "action_name": tool_action.action["name"],
+                                    "input": tool_action.action["input"],
+                                    "params": inputs,
+                                    "timeout": 300
+                                }
+                            })
+                    else:       # 这里处理无请求参数的动作
+                        tool = await Tool.get_or_none(name=tool_action.tool_name, version=tool_action.version_number,
+                                                      deleted=False)
+                        if not tool:
+                            continue
+                        resource = await ToolResourcesModel.get_or_none(tool_name=tool_action.tool_name, deleted=False)
+                        action_list.append({
+                            "type": "action",
+                            "action_input": {
+                                "app_name": tool_action.tool_name,
+                                "app_ver": tool_action.version_number,
+                                "resource": resource.status if resource else 0,
+                                "node_name": tool.description,
+                                "name": tool.description,
+                                "main": tool.main,
+                                "action": tool_action.action["func"],
+                                "action_name": tool_action.action["name"],
+                                "input": tool_action.action["input"],
+                                "params": {},
+                                "timeout": 300
+                            }
+                        })
+            message_data["content"] = action_list
+        else:       # 这里处理ai问答内容
+            match = re.search(r"</think>\s*(.*)", full_response, re.S)
+            result = match.group(1).strip()
+            message_data["content"] = result
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
         return message_data
 
-    async def connect(self, user: Account, ws):
+    async def connect(self, user: Account, ws, ws_type=None):
         """处理用户连接"""
-        self.active_connections[user.id] = {"conn": ws, "current_room": None, "run_id": None}
+        if not ws_type:
+            self.active_connections[user.id] = {"conn": ws, "current_room": None, "run_id": None}
+        self.active_connections[str(user.id) + "_ai"] = {"conn": ws, "current_room": None, "run_id": None}
         status_message = {
             "type": "user_status",
             "user_id": user.id,
@@ -365,7 +393,7 @@ class ChatManager:
                     users = await Account.filter(id__in=log['users'].split(',')).all()
                     await approve.approvers.add(*users)
                 if log.get('roles'):
-                    users = await Account.filter(role_id__in=log['roles'].split(',')).all()
+                    users = await Account.filter(roles__id__in=log['roles'].split(',')).all()
                     await approve.approvers.add(*users)
             else:
                 key = log.get('run_id', '')
@@ -402,8 +430,6 @@ class ChatManager:
                 await self._handle_public_message(user, data)
             elif message_type == "private":
                 await self._handle_private_message(user, data)
-            elif message_type == "ai":
-                await self._handle_ai_message(user, data)
             elif message_type == "recall":
                 await self._handle_recall_message(user, data)
                 await ws.send(orjson.dumps({"type": "recall_success", "message_id": data.get("message_id")}).decode())
@@ -428,6 +454,18 @@ class ChatManager:
             logger.error(f"{e} | {traceback.format_exc()}")
             await ws.send(orjson.dumps({"type": "error", "message": str(e),
                                         "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
+
+    async def handle_ai_message(self, user: Account, data: dict):
+        """消息处理"""
+        try:
+            message_type = data.get("type")
+            # 按消息类型调用处理方法 (前端发送)
+            if message_type == "ai":
+                await self._handle_ai_message(user, data)
+            return None
+        except Exception as e:
+            logger.error(f"{e} | {traceback.format_exc()}")
+            return {"type": "error", "message": str(e)}
 
     async def _handle_public_message(self, user: Account, data: dict):
         """处理发送群聊消息"""
@@ -490,7 +528,7 @@ class ChatManager:
         sender = await Account.get(username="system")
         # 保存消息到数据库
         message = await Message.create(
-            type="public",
+            type="ai-question",
             sender=user,
             room=room,
             content=content,
@@ -500,7 +538,7 @@ class ChatManager:
 
         # 广播
         message_data = {
-            "type": "public",
+            "type": "ai-question",
             "message_id": str(message.id),
             "sender_id": user.id,
             "sender_name": user.username,

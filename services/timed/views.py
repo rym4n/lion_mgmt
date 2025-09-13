@@ -1,4 +1,6 @@
+import asyncio
 import datetime
+import time
 from collections import defaultdict
 
 import pytz
@@ -12,6 +14,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
+from libs.utils import strip_timezone_to_seconds
 from models import Timed, Playbook, ToolAction, Runlog, PlaybookVersion
 from services.workflow.views import get_playbook_input
 from settings import KAFKA_SERVERS, TASK_TOPIC
@@ -195,23 +198,31 @@ async def get_all(request):
     start = (page - 1) * size
     end = start + size
     paged_items = filtered_items[start:end]
-    items = []
-    for item in paged_items:
-        await timer_success_rate(item.id)
-        data = item.json
-        if item.playbook_input:
-            input_args = await get_playbook_input(item.playbook_input["flow_id"])
-            data["input_args"] = input_args
-        if item.action_input:
-            actions = await ToolAction.filter(tool_name=item.action_input.get("app_name"), deleted=False, version_number=item.action_input.get("app_ver")).all()
-            for action in actions:
-                if action.action["func"] == item.action_input["action"]:
-                    input_args = []
-                    args = action.action["input"]
-                    for arg in args:
-                        input_args.append({arg["key"]: arg})
-                    data["input_args"] = input_args
-        items.append(data)
+
+    items = [{
+                "id": item.id,
+                "ctime": strip_timezone_to_seconds(item.ctime),
+                "utime": strip_timezone_to_seconds(item.utime),
+                "name": item.name,
+                "type": item.type,
+                "status": item.status,
+                "tactics": item.tactics,
+                "result": item.result,
+                "playbook_remark": item.playbook.name if item.playbook else "",
+                "action": item.action.action["name"] if item.action else "",
+                "enable": item.enable,
+                "end_time": item.end_time,
+                "creator": {
+                    "username": item.creator.username,
+                    "display_name": item.creator.display_name,
+                },
+                "updator": {
+                    "username": item.updator.username,
+                    "display_name": item.updator.display_name,
+                },
+            }
+            for item in paged_items
+        ]
 
     return response_ok({
         "page": page,
@@ -219,6 +230,54 @@ async def get_all(request):
         "total": total,
         "items": items
     })
+
+
+@timed_bp.post("/success")
+@requires_permission("timed:r")
+async def get_success_rate(request):
+    """
+    获取定时任务成功率 (需要定时任务查看权限)
+
+    请求参数：
+        - ids 定时任务的id列表 list
+    """
+    items = await Timed.filter(id__in=request.json.get("ids"), deleted=False).all()
+    return response_ok([await timer_success_rate(item) for item in items])
+
+
+@timed_bp.post("/detail")
+@requires_permission("timed:r")
+async def get_timed_detail(request):
+    """
+    获取单个定时任务详情
+    请求参数：
+        id : 定时任务id
+    """
+    timed_id = request.json.get("id")
+    if not timed_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    timed = await Timed.get_or_none(id=timed_id, deleted=False).prefetch_related("action", "playbook", "creator", "updator")
+
+    if not timed:
+        raise CustomError(ErrorCode.ParameterError)
+
+    data = timed.json
+    if timed.playbook_input:
+        input_args = await get_playbook_input(timed.playbook_input["flow_id"])
+        data["input_args"] = input_args
+    if timed.action_input:
+        actions = await ToolAction.filter(tool_name=timed.action_input.get("app_name"), deleted=False,
+                                          version_number=timed.action_input.get("app_ver")).all()
+        for action in actions:
+            if action.action["func"] == timed.action_input["action"]:
+                input_args = []
+                args = action.action["input"]
+                for arg in args:
+                    input_args.append({arg["key"]: arg})
+                data["input_args"] = input_args
+
+    return response_ok({"items":[data]})
 
 
 @timed_bp.post("/update")
@@ -430,29 +489,25 @@ def runlog_list(all_logs):
     return run_logs
 
 
-async def timer_success_rate(timed_id):
-    timed = await Timed.get_or_none(id=timed_id, deleted=False)
-    beijing_tz = pytz.timezone("Asia/Shanghai")
-    now = datetime.datetime.now(beijing_tz)
+async def timer_success_rate(timed: str):
+    """计算定时任务的成功率和最近一次执行结果"""
+    logs = await Runlog.filter(timer_id=timed.id, deleted=False).order_by("-start_time").limit(10)
 
-    start_of_day = beijing_tz.localize(
-        datetime.datetime.combine(now.date(), datetime.time.min)
-    )
-    end_of_day = start_of_day + datetime.timedelta(days=1)
-
-    quantity = await Runlog.filter(timer_id=timed_id, start_time__gte=start_of_day, start_time__lte=end_of_day,
-                                   deleted=False).count()
-
-    if quantity > 10:
-        success_quantity = await Runlog.filter(timer_id=timed_id, start_time__gte=start_of_day,
-                                               start_time__lte=end_of_day, deleted=False, status=0).count()
-        timed.success_rate = str(round(success_quantity / quantity, 4) * 100) + "%"
+    # 计算成功率
+    if logs:
+        success_count = sum(1 for log in logs if log.status == 0)
+        timed.success_rate = f"{round(success_count / len(logs) * 100, 2)}%"
+        # 最近一次执行结果
+        timed.result = "success" if logs[0].status == 0 else "fail"
     else:
-        recent_logs = await Runlog.filter(timer_id=timed_id, deleted=False).limit(10)
-        success_quantity = sum(1 for log in recent_logs if log.status == 0)
-        if len(recent_logs) != 0:
-            timed.success_rate = str(round(success_quantity / len(recent_logs), 4) * 100) + "%"
-    runlog = await Runlog.filter(timer_id=timed_id, deleted=False).first()
-    if runlog:
-        timed.result = "success" if runlog.status == 0 else "fail"
+        timed.success_rate = None
+        timed.result = None
+
     await timed.save()
+
+    return {
+        "id": timed.id,
+        "result": timed.result,
+        "success_rate": timed.success_rate,
+    }
+

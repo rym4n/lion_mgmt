@@ -116,6 +116,7 @@ async def list_workflow(request):
         keyword: 可选，搜索时使用，支持搜索名称或备注
         scene: 可选，搜索时使用，支持搜索场景
         tag: 可选，搜索时使用，支持搜索标签 str
+        scope： 获取剧本范围 int 0为获取全剧本、1表示获取普通剧本列表、 2表示内部剧本列表
     """
     json_params = request.json
     page = int(json_params.get("page", 1))
@@ -133,7 +134,13 @@ async def list_workflow(request):
     pb_ids = set(permissions)
 
     # 分页查询Account，返回总数和数据
-    condition = Q(deleted=False, id__in=pb_ids)
+    scope = json_params.get("scope", 0)
+    if scope == 0:
+        condition = Q(deleted=False, id__in=pb_ids)
+    elif scope == 1:
+        condition = Q(deleted=False, internal=False, id__in=pb_ids)
+    elif scope == 2:
+        condition = Q(deleted=False, internal=True, id__in=pb_ids)
     if json_params.get("keyword"):
         # 模糊搜索name字段和remark字段
         keyword = json_params.get("keyword")
@@ -371,7 +378,9 @@ async def delete_workflow(request):
     请求参数：
         playbook_id: 剧本ID
     """
-    playbook = await Playbook.get(id=request.json.get("playbook_id"), internal=False)
+    playbook = await Playbook.get(id=request.json.get("playbook_id"))
+    if playbook.internal:
+        raise CustomError(ErrorCode.PlaybookNotExists)
     pvs = await PlaybookVersion.filter(playbook=playbook, deleted=False).all()
     pv_ids = [pv.id for pv in pvs]
     pv_versions = [pv.version for pv in pvs]
@@ -404,7 +413,9 @@ async def delete_workflow_version(request):
     请求参数：
         flow_id: 剧本版本ID
     """
-    pv = await PlaybookVersion.get(id=request.json.get("flow_id"))
+    pv = await PlaybookVersion.get(id=request.json.get("flow_id")).prefetch_related("playbook")
+    if pv.playbook.internal:
+        raise CustomError(ErrorCode.PlaybookNotExists)
     if await EventRelatedScript.filter(script_id__contains=[pv.id], deleted=False).exists():
         raise CustomError(ErrorCode.PlaybookUsedByEvent)
     if await Timed.filter(playbook_id=pv.playbook_id, playbook_version=pv.version, deleted=False).exists():
@@ -728,6 +739,12 @@ async def add_permission(request):
 
     if not playbook_id:
         raise CustomError(ErrorCode.ParameterError)
+
+    playbook = await Playbook.get_or_none(id=playbook_id)
+    if not playbook:
+        raise CustomError(ErrorCode.PlaybookNotFound)
+    if playbook.internal:
+        raise CustomError(ErrorCode.PlaybookNotExists)
 
     # 处理用户权限
     for uid, perms in users.items():
