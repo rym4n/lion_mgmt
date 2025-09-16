@@ -32,7 +32,8 @@ async def get_prompt_words(redis):
     for tool in tools:
         if tool["tool_name"] not in tool_names:
             tool_names.append(tool["tool_name"])
-    tool_names.remove("lion_mgmt")
+    if "lion_mgmt" in tool_names:
+        tool_names.remove("lion_mgmt")
 
     latest_versions = await ToolAction.filter(
         deleted=False, tool_name__in=tool_names

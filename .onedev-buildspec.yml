@@ -1,7 +1,7 @@
 version: 40
 jobs:
 - name: cd
-  jobExecutor: tgy-deploy
+  jobExecutor: aioe-test
   steps:
   - !CommandStep
     name: 更新docker-compose配置
@@ -42,7 +42,7 @@ jobs:
     dockerfile: '@project_path@/Dockerfile'
     output: !RegistryOutput
       tags: reg.hongcloud.net/lion_mgmt:@tag@
-    platforms: linux/amd64,linux/arm64
+    platforms: linux/amd64
     condition: SUCCESSFUL
     optional: false
   triggers:
