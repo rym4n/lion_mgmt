@@ -54,7 +54,7 @@ async def ai_question(request):
 
 @ai_bp.post("/action")
 @requires_permission("warroom:r")
-async def ai_question(request):
+async def ai_action(request):
     """
     ai动作
 
