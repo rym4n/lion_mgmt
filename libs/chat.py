@@ -62,6 +62,8 @@ async def get_prompt_words(redis):
         else:
             actions_dict[name].append(action.id)
     prompt_word = await redis.get("PROMPT_WORD")
+    logger.info(actions_dict)
+    logger.info(actions_desc)
     for k, v in actions_desc.items():
         prompt_word += f"{k}:{v}\n"
     return prompt_word, actions_dict, actions_desc
