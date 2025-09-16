@@ -1,7 +1,7 @@
 version: 40
 jobs:
 - name: cd
-  jobExecutor: tgy-deploy
+  jobExecutor: aioe-test
   steps:
   - !CommandStep
     name: 更新docker-compose配置
