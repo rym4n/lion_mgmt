@@ -56,7 +56,7 @@ async def ai_question(request):
 @requires_permission("warroom:r")
 async def ai_question(request):
     """
-    进行ai对话
+    ai动作
 
     {"type":"ai","content":"什么是智能体","image_content":"","room_id":"c6ab45be-fe5b-4f3e-b4aa-cf009fcfab2a"}
 
