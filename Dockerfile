@@ -10,7 +10,7 @@ RUN apt update -y && apt install -y \
     libaio-dev \
     ccache
 
-RUN pip install uv==0.7.4 nuitka==2.7.13 -i https://mirrors.aliyun.com/pypi/simple
+RUN pip install uv==0.8.17 nuitka==2.7.14 -i https://mirrors.aliyun.com/pypi/simple
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \

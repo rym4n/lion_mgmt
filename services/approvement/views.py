@@ -144,7 +144,7 @@ async def update_approvement(request):
         msg = {
             "run_type": 'flow', "run_id": approve.run_id,
             "run_args": {
-                "flow_id": approve.flow_id, "flow_input": params, "approval_node_id": approve.audit_node, "next_node_id": approve.next_node, "approval_status": approve.status,
+                "flow_id": approve.flow_id, "flow_input": params, "approval_node_id": approve.audit_node, "approval_status": approve.status,
                 "executor": ",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session['account_info'].id
             }
         }
