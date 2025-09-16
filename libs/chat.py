@@ -69,16 +69,6 @@ async def get_prompt_words(redis):
     return prompt_word, actions_dict, actions_desc
 
 
-async def get_action_details(data, params):
-    actions = await ToolAction.filter(id=data, deleted=False).all()
-    recommended_action_list = []
-    for action in actions:
-
-        recommended_action_list.append()
-
-    return recommended_action_list
-
-
 # 获取或创建私聊作战室
 async def get_or_create_private_chat_room(cache_client, sender: Account, receiver: Account) -> dict:
     # 保证顺序
