@@ -1,0 +1,57 @@
+name: mgmt镜像构建
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*" ]
+
+jobs:
+  build-multi-images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - dockerfile: Dockerfile
+            image_name: lion_mgmt
+            context: .
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU for multi-arch build
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+
+      - name: Login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: reg.hongcloud.net
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push ${{ matrix.dockerfile }} image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            reg.hongcloud.net/${{ matrix.image_name }}:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=${{ matrix.image_name }}-${{ matrix.dockerfile }}
+          cache-to: type=gha,scope=${{ matrix.image_name }}-${{ matrix.dockerfile }},mode=max
+          provenance: false
