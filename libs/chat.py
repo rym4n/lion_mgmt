@@ -8,6 +8,7 @@ from datetime import datetime
 
 import orjson
 import pytz
+import openai
 from aiocache import caches
 from openai import OpenAI
 from sanic.exceptions import WebsocketClosed
@@ -202,14 +203,21 @@ class ChatManager:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": "用户输入的是: " + prompt}
         ]
-        # 使用阻碍式输出
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=8000,
-            temperature=0.75
-        )
-        full_response = response.choices[0].message.content if response.choices else ""
+        try:
+            # 使用阻碍式输出
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=8000,
+                temperature=0.75,
+                timeout=300
+            )
+            full_response = response.choices[0].message.content if response.choices else ""
+
+        except openai.APITimeoutError:
+            # 专门处理超时异常
+            message_data["content"] = "ai请求超时，300s内未收到回应"
+            return message_data
 
         action_list = []
         logger.info(full_response)
@@ -249,13 +257,19 @@ class ChatManager:
                             {"role": "system", "content": prompt_word},
                             {"role": "user", "content": "用户输入的是: " + prompt}
                         ]
-                        response = client.chat.completions.create(
-                            model=model,
-                            messages=messages,
-                            max_tokens=8000,
-                            temperature=0.75
-                        )
-                        full_response = response.choices[0].message.content if response.choices else ""
+                        try:
+                            response = client.chat.completions.create(
+                                model=model,
+                                messages=messages,
+                                max_tokens=8000,
+                                temperature=0.75,
+                                timeout=300
+                            )
+                            full_response = response.choices[0].message.content if response.choices else ""
+                        except openai.APITimeoutError:
+                            # 专门处理超时异常
+                            message_data["content"] = "ai请求超时，300s内未收到回应"
+                            return message_data
                         logger.info(full_response)
                         if full_response:
                             if "</think>" in full_response:

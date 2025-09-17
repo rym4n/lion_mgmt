@@ -10,7 +10,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import gen_order_version
-from models import Tool, ToolResources
+from models import Tool, ToolResources, Account
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
 ai_bp = Blueprint('ai', url_prefix='/ai')
@@ -29,6 +29,7 @@ async def ai_question(request):
         "content":"什么是智能体"      消息
         "room_id":"c6ab45be-fe5b-4f3e-b4aa-cf009fcfab2a"    作战室id
     """
+    # 目前先用动作实现 后续进行拆分使用剧本实现
     room_id = request.json.get("room_id")
     content = request.json.get("content")
     tool = await Tool.filter(name="lion_mgmt", deleted=False).order_by("-ctime").first()
@@ -42,13 +43,13 @@ async def ai_question(request):
     user = request.ctx.session['account_info']
     params = {"resource": resource.id, "node_name": tool.description,
               "action": "ai_run_action", "action_name": "ai执行动作", "app_name": "lion_mgmt",
-              "name": tool.description, "app_ver": tool.version, "main": tool.main, "action_input": {"msg": content, "room_id": room_id},
+              "name": tool.description, "app_ver": tool.version, "main": tool.main, "action_input": {"msg": content, "room_id": room_id, "user_id": user.id},
               "retry_times": 0, "timeout": 300,
               "executor": user.id}
     run_id = gen_order_version(length=6)
     msg = {"run_type": "action", "run_id": run_id, "run_args": params}
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
-    # 目前先用add_task 后续进行拆分使用剧本实现
+
     # room_id = request.json.get("room_id")
     # content = request.json.get("content")
     # user = request.ctx.session['account_info']
@@ -79,7 +80,8 @@ async def ai_action(request):
     """
     room_id = request.json.get("room_id")
     content = request.json.get("content")
-    user = request.ctx.session['account_info']
+    user_id = request.json.get("user_id")
+    user = await Account.get(id=user_id,deleted=False)
     if not room_id or not content:
         raise CustomError(ErrorCode.ParamValueError)
     message = {
@@ -88,6 +90,7 @@ async def ai_action(request):
         "image_content": "",
         "room_id": room_id
     }
+
     await chat_manager.handle_ai_message(user, message)
 
     return response_ok("运行成功")
