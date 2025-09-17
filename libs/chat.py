@@ -207,8 +207,7 @@ class ChatManager:
             model=model,
             messages=messages,
             max_tokens=8000,
-            temperature=0.75,
-            timeout = 60.0
+            temperature=0.75
         )
         full_response = response.choices[0].message.content if response.choices else ""
 
