@@ -493,7 +493,7 @@ async def execute_action(request):
     beijing_tz = pytz.timezone("Asia/Shanghai")
     utime = datetime.datetime.now(beijing_tz)
     message = request.json
-    if message.get("type") in ('flow', 'action'):
+    if message.get("type") in ('flow', 'action', 'code'):
         if message.get("type") == "flow":
             pv = await PlaybookVersion.get_or_none(id=message.get("flow_id"))
             playbook_id = pv.playbook_id
@@ -519,6 +519,8 @@ async def execute_action(request):
                 if message.get("type") == "action" and len(sent_id) >= len(message.get('resource', '').split()):
                     break
                 if message.get("type") == "flow" and any(log.node_type == "end-node" for log in logs):
+                    break
+                if message.get('type') == "code":
                     break
                 if any(log.status in [-1, 2] for log in logs):
                     break

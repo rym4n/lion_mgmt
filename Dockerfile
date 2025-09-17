@@ -1,7 +1,5 @@
 FROM python:3.11-slim AS builder
 
-RUN sed -i 's/http:\/\/deb.debian.org/https:\/\/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
-
 RUN apt update -y && apt install -y \
     gcc \
     libc-dev \
@@ -10,14 +8,17 @@ RUN apt update -y && apt install -y \
     libaio-dev \
     ccache
 
-RUN pip install uv==0.8.17 nuitka==2.7.14 -i https://mirrors.aliyun.com/pypi/simple
+RUN pip install uv==0.8.17 nuitka==2.7.14
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH="/usr/lib/ccache:$PATH" \
-    CCACHE_DIR="/root/.ccache"
+    CCACHE_DIR="/root/.ccache" \
+    CCACHE_MAXSIZE="2G" \
+    CCACHE_COMPRESS="true" \
+    CFLAGS="-fPIC -O3"
 
 WORKDIR /app
 
@@ -46,8 +47,6 @@ ENV VIRTUAL_ENV=/app/.venv \
     PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
-
-RUN sed -i 's/http:\/\/deb.debian.org/https:\/\/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 
 RUN apt update -y \
     && apt install -y curl libc-dev python3-dev libaio-dev \
