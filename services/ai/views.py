@@ -31,23 +31,35 @@ async def ai_question(request):
     """
     room_id = request.json.get("room_id")
     content = request.json.get("content")
-    tool = await Tool.filter(name="lion_mgmt", deleted=False).order_by("-ctime").first()
-    if not tool:
-        return response_ok("ai运行APP缺失，请联系管理员处理")
-
-    resource = await ToolResources.filter(tool_name="lion_mgmt", deleted=False).order_by("-ctime").first()
-    if not resource:
-        raise response_ok("ai运行资源不存在，请联系管理员处理")
-
     user = request.ctx.session['account_info']
-    params = {"resource": resource.id, "node_name": tool.description,
-              "action": "ai_run_action", "action_name": "ai执行动作", "app_name": "lion_mgmt",
-              "name": tool.description, "app_ver": tool.version, "main": tool.main, "action_input": {"msg": content, "room_id": room_id},
-              "retry_times": 0, "timeout": 300,
-              "executor": user.id}
-    run_id = gen_order_version(length=6)
-    msg = {"run_type": "action", "run_id": run_id, "run_args": params}
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    if not room_id or not content:
+        raise CustomError(ErrorCode.ParamValueError)
+    message = {
+        "type": "ai",
+        "content": content,
+        "image_content": "",
+        "room_id": room_id
+    }
+    await chat_manager.handle_ai_message(user, message)
+    # room_id = request.json.get("room_id")
+    # content = request.json.get("content")
+    # tool = await Tool.filter(name="lion_mgmt", deleted=False).order_by("-ctime").first()
+    # if not tool:
+    #     return response_ok("ai运行APP缺失，请联系管理员处理")
+    #
+    # resource = await ToolResources.filter(tool_name="lion_mgmt", deleted=False).order_by("-ctime").first()
+    # if not resource:
+    #     raise response_ok("ai运行资源不存在，请联系管理员处理")
+    #
+    # user = request.ctx.session['account_info']
+    # params = {"resource": resource.id, "node_name": tool.description,
+    #           "action": "ai_run_action", "action_name": "ai执行动作", "app_name": "lion_mgmt",
+    #           "name": tool.description, "app_ver": tool.version, "main": tool.main, "action_input": {"msg": content, "room_id": room_id},
+    #           "retry_times": 0, "timeout": 300,
+    #           "executor": user.id}
+    # run_id = gen_order_version(length=6)
+    # msg = {"run_type": "action", "run_id": run_id, "run_args": params}
+    # await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
     # 目前先用add_task 后续进行拆分使用剧本实现
     # room_id = request.json.get("room_id")
     # content = request.json.get("content")
