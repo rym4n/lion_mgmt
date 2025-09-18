@@ -45,15 +45,6 @@ jobs:
     platforms: linux/amd64
     condition: SUCCESSFUL
     optional: false
-  - !CommandStep
-    name: 同步到生产
-    runInContainer: false
-    interpreter: !DefaultInterpreter
-      commands: |
-        gcrane copy reg.hongcloud.net/lion_mgmt:@tag@ 10.3.0.38:5000/lion_mgmt:@tag@ --insecure
-    useTTY: true
-    condition: SUCCESSFUL
-    optional: true
   triggers:
   - !TagCreateTrigger
     branches: master
