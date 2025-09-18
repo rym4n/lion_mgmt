@@ -64,7 +64,10 @@ jobs:
         gcrane copy reg.hongcloud.net/lion_mgmt:@tag@ 10.3.0.38:5000/lion_mgmt:@tag@ --insecure
     useTTY: true
     condition: SUCCESSFUL
-    optional: false
+    optional: true
+  triggers:
+  - !DependencyFinishedTrigger
+    projects: lion_mgmt
   jobDependencies:
   - jobName: ci
     requireSuccessful: true
