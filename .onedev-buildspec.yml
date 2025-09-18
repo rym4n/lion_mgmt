@@ -53,26 +53,3 @@ jobs:
   maxRetries: 3
   retryDelay: 30
   timeout: 14400
-- name: sync
-  jobExecutor: tgy-deploy
-  steps:
-  - !CommandStep
-    name: 同步镜像
-    runInContainer: false
-    interpreter: !DefaultInterpreter
-      commands: |
-        gcrane copy reg.hongcloud.net/lion_mgmt:@tag@ 10.3.0.38:5000/lion_mgmt:@tag@ --insecure
-    useTTY: true
-    condition: SUCCESSFUL
-    optional: true
-  triggers:
-  - !DependencyFinishedTrigger
-    projects: lion_mgmt
-  jobDependencies:
-  - jobName: ci
-    requireSuccessful: true
-    artifacts: '**'
-  retryCondition: never
-  maxRetries: 3
-  retryDelay: 30
-  timeout: 14400
