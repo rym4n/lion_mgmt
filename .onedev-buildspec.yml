@@ -9,7 +9,7 @@ jobs:
     interpreter: !DefaultInterpreter
       commands: |
         NEW_VER=@tag@
-        sed -i -E "s#(reg\.hongcloud\.net/lion_mgmt:)v[0-9]+\.[0-9]+\.[0-9]+#\1${NEW_VER}#" /opt/lion/docker-compose.yml
+        sed -i -E "s#(reg\-test\.hongcloud\.net/lion_mgmt:)v[0-9]+\.[0-9]+\.[0-9]+#\1${NEW_VER}#" /opt/lion/docker-compose.yml
         docker-compose -f /opt/lion/docker-compose.yml --env-file /opt/lion/.env up -d
     useTTY: true
     condition: SUCCESSFUL
@@ -41,7 +41,7 @@ jobs:
     buildPath: '@project_path@'
     dockerfile: '@project_path@/Dockerfile'
     output: !RegistryOutput
-      tags: 10.3.0.41:5000/lion_mgmt:@tag@
+      tags: reg-test.hongcloud.net/lion_mgmt:@tag@
     platforms: linux/amd64
     condition: SUCCESSFUL
     optional: false
