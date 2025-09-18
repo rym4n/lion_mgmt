@@ -140,14 +140,14 @@ async def update_approvement(request):
 
     await approve.save()
 
-    if do_action:
-        msg = {
-            "run_type": 'flow', "run_id": approve.run_id,
-            "run_args": {
-                "flow_id": approve.flow_id, "flow_input": params, "approval_node_id": approve.audit_node, "approval_status": approve.status,
-                "executor": ",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session['account_info'].id
-            }
+    # if do_action:
+    msg = {
+        "run_type": 'flow', "run_id": approve.run_id,
+        "run_args": {
+            "flow_id": approve.flow_id, "flow_input": params, "approval_node_id": approve.audit_node, "approval_status": approve.status,
+            "executor": ",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session['account_info'].id
         }
-        await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    }
+    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
     return response_ok('success')
