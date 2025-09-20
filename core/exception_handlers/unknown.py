@@ -24,8 +24,6 @@ class UnknownExcHandler(BaseExcHandler):
             return response_fail(ErrorCode.ParameterError)
         elif isinstance(exception, IntegrityError) or isinstance(exception, UniqueViolationError):
             return response_fail(ErrorCode.DataAlreadyExists)
-        elif isinstance(exception, elasticsearch.BadRequestError):
-            return response_fail(ErrorCode.ESQueryError)
         elif isinstance(exception, MethodNotAllowed):
             return response_fail(ErrorCode.MethodNotAllowed)
         else:
