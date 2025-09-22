@@ -528,7 +528,7 @@ async def oauth2_callback(request):
     # user_info['redirect'] = redirect_url
     # user_info_str = base64.urlsafe_b64encode(orjson.dumps(user_info)).decode()
     # return response.redirect("https://" + request.host + "#/loading?" + user_info_str)
-    resp = response.redirect(request.args.get('redirect'))
+    resp = response.redirect(redirect_url)
     resp.cookies.add_cookie(
         f"aioe-auth",
         token,
@@ -537,7 +537,7 @@ async def oauth2_callback(request):
         secure=SESSION_SECURE,
         expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
     )
-    return response.redirect(resp)
+    return resp
 
 
 @user_bp.post("/scene-list")
