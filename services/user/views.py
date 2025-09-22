@@ -508,7 +508,7 @@ async def oauth2_login(request):
     redirect_uri = request.args.get("redirect", "https://" + request.host + "#/welcome")
     state = str(uuid.uuid4())
     logger.info(redirect_uri)
-    await request.app.ctx.cache_client.set(state, redirect_uri, 600)
+    await request.app.ctx.cache_client.set(state, redirect_uri, 300)
     cb_url = "https://" + request.host + "/api/user/oauth/callback"
     auth_url = await request.app.ctx.oauth2.get_authorization_url(cb_url, state=state)
     return response.redirect(auth_url)
@@ -527,7 +527,9 @@ async def oauth2_callback(request):
     state = request.args.get("state")
     logger.info(f"oauth2 callback: code={code}, state={state}")
     logger.info(f"oauth2 config: {request.app.ctx.oauth_cfg}")
-    redirect_url = request.app.ctx.cache_client.get(state) or "https://" + request.host + "#/welcome"
+    redirect_url = await request.app.ctx.cache_client.get(state)
+    if not redirect_url:
+        redirect_url = "https://" + request.host + "#/welcome"
     logger.info(f"oauth2 redirect_url: {redirect_url}")
     user_info, token = await oauth_callback(request.app.ctx.oauth2, code, "https://" + request.host + "/api/user/oauth/callback", request.app.ctx.oauth_cfg)
     resp = response.redirect(redirect_url)
