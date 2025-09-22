@@ -111,7 +111,6 @@ class ErrorCode(BaseErrorCode):
     LogParseError = ErrorData(4081, "日志解析失败，请联系管理员")
     TypeNotSupportedError = ErrorData(4082, "当前转换类型不支持，请联系管理员")
 
-    ESQueryError = ErrorData(4083, "ES查询参数错误")
     FileNotFound = ErrorData(4084, "文件不存在")
 
     CannotDeleteAdmin = ErrorData(4085, "不允许删除内置管理员账号")

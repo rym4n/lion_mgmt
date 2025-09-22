@@ -1,10 +1,8 @@
 # coding=utf-8
-import base64
 import time
 import uuid
 from datetime import datetime
 
-import orjson
 import pyotp
 from argon2.exceptions import VerificationError, InvalidHashError
 from sanic import Blueprint, response
@@ -294,6 +292,7 @@ async def local_auth(request):
     token = token_encode(account.id, account.username, account.display_name, False, str(uuid.uuid4()), AUTHENTICATION_SESSION_EXPIRATION, account.password)
     return response_ok({"token": account.id + ":" + token})
 
+
 @user_bp.post("/refresh-token")
 async def refresh_session_token(request):
     """
@@ -526,10 +525,10 @@ async def oauth2_callback(request):
     redirect_url = request.args.get("redirect")
     user_info, token = await oauth_callback(request.app.ctx.oauth2, code, redirect_url, request.app.ctx.oauth_cfg)
     # user_info['aioe-auth'] = token
-    user_info['redirect'] = redirect_url
-    user_info_str = base64.urlsafe_b64encode(orjson.dumps(user_info)).decode()
+    # user_info['redirect'] = redirect_url
+    # user_info_str = base64.urlsafe_b64encode(orjson.dumps(user_info)).decode()
     # return response.redirect("https://" + request.host + "#/loading?" + user_info_str)
-    resp = response.redirect("https://" + request.host + "#/loading?" + user_info_str)
+    resp = response.redirect(redirect_url)
     resp.cookies.add_cookie(
         f"aioe-auth",
         token,
@@ -538,7 +537,7 @@ async def oauth2_callback(request):
         secure=SESSION_SECURE,
         expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
     )
-    return response.redirect(f"https://{request.host}#{request.args.get('redirect')}")
+    return resp
 
 
 @user_bp.post("/scene-list")

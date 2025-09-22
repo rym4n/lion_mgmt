@@ -2,6 +2,7 @@
 
 from elasticsearch import AsyncElasticsearch
 from sanic import Blueprint
+from sanic.log import logger
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -27,8 +28,12 @@ async def get_logs_by_sql(request):
         raise CustomError(ErrorCode.ParameterError)
 
     async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS)) as es:
-        resp = await es.sql.query(body={"query": sql})
-        return response_ok(resp.body)
+        try:
+            resp = await es.sql.query(body={"query": sql})
+            return response_ok(resp.body)
+        except Exception as e:
+            logger.warning(e)
+            return response_ok([])
 
 
 @logs_bp.route('/indexes', methods=['POST'])
