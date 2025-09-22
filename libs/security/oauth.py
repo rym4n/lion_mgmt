@@ -13,7 +13,7 @@ from libs.security.authentication import token_encode
 from models import Account
 
 
-async def oauth_callback(client: BaseOAuth2, code: str, redirect_url: str, oauth_cfg: dict, code_verifier: str = None) -> tuple[dict, str]:
+async def oauth_callback(client: BaseOAuth2, code: str, redirect_url: str, oauth_cfg: dict, code_verifier: str = None):
     try:
         token_info = await client.get_access_token(
             code,
@@ -50,7 +50,7 @@ async def oauth_callback(client: BaseOAuth2, code: str, redirect_url: str, oauth
             )
             await account.fetch_related("roles")
         aioe_token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, str(uuid.uuid4()))
-        return account.json, aioe_token
+        return account, aioe_token
     except IntegrityError:
         raise CustomError(ErrorCode.CredentialsError)
 

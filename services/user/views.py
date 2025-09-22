@@ -531,7 +531,10 @@ async def oauth2_callback(request):
     if not redirect_url:
         redirect_url = "https://" + request.host + "#/welcome"
     logger.info(f"oauth2 redirect_url: {redirect_url}")
-    user_info, token = await oauth_callback(request.app.ctx.oauth2, code, "https://" + request.host + "/api/user/oauth/callback", request.app.ctx.oauth_cfg)
+    account, token = await oauth_callback(request.app.ctx.oauth2, code, "https://" + request.host + "/api/user/oauth/callback", request.app.ctx.oauth_cfg)
+
+    await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
+
     resp = response.redirect(redirect_url)
     resp.cookies.add_cookie(
         f"aioe-auth",

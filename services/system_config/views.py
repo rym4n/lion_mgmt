@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 
 import aiofile
+import jwt
 import orjson
 import yaml
 from aiocache import cached
@@ -11,7 +12,6 @@ from sanic import json
 from sanic import response
 from tortoise.transactions import in_transaction
 
-import settings
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
@@ -19,6 +19,7 @@ from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
 from models import AuditLog, Config
 from services.event_ingestion.views import check_vector_config
+from settings import SECRET, SESSION_ENCODING_ALGORITHM, UPLOAD_DIR, BASE_DIR, VECTOR_CFG
 
 system_bp = Blueprint('system', url_prefix='/system')
 _all__ = ["system_bp"]
@@ -92,7 +93,7 @@ async def upload_image(request):
         elif field == "logo":
             filename = f"logo.svg"
         if file and filename:
-            file_path = os.path.join(settings.UPLOAD_DIR, filename)
+            file_path = os.path.join(UPLOAD_DIR, filename)
 
             with open(file_path, "wb") as f:
                 f.write(file.body)
@@ -179,7 +180,7 @@ async def get_system_status(request):
         'lion-fs': '文件存储服务', 'lion-es': 'ES存储服务'
     }
     # 遍历目录获取 status_ 开头的json文件
-    data_dir = os.path.join(settings.BASE_DIR, 'data')
+    data_dir = os.path.join(BASE_DIR, 'data')
     status_files = [f for f in os.listdir(data_dir) if f.startswith('status_') and f.endswith('.json')]
     if not status_files:
         raise CustomError(ErrorCode.CheckStatusNotFound)
@@ -209,6 +210,20 @@ async def get_oauth_status(request):
     无请求参数，直接调用，返回SSO状态
     """
     record = await Config.get_or_none(module='sso', key='use_oauth2')
+    if request.cookies.get("aioe-auth") and ':' not in request.cookies.get("aioe-auth"):
+        try:
+            token = request.cookies.get("aioe-auth")
+            payload = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
+            account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
+            if account:
+                resp = account.json()
+                return response_ok({
+                    **resp,
+                    "use_oauth2": record.value == 'true' if record else False
+                })
+        except Exception:
+            raise CustomError(ErrorCode.SessionInvalid)
+
     return response_ok({
         "use_oauth2": record.value == 'true' if record else False
     })
@@ -426,7 +441,7 @@ async def outgoing(request):
         ]
     """
     data = {}
-    yaml_file = os.path.join(settings.VECTOR_CFG, "aioe_audit.yaml")
+    yaml_file = os.path.join(VECTOR_CFG, "aioe_audit.yaml")
     with open(yaml_file, "r", encoding="utf-8") as f:
         old_data = yaml.safe_load(f)  # 转换成 Python 对象
 
@@ -464,7 +479,7 @@ async def outgoing(request):
             password = item.get("sasl_password")
             if not topic:
                 raise CustomError(ErrorCode.ParameterError)
-            data["sinks"]["kafka_sinks_"+str(m)] = {
+            data["sinks"]["kafka_sinks_" + str(m)] = {
                 "type": "kafka",
                 "inputs": ["aioe_kafka_audit"],
                 "bootstrap_servers": ",".join(sink_address),
