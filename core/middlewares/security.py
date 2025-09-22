@@ -58,10 +58,10 @@ class SecurityMiddleware(BaseMiddleware):
             if params:
                 params['code'] = '******'
             data = {
-                "username": request.ctx.session['name'],
-                "display_name": request.ctx.session['display_name'],
-                "client_ip": request.ctx.session['ip'],
-                "result": "成功" if response.status == 200 else "失败",
+                "username": '',
+                "display_name": '',
+                "client_ip": get_client_ip(request),
+                "result": "成功" if response.status < 400 else "失败",
                 "uri": request.path,
                 "client_ua": request.headers.get('User-Agent', ''),
                 "request_data": params
