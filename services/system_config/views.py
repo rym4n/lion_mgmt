@@ -209,21 +209,20 @@ async def get_oauth_status(request):
 
     无请求参数，直接调用，返回SSO状态
     """
-    record = await Config.get_or_none(module='sso', key='use_oauth2')
+
     if request.cookies.get("aioe-auth") and ':' not in request.cookies.get("aioe-auth"):
         try:
             token = request.cookies.get("aioe-auth")
             payload = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
             account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
             if account:
-                resp = account.json()
-                return response_ok({
-                    **resp,
-                    "use_oauth2": record.value == 'true' if record else False
-                })
+                resp = account.json
+                resp['user_oauth2'] = True
+                return response_ok(resp)
         except Exception:
             pass
 
+    record = await Config.get_or_none(module='sso', key='use_oauth2')
     return response_ok({
         "use_oauth2": record.value == 'true' if record else False
     })
