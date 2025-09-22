@@ -582,7 +582,7 @@ async def get_event_detail(request):
 
     event_dict = {"created_name": request.ctx.session['account_info'].username}
 
-    run_logs = await Runlog.filter(event_id=event_id, deleted=False).all().prefetch_related("playbook_version")
+    run_logs = await Runlog.filter(event_id=event_id, deleted=False).order_by('ctime').all().prefetch_related("playbook_version")
     run_logs_grouped = runlog_list(run_logs)
     event_dict["data"] = run_logs_grouped
 
