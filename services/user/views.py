@@ -508,7 +508,7 @@ async def oauth2_login(request):
     redirect_uri = request.args.get("redirect", "https://" + request.host + "#/welcome")
     state = str(uuid.uuid4())
     logger.info(redirect_uri)
-    request.app.ctx.cache_client.set(state, redirect_uri, 600)
+    await request.app.ctx.cache_client.set(state, redirect_uri, 600)
     cb_url = "https://" + request.host + "/api/user/oauth/callback"
     auth_url = await request.app.ctx.oauth2.get_authorization_url(cb_url, state=state)
     return response.redirect(auth_url)
