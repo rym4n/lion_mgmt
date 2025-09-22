@@ -505,8 +505,10 @@ async def assign_role_to_user(request):
 @user_bp.get("/oauth/login")
 async def oauth2_login(request):
     """重定向用户到SSO登录页"""
-    redirect_uri = request.args.get("redirect")
-    auth_url = await request.app.ctx.oauth2.get_authorization_url(redirect_uri, state=str(uuid.uuid4()))
+    redirect_uri = request.args.get("redirect", "https://" + request.host + "#/welcome")
+    state = str(uuid.uuid4())
+    request.app.ctx.cache_client.set(state, redirect_uri, expire=600)
+    auth_url = await request.app.ctx.oauth2.get_authorization_url(redirect_uri, state=state)
     return response.redirect(auth_url)
 
 
@@ -520,14 +522,12 @@ async def oauth2_callback(request):
         redirect: 重定向地址
     """
     code = request.args.get("code")
-    logger.info(f"oauth2 callback: {code}")
-    logger.info(f"oauth2 callback: {request.app.ctx.oauth_cfg}")
-    redirect_url = request.args.get("redirect")
-    user_info, token = await oauth_callback(request.app.ctx.oauth2, code, redirect_url, request.app.ctx.oauth_cfg)
-    # user_info['aioe-auth'] = token
-    # user_info['redirect'] = redirect_url
-    # user_info_str = base64.urlsafe_b64encode(orjson.dumps(user_info)).decode()
-    # return response.redirect("https://" + request.host + "#/loading?" + user_info_str)
+    state = request.args.get("state")
+    logger.info(f"oauth2 callback: code={code}, state={state}")
+    logger.info(f"oauth2 config: {request.app.ctx.oauth_cfg}")
+    redirect_url = request.app.ctx.cache_client.get(state) or "https://" + request.host + "#/welcome"
+    logger.info(f"oauth2 redirect_url: {redirect_url}")
+    user_info, token = await oauth_callback(request.app.ctx.oauth2, code, "https://" + request.host + "/api/user/oauth/callback", request.app.ctx.oauth_cfg)
     resp = response.redirect(redirect_url)
     resp.cookies.add_cookie(
         f"aioe-auth",
