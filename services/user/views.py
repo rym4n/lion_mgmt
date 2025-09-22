@@ -1,10 +1,8 @@
 # coding=utf-8
-import base64
 import time
 import uuid
 from datetime import datetime
 
-import orjson
 import pyotp
 from argon2.exceptions import VerificationError, InvalidHashError
 from sanic import Blueprint, response
@@ -527,8 +525,8 @@ async def oauth2_callback(request):
     redirect_url = request.args.get("redirect")
     user_info, token = await oauth_callback(request.app.ctx.oauth2, code, redirect_url, request.app.ctx.oauth_cfg)
     # user_info['aioe-auth'] = token
-    user_info['redirect'] = redirect_url
-    user_info_str = base64.urlsafe_b64encode(orjson.dumps(user_info)).decode()
+    # user_info['redirect'] = redirect_url
+    # user_info_str = base64.urlsafe_b64encode(orjson.dumps(user_info)).decode()
     # return response.redirect("https://" + request.host + "#/loading?" + user_info_str)
     resp = response.redirect(request.args.get('redirect'))
     resp.cookies.add_cookie(
