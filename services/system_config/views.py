@@ -222,7 +222,7 @@ async def get_oauth_status(request):
                     "use_oauth2": record.value == 'true' if record else False
                 })
         except Exception:
-            raise CustomError(ErrorCode.SessionInvalid)
+            pass
 
     return response_ok({
         "use_oauth2": record.value == 'true' if record else False
