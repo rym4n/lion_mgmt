@@ -543,7 +543,7 @@ async def oauth2_callback(request):
         redirect_url = "https://" + request.host + "#/welcome"
     logger.info(f"oauth2 redirect_url: {redirect_url}")
 
-    token_info = await request.app.ctx.oauth2.get_access_token(code, redirect_url)
+    token_info = await request.app.ctx.oauth2.get_access_token(code, "https://" + request.host + "/api/user/oauth/callback")
     logger.info(f"token_info: {token_info}")
     access_token = jsonpath(token_info, request.app.ctx.oauth_cfg['token_path'])
     if not access_token:
