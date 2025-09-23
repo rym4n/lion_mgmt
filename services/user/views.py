@@ -5,6 +5,7 @@ from datetime import datetime
 
 import pyotp
 from argon2.exceptions import VerificationError, InvalidHashError
+from jsonpath import jsonpath
 from sanic import Blueprint, response
 from sanic.log import logger
 from tortoise.exceptions import IntegrityError, DoesNotExist
@@ -15,7 +16,6 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authentication import validate_password, token_encode, refresh_token, validate_username
 from libs.security.authorization import requires_permission
-from libs.security.oauth import oauth_callback
 from libs.utils import password_hasher, ip_in_list, get_client_ip, validate_ips, get_expiration_date
 from models import Account, Role, Scene
 from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE
@@ -320,10 +320,15 @@ async def logout(request):
     """
     用户登出
     """
-    # todo: oauth凭据销毁
-    # token_info = await oauth_revoke(request, google_oauth)
     await request.app.ctx.cache_client.delete(f"account_{request.ctx.session['sub']}")
-    resp = response_ok("登出成功")
+
+    if request.app.ctx.oauth_cfg.get('use_oauth2') == 'true':
+        # todo: 联动oauth2登出
+        # request.app.ctx.oauth2.revoke_token(request.ctx.session.get('token'))
+        resp = response.redirect("https://" + request.host + "/api/user/oauth/login")
+    else:
+        resp = response_ok("登出成功")
+
     resp.cookies.add_cookie(
         f"aioe-auth",
         '',
@@ -537,14 +542,49 @@ async def oauth2_callback(request):
     if not redirect_url:
         redirect_url = "https://" + request.host + "#/welcome"
     logger.info(f"oauth2 redirect_url: {redirect_url}")
-    account, token = await oauth_callback(request.app.ctx.oauth2, code, "https://" + request.host + "/api/user/oauth/callback", request.app.ctx.oauth_cfg)
 
+    token_info = await request.app.ctx.oauth2.get_access_token(code, redirect_url)
+    logger.info(f"token_info: {token_info}")
+    access_token = jsonpath(token_info, request.app.ctx.oauth_cfg['token_path'])
+    if not access_token:
+        raise CustomError(ErrorCode.GetAccessTokenError)
+
+    async with request.app.ctx.oauth2.get_httpx_client() as c:
+        resp = await c.get(request.app.ctx.oauth_cfg['user_info_uri'], headers={"Authorization": f"Bearer {access_token[0]}"})
+        user_info = resp.json()
+        logger.info(f"user_info: {user_info}")
+
+    username = jsonpath(user_info, request.app.ctx.oauth_cfg['user_id_path'])
+    if not username:
+        raise CustomError(ErrorCode.GetUserInfoError)
+    try:
+        account = await Account.get(username=username[0]).prefetch_related("roles")
+    except DoesNotExist:
+        if request.app.ctx.oauth_cfg['auto_create'] != 'true':
+            raise CustomError(ErrorCode.AccountNotFound)
+        # 不存在自动新建
+        account = await Account.create(
+            username=username[0],
+            oauth_id=username[0],
+            password='',
+            display_name=(jsonpath(user_info, request.app.ctx.oauth_cfg.get('display_name_path')) or [None])[0],
+            email=(jsonpath(user_info, request.app.ctx.oauth_cfg.get('email_path')) or [None])[0],
+            phone=(jsonpath(user_info, request.app.ctx.oauth_cfg.get('phone_path')) or [None])[0],
+            disabled=False,
+            mfa_enable=False,
+            mfa_key=None,
+            creator='auto',
+            permit_ip=None
+        )
+        await account.fetch_related("roles")
+
+    aioe_token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, str(uuid.uuid4()))
     await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
 
     resp = response.redirect(redirect_url)
     resp.cookies.add_cookie(
         f"aioe-auth",
-        token,
+        aioe_token,
         httponly=SESSION_HTTPONLY,
         samesite=SESSION_SAMESITE,
         secure=SESSION_SECURE,

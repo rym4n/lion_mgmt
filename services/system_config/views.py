@@ -217,14 +217,13 @@ async def get_oauth_status(request):
             account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
             if account:
                 resp = account.json
-                resp['use_oauth2'] = True
+                resp['use_oauth2'] = request.app.ctx.oauth_cfg.get('use_oauth2') == 'true'
                 return response_ok(resp)
         except Exception:
             pass
 
-    record = await Config.get_or_none(module='sso', key='use_oauth2')
     return response_ok({
-        "use_oauth2": record.value == 'true' if record else False
+        "use_oauth2": request.app.ctx.oauth_cfg.get('use_oauth2') == 'true'
     })
 
 
