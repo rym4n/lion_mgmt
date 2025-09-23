@@ -325,7 +325,7 @@ async def logout(request):
     if request.app.ctx.oauth_cfg.get('use_oauth2') == 'true':
         # todo: 联动oauth2登出
         # request.app.ctx.oauth2.revoke_token(request.ctx.session.get('token'))
-        resp = response.redirect("https://" + request.host + "/api/user/oauth/login")
+        resp = response.redirect(f"https://{request.host}/api/user/oauth/login?redirect=https://{request.host}/%23%2Fwelcome")
     else:
         resp = response_ok("登出成功")
 
