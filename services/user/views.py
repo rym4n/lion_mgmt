@@ -323,7 +323,16 @@ async def logout(request):
     # todo: oauth凭据销毁
     # token_info = await oauth_revoke(request, google_oauth)
     await request.app.ctx.cache_client.delete(f"account_{request.ctx.session['sub']}")
-    return response_ok("登出成功")
+    resp = response_ok("登出成功")
+    resp.cookies.add_cookie(
+        f"aioe-auth",
+        '',
+        httponly=SESSION_HTTPONLY,
+        samesite=SESSION_SAMESITE,
+        secure=SESSION_SECURE,
+        expires=get_expiration_date(-60),
+    )
+    return resp
 
 
 @user_bp.post("/mfa-auth")

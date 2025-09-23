@@ -54,11 +54,7 @@ def gen_random_code(digits_only: bool = True, length=6) -> str:
 
 
 def get_expiration_date(seconds: int) -> datetime.datetime:
-    return (
-        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=seconds)
-        if seconds > 0
-        else None
-    )
+    return datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=seconds)
 
 
 def validate_ips(ip_str):
