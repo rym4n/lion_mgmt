@@ -217,7 +217,7 @@ async def get_oauth_status(request):
             account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
             if account:
                 resp = account.json
-                resp['user_oauth2'] = True
+                resp['use_oauth2'] = True
                 return response_ok(resp)
         except Exception:
             pass
