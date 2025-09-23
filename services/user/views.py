@@ -299,14 +299,11 @@ async def refresh_session_token(request):
     刷新token
     """
     new_token = refresh_token(request.ctx.session)
-    resp = {
-        "aioe-auth": new_token
-    }
     account = await request.app.ctx.cache_client.get(f"account_{request.ctx.session['sub']}")
     if not account:
         account = await Account.get(id=request.ctx.session["sub"]).prefetch_related('roles')
     await request.app.ctx.cache_client.set(f"account_{request.ctx.session['sub']}", account, AUTHENTICATION_SESSION_EXPIRATION)
-    resp_ok = response_ok(resp)
+    resp_ok = response_ok('success')
     resp_ok.cookies.add_cookie(
         f"aioe-auth",
         new_token,
