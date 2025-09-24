@@ -432,6 +432,8 @@ async def edit_user(request):
         elif p == 'mfa_enable':
             if user.mfa_enable == params[p]:
                 continue
+            if user.oauth_id and params[p]:
+                raise CustomError(ErrorCode.OauthUserCannotUseMfa)
             user.mfa_enable = params[p]
             user.mfa_key = pyotp.random_base32(32) if user.mfa_enable else None
             user.mfa_bind = False
