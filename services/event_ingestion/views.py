@@ -393,7 +393,7 @@ async def update_event_ingestion(request):
     kafka_topic = data.get('kafka_topic', [])
     event = await EventsIngestion.get(id=event_id)
 
-    data = event.vector_config
+    data = event.vector_config_raw
 
     if kafka_topic:
         data["sources"][event.vector_name]["topics"] = kafka_topic
