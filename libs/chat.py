@@ -322,10 +322,14 @@ class ChatManager:
                             }
                         })
             message_data["content"] = action_list
-        else:       # 这里处理ai问答内容
-            match = re.search(r"</think>\s*(.*)", full_response, re.S)
-            result = match.group(1).strip()
-            message_data["content"] = result
+        else:
+            # 这里处理ai问答内容
+            if "</think>" in full_response:
+                match = re.search(r"</think>\s*(.*)", full_response, re.S)
+                result = match.group(1).strip()
+                message_data["content"] = result
+            else:
+                message_data["content"] = orjson.loads(full_response)
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
         return message_data
