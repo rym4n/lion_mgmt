@@ -177,45 +177,7 @@ async def get_playbook_permissions(pb_id, subject, cache_client, is_user: bool =
     return data
 
 
-@timed_bp.post("/all")
-@requires_permission("timed:r")
-async def get_all(request):
-    """
-    获取所有定时任务列表 (需要定时任务查看权限)
-
-    请求参数：
-        - page int 页码  必填   默认1
-        - size int 页大小  必填   默认10
-        - keyword str 搜索关键字  可选 目前支持任务名称，动作名称，剧本名称搜索
-    """
-    page = int(request.json.get("page") or 1)
-    size = int(request.json.get("size") or 15)
-    keyword = request.json.get("keyword", "").strip()
-
-    # 获取全部（后续在 Python 层过滤）
-    all_items = await Timed.filter(deleted=False).prefetch_related("action", "playbook", "creator", "updator")
-
-    if keyword:
-        keyword = keyword.lower()
-
-        def match(item):
-            name_match = keyword in (item.name or "").lower()
-
-            action_desc = ""
-            if item.action and isinstance(item.action.action, dict):
-                action_desc = item.action.action.get("name", "")
-            action_match = keyword in action_desc.lower()
-
-            playbook_name = item.playbook.name if item.playbook else ""
-            playbook_match = keyword in playbook_name.lower()
-
-            return name_match or action_match or playbook_match
-
-        filtered_items = list(filter(match, all_items))
-    else:
-        filtered_items = all_items
-
-    # 权限过滤
+async def get_timed_permissions(request, filtered_items):
     result = []
     permissions = {}
     user = request.ctx.session['account_info']
@@ -260,6 +222,49 @@ async def get_all(request):
                         result.append(item)
                         permissions[item.id] = ["r", "e"]
                         break
+    return result, permissions
+
+
+@timed_bp.post("/all")
+@requires_permission("timed:r")
+async def get_all(request):
+    """
+    获取所有定时任务列表 (需要定时任务查看权限)
+
+    请求参数：
+        - page int 页码  必填   默认1
+        - size int 页大小  必填   默认10
+        - keyword str 搜索关键字  可选 目前支持任务名称，动作名称，剧本名称搜索
+    """
+    page = int(request.json.get("page") or 1)
+    size = int(request.json.get("size") or 15)
+    keyword = request.json.get("keyword", "").strip()
+
+    # 获取全部（后续在 Python 层过滤）
+    all_items = await Timed.filter(deleted=False).prefetch_related("action", "playbook", "creator", "updator")
+
+    if keyword:
+        keyword = keyword.lower()
+
+        def match(item):
+            name_match = keyword in (item.name or "").lower()
+
+            action_desc = ""
+            if item.action and isinstance(item.action.action, dict):
+                action_desc = item.action.action.get("name", "")
+            action_match = keyword in action_desc.lower()
+
+            playbook_name = item.playbook.name if item.playbook else ""
+            playbook_match = keyword in playbook_name.lower()
+
+            return name_match or action_match or playbook_match
+
+        filtered_items = list(filter(match, all_items))
+    else:
+        filtered_items = all_items
+
+    # 权限过滤
+    result, permissions = await get_timed_permissions(request, filtered_items)
 
     total = len(result)
     start = (page - 1) * size
@@ -373,6 +378,10 @@ async def update_timed(request):
 
     timed = await Timed.get(id=timed_id, deleted=False).prefetch_related("action", "playbook", "creator",
                                                                          "updator")
+    result, permissions = await get_timed_permissions(request, [timed])
+
+    if not result:
+        raise CustomError(ErrorCode.Unauthorized)
 
     run_type = int(data.get("type", timed.type))
     if run_type not in [RUN_TYPE_FLOW, RUN_TYPE_ACTION]:
