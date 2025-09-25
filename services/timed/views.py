@@ -15,7 +15,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
-from models import Timed, Playbook, ToolAction, Runlog, PlaybookVersion
+from models import Timed, Playbook, ToolAction, Runlog, PlaybookVersion, PlaybookPermissions, ActionPermissions
 from services.workflow.views import get_playbook_input
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
@@ -156,6 +156,27 @@ async def add_timed(request):
     return response_ok(timed.json)
 
 
+async def get_playbook_permissions(pb_id, subject, cache_client, is_user: bool = True):
+    """
+    获取某个 playbook 的权限（优先查缓存，否则查数据库）
+    :param pb_id: playbook id
+    :param subject: 用户ID 或 角色ID
+    :param is_user: 是否是用户（否则为角色）
+    """
+    cache_key = (pb_id, subject)
+    data = await cache_client.get(cache_key)
+    if not data:
+        filter_kwargs = {"pb_id": pb_id}
+        if is_user:
+            filter_kwargs["users_id"] = subject
+        else:
+            filter_kwargs["roles_id"] = subject
+        pp = await PlaybookPermissions.get_or_none(**filter_kwargs)
+        if pp:
+            data = pp.permissions
+    return data
+
+
 @timed_bp.post("/all")
 @requires_permission("timed:r")
 async def get_all(request):
@@ -194,10 +215,56 @@ async def get_all(request):
     else:
         filtered_items = all_items
 
-    total = len(filtered_items)
+    # 权限过滤
+    result = []
+    permissions = {}
+    user = request.ctx.session['account_info']
+    user_id = user.id
+    user_roles = set(str(role.id) for role in user.roles)
+    cache_client = request.app.ctx.cache_client
+    for item in filtered_items:
+        if item.playbook_id:
+            # 先查用户权限
+            data = await get_playbook_permissions(item.playbook_id, user_id, cache_client, is_user=True)
+            if data and any(perm in data for perm in ("r", "e")):
+                result.append(item)
+                permissions[item.id] = data
+                continue
+
+            # 再查角色权限
+            for role_id in user_roles:
+                data = await get_playbook_permissions(item.playbook_id, role_id, cache_client, is_user=False)
+                if data and any(perm in data for perm in ("r", "e")):
+                    result.append(item)
+                    permissions[item.id] = data
+                    break
+        else:
+            # 动作权限处理
+            permission = await ActionPermissions.get(
+                tool_name=item.action_input["app_name"],
+                action_name=item.action_input["action"],
+                deleted=False
+            )
+
+            resource = item.action_input["resource"]
+
+            # 用户权限
+            for res_dict in (permission.users or []):
+                if resource in res_dict and user_id in map(str, res_dict[resource]):
+                    result.append(item)
+                    permissions[item.id] = ["r", "e"]
+                    break
+            else:  # 只有用户不满足时再检查角色
+                for res_dict in (permission.roles or []):
+                    if resource in res_dict and not user_roles.isdisjoint(map(str, res_dict[resource])):
+                        result.append(item)
+                        permissions[item.id] = ["r", "e"]
+                        break
+
+    total = len(result)
     start = (page - 1) * size
     end = start + size
-    paged_items = filtered_items[start:end]
+    paged_items = result[start:end]
 
     items = [{
                 "id": item.id,
@@ -220,6 +287,7 @@ async def get_all(request):
                     "username": item.updator.username,
                     "display_name": item.updator.display_name,
                 },
+                "permissions": permissions.get(item.id, [])
             }
             for item in paged_items
         ]
