@@ -824,9 +824,7 @@ async def add_permission(request):
         if not user_dict_list or not isinstance(user_dict_list[0], dict):
             user_dict_list = [{}]
 
-        current_users = user_dict_list[0].get(resource_id, [])
-        merged_users = list(set(current_users) | set(users_id))
-        user_dict_list[0][resource_id] = merged_users
+        user_dict_list[0][resource_id] = users_id
 
         role_dict_list = []
         if isinstance(permission.roles, list):
@@ -840,9 +838,7 @@ async def add_permission(request):
         if not role_dict_list or not isinstance(role_dict_list[0], dict):
             role_dict_list = [{}]
 
-        current_roles = role_dict_list[0].get(resource_id, [])
-        merged_roles = list(set(current_roles) | set(roles_id))
-        role_dict_list[0][resource_id] = merged_roles
+        role_dict_list[0][resource_id] = roles_id
 
         permission.users = user_dict_list
         permission.roles = role_dict_list
