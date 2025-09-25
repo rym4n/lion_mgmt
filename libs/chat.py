@@ -330,11 +330,9 @@ class ChatManager:
 
         return message_data
 
-    async def connect(self, user: Account, ws, ws_type=None):
+    async def connect(self, user: Account, ws):
         """处理用户连接"""
-        if not ws_type:
-            self.active_connections[user.id] = {"conn": ws, "current_room": None, "run_id": None}
-        self.active_connections[str(user.id) + "_ai"] = {"conn": ws, "current_room": None, "run_id": None}
+        self.active_connections[user.id] = {"conn": ws, "current_room": None, "run_id": None}
         status_message = {
             "type": "user_status",
             "user_id": user.id,
@@ -360,6 +358,7 @@ class ChatManager:
             await msg_sub.subscribe(WR_TOPIC)
             async for message in msg_sub.listen():
                 try:
+                    logger.info(message)
                     if message.get('type') != 'message':
                         continue
                     msg = orjson.loads(message['data'])
@@ -454,7 +453,8 @@ class ChatManager:
                     {"type": "delete_announcement_success", "announcement_id": data.get("announcement_id")}).decode())
             elif message_type == "request_online_users":
                 online_users = await self._handle_request_online_users(data)
-                self.active_connections[user.id]['current_room'] = data['room_id']
+                if user.id in self.active_connections:
+                    self.active_connections[user.id]['current_room'] = data['room_id']
                 # 发送在线状态列表
                 await ws.send(orjson.dumps(
                     {"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
