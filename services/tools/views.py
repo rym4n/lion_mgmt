@@ -139,6 +139,9 @@ async def upload_and_extract_zip(request):
                 await ActionPermissions.create(tool_name=tool_name, action_name=action["func"],
                                                action_description=action.get("name") or "", roles=[],
                                                users=[])
+            await ActionPermissions.create(tool_name=tool_name, action_name="all",
+                                           action_description="动作全部动作权限", roles=[],
+                                           users=[])
         configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False)
         if not configuration or configuration.resources != config_data.get("resource"):
             trm = await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {}, status=1 if (config_data.get("resource") and any(field.get("required") is True for field in config_data.get("resource").values())) else 0, health_check=health_check)
@@ -804,7 +807,11 @@ async def add_permission(request):
         raise CustomError(ErrorCode.ParameterError)
 
     if "all" in actions:
-        permissions = await ActionPermissions.filter(tool_name=name, deleted=False).all()
+        if not await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False).exists():
+            await ActionPermissions.create(tool_name=name, action_name="all",
+                                           action_description="动作全部动作权限", roles=[],
+                                           users=[])
+        permissions = await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False).all()
     else:
         permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False).all()
 
@@ -848,99 +855,6 @@ async def add_permission(request):
     return response_ok({"message": "工具动作权限新增成功"})
 
 
-@tools_bp.post("/action/permissions/delete")
-@requires_permission("tool:u")
-async def delete_permission(request):
-    """
-    删除工具动作权限（需要工具更新权限）
-
-    query参数:
-        - name: 工具名称    str
-        - resource_id: 资源id    str
-        - actions: 动作名称    list    可选，默认all
-        - users_id: 用户ID列表    list
-        - roles_id: 角色ID列表    list
-    """
-    name = request.json.get("name")
-    resource_id = request.json.get("resource_id")
-    actions = request.json.get("actions", ["all"])
-    users_id = list(set(request.json.get("users_id", [])))
-    roles_id = list(set(request.json.get("roles_id", [])))
-    if not name:
-        raise CustomError(ErrorCode.ParameterError)
-    if not isinstance(users_id, list) or not isinstance(roles_id, list) or not isinstance(actions, list):
-        raise CustomError(ErrorCode.ParameterError)
-
-    permissions = await ActionPermissions.filter(
-        tool_name=name,
-        deleted=False,
-        **({"action_name__in": actions} if "all" not in actions else {})
-    ).all()
-
-    if not permissions:
-        raise CustomError(ErrorCode.ActionNotFoundError)
-
-    for permission in permissions:
-        user_dict_list = []
-        if isinstance(permission.users, list):
-            user_dict_list = permission.users.copy()
-        elif isinstance(permission.users, str):
-            try:
-                user_dict_list = orjson.loads(permission.users)
-            except orjson.JSONDecodeError:
-                user_dict_list = []
-
-        if not user_dict_list or not isinstance(user_dict_list[0], dict):
-            user_dict_list = [{}]
-
-        if resource_id in user_dict_list[0]:
-            original_users = set(user_dict_list[0][resource_id])
-            removed_users = set(users_id)
-            updated_users = list(original_users - removed_users)
-
-            if updated_users:
-                user_dict_list[0][resource_id] = updated_users
-            else:
-                del user_dict_list[0][resource_id]
-                if not user_dict_list[0]:
-                    user_dict_list = []
-
-        permission.users = user_dict_list
-
-        role_dict_list = []
-        if isinstance(permission.roles, list):
-            role_dict_list = permission.roles.copy()
-        elif isinstance(permission.roles, str):
-            try:
-                role_dict_list = orjson.loads(permission.roles)
-            except orjson.JSONDecodeError:
-                role_dict_list = []
-
-        if not role_dict_list or not isinstance(role_dict_list[0], dict):
-            role_dict_list = [{}]
-
-        if resource_id in role_dict_list[0]:
-            original_roles = set(role_dict_list[0][resource_id])
-            removed_roles = set(roles_id)
-            updated_roles = list(original_roles - removed_roles)
-
-            if updated_roles:
-                role_dict_list[0][resource_id] = updated_roles
-            else:
-                del role_dict_list[0][resource_id]
-                if not role_dict_list[0]:
-                    role_dict_list = []
-
-        permission.roles = role_dict_list
-
-    await ActionPermissions.bulk_update(
-        permissions,
-        fields=["users", "roles"]
-    )
-
-    return response_ok({"message": "工具动作权限删除成功"})
-
-
 @tools_bp.post("/action/permissions/select")
 @requires_permission("tool:r")
 async def select_permission_all(request):
@@ -959,7 +873,11 @@ async def select_permission_all(request):
         raise CustomError(ErrorCode.ParameterError)
 
     if "all" in actions:
-        permissions = await ActionPermissions.filter(tool_name=name, deleted=False).all()
+        if not await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False).exists():
+            await ActionPermissions.create(tool_name=name, action_name="all",
+                                           action_description="动作全部动作权限", roles=[],
+                                           users=[])
+        permissions = await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False).all()
     else:
         permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False).all()
 
