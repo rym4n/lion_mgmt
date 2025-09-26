@@ -163,10 +163,21 @@ async def list_workflow(request):
 
     total = await Playbook.filter(condition).count()
 
-    data = [{
-        **p.json,
-        "versions": p.versions  # 直接使用 annotate 的结果
-    } for p in playbooks]
+    playbook_versions = await PlaybookVersion.filter(
+        playbook_id__in=[p.id for p in playbooks]
+    ).all()
+
+    version_map = {v.playbook_id: v for v in playbook_versions}
+
+    # 组装数据
+    data = []
+    for p in playbooks:
+        pv = version_map.get(p.id)
+        data.append({
+            **p.json,
+            "flow_timeout": pv.flow_timeout if pv else 300,
+            "versions": p.versions
+        })
 
     return response_ok({
         "total": total,
