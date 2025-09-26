@@ -3,9 +3,9 @@ from tortoise import BaseDBAsyncClient
 
 async def upgrade(db: BaseDBAsyncClient) -> str:
     return """
-        CREATE INDEX IF NOT EXISTS "idx_runlog_run_id_466a30" ON "runlog" ("run_id", "node_id");"""
+        ALTER TABLE "playbook_version" ADD "flow_timeout" INT NOT NULL DEFAULT 300;"""
 
 
 async def downgrade(db: BaseDBAsyncClient) -> str:
     return """
-        DROP INDEX IF EXISTS "idx_runlog_run_id_466a30";"""
+        ALTER TABLE "playbook_version" DROP COLUMN "flow_timeout";"""
