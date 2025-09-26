@@ -229,7 +229,7 @@ class ChatManager:
             actions = orjson.loads(full_response)
         AI = await self.redis.get("AI")
         if AI in [2, 3]:
-            if "暂无支持的动作" not in actions and "[" in actions:
+            if "暂无支持的动作" not in str(actions) and "[" in str(actions):
                 message_data["type"] = "execute"
                 for action in actions:
                     logger.info(action)
