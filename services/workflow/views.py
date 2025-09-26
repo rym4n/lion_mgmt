@@ -360,11 +360,12 @@ async def publish_workflow(request):
     请求参数：
         flow_id: 必填，剧本版本ID
         change_desc: 必填, 版本变更说明
+        flow_timeout: 必填，剧本运行超时时间，最小5分钟最大3天，单位秒
     """
     if not request.json.get("flow_id") or not request.json.get("change_desc"):
         raise CustomError(ErrorCode.ParameterError)
     await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0).update(status=1, updator=request.ctx.session[
-        'account_info'], version=gen_order_version(), change_desc=request.json.get("change_desc"))
+        'account_info'], version=gen_order_version(), change_desc=request.json.get("change_desc"), flow_timeout=int(request.json.get("flow_timeout")))
     return response_ok("剧本发布成功")
 
 
