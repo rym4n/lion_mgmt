@@ -43,6 +43,7 @@ async def create_workflow(request):
         tags: 标签，列表格式，例如 ["aaa","bbb"]，可选
         scenes: 场景，列表格式，例如 ["aaa","bbb"]，可选
         flow_json_list: 流程图具体内容, 列表格式, 列表的每个元素是一个独立的剧本json, 可选
+        flow_timeout: 可选，剧本运行超时时间，最小5分钟最大3天，单位秒 默认300
     """
     data = request.json
     if not data.get("name") or not data.get("flow_json_list"):
@@ -95,7 +96,8 @@ async def create_workflow(request):
                 change_desc=data.get("change_desc", ''),
                 flow_json=flow_json,
                 creator=request.ctx.session['account_info'],
-                updator=request.ctx.session['account_info']
+                updator=request.ctx.session['account_info'],
+                flow_timeout=int(data.get("flow_timeout", 300))
             )
 
             action_ids = await statistics_data(flow_json)
@@ -292,6 +294,7 @@ async def edit_workflow(request):
         remark: 可选，备注
         scenes: 可选，关联场景名称，列表格式
         tags: 可选，标签名称，列表格式
+        flow_timeout: 可选，剧本运行超时时间，最小5分钟最大3天，单位秒 默认300
     """
     params = request.json
     playbook = await Playbook.get(id=params.get("playbook_id")).prefetch_related("scenes", "tags")
@@ -309,6 +312,8 @@ async def edit_workflow(request):
         tags = await Tag.filter(name__in=params.get("tags"))
         await playbook.tags.clear()
         await playbook.tags.add(*tags)
+    if params.get("flow_timeout"):
+        await PlaybookVersion.filter(playbook_id=playbook.id).update(flow_timeout=int(params.get("flow_timeout", 300)))
     playbook.updator = request.ctx.session['account_info']
     await playbook.save()
     return response_ok(playbook.json)
@@ -360,7 +365,6 @@ async def publish_workflow(request):
     请求参数：
         flow_id: 必填，剧本版本ID
         change_desc: 必填, 版本变更说明
-        flow_timeout: 必填，剧本运行超时时间，最小5分钟最大3天，单位秒
     """
     if not request.json.get("flow_id") or not request.json.get("change_desc"):
         raise CustomError(ErrorCode.ParameterError)
