@@ -67,6 +67,13 @@ async def create_workflow(request):
     if await Playbook.filter(name=data.get("name"), deleted=False).exists():
         raise CustomError(ErrorCode.PlaybookNameExists)
 
+    flow_timeout = 300
+    if data.get("flow_timeout"):
+        if 300 <= int(data.get("flow_timeout")) <= 259200:
+            flow_timeout = int(data.get("flow_timeout"))
+        else:
+            raise CustomError(ErrorCode.FlowTimeOutError)
+
     flow_json_list = data.get("flow_json_list") or []
     creator = request.ctx.session['account_info']
     admin = await Role.get(id="111111")
@@ -97,7 +104,7 @@ async def create_workflow(request):
                 flow_json=flow_json,
                 creator=request.ctx.session['account_info'],
                 updator=request.ctx.session['account_info'],
-                flow_timeout=int(data.get("flow_timeout", 300))
+                flow_timeout=flow_timeout
             )
 
             action_ids = await statistics_data(flow_json)
@@ -324,6 +331,8 @@ async def edit_workflow(request):
         await playbook.tags.clear()
         await playbook.tags.add(*tags)
     if params.get("flow_timeout"):
+        if 300 >= int(params.get("flow_timeout")) or int(params.get("flow_timeout")) >= 259200:
+            raise CustomError(ErrorCode.FlowTimeOutError)
         await PlaybookVersion.filter(playbook_id=playbook.id).update(flow_timeout=int(params.get("flow_timeout", 300)))
     playbook.updator = request.ctx.session['account_info']
     await playbook.save()
