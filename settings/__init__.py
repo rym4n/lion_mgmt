@@ -155,8 +155,8 @@ TORTOISE = {
                 "user": os.environ.get("RY_DB_USER"),
                 "password": os.environ.get("RY_DB_PASS"),
                 "database": os.environ.get("RY_DB_NAME"),
-                "maxsize": 30,
-                # "minsize": 1, # 最小连接数
+                "maxsize": 50,
+                "minsize": 5,
                 # 关闭池中非活动连接的秒数。通过 0 则禁用此机制。
                 "max_inactive_connection_lifetime": 60
             }

@@ -221,63 +221,87 @@ class ChatManager:
 
         action_list = []
         logger.info(full_response)
-        if "暂无支持的动作" not in full_response and "[" in full_response:
-            message_data["type"] = "execute"
-            if "</think>" in full_response:
-                match = re.search(r"</think>\s*(.*)", full_response, re.S)
-                actions = match.group(1).strip()
-                actions = orjson.loads(actions)
-            else:
-                actions = orjson.loads(full_response)
-            for action in actions:
-                logger.info(action)
-                data = actions_dict.get(actions_desc.get(action))
-                logger.info(data)
-                if not data:
-                    continue
+        if "</think>" in full_response:
+            match = re.search(r"</think>\s*(.*)", full_response, re.S)
+            actions = match.group(1).strip()
+            actions = orjson.loads(actions)
+        else:
+            actions = orjson.loads(full_response)
+        AI = await self.redis.get("AI")
+        if AI in [2, 3]:
+            if "暂无支持的动作" not in actions and "[" in actions:
+                message_data["type"] = "execute"
+                for action in actions:
+                    logger.info(action)
+                    data = actions_dict.get(actions_desc.get(action))
+                    logger.info(data)
+                    if not data:
+                        continue
 
-                # 获取动作输入参数列表
-                tool_actions = await ToolAction.filter(id__in=data, deleted=False).all()
-                for tool_action in tool_actions:
-                    # 这里处理请求参数的动作
-                    if tool_action.action["input"]:
-                        action_inputs = tool_action.action["input"]
-                        actions_input = ""
-                        for a_input in action_inputs:
-                            actions_input += "- {}:{}\n".format(a_input["key"], a_input["description"])
-                        prompt_word = """
+                    # 获取动作输入参数列表
+                    tool_actions = await ToolAction.filter(id__in=data, deleted=False).all()
+                    for tool_action in tool_actions:
+                        # 这里处理请求参数的动作
+                        if tool_action.action["input"]:
+                            action_inputs = tool_action.action["input"]
+                            actions_input = ""
+                            for a_input in action_inputs:
+                                actions_input += "- {}:{}\n".format(a_input["key"], a_input["description"])
+                            prompt_word = """
 # 角色
 请根据动作的参数描述从用户输入中提取合适参数，严格按照JSON格式输出文本，不要用markdown格式。示例：{"key": "value"}。
 
 # 动作参数描述
 """ + actions_input
-                        logger.info(prompt_word)
-                        # 再次进行AI生成，进行输入参数值确认
-                        messages = [
-                            {"role": "system", "content": prompt_word},
-                            {"role": "user", "content": "用户输入的是: " + prompt}
-                        ]
-                        try:
-                            response = client.chat.completions.create(
-                                model=model,
-                                messages=messages,
-                                max_tokens=8000,
-                                temperature=0.75,
-                                timeout=300
-                            )
-                            full_response = response.choices[0].message.content if response.choices else ""
-                        except openai.APITimeoutError:
-                            # 专门处理超时异常
-                            message_data["content"] = "ai请求超时，300s内未收到回应"
-                            return message_data
-                        logger.info(full_response)
-                        if full_response:
-                            if "</think>" in full_response:
-                                match = re.search(r"</think>\s*(.*)", full_response, re.S)
-                                result = match.group(1).strip()
-                                inputs = orjson.loads(result)
-                            else:
-                                inputs = orjson.loads(full_response)
+                            logger.info(prompt_word)
+                            # 再次进行AI生成，进行输入参数值确认
+                            messages = [
+                                {"role": "system", "content": prompt_word},
+                                {"role": "user", "content": "用户输入的是: " + prompt}
+                            ]
+                            try:
+                                response = client.chat.completions.create(
+                                    model=model,
+                                    messages=messages,
+                                    max_tokens=8000,
+                                    temperature=0.75,
+                                    timeout=300
+                                )
+                                full_response = response.choices[0].message.content if response.choices else ""
+                            except openai.APITimeoutError:
+                                # 专门处理超时异常
+                                message_data["content"] = "ai请求超时，300s内未收到回应"
+                                return message_data
+                            logger.info(full_response)
+                            if full_response:
+                                if "</think>" in full_response:
+                                    match = re.search(r"</think>\s*(.*)", full_response, re.S)
+                                    result = match.group(1).strip()
+                                    inputs = orjson.loads(result)
+                                else:
+                                    inputs = orjson.loads(full_response)
+                                tool = await Tool.get_or_none(name=tool_action.tool_name, version=tool_action.version_number,
+                                                              deleted=False)
+                                if not tool:
+                                    continue
+                                resource = await ToolResourcesModel.get_or_none(tool_name=tool_action.tool_name, deleted=False)
+                                action_list.append({
+                                    "type": "action",
+                                    "action_input": {
+                                        "app_name": tool_action.tool_name,
+                                        "app_ver": tool_action.version_number,
+                                        "resource": resource.status if resource else 0,
+                                        "node_name": tool.description,
+                                        "name": tool.description,
+                                        "main": tool.main,
+                                        "action": tool_action.action["func"],
+                                        "action_name": tool_action.action["name"],
+                                        "input": tool_action.action["input"],
+                                        "params": inputs,
+                                        "timeout": 300
+                                    }
+                                })
+                        else:       # 这里处理无请求参数的动作
                             tool = await Tool.get_or_none(name=tool_action.tool_name, version=tool_action.version_number,
                                                           deleted=False)
                             if not tool:
@@ -295,34 +319,14 @@ class ChatManager:
                                     "action": tool_action.action["func"],
                                     "action_name": tool_action.action["name"],
                                     "input": tool_action.action["input"],
-                                    "params": inputs,
+                                    "params": {},
                                     "timeout": 300
                                 }
                             })
-                    else:       # 这里处理无请求参数的动作
-                        tool = await Tool.get_or_none(name=tool_action.tool_name, version=tool_action.version_number,
-                                                      deleted=False)
-                        if not tool:
-                            continue
-                        resource = await ToolResourcesModel.get_or_none(tool_name=tool_action.tool_name, deleted=False)
-                        action_list.append({
-                            "type": "action",
-                            "action_input": {
-                                "app_name": tool_action.tool_name,
-                                "app_ver": tool_action.version_number,
-                                "resource": resource.status if resource else 0,
-                                "node_name": tool.description,
-                                "name": tool.description,
-                                "main": tool.main,
-                                "action": tool_action.action["func"],
-                                "action_name": tool_action.action["name"],
-                                "input": tool_action.action["input"],
-                                "params": {},
-                                "timeout": 300
-                            }
-                        })
-            message_data["content"] = action_list
-        else:
+                message_data["content"] = action_list
+            else:
+                message_data["content"] = "暂无支持动作"
+        elif AI in [1, 3]:
             # 这里处理ai问答内容
             if "</think>" in full_response:
                 match = re.search(r"</think>\s*(.*)", full_response, re.S)

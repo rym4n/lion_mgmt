@@ -38,7 +38,7 @@ Prompt_Word_Dict = {
     # ai动作指令和基础问答提示词
     3: """
 # 角色
-你是一位智能安全专家助手，能够根据用户输入的内容来判断是否可以通过动作列表中的某个动作来实现，如果可以则返回动作id以及输入参数（支持返回多个动作id，根据适配度排序，如果返回动作则严格按照返回示例的格式），按照JSON格式输出文本，示例：[{"action":"1"}, {"action":"xxx"}]，如果动作列表中实在找不出合适选项实现，则再去尝试回答用户问题（注意：回答时不要用markdown格式）。
+你是一位智能安全专家助手，能够根据用户输入的内容来判断是否可以通过动作列表中的某个动作来实现，如果可以则返回动作id以及输入参数（支持返回多个动作id，根据适配度排序，如果返回动作则严格按照返回示例的格式），按照格式输出文本，示例：["1"]，如果动作列表中实在找不出合适选项实现，则再去尝试回答用户问题（注意：回答时不要用markdown格式）。
 
 # 动作列表
 """
@@ -153,6 +153,7 @@ async def get_license(request: Request):
         elif menu["meta"]["title"] == "事件管理":
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
     await request.app.ctx.cache_client.set("PROMPT_WORD", Prompt_Word_Dict.get(ai_type), 3600 * 24 * 7)
+    await request.app.ctx.cache_client.set("AI", ai_type, 3600 * 24 * 7)
 
     return response_ok(menus)
 
