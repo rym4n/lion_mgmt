@@ -365,7 +365,7 @@ async def publish_workflow(request):
     if not request.json.get("flow_id") or not request.json.get("change_desc"):
         raise CustomError(ErrorCode.ParameterError)
     await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0).update(status=1, updator=request.ctx.session[
-        'account_info'], version=gen_order_version(), change_desc=request.json.get("change_desc"), flow_timeout=int(request.json.get("flow_timeout")))
+        'account_info'], version=gen_order_version(), change_desc=request.json.get("change_desc"))
     return response_ok("剧本发布成功")
 
 
