@@ -4,13 +4,13 @@ import hashlib
 import re
 import time
 import traceback
+import aiohttp
 from datetime import datetime
 
 import orjson
 import pytz
 import openai
 from aiocache import caches
-from openai import OpenAI
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
 
@@ -21,6 +21,31 @@ from models.warroom import Room, Message, MessageAccount
 from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC, WR_TOPIC, AUTHENTICATION_SESSION_EXPIRATION
 from tortoise.functions import Max
 from tortoise.expressions import Q
+
+
+async def fetch_completion(host, api_key, model, messages):
+    url = f"{host}/chat/completions"
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": 8000,
+        "temperature": 0.75
+    }
+
+    timeout = aiohttp.ClientTimeout(total=300)  # 300 秒超时
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(url, headers=headers, json=payload) as resp:
+            if resp.status != 200:
+                text = await resp.text()
+                return f"Request failed: {resp.status}, {text}"
+            data = await resp.json()
+            return data["choices"][0]["message"]["content"] if data.get("choices") else ""
 
 
 async def get_prompt_words(prompt_word):
@@ -189,10 +214,7 @@ class ChatManager:
         logger.info(host)
         logger.info(api_key)
         logger.info(model)
-        client = OpenAI(
-            base_url=host,
-            api_key=api_key
-        )
+
         system_prompt, actions_dict, actions_desc = await get_prompt_words(ai_cfg["PROMPT_WORD"])
         logger.info(system_prompt)
         messages = [
@@ -201,14 +223,7 @@ class ChatManager:
         ]
         try:
             # 使用阻碍式输出
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                max_tokens=8000,
-                temperature=0.75,
-                timeout=300
-            )
-            full_response = response.choices[0].message.content if response.choices else ""
+            full_response = await fetch_completion(host, api_key, model, messages)
 
         except openai.APITimeoutError:
             # 专门处理超时异常
@@ -256,14 +271,7 @@ class ChatManager:
                                 {"role": "user", "content": "用户输入的是: " + prompt}
                             ]
                             try:
-                                response = client.chat.completions.create(
-                                    model=model,
-                                    messages=messages,
-                                    max_tokens=8000,
-                                    temperature=0.75,
-                                    timeout=300
-                                )
-                                full_response = response.choices[0].message.content if response.choices else ""
+                                full_response = await fetch_completion(host, api_key, model, messages)
                             except openai.APITimeoutError:
                                 # 专门处理超时异常
                                 message_data["content"] = "ai请求超时，300s内未收到回应"
