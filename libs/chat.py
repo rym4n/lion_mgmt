@@ -38,7 +38,7 @@ async def fetch_completion(host, api_key, model, messages):
         "temperature": 0.75
     }
 
-    timeout = aiohttp.ClientTimeout(total=300)  # 300 秒超时
+    timeout = aiohttp.ClientTimeout(total=3000)  # 300 秒超时
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, headers=headers, json=payload) as resp:
             if resp.status != 200:
