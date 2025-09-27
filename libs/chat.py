@@ -38,7 +38,7 @@ async def fetch_completion(host, api_key, model, messages):
         "temperature": 0.75
     }
 
-    timeout = aiohttp.ClientTimeout(total=3000)  # 300 秒超时
+    timeout = aiohttp.ClientTimeout(total=600)  # 600 秒超时
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, headers=headers, json=payload) as resp:
             if resp.status != 200:
@@ -227,7 +227,7 @@ class ChatManager:
 
         except openai.APITimeoutError:
             # 专门处理超时异常
-            message_data["content"] = "ai请求超时，300s内未收到回应"
+            message_data["content"] = "ai请求超时，600s内未收到回应"
             return message_data
 
         action_list = []
@@ -274,7 +274,7 @@ class ChatManager:
                                 full_response = await fetch_completion(host, api_key, model, messages)
                             except openai.APITimeoutError:
                                 # 专门处理超时异常
-                                message_data["content"] = "ai请求超时，300s内未收到回应"
+                                message_data["content"] = "ai请求超时，600s内未收到回应"
                                 return message_data
                             logger.info(full_response)
                             if full_response:
