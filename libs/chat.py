@@ -227,6 +227,7 @@ class ChatManager:
         full_response = await fetch_completion(host, api_key, model, messages)
         if not full_response:
             message_data["content"] = "ai请求超时"
+            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
             return message_data
         action_list = []
         logger.info(full_response)
@@ -271,6 +272,7 @@ class ChatManager:
                             full_response = await fetch_completion(host, api_key, model, messages)
                             if not full_response:
                                 message_data["content"] = "ai请求超时"
+                                await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
                                 return message_data
                             logger.info(full_response)
                             if full_response:
