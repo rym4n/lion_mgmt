@@ -154,7 +154,7 @@ async def get_license(request: Request):
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
 
     await Config.update_or_create(key="PROMPT_WORD", defaults={"value": Prompt_Word_Dict.get(ai_type)}, module="ai")
-    await Config.update_or_create(key="AI", defaults={"value": ai_type}, module="ai")
+    await Config.update_or_create(key="AI", defaults={"value": str(ai_type)}, module="ai")
 
     return response_ok(menus)
 
