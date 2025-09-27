@@ -78,6 +78,13 @@ async def ai_action(request):
         "content":"什么是智能体"      消息
         "room_id":"c6ab45be-fe5b-4f3e-b4aa-cf009fcfab2a"    作战室id
     """
+    resp = await request.respond(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
     room_id = request.json.get("room_id")
     content = request.json.get("content")
     user_id = request.json.get("user_id")
@@ -93,4 +100,7 @@ async def ai_action(request):
 
     await chat_manager.handle_ai_message(user, message)
 
-    return response_ok("运行成功")
+    if resp:
+        await resp.eof()
+
+    return resp
