@@ -9,7 +9,6 @@ from datetime import datetime
 
 import orjson
 import pytz
-import openai
 from aiocache import caches
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
@@ -39,13 +38,16 @@ async def fetch_completion(host, api_key, model, messages):
     }
 
     timeout = aiohttp.ClientTimeout(total=600)  # 600 秒超时
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(url, headers=headers, json=payload) as resp:
-            if resp.status != 200:
-                text = await resp.text()
-                return f"Request failed: {resp.status}, {text}"
-            data = await resp.json()
-            return data["choices"][0]["message"]["content"] if data.get("choices") else ""
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    return f"Request failed: {resp.status}, {text}"
+                data = await resp.json()
+                return data["choices"][0]["message"]["content"] if data.get("choices") else ""
+    except asyncio.TimeoutError:
+        return False
 
 
 async def get_prompt_words(prompt_word):
@@ -221,15 +223,10 @@ class ChatManager:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": "用户输入的是: " + prompt}
         ]
-        try:
-            # 使用阻碍式输出
-            full_response = await fetch_completion(host, api_key, model, messages)
-
-        except openai.APITimeoutError:
-            # 专门处理超时异常
+        full_response = await fetch_completion(host, api_key, model, messages)
+        if not full_response:
             message_data["content"] = "ai请求超时，600s内未收到回应"
             return message_data
-
         action_list = []
         logger.info(full_response)
         if "</think>" in full_response:
@@ -270,10 +267,8 @@ class ChatManager:
                                 {"role": "system", "content": prompt_word},
                                 {"role": "user", "content": "用户输入的是: " + prompt}
                             ]
-                            try:
-                                full_response = await fetch_completion(host, api_key, model, messages)
-                            except openai.APITimeoutError:
-                                # 专门处理超时异常
+                            full_response = await fetch_completion(host, api_key, model, messages)
+                            if not full_response:
                                 message_data["content"] = "ai请求超时，600s内未收到回应"
                                 return message_data
                             logger.info(full_response)
