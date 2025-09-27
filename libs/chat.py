@@ -23,7 +23,7 @@ from tortoise.functions import Max
 from tortoise.expressions import Q
 
 
-async def get_prompt_words(redis):
+async def get_prompt_words(prompt_word):
     tool_names = []
     actions = await ToolResourcesModel.filter(deleted=False, status=0).all().values("tool_name")
     for action in actions:
@@ -62,7 +62,6 @@ async def get_prompt_words(redis):
             actions_dict[name] = [action.id]
         else:
             actions_dict[name].append(action.id)
-    prompt_word = await redis.get("PROMPT_WORD")
     logger.info(actions_dict)
     logger.info(actions_desc)
     for k, v in actions_desc.items():
@@ -151,12 +150,9 @@ async def creat_message(room_id, log, user, redis):
     return message_data
 
 
-async def get_ai_config(cache_client):
-    ai_cfg = await cache_client.get('ai_config') or {}
-    if not ai_cfg:
-        records = await Config.filter(module='ai').values('key', 'value')
-        ai_cfg = {c['key']: c['value'] for c in records}
-        await cache_client.set('ai_config', ai_cfg, ttl=60 * 60 * 24)
+async def get_ai_config():
+    records = await Config.filter(module='ai').values('key', 'value')
+    ai_cfg = {c['key']: c['value'] for c in records}
     return ai_cfg
 
 
@@ -177,7 +173,7 @@ class ChatManager:
         """
         阻碍式对话响应
         """
-        ai_cfg = await get_ai_config(self.redis)
+        ai_cfg = await get_ai_config()
         host = ai_cfg.get('llm_host')
         if host is None:
             message_data["content"] = "当前未配置ai服务地址，请前往系统设置进行配置。"
@@ -197,7 +193,7 @@ class ChatManager:
             base_url=host,
             api_key=api_key
         )
-        system_prompt, actions_dict, actions_desc = await get_prompt_words(self.redis)
+        system_prompt, actions_dict, actions_desc = await get_prompt_words(ai_cfg["PROMPT_WORD"])
         logger.info(system_prompt)
         messages = [
             {"role": "system", "content": system_prompt},
@@ -227,7 +223,7 @@ class ChatManager:
             actions = orjson.loads(actions)
         else:
             actions = orjson.loads(full_response)
-        AI = await self.redis.get("AI")
+        AI = int(ai_cfg.get("AI"))
         if AI in [2, 3]:
             if "暂无支持的动作" not in str(actions) and "[" in str(actions):
                 message_data["type"] = "execute"

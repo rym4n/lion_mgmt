@@ -15,7 +15,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission, load_license, get_license_sha256
 from libs.utils import verify_license
-from models import Tool, Playbook, Account, PermissionsMenu
+from models import Tool, Playbook, Account, PermissionsMenu, Config
 from settings import LICENSE_DIR
 from sanic.log import logger
 
@@ -152,8 +152,9 @@ async def get_license(request: Request):
             menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
         elif menu["meta"]["title"] == "事件管理":
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
-    await request.app.ctx.cache_client.set("PROMPT_WORD", Prompt_Word_Dict.get(ai_type), 3600 * 24 * 7)
-    await request.app.ctx.cache_client.set("AI", ai_type, 3600 * 24 * 7)
+
+    await Config.update_or_create(key="PROMPT_WORD", defaults={"value": Prompt_Word_Dict.get(ai_type)}, module="ai")
+    await Config.update_or_create(key="AI", defaults={"value": ai_type}, module="ai")
 
     return response_ok(menus)
 

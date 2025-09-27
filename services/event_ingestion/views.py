@@ -1039,7 +1039,7 @@ async def grok_ai(request):
 输出结果：%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:level} %{GREEDYDATA:message}
     """
 
-    ai_cfg = await get_ai_config(request.app.ctx.cache_client)
+    ai_cfg = await get_ai_config()
     host = ai_cfg.get('llm_host')
     if host is None:
         return response_ok("当前未配置ai服务模型，请前往系统设置进行配置。")
