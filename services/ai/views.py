@@ -179,7 +179,13 @@ async def get_tool_action(request):
     tool_actions = await ToolAction.filter(id__in=request.json.get("data"), deleted=False).all()
 
     return response_ok({
-        "tool_actions": tool_actions
+        "tool_actions": [
+            {
+                "action": tool_action.action,
+                "tool_name": tool_action.tool_name,
+                "version_number": tool_action.version_number
+            } for tool_action in tool_actions
+        ]
     })
 
 
