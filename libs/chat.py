@@ -4,22 +4,22 @@ import hashlib
 import re
 import time
 import traceback
-import aiohttp
 from datetime import datetime
 
+import httpx
 import orjson
 import pytz
 from aiocache import caches
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
+from tortoise.expressions import Q
+from tortoise.functions import Max
 
 from libs.kafka import aconsume
 from models import Runlog, Approvement, Events, Config, ToolAction, ToolResourcesModel, ToolResources, Tool
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
 from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC, WR_TOPIC, AUTHENTICATION_SESSION_EXPIRATION
-from tortoise.functions import Max
-from tortoise.expressions import Q
 
 
 async def fetch_completion(host, api_key, model, messages):
@@ -37,18 +37,14 @@ async def fetch_completion(host, api_key, model, messages):
         "temperature": 0.75
     }
 
-    timeout = aiohttp.ClientTimeout(total=600)  # 600 秒超时
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, headers=headers, json=payload) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    logger.error(text)
-                    return False
-                data = await resp.json()
-                return data["choices"][0]["message"]["content"] if data.get("choices") else ""
-    except asyncio.TimeoutError:
-        return False
+        async with httpx.AsyncClient(timeout=600) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            data = response.json()
+            return data["choices"][0]["message"]["content"] if data.get("choices") else ""
+    except Exception as e:
+        logger.error(f"Error on fetch_completion: {e}")
+        return ""
 
 
 async def get_prompt_words(prompt_word):
@@ -303,7 +299,7 @@ class ChatManager:
                                         "timeout": 300
                                     }
                                 })
-                        else:       # 这里处理无请求参数的动作
+                        else:  # 这里处理无请求参数的动作
                             tool = await Tool.get_or_none(name=tool_action.tool_name, version=tool_action.version_number,
                                                           deleted=False)
                             if not tool:
