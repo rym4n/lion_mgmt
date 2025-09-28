@@ -193,148 +193,149 @@ class ChatManager:
         self.active_connections: dict[str, dict] = {}
         self.run_connections: dict[str, dict] = {}
 
-    async def stream_chat_completion(self, prompt: str, message_data: dict):
-        """
-        阻碍式对话响应
-        """
-        ai_cfg = await get_ai_config()
-        host = ai_cfg.get('llm_host')
-        if host is None:
-            message_data["content"] = "当前未配置ai服务地址，请前往系统设置进行配置。"
-            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
-            return None
-
-        api_key = ai_cfg.get('llm_api_key')
-        model = ai_cfg.get('llm_model')
-        if model is None:
-            message_data["content"] = "当前未配置ai服务模型，请前往系统设置进行配置。"
-            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
-            return None
-        logger.info(host)
-        logger.info(api_key)
-        logger.info(model)
-
-        system_prompt, actions_dict, actions_desc = await get_prompt_words(ai_cfg["PROMPT_WORD"])
-        logger.info(system_prompt)
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": "用户输入的是: " + prompt}
-        ]
-        full_response = await fetch_completion(host, api_key, model, messages)
-        if not full_response:
-            message_data["content"] = "ai请求超时"
-            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
-            return message_data
-        action_list = []
-        logger.info(full_response)
-        if "</think>" in full_response:
-            match = re.search(r"</think>\s*(.*)", full_response, re.S)
-            actions = match.group(1).strip()
-            actions = orjson.loads(actions)
-        else:
-            actions = orjson.loads(full_response)
-        AI = int(ai_cfg.get("AI"))
-        if AI in [2, 3]:
-            if "暂无支持的动作" not in str(actions) and "[" in str(actions):
-                message_data["type"] = "execute"
-                for action in actions:
-                    logger.info(action)
-                    data = actions_dict.get(actions_desc.get(action))
-                    logger.info(data)
-                    if not data:
-                        continue
-
-                    # 获取动作输入参数列表
-                    tool_actions = await ToolAction.filter(id__in=data, deleted=False).all()
-                    for tool_action in tool_actions:
-                        # 这里处理请求参数的动作
-                        if tool_action.action["input"]:
-                            action_inputs = tool_action.action["input"]
-                            actions_input = ""
-                            for a_input in action_inputs:
-                                actions_input += "- {}:{}\n".format(a_input["key"], a_input["description"])
-                            prompt_word = """
-# 角色
-请根据动作的参数描述从用户输入中提取合适参数，严格按照JSON格式输出文本，不要用markdown格式。示例：{"key": "value"}。
-
-# 动作参数描述
-""" + actions_input
-                            logger.info(prompt_word)
-                            # 再次进行AI生成，进行输入参数值确认
-                            messages = [
-                                {"role": "system", "content": prompt_word},
-                                {"role": "user", "content": "用户输入的是: " + prompt}
-                            ]
-                            full_response = await fetch_completion(host, api_key, model, messages)
-                            if not full_response:
-                                message_data["content"] = "ai请求超时"
-                                await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
-                                return message_data
-                            logger.info(full_response)
-                            if full_response:
-                                if "</think>" in full_response:
-                                    match = re.search(r"</think>\s*(.*)", full_response, re.S)
-                                    result = match.group(1).strip()
-                                    inputs = orjson.loads(result)
-                                else:
-                                    inputs = orjson.loads(full_response)
-                                tool = await Tool.get_or_none(name=tool_action.tool_name, version=tool_action.version_number,
-                                                              deleted=False)
-                                if not tool:
-                                    continue
-                                resource = await ToolResourcesModel.get_or_none(tool_name=tool_action.tool_name, deleted=False)
-                                action_list.append({
-                                    "type": "action",
-                                    "action_input": {
-                                        "app_name": tool_action.tool_name,
-                                        "app_ver": tool_action.version_number,
-                                        "resource": resource.status if resource else 0,
-                                        "node_name": tool.description,
-                                        "name": tool.description,
-                                        "main": tool.main,
-                                        "action": tool_action.action["func"],
-                                        "action_name": tool_action.action["name"],
-                                        "input": tool_action.action["input"],
-                                        "params": inputs,
-                                        "timeout": 300
-                                    }
-                                })
-                        else:  # 这里处理无请求参数的动作
-                            tool = await Tool.get_or_none(name=tool_action.tool_name, version=tool_action.version_number,
-                                                          deleted=False)
-                            if not tool:
-                                continue
-                            resource = await ToolResourcesModel.get_or_none(tool_name=tool_action.tool_name, deleted=False)
-                            action_list.append({
-                                "type": "action",
-                                "action_input": {
-                                    "app_name": tool_action.tool_name,
-                                    "app_ver": tool_action.version_number,
-                                    "resource": resource.status if resource else 0,
-                                    "node_name": tool.description,
-                                    "name": tool.description,
-                                    "main": tool.main,
-                                    "action": tool_action.action["func"],
-                                    "action_name": tool_action.action["name"],
-                                    "input": tool_action.action["input"],
-                                    "params": {},
-                                    "timeout": 300
-                                }
-                            })
-                message_data["content"] = action_list
-            else:
-                message_data["content"] = "暂无支持动作"
-        elif AI in [1, 3]:
-            # 这里处理ai问答内容
-            if "</think>" in full_response:
-                match = re.search(r"</think>\s*(.*)", full_response, re.S)
-                result = match.group(1).strip()
-                message_data["content"] = result
-            else:
-                message_data["content"] = orjson.loads(full_response)
-        await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
-
-        return message_data
+    # 现在使用动作实现ai相关代码注释以防动作代码出问题可以进行对比维护
+#     async def stream_chat_completion(self, prompt: str, message_data: dict):
+#         """
+#         阻碍式对话响应
+#         """
+#         ai_cfg = await get_ai_config()
+#         host = ai_cfg.get('llm_host')
+#         if host is None:
+#             message_data["content"] = "当前未配置ai服务地址，请前往系统设置进行配置。"
+#             await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+#             return None
+#
+#         api_key = ai_cfg.get('llm_api_key')
+#         model = ai_cfg.get('llm_model')
+#         if model is None:
+#             message_data["content"] = "当前未配置ai服务模型，请前往系统设置进行配置。"
+#             await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+#             return None
+#         logger.info(host)
+#         logger.info(api_key)
+#         logger.info(model)
+#
+#         system_prompt, actions_dict, actions_desc = await get_prompt_words(ai_cfg["PROMPT_WORD"])
+#         logger.info(system_prompt)
+#         messages = [
+#             {"role": "system", "content": system_prompt},
+#             {"role": "user", "content": "用户输入的是: " + prompt}
+#         ]
+#         full_response = await fetch_completion(host, api_key, model, messages)
+#         if not full_response:
+#             message_data["content"] = "ai请求超时"
+#             await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+#             return message_data
+#         action_list = []
+#         logger.info(full_response)
+#         if "</think>" in full_response:
+#             match = re.search(r"</think>\s*(.*)", full_response, re.S)
+#             actions = match.group(1).strip()
+#             actions = orjson.loads(actions)
+#         else:
+#             actions = orjson.loads(full_response)
+#         AI = int(ai_cfg.get("AI"))
+#         if AI in [2, 3]:
+#             if "暂无支持的动作" not in str(actions) and "[" in str(actions):
+#                 message_data["type"] = "execute"
+#                 for action in actions:
+#                     logger.info(action)
+#                     data = actions_dict.get(actions_desc.get(action))
+#                     logger.info(data)
+#                     if not data:
+#                         continue
+#
+#                     # 获取动作输入参数列表
+#                     tool_actions = await ToolAction.filter(id__in=data, deleted=False).all()
+#                     for tool_action in tool_actions:
+#                         # 这里处理请求参数的动作
+#                         if tool_action.action["input"]:
+#                             action_inputs = tool_action.action["input"]
+#                             actions_input = ""
+#                             for a_input in action_inputs:
+#                                 actions_input += "- {}:{}\n".format(a_input["key"], a_input["description"])
+#                             prompt_word = """
+# # 角色
+# 请根据动作的参数描述从用户输入中提取合适参数，严格按照JSON格式输出文本，不要用markdown格式。示例：{"key": "value"}。
+#
+# # 动作参数描述
+# """ + actions_input
+#                             logger.info(prompt_word)
+#                             # 再次进行AI生成，进行输入参数值确认
+#                             messages = [
+#                                 {"role": "system", "content": prompt_word},
+#                                 {"role": "user", "content": "用户输入的是: " + prompt}
+#                             ]
+#                             full_response = await fetch_completion(host, api_key, model, messages)
+#                             if not full_response:
+#                                 message_data["content"] = "ai请求超时"
+#                                 await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+#                                 return message_data
+#                             logger.info(full_response)
+#                             if full_response:
+#                                 if "</think>" in full_response:
+#                                     match = re.search(r"</think>\s*(.*)", full_response, re.S)
+#                                     result = match.group(1).strip()
+#                                     inputs = orjson.loads(result)
+#                                 else:
+#                                     inputs = orjson.loads(full_response)
+#                                 tool = await Tool.get_or_none(name=tool_action.tool_name, version=tool_action.version_number,
+#                                                               deleted=False)
+#                                 if not tool:
+#                                     continue
+#                                 resource = await ToolResourcesModel.get_or_none(tool_name=tool_action.tool_name, deleted=False)
+#                                 action_list.append({
+#                                     "type": "action",
+#                                     "action_input": {
+#                                         "app_name": tool_action.tool_name,
+#                                         "app_ver": tool_action.version_number,
+#                                         "resource": resource.status if resource else 0,
+#                                         "node_name": tool.description,
+#                                         "name": tool.description,
+#                                         "main": tool.main,
+#                                         "action": tool_action.action["func"],
+#                                         "action_name": tool_action.action["name"],
+#                                         "input": tool_action.action["input"],
+#                                         "params": inputs,
+#                                         "timeout": 300
+#                                     }
+#                                 })
+#                         else:  # 这里处理无请求参数的动作
+#                             tool = await Tool.get_or_none(name=tool_action.tool_name, version=tool_action.version_number,
+#                                                           deleted=False)
+#                             if not tool:
+#                                 continue
+#                             resource = await ToolResourcesModel.get_or_none(tool_name=tool_action.tool_name, deleted=False)
+#                             action_list.append({
+#                                 "type": "action",
+#                                 "action_input": {
+#                                     "app_name": tool_action.tool_name,
+#                                     "app_ver": tool_action.version_number,
+#                                     "resource": resource.status if resource else 0,
+#                                     "node_name": tool.description,
+#                                     "name": tool.description,
+#                                     "main": tool.main,
+#                                     "action": tool_action.action["func"],
+#                                     "action_name": tool_action.action["name"],
+#                                     "input": tool_action.action["input"],
+#                                     "params": {},
+#                                     "timeout": 300
+#                                 }
+#                             })
+#                 message_data["content"] = action_list
+#             else:
+#                 message_data["content"] = "暂无支持动作"
+#         elif AI in [1, 3]:
+#             # 这里处理ai问答内容
+#             if "</think>" in full_response:
+#                 match = re.search(r"</think>\s*(.*)", full_response, re.S)
+#                 result = match.group(1).strip()
+#                 message_data["content"] = result
+#             else:
+#                 message_data["content"] = orjson.loads(full_response)
+#         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+#
+#         return message_data
 
     async def connect(self, user: Account, ws):
         """处理用户连接"""
@@ -473,13 +474,10 @@ class ChatManager:
             await ws.send(orjson.dumps({"type": "error", "message": str(e),
                                         "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}).decode())
 
-    async def handle_ai_message(self, user: Account, data: dict):
+    async def publish_ai_message(self, data: dict):
         """消息处理"""
         try:
-            message_type = data.get("type")
-            # 按消息类型调用处理方法 (前端发送)
-            if message_type == "ai":
-                await self._handle_ai_message(user, data)
+            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(data).decode())
             return None
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
@@ -531,58 +529,60 @@ class ChatManager:
 
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
-    async def _handle_ai_message(self, user: Account, data: dict):
-        """处理发送ai消息"""
-        current_room_id = data.get("room_id")
-        room = await Room.filter(id=current_room_id).get()
-        if not room:
-            raise Exception("作战室不存在")
 
-        content = data.get("content", "")
-        image_content = data.get("image_content", "")
-
-        if not content and not image_content:
-            raise Exception("消息不能为空")
-        sender = await Account.get(username="system")
-        # 保存消息到数据库
-        message = await Message.create(
-            type="ai-question",
-            sender=user,
-            room=room,
-            content=content,
-            image_content=image_content,
-            receiver=user  # 群聊消息设为发送者自己作为占位符
-        )
-
-        # 广播
-        message_data = {
-            "type": "ai-question",
-            "message_id": str(message.id),
-            "sender_id": user.id,
-            "sender_name": user.username,
-            "sender_display_name": user.display_name,
-            "content": content,
-            "image_content": image_content,
-            "timestamp": str(message.ctime),
-            "room_id": current_room_id
-        }
-
-        await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
-        # 在发送完用户消息后，切换系统回复AI消息
-        message_data["sender_id"] = sender.id
-        message_data["sender_name"] = sender.username
-        message_data["type"] = "ai"
-        message_data = await self.stream_chat_completion(content, message_data)
-
-        if message_data.get("content"):
-            await Message.create(
-                type=message_data.get("type"),
-                sender=sender,
-                room=room,
-                content=message_data.get("content"),
-                image_content=image_content,
-                receiver=user  # 群聊消息设为发送者自己作为占位符
-            )
+    # 现在使用动作实现ai相关代码注释以防动作代码出问题可以进行对比维护
+    # async def _handle_ai_message(self, user: Account, data: dict):
+    #     """处理发送ai消息"""
+    #     current_room_id = data.get("room_id")
+    #     room = await Room.filter(id=current_room_id).get()
+    #     if not room:
+    #         raise Exception("作战室不存在")
+    #
+    #     content = data.get("content", "")
+    #     image_content = data.get("image_content", "")
+    #
+    #     if not content and not image_content:
+    #         raise Exception("消息不能为空")
+    #     sender = await Account.get(username="system")
+    #     # 保存消息到数据库
+    #     message = await Message.create(
+    #         type="ai-question",
+    #         sender=user,
+    #         room=room,
+    #         content=content,
+    #         image_content=image_content,
+    #         receiver=user  # 群聊消息设为发送者自己作为占位符
+    #     )
+    #
+    #     # 广播
+    #     message_data = {
+    #         "type": "ai-question",
+    #         "message_id": str(message.id),
+    #         "sender_id": user.id,
+    #         "sender_name": user.username,
+    #         "sender_display_name": user.display_name,
+    #         "content": content,
+    #         "image_content": image_content,
+    #         "timestamp": str(message.ctime),
+    #         "room_id": current_room_id
+    #     }
+    #
+    #     await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+    #     # 在发送完用户消息后，切换系统回复AI消息
+    #     message_data["sender_id"] = sender.id
+    #     message_data["sender_name"] = sender.username
+    #     message_data["type"] = "ai"
+    #     message_data = await self.stream_chat_completion(content, message_data)
+    #
+    #     if message_data.get("content"):
+    #         await Message.create(
+    #             type=message_data.get("type"),
+    #             sender=sender,
+    #             room=room,
+    #             content=message_data.get("content"),
+    #             image_content=image_content,
+    #             receiver=user  # 群聊消息设为发送者自己作为占位符
+    #         )
 
     async def _handle_private_message(self, user: Account, data: dict):
         """处理发送私聊消息"""
