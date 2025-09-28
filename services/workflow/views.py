@@ -125,7 +125,7 @@ async def list_workflow(request):
         keyword: 可选，搜索时使用，支持搜索名称或备注
         scene: 可选，搜索时使用，支持搜索场景
         tag: 可选，搜索时使用，支持搜索标签 str
-        scope： 获取剧本范围 int 0为获取全剧本、1表示获取普通剧本列表、 2表示内部剧本列表
+        scope： 获取剧本范围 int 0表示获取普通剧本列表、 1表示内部剧本列表
     """
     json_params = request.json
     page = int(json_params.get("page", 1))
@@ -145,10 +145,8 @@ async def list_workflow(request):
     # 分页查询Account，返回总数和数据
     scope = json_params.get("scope", 0)
     if scope == 0:
-        condition = Q(deleted=False, id__in=pb_ids)
-    elif scope == 1:
         condition = Q(deleted=False, internal=False, id__in=pb_ids)
-    elif scope == 2:
+    elif scope == 1:
         condition = Q(deleted=False, internal=True, id__in=pb_ids)
     if json_params.get("keyword"):
         # 模糊搜索name字段和remark字段
@@ -405,7 +403,7 @@ async def delete_workflow(request):
     """
     playbook = await Playbook.get(id=request.json.get("playbook_id"))
     if playbook.internal:
-        raise CustomError(ErrorCode.PlaybookNotExists)
+        raise CustomError(ErrorCode.InternalDeleteError)
     pvs = await PlaybookVersion.filter(playbook=playbook, deleted=False).all()
     pv_ids = [pv.id for pv in pvs]
     pv_versions = [pv.version for pv in pvs]
@@ -440,7 +438,7 @@ async def delete_workflow_version(request):
     """
     pv = await PlaybookVersion.get(id=request.json.get("flow_id")).prefetch_related("playbook")
     if pv.playbook.internal:
-        raise CustomError(ErrorCode.PlaybookNotExists)
+        raise CustomError(ErrorCode.InternalDeleteError)
     if await EventRelatedScript.filter(script_id__contains=[pv.id], deleted=False).exists():
         raise CustomError(ErrorCode.PlaybookUsedByEvent)
     if await Timed.filter(playbook_id=pv.playbook_id, playbook_version=pv.version, deleted=False).exists():
@@ -771,7 +769,7 @@ async def add_permission(request):
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
     if playbook.internal:
-        raise CustomError(ErrorCode.PlaybookNotExists)
+        raise CustomError(ErrorCode.InternalDeleteError)
 
     # 处理用户权限
     for uid, perms in users.items():
