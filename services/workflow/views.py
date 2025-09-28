@@ -331,7 +331,7 @@ async def edit_workflow(request):
         await playbook.tags.clear()
         await playbook.tags.add(*tags)
     if params.get("flow_timeout"):
-        if 300 >= int(params.get("flow_timeout")) or int(params.get("flow_timeout")) >= 259200:
+        if 300 > int(params.get("flow_timeout")) or int(params.get("flow_timeout")) > 259200:
             raise CustomError(ErrorCode.FlowTimeOutError)
         await PlaybookVersion.filter(playbook_id=playbook.id).update(flow_timeout=int(params.get("flow_timeout", 300)))
     playbook.updator = request.ctx.session['account_info']
