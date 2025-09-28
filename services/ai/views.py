@@ -85,7 +85,7 @@ async def ai_question(request):
     params = {"resource": resource.id, "node_name": tool.description,
               "action": "ai_run_action", "action_name": "ai执行动作", "app_name": "lion_mgmt",
               "name": tool.description, "app_ver": tool.version, "main": tool.main,
-              "action_input": {"msg": content, "room_id": room_id, "user_id": sender.id, "ai_config": orjson.dumps(ai_config).decode()},
+              "action_input": {"msg": content, "room_id": room_id, "user_id": sender.id, "ai_config": orjson.dumps(ai_config).decode("utf-8")},
               "retry_times": 0, "timeout": 700,
               "executor": user.id}
     run_id = gen_order_version(length=6)
