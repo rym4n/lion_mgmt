@@ -3,7 +3,7 @@ import orjson
 from sanic import Blueprint
 
 from core.response import response_ok
-from libs.chat import chat_manager, get_ai_config
+from libs.chat import chat_manager, get_ai_config, get_prompt_words
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import gen_order_version
@@ -159,7 +159,7 @@ async def get_prompt_word(request):
     请求参数:
         "prompt_word": 基础提示词
     """
-    system_prompt, actions_dict, actions_desc = await chat_manager.get_prompt_words(request.json.get("prompt_word"))
+    system_prompt, actions_dict, actions_desc = await get_prompt_words(request.json.get("prompt_word"))
 
     return response_ok({
         "system_prompt": system_prompt,
