@@ -29,26 +29,26 @@ async def ai_question(request):
         "content":"什么是智能体"      消息
         "room_id":"c6ab45be-fe5b-4f3e-b4aa-cf009fcfab2a"    作战室id
     """
-    # # 目前先用动作实现 后续进行拆分使用剧本实现
-    # room_id = request.json.get("room_id")
-    # content = request.json.get("content")
-    # tool = await Tool.filter(name="lion_mgmt", deleted=False).order_by("-ctime").first()
-    # if not tool:
-    #     return response_ok("ai运行APP缺失，请联系管理员处理")
-    #
-    # resource = await ToolResources.filter(tool_name="lion_mgmt", deleted=False).order_by("-ctime").first()
-    # if not resource:
-    #     raise response_ok("ai运行资源不存在，请联系管理员处理")
-    #
+    # 目前先用动作实现 后续进行拆分使用剧本实现
+    room_id = request.json.get("room_id")
+    content = request.json.get("content")
+    tool = await Tool.filter(name="lion_mgmt", deleted=False).order_by("-ctime").first()
+    if not tool:
+        return response_ok("ai运行APP缺失，请联系管理员处理")
 
-    # params = {"resource": resource.id, "node_name": tool.description,
-    #           "action": "ai_run_action", "action_name": "ai执行动作", "app_name": "lion_mgmt",
-    #           "name": tool.description, "app_ver": tool.version, "main": tool.main, "action_input": {"msg": content, "room_id": room_id, "user_id": user.id},
-    #           "retry_times": 0, "timeout": 300,
-    #           "executor": user.id}
-    # run_id = gen_order_version(length=6)
-    # msg = {"run_type": "action", "run_id": run_id, "run_args": params}
-    # await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    resource = await ToolResources.filter(tool_name="lion_mgmt", deleted=False).order_by("-ctime").first()
+    if not resource:
+        raise response_ok("ai运行资源不存在，请联系管理员处理")
+
+    user = request.ctx.session['account_info']
+    params = {"resource": resource.id, "node_name": tool.description,
+              "action": "ai_run_action", "action_name": "ai执行动作", "app_name": "lion_mgmt",
+              "name": tool.description, "app_ver": tool.version, "main": tool.main, "action_input": {"msg": content, "room_id": room_id, "user_id": user.id},
+              "retry_times": 0, "timeout": 700,
+              "executor": user.id}
+    run_id = gen_order_version(length=6)
+    msg = {"run_type": "action", "run_id": run_id, "run_args": params}
+    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
     # room_id = request.json.get("room_id")
     # content = request.json.get("content")
@@ -63,19 +63,6 @@ async def ai_question(request):
     # }
     # request.app.add_task(chat_manager.handle_ai_message(user, message))
 
-    room_id = request.json.get("room_id")
-    content = request.json.get("content")
-    user = request.ctx.session['account_info']
-    if not room_id or not content:
-        raise CustomError(ErrorCode.ParamValueError)
-    message = {
-        "type": "ai",
-        "content": content,
-        "image_content": "",
-        "room_id": room_id
-    }
-
-    await chat_manager.handle_ai_message(user, message)
 
     return response_ok("运行成功")
 
@@ -95,7 +82,7 @@ async def ai_action(request):
     room_id = request.json.get("room_id")
     content = request.json.get("content")
     user_id = request.json.get("user_id")
-    user = await Account.get(id=user_id,deleted=False)
+    user = await Account.get(id=user_id, deleted=False)
     if not room_id or not content:
         raise CustomError(ErrorCode.ParamValueError)
     message = {
