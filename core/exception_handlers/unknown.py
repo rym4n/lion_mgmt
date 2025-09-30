@@ -21,6 +21,7 @@ class UnknownExcHandler(BaseExcHandler):
         if isinstance(exception, exceptions.NotFound) or isinstance(exception, DoesNotExist):
             return response_fail(ErrorCode.NotFound)
         elif isinstance(exception, exceptions.BadRequest) or isinstance(exception, ValidationError) or isinstance(exception, ValueError) or isinstance(exception, TypeError) or isinstance(exception, KeyError) or isinstance(exception, FieldError):
+            logger.exception(exception)
             return response_fail(ErrorCode.ParameterError)
         elif isinstance(exception, IntegrityError) or isinstance(exception, UniqueViolationError):
             return response_fail(ErrorCode.DataAlreadyExists)

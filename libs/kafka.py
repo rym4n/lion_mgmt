@@ -9,11 +9,11 @@ from sanic.log import logger
 
 
 async def aproduce(servers, topic, value, key=None, partition=None, max_request_size=1048576):
-    async with AIOKafkaProducer(bootstrap_servers=servers.split(','), max_request_size=max_request_size) as producer:
-        try:
+    try:
+        async with AIOKafkaProducer(bootstrap_servers=servers.split(','), max_request_size=max_request_size) as producer:
             _ = await producer.send_and_wait(topic, orjson.dumps(value), key, partition)
-        except Exception as err:
-            logger.error(err)
+    except Exception as err:
+        logger.error(err)
 
 
 async def aconsume(servers, topic, group_id, callback_func=None, consume_records=500):

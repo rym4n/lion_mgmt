@@ -12,10 +12,10 @@ class Playbook(BaseModel):
     """
     name = fields.CharField(max_length=255, unique=True, description="剧本名称")
     remark = fields.TextField(description="描述")
-    tags = fields.ManyToManyField("models.Tag", null=True, through="playbook_tag")
-    scenes = fields.ManyToManyField("models.Scene", null=True, through="playbook_scene")
+    tags = fields.ManyToManyField("models.Tag", through="playbook_tag")
+    scenes = fields.ManyToManyField("models.Scene", through="playbook_scene")
     internal = fields.BooleanField(default=False, description="是否内置剧本")
-    creator = fields.ForeignKeyField("models.Account", null=True, related_name="created_playbook", description="创建人")
+    creator = fields.ForeignKeyField("models.Account", related_name="created_playbook", description="创建人")
 
     def validate(self) -> None:
         raise NotImplementedError

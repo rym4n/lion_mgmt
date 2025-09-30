@@ -12,7 +12,7 @@ import pytz
 from aiocache import caches
 from sanic import Blueprint, response
 from tortoise.expressions import Q
-from tortoise.functions import Count
+from tortoise.functions import Count, Max
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
@@ -125,7 +125,8 @@ async def list_workflow(request):
         keyword: 可选，搜索时使用，支持搜索名称或备注
         scene: 可选，搜索时使用，支持搜索场景
         tag: 可选，搜索时使用，支持搜索标签 str
-        scope： 获取剧本范围 int 0为获取全剧本、1表示获取普通剧本列表、 2表示内部剧本列表
+        publish： 可选，搜索时使用，支持搜索发布状态, int 0未发布 1已发布
+        scope： 获取剧本范围 int 1表示获取普通剧本列表、 2表示内部剧本列表
     """
     json_params = request.json
     page = int(json_params.get("page", 1))
@@ -142,14 +143,20 @@ async def list_workflow(request):
     ).values_list('pb_id', flat=True)
     pb_ids = set(permissions)
 
+    condition = Q(deleted=False, id__in=pb_ids)
+
     # 分页查询Account，返回总数和数据
-    scope = json_params.get("scope", 0)
-    if scope == 0:
-        condition = Q(deleted=False, id__in=pb_ids)
-    elif scope == 1:
-        condition = Q(deleted=False, internal=False, id__in=pb_ids)
+    scope = json_params.get("scope", 1)
+
+    # if scope == 0:
+    #     condition = Q(deleted=False, id__in=pb_ids)
+    if scope == 1:
+        condition = condition & Q(internal=False)
     elif scope == 2:
-        condition = Q(deleted=False, internal=True, id__in=pb_ids)
+        condition = condition & Q(internal=True)
+    else:
+        raise CustomError(ErrorCode.ParameterError)
+
     if json_params.get("keyword"):
         # 模糊搜索name字段和remark字段
         keyword = json_params.get("keyword")
@@ -164,25 +171,22 @@ async def list_workflow(request):
         if tags:
             condition = condition & Q(tags__in=tags)
 
+    pv_condition = Q(playbook_versions__deleted=False)
+    if json_params.get("publish") in (0, 1):
+        pv_condition = pv_condition & Q(playbook_versions__status=json_params.get("publish"))
+
     playbooks = await Playbook.filter(condition).annotate(
-        versions=Count("playbook_versions")
+        versions=Count("playbook_versions", _filter=pv_condition), max_flow_timeout=Max("playbook_versions__flow_timeout")
     ).order_by("-utime").offset(offset).limit(limit).prefetch_related("scenes", "tags")
 
     total = await Playbook.filter(condition).count()
 
-    playbook_versions = await PlaybookVersion.filter(
-        playbook_id__in=[p.id for p in playbooks]
-    ).all()
-
-    version_map = {v.playbook_id: v for v in playbook_versions}
-
     # 组装数据
     data = []
     for p in playbooks:
-        pv = version_map.get(p.id)
         data.append({
             **p.json,
-            "flow_timeout": pv.flow_timeout if pv else 300,
+            "flow_timeout": p.max_flow_timeout or 300,
             "versions": p.versions
         })
 
