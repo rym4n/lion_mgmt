@@ -51,13 +51,14 @@ class CacheListener(BaseListener):
         app.add_task(chat_manager.log_listener, name="run_log_listener")
 
     async def before_server_stop(self, app: Sanic, loop: BaseEventLoop) -> None:
-        """释放连接"""
+        """关闭后台任务，释放连接"""
         try:
             await app.cancel_task("chat_msg_listener")
             await app.cancel_task("run_log_listener")
+        except Exception as e:
+            logger.warning(f"释放资源异常: {e}")
+        finally:
             cache_client = getattr(app.ctx, 'cache_client', None)
             if cache_client:
                 await cache_client.close()
                 logger.info("Redis closed.")
-        except Exception as e:
-            logger.warning(f"释放资源异常: {e}")
