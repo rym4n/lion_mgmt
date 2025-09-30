@@ -44,6 +44,7 @@ async def create_workflow(request):
         scenes: 场景，列表格式，例如 ["aaa","bbb"]，可选
         flow_json_list: 流程图具体内容, 列表格式, 列表的每个元素是一个独立的剧本json, 可选
         flow_timeout: 可选，剧本运行超时时间，最小5分钟最大3天，单位秒 默认300
+        scope：  int 0表示获取普通剧本列表、 1表示内部剧本列表
     """
     data = request.json
     if not data.get("name") or not data.get("flow_json_list"):
@@ -81,7 +82,8 @@ async def create_workflow(request):
         playbook = await Playbook.create(
             name=data.get("name"),
             remark=data.get("remark", ""),
-            creator=creator
+            creator=creator,
+            internal=False if int(data.get("scope", 0)) == 0 else True,
         )
         await PlaybookPermissions.create(pb=playbook, users=creator, roles=None, permissions=["r", "u", "d", "e", "p"])
         await PlaybookPermissions.create(pb=playbook, users=None, roles=admin, permissions=["r", "u", "d", "e", "p"])
@@ -126,7 +128,7 @@ async def list_workflow(request):
         scene: 可选，搜索时使用，支持搜索场景
         tag: 可选，搜索时使用，支持搜索标签 str
         publish： 可选，搜索时使用，支持搜索发布状态, int 0未发布 1已发布
-        scope： 获取剧本范围 int 1表示获取普通剧本列表、 2表示内部剧本列表
+        scope： 获取剧本范围 int 0表示获取普通剧本列表、 1表示内部剧本列表
     """
     json_params = request.json
     page = int(json_params.get("page", 1))
@@ -146,17 +148,13 @@ async def list_workflow(request):
     condition = Q(deleted=False, id__in=pb_ids)
 
     # 分页查询Account，返回总数和数据
-    scope = json_params.get("scope", 1)
-
-    # if scope == 0:
-    #     condition = Q(deleted=False, id__in=pb_ids)
-    if scope == 1:
+    scope = json_params.get("scope", 0)
+    if scope == 0:
         condition = condition & Q(internal=False)
-    elif scope == 2:
+    elif scope == 1:
         condition = condition & Q(internal=True)
     else:
         raise CustomError(ErrorCode.ParameterError)
-
     if json_params.get("keyword"):
         # 模糊搜索name字段和remark字段
         keyword = json_params.get("keyword")
@@ -335,7 +333,7 @@ async def edit_workflow(request):
         await playbook.tags.clear()
         await playbook.tags.add(*tags)
     if params.get("flow_timeout"):
-        if 300 >= int(params.get("flow_timeout")) or int(params.get("flow_timeout")) >= 259200:
+        if 300 > int(params.get("flow_timeout")) or int(params.get("flow_timeout")) > 259200:
             raise CustomError(ErrorCode.FlowTimeOutError)
         await PlaybookVersion.filter(playbook_id=playbook.id).update(flow_timeout=int(params.get("flow_timeout", 300)))
     playbook.updator = request.ctx.session['account_info']
@@ -409,7 +407,7 @@ async def delete_workflow(request):
     """
     playbook = await Playbook.get(id=request.json.get("playbook_id"))
     if playbook.internal:
-        raise CustomError(ErrorCode.PlaybookNotExists)
+        raise CustomError(ErrorCode.InternalDeleteError)
     pvs = await PlaybookVersion.filter(playbook=playbook, deleted=False).all()
     pv_ids = [pv.id for pv in pvs]
     pv_versions = [pv.version for pv in pvs]
@@ -444,7 +442,7 @@ async def delete_workflow_version(request):
     """
     pv = await PlaybookVersion.get(id=request.json.get("flow_id")).prefetch_related("playbook")
     if pv.playbook.internal:
-        raise CustomError(ErrorCode.PlaybookNotExists)
+        raise CustomError(ErrorCode.InternalDeleteError)
     if await EventRelatedScript.filter(script_id__contains=[pv.id], deleted=False).exists():
         raise CustomError(ErrorCode.PlaybookUsedByEvent)
     if await Timed.filter(playbook_id=pv.playbook_id, playbook_version=pv.version, deleted=False).exists():
@@ -775,7 +773,7 @@ async def add_permission(request):
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
     if playbook.internal:
-        raise CustomError(ErrorCode.PlaybookNotExists)
+        raise CustomError(ErrorCode.InternalDeleteError)
 
     # 处理用户权限
     for uid, perms in users.items():

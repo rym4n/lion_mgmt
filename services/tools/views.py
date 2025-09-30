@@ -340,6 +340,7 @@ async def all_tools(request):
         - key: 名称和描述的搜索（可选，模糊搜索）   str
         - tag: 标签名称（可选，精确搜索）   str
         - logo: 是否需要logo数据 0为不需要，1为需要  int
+        - scope: 获取应用范围 int 0表示获取普通应用、 1表示内部应用
     """
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 15))
@@ -349,6 +350,10 @@ async def all_tools(request):
         raise CustomError(ErrorCode.RequestTooManyError)
 
     subquery = Tool.filter(deleted=False).annotate(max_version=Max("version")).group_by("name")
+    if int(request.json.get("scope", 0)) == 1:
+        subquery = subquery.filter(internal=True)
+    else:
+        subquery = subquery.filter(internal=False)
     if key:
         tool_actions = await ToolAction.filter(deleted=False).values("tool_name", "version_number", "action")
         tool_name_version_set = set()
@@ -534,10 +539,16 @@ async def delete_tool(request):
         if tool.status == 1:
             raise CustomError(ErrorCode.ToolHasScriptError)
 
+        if tool.internal:
+            raise CustomError(ErrorCode.InternalDeleteError)
+
         tool_path = os.path.join(TOOLS_DIR, name, version)
         if os.path.exists(tool_path):
             shutil.rmtree(tool_path)
 
+        await ToolAction.filter(tool_name=name, version_number=version, deleted=False).update(deleted=True)
+        await ToolResourcesModel.filter(tool_name=name, version=version, deleted=False).update(deleted=True)
+        await ToolResources.filter(tool_name=name, version=version, deleted=False).delete()
         tool.deleted = True
         tool.updater = request.ctx.session['account_info'].username
         await ToolAction.filter(tool_name=name, version_number=version, deleted=False).update(deleted=True)
@@ -558,6 +569,9 @@ async def delete_tool_all(request):
     name = request.json.get("name")
     if not name:
         raise CustomError(ErrorCode.ParameterError)
+
+    if await Tool.filter(name=name, deleted=False, internal=True).exists():
+        raise CustomError(ErrorCode.InternalDeleteError)
 
     if await Tool.filter(name=name, deleted=False, status=1).exists():
         raise CustomError(ErrorCode.ToolHasScriptError)

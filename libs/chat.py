@@ -510,9 +510,9 @@ class ChatManager:
         if specify_users:
             for specify_user in specify_users:
                 # 指定用户发送消息
-                user = await Account.filter(id=specify_user).first()
+                sf_user = await Account.filter(id=specify_user).first()
                 await MessageAccount.create(message=message, account_id=specify_user)
-                await user.star_rooms.add(room)
+                await sf_user.star_rooms.add(room)
 
         # 广播
         message_data = {

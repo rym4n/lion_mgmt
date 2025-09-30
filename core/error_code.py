@@ -120,5 +120,5 @@ class ErrorCode(BaseErrorCode):
     OutboundFileConfigurationFailed = ErrorData(4087, "外发文件配置失败，请检查配置")
     MultipleSyslogAddressNotSupported = ErrorData(4088, "多个syslog外发配置地址不支持用，分隔")
     InvalidPortError = ErrorData(4089, "端口范围超出1-65535之间，请检查配置")
-    PlaybookNotExists = ErrorData(4090, "当前剧本为内部剧本，禁止删除")
-    FlowTimeOutError = ErrorData(4091, "剧本运行超时时间不得小于5分钟或大于3天")
+    FlowTimeOutError = ErrorData(4090, "剧本运行超时时间不得小于5分钟或大于3天")
+    InternalDeleteError = ErrorData(4091, "系统内置，禁止删除")

@@ -77,6 +77,7 @@ async def add_timed(request):
        - status int 执行类型  必填  0为单次执行，1为周期执行
        - tactics str 执行策略  必填   如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数
        - end_time str 结束时间  为周期执行时填写，格式为2025-12-12 00:00:00
+       - scope: 获取定时任务范围 int 0表示获取普通定时任务、 1表示内部定时任务
     """
     data = request.json
     name = data.get("name")
@@ -149,6 +150,7 @@ async def add_timed(request):
     timed = await Timed.create(name=name, type=operate_type, playbook=playbook, playbook_input=playbook_input,
                                action=action, playbook_version=playbook_version.version if playbook_version else None,
                                action_input=action_input, status=status, tactics=tactics, end_time=end_time, enable=1,
+                               internal= False if int(request.json.get("scope", 0)) == 0 else True,
                                creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
     msg["timer_id"] = timed.id
     msg["timer_rule"] = timer_rule
@@ -179,7 +181,7 @@ async def get_playbook_permissions(pb_id, subject, cache_client, is_user: bool =
 
 async def get_timed_permissions(request, filtered_items):
     result = []
-    permissions = {}
+    timed_permissions = {}
     user = request.ctx.session['account_info']
     user_id = user.id
     user_roles = set(str(role.id) for role in user.roles)
@@ -190,7 +192,7 @@ async def get_timed_permissions(request, filtered_items):
             data = await get_playbook_permissions(item.playbook_id, user_id, cache_client, is_user=True)
             if data and any(perm in data for perm in ("r", "e")):
                 result.append(item)
-                permissions[item.id] = data
+                timed_permissions[item.id] = data
                 continue
 
             # 再查角色权限
@@ -198,31 +200,40 @@ async def get_timed_permissions(request, filtered_items):
                 data = await get_playbook_permissions(item.playbook_id, role_id, cache_client, is_user=False)
                 if data and any(perm in data for perm in ("r", "e")):
                     result.append(item)
-                    permissions[item.id] = data
+                    timed_permissions[item.id] = data
                     break
         else:
             # 动作权限处理
-            permission = await ActionPermissions.get(
+            permissions = await ActionPermissions.filter(
                 tool_name=item.action_input["app_name"],
-                action_name=item.action_input["action"],
+                action_name__in=[item.action_input["action"], "all"],
                 deleted=False
             )
 
             resource = item.action_input["resource"]
-
+            if not resource:
+                result.append(item)
+                timed_permissions[item.id] = ["r", "e"]
+                continue
             # 用户权限
-            for res_dict in (permission.users or []):
-                if resource in res_dict and user_id in map(str, res_dict[resource]):
-                    result.append(item)
-                    permissions[item.id] = ["r", "e"]
-                    break
-            else:  # 只有用户不满足时再检查角色
-                for res_dict in (permission.roles or []):
-                    if resource in res_dict and not user_roles.isdisjoint(map(str, res_dict[resource])):
-                        result.append(item)
-                        permissions[item.id] = ["r", "e"]
-                        break
-    return result, permissions
+            if "," in resource:
+                resources = resource.split(",")
+            else:
+                resources = [resource]
+            for permission in permissions:
+                for resource in resources:
+                    for res_dict in (permission.users or []):
+                        if resource in res_dict and user_id in map(str, res_dict[resource]):
+                            result.append(item)
+                            timed_permissions[item.id] = ["r", "e"]
+                            break
+                    else:  # 只有用户不满足时再检查角色
+                        for res_dict in (permission.roles or []):
+                            if resource in res_dict and not user_roles.isdisjoint(map(str, res_dict[resource])):
+                                result.append(item)
+                                timed_permissions[item.id] = ["r", "e"]
+                                break
+    return result, timed_permissions
 
 
 @timed_bp.post("/all")
@@ -235,13 +246,17 @@ async def get_all(request):
         - page int 页码  必填   默认1
         - size int 页大小  必填   默认10
         - keyword str 搜索关键字  可选 目前支持任务名称，动作名称，剧本名称搜索
+        - scope: 获取定时任务范围 int 0表示获取普通定时任务、 1表示内部定时任务
     """
     page = int(request.json.get("page") or 1)
     size = int(request.json.get("size") or 15)
     keyword = request.json.get("keyword", "").strip()
-
+    if int(request.json.get("scope", 0)) == 1:
+        internal = True
+    else:
+        internal = False
     # 获取全部（后续在 Python 层过滤）
-    all_items = await Timed.filter(deleted=False).prefetch_related("action", "playbook", "creator", "updator")
+    all_items = await Timed.filter(deleted=False, internal=internal).prefetch_related("action", "playbook", "creator", "updator")
 
     if keyword:
         keyword = keyword.lower()
@@ -476,6 +491,8 @@ async def delete_timed(request):
     timed = await Timed.get_or_none(id=timed_id, deleted=False)
     if not timed:
         raise CustomError(ErrorCode.TimedNotFound)
+    if timed.internal:
+        raise CustomError(ErrorCode.InternalDeleteError)
     msg = {}
     if timed.type == RUN_TYPE_FLOW:
         msg["run_type"] = "flow"
