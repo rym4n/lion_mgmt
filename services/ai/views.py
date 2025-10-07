@@ -6,7 +6,7 @@ from core.response import response_ok
 from libs.chat import chat_manager, get_ai_config, get_prompt_words
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
-from libs.utils import gen_order_version
+from libs.utils import gen_run_id
 from models import Tool, ToolResources, Account, Message, Room, ToolAction, ToolResourcesModel
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
@@ -88,7 +88,7 @@ async def ai_question(request):
               "action_input": {"msg": content, "room_id": room_id, "user_id": sender.id, "ai_config": orjson.dumps(ai_config).decode("utf-8")},
               "retry_times": 0, "timeout": 700,
               "executor": user.id}
-    run_id = gen_order_version(length=6)
+    run_id = gen_run_id()
     msg = {"run_type": "action", "run_id": run_id, "run_args": params}
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 

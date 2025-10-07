@@ -11,7 +11,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
-from libs.utils import gen_random_code, strip_timezone_to_seconds, gen_order_version
+from libs.utils import gen_random_code, strip_timezone_to_seconds, gen_run_id
 from models import Events, Runlog, Room, Account, Role, EventsIngestion, ToolAction, ToolResources, Tool
 from services.timed.views import runlog_list
 from settings import KAFKA_SERVERS, TASK_TOPIC
@@ -343,7 +343,7 @@ async def execution(request):
     params["executor"] = user.id
     if executorActionAssetIds and type == "action":
         params["resource"] = executorActionAssetIds
-    run_id = gen_order_version(length=6)
+    run_id = gen_run_id()
     msg = {"run_type": type, "run_id": run_id, "run_args": params}
     room = await Room.get_or_none(id=room_id)
     room.updator = user

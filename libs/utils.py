@@ -138,7 +138,7 @@ def fix_zip_filename(filename: str) -> str:
             return filename
 
 
-def gen_order_version(length=5):
+def gen_run_id(length=4):
     """
     生成版本号，按时间顺序
     """

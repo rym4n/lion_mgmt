@@ -21,7 +21,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license, playbook_permission, \
     check_playbook_permission
-from libs.utils import gen_order_version, strip_timezone_to_seconds
+from libs.utils import gen_run_id, strip_timezone_to_seconds
 from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, \
     EventRelatedScript, Timed
 from services.tools.views import tool_action_update, tool_action_playbook_delete
@@ -100,7 +100,7 @@ async def create_workflow(request):
         for flow_json in flow_json_list:
             pv = await PlaybookVersion.create(
                 playbook=playbook,
-                version=gen_order_version(),
+                version=gen_run_id(),
                 status=0,
                 change_desc=data.get("change_desc", ''),
                 flow_json=flow_json,
@@ -361,7 +361,7 @@ async def edit_workflow_flow(request):
     pv.updator = request.ctx.session['account_info']
     # 已发布的剧本是不允许修改的
     if pv.status == 1:
-        pv = await PlaybookVersion.create(playbook=pv.playbook, version=gen_order_version(), flow_json=pv.flow_json,
+        pv = await PlaybookVersion.create(playbook=pv.playbook, version=gen_run_id(), flow_json=pv.flow_json,
                                           change_desc=None, status=0, creator=request.ctx.session['account_info'],
                                           updator=request.ctx.session['account_info'])
     else:
@@ -391,7 +391,7 @@ async def publish_workflow(request):
     if not request.json.get("flow_id") or not request.json.get("change_desc"):
         raise CustomError(ErrorCode.ParameterError)
     await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0).update(status=1, updator=request.ctx.session[
-        'account_info'], version=gen_order_version(), change_desc=request.json.get("change_desc"))
+        'account_info'], version=gen_run_id(), change_desc=request.json.get("change_desc"))
     return response_ok("剧本发布成功")
 
 
@@ -530,7 +530,7 @@ async def execute_action(request):
                 await resp.send(f"data: 缺少剧本执行权限，执行失败\n\n")
                 await resp.eof()
                 return resp
-        run_id = gen_order_version(length=6)
+        run_id = gen_run_id()
         message["executor"] = request.ctx.session['account_info'].id
         msg = {"run_type": message['type'], "run_id": run_id, "run_args": message}
         await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)

@@ -29,7 +29,7 @@ from libs import utils
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license
-from libs.utils import fix_zip_filename, gen_order_version
+from libs.utils import fix_zip_filename, gen_run_id
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion, \
     Runlog, Timed
 from settings import TOOLS_DIR, KAFKA_SERVERS, TASK_TOPIC, AUTHENTICATION_SESSION_EXPIRATION
@@ -1330,7 +1330,7 @@ async def health_check(request):
     utime = datetime.datetime.now(beijing_tz)
     message = request.json.get("action_input", {})
     if message.get("type") in ('flow', 'action'):
-        run_id = gen_order_version(length=6)
+        run_id = gen_run_id()
         message["executor"] = request.ctx.session['account_info'].id
         message["resource"] = id
         msg = {"run_type": message['type'], "run_id": run_id, "run_args": message}
@@ -1385,7 +1385,7 @@ async def tool_debug(request):
               "name": tool.description, "app_ver": tool.version, "main": tool.main, "action_input": {"data": data},
               "retry_times": 0, "timeout": 300,
               "executor": user.id}
-    run_id = gen_order_version(length=6)
+    run_id = gen_run_id()
     msg = {"run_type": "action", "run_id": run_id, "run_args": params}
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
     sent_id = []

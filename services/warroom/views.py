@@ -17,7 +17,7 @@ from libs.chat import get_or_create_private_chat_room, chat_manager
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
-from libs.utils import gen_order_version, gen_random_code
+from libs.utils import gen_run_id, gen_random_code
 from models import Approvement, Events, ToolAction, Tool, Runlog
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
@@ -627,7 +627,7 @@ async def run(request):
     if not params:
         raise CustomError(ErrorCode.ParamValueError)
     params["executor"] = user.id
-    msg = {"run_type": type, "run_id": gen_order_version(length=6), "run_args": params}
+    msg = {"run_type": type, "run_id": gen_run_id(), "run_args": params}
     room = await Room.get_or_none(id=room_id)
     room.updator = user
     room.run_id.append(msg["run_id"])
@@ -698,7 +698,7 @@ async def execution(request):
     params["executor"] = user.id
     if executorActionAssetIds and type == "action":
         params["resource"] = executorActionAssetIds
-    run_id = gen_order_version(length=6)
+    run_id = gen_run_id()
     msg = {"run_type": type, "run_id": run_id, "run_args": params}
     room = await Room.get_or_none(id=room_id)
     room.updator = user
