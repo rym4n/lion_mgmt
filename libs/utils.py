@@ -337,12 +337,39 @@ def decrypt_aes256_gcm(encrypted_data: str) -> str:
         raise ValueError("解密失败: 密码错误或数据损坏") from e
 
 
-async def setup_logs_template(pattern, alias_name):
+async def setup_ilm_policy(policy_name, retention_age="180d"):
+    """设置ILM策略"""
+    async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
+        policy = {
+            "policy": {
+                "phases": {
+                    "hot": {
+                        "min_age": "0ms",
+                        "actions": {
+                            "set_priority": {
+                                "priority": 100
+                            }
+                        }
+                    },
+                    "delete": {
+                        "min_age": retention_age,
+                        "actions": {
+                            "delete": {}
+                        }
+                    }
+                }
+            }
+        }
+        await es.ilm.put_lifecycle(policy_name, policy)
+
+
+async def setup_logs_template(pattern, alias_name, ilm_policy):
     async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
         template = {
             "aliases": {alias_name: {}},
             "settings": {
-                "number_of_shards": 1, "number_of_replicas": 0, "index.refresh_interval": "5s"
+                "number_of_shards": 1, "number_of_replicas": 0, "index.refresh_interval": "5s",
+                "index.lifecycle.name": ilm_policy
             },
             "mappings": {
                 "dynamic_templates": [

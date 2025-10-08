@@ -26,7 +26,7 @@ from libs import supervisor
 from libs.chat import get_ai_config
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import get_client_ip, run_linux_command, setup_logs_template
+from libs.utils import get_client_ip, run_linux_command, setup_logs_template, setup_ilm_policy
 from models import PlaybookVersion, Playbook, Config
 from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
@@ -197,21 +197,23 @@ async def event_ingestion(request):
         sasl_password: sasl密码 (str)   事件来源类型为kafka时才传，默认为None
         enabled_status: 上游接入(int) 启用为 1 ，禁用为 0 默认启用
         linked_execution: 联动执行 (int) 启用为 1 ，禁用为 0 默认禁用
+        retention_days: 日志数据的保留天数 (int), 默认为 7
     """
     data = request.json  # 只解析一次
     event_name = data.get('event_name')
     event_describe = data.get('event_describe')
     event_source_type = data.get('event_source_type')
     syslog_port = data.get('syslog_port', None)
-    event_source_address = data.get('event_source_address', [])
+    event_source_address = data.get('event_source_address') or []
     communication_type = data.get('communication_type', None)
     kafka_group_id = data.get('kafka_group_id', "Aioe_lion_ship")
-    kafka_topic = data.get('kafka_topic', [])
+    kafka_topic = data.get('kafka_topic') or []
     sasl_mechanism = data.get('sasl_mechanism', None)
     sasl_username = data.get('sasl_username', None)
     sasl_password = data.get('sasl_password', None)
-    enabled_status = data.get('enabled_status', 1)
-    linked_execution = data.get('linked_execution', 0)
+    enabled_status = int(data.get('enabled_status', 1))
+    linked_execution = int(data.get('linked_execution', 0))
+    retention_days = int(data.get('retention_days', 7))
     client_ip = get_client_ip(request)
 
     syslog_config = None
@@ -233,6 +235,7 @@ async def event_ingestion(request):
 
     topic = vector_name
 
+    await setup_ilm_policy(f"logs_retention_policy-{event_name}", f"{retention_days}d")
     await setup_logs_template(f"logs-{event_name}-*", f"logs-{event_name}")
 
     if event_source_type in ["syslog", "socket"]:
