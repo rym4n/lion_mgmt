@@ -320,6 +320,8 @@ async def logout(request):
     """
     用户登出
     """
+    if not hasattr(request.ctx, "session") or not request.ctx.session or not request.ctx.session.get('sub'):
+        return response_ok("登出成功")
     await request.app.ctx.cache_client.delete(f"account_{request.ctx.session['sub']}")
 
     if request.app.ctx.oauth_cfg.get('use_oauth2') == 'true':
@@ -335,7 +337,7 @@ async def logout(request):
         httponly=SESSION_HTTPONLY,
         samesite=SESSION_SAMESITE,
         secure=SESSION_SECURE,
-        expires=get_expiration_date(-60),
+        expires=get_expiration_date(-60)
     )
     return resp
 
