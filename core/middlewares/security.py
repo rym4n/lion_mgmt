@@ -17,7 +17,7 @@ class SecurityMiddleware(BaseMiddleware):
         # 判断请求URI是否需要身份验证
         white_urls = [
             "/user/login", "/health", '/system/oauth/status', '/system/platform', '/system/picture',
-            '/user/oauth/login', '/user/oauth/callback', '/user/local-auth', '/user/logout'
+            '/user/oauth/login', '/user/oauth/callback', '/user/local-auth'
         ]
         if request.path not in white_urls:
             await authenticate(request)
