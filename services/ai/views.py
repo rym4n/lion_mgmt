@@ -3,7 +3,7 @@ import orjson
 from sanic import Blueprint
 
 from core.response import response_ok
-from libs.chat import chat_manager, get_ai_config, get_prompt_words
+from libs.chat import chat_manager, get_ai_config, get_prompt_words, get_playbook_prompt_words
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import gen_run_id
@@ -25,6 +25,7 @@ async def ai_question(request):
     请求参数:
         "content":"什么是智能体"      消息
         "room_id":"c6ab45be-fe5b-4f3e-b4aa-cf009fcfab2a"    作战室id
+        "ai_type": "action"/"playbook"  获取动作或者剧本
     """
     # 目前先用动作实现 后续进行拆分使用剧本实现
     room_id = request.json.get("room_id")
@@ -85,7 +86,7 @@ async def ai_question(request):
     params = {"resource": resource.id, "node_name": tool.description,
               "action": "ai_run_action", "action_name": "ai执行动作", "app_name": "lion_mgmt",
               "name": tool.description, "app_ver": tool.version, "main": tool.main,
-              "action_input": {"msg": content, "room_id": room_id, "user_id": sender.id, "ai_config": orjson.dumps(ai_config).decode("utf-8")},
+              "action_input": {"msg": content, "room_id": room_id, "user_id": sender.id, "ai_config": orjson.dumps(ai_config).decode("utf-8"), "ai_type": request.json.get("ai_type", "action")},
               "retry_times": 0, "timeout": 700,
               "executor": user.id}
     run_id = gen_run_id()
@@ -158,13 +159,17 @@ async def get_prompt_word(request):
     获取提示词
     请求参数:
         "prompt_word": 基础提示词
+        "ai_type": 提示词类型
     """
-    system_prompt, actions_dict, actions_desc = await get_prompt_words(request.json.get("prompt_word"))
+    if request.json.get("ai_type") == "action":
+        system_prompt, ai_dict, ai_desc = await get_prompt_words(request.json.get("prompt_word"))
+    else:
+        system_prompt, ai_dict, ai_desc = await get_playbook_prompt_words(request.json.get("prompt_word"))
 
     return response_ok({
         "system_prompt": system_prompt,
-        "actions_dict": actions_dict,
-        "actions_desc": actions_desc
+        "actions_dict": ai_dict,
+        "actions_desc": ai_desc
     })
 
 

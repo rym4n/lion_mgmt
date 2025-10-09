@@ -16,7 +16,8 @@ from tortoise.expressions import Q
 from tortoise.functions import Max
 
 from libs.kafka import aconsume
-from models import Runlog, Approvement, Events, Config, ToolAction, ToolResourcesModel, ToolResources, Tool
+from models import Runlog, Approvement, Events, Config, ToolAction, ToolResourcesModel, ToolResources, Tool, Playbook, \
+    PlaybookVersion
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
 from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC, WR_TOPIC, AUTHENTICATION_SESSION_EXPIRATION
@@ -46,7 +47,7 @@ async def fetch_completion(host, api_key, model, messages):
         logger.error(f"Error on fetch_completion: {e}")
         return ""
 
-
+# 获取动作推荐列表
 async def get_prompt_words(prompt_word):
     tool_names = []
     actions = await ToolResourcesModel.filter(deleted=False, status=0).all().values("tool_name")
@@ -91,6 +92,27 @@ async def get_prompt_words(prompt_word):
     for k, v in actions_desc.items():
         prompt_word += f"{k}:{v}\n"
     return prompt_word, actions_dict, actions_desc
+
+
+# 获取剧本推荐列表
+async def get_playbook_prompt_words(prompt_word):
+    playbooks = await Playbook.filter(deleted=False, internal=False).all()
+
+    a = 0
+    playbooks_desc = {}
+    playbooks_dict = {}
+    for playbook in playbooks:
+        if await PlaybookVersion.filter(status=1, playbook_id=playbook.id).exists():
+            playbooks_desc[str(a)] = {"名称": playbook.name, "描述": playbook.remark}
+            a += 1
+            pv = await PlaybookVersion.filter(status=1, playbook_id=playbook.id).order_by("-ctime").first()
+            playbooks_dict[playbook.name] = pv.id
+
+    logger.info(playbooks_dict)
+    logger.info(playbooks_desc)
+    for k, v in playbooks_desc.items():
+        prompt_word += f"{k}:{v}\n"
+    return prompt_word, playbooks_dict, playbooks_desc
 
 
 # 获取或创建私聊作战室
