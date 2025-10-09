@@ -66,8 +66,6 @@ def register_blueprints(app: Sanic) -> None:
             "logs_bp": logs_bp,
             "ai_bp": ai_bp,
         }
-        for bp in bp_dict.values():
-            app.blueprint(bp)
         license_data = load_license()
         if license_data and 'moduleList' in license_data:
             for item in license_data["moduleList"]:
