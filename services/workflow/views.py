@@ -44,7 +44,7 @@ async def create_workflow(request):
         scenes: 场景，列表格式，例如 ["aaa","bbb"]，可选
         flow_json_list: 流程图具体内容, 列表格式, 列表的每个元素是一个独立的剧本json, 可选
         flow_timeout: 可选，剧本运行超时时间，最小5分钟最大3天，单位秒 默认300
-        scope：  int 0表示获取普通剧本列表、 1表示内部剧本列表
+        scope：  int 0表示获取普通剧本、 1表示内部剧本
     """
     data = request.json
     if not data.get("name") or not data.get("flow_json_list"):

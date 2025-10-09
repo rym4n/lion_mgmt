@@ -236,7 +236,7 @@ async def event_ingestion(request):
     topic = vector_name
 
     await setup_ilm_policy(f"logs_retention_policy-{event_name}", f"{retention_days}d")
-    await setup_logs_template(f"logs-{event_name}-*", f"logs-{event_name}")
+    await setup_logs_template(f"logs-{event_name}-*", f"logs-{event_name}", f"logs_retention_policy-{event_name}")
 
     if event_source_type in ["syslog", "socket"]:
         sources = {vector_name: {
