@@ -1413,7 +1413,7 @@ async def add_config(request):
         module: 所属模块
     """
     data = request.json
-    await Config.create(key=data["key"], value=data["value"], module=data["module"])
+    await Config.update_or_create(key=data["key"], module=data["module"], defaults={"value": data["value"]})
     return response_ok("添加成功")
 
 
