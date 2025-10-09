@@ -360,7 +360,7 @@ async def setup_ilm_policy(policy_name, retention_age="180d"):
                 }
             }
         }
-        await es.ilm.put_lifecycle(policy_name, policy)
+        await es.ilm.put_lifecycle(name=policy_name, policy=policy)
 
 
 async def setup_logs_template(pattern, alias_name, ilm_policy):
