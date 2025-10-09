@@ -442,12 +442,14 @@ async def all_versions(request):
 
     query参数:
         - name: 工具名称   str
+        - scope: 获取应用范围 int 0表示获取普通应用、 1表示内部应用
     """
     name = request.json.get("name")
+    internal = True if int(request.json.get("scope", 0)) == 1 else False
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tools = await Tool.filter(name=name, deleted=False).order_by("-ctime").values()
+    tools = await Tool.filter(name=name, deleted=False, internal=internal).order_by("-ctime").values()
 
     for tool in tools:
         tool.pop("path")
@@ -547,8 +549,6 @@ async def delete_tool(request):
             shutil.rmtree(tool_path)
 
         await ToolAction.filter(tool_name=name, version_number=version, deleted=False).update(deleted=True)
-        await ToolResourcesModel.filter(tool_name=name, version=version, deleted=False).update(deleted=True)
-        await ToolResources.filter(tool_name=name, version=version, deleted=False).delete()
         tool.deleted = True
         tool.updater = request.ctx.session['account_info'].username
         await ToolAction.filter(tool_name=name, version_number=version, deleted=False).update(deleted=True)
