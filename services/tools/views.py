@@ -1334,7 +1334,8 @@ async def health_check(request):
                 if log.id not in sent_id:
                     sent_id.append(log.id)
                     await resp.send(f"data: {orjson.dumps(log.json).decode()}\n\n")
-                    break
+            if log.result != "执行中":
+                break
             await asyncio.sleep(1)
 
     if resp:
