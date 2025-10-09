@@ -741,7 +741,7 @@ async def delete_tool_resource(request):
 
     playbook_ids = []
     for playbook in playbooks:
-        playbook_ids += playbook["playbook"]
+        playbook_ids += playbook.get("playbook") if playbook.get("playbook") else []
 
     playbooks = await PlaybookVersion.filter(id__in=playbook_ids, deleted=False).all().prefetch_related("playbook")
 
@@ -1309,16 +1309,9 @@ async def health_check(request):
                 "action_name":"健康检查",    动作名称 中文名称
                 "retry_times":1,             重试次数
                 "timeout":300,               超时时间,单位秒
+                "resource": "1111111111111" 进行资源检查的id
             }
-        - name: 资源名称    str 必填
-        - resources: 资源列表    dict 必填
     """
-    name = request.json.get("name")
-    resources = request.json.get("resources")
-    id = str(uuid.uuid4())
-    r = {k: resources[k].get('value') or resources[k].get('default_value', '') for k in resources}
-    r[id + "_name"] = name
-    await caches.get("redis_chat").set("resource_" + id, r, AUTHENTICATION_SESSION_EXPIRATION)
     resp = await request.respond(
         content_type="text/event-stream",
         headers={
@@ -1332,7 +1325,6 @@ async def health_check(request):
     if message.get("type") in ('flow', 'action'):
         run_id = gen_run_id()
         message["executor"] = request.ctx.session['account_info'].id
-        message["resource"] = id
         msg = {"run_type": message['type'], "run_id": run_id, "run_args": message}
         await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
         sent_id = []
