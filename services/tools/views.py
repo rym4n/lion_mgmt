@@ -1401,3 +1401,27 @@ async def tool_debug(request):
         await resp.eof()
 
     return resp
+
+
+@tools_bp.post("/add-config")
+@requires_permission("tool:u")
+async def add_config(request):
+    """
+    添加config配置
+        key: 键
+        value: 值
+        module: 所属模块
+    """
+    data = request.json
+    await Config.create(key=data["key"], value=data["value"], module=data["module"])
+    return response_ok("添加成功")
+
+
+@tools_bp.post("/health-check-result")
+@requires_permission("tool:u")
+async def get_health_check_result(request):
+    """
+    无请求参数
+    """
+    result = await Config.get_or_none(key="health_check", module="tools")
+    return response_ok(result.json if result else {})
