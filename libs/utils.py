@@ -341,21 +341,19 @@ async def setup_ilm_policy(policy_name, retention_age="180d"):
     """设置ILM策略"""
     async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
         policy = {
-            "policy": {
-                "phases": {
-                    "hot": {
-                        "min_age": "0ms",
-                        "actions": {
-                            "set_priority": {
-                                "priority": 100
-                            }
+            "phases": {
+                "hot": {
+                    "min_age": "0ms",
+                    "actions": {
+                        "set_priority": {
+                            "priority": 100
                         }
-                    },
-                    "delete": {
-                        "min_age": retention_age,
-                        "actions": {
-                            "delete": {}
-                        }
+                    }
+                },
+                "delete": {
+                    "min_age": retention_age,
+                    "actions": {
+                        "delete": {}
                     }
                 }
             }
