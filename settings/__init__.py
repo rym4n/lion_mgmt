@@ -21,7 +21,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 SUPERVISOR_PATH = "./data/action"
 os.makedirs(SUPERVISOR_PATH, exist_ok=True)
 
-# 存储上传文件的目录
+# 存储上传APP包的目录
 TOOLS_DIR = "./data/tools"
 os.makedirs(TOOLS_DIR, exist_ok=True)
 
@@ -95,6 +95,7 @@ WEBSOCKET_MAX_SIZE = 2 ** 20  # 消息最大1MB
 WEBSOCKET_PING_INTERVAL = 45
 RESPONSE_TIMEOUT = 600
 REQUEST_TIMEOUT = 600
+REQUEST_MAX_SIZE = 20 * 1024 * 1024  # 20MB
 KEEP_ALIVE_TIMEOUT = 45
 WEBSOCKET_PING_TIMEOUT = 60
 
