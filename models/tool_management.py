@@ -50,6 +50,7 @@ class Tool(BaseModel):
     updater: str = fields.CharField(max_length=255, null=True, description="更新者")
     hash_value: str = fields.CharField(max_length=255, null=True, description="文件hash值")
     internal: str = fields.BooleanField(default=False, description="是否内置应用")
+    download: str = fields.BooleanField(default=False, description="是否支持下载")
     tag: list[str] = fields.JSONField(null=True, description="工具标签")
     main: str = fields.CharField(max_length=255, null=True, description="入口文件")
 
