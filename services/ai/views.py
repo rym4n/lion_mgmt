@@ -25,7 +25,7 @@ async def ai_question(request):
     请求参数:
         "content":"什么是智能体"      消息
         "room_id":"c6ab45be-fe5b-4f3e-b4aa-cf009fcfab2a"    作战室id
-        "ai_type": "action"/"playbook"  获取动作或者剧本
+        "ai_type": "action"/"flow"  获取动作或者剧本
     """
     # 目前先用动作实现 后续进行拆分使用剧本实现
     room_id = request.json.get("room_id")
@@ -168,8 +168,8 @@ async def get_prompt_word(request):
 
     return response_ok({
         "system_prompt": system_prompt,
-        "actions_dict": ai_dict,
-        "actions_desc": ai_desc
+        "ai_dict": ai_dict,
+        "ai_desc": ai_desc
     })
 
 
