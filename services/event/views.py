@@ -568,12 +568,14 @@ async def get_event_detail(request):
     if not event:
         raise CustomError(ErrorCode.NotFound)
     creator = request.ctx.session['account_info']
+    first = False
     if not event.room:
         room_name = event.event_name + "_" + gen_random_code(6)
         if await Room.filter(name=room_name, deleted=False).exists():
             raise CustomError(ErrorCode.RoomNameExists)
         room = await Room.create(name=room_name, creator=creator)
         event.room = room
+        first = True
     if event.event_process_status == "待处理":
         event.event_process_status = "处理中"
     await event.save()
@@ -602,6 +604,7 @@ async def get_event_detail(request):
     event_dict.update(event.json)
 
     event_dict["owner"] = {"role": role_list, "user": user_list}
+    event_dict["first"] = first
 
     return response_ok(event_dict)
 
