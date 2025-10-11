@@ -44,7 +44,6 @@ async def create_workflow(request):
         scenes: 场景，列表格式，例如 ["aaa","bbb"]，可选
         flow_json_list: 流程图具体内容, 列表格式, 列表的每个元素是一个独立的剧本json, 可选
         flow_timeout: 可选，剧本运行超时时间，最小5分钟最大3天，单位秒 默认300
-        scope：  int 0表示获取普通剧本、 1表示内部剧本
     """
     data = request.json
     if not data.get("name") or not data.get("flow_json_list"):
@@ -78,12 +77,13 @@ async def create_workflow(request):
     flow_json_list = data.get("flow_json_list") or []
     creator = request.ctx.session['account_info']
     admin = await Role.get(id="111111")
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     async with in_transaction():
         playbook = await Playbook.create(
             name=data.get("name"),
             remark=data.get("remark", ""),
             creator=creator,
-            internal=False if int(data.get("scope", 0)) == 0 else True,
+            internal=maintenance_mode if maintenance_mode else False,
         )
         await PlaybookPermissions.create(pb=playbook, users=creator, roles=None, permissions=["r", "u", "d", "e", "p"])
         await PlaybookPermissions.create(pb=playbook, users=None, roles=admin, permissions=["r", "u", "d", "e", "p"])
@@ -128,7 +128,6 @@ async def list_workflow(request):
         scene: 可选，搜索时使用，支持搜索场景
         tag: 可选，搜索时使用，支持搜索标签 str
         publish： 可选，搜索时使用，支持搜索发布状态, int 0未发布 1已发布
-        scope： 获取剧本范围 int 0表示获取普通剧本列表、 1表示内部剧本列表
     """
     json_params = request.json
     page = int(json_params.get("page", 1))
@@ -148,13 +147,8 @@ async def list_workflow(request):
     condition = Q(deleted=False, id__in=pb_ids)
 
     # 分页查询Account，返回总数和数据
-    scope = json_params.get("scope", 0)
-    if scope == 0:
-        condition = condition & Q(internal=False)
-    elif scope == 1:
-        condition = condition & Q(internal=True)
-    else:
-        raise CustomError(ErrorCode.ParameterError)
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    condition = condition & Q(internal=maintenance_mode if maintenance_mode else False)
     if json_params.get("keyword"):
         # 模糊搜索name字段和remark字段
         keyword = json_params.get("keyword")

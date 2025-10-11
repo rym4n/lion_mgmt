@@ -122,3 +122,5 @@ class ErrorCode(BaseErrorCode):
     InvalidPortError = ErrorData(4089, "端口范围超出1-65535之间，请检查配置")
     FlowTimeOutError = ErrorData(4090, "剧本运行超时时间不得小于5分钟或大于3天")
     InternalDeleteError = ErrorData(4091, "系统内置，禁止删除")
+    NotDownloadError = ErrorData(4091, "当前应用不支持下载")
+    MaintenanceModeError = ErrorData(4091, "当前用户不支持查看维护模式")

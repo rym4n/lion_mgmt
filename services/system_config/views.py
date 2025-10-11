@@ -551,3 +551,26 @@ async def get_outgoing_config(request):
 
     python_list = ast.literal_eval(config.value)
     return response_ok(python_list)
+
+
+@system_bp.post("/up-mt")
+@requires_permission("audit:r")
+async def update_maintenance_mode_status(request):
+    """
+    更新维护模式状态
+
+    请求参数：
+        mt_status: 1表示开启维护模式，0表示关闭维护模式
+    """
+    if request.json.get("mt_status") is None:
+        raise CustomError(ErrorCode.ParameterError)
+
+    mt_status = int(request.json.get("mt_status"))
+    if request.ctx.session["account_info"].username == "admin":
+        if mt_status == 1:
+            await request.app.ctx.cache_client.set(request.ctx.session["id"], True, 86400)
+        else:
+            await request.app.ctx.cache_client.set(request.ctx.session["id"], False, 86400)
+    else:
+        raise CustomError(ErrorCode.MaintenanceModeError)
+    return response_ok("更新成功")

@@ -47,6 +47,7 @@ async def fetch_completion(host, api_key, model, messages):
         logger.error(f"Error on fetch_completion: {e}")
         return ""
 
+
 # 获取动作推荐列表
 async def get_prompt_words(prompt_word):
     tool_names = []

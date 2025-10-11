@@ -77,7 +77,6 @@ async def add_timed(request):
        - status int 执行类型  必填  0为单次执行，1为周期执行
        - tactics str 执行策略  必填   如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数
        - end_time str 结束时间  为周期执行时填写，格式为2025-12-12 00:00:00
-       - scope: 获取定时任务范围 int 0表示获取普通定时任务、 1表示内部定时任务
     """
     data = request.json
     name = data.get("name")
@@ -147,10 +146,11 @@ async def add_timed(request):
                 logger.info(f"定时任务{name}的执行策略{tactics}不符合crontab格式，创建失败")
                 raise CustomError(ErrorCode.CronExpressionError)
             timer_rule["crontab"] = tactics
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     timed = await Timed.create(name=name, type=operate_type, playbook=playbook, playbook_input=playbook_input,
                                action=action, playbook_version=playbook_version.version if playbook_version else None,
                                action_input=action_input, status=status, tactics=tactics, end_time=end_time, enable=1,
-                               internal= False if int(request.json.get("scope", 0)) == 0 else True,
+                               internal=maintenance_mode if maintenance_mode else False,
                                creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
     msg["timer_id"] = timed.id
     msg["timer_rule"] = timer_rule
@@ -246,17 +246,13 @@ async def get_all(request):
         - page int 页码  必填   默认1
         - size int 页大小  必填   默认10
         - keyword str 搜索关键字  可选 目前支持任务名称，动作名称，剧本名称搜索
-        - scope: 获取定时任务范围 int 0表示获取普通定时任务、 1表示内部定时任务
     """
     page = int(request.json.get("page") or 1)
     size = int(request.json.get("size") or 15)
     keyword = request.json.get("keyword", "").strip()
-    if int(request.json.get("scope", 0)) == 1:
-        internal = True
-    else:
-        internal = False
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     # 获取全部（后续在 Python 层过滤）
-    all_items = await Timed.filter(deleted=False, internal=internal).prefetch_related("action", "playbook", "creator", "updator")
+    all_items = await Timed.filter(deleted=False, internal=maintenance_mode if maintenance_mode else False).prefetch_related("action", "playbook", "creator", "updator")
 
     if keyword:
         keyword = keyword.lower()

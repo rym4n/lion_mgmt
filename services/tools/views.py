@@ -109,7 +109,7 @@ async def upload_and_extract_zip(request):
             continue
 
         config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, resp,
-                                                           success_progress, request.app.ctx.cache_client)
+                                                           success_progress, request.app.ctx.cache_client, request.ctx.session["id"])
         if msg != "success":
             results.append({"tool": tool_name, "msg": msg})
             data += 1
@@ -168,7 +168,7 @@ async def upload_and_extract_zip(request):
     return resp
 
 
-async def unzip(zip_data, creator, single_progress, resp, success_progress, redis_client):
+async def unzip(zip_data, creator, single_progress, resp, success_progress, redis_client, token_id):
     """
     解压 ZIP 文件，直接从文件流读取，并进行文件结构校验
     """
@@ -312,14 +312,15 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 
         config_parent_dir = os.path.dirname(config_path.filename)
         save_path = os.path.join(extra_path, config_parent_dir).replace("\\", "/")
-
+        maintenance_mode = await redis_client.get(token_id)
         tool = await Tool.create(
             name=name, version=version, path=save_path,
             description=config_data.get("description"),
             creator=creator, updater=creator,
             hash_value=hasher.hexdigest(),
-            internal=config_data.get("internal", False),
+            download=config_data.get("internal", False),
             main=py_file_name,
+            internal=maintenance_mode if maintenance_mode else False
         )
 
         # 将config数据存入redis
@@ -340,7 +341,6 @@ async def all_tools(request):
         - key: 名称和描述的搜索（可选，模糊搜索）   str
         - tag: 标签名称（可选，精确搜索）   str
         - logo: 是否需要logo数据 0为不需要，1为需要  int
-        - scope: 获取应用范围 int 0表示获取普通应用、 1表示内部应用
     """
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 15))
@@ -350,10 +350,8 @@ async def all_tools(request):
         raise CustomError(ErrorCode.RequestTooManyError)
 
     subquery = Tool.filter(deleted=False).annotate(max_version=Max("version")).group_by("name")
-    if int(request.json.get("scope", 0)) == 1:
-        subquery = subquery.filter(internal=True)
-    else:
-        subquery = subquery.filter(internal=False)
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    subquery = subquery.filter(internal=maintenance_mode if maintenance_mode else False)
     if key:
         tool_actions = await ToolAction.filter(deleted=False).values("tool_name", "version_number", "action")
         tool_name_version_set = set()
@@ -442,14 +440,13 @@ async def all_versions(request):
 
     query参数:
         - name: 工具名称   str
-        - scope: 获取应用范围 int 0表示获取普通应用、 1表示内部应用
     """
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     name = request.json.get("name")
-    internal = True if int(request.json.get("scope", 0)) == 1 else False
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tools = await Tool.filter(name=name, deleted=False, internal=internal).order_by("-ctime").values()
+    tools = await Tool.filter(name=name, deleted=False, internal=maintenance_mode if maintenance_mode else False).order_by("-ctime").values()
 
     for tool in tools:
         tool.pop("path")
@@ -785,6 +782,9 @@ async def download_zip(request):
 
     if tool.internal:
         raise CustomError(ErrorCode.InternalToolError)
+
+    if tool.download:
+        raise CustomError(ErrorCode.NotDownloadError)
 
     zip_path = os.path.abspath(os.path.join(os.path.dirname(tool.path), f"SourceFile.zip"))
 
