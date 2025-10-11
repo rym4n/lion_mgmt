@@ -56,7 +56,6 @@ class EventsIngestion(BaseModel):
     """
     事件接入列表
     """
-
     event_ingestion_name: str = fields.CharField(max_length=255, null=True, description="事件接入名称")
     event_ingestion_describe: str = fields.CharField(max_length=255, null=True, description="事件接入描述")
     event_source_type: str = fields.CharField(max_length=255, null=True, description="事件来源类型")
@@ -74,6 +73,7 @@ class EventsIngestion(BaseModel):
     enabled_health_status: str = fields.CharField(max_length=255, null=True, description="上游接入健康状态")
     execution_health_status: str = fields.CharField(max_length=255, null=True, description="联动执行健康状态")
     convert_health_status: str = fields.CharField(max_length=255, null=True, description="转换配置健康状态")
+    retention_days: int = fields.IntField(default=7, null=True, description="数据保存天数")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -98,6 +98,7 @@ class EventsIngestion(BaseModel):
             "enabled_health_status": self.enabled_health_status,
             "execution_health_status": self.execution_health_status,
             "convert_health_status": self.convert_health_status,
+            "retention_days": self.retention_days,
             "config_info": self.config_info
         }
 
