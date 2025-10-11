@@ -1,5 +1,6 @@
 import ast
 import os
+import uuid
 from datetime import datetime
 
 import aiofile
@@ -19,7 +20,7 @@ from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
 from models import AuditLog, Config
 from services.event_ingestion.views import check_vector_config
-from settings import SECRET, SESSION_ENCODING_ALGORITHM, UPLOAD_DIR, BASE_DIR, VECTOR_CFG
+from settings import SECRET, SESSION_ENCODING_ALGORITHM, UPLOAD_DIR, BASE_DIR, VECTOR_CFG, COMMON_FILES_DIR
 
 system_bp = Blueprint('system', url_prefix='/system')
 _all__ = ["system_bp"]
@@ -574,3 +575,69 @@ async def update_maintenance_mode_status(request):
     else:
         raise CustomError(ErrorCode.MaintenanceModeError)
     return response_ok("更新成功")
+
+
+@system_bp.post("/up-file")
+@requires_permission("audit:r")
+async def update_file(request):
+    """
+    上传文件
+
+    请求参数：
+        "file": 字节流文件
+    """
+    if not request.files or "file" not in request.files:
+        raise CustomError(ErrorCode.ParameterError)
+
+    files = request.files.getlist("file")
+    saved_files = []
+
+    for f in files:
+        filename = f.name or f.filename
+        ext = os.path.splitext(filename)[1]
+        safe_name = f"{uuid.uuid4().hex}{ext}"
+        save_path = os.path.join(COMMON_FILES_DIR, safe_name)
+
+        # 异步写入文件
+        async with aiofile.AIOFile(save_path, 'wb') as zip_file:
+            await zip_file.write(f.body)
+
+        file_info = {
+            "filename": filename,
+            "savename": safe_name,
+            "size": len(f.body),
+            "result": "success"
+        }
+        saved_files.append(file_info)
+
+    return response_ok({"files": saved_files})
+
+
+@system_bp.post("/down-file")
+@requires_permission("audit:r")
+async def download_file(request):
+    """
+    下载文件
+
+    请求参数：
+        - filename: str 文件名（上传时返回的 savename）
+    """
+    filename = request.json.get("filename")
+    if not filename:
+        raise CustomError(ErrorCode.ParameterError)
+
+    file_path = os.path.join(COMMON_FILES_DIR, filename)
+
+    # 检查文件是否存在
+    if not os.path.exists(file_path):
+        raise CustomError(ErrorCode.FileNotFound, f"文件不存在: {filename}")
+
+    # 异步流式返回文件
+    return await response.file(
+        file_path,
+        mime_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+    )
+

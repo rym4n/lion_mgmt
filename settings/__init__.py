@@ -33,6 +33,10 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 LICENSE_DIR = "./data/license"
 os.makedirs(LICENSE_DIR, exist_ok=True)
 
+# 存储通用文件的目录
+COMMON_FILES_DIR = "./data/common_files"
+os.makedirs(COMMON_FILES_DIR, exist_ok=True)
+
 if os.environ.get("RY_ENV") == 'DEV':
     try:
         from dotenv import load_dotenv

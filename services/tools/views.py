@@ -32,7 +32,7 @@ from libs.security.authorization import requires_permission, load_license
 from libs.utils import fix_zip_filename, gen_run_id
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion, \
     Runlog, Timed
-from settings import TOOLS_DIR, KAFKA_SERVERS, TASK_TOPIC, AUTHENTICATION_SESSION_EXPIRATION
+from settings import TOOLS_DIR, KAFKA_SERVERS, TASK_TOPIC
 
 # 定义 Blueprint
 tools_bp = Blueprint("tools", url_prefix="/tools")
