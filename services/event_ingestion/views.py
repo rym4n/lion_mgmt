@@ -26,7 +26,7 @@ from libs import supervisor
 from libs.chat import get_ai_config
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import run_linux_command, setup_logs_template, setup_ilm_policy, setup_ilm_for_index
+from libs.utils import run_linux_command, setup_logs_template, setup_ilm_policy, delete_ilm_policy
 from models import PlaybookVersion, Playbook, Config
 from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
@@ -219,7 +219,7 @@ async def event_ingestion(request):
     topic = vector_name
 
     await setup_ilm_policy(f"logs_retention_policy-{event_name}", f"{retention_days}d")
-    await setup_logs_template(f"logs-{event_name}-*", f"logs-{event_name}", f"logs_retention_policy-{event_name}")
+    await setup_logs_template(f"logs-{event_name}", f"logs_retention_policy-{event_name}")
 
     if event_source_type in ["syslog", "socket"]:
         sources = {vector_name: {
@@ -323,6 +323,8 @@ async def delete_event_ingestion(request):
         raise CustomError(ErrorCode.NotFound)
     if event.enabled_status == 1:
         return response_ok("事件已启用，禁止删除，请先禁用事件")
+
+    await delete_ilm_policy(f"logs_retention_policy-{event.event_ingestion_name}")
 
     async with in_transaction():
         event.deleted = True
@@ -446,7 +448,7 @@ async def update_event_ingestion(request):
 
     if retention_days:
         event.retention_days = retention_days
-        await setup_ilm_for_index(f"logs-{event.event_ingestion_name}-*", f"{retention_days}d")
+        await setup_ilm_policy(f"logs_retention_policy-{event.event_ingestion_name}", f"{retention_days}d")
 
     event.updator = request.ctx.session["account_info"]
 
