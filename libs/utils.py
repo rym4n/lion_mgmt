@@ -28,7 +28,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from elasticsearch import AsyncElasticsearch
+from elasticsearch import AsyncElasticsearch, NotFoundError
 from sanic.log import logger
 
 from core.error_code import ErrorCode
@@ -361,7 +361,16 @@ async def setup_ilm_policy(policy_name, retention_age="180d"):
         await es.ilm.put_lifecycle(name=policy_name, policy=policy)
 
 
-async def setup_logs_template(pattern, alias_name, ilm_policy):
+async def delete_ilm_policy(policy_name):
+    """删除ILM策略"""
+    async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
+        try:
+            await es.ilm.delete_lifecycle(name=policy_name)
+        except NotFoundError:
+            pass
+
+
+async def setup_logs_template(alias_name, ilm_policy):
     async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
         template = {
             "aliases": {alias_name: {}},
@@ -381,7 +390,7 @@ async def setup_logs_template(pattern, alias_name, ilm_policy):
                 }
             }
         }
-        await es.indices.put_index_template(name=f"template-{alias_name}", index_patterns=[pattern], priority=500,
+        await es.indices.put_index_template(name=f"template-{alias_name}", index_patterns=[alias_name + "-*"], priority=500,
                                             data_stream=None, template=template)
 
 

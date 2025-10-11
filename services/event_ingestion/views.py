@@ -26,7 +26,7 @@ from libs import supervisor
 from libs.chat import get_ai_config
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import get_client_ip, run_linux_command, setup_logs_template, setup_ilm_policy
+from libs.utils import run_linux_command, setup_logs_template, setup_ilm_policy, delete_ilm_policy
 from models import PlaybookVersion, Playbook, Config
 from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
@@ -162,22 +162,6 @@ async def build_kafka_file_configuration_file(output_path, sources, topic, event
     return config
 
 
-async def creat_event_ingestion_dbdata(event_ingestion_name, event_ingestion_describe, event_source_type,
-                                       enabled_status, create, updator, file_path, client_ip, linked_execution,
-                                       syslog_config, vector_name, vector_config):
-    events_ingestion = await EventsIngestion.create(event_ingestion_name=event_ingestion_name,
-                                                    event_ingestion_describe=event_ingestion_describe,
-                                                    event_source_type=event_source_type, enabled_status=enabled_status,
-                                                    creator=create, updator=updator, file_path=file_path,
-                                                    linked_execution=linked_execution,
-                                                    syslog_config=syslog_config, vector_name=vector_name,
-                                                    vector_config=vector_config,
-                                                    vector_config_raw=vector_config,
-                                                    enabled_health_status="healthy")
-    logger.info(f"Client {client_ip} has added a new role {events_ingestion.id}.")
-    return events_ingestion.json
-
-
 @event_ingestion_bp.post('/new')
 @requires_permission('ingestion:c')
 async def event_ingestion(request):
@@ -214,7 +198,6 @@ async def event_ingestion(request):
     enabled_status = int(data.get('enabled_status', 1))
     linked_execution = int(data.get('linked_execution', 0))
     retention_days = int(data.get('retention_days', 7))
-    client_ip = get_client_ip(request)
 
     syslog_config = None
     if syslog_port and communication_type:
@@ -236,7 +219,7 @@ async def event_ingestion(request):
     topic = vector_name
 
     await setup_ilm_policy(f"logs_retention_policy-{event_name}", f"{retention_days}d")
-    await setup_logs_template(f"logs-{event_name}-*", f"logs-{event_name}", f"logs_retention_policy-{event_name}")
+    await setup_logs_template(f"logs-{event_name}", f"logs_retention_policy-{event_name}")
 
     if event_source_type in ["syslog", "socket"]:
         sources = {vector_name: {
@@ -275,20 +258,15 @@ async def event_ingestion(request):
     if vector_config is None:
         raise CustomError(ErrorCode.ConfigFileGenerateError)
 
-    event_ingestion_dbdata = await creat_event_ingestion_dbdata(event_ingestion_name=event_name,
-                                                                event_ingestion_describe=event_describe,
-                                                                event_source_type=event_source_type,
-                                                                enabled_status=enabled_status,
-                                                                create=request.ctx.session['account_info'],
-                                                                file_path=output_path.replace("\\", "/"),
-                                                                client_ip=client_ip,
-                                                                updator=request.ctx.session['account_info'],
-                                                                linked_execution=linked_execution,
-                                                                syslog_config=syslog_config,
-                                                                vector_name=vector_name,
-                                                                vector_config=vector_config)
+    events_ingestion = await EventsIngestion.create(event_ingestion_name=event_name, event_ingestion_describe=event_describe,
+                                                    event_source_type=event_source_type, enabled_status=enabled_status,
+                                                    creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'],
+                                                    file_path=output_path.replace("\\", "/"),
+                                                    linked_execution=linked_execution, syslog_config=syslog_config, vector_name=vector_name,
+                                                    vector_config=vector_config, vector_config_raw=vector_config,
+                                                    enabled_health_status="healthy", retention_days=retention_days)
 
-    return response_ok(event_ingestion_dbdata)
+    return response_ok(events_ingestion.json)
 
 
 @event_ingestion_bp.post('/list')
@@ -346,6 +324,8 @@ async def delete_event_ingestion(request):
     if event.enabled_status == 1:
         return response_ok("事件已启用，禁止删除，请先禁用事件")
 
+    await delete_ilm_policy(f"logs_retention_policy-{event.event_ingestion_name}")
+
     async with in_transaction():
         event.deleted = True
         event.file_path = None
@@ -377,6 +357,7 @@ async def update_event_ingestion(request):
         sasl_username: sasl用户名 (str)   事件来源类型为kafka时才传，默认为None       非必填
         sasl_password: sasl密码 (str)   事件来源类型为kafka时才传，默认为None       非必填
         enabled_status: 上游接入(int) 启用为 1 ，禁用为 0      非必填
+        retention_days: 日志数据的保留天数 (int), 默认为 7
     """
     data = request.json  # 只解析一次
     event_id = data.get('id')
@@ -391,6 +372,7 @@ async def update_event_ingestion(request):
     sasl_username = data.get('sasl_username', None)
     sasl_password = data.get('sasl_password', None)
     enabled_status = data.get('enabled_status', None)
+    retention_days = data.get('retention_days')
     key_delimiter_value = data.get('key_delimiter_value', None)
     key_value_delimiter = data.get('key_value_delimiter', None)
     kafka_topic = data.get('kafka_topic', [])
@@ -463,6 +445,10 @@ async def update_event_ingestion(request):
                 yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
                 await f.write(yaml_str)
         event.enabled_status = enabled_status
+
+    if retention_days:
+        event.retention_days = retention_days
+        await setup_ilm_policy(f"logs_retention_policy-{event.event_ingestion_name}", f"{retention_days}d")
 
     event.updator = request.ctx.session["account_info"]
 
