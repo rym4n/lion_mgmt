@@ -358,7 +358,18 @@ async def setup_ilm_policy(policy_name, retention_age="180d"):
                 }
             }
         }
-        await es.ilm.put_lifecycle(name=policy_name, policy=policy)
+        await es.ilm.put_lifecycle(name=policy_name, policy=policy)\
+
+
+async def setup_ilm_for_index(index_name, ilm_policy):
+    """为索引设置ILM策略"""
+    async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
+        await es.indices.put_settings(
+            index=index_name,
+            body={
+                "index.lifecycle.name": ilm_policy
+            }
+        )
 
 
 async def setup_logs_template(pattern, alias_name, ilm_policy):

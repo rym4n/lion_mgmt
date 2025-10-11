@@ -26,7 +26,7 @@ from libs import supervisor
 from libs.chat import get_ai_config
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import run_linux_command, setup_logs_template, setup_ilm_policy
+from libs.utils import run_linux_command, setup_logs_template, setup_ilm_policy, setup_ilm_for_index
 from models import PlaybookVersion, Playbook, Config
 from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
@@ -355,6 +355,7 @@ async def update_event_ingestion(request):
         sasl_username: sasl用户名 (str)   事件来源类型为kafka时才传，默认为None       非必填
         sasl_password: sasl密码 (str)   事件来源类型为kafka时才传，默认为None       非必填
         enabled_status: 上游接入(int) 启用为 1 ，禁用为 0      非必填
+        retention_days: 日志数据的保留天数 (int), 默认为 7
     """
     data = request.json  # 只解析一次
     event_id = data.get('id')
@@ -369,6 +370,7 @@ async def update_event_ingestion(request):
     sasl_username = data.get('sasl_username', None)
     sasl_password = data.get('sasl_password', None)
     enabled_status = data.get('enabled_status', None)
+    retention_days = data.get('retention_days')
     key_delimiter_value = data.get('key_delimiter_value', None)
     key_value_delimiter = data.get('key_value_delimiter', None)
     kafka_topic = data.get('kafka_topic', [])
@@ -441,6 +443,10 @@ async def update_event_ingestion(request):
                 yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
                 await f.write(yaml_str)
         event.enabled_status = enabled_status
+
+    if retention_days:
+        event.retention_days = retention_days
+        await setup_ilm_for_index(f"logs-{event.event_ingestion_name}-*", f"{retention_days}d")
 
     event.updator = request.ctx.session["account_info"]
 
