@@ -20,7 +20,8 @@ from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
 from models import AuditLog, Config
 from services.event_ingestion.views import check_vector_config
-from settings import SECRET, SESSION_ENCODING_ALGORITHM, UPLOAD_DIR, BASE_DIR, VECTOR_CFG, COMMON_FILES_DIR
+from settings import SECRET, SESSION_ENCODING_ALGORITHM, UPLOAD_DIR, BASE_DIR, VECTOR_CFG, COMMON_FILES_DIR, \
+    AUTHENTICATION_SESSION_EXPIRATION
 
 system_bp = Blueprint('system', url_prefix='/system')
 _all__ = ["system_bp"]
@@ -569,9 +570,9 @@ async def update_maintenance_mode_status(request):
     mt_status = int(request.json.get("mt_status"))
     if request.ctx.session["account_info"].username == "admin":
         if mt_status == 1:
-            await request.app.ctx.cache_client.set(request.ctx.session["id"], True, 86400)
+            await request.app.ctx.cache_client.set(request.ctx.session["id"], True, AUTHENTICATION_SESSION_EXPIRATION)
         else:
-            await request.app.ctx.cache_client.set(request.ctx.session["id"], False, 86400)
+            await request.app.ctx.cache_client.set(request.ctx.session["id"], False, AUTHENTICATION_SESSION_EXPIRATION)
     else:
         raise CustomError(ErrorCode.MaintenanceModeError)
     return response_ok("更新成功")

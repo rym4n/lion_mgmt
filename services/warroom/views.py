@@ -562,7 +562,10 @@ async def get_list(request):
     messages = await MessageAccount.filter(account_id=account.id, status=0).all().prefetch_related("message__sender")
     for message in messages:
         message_list.append(message.json)
-    return response_ok({"message_list": message_list})
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    if maintenance_mode:
+        return response_ok({"message_list": message_list, "maintenance_mode": True})
+    return response_ok({"message_list": message_list, "maintenance_mode": False})
 
 
 @warroom_bp.post("/up/status")
