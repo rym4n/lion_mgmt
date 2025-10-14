@@ -303,6 +303,11 @@ async def refresh_session_token(request):
     if not account:
         account = await Account.get(id=request.ctx.session["sub"]).prefetch_related('roles')
     await request.app.ctx.cache_client.set(f"account_{request.ctx.session['sub']}", account, AUTHENTICATION_SESSION_EXPIRATION)
+
+    # 更新维护模式redis缓存
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    await request.app.ctx.cache_client.set(request.ctx.session["id"], maintenance_mode, AUTHENTICATION_SESSION_EXPIRATION)
+
     resp_ok = response_ok('success')
     resp_ok.cookies.add_cookie(
         f"aioe-auth",
