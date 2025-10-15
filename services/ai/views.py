@@ -75,7 +75,7 @@ async def ai_question(request):
         return None
 
     # 剧本实现
-    pv = await PlaybookVersion.filter(playbook_id="222222", deleted=False).order_by("-ctime").first()
+    pv = await PlaybookVersion.filter(playbook_id="222222", deleted=False, status=1).order_by("-ctime").first()
     if not pv:
         return response_ok("ai功能剧本缺失，请联系管理员处理")
 
