@@ -12,13 +12,14 @@ from sanic import Blueprint
 from sanic import json
 from sanic import response
 from tortoise.transactions import in_transaction
+from urllib.parse import quote
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
-from models import AuditLog, Config
+from models import AuditLog, Config, Variables
 from services.event_ingestion.views import check_vector_config
 from settings import SECRET, SESSION_ENCODING_ALGORITHM, UPLOAD_DIR, BASE_DIR, VECTOR_CFG, COMMON_FILES_DIR, \
     AUTHENTICATION_SESSION_EXPIRATION
@@ -595,17 +596,16 @@ async def update_file(request):
 
     for f in files:
         filename = f.name or f.filename
-        ext = os.path.splitext(filename)[1]
-        safe_name = f"{uuid.uuid4().hex}{ext}"
-        save_path = os.path.join(COMMON_FILES_DIR, safe_name)
-
+        file_id = str(uuid.uuid4())
+        save_path = os.path.join(COMMON_FILES_DIR, filename)
+        await Variables.create(id=file_id, name=file_id, value=[filename], type="file", updator=request.ctx.session['account_info'])
         # 异步写入文件
         async with aiofile.AIOFile(save_path, 'wb') as zip_file:
             await zip_file.write(f.body)
 
         file_info = {
             "filename": filename,
-            "savename": safe_name,
+            "file_id": file_id,
             "size": len(f.body),
             "result": "success"
         }
@@ -614,31 +614,39 @@ async def update_file(request):
     return response_ok({"files": saved_files})
 
 
-@system_bp.post("/down-file")
-@requires_permission("audit:r")
-async def download_file(request):
+@system_bp.get("/down-file/<file_id>")
+async def download_file(request, file_id):
     """
     下载文件
 
     请求参数：
-        - filename: str 文件名（上传时返回的 savename）
+        - file_id: str 文件名（上传时返回的 file_id）
     """
-    filename = request.json.get("filename")
-    if not filename:
+    if not file_id:
         raise CustomError(ErrorCode.ParameterError)
 
+    var = await Variables.get_or_none(name=file_id, type="file")
+    if not var or not var.value:
+        raise CustomError(ErrorCode.FileNotFound, f"未找到文件ID: {file_id}")
+
+    filename = var.value[0]
     file_path = os.path.join(COMMON_FILES_DIR, filename)
 
     # 检查文件是否存在
     if not os.path.exists(file_path):
         raise CustomError(ErrorCode.FileNotFound, f"文件不存在: {filename}")
 
+    # 对中文文件名进行编码（RFC 5987）
+    quoted_filename = quote(filename)
+    headers = {
+        "Content-Disposition": f"attachment; filename=\"{filename}\";filename*=UTF-8''{quoted_filename}",
+        "Content-Type": "application/octet-stream; charset=utf-8"
+    }
+
     # 异步流式返回文件
     return await response.file(
         file_path,
         mime_type="application/octet-stream",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        }
+        headers=headers
     )
 

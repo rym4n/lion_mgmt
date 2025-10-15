@@ -29,7 +29,7 @@ async def new_variable(request):
     if not name or not value:
         raise CustomError(ErrorCode.ParameterError)
 
-    var = await Variables.create(name=request.json["name"], value=value, updator=request.ctx.session['account_info'])
+    var = await Variables.create(name=request.json["name"], value=value, type="global", updator=request.ctx.session['account_info'])
     await caches.get("redis_chat").set(f"global_{var.name}", value)
     return response_ok(var.json)
 
@@ -49,7 +49,7 @@ async def all_variables(request):
     size = int(request.json.get("size", 15))
     offset = (page - 1) * size
     limit = size
-    condition = Q()
+    condition = Q(type="global")
     keyword = request.json.get("keyword")
     if keyword:
         condition = Q(name__icontains=keyword) | Q(value__contains=[keyword])
@@ -69,7 +69,7 @@ async def delelte_variable(request):
     请求参数:
         name: 变量名
     """
-    var = await Variables.get_or_none(name=request.json.get("name"))
+    var = await Variables.get_or_none(name=request.json.get("name"), type="global")
     if not var:
         raise CustomError(ErrorCode.NotFound)
     await caches.get("redis_chat").delete(f"global_{var.name}")
@@ -86,7 +86,7 @@ async def update_variable(request):
     if not name or not value:
         raise CustomError(ErrorCode.ParameterError)
 
-    var = await Variables.get(name=name)
+    var = await Variables.get(name=name, type="global")
     if not var:
         raise CustomError(ErrorCode.NotFound)
 
