@@ -7,7 +7,7 @@ from libs.chat import chat_manager, get_ai_config, get_prompt_words, get_playboo
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import gen_run_id
-from models import Tool, ToolResources, Account, Message, Room, ToolAction, ToolResourcesModel
+from models import Tool, ToolResources, Account, Message, Room, ToolAction, ToolResourcesModel, PlaybookVersion
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
 ai_bp = Blueprint('ai', url_prefix='/ai')
@@ -27,17 +27,8 @@ async def ai_question(request):
         "room_id":"c6ab45be-fe5b-4f3e-b4aa-cf009fcfab2a"    作战室id
         "ai_type": "action"/"flow"  获取动作或者剧本
     """
-    # 目前先用动作实现 后续进行拆分使用剧本实现
     room_id = request.json.get("room_id")
     content = request.json.get("content")
-    tool = await Tool.filter(name="lion_mgmt", deleted=False).order_by("-ctime").first()
-    if not tool:
-        return response_ok("ai运行APP缺失，请联系管理员处理")
-
-    resource = await ToolResources.filter(tool_name="lion_mgmt", deleted=False).order_by("-ctime").first()
-    if not resource:
-        raise response_ok("ai运行资源不存在，请联系管理员处理")
-
     user = request.ctx.session['account_info']
 
     room = await Room.get(id=room_id, deleted=False)
@@ -83,14 +74,22 @@ async def ai_question(request):
         await chat_manager.publish_ai_message(message_data)
         return None
 
-    params = {"resource": resource.id, "node_name": tool.description,
-              "action": "ai_run_action", "action_name": "ai执行动作", "app_name": "lion_mgmt",
-              "name": tool.description, "app_ver": tool.version, "main": tool.main,
-              "action_input": {"msg": content, "room_id": room_id, "user_id": sender.id, "ai_config": orjson.dumps(ai_config).decode("utf-8"), "ai_type": request.json.get("ai_type", "action")},
-              "retry_times": 0, "timeout": 700,
+    # 剧本实现
+    pv = await PlaybookVersion.filter(playbook_id="222222", deleted=False).order_by("-ctime").first()
+    if not pv:
+        return response_ok("ai功能剧本缺失，请联系管理员处理")
+
+    params = {"flow_id": pv.id,
+              "flow_input": {
+                  "msg": content,
+                  "room_id": room_id,
+                  "user_id": sender.id,
+                  "ai_config": orjson.dumps(ai_config).decode("utf-8"),
+                  "ai_type": request.json.get("ai_type", "action")
+              },
               "executor": user.id}
     run_id = gen_run_id()
-    msg = {"run_type": "action", "run_id": run_id, "run_args": params}
+    msg = {"run_type": "flow", "run_id": run_id, "run_args": params}
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
     return response_ok("运行成功")
