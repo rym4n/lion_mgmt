@@ -596,16 +596,17 @@ async def update_file(request):
 
     for f in files:
         filename = f.name or f.filename
+        ext = filename.split(".")[-1]
         file_id = str(uuid.uuid4())
-        save_path = os.path.join(COMMON_FILES_DIR, filename)
-        await Variables.create(id=file_id, name=file_id, value=[filename], type="file", updator=request.ctx.session['account_info'])
+        save_path = os.path.join(COMMON_FILES_DIR, file_id+'.'+ext)
+
         # 异步写入文件
         async with aiofile.AIOFile(save_path, 'wb') as zip_file:
             await zip_file.write(f.body)
 
         file_info = {
             "filename": filename,
-            "file_id": file_id,
+            "file_id": file_id+'.'+ext,
             "size": len(f.body),
             "result": "success"
         }
@@ -621,25 +622,26 @@ async def download_file(request, file_id):
 
     请求参数：
         - file_id: str 文件名（上传时返回的 file_id）
+        - download_name: str 下载文件名, 可选
     """
     if not file_id:
         raise CustomError(ErrorCode.ParameterError)
-
-    var = await Variables.get_or_none(name=file_id, type="file")
-    if not var or not var.value:
-        raise CustomError(ErrorCode.FileNotFound, f"未找到文件ID: {file_id}")
-
-    filename = var.value[0]
-    file_path = os.path.join(COMMON_FILES_DIR, filename)
+    safe_name = os.path.basename(file_id)
+    file_path = os.path.join(COMMON_FILES_DIR, safe_name)
 
     # 检查文件是否存在
     if not os.path.exists(file_path):
-        raise CustomError(ErrorCode.FileNotFound, f"文件不存在: {filename}")
+        raise CustomError(ErrorCode.FileNotFound)
+    download_name = request.args.get("download_name") or safe_name
+
+    if "." not in download_name and "." in safe_name:
+        ext = safe_name.split(".")[-1]
+        download_name += "." + ext
 
     # 对中文文件名进行编码（RFC 5987）
-    quoted_filename = quote(filename)
+    quoted_filename = quote(download_name)
     headers = {
-        "Content-Disposition": f"attachment; filename=\"{filename}\";filename*=UTF-8''{quoted_filename}",
+        "Content-Disposition": f"attachment; filename=\"{download_name}\";filename*=UTF-8''{quoted_filename}",
         "Content-Type": "application/octet-stream; charset=utf-8"
     }
 
