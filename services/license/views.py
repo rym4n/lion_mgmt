@@ -146,9 +146,9 @@ async def get_license(request: Request):
             menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
         elif menu["meta"]["title"] == "事件管理":
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
-
-    await Config.update_or_create(key="PROMPT_WORD", defaults={"value": Prompt_Word_Dict.get(ai_type)}, module="ai")
-    await Config.update_or_create(key="AI", defaults={"value": str(ai_type)}, module="ai")
+    if ai_type in [1, 2, 3]:
+        await Config.update_or_create(key="PROMPT_WORD", defaults={"value": Prompt_Word_Dict.get(ai_type)}, module="ai")
+        await Config.update_or_create(key="AI", defaults={"value": str(ai_type)}, module="ai")
 
     return response_ok(menus)
 
