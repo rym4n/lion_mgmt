@@ -318,9 +318,9 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
             description=config_data.get("description"),
             creator=creator, updater=creator,
             hash_value=hasher.hexdigest(),
-            download=config_data.get("internal", False),
+            internal=config_data.get("internal", False),
             main=py_file_name,
-            internal=maintenance_mode if maintenance_mode else False
+            maintain=maintenance_mode if maintenance_mode else False
         )
 
         # 将config数据存入redis
@@ -351,7 +351,7 @@ async def all_tools(request):
 
     subquery = Tool.filter(deleted=False).annotate(max_version=Max("version")).group_by("name")
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    subquery = subquery.filter(internal=maintenance_mode if maintenance_mode else False)
+    subquery = subquery.filter(maintain=maintenance_mode if maintenance_mode else False)
     if key:
         tool_actions = await ToolAction.filter(deleted=False).values("tool_name", "version_number", "action")
         tool_name_version_set = set()
@@ -446,7 +446,7 @@ async def all_versions(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tools = await Tool.filter(name=name, deleted=False, internal=maintenance_mode if maintenance_mode else False).order_by("-ctime").values()
+    tools = await Tool.filter(name=name, deleted=False, maintain=maintenance_mode if maintenance_mode else False).order_by("-ctime").values()
 
     for tool in tools:
         tool.pop("path")
@@ -538,7 +538,7 @@ async def delete_tool(request):
         if tool.status == 1:
             raise CustomError(ErrorCode.ToolHasScriptError)
 
-        if tool.internal:
+        if tool.maintain:
             raise CustomError(ErrorCode.InternalDeleteError)
 
         tool_path = os.path.join(TOOLS_DIR, name, version)
@@ -567,7 +567,7 @@ async def delete_tool_all(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    if await Tool.filter(name=name, deleted=False, internal=True).exists():
+    if await Tool.filter(name=name, deleted=False, maintain=True).exists():
         raise CustomError(ErrorCode.InternalDeleteError)
 
     if await Tool.filter(name=name, deleted=False, status=1).exists():
@@ -780,10 +780,10 @@ async def download_zip(request):
     if not tool:
         raise CustomError(ErrorCode.ToolNotFoundError)
 
-    if tool.internal:
+    if tool.maintain:
         raise CustomError(ErrorCode.InternalToolError)
 
-    if tool.download:
+    if tool.internal:
         raise CustomError(ErrorCode.NotDownloadError)
 
     zip_path = os.path.abspath(os.path.join(os.path.dirname(tool.path), f"SourceFile.zip"))
