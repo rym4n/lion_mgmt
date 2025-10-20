@@ -36,7 +36,6 @@ TYPE_DICT = {
 @warroom_bp.websocket('/ws')
 @requires_permission('warroom:r')
 async def warroom_ws(request: Request, ws: Websocket):
-    
     account = None
     try:
         # 先获取认证信息
@@ -112,7 +111,6 @@ async def warroom_ws(request: Request, ws: Websocket):
 })
 @requires_permission('warroom:c')
 async def create_room(request: Request):
-    
     room_name = request.json.get('name')
     members_ids = request.json.get('members', [])
     user_id = []
@@ -308,7 +306,6 @@ async def quit_room(request: Request):
 })
 @requires_permission('warroom:r')
 async def get_room_list(request: Request):
-    
     condition = Q(users__id=request.ctx.session['account_info'].id)
     keyword = request.json.get("keyword")
     if keyword:
@@ -368,7 +365,6 @@ async def get_room_list(request: Request):
 })
 @requires_permission('warroom:r')
 async def get_all_rooms(request: Request):
-    
     page = request.json.get("page", 1)
     size = request.json.get("size", 10)
     offset = (page - 1) * size
@@ -433,7 +429,6 @@ async def get_all_rooms(request: Request):
 })
 @requires_permission('warroom:r')
 async def acquire_members(request: Request):
-    
     room_id = request.json.get('id')
 
     room = await Room.get(id=room_id).prefetch_related('creator', 'users')
@@ -489,7 +484,6 @@ async def acquire_members(request: Request):
 })
 @requires_permission('warroom:c')
 async def get_private_room(request: Request):
-    
     user = request.ctx.session['account_info']
     partner_id = request.json.get('partner_id')
     partner = await Account.get(id=partner_id)
@@ -542,7 +536,6 @@ async def get_private_room(request: Request):
 })
 @requires_permission('warroom:r')
 async def get_star_rooms(request: Request):
-    
     user = request.ctx.session['account_info']
     return response_ok({
         "star_rooms": [r.json for r in await user.star_rooms.all().prefetch_related('creator', 'users')]
@@ -578,7 +571,6 @@ async def get_star_rooms(request: Request):
 })
 @requires_permission('warroom:r')
 async def star_room(request: Request):
-    
     room_id = request.json.get('id')
     room = await Room.get(id=room_id)
     user = request.ctx.session['account_info']
@@ -619,7 +611,6 @@ async def star_room(request: Request):
 })
 @requires_permission('warroom:u')
 async def unstar_room(request: Request):
-    
     room_id = request.json.get('id')
     room = await Room.get(id=room_id)
     user = request.ctx.session['account_info']
@@ -676,7 +667,6 @@ async def unstar_room(request: Request):
 })
 @requires_permission('warroom:r')
 async def get_user_rooms(request: Request):
-    
     user = request.ctx.session['account_info']
     keyword = request.json.get('keyword', '')
     query = Room.filter(users__id=user.id)
@@ -764,8 +754,6 @@ async def get_user_rooms(request: Request):
 })
 @requires_permission('warroom:r')
 async def query_messages(request: Request):
-    
-    user = request.ctx.session['account_info']
     query_type = request.json.get("query_type")
     room_id = request.json.get("room_id")
     keyword = request.json.get("keyword", "")
@@ -975,7 +963,6 @@ async def query_messages(request: Request):
 })
 @requires_permission("warroom:r")
 async def get_list(request):
-    
     message_list = []
     account = request.ctx.session['account_info']
     messages = await MessageAccount.filter(account_id=account.id, status=0).all().prefetch_related("message__sender")
@@ -1019,7 +1006,6 @@ async def get_list(request):
 })
 @requires_permission("warroom:u")
 async def up_status(request):
-    
     ids = request.json.get("ids")
     if not ids:
         raise CustomError(ErrorCode.ParamValueError)
@@ -1057,8 +1043,7 @@ async def up_status(request):
                         },
                         "flow_input": {
                             "type": "object",
-                            "description": "剧本输入参数",
-                            "example": {"l": "123456789", "c": "123456789"}
+                            "description": "剧本输入参数"
                         }
                     }
                 },
@@ -1072,8 +1057,7 @@ async def up_status(request):
                         "main": {"type": "string", "description": "主程序文件名"},
                         "action_input": {
                             "type": "object",
-                            "description": "动作输入参数",
-                            "example": {"clients": "abcd", "groups": "123456789"}
+                            "description": "动作输入参数"
                         },
                         "resource": {
                             "type": "string",
@@ -1113,15 +1097,15 @@ async def up_status(request):
 @requires_permission("warroom:r")
 async def run(request):
     room_id = request.json.get("id")
-    type = request.json.get("type")
+    run_type = request.json.get("type")
     user = request.ctx.session['account_info']
-    if not room_id or not type:
+    if not room_id or not run_type:
         raise CustomError(ErrorCode.ParamValueError)
     params = request.json.get("playbook_input") or request.json.get("action_input")
     if not params:
         raise CustomError(ErrorCode.ParamValueError)
     params["executor"] = user.id
-    msg = {"run_type": type, "run_id": gen_run_id(), "run_args": params}
+    msg = {"run_type": run_type, "run_id": gen_run_id(), "run_args": params}
     room = await Room.get_or_none(id=room_id)
     room.updator = user
     room.run_id.append(msg["run_id"])
@@ -1174,8 +1158,7 @@ async def run(request):
                             "value": {"type": "string"}
                         }
                     },
-                    "description": "运行参数",
-                    "example": [{"key": "a", "value": "b"}, {"key": "c", "value": "d"}]
+                    "description": "运行参数"
                 }
             }
         }
@@ -1200,7 +1183,6 @@ async def run(request):
 })
 @requires_permission("warroom:r")
 async def execution(request):
-    
     eventId = request.json.get("eventId")
     executorInstanceType = request.json.get("executorInstanceType")
     executorInstanceId = request.json.get("executorInstanceId")
@@ -1215,18 +1197,18 @@ async def execution(request):
         room = await Room.create(name=room_name, creator=user)
         event.room = room
     room_id = event.room_id
-    type = TYPE_DICT.get(executorInstanceType)
-    if not room_id or not type:
+    run_type = TYPE_DICT.get(executorInstanceType)
+    if not room_id or not run_type:
         raise CustomError(ErrorCode.ParamValueError)
     params = {}
     input_data = {}
-    if type == "flow":
+    if run_type == "flow":
         if executorParams:
             for param in executorParams:
                 input_data[param["key"]] = param["value"]
         params["flow_id"] = executorInstanceId
         params["flow_input"] = input_data
-    elif type == "action":
+    elif run_type == "action":
         action = await ToolAction.get_or_none(id=executorInstanceId, deleted=False)
         tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False)
         if executorParams:
@@ -1303,7 +1285,6 @@ async def execution(request):
 })
 @requires_permission("warroom:r")
 async def activity(request, activityId):
-    
     if not activityId:
         raise CustomError(ErrorCode.ParamValueError)
     logs = await Runlog.filter(run_id=activityId, deleted=False).all()
@@ -1398,7 +1379,6 @@ async def activity(request, activityId):
 })
 @requires_permission("warroom:r")
 async def send_message(request):
-    
     username = request.json.get('username')
     partner = await Account.get(username=username)
     sender = await Account.get(username="system", type="api")
