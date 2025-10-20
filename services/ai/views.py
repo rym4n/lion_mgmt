@@ -1,13 +1,14 @@
 # coding=utf-8
 import orjson
 from sanic import Blueprint
+from sanic_ext import openapi
 
 from core.response import response_ok
 from libs.chat import chat_manager, get_ai_config, get_prompt_words, get_playbook_prompt_words
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import gen_run_id
-from models import Tool, ToolResources, Account, Message, Room, ToolAction, ToolResourcesModel, PlaybookVersion
+from models import Tool, Account, Message, Room, ToolAction, ToolResourcesModel, PlaybookVersion
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
 ai_bp = Blueprint('ai', url_prefix='/ai')
@@ -15,18 +16,50 @@ __all__ = ['ai_bp']
 
 
 @ai_bp.post("/question")
+@openapi.definition(
+    summary="进行AI对话",
+    description="进行AI对话",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "消息内容"
+                    },
+                    "room_id": {
+                        "type": "string",
+                        "description": "作战室ID"
+                    },
+                    "ai_type": {
+                        "type": "string",
+                        "description": "获取动作或者剧本，可选action或flow"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "运行成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("warroom:r")
 async def ai_question(request):
-    """
-    进行ai对话
-
-    {"type":"ai","content":"什么是智能体","image_content":"","room_id":"c6ab45be-fe5b-4f3e-b4aa-cf009fcfab2a"}
-
-    请求参数:
-        "content":"什么是智能体"      消息
-        "room_id":"c6ab45be-fe5b-4f3e-b4aa-cf009fcfab2a"    作战室id
-        "ai_type": "action"/"flow"  获取动作或者剧本
-    """
     room_id = request.json.get("room_id")
     content = request.json.get("content")
     user = request.ctx.session['account_info']
@@ -96,18 +129,67 @@ async def ai_question(request):
 
 
 @ai_bp.post("/create-msg")
+@openapi.definition(
+    summary="创建AI作战室历史消息",
+    description="创建AI作战室历史消息",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "消息内容"
+                    },
+                    "room_id": {
+                        "type": "string",
+                        "description": "作战室ID"
+                    },
+                    "user_id": {
+                        "type": "string",
+                        "description": "用户ID"
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "消息类型"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "创建成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "type": {"type": "string"},
+                                    "message_id": {"type": "string"},
+                                    "sender_id": {"type": "string"},
+                                    "sender_name": {"type": "string"},
+                                    "sender_display_name": {"type": "string"},
+                                    "content": {"type": "string"},
+                                    "image_content": {"type": "string"},
+                                    "timestamp": {"type": "string"},
+                                    "room_id": {"type": "string"}
+                                }
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("warroom:r")
 async def create_msg(request):
-    """
-    创建ai作战室历史消息
-
-    请求参数:
-        "content":"什么是智能体"      消息
-        "room_id":"c6ab45be-fe5b-4f3e-b4aa-cf009fcfab2a"    作战室id
-        "user_id": "43782755-6382-4f42-82a2-5e557370d858" 用户id
-        "type": "ai-question" 消息类型
-    """
-
     user_id = request.json.get("user_id")
     room_id = request.json.get("room_id")
     content = request.json.get("content")
@@ -139,27 +221,95 @@ async def create_msg(request):
 
 
 @ai_bp.post("/publish-msg")
+@openapi.definition(
+    summary="实时发送AI消息",
+    description="实时发送AI消息",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "description": "往redis里面发的ai消息"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "发送成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "boolean"},
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("warroom:r")
 async def publish_msg(request):
-    """
-    实时发送ai消息
-    请求参数:
-        "data": 往redis里面发的ai消息
-    """
     await chat_manager.publish_ai_message(request.json.get("data"))
 
     return response_ok(True)
 
 
 @ai_bp.post("/prompt-word")
+@openapi.definition(
+    summary="获取提示词",
+    description="获取提示词",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "prompt_word": {
+                        "type": "string",
+                        "description": "基础提示词"
+                    },
+                    "ai_type": {
+                        "type": "string",
+                        "description": "提示词类型"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "system_prompt": {"type": "string"},
+                                    "ai_dict": {"type": "object"},
+                                    "ai_desc": {"type": "object"}
+                                }
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("warroom:r")
 async def get_prompt_word(request):
-    """
-    获取提示词
-    请求参数:
-        "prompt_word": 基础提示词
-        "ai_type": 提示词类型
-    """
     if request.json.get("ai_type") == "action":
         system_prompt, ai_dict, ai_desc = await get_prompt_words(request.json.get("prompt_word"))
     else:
@@ -173,13 +323,58 @@ async def get_prompt_word(request):
 
 
 @ai_bp.post("/tool-action")
+@openapi.definition(
+    summary="获取动作输入参数列表",
+    description="获取动作输入参数列表",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "动作ID列表"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "tool_actions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "action": {"type": "object"},
+                                                "tool_name": {"type": "string"},
+                                                "version_number": {"type": "string"}
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("warroom:r")
 async def get_tool_action(request):
-    """
-    获取动作输入参数列表
-    请求参数:
-        "data": 动作id
-    """
     tool_actions = await ToolAction.filter(id__in=request.json.get("data"), deleted=False).all()
     data = []
     for tool_action in tool_actions:
@@ -194,14 +389,53 @@ async def get_tool_action(request):
 
 
 @ai_bp.post("/tool-info")
+@openapi.definition(
+    summary="获取动作信息",
+    description="获取动作信息",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "tool_name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    },
+                    "version_number": {
+                        "type": "string",
+                        "description": "版本号"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "description": {"type": "string"},
+                                    "main": {"type": "string"},
+                                    "resource": {"type": "integer"}
+                                }
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("warroom:r")
 async def get_tool_info(request):
-    """
-    获取动作信息
-    请求参数:
-        "tool_name"
-        "version_number"
-    """
     tool = await Tool.get_or_none(name=request.json.get("tool_name"),
                                   version=request.json.get("version_number"),
                                   deleted=False)

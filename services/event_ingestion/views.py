@@ -18,6 +18,7 @@ from elasticsearch import AsyncElasticsearch
 from openai import OpenAI
 from sanic import Blueprint, response
 from sanic.log import logger
+from sanic_ext import openapi
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
@@ -163,26 +164,100 @@ async def build_kafka_file_configuration_file(output_path, sources, topic, event
 
 
 @event_ingestion_bp.post('/new')
+@openapi.definition(
+    summary="创建新的事件接入",
+    description="创建新的事件接入(需要事件接入创建权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "event_name": {
+                        "type": "string",
+                        "description": "事件名称"
+                    },
+                    "event_describe": {
+                        "type": "string",
+                        "description": "事件描述"
+                    },
+                    "event_source_type": {
+                        "type": "string",
+                        "description": "事件来源类型 目前支持kafka、socket"
+                    },
+                    "syslog_port": {
+                        "type": "integer",
+                        "description": "日志端口 事件来源类型为syslog时才传，默认为None"
+                    },
+                    "event_source_address": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "事件来源地址 事件来源类型为kafka时才传 默认为None"
+                    },
+                    "communication_type": {
+                        "type": "string",
+                        "description": "通信类型 事件来源类型为syslog时才传，默认为None tcp/udp"
+                    },
+                    "kafka_group_id": {
+                        "type": "string",
+                        "description": "kafka消费组ID 事件来源类型为kafka时才传，默认为None"
+                    },
+                    "kafka_topic": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "kafka主题 事件来源类型为kafka时才传，默认为None"
+                    },
+                    "sasl_mechanism": {
+                        "type": "string",
+                        "description": "sasl机制 事件来源类型为kafka时才传，默认为None"
+                    },
+                    "sasl_username": {
+                        "type": "string",
+                        "description": "sasl用户名 事件来源类型为kafka时才传，默认为None"
+                    },
+                    "sasl_password": {
+                        "type": "string",
+                        "description": "sasl密码 事件来源类型为kafka时才传，默认为None"
+                    },
+                    "enabled_status": {
+                        "type": "integer",
+                        "description": "上游接入 启用为 1 ，禁用为 0 默认启用"
+                    },
+                    "linked_execution": {
+                        "type": "integer",
+                        "description": "联动执行 启用为 1 ，禁用为 0 默认禁用"
+                    },
+                    "retention_days": {
+                        "type": "integer",
+                        "description": "日志数据的保留天数, 默认为 7"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "创建成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "object"},
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('ingestion:c')
 async def event_ingestion(request):
-    """
-    创建新的事件接入(需要事件接入创建权限)
-    请求参数：
-        event_name: 事件名称 (str)
-        event_describe: 事件描述 (str)
-        event_source_type: 事件来源类型 (str) 目前支持kafka、socket
-        syslog_port: 日志端口 (int) 事件来源类型为syslog时才传，默认为None
-        event_source_address: 事件来源地址 (list)  事件来源类型为kafka时才传  默认为None
-        communication_type: 通信类型 (str)   事件来源类型为syslog时才传，默认为None tcp/udp
-        kafka_group_id: kafka消费组ID (str)   事件来源类型为kafka时才传，默认为None
-        kafka_topic: kafka主题 (list)   事件来源类型为kafka时才传，默认为None
-        sasl_mechanism: sasl机制 (str)   事件来源类型为kafka时才传，默认为None
-        sasl_username: sasl用户名 (str)   事件来源类型为kafka时才传，默认为None
-        sasl_password: sasl密码 (str)   事件来源类型为kafka时才传，默认为None
-        enabled_status: 上游接入(int) 启用为 1 ，禁用为 0 默认启用
-        linked_execution: 联动执行 (int) 启用为 1 ，禁用为 0 默认禁用
-        retention_days: 日志数据的保留天数 (int), 默认为 7
-    """
     data = request.json  # 只解析一次
     event_name = data.get('event_name')
     event_describe = data.get('event_describe')
@@ -270,16 +345,62 @@ async def event_ingestion(request):
 
 
 @event_ingestion_bp.post('/list')
+@openapi.definition(
+    summary="获取所有事件接入列表",
+    description="获取所有事件接入列表(需要事件查看权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "integer",
+                        "description": "页码"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "description": "页面大小"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "事件名称 非必填"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "events": {
+                                        "type": "array",
+                                        "items": {"type": "object"}
+                                    },
+                                    "total": {"type": "integer"},
+                                    "page": {"type": "integer"},
+                                    "size": {"type": "integer"},
+                                    "total_pages": {"type": "integer"}
+                                }
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('ingestion:r')
 async def get_all_events_ingestion(request):
-    """
-    获取所有事件接入列表(需要事件查看权限)
-
-    请求参数:
-        page: 页码 (int)
-        size: 页面大小 (int)
-        name: 事件名称 (str) 非必填
-    """
     page = request.json.get('page', 1)
     size = request.json.get("size", 15)
     offset = (page - 1) * size
@@ -303,14 +424,43 @@ async def get_all_events_ingestion(request):
 
 
 @event_ingestion_bp.post('/delete')
+@openapi.definition(
+    summary="删除事件接入",
+    description="删除事件接入(需要事件删除权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "事件ID"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('ingestion:d')
 async def delete_event_ingestion(request):
-    """
-    删除事件接入(需要事件删除权限)
-
-    请求参数:
-        id: 事件ID (str)
-    """
     event_id = request.json.get('id')
     event = await EventsIngestion.get(id=event_id)
     es = await EventRelatedScript.get_or_none(event_ingestion_id=event_id)
@@ -336,29 +486,109 @@ async def delete_event_ingestion(request):
 
 
 @event_ingestion_bp.post('/update')
+@openapi.definition(
+    summary="更新事件接入",
+    description="更新事件接入(需要事件更新权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "事件ID"
+                    },
+                    "event_describe": {
+                        "type": "string",
+                        "description": "事件描述 非必填"
+                    },
+                    "event_source_address": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "事件来源地址 事件来源类型为kafka时才传 非必填"
+                    },
+                    "syslog_port": {
+                        "type": "integer",
+                        "description": "日志端口 端口范围500-2000 事件来源类型为syslog时才传，默认为None 非必填"
+                    },
+                    "communication_type": {
+                        "type": "string",
+                        "description": "通信类型 事件来源类型为syslog时才传，默认为None 非必填"
+                    },
+                    "kafka_group_id": {
+                        "type": "string",
+                        "description": "kafka消费组ID 事件来源类型为kafka时才传，默认为None 非必填"
+                    },
+                    "kafka_topic": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "kafka主题 事件来源类型为kafka时才传，默认为None 非必填"
+                    },
+                    "transforms_type": {
+                        "type": "string",
+                        "description": "转换类型 目前支持Grok、CEF、key-value、JSON、Delimiter(分割符) 非必填"
+                    },
+                    "transforms_config": {
+                        "type": "string",
+                        "description": "转换配置 只有Grok时需要填写，默认情况下为None 非必填"
+                    },
+                    "key_value_delimiter": {
+                        "type": "string",
+                        "description": "键值对分隔符 只有key-value时需要填写，默认情况下为None 非必填"
+                    },
+                    "key_delimiter_value": {
+                        "type": "string",
+                        "description": "键值分隔符 只有key-value时需要填写，默认情况下为None 非必填"
+                    },
+                    "sasl_mechanism": {
+                        "type": "string",
+                        "description": "sasl机制 事件来源类型为kafka时才传，默认为None 非必填"
+                    },
+                    "sasl_username": {
+                        "type": "string",
+                        "description": "sasl用户名 事件来源类型为kafka时才传，默认为None 非必填"
+                    },
+                    "sasl_password": {
+                        "type": "string",
+                        "description": "sasl密码 事件来源类型为kafka时才传，默认为None 非必填"
+                    },
+                    "enabled_status": {
+                        "type": "integer",
+                        "description": "上游接入 启用为 1 ，禁用为 0 非必填"
+                    },
+                    "retention_days": {
+                        "type": "integer",
+                        "description": "日志数据的保留天数, 默认为 7"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('ingestion:u')
 async def update_event_ingestion(request):
-    """
-    更新事件接入(需要事件更新权限)
-
-    请求参数:
-        id: 事件ID (str)  必填
-        event_describe: 事件描述 (str)      非必填
-        event_source_address: 事件来源地址 (list) 事件来源类型为kafka时才传     非必填
-        syslog_port: 日志端口 (int) 端口范围500-2000  事件来源类型为syslog时才传，默认为None       非必填
-        communication_type: 通信类型 (str)   事件来源类型为syslog时才传，默认为None       非必填
-        kafka_group_id: kafka消费组ID (str)   事件来源类型为kafka时才传，默认为None      非必填
-        kafka_topic: kafka主题 (list)   事件来源类型为kafka时才传，默认为None      非必填
-        transforms_type: 转换类型 (str) 目前支持Grok、CEF、key-value、JSON、Delimiter(分割符)       非必填
-        transforms_config: 转换配置 (str) 只有Grok时需要填写，默认情况下为None       非必填
-        key_value_delimiter: 键值对分隔符 (str) 只有key-value时需要填写，默认情况下为None       非必填
-        key_delimiter_value: 键值分隔符 (str) 只有key-value时需要填写，默认情况下为None       非必填
-        sasl_mechanism: sasl机制 (str)   事件来源类型为kafka时才传，默认为None       非必填
-        sasl_username: sasl用户名 (str)   事件来源类型为kafka时才传，默认为None       非必填
-        sasl_password: sasl密码 (str)   事件来源类型为kafka时才传，默认为None       非必填
-        enabled_status: 上游接入(int) 启用为 1 ，禁用为 0      非必填
-        retention_days: 日志数据的保留天数 (int), 默认为 7
-    """
     data = request.json  # 只解析一次
     event_id = data.get('id')
     event_describe = data.get('event_describe', None)
@@ -462,14 +692,49 @@ async def update_event_ingestion(request):
 
 
 @event_ingestion_bp.post('/detail')
+@openapi.definition(
+    summary="获取事件接入详情",
+    description="获取事件接入详情(需要事件查看权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "事件ID"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "event": {"type": "object"},
+                                    "sources": {"type": "object"}
+                                }
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('ingestion:r')
 async def get_event_ingestion_detail(request):
-    """
-    获取事件接入详情(需要事件查看权限)
-
-    请求参数:
-        id: 事件ID (str)
-    """
     event_id = request.json.get('id')
     event = await EventsIngestion.get(id=event_id).prefetch_related("creator", "updator")
     if not event:
@@ -480,14 +745,50 @@ async def get_event_ingestion_detail(request):
 
 # noinspection PyTypeChecker
 @event_ingestion_bp.post('/sample')
+@openapi.definition(
+    summary="获取事件接入处理后的日志样例",
+    description="获取事件接入处理后的日志样例(需要事件查看权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "事件id"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "description": "每页条数，默认10"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {"type": "object"}
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('ingestion:r')
 async def get_event_ingestion_kafka_sample(request):
-    """
-    获取事件接入处理后的日志样例(需要事件查看权限)
-    请求参数:
-         id: 事件id (str)
-         size: 每页条数 (int)，默认10
-    """
     data = request.json
     event_id = data.get('id')
     size = data.get("size", 15)
@@ -521,43 +822,86 @@ async def get_event_ingestion_kafka_sample(request):
 
 
 @event_ingestion_bp.post('/binding')
+@openapi.definition(
+    summary="绑定事件接入和剧本",
+    description="绑定事件接入和剧本(需要事件创建权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["event_ingestion_id", "binding_data"],
+                "properties": {
+                    "event_ingestion_id": {
+                        "type": "string",
+                        "description": "事件接入ID"
+                    },
+                    "binding_data": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "conditions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "type": {"type": "string"},
+                                            "name": {"type": "string"},
+                                            "value": {"type": "string"},
+                                            "connect_type": {"type": "string"}
+                                        }
+                                    },
+                                    "description": "条件"
+                                },
+                                "linked_execution": {
+                                    "type": "integer",
+                                    "description": "联动执行 启用为 1 ，禁用为 0 非必填"
+                                },
+                                "script_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "剧本ID 非必填，选择联动执行时必填"
+                                },
+                                "event_name": {
+                                    "type": "string",
+                                    "description": "事件名称 用户选择的事件名称，传default"
+                                },
+                                "numbers": {
+                                    "type": "integer",
+                                    "description": "去重条数 非必填，选择去重时才填写 默认5000, 最大10000"
+                                },
+                                "fields": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "字段 非必填，选择去重时才填写"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "绑定成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('ingestion:u')
 async def binding_event_ingestion_script(request):
-    """
-    绑定事件接入和剧本(需要事件创建权限)
-    请求参数:
-        event_ingestion_id: 事件接入ID (str)
-        binding_data: [{
-        conditions: 条件 (list)
-            conditions: [
-                {
-                    type: "type",
-                    name: "name",
-                    value: "value",
-                    connect_type: "&&" or "||" or None
-                },
-                {
-                    type: "type",
-                    name: "name",
-                    value: "value",
-                    connect_type: "&&" or "||" or None
-                }
-            ]
-        目前支持的判断条件类型有：
-            等于 == ，不等于!= ，大于 > ，小于 < ，大于等于 >= ，小于等于 <=
-            字段中包含字符串 contains ，字段中不包含字符串 !contains
-            字段中存在集合 includes ，字段中不存在集合 !includes     value为集合，如"[\"abc\",\"lmd\"]"
-            字段存在 exists ，字段不存在 !exists        value为空
-            字段为空 is_empty ，字段不为空 !is_empty    value为空
-            正则表达式 match  字段匹配正则表达式       value为正则表达式，如"^abc.*$"
-        linked_execution: 联动执行 (int) 启用为 1 ，禁用为 0      非必填
-        script_ids: 剧本ID (list)      非必填，选择联动执行时必填
-        event_name: 事件名称 (str)  用户选择的事件名称，传default
-        自定义名称案例：to_string!(.name) + "_" + to_string(.datetime_str) + "234"
-        numbers: 去重条数 (int)  非必填，选择去重时才填写 默认5000, 最大10000
-        fields: 字段 (list)  非必填，选择去重时才填写
-        }]
-    """
     event_ingestion_id = request.json.get('event_ingestion_id')
     event = await EventsIngestion.get(id=event_ingestion_id).prefetch_related("creator")
     if not event:
@@ -685,14 +1029,48 @@ del(.datetime_str)
 
 
 @event_ingestion_bp.post('/unbundled')
+@openapi.definition(
+    summary="解绑事件接入和剧本",
+    description="解绑事件接入和剧本(需要事件创建权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["event_ingestion_id", "script_ids"],
+                "properties": {
+                    "event_ingestion_id": {
+                        "type": "string",
+                        "description": "事件接入ID"
+                    },
+                    "script_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "剧本ID"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "解绑成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('ingestion:u')
 async def unbundled_event_ingestion_script(request):
-    """
-    解绑事件接入和剧本(需要事件创建权限)
-    请求参数:
-        event_ingestion_id: 事件接入ID (str)
-        script_ids: 剧本ID (list)
-    """
     event_ingestion_id = request.json.get('event_ingestion_id')
     script_ids = request.json.get('script_ids')
 
@@ -750,13 +1128,37 @@ async def unbundled_event_ingestion_script(request):
 
 
 @event_ingestion_bp.post('/export')
+@openapi.definition(
+    summary="导出事件接入",
+    description="导出事件接入(需要事件查看权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["ids"],
+                "properties": {
+                    "ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "事件接入ID"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导出成功",
+            "content": {
+                "application/zip": {
+                    "schema": {"type": "string", "format": "binary"}
+                }
+            }
+        }
+    }
+)
 @requires_permission('ingestion:r')
 async def export_event_ingestion_script(request):
-    """
-    导出事件接入(需要事件查看权限)
-    请求参数:
-        ids: 事件接入ID (list)
-    """
     event_ids = request.json.get('ids', [])
     if not isinstance(event_ids, list) or not event_ids:
         raise CustomError(ErrorCode.ParameterError)
@@ -785,13 +1187,46 @@ async def export_event_ingestion_script(request):
 
 
 @event_ingestion_bp.post('/import')
+@openapi.definition(
+    summary="导入事件",
+    description="导入事件",
+    body={
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "files": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "上传的文件"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导入成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {"type": "object"}
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('ingestion:c')
 async def import_event_ingestion_script(request):
-    """
-    导入事件
-    请求参数:
-        files: 上传的文件
-    """
     files = request.files["files"]
     if not files:
         raise CustomError(ErrorCode.ParameterError)
@@ -853,18 +1288,59 @@ async def import_event_ingestion_script(request):
 
 
 @event_ingestion_bp.post('/parse')
+@openapi.definition(
+    summary="解析日志",
+    description="解析日志（需要事件查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id", "transforms_type"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "事件接入id"
+                    },
+                    "transforms_type": {
+                        "type": "string",
+                        "description": "转换类型"
+                    },
+                    "transforms_config": {
+                        "type": "string",
+                        "description": "转换配置"
+                    },
+                    "key_value_delimiter": {
+                        "type": "string",
+                        "description": "键值对分隔符"
+                    },
+                    "key_delimiter_value": {
+                        "type": "string",
+                        "description": "键值分隔符"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "解析成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('ingestion:r')
 async def parse_log(request):
-    """
-    解析日志（需要事件查看权限）
-
-    请求参数:
-        id: 事件接入id (str)
-        transforms_type: 转换类型 (str)
-        transforms_config: 转换配置 (str)
-        key_value_delimiter: 键值对分隔符 (str)
-        key_delimiter_value: 键值分隔符 (str)
-    """
     transforms_type = request.json.get('transforms_type')
     transformsconfig = request.json.get('transforms_config')
     key_value_delimiter = request.json.get('key_value_delimiter')
@@ -944,13 +1420,46 @@ async def parse_log(request):
 
 
 @event_ingestion_bp.post('/config/list')
+@openapi.definition(
+    summary="获取事件接入配置列表",
+    description="获取事件接入配置列表",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "事件接入id"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {"type": "object"}
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('ingestion:r')
 async def event_ingestion_config_list(request):
-    """
-    获取事件接入配置列表
-    请求参数:
-        id： str 事件接入id
-    """
     event_id = request.json.get('id')
     if not event_id:
         raise CustomError(ErrorCode.ParameterError)
@@ -976,37 +1485,109 @@ async def event_ingestion_config_list(request):
 
 
 @event_ingestion_bp.post('/playbook-list')
+@openapi.definition(
+    summary="获取playbook名称和id列表",
+    description="获取playbook名称和id列表",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "name": {"type": "string"}
+                                    }
+                                }
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 async def playbook_list(request):
-    """
-    获取playbook名称和id列表
-
-    无请求参数
-    """
     playbooks = await Playbook.filter(deleted=False).all().values_list("id", "name")
 
     return response_ok([{"id": playbook[0], "name": playbook[1]} for playbook in playbooks])
 
 
 @event_ingestion_bp.post('/transforms-list')
+@openapi.definition(
+    summary="获取transforms列表",
+    description="获取transforms列表",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {"type": "string"},
+                                        "type": {"type": "string"}
+                                    }
+                                }
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 async def transforms_list(request):
-    """
-    获取transforms列表
-
-    无请求参数
-    """
     transforms = await Config.filter(deleted=False, module="transforms").all()
 
     return response_ok([{"key": transform.key, "type": transform.type} for transform in transforms])
 
 
 @event_ingestion_bp.post('/grok-ai')
+@openapi.definition(
+    summary="使用AI进行日志解析生成grok表达式",
+    description="使用ai进行日志解析生成grok表达式并返回",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["log"],
+                "properties": {
+                    "log": {
+                        "type": "string",
+                        "description": "日志内容"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "生成成功",
+            "content": {
+                "text/plain": {
+                    "schema": {"type": "string"}
+                }
+            }
+        }
+    }
+)
 async def grok_ai(request):
-    """
-    使用ai进行日志解析生成grok表达式并返回
-
-    请求参数:
-        log: 日志内容 (str)
-    """
     log = request.json.get('log')
     SYSTEM_PROMPT = """
 # 角色
