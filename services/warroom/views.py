@@ -24,6 +24,8 @@ from models.warroom import Room, Message, MessageAccount
 from services.timed.views import runlog_list
 from settings import KAFKA_SERVERS, TASK_TOPIC, WR_TOPIC, CACHE
 
+from sanic_ext import openapi
+
 warroom_bp = Blueprint('warroom', url_prefix='/warroom')
 __all__ = ['warroom_bp']
 
@@ -586,6 +588,97 @@ async def up_status(request):
 
 @warroom_bp.post("/run")
 @requires_permission("warroom:r")
+@openapi.definition(
+    summary="运行剧本或动作",
+    description="根据运行类型执行flow或action操作，需要作战室查看权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id", "type"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "作战室ID",
+                        "example": "作战室123"
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "运行类型：flow/action",
+                        "enum": ["flow", "action"],
+                        "example": "flow"
+                    },
+                    "playbook_input": {
+                        "type": "object",
+                        "description": "剧本输入参数（当type为flow时必填）",
+                        "properties": {
+                            "flow_id": {
+                                "type": "string",
+                                "description": "剧本版本ID",
+                                "example": "73ecfba0-1aa4-4128-b99a-b97fb08a14be"
+                            },
+                            "flow_input": {
+                                "type": "object",
+                                "description": "剧本输入参数",
+                                "example": {"l": "123456789", "c": "123456789"}
+                            }
+                        }
+                    },
+                    "action_input": {
+                        "type": "object",
+                        "description": "动作输入参数（当type为action时必填）",
+                        "properties": {
+                            "app_name": {"type": "string", "description": "应用名称，英文标识"},
+                            "name": {"type": "string", "description": "应用中文名称"},
+                            "app_ver": {"type": "string", "description": "应用版本号"},
+                            "main": {"type": "string", "description": "主程序文件名"},
+                            "action_input": {
+                                "type": "object",
+                                "description": "动作输入参数",
+                                "example": {"clients": "abcd", "groups": "123456789"}
+                            },
+                            "resource": {
+                                "type": "string",
+                                "description": "资源ID，多个时用逗号分割",
+                                "example": "11111,22222,33333"
+                            },
+                            "node_name": {"type": "string", "description": "节点名称"},
+                            "action": {"type": "string", "description": "动作名称，英文标识"},
+                            "action_name": {"type": "string", "description": "动作名称，中文名称"},
+                            "retry_times": {
+                                "type": "integer",
+                                "description": "重试次数",
+                                "default": 1
+                            },
+                            "timeout": {
+                                "type": "integer",
+                                "description": "超时时间，单位秒",
+                                "default": 300
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "操作执行成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "message": {"type": "string", "example": "操作执行成功"},
+                            "data": {"type": "object"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 async def run(request):
     """
     运行剧本或动作（需要作战室创建权限）
@@ -593,7 +686,7 @@ async def run(request):
     请求参数：
         id: 必填，作战室ID
         type: 必填，运行类型，flow/action
-        -playbook_input dict 剧本输入参数 当type为flow时必填
+        playbook_input dict 剧本输入参数 当type为flow时必填
             示例如下：
             {
                 "flow_id": "73ecfba0-1aa4-4128-b99a-b97fb08a14be",      剧本版本id
@@ -606,9 +699,9 @@ async def run(request):
             示例如下：
             {
                 "app_name":"huorong_edr",         应用名称，英文标识
-                "name": "中文名称",               应用中文名称
+                "name": "中文名称",                应用中文名称
                 "app_ver":"v1746495758839",      应用版本号
-                "main":"huorong_edr.py",          主程序文件名  获取工具版本时会传
+                "main":"huorong_edr.py",         主程序文件名  获取工具版本时会传
                 "action_input":{
                     "clients":"abcd",             动作输入参数
                     "groups":"123456789"          动作输入参数
