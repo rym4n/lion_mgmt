@@ -34,6 +34,7 @@ TYPE_DICT = {
 
 
 @warroom_bp.websocket('/ws')
+@openapi.exclude()
 @requires_permission('warroom:r')
 async def warroom_ws(request: Request, ws: Websocket):
     account = None

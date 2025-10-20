@@ -179,7 +179,12 @@ async def todo_approvement(request):
     await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
 
     # 将created_at从UTC时间转换为北京时间（UTC+8）
-    sql = f
+    sql = f"""
+          SELECT a.title, a.content, a.expire_time, a.created_at, a.approve_type
+          FROM approvement a
+          JOIN approve_accounts b ON a.id = b.approvement_id AND b.account_id = '{request.ctx.session["sub"]}'
+          WHERE a.status = 0 AND NOT a.results ? '{request.ctx.session["sub"]}'
+        """
     async with in_transaction() as conn:
         rows = await conn.execute_query_dict(sql)
         for row in rows:

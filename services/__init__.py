@@ -5,12 +5,14 @@ import traceback
 import orjson
 from sanic import Sanic
 from sanic.log import logger
+from sanic_ext import openapi
 from tortoise.contrib.sanic import register_tortoise
 
 from core.exception_handlers import EXC_HDL_TUPLE, BaseExcHandler
 from core.listeners import LISTENER_TUPLE, BaseListener
 from core.middlewares import MIDDLEWARE_TUPLE, BaseMiddleware
 from libs.security.authorization import load_license
+from services.ai.views import ai_bp
 from services.approvement.views import approve_bp
 from services.dashboard.views import dashboard_bp
 from services.event.views import event_bp
@@ -27,7 +29,6 @@ from services.user.views import user_bp
 from services.variables.views import var_bp
 from services.warroom.views import warroom_bp
 from services.workflow.views import workflow_bp
-from services.ai.views import ai_bp
 from settings import BASE_LOGGING, TORTOISE
 
 
@@ -39,6 +40,7 @@ def create_app() -> Sanic:
     register_middleware(app)
     register_exception_handler(app)
     register_blueprints(app)
+    openapi.exclude(bp=license_bp)
     return app
 
 

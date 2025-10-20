@@ -3,6 +3,7 @@
 from elasticsearch import AsyncElasticsearch
 from sanic import Blueprint
 from sanic.log import logger
+from sanic_ext import openapi
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -15,14 +16,45 @@ _all__ = ["logs_bp"]
 
 
 @logs_bp.route('/query', methods=['POST'])
+@openapi.definition(
+    summary="查询ES日志数据",
+    description="通过SQL语句查询Elasticsearch中的日志数据",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["sql"],
+                "properties": {
+                    "sql": {
+                        "type": "string",
+                        "description": "查询语句"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "查询成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {
+                                "type": "object",
+                                "description": "ES查询结果"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('logs:r')
 async def get_logs_by_sql(request):
-    """
-    查询ES日志数据
-
-    请求参数：
-        sql: str, 查询语句，必填
-    """
     sql = request.json.get('sql')
     if not sql:
         raise CustomError(ErrorCode.ParameterError)
@@ -37,11 +69,34 @@ async def get_logs_by_sql(request):
 
 
 @logs_bp.route('/indexes', methods=['POST'])
+@openapi.definition(
+    summary="获取索引列表",
+    description="获取Elasticsearch中以'logs-'开头的索引别名列表",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "索引别名列表"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('logs:r')
 async def get_index_list(request):
-    """
-    获取索引列表
-    """
     async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS)) as es:
         resp = await es.cat.aliases(format='json')
         result = [i['alias'] for i in resp.body if i.get('alias', '').startswith('logs-')]
@@ -62,14 +117,45 @@ def extract_fields(mapping, prefix=''):
 
 
 @logs_bp.route('/fields', methods=['POST'])
+@openapi.definition(
+    summary="获取索引字段列表",
+    description="获取指定索引的字段列表及其数据类型",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["index"],
+                "properties": {
+                    "index": {
+                        "type": "string",
+                        "description": "索引别名"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {
+                                "type": "object",
+                                "description": "字段信息，键为字段名，值为字段类型"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('logs:r')
 async def get_field_list(request):
-    """
-    获取索引字段列表
-
-    请求参数：
-        index: str, 索引别名，必填
-    """
     index_name = request.json.get('index')
     if not index_name:
         raise CustomError(ErrorCode.ParameterError)
