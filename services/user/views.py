@@ -659,44 +659,7 @@ async def login(request):
 
 
 @user_bp.post("/local-auth")
-@openapi.definition(
-    summary="本地认证",
-    description="本地认证接口，仅限127.0.0.1访问",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "username": {
-                        "type": "string",
-                        "description": "用户名"
-                    }
-                }
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "认证成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "token": {"type": "string"}
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-)
+@openapi.exclude()
 async def local_auth(request):
     if request.ip != "127.0.0.1":
         raise CustomError(ErrorCode.IpForbidden)

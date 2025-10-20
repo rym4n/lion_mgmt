@@ -71,7 +71,7 @@ async def get_logs_by_sql(request):
 @logs_bp.route('/indexes', methods=['POST'])
 @openapi.definition(
     summary="获取索引列表",
-    description="获取Elasticsearch中以'logs-'开头的索引别名列表",
+    description="获取所有事件接入原始数据的索引别名列表",
     response={
         "200": {
             "description": "获取成功",

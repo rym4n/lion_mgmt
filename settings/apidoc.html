@@ -50,48 +50,9 @@
         }
 
         .container {
-            max-width: 1400px;
             margin: 0 auto;
-            padding: 2rem;
-        }
-
-        /* 响应式断点 */
-        @media (min-width: 768px) {
-            .container {
-                padding: 3rem;
-            }
-        }
-
-        @media (min-width: 1200px) {
-            .container {
-                padding: 4rem;
-            }
-        }
-
-        /* 平滑滚动与焦点管理 */
-        html {
-            scroll-behavior: smooth;
-        }
-
-        :focus {
-            outline: 2px solid var(--primary-500);
-            outline-offset: 2px;
-        }
-
-        /* 加载状态优化 */
-        #redoc-container:empty::before {
-            content: "正在加载API文档...";
-            display: block;
-            text-align: center;
-            color: var(--text-light);
-            padding: 2rem;
-            font-style: italic;
-        }
-
-        /* 性能优化：减少布局偏移 */
-        .container {
-            min-height: 100vh;
-            transition: padding 0.3s ease;
+            padding: 0; /* 移除内边距，让 Redoc 自行处理 */
+            height: 100vh;
         }
     </style>
 </head>
@@ -150,12 +111,12 @@
                 },
             },
             // 功能优化
+            lazyRendering: false,
+            nativeScrollbars: true,
             expandResponses: "all",
-            lazyRendering: true, // 性能优化：延迟渲染
             scrollYOffset: 60,
             hideDownloadButton: true,
             hideLoading: true,
-            // 菜单优化
             menuToggle: true,
             jsonSampleExpandLevel: 2,
         },
