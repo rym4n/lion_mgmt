@@ -2,9 +2,8 @@
 from datetime import datetime
 
 import pytz
-from tortoise import Tortoise
-
 from sanic import Blueprint
+from sanic_ext import openapi
 from tortoise.expressions import Q, RawSQL
 from tortoise.functions import Count
 from tortoise.transactions import in_transaction
@@ -20,21 +19,76 @@ _all__ = ["dashboard_bp"]
 
 
 @dashboard_bp.post('/view')
+@openapi.definition(
+    summary="获取仪表盘数据",
+    description="获取仪表盘数据，需要dashboard:r权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["table_name", "conditions", "start_time", "end_time"],
+                "properties": {
+                    "table_name": {
+                        "type": "string",
+                        "description": "表名，可选值：events, runlog"
+                    },
+                    "conditions": {
+                        "type": "object",
+                        "description": "查询条件"
+                    },
+                    "static_type": {
+                        "type": "string",
+                        "description": "统计类型，可选值：count(数量), value(全部字段的值)"
+                    },
+                    "group_by": {
+                        "type": "string",
+                        "description": "分组字段，events表可选字段：event_name, event_process_status, event_source, owner, room, updator, creator；runlog表可选字段：playbook_name"
+                    },
+                    "count_key": {
+                        "type": "string",
+                        "description": "分组统计的时候按什么字段做统计"
+                    },
+                    "count_distinct": {
+                        "type": "boolean",
+                        "description": "是否统计数量的不同值，默认值：True"
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "description": "统计的起始时间，格式：YYYY-MM-DD HH:MM:SS"
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "统计的结束时间，格式：YYYY-MM-DD HH:MM:SS"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "oneOf": [
+                                    {"type": "integer"},
+                                    {"type": "array"},
+                                    {"type": "object"}
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('dashboard:r')
 async def view_dashboard(request):
-    """
-    获取仪表盘数据
-
-    请求参数：
-        table_name: str, 表名，必填值：events, runlog
-        conditions: dict, 查询条件，必填值：
-        static_type: str, 统计类型，选填值（group_by为空时必填）：count(数量), value(全部字段的值)
-        group_by: str, 分组字段，选填值（static_type为空时必填）, events表可选字段：event_name, event_process_status, event_source, owner, room, updator, creator；runlog表可选字段：playbook_name
-        count_key: str, 分组统计的时候按什么字段做统计，group_by 不为空的时候必填
-        count_distinct: bool, 是否统计数量的不同值，默认值：True
-        start_time: str, 统计的起始时间
-        end_time: str, 统计的结束时间
-    """
     params = request.json
     table_dict = {
         "events": Events,
@@ -81,11 +135,56 @@ async def view_dashboard(request):
 
 
 @dashboard_bp.post('/mttr')
+@openapi.definition(
+    summary="获取MTTR数据",
+    description="获取MTTR数据，需要dashboard:r权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["start_time", "end_time"],
+                "properties": {
+                    "start_time": {
+                        "type": "string",
+                        "description": "统计的起始时间，格式：YYYY-MM-DD HH:MM:SS"
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "统计的结束时间，格式：YYYY-MM-DD HH:MM:SS"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "day": {"type": "string"},
+                                        "counts": {"type": "number"},
+                                        "event_count": {"type": "integer"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('dashboard:r')
 async def count_mttr(request):
-    """
-    获取MTTR数据
-    """
     params = request.json
     start_time = params.get("start_time")
     end_time = params.get("end_time")
@@ -120,11 +219,28 @@ async def count_mttr(request):
 
 
 @dashboard_bp.post('/playbooks')
+@openapi.definition(
+    summary="获取已发布的剧本数量",
+    description="获取已发布的剧本数量，需要dashboard:r权限",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "integer"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('dashboard:r')
 async def count_playbooks(request):
-    """
-    获取已发布的剧本数量
-    """
     result = await PlaybookVersion.filter(status=1).annotate(
         counts=Count('playbook_id', distinct=True)
     ).values("counts")
@@ -132,11 +248,28 @@ async def count_playbooks(request):
 
 
 @dashboard_bp.post('/apps')
+@openapi.definition(
+    summary="获取已配置资源的应用数量",
+    description="获取已配置资源的应用数量，需要dashboard:r权限",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "integer"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('dashboard:r')
 async def count_apps(request):
-    """
-    获取已配置资源的应用数量
-    """
     result = await ToolResources.annotate(
         counts=Count('tool_name', distinct=True)
     ).values("counts")
@@ -144,11 +277,37 @@ async def count_apps(request):
 
 
 @dashboard_bp.post('/success-rate')
+@openapi.definition(
+    summary="获取剧本的成功率排行",
+    description="获取剧本的成功率排行（修复成功率计算），需要dashboard:r权限",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "playbook_name": {"type": "string"},
+                                        "success_rate": {"type": "number"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('dashboard:r')
 async def playbooks_success_rate(request):
-    """
-    获取剧本的成功率排行（修复成功率计算）
-    """
     sql = """
         SELECT
             playbook_name,

@@ -4,6 +4,7 @@ from datetime import datetime
 import pytz
 from sanic import Blueprint
 from sanic import response
+from sanic_ext import openapi
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
@@ -48,19 +49,26 @@ NODE_TYPE = {
 
 
 @event_bp.post('/list')
+@openapi.definition(
+    summary="获取指定页数的事件列表",
+    description="获取指定页数的事件（支持条件筛选）(需要事件查询权限)",
+    body={
+        "page": 1,
+        "size": 15,
+        "event_name": "事件名称（支持模糊搜索）",
+        "event_process_status": "事件处理状态（精确匹配）",
+        "event_source": "事件来源（精确匹配）"
+    },
+    response={
+        "events": [],
+        "total": 0,
+        "page": 1,
+        "size": 15,
+        "total_pages": 0
+    }
+)
 @requires_permission('event:r')
 async def get_all_events(request):
-    """
-    获取指定页数的事件（支持条件筛选）(需要事件查询权限)
-
-    请求参数：
-        page: int 页数
-        size: int 每页大小
-        event_name: str 事件名称（支持模糊搜索）
-        event_process_status: str 事件处理状态（精确匹配）
-        event_source: str 事件来源（精确匹配）
-    """
-
     page = int(request.json.get('page', 1))
     size = int(request.json.get('size', 15))
     offset = (page - 1) * size
@@ -124,16 +132,49 @@ async def get_all_events(request):
 
 
 @event_bp.post('/artificial')
+@openapi.definition(
+    summary="人工创建事件（旧接口）",
+    description="人工创建事件（需要事件创建权限）（兼容老接口，请勿使用）",
+    deprecated=True,
+    body={
+        "eventName": "事件名称",
+        "ownerId": 1,
+        "eventSummary": "事件概要"
+    },
+    response={
+        "code": 0,
+        "data": {
+            "id": 1
+        },
+        "result": {
+            "id": 1,
+            "eventName": "事件名称",
+            "categoryName": "",
+            "categoryId": 0,
+            "ownerId": 1,
+            "eventSummary": "事件概要",
+            "eventStatus": "NEW",
+            "eventProcessStatus": "OPENED",
+            "sceneName": "",
+            "sceneDisplay": "",
+            "logId": "",
+            "relationEventId": 0,
+            "relationType": "UNKNOWN",
+            "eventSource": "MANUAL",
+            "bizName": "",
+            "openTime": None,
+            "resolvedTime": None,
+            "categoryDisplayName": None,
+            "resolvedBy": "",
+            "preBizModel": None,
+            "logModel": None,
+            "permissions": [],
+            "members": []
+        }
+    }
+)
 @requires_permission('event:c')
 async def artificial_create_event(request):
-    """
-    人工创建事件（需要事件创建权限）（兼容老接口，请勿使用）
-
-    请求参数：
-        eventName: str 事件名称 (必填)
-        ownerId: long 事件责任人id (非必填)不填则为空
-        eventSummary: str 事件概要 (非必填)
-    """
     event_name = request.json.get("eventName")
     event_process_status = "待处理"
     event_source = "人工"
@@ -204,16 +245,49 @@ async def artificial_create_event(request):
 
 
 @event_bp.post('/')
+@openapi.definition(
+    summary="人工创建事件（旧接口）",
+    description="人工创建事件（需要事件创建权限） （兼容老接口，请勿使用）",
+    deprecated=True,
+    body={
+        "eventName": "事件名称",
+        "ownerId": 1,
+        "eventSummary": "事件概要"
+    },
+    response={
+        "code": 0,
+        "data": {
+            "id": 1
+        },
+        "result": {
+            "id": 1,
+            "eventName": "事件名称",
+            "categoryName": "",
+            "categoryId": 0,
+            "ownerId": 1,
+            "eventSummary": "事件概要",
+            "eventStatus": "NEW",
+            "eventProcessStatus": "OPENED",
+            "sceneName": "",
+            "sceneDisplay": "",
+            "logId": "",
+            "relationEventId": 0,
+            "relationType": "UNKNOWN",
+            "eventSource": "MANUAL",
+            "bizName": "",
+            "openTime": None,
+            "resolvedTime": None,
+            "categoryDisplayName": None,
+            "resolvedBy": "",
+            "preBizModel": None,
+            "logModel": None,
+            "permissions": [],
+            "members": []
+        }
+    }
+)
 @requires_permission('event:c')
 async def artificial_create_event_wuzhi(request):
-    """
-    人工创建事件（需要事件创建权限） （兼容老接口，请勿使用）
-
-    请求参数：
-        eventName: str 事件名称 (必填)
-        ownerId: long 事件责任人id (非必填)不填则为空
-        eventSummary: str 事件概要 (非必填)
-    """
     event_name = request.json.get("eventName")
     event_process_status = "待处理"
     event_source = "人工"
@@ -284,20 +358,29 @@ async def artificial_create_event_wuzhi(request):
 
 
 @event_bp.post("/execution")
+@openapi.definition(
+    summary="运行剧本或动作",
+    description="运行剧本或动作（需要作战室创建权限）（兼容老接口，请勿使用）",
+    deprecated=True,
+    body={
+        "eventId": 1,
+        "executorInstanceId": 1,
+        "executorInstanceName": "执行实例名称",
+        "executorInstanceType": "PLAYBOOK/ACTION",
+        "execMode": "NORMAL",
+        "executorActionAssetIds": "资源id,多个资源用,分割",
+        "params": [{"key": "a", "value": "b"}]
+    },
+    response={
+        "code": 0,
+        "data": {
+            "activityId": "活动ID"
+        },
+        "result": "活动ID"
+    }
+)
 @requires_permission("event:r")
 async def execution(request):
-    """
-    运行剧本或动作（需要作战室创建权限）（兼容老接口，请勿使用）
-
-    请求参数：
-        eventId: 必填，事件ID
-        executorInstanceId: 必填 实例ID(剧本版本id或动作id)
-        executorInstanceName: 非必填 执行实例名称(剧本或者动作名字)
-        executorInstanceType: 必填，运行类型，PLAYBOOK/ACTION
-        execMode: 非必填，执行模式，NORMAL 正常模式
-        executorActionAssetIds: 非必填 动作资源id,多个资源用,分割
-        params: 非必填 运行参数 [{"key":"a","value":"b"},{"key":"c","value":"d"}]
-    """
     eventId = request.json.get("eventId")
     executorInstanceType = request.json.get("executorInstanceType")
     executorInstanceId = request.json.get("executorInstanceId")
@@ -362,14 +445,39 @@ async def execution(request):
 
 
 @event_bp.get('/activity/<activityId>')
+@openapi.definition(
+    summary="获取剧本或动作的执行结果",
+    description="获取剧本或动作的执行结果（需要事件查看权限）",
+    deprecated=True,
+    parameter=[{
+        "name": "activityId",
+        "location": "path",
+        "description": "活动id",
+        "required": True,
+        "schema": {"type": "string"}
+    }],
+    response={
+        "code": 0,
+        "result": {
+            "activity": {
+                "eventId": 1,
+                "executorInstanceId": 1,
+                "executorActionParams": "",
+                "execMode": None,
+                "displayName": "",
+                "code": 200,
+                "msg": "",
+                "messageId": None,
+                "startTime": 0,
+                "finishTime": 0,
+                "excuteStatus": "RUNNING/WAITING_APPROVE/FAIL/SUCCESS"
+            },
+            "nodeResults": []
+        }
+    }
+)
 @requires_permission('event:r')
 async def get_activity_result(request, activityId):
-    """
-    获取剧本或动作的执行结果（需要事件查看权限）（兼容老接口，请勿使用）
-
-    请求参数：
-        activityId: str 活动id (必填)
-    """
     if not activityId:
         raise CustomError(ErrorCode.ParamValueError)
     logs = await Runlog.filter(run_id=activityId, deleted=False).all()
@@ -515,23 +623,28 @@ async def get_activity_result(request, activityId):
 
 
 @event_bp.post('/create')
+@openapi.definition(
+    summary="创建事件",
+    description="创建事件（需要事件创建权限）",
+    body={
+        "event_name": "事件名称",
+        "event_source": "事件来源",
+        "owner": {
+            "role": ["root"],
+            "user": ["test"]
+        },
+        "event_summary": "事件概要",
+        "event_ingestion_id": "事件接入id",
+        "log_data": "日志数据"
+    },
+    response={
+        "code": 0,
+        "data": "创建成功",
+        "message": "创建成功"
+    }
+)
 @requires_permission('event:c')
 async def create_event(request):
-    """
-    创建事件（需要事件创建权限）
-
-    请求参数：
-        event_name: str 事件名称
-        event_source: str 事件来源   (人工创建时默认传人工)
-        owner: list 负责人 示例：
-        {
-            "role":["root"],
-            "user":["test"]
-        }
-        event_summary: str 事件概要 (非必填)
-        event_ingestion_id: str 事件接入id   (人工创建时不传此参数)
-        log_data: str 日志数据 (非必填)    (人工创建时不传此参数)
-    """
     event_name = request.json.get("event_name")
     event_process_status = "待处理"
     event_source = "人工"
@@ -554,14 +667,20 @@ async def create_event(request):
 
 
 @event_bp.post('/detail')
+@openapi.definition(
+    summary="获取事件详情",
+    description="获取事件详情（需要事件查询权限）",
+    body={
+        "id": "事件id"
+    },
+    response={
+        "code": 0,
+        "data": {},
+        "message": "成功"
+    }
+)
 @requires_permission('event:r')
 async def get_event_detail(request):
-    """
-    获取事件详情（需要事件查询权限）
-
-    请求参数：
-        id: str 事件id
-    """
     event_id = request.json.get("id")
 
     event = await Events.get(id=event_id, deleted=False).prefetch_related("room", "creator", "updator")
@@ -610,24 +729,28 @@ async def get_event_detail(request):
 
 
 @event_bp.post('/update')
+@openapi.definition(
+    summary="更新事件",
+    description="更新事件（需要事件更新权限）",
+    body={
+        "id": "事件id",
+        "event_name": "事件名称",
+        "owner": {
+            "role": ["root"],
+            "user": ["test"]
+        },
+        "event_summary": "事件概要",
+        "event_process_status": "事件处理状态",
+        "room_user_id": "作战室新增用户id"
+    },
+    response={
+        "code": 0,
+        "data": "更新成功",
+        "message": "更新成功"
+    }
+)
 @requires_permission('event:u')
 async def update_event(request):
-    """
-    更新事件（需要事件更新权限）
-
-    请求参数：
-        id: str 事件id
-        event_name: str 事件名称    (非必填)
-        owner: list 负责人          (非必填)
-        示例：
-        {
-            "role":["root"],
-            "user":["test"]
-        }
-        event_summary: str 事件概要 (非必填)
-        event_process_status: str 事件处理状态 (非必填)
-        room_user_id: str 作战室新增用户id (非必填)
-    """
     params = request.json
     event_id = params.get("id")
     if not event_id:

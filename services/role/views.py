@@ -2,10 +2,11 @@
 import time
 
 from sanic import Blueprint
+from sanic_ext import openapi
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
-from core.response import response_ok, response_fail
+from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
 from models import Role, Account, PermissionsMenu
@@ -15,16 +16,68 @@ _all__ = ["role_bp"]
 
 
 @role_bp.post("/add")
+@openapi.definition(
+    summary="新建角色",
+    description="新建一个角色，需要角色创建权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "角色名"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "描述"
+                    },
+                    "permissions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "权限列表"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "创建成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "ctime": {"type": "string"},
+                                    "utime": {"type": "string"},
+                                    "name": {"type": "string"},
+                                    "description": {"type": "string"},
+                                    "permissions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('role:c')
 async def add_role(request):
-    """
-    新建角色(需要角色创建权限)
-
-    请求参数：
-        name:角色名
-        description:描述
-        permissions:权限  ["a:1"]
-    """
     name = request.json.get("name")
     description = request.json.get("description", "")
     permissions = request.json.get("permissions", [])
@@ -34,15 +87,72 @@ async def add_role(request):
 
 
 @role_bp.post("/all")
+@openapi.definition(
+    summary="查找全部角色",
+    description="查找全部角色，需要角色查看权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "integer",
+                        "description": "页码"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "description": "页容量"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "roles": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "ctime": {"type": "string"},
+                                                "utime": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "description": {"type": "string"},
+                                                "permissions": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "total": {"type": "integer"},
+                                    "page": {"type": "integer"},
+                                    "size": {"type": "integer"},
+                                    "total_pages": {"type": "integer"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('role:r')
 async def find_all(request):
-    """
-    查找全部角色  (需要角色查看权限)
-
-    请求参数：
-        page:页码
-        size:页容量
-    """
     page = int(request.json.get('page', 1))
     size = int(request.json.get("size", 15))
     offset = (page - 1) * size
@@ -59,14 +169,70 @@ async def find_all(request):
 
 
 @role_bp.post("/details")
+@openapi.definition(
+    summary="查找具体角色信息",
+    description="查找具体角色信息，需要角色查看权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["role_id"],
+                "properties": {
+                    "role_id": {
+                        "type": "string",
+                        "description": "角色id"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "ctime": {"type": "string"},
+                                    "utime": {"type": "string"},
+                                    "name": {"type": "string"},
+                                    "description": {"type": "string"},
+                                    "permissions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "model": {"type": "string"},
+                                                "model_description": {"type": "string"},
+                                                "sp": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "additionalProperties": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('role:r')
 async def find_role(request):
-    """
-    查找具体角色信息（需要角色查看权限）
-
-    请求参数：
-        role_id：角色id
-    """
     role_id = request.json.get("role_id")
     role = await Role.get_or_none(id=role_id, deleted=False)
     if not role:
@@ -111,14 +277,44 @@ async def find_role(request):
 
 
 @role_bp.post("/delete")
+@openapi.definition(
+    summary="删除指定角色",
+    description="删除指定角色，需要角色删除权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["role_id"],
+                "properties": {
+                    "role_id": {
+                        "type": "string",
+                        "description": "角色id"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('role:d')
 async def delete_role(request):
-    """
-    删除指定角色    (需要角色删除权限)
-
-    请求参数：
-        role_id：角色id
-    """
     role_id = request.json.get("role_id")
     exists = await Account.filter(roles__id=role_id).exists()
     if exists:
@@ -132,17 +328,72 @@ async def delete_role(request):
 
 
 @role_bp.post("/update")
+@openapi.definition(
+    summary="修改角色内容",
+    description="修改角色内容，需要角色修改权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["role_id"],
+                "properties": {
+                    "role_id": {
+                        "type": "string",
+                        "description": "角色id"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "新的角色名"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "新的描述"
+                    },
+                    "permissions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "新的权限"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "ctime": {"type": "string"},
+                                    "utime": {"type": "string"},
+                                    "name": {"type": "string"},
+                                    "description": {"type": "string"},
+                                    "permissions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('role:u')
 async def update_role(request):
-    """
-    修改角色内容    (需要角色修改权限)
-
-    请求参数：
-        role_id：角色id
-        name：新的角色名
-        description：新的描述
-        permissions：新的权限
-    """
     role_id = request.json.get("role_id")
     name = request.json.get("name")
     description = request.json.get("description", "")
@@ -161,13 +412,56 @@ async def update_role(request):
 
 
 @role_bp.post("/permission/all")
+@openapi.definition(
+    summary="查找全部权限",
+    description="查找全部权限，需要角色查看权限",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "permissions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "ctime": {"type": "string"},
+                                                "utime": {"type": "string"},
+                                                "model": {"type": "string"},
+                                                "bp": {"type": "string"},
+                                                "description": {"type": "string"},
+                                                "Permissions": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "value": {"type": "string"},
+                                                            "label": {"type": "string"}
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission('role:r')
 async def all_permission(request):
-    """
-    查找全部权限    (需要角色查看权限)
-
-    请求参数：
-    """
     menu_dict = {}
     lic = load_license()
     if not lic:

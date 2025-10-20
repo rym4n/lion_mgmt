@@ -2,6 +2,7 @@
 # coding=utf-8
 from aiocache import caches
 from sanic import Blueprint
+from sanic_ext import openapi
 from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
@@ -15,15 +16,57 @@ _all__ = ["var_bp"]
 
 
 @var_bp.post("/new")
+@openapi.definition(
+    summary="新建全局变量",
+    description="创建一个新的全局变量，需要var:c权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "value"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "变量名（唯一）"
+                    },
+                    "value": {
+                        "type": "object",
+                        "description": "变量值，JSON格式对象，不是字符串"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "创建成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "ctime": {"type": "string"},
+                                    "utime": {"type": "string"},
+                                    "name": {"type": "string"},
+                                    "value": {"type": "object"},
+                                    "type": {"type": "string"},
+                                    "updator": {"type": "object"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("var:c")
 async def new_variable(request):
-    """
-    新建全局变量
-
-    请求参数
-        name: 变量名（唯一）
-        value: 变量值，JSON格式对象，不是字符串
-    """
     name = request.json.get("name")
     value = request.json.get("value")
     if not name or not value:
@@ -35,16 +78,69 @@ async def new_variable(request):
 
 
 @var_bp.post("/list")
+@openapi.definition(
+    summary="获取所有全局变量信息",
+    description="获取所有全局变量列表，需要var:r权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "integer",
+                        "description": "页码"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "description": "每页数量"
+                    },
+                    "keyword": {
+                        "type": "string",
+                        "description": "可选参数，变量名 或 变量值（元素要完全匹配）"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "total": {"type": "integer"},
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "ctime": {"type": "string"},
+                                                "utime": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "value": {"type": "object"},
+                                                "type": {"type": "string"},
+                                                "updator": {"type": "object"}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("var:r")
 async def all_variables(request):
-    """
-    获取所有全局变量信息（需要var:r权限）
-    
-    请求参数：
-        page: 页码
-        size: 每页数量
-        keyword: 可选参数，变量名 或 变量值（元素要完全匹配）
-    """
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 15))
     offset = (page - 1) * size
@@ -61,14 +157,42 @@ async def all_variables(request):
 
 
 @var_bp.post("/del")
+@openapi.definition(
+    summary="删除全局变量",
+    description="删除指定的全局变量，需要var:d权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "变量名"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("var:d")
 async def delelte_variable(request):
-    """
-    删除全局变量（需要var:d权限）
-
-    请求参数:
-        name: 变量名
-    """
     var = await Variables.get_or_none(name=request.json.get("name"), type="global")
     if not var:
         raise CustomError(ErrorCode.NotFound)
@@ -78,9 +202,46 @@ async def delelte_variable(request):
 
 
 @var_bp.post("/update")
+@openapi.definition(
+    summary="更新全局变量",
+    description="更新指定的全局变量，需要var:u权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "value"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "变量名"
+                    },
+                    "value": {
+                        "type": "object",
+                        "description": "变量值，JSON格式对象"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("var:u")
 async def update_variable(request):
-    """更新全局变量（需要var:u权限）"""
     name = request.json.get("name")
     value = request.json.get("value")
     if not name or not value:

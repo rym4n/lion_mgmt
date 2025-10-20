@@ -1,12 +1,12 @@
-import asyncio
+# coding=utf-8
+
 import datetime
-import time
-from collections import defaultdict
 
 import pytz
 from croniter import croniter
 from sanic import Blueprint
 from sanic.log import logger
+from sanic_ext import openapi
 from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
@@ -39,45 +39,108 @@ def build_timer_rule(status, tactics, end_time):
 
 
 @timed_bp.post("/add")
-@requires_permission("timed:c")
-async def add_timed(request):
-    """
-    添加定时任务 (需要定时任务创建权限)
-
-    请求参数：
-       - name  str 定时任务名称  必填
-       - type int 执行操作类型  必填  0为执行剧本， 1为执行动作
-       - playbook_id str 剧本id 当type为0时必填
-       - playbook_input dict 剧本输入参数 当type为0时必填,示例如下：
-            {
-                "flow_id": "73ecfba0-1aa4-4128-b99a-b97fb08a14be",      剧本id
-                "flow_input": {
-                    "l":"123456789",        剧本输入参数
-                    "c":"123456789"         剧本输入参数
+@openapi.definition(
+    summary="添加定时任务",
+    description="添加一个新的定时任务，需要定时任务创建权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "type", "status", "tactics"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "定时任务名称"
+                    },
+                    "type": {
+                        "type": "integer",
+                        "description": "执行操作类型 0为执行剧本，1为执行动作"
+                    },
+                    "playbook_id": {
+                        "type": "string",
+                        "description": "剧本id 当type为0时必填"
+                    },
+                    "playbook_input": {
+                        "type": "object",
+                        "description": "剧本输入参数 当type为0时必填"
+                    },
+                    "action_id": {
+                        "type": "string",
+                        "description": "动作id 当type为1时必填"
+                    },
+                    "action_input": {
+                        "type": "object",
+                        "description": "动作输入参数 当type为1时必填"
+                    },
+                    "status": {
+                        "type": "integer",
+                        "description": "执行类型 0为单次执行，1为周期执行"
+                    },
+                    "tactics": {
+                        "type": "string",
+                        "description": "执行策略 如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数"
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "结束时间 为周期执行时填写，格式为2025-12-12 00:00:00"
+                    }
                 }
             }
-       - action_id str 动作id 当type为1时必填
-       - action_input dict 动作输入参数 当type为1时必填,示例如下：
-            {
-                "app_name":"huorong_edr",         应用名称，英文标识
-                "name": "中文名称",               应用中文名称
-                "app_ver":"v1746495758839",      应用版本号
-                "main":"huorong_edr.py",          主程序文件名  获取工具版本时会传
-                "action_input":{
-                    "clients":"abcd",             动作输入参数
-                    "groups":"123456789"          动作输入参数
-                },
-                "resource":"123456789,12348798798",  资源id,多个资源用逗号分隔
-                "node_name":"自定义扫描",    节点名称，定时任务模块中取动作描述
-                "action":"custom_scan",     动作名称 英文标识
-                "action_name":"自定义扫描",    动作名称 中文名称
-                "retry_times":1,             重试次数
-                "timeout":300,               超时时间,单位秒
+        }
+    },
+    response={
+        "200": {
+            "description": "添加成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "ctime": {"type": "string"},
+                                    "utime": {"type": "string"},
+                                    "name": {"type": "string"},
+                                    "type": {"type": "integer"},
+                                    "playbook_id": {"type": "string"},
+                                    "playbook_input": {"type": "object"},
+                                    "action_id": {"type": "string"},
+                                    "action_input": {"type": "object"},
+                                    "status": {"type": "integer"},
+                                    "tactics": {"type": "string"},
+                                    "end_time": {"type": "string"},
+                                    "enable": {"type": "integer"},
+                                    "result": {"type": "string"},
+                                    "success_rate": {"type": "string"},
+                                    "internal": {"type": "boolean"},
+                                    "creator": {
+                                        "type": "object",
+                                        "properties": {
+                                            "username": {"type": "string"},
+                                            "display_name": {"type": "string"}
+                                        }
+                                    },
+                                    "updator": {
+                                        "type": "object",
+                                        "properties": {
+                                            "username": {"type": "string"},
+                                            "display_name": {"type": "string"}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-       - status int 执行类型  必填  0为单次执行，1为周期执行
-       - tactics str 执行策略  必填   如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数
-       - end_time str 结束时间  为周期执行时填写，格式为2025-12-12 00:00:00
-    """
+        }
+    }
+)
+@requires_permission("timed:c")
+async def add_timed(request):
     data = request.json
     name = data.get("name")
     operate_type = int(data.get("type"))
@@ -159,12 +222,6 @@ async def add_timed(request):
 
 
 async def get_playbook_permissions(pb_id, subject, cache_client, is_user: bool = True):
-    """
-    获取某个 playbook 的权限（优先查缓存，否则查数据库）
-    :param pb_id: playbook id
-    :param subject: 用户ID 或 角色ID
-    :param is_user: 是否是用户（否则为角色）
-    """
     cache_key = (pb_id, subject)
     data = await cache_client.get(cache_key)
     if not data:
@@ -237,16 +294,96 @@ async def get_timed_permissions(request, filtered_items):
 
 
 @timed_bp.post("/all")
+@openapi.definition(
+    summary="获取所有定时任务列表",
+    description="获取所有定时任务列表，需要定时任务查看权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "integer",
+                        "description": "页码，默认1"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "description": "页大小，默认10"
+                    },
+                    "keyword": {
+                        "type": "string",
+                        "description": "搜索关键字，目前支持任务名称，动作名称，剧本名称搜索"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "page": {"type": "integer"},
+                                    "size": {"type": "integer"},
+                                    "total": {"type": "integer"},
+                                    "items": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "ctime": {"type": "string"},
+                                                "utime": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "type": {"type": "integer"},
+                                                "status": {"type": "integer"},
+                                                "tactics": {"type": "string"},
+                                                "result": {"type": "string"},
+                                                "playbook_remark": {"type": "string"},
+                                                "action": {"type": "string"},
+                                                "enable": {"type": "integer"},
+                                                "end_time": {"type": "string"},
+                                                "creator": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "username": {"type": "string"},
+                                                        "display_name": {"type": "string"}
+                                                    }
+                                                },
+                                                "updator": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "username": {"type": "string"},
+                                                        "display_name": {"type": "string"}
+                                                    }
+                                                },
+                                                "permissions": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("timed:r")
 async def get_all(request):
-    """
-    获取所有定时任务列表 (需要定时任务查看权限)
-
-    请求参数：
-        - page int 页码  必填   默认1
-        - size int 页大小  必填   默认10
-        - keyword str 搜索关键字  可选 目前支持任务名称，动作名称，剧本名称搜索
-    """
     page = int(request.json.get("page") or 1)
     size = int(request.json.get("size") or 15)
     keyword = request.json.get("keyword", "").strip()
@@ -283,30 +420,30 @@ async def get_all(request):
     paged_items = result[start:end]
 
     items = [{
-                "id": item.id,
-                "ctime": strip_timezone_to_seconds(item.ctime),
-                "utime": strip_timezone_to_seconds(item.utime),
-                "name": item.name,
-                "type": item.type,
-                "status": item.status,
-                "tactics": item.tactics,
-                "result": item.result,
-                "playbook_remark": item.playbook.name if item.playbook else "",
-                "action": item.action.action["name"] if item.action else "",
-                "enable": item.enable,
-                "end_time": item.end_time,
-                "creator": {
-                    "username": item.creator.username,
-                    "display_name": item.creator.display_name,
-                },
-                "updator": {
-                    "username": item.updator.username,
-                    "display_name": item.updator.display_name,
-                },
-                "permissions": permissions.get(item.id, [])
-            }
-            for item in paged_items
-        ]
+        "id": item.id,
+        "ctime": strip_timezone_to_seconds(item.ctime),
+        "utime": strip_timezone_to_seconds(item.utime),
+        "name": item.name,
+        "type": item.type,
+        "status": item.status,
+        "tactics": item.tactics,
+        "result": item.result,
+        "playbook_remark": item.playbook.name if item.playbook else "",
+        "action": item.action.action["name"] if item.action else "",
+        "enable": item.enable,
+        "end_time": item.end_time,
+        "creator": {
+            "username": item.creator.username,
+            "display_name": item.creator.display_name,
+        },
+        "updator": {
+            "username": item.updator.username,
+            "display_name": item.updator.display_name,
+        },
+        "permissions": permissions.get(item.id, [])
+    }
+        for item in paged_items
+    ]
 
     return response_ok({
         "page": page,
@@ -317,26 +454,143 @@ async def get_all(request):
 
 
 @timed_bp.post("/success")
+@openapi.definition(
+    summary="获取定时任务成功率",
+    description="获取定时任务成功率，需要定时任务查看权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "定时任务的id列表"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "result": {"type": "string"},
+                                        "success_rate": {"type": "string"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("timed:r")
 async def get_success_rate(request):
-    """
-    获取定时任务成功率 (需要定时任务查看权限)
-
-    请求参数：
-        - ids 定时任务的id列表 list
-    """
     items = await Timed.filter(id__in=request.json.get("ids"), deleted=False).all()
     return response_ok([await timer_success_rate(item) for item in items])
 
 
 @timed_bp.post("/detail")
+@openapi.definition(
+    summary="获取单个定时任务详情",
+    description="获取单个定时任务详情",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "定时任务id"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "items": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "ctime": {"type": "string"},
+                                                "utime": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "type": {"type": "integer"},
+                                                "playbook_id": {"type": "string"},
+                                                "playbook_input": {"type": "object"},
+                                                "action_id": {"type": "string"},
+                                                "action_input": {"type": "object"},
+                                                "status": {"type": "integer"},
+                                                "tactics": {"type": "string"},
+                                                "end_time": {"type": "string"},
+                                                "enable": {"type": "integer"},
+                                                "result": {"type": "string"},
+                                                "success_rate": {"type": "string"},
+                                                "internal": {"type": "boolean"},
+                                                "creator": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "username": {"type": "string"},
+                                                        "display_name": {"type": "string"}
+                                                    }
+                                                },
+                                                "updator": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "username": {"type": "string"},
+                                                        "display_name": {"type": "string"}
+                                                    }
+                                                },
+                                                "input_args": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("timed:r")
 async def get_timed_detail(request):
-    """
-    获取单个定时任务详情
-    请求参数：
-        id : 定时任务id
-    """
     timed_id = request.json.get("id")
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
@@ -361,27 +615,116 @@ async def get_timed_detail(request):
                     input_args.append({arg["key"]: arg})
                 data["input_args"] = input_args
 
-    return response_ok({"items":[data]})
+    return response_ok({"items": [data]})
 
 
 @timed_bp.post("/update")
+@openapi.definition(
+    summary="更新定时任务",
+    description="更新定时任务，需要定时任务更新权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "定时任务id"
+                    },
+                    "type": {
+                        "type": "integer",
+                        "description": "执行操作类型 0为执行剧本，1为执行动作"
+                    },
+                    "playbook_id": {
+                        "type": "string",
+                        "description": "剧本id 当type为0时必填"
+                    },
+                    "playbook_input": {
+                        "type": "object",
+                        "description": "剧本输入参数 当type为0时必填"
+                    },
+                    "action_id": {
+                        "type": "string",
+                        "description": "动作id 当type为1时必填"
+                    },
+                    "action_input": {
+                        "type": "object",
+                        "description": "动作输入参数 当type为1时必填"
+                    },
+                    "status": {
+                        "type": "integer",
+                        "description": "执行类型 0为单次执行，1为周期执行"
+                    },
+                    "tactics": {
+                        "type": "string",
+                        "description": "执行策略 如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数"
+                    },
+                    "enable": {
+                        "type": "integer",
+                        "description": "是否启用 0为禁用，1为启用"
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "结束时间 为周期执行时填写，格式为2025-12-12 00:00:00"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "ctime": {"type": "string"},
+                                    "utime": {"type": "string"},
+                                    "name": {"type": "string"},
+                                    "type": {"type": "integer"},
+                                    "playbook_id": {"type": "string"},
+                                    "playbook_input": {"type": "object"},
+                                    "action_id": {"type": "string"},
+                                    "action_input": {"type": "object"},
+                                    "status": {"type": "integer"},
+                                    "tactics": {"type": "string"},
+                                    "end_time": {"type": "string"},
+                                    "enable": {"type": "integer"},
+                                    "result": {"type": "string"},
+                                    "success_rate": {"type": "string"},
+                                    "internal": {"type": "boolean"},
+                                    "creator": {
+                                        "type": "object",
+                                        "properties": {
+                                            "username": {"type": "string"},
+                                            "display_name": {"type": "string"}
+                                        }
+                                    },
+                                    "updator": {
+                                        "type": "object",
+                                        "properties": {
+                                            "username": {"type": "string"},
+                                            "display_name": {"type": "string"}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("timed:u")
 async def update_timed(request):
-    """
-    更新定时任务 (需要定时任务更新权限)
-
-    请求参数：
-       - id str 定时任务id  必填
-       - type int 执行操作类型  非必填  0为执行剧本， 1为执行动作
-       - playbook_id str 剧本id 当type为0时必填
-       - playbook_input dict 剧本输入参数 当type为0时必填
-       - action_id str 动作id 当type为1时必填
-       - action_input dict 动作输入参数 当type为1时必填
-       - status int 执行类型  非必填  0为单次执行，1为周期执行
-       - tactics str 执行策略  非必填   如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数
-       - enable int 是否启用  非必填  0为禁用，1为启用
-       - end_time int 结束时间  为周期执行时填写，格式为2025-12-12 00:00:00
-    """
     data = request.json
     timed_id = data.get("id")
     if not timed_id:
@@ -472,14 +815,44 @@ async def update_timed(request):
 
 
 @timed_bp.post("/delete")
+@openapi.definition(
+    summary="删除定时任务",
+    description="删除定时任务，需要定时任务删除权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "定时任务id"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("timed:d")
 async def delete_timed(request):
-    """
-    删除定时任务 (需要定时任务删除权限)
-
-    请求参数：
-       - id str 定时任务id  必填
-    """
     timed_id = request.json.get("id")
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
@@ -508,18 +881,103 @@ async def delete_timed(request):
 
 
 @timed_bp.post("/runlog")
+@openapi.definition(
+    summary="获取定时任务执行日志",
+    description="获取定时任务执行日志，需要定时任务查看权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id", "page", "size"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "定时任务id"
+                    },
+                    "page": {
+                        "type": "integer",
+                        "description": "页码，默认1"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "description": "页大小，默认10"
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "description": "开始时间，格式为2025-12-12 00:00:00"
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "结束时间，格式为2025-12-12 00:00:00"
+                    },
+                    "status": {
+                        "type": "integer",
+                        "description": "状态 0为成功，1为失败"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "page": {"type": "integer"},
+                                    "size": {"type": "integer"},
+                                    "total": {"type": "integer"},
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "id": {"type": "string"},
+                                                    "ctime": {"type": "string"},
+                                                    "utime": {"type": "string"},
+                                                    "run_id": {"type": "string"},
+                                                    "event_id": {"type": "string"},
+                                                    "node_id": {"type": "string"},
+                                                    "node_name": {"type": "string"},
+                                                    "node_type": {"type": "string"},
+                                                    "tool_name": {"type": "string"},
+                                                    "tool_version": {"type": "string"},
+                                                    "tool_display_name": {"type": "string"},
+                                                    "action_name": {"type": "string"},
+                                                    "action_display_name": {"type": "string"},
+                                                    "status": {"type": "integer"},
+                                                    "args": {"type": "object"},
+                                                    "result": {"type": "string"},
+                                                    "start_time": {"type": "string"},
+                                                    "end_time": {"type": "string"},
+                                                    "executor": {"type": "string"},
+                                                    "resource_name": {"type": "string"},
+                                                    "playbook_name": {"type": "string"},
+                                                    "playbook_version_id": {"type": "string"},
+                                                    "timer_id": {"type": "string"}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("timed:r")
 async def get_run_log(request):
-    """
-    获取定时任务执行日志 (需要定时任务查看权限)
-    请求参数：
-        - id str 定时任务id  必填
-        - page int 页码  必填   默认1
-        - size int 页大小  必填   默认10
-        - start_time str 开始时间  非必填   格式为2025-12-12 00:00:00
-        - end_time str 结束时间  非必填   格式为2025-12-12 00:00:00
-        - status int 状态  非必填   0为成功，1为失败
-    """
     timed_id = request.json.get("id")
     page = int(request.json.get("page") or 1)
     size = int(request.json.get("size") or 15)
@@ -548,7 +1006,6 @@ async def get_run_log(request):
     run_ids = await Runlog.filter(condition).distinct().order_by('-run_id').offset((page - 1) * size).limit(size).values_list('run_id', flat=True)
     run_logs = []
     if run_ids:
-
         all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).order_by('ctime').prefetch_related("timer", "playbook_version").all()
         run_logs = runlog_list(all_logs)
 
@@ -580,7 +1037,6 @@ def runlog_list(all_logs):
 
 
 async def timer_success_rate(timed: str):
-    """计算定时任务的成功率和最近一次执行结果"""
     logs = await Runlog.filter(timer_id=timed.id, deleted=False).order_by("-start_time").limit(10)
 
     # 计算成功率
@@ -600,4 +1056,3 @@ async def timer_success_rate(timed: str):
         "result": timed.result,
         "success_rate": timed.success_rate,
     }
-

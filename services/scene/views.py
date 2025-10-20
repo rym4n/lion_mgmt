@@ -1,5 +1,6 @@
 from aiocache import caches
 from sanic import Blueprint
+from sanic_ext import openapi
 from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
@@ -14,16 +15,74 @@ _all__ = ["scene_bp"]
 
 
 @scene_bp.post("/add")
+@openapi.definition(
+    summary="添加场景",
+    description="添加一个新的场景，需要场景创建权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "remark", "status"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "场景名称"
+                    },
+                    "remark": {
+                        "type": "string",
+                        "description": "场景描述"
+                    },
+                    "status": {
+                        "type": "integer",
+                        "description": "场景状态 0-禁用 1-启用"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "添加成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "ctime": {"type": "string"},
+                                    "utime": {"type": "string"},
+                                    "name": {"type": "string"},
+                                    "remark": {"type": "string"},
+                                    "status": {"type": "integer"},
+                                    "creator": {
+                                        "type": "object",
+                                        "properties": {
+                                            "username": {"type": "string"},
+                                            "display_name": {"type": "string"}
+                                        }
+                                    },
+                                    "updator": {
+                                        "type": "object",
+                                        "properties": {
+                                            "username": {"type": "string"},
+                                            "display_name": {"type": "string"}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("scene:c")
 async def add_scene(request):
-    """
-    添加场景 (需要场景创建权限)
-
-    请求参数：
-        name str 场景名称 必填
-        remark str 场景描述 必填
-        status int 场景状态 必填 0-禁用 1-启用
-    """
     name = request.json.get('name')
     remark = request.json.get('remark')
     status = int(request.json.get('status'))
@@ -44,15 +103,70 @@ async def add_scene(request):
 
 
 @scene_bp.post("/update")
+@openapi.definition(
+    summary="更新场景",
+    description="更新指定场景信息，需要场景更新权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "场景id"
+                    },
+                    "remark": {
+                        "type": "string",
+                        "description": "场景描述"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "ctime": {"type": "string"},
+                                    "utime": {"type": "string"},
+                                    "name": {"type": "string"},
+                                    "remark": {"type": "string"},
+                                    "status": {"type": "integer"},
+                                    "creator": {
+                                        "type": "object",
+                                        "properties": {
+                                            "username": {"type": "string"},
+                                            "display_name": {"type": "string"}
+                                        }
+                                    },
+                                    "updator": {
+                                        "type": "object",
+                                        "properties": {
+                                            "username": {"type": "string"},
+                                            "display_name": {"type": "string"}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("scene:u")
 async def update_scene(request):
-    """
-    更新场景 (需要场景更新权限)
-
-    请求参数：
-        id str 场景id 必填
-        remark str 场景描述 非必填
-    """
     id = request.json.get('id')
     remark = (request.json.get('remark') or None)
     if not id:
@@ -71,16 +185,87 @@ async def update_scene(request):
 
 
 @scene_bp.post("/all")
+@openapi.definition(
+    summary="获取所有场景",
+    description="获取所有场景列表",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "integer",
+                        "description": "页码，默认为1"
+                    },
+                    "page_size": {
+                        "type": "integer",
+                        "description": "每页数量，默认为10"
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "搜索关键字"
+                    },
+                    "status": {
+                        "type": "integer",
+                        "description": "场景状态 0-禁用 1-启用"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "scenes": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "ctime": {"type": "string"},
+                                                "utime": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "remark": {"type": "string"},
+                                                "status": {"type": "integer"},
+                                                "creator": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "username": {"type": "string"},
+                                                        "display_name": {"type": "string"}
+                                                    }
+                                                },
+                                                "updator": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "username": {"type": "string"},
+                                                        "display_name": {"type": "string"}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    "page": {"type": "integer"},
+                                    "page_size": {"type": "integer"},
+                                    "total": {"type": "integer"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 async def get_all_scene(request):
-    """
-    获取所有场景 (需要场景查看权限)
-
-    请求参数:
-        page int 页码 非必填 默认为1
-        page_size int 每页数量 非必填 默认为10
-        key str 搜索关键字 非必填 默认为空
-        status int 场景状态 非必填 0-禁用 1-启用
-    """
     page = int(request.json.get('page') or 1)
     page_size = int(request.json.get('page_size') or 10)
     key = request.json.get('key') or None
@@ -108,14 +293,42 @@ async def get_all_scene(request):
 
 
 @scene_bp.post("/current")
+@openapi.definition(
+    summary="设置当前场景",
+    description="设置指定场景为当前场景，需要场景更新权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "场景id"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "设置成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("scene:u")
 async def set_current_scene(request):
-    """
-    设置当前场景 (需要场景更新权限)
-
-    请求参数：
-        id str 场景id 必填
-    """
     id = request.json.get('id')
     if not id:
         raise CustomError(ErrorCode.ParameterError)
@@ -134,14 +347,42 @@ async def set_current_scene(request):
 
 
 @scene_bp.post("/remove")
+@openapi.definition(
+    summary="删除场景",
+    description="删除指定场景，需要场景删除权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "场景id"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("scene:d")
 async def remove_scene(request):
-    """
-    删除场景 (需要场景删除权限)
-
-    请求参数：
-        id str 场景id 必填
-    """
     id = request.json.get('id')
     if not id:
         raise CustomError(ErrorCode.ParameterError)

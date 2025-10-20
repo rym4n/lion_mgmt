@@ -4,6 +4,7 @@ from datetime import datetime
 
 import pytz
 from sanic import Blueprint
+from sanic_ext import openapi
 from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
@@ -20,17 +21,97 @@ _all__ = ["approve_bp"]
 
 
 @approve_bp.post("/list")
+@openapi.definition(
+    summary="获取审批人为当前用户的审批任务信息",
+    description="获取审批人为当前用户的审批任务信息，需要approve:r权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "integer",
+                        "description": "页码"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "description": "每页数量"
+                    },
+                    "keyword": {
+                        "type": "string",
+                        "description": "关键字，模糊搜索审核标题或者审核内容"
+                    },
+                    "status": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        },
+                        "description": "处理状态，支持同时过滤多个状态，0代表待处理，1代表通过，2代表拒绝，3代表已过期"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "total": {"type": "integer"},
+                                    "page": {"type": "integer"},
+                                    "size": {"type": "integer"},
+                                    "total_pages": {"type": "integer"},
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "ctime": {"type": "string"},
+                                                "utime": {"type": "string"},
+                                                "title": {"type": "string"},
+                                                "run_id": {"type": "string"},
+                                                "content": {"type": "string"},
+                                                "status": {"type": "integer"},
+                                                "approve_type": {"type": "integer"},
+                                                "expire_time": {"type": "string"},
+                                                "audit_node": {"type": "string"},
+                                                "created_at": {"type": "string"},
+                                                "params": {"type": "array"},
+                                                "results": {"type": "object"},
+                                                "flow_id": {"type": "string"},
+                                                "approvers": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "id": {"type": "string"},
+                                                            "username": {"type": "string"},
+                                                            "display_name": {"type": "string"}
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("approve:r")
 async def all_approvement(request):
-    """
-    获取审批人为当前用户的审批任务信息（需要approve:r权限）
-    
-    请求参数：
-        page: 页码
-        size: 每页数量
-        keyword: 关键字，模糊搜索审核标题或者审核内容，可选参数
-        status: 处理状态，list类型，支持同时过滤多个状态，0代表待处理，1代表通过，2代表拒绝，3代表已过期
-    """
     params = request.json
     page = int(params.get("page", 1))
     size = int(params.get("size", 15))
@@ -61,21 +142,44 @@ async def all_approvement(request):
 
 
 @approve_bp.post("/todolist")
+@openapi.definition(
+    summary="获取当前登录用户的待处理任务信息",
+    description="获取当前登录用户的待处理任务信息，主要用于右上角的待办提醒",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "title": {"type": "string"},
+                                        "content": {"type": "string"},
+                                        "expire_time": {"type": "string"},
+                                        "created_at": {"type": "string"},
+                                        "approve_type": {"type": "integer"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 async def todo_approvement(request):
-    """
-    获取当前登录用户的待处理任务信息（需要approve:r权限）
-    主要用于右上角的待办提醒
-    """
     # 修改过期任务状态,后端就不做定时任务了
     await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
 
     # 将created_at从UTC时间转换为北京时间（UTC+8）
-    sql = f"""
-          SELECT a.title, a.content, a.expire_time, a.created_at, a.approve_type
-          FROM approvement a
-          JOIN approve_accounts b ON a.id = b.approvement_id AND b.account_id = '{request.ctx.session["sub"]}'
-          WHERE a.status = 0 AND NOT a.results ? '{request.ctx.session["sub"]}'
-        """
+    sql = f
     async with in_transaction() as conn:
         rows = await conn.execute_query_dict(sql)
         for row in rows:
@@ -85,17 +189,57 @@ async def todo_approvement(request):
 
 
 @approve_bp.post("/update")
+@openapi.definition(
+    summary="发送审核结果",
+    description="发送审核结果，需要approve:u权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id", "agree"],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "审核id"
+                    },
+                    "agree": {
+                        "type": "boolean",
+                        "description": "布尔类型：True/False，同意或拒绝"
+                    },
+                    "remark": {
+                        "type": "string",
+                        "description": "审批备注信息"
+                    },
+                    "params": {
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        },
+                        "description": "自定义参数的内容信息"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("approve:u")
 async def update_approvement(request):
-    """
-    发送审核结果（需要approve:u权限）
-
-    请求参数:
-        id: 审核id，必填参数
-        agree: 布尔类型：True/False，同意或拒绝，必填参数
-        remark: 审批备注信息
-        params: 自定义参数的内容信息, 例如 {"key": "value"}
-    """
     param = request.json
     approvement_id = param.get("id")
     agree = param.get("agree")

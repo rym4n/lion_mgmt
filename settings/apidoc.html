@@ -1,220 +1,166 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-        <meta name="description" content="API文档" />
-        <title>API文档说明</title>
-        <style>
-            /* 现代化色彩系统 - 深蓝主色与中性色阶 */
-            :root {
-                --primary-50: #eff6ff;
-                --primary-100: #dbeafe;
-                --primary-500: #3b82f6;
-                --primary-600: #2563eb;
-                --primary-700: #1d4ed8;
-                --gray-50: #f9fafb;
-                --gray-100: #f3f4f6;
-                --gray-400: #9ca3af;
-                --gray-600: #4b5563;
-                --gray-900: #111827;
-                --bg: var(--gray-50);
-                --bg-secondary: var(--gray-100);
-                --text: var(--gray-900);
-                --text-light: var(--gray-600);
-                --border: var(--gray-400);
-            }
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+    <meta name="description" content="API文档"/>
+    <title>API文档说明</title>
+    <style>
+        /* 现代化色彩系统 - 深蓝主色与中性色阶 */
+        :root {
+            --primary-50: #eff6ff;
+            --primary-100: #dbeafe;
+            --primary-500: #3b82f6;
+            --primary-600: #2563eb;
+            --primary-700: #1d4ed8;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-400: #9ca3af;
+            --gray-600: #4b5563;
+            --gray-900: #111827;
+            --bg: var(--gray-50);
+            --bg-secondary: var(--gray-100);
+            --text: var(--gray-900);
+            --text-light: var(--gray-600);
+            --border: var(--gray-400);
+        }
 
-            /* 使用系统字体栈替代Google Fonts */
-            @font-face {
-                font-family: "SystemUI";
-                src: local("Segoe UI"), local("San Francisco"), local(".AppleSystemUIFont"), local("Roboto"), local("Ubuntu"), local("Helvetica Neue");
-                font-display: swap; /* 确保文本始终可见 */
-            }
+        /* 使用系统字体栈替代Google Fonts */
+        @font-face {
+            font-family: "SystemUI";
+            src: local("Segoe UI"), local("San Francisco"), local(".AppleSystemUIFont"), local("Roboto"), local("Ubuntu"), local("Helvetica Neue");
+            font-display: swap; /* 确保文本始终可见 */
+        }
 
-            body {
-                font-family: "SystemUI", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-                line-height: 1.6;
-                font-weight: 400;
-                color: var(--text);
-                background: var(--bg);
-                margin: 0;
-                -webkit-font-smoothing: antialiased;
-                -moz-osx-font-smoothing: grayscale;
-            }
+        body {
+            font-family: "SystemUI", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+            line-height: 1.6;
+            font-weight: 400;
+            color: var(--text);
+            background: var(--bg);
+            margin: 0;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
 
-            /* 代码字体使用系统等宽字体 */
-            code,
-            pre {
-                font-family: "SF Mono", "Monaco", "Cascadia Code", "Roboto Mono", "Consolas", "Liberation Mono", "Courier New", monospace;
-            }
+        /* 代码字体使用系统等宽字体 */
+        code,
+        pre {
+            font-family: "SF Mono", "Monaco", "Cascadia Code", "Roboto Mono", "Consolas", "Liberation Mono", "Courier New", monospace;
+        }
 
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* 响应式断点 */
+        @media (min-width: 768px) {
             .container {
-                max-width: 1400px;
-                margin: 0 auto;
-                padding: 2rem;
+                padding: 3rem;
             }
+        }
 
-            /* 响应式断点 */
-            @media (min-width: 768px) {
-                .container {
-                    padding: 3rem;
-                }
-            }
-            @media (min-width: 1200px) {
-                .container {
-                    padding: 4rem;
-                }
-            }
-
-            /* 平滑滚动与焦点管理 */
-            html {
-                scroll-behavior: smooth;
-            }
-
-            :focus {
-                outline: 2px solid var(--primary-500);
-                outline-offset: 2px;
-            }
-
-            /* 加载状态优化 */
-            #redoc-container:empty::before {
-                content: "正在加载API文档...";
-                display: block;
-                text-align: center;
-                color: var(--text-light);
-                padding: 2rem;
-                font-style: italic;
-            }
-
-            /* 性能优化：减少布局偏移 */
+        @media (min-width: 1200px) {
             .container {
-                min-height: 100vh;
-                transition: padding 0.3s ease;
+                padding: 4rem;
             }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div id="redoc-container"></div>
-        </div>
+        }
 
-        <script src="/redoc.standalone.js"></script>
-        <script>
-            Redoc.init(
-                "/docs/openapi.json",
-                {
-                    theme: {
-                        colors: {
-                            primary: {
-                                main: "#2563eb",
-                                light: "#dbeafe",
-                            },
-                            text: {
-                                primary: "#111827",
-                                secondary: "#4b5563",
-                            },
-                            http: {
-                                get: "#10b981",
-                                post: "#f59e0b",
-                                put: "#8b5cf6",
-                                delete: "#ef4444",
-                            },
-                            gray: {
-                                50: "#f9fafb",
-                                100: "#f3f4f6",
-                            },
-                        },
-                        typography: {
-                            // 使用系统字体栈
-                            fontFamily: "'SystemUI', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
-                            headings: {
-                                fontWeight: "600",
-                                lineHeight: 1.25,
-                            },
-                            code: {
-                                // 使用系统等宽字体
-                                fontFamily: "'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', 'Consolas', monospace",
-                                fontSize: "14px",
-                                fontWeight: "500",
-                            },
-                        },
-                        sidebar: {
-                            backgroundColor: "#f3f4f6",
-                            width: "260px",
-                        },
-                        rightPanel: {
-                            backgroundColor: "#111827",
-                            width: "40%",
-                        },
+        /* 平滑滚动与焦点管理 */
+        html {
+            scroll-behavior: smooth;
+        }
+
+        :focus {
+            outline: 2px solid var(--primary-500);
+            outline-offset: 2px;
+        }
+
+        /* 加载状态优化 */
+        #redoc-container:empty::before {
+            content: "正在加载API文档...";
+            display: block;
+            text-align: center;
+            color: var(--text-light);
+            padding: 2rem;
+            font-style: italic;
+        }
+
+        /* 性能优化：减少布局偏移 */
+        .container {
+            min-height: 100vh;
+            transition: padding 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div id="redoc-container"></div>
+</div>
+
+<script src="/redoc.standalone.js"></script>
+<script>
+    Redoc.init(
+        "/docs/openapi.json",
+        {
+            theme: {
+                colors: {
+                    primary: {
+                        main: "#2563eb",
+                        light: "#dbeafe",
                     },
-                    // 功能优化
-                    expandResponses: "all",
-                    lazyRendering: true, // 性能优化：延迟渲染
-                    scrollYOffset: 60,
-                    hideDownloadButton: false,
-                    hideLoading: true,
-                    // 菜单优化
-                    menuToggle: true,
-                    jsonSampleExpandLevel: 2,
+                    text: {
+                        primary: "#111827",
+                        secondary: "#4b5563",
+                    },
+                    http: {
+                        get: "#10b981",
+                        post: "#f59e0b",
+                        put: "#8b5cf6",
+                        delete: "#ef4444",
+                    },
+                    gray: {
+                        50: "#f9fafb",
+                        100: "#f3f4f6",
+                    },
                 },
-                document.getElementById("redoc-container"),
-                // 错误处理
-                function (error) {
-                    const container = document.getElementById("redoc-container");
-                    container.innerHTML = `
-          <div style="text-align: center; padding: 3rem; color: var(--text-light);">
-            <h3>文档加载失败</h3>
-            <p>请刷新页面或检查网络连接后重试。</p>
-            <button onclick="window.location.reload()" style="
-              background: var(--primary-600);
-              color: white;
-              border: none;
-              padding: 0.5rem 1rem;
-              border-radius: 0.375rem;
-              cursor: pointer;
-              margin-top: 1rem;
-            ">重新加载</button>
-          </div>
-        `;
-                    console.error("Redoc初始化失败:", error);
-                }
-            );
-
-            // 交互增强
-            document.addEventListener("DOMContentLoaded", function () {
-                // 添加加载状态管理
-                let isLoading = true;
-
-                const observer = new MutationObserver(function (mutations) {
-                    mutations.forEach(function (mutation) {
-                        if (mutation.type === "childList" && isLoading) {
-                            isLoading = false;
-
-                            // 为导航链接添加交互效果
-                            setTimeout(() => {
-                                const navLinks = document.querySelectorAll(".menu-content a");
-                                navLinks.forEach((link) => {
-                                    link.style.transition = "all 0.2s ease";
-                                    link.addEventListener("mouseenter", (e) => {
-                                        e.target.style.color = "#2563eb";
-                                        e.target.style.transform = "translateX(4px)";
-                                    });
-                                    link.addEventListener("mouseleave", (e) => {
-                                        e.target.style.color = "";
-                                        e.target.style.transform = "";
-                                    });
-                                });
-                            }, 500);
-                        }
-                    });
-                });
-
-                observer.observe(document.getElementById("redoc-container"), {
-                    childList: true,
-                    subtree: true,
-                });
-            });
-        </script>
-    </body>
+                typography: {
+                    // 使用系统字体栈
+                    fontFamily: "'SystemUI', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+                    headings: {
+                        fontWeight: "600",
+                        lineHeight: 1.25,
+                    },
+                    code: {
+                        // 使用系统等宽字体
+                        fontFamily: "'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', 'Consolas', monospace",
+                        fontSize: "14px",
+                        fontWeight: "500",
+                    },
+                },
+                sidebar: {
+                    backgroundColor: "#f3f4f6",
+                    width: "260px",
+                },
+                rightPanel: {
+                    backgroundColor: "#111827",
+                    width: "40%",
+                },
+            },
+            // 功能优化
+            expandResponses: "all",
+            lazyRendering: true, // 性能优化：延迟渲染
+            scrollYOffset: 60,
+            hideDownloadButton: true,
+            hideLoading: true,
+            // 菜单优化
+            menuToggle: true,
+            jsonSampleExpandLevel: 2,
+        },
+        document.getElementById("redoc-container")
+    );
+</script>
+</body>
 </html>

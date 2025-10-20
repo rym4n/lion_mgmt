@@ -8,7 +8,6 @@ import os
 import re
 import shutil
 import time
-import uuid
 import zipfile
 from collections import defaultdict
 from functools import reduce
@@ -19,6 +18,7 @@ import orjson
 import pytz
 from aiocache import caches
 from sanic import Blueprint, response
+from sanic_ext import openapi
 from tortoise.expressions import Q
 from tortoise.functions import Max
 from tortoise.transactions import in_transaction
@@ -57,13 +57,56 @@ def check_file_size(file_obj, max_size_kb=5):
 
 
 @tools_bp.post("/upload")
+@openapi.definition(
+    summary="上传工具接口",
+    description="上传ZIP格式的工具包（需要工具创建权限）",
+    body={
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "ZIP文件"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "上传成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "tools": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "tool": {"type": "string"},
+                                                "msg": {"type": "string"}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:c")
 async def upload_and_extract_zip(request):
-    """
-    上传工具接口（需要工具创建权限）
-    请求参数:
-        - file: ZIP 文件 (multipart/form-data)
-    """
     resp = await request.respond(
         content_type="text/event-stream",
         headers={
@@ -169,9 +212,6 @@ async def upload_and_extract_zip(request):
 
 
 async def unzip(zip_data, creator, single_progress, resp, success_progress, redis_client, token_id):
-    """
-    解压 ZIP 文件，直接从文件流读取，并进行文件结构校验
-    """
     data = 0
     zip_buffer = BytesIO(zip_data)
 
@@ -330,18 +370,81 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 
 
 @tools_bp.post("/all")
+@openapi.definition(
+    summary="获取所有工具列表",
+    description="获取所有工具列表（仅显示每个工具的最新版本，并对工具名称进行模糊搜索），需要工具查看权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "integer",
+                        "description": "页码（默认1）"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "description": "每页数量（默认10）"
+                    },
+                    "key": {
+                        "type": "string",
+                        "description": "名称和描述的搜索（可选，模糊搜索）"
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "标签名称（可选，精确搜索）"
+                    },
+                    "logo": {
+                        "type": "integer",
+                        "description": "是否需要logo数据 0为不需要，1为需要"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "tools": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "version": {"type": "string"},
+                                                "description": {"type": "string"},
+                                                "logo": {"type": "string"},
+                                                "required": {"type": "integer"},
+                                                "health_check": {"type": "integer"},
+                                                "health_check_version": {"type": "string"}
+                                            }
+                                        }
+                                    },
+                                    "total": {"type": "integer"},
+                                    "page": {"type": "integer"},
+                                    "size": {"type": "integer"},
+                                    "total_pages": {"type": "integer"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:r")
 async def all_tools(request):
-    """
-    获取所有工具列表（仅显示每个工具的最新版本，并对工具名称进行模糊搜索）
-
-    query参数:
-        - page: 页码（默认1）     int
-        - size: 每页数量（默认10）     int
-        - key: 名称和描述的搜索（可选，模糊搜索）   str
-        - tag: 标签名称（可选，精确搜索）   str
-        - logo: 是否需要logo数据 0为不需要，1为需要  int
-    """
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 15))
     key = request.json.get("key", "").strip()
@@ -433,14 +536,57 @@ async def enrich_tool(tool, cache_client):
 
 
 @tools_bp.post("/versions")
+@openapi.definition(
+    summary="获取具体工具的所有版本列表",
+    description="获取具体工具的所有版本列表（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "name": {"type": "string"},
+                                        "version": {"type": "string"},
+                                        "description": {"type": "string"},
+                                        "creator": {"type": "string"},
+                                        "updater": {"type": "string"},
+                                        "ctime": {"type": "string"},
+                                        "utime": {"type": "string"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:r")
 async def all_versions(request):
-    """
-    获取具体工具的所有版本列表（需要工具查看权限）
-
-    query参数:
-        - name: 工具名称   str
-    """
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     name = request.json.get("name")
     if not name:
@@ -455,15 +601,86 @@ async def all_versions(request):
 
 
 @tools_bp.post("/actions")
+@openapi.definition(
+    summary="获取工具当前版本的所有动作列表",
+    description="获取工具当前版本的所有动作列表（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "version"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    },
+                    "version": {
+                        "type": "string",
+                        "description": "工具版本号"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "actions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "func": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "input": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "key": {"type": "string"},
+                                                            "type": {"type": "string"},
+                                                            "required": {"type": "boolean"},
+                                                            "description": {"type": "string"}
+                                                        }
+                                                    }
+                                                },
+                                                "id": {"type": "string"},
+                                                "playbook": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "id": {"type": "string"},
+                                                            "pv_id": {"type": "string"},
+                                                            "name": {"type": "string"},
+                                                            "version": {"type": "string"},
+                                                            "status": {"type": "integer"}
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:r")
 async def tool_actions(request):
-    """
-    获取工具当前版本的所有动作列表（需要工具查看权限）
-
-    query参数:
-        - name: 工具名称    str
-        - version: 工具版本号    str
-    """
     name = request.json.get("name")
     version = request.json.get("version")
     if not name or not version:
@@ -489,16 +706,55 @@ async def tool_actions(request):
 
 
 @tools_bp.post("/upstatus")
+@openapi.definition(
+    summary="更新工具状态",
+    description="更新工具状态（需要工具更新权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "version", "status"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    },
+                    "version": {
+                        "type": "string",
+                        "description": "工具版本号"
+                    },
+                    "status": {
+                        "type": "integer",
+                        "description": "工具状态（1:有 0:无）"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:u")
 async def update_tool_status(request):
-    """
-    更新工具状态（需要工具更新权限）
-
-    query参数:
-        - name: 工具名称    str
-        - version: 工具版本号    str
-        - status: 工具状态（1:有 0:无） int
-    """
     name = request.json.get("name")
     version = request.json.get("version")
     status = int(request.json.get("status"))
@@ -516,15 +772,51 @@ async def update_tool_status(request):
 
 
 @tools_bp.post("/delete/version")
+@openapi.definition(
+    summary="删除指定版本工具",
+    description="删除指定版本工具（需要工具删除权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "version"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    },
+                    "version": {
+                        "type": "string",
+                        "description": "工具版本号"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:d")
 async def delete_tool(request):
-    """
-    删除指定版本工具（需要工具删除权限）
-
-    query参数:
-        - name: 工具名称
-        - version: 工具版本号
-    """
     name = request.json.get("name")
     version = request.json.get("version")
     if not name or not version:
@@ -555,14 +847,47 @@ async def delete_tool(request):
 
 
 @tools_bp.post("/delete/all")
+@openapi.definition(
+    summary="删除工具全部版本",
+    description="删除工具全部版本（需要工具删除权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:d")
 async def delete_tool_all(request):
-    """
-    删除工具全部版本（需要工具删除权限）
-
-    query参数:
-        - name: 工具名称
-    """
     name = request.json.get("name")
     if not name:
         raise CustomError(ErrorCode.ParameterError)
@@ -588,14 +913,53 @@ async def delete_tool_all(request):
 
 
 @tools_bp.post("/resource/model")
+@openapi.definition(
+    summary="获取工具的资源模型",
+    description="获取工具的资源模型（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "工具name"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "ctime": {"type": "string"},
+                                    "utime": {"type": "string"},
+                                    "tool_name": {"type": "string"},
+                                    "resources": {
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:r")
 async def tool_resource_model(request):
-    """
-    获取工具的资源模型（需要工具查看权限）
-
-    query参数:
-        - name: 工具name    str
-    """
     tool_name = request.json.get("name")
     if not tool_name:
         raise CustomError(ErrorCode.ParameterError)
@@ -608,26 +972,60 @@ async def tool_resource_model(request):
 
 
 @tools_bp.post("/resource/add")
+@openapi.definition(
+    summary="新增工具资源",
+    description="新增工具资源（需要工具创建权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["tool_name", "name", "resources"],
+                "properties": {
+                    "tool_name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "资源名称"
+                    },
+                    "engine": {
+                        "type": "string",
+                        "description": "执行引擎"
+                    },
+                    "resources": {
+                        "type": "object",
+                        "description": "资源模板"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "新增成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"},
+                                    "id": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:c")
 async def add_tool_resource(request):
-    """
-    新增工具资源（需要工具创建权限）
-
-    query参数:
-        - tool_name: 工具名称    str
-        - name: 资源名称    str
-        - engine: 执行引擎    str
-        - resources: 资源模板   dict
-                {"Lizhu_username": {
-                        "order": 0,
-                        "options": "",
-                        "required": true,
-                        "data_type": "string",
-                        "description": "离朱安全验证平台登录用户名",
-                        "default_value": "admin",
-                        "value":"test"      这个是新增的值
-                }}
-    """
     tool_name = request.json.get("tool_name")
     name = request.json.get("name")
     engine = request.json.get("engine")
@@ -651,14 +1049,60 @@ async def add_tool_resource(request):
 
 
 @tools_bp.post("/resource/detailed")
+@openapi.definition(
+    summary="获取工具的资源详情",
+    description="获取工具的资源详情（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "ctime": {"type": "string"},
+                                        "utime": {"type": "string"},
+                                        "tool_name": {"type": "string"},
+                                        "name": {"type": "string"},
+                                        "engine": {"type": "string"},
+                                        "resources": {
+                                            "type": "object"
+                                        },
+                                        "creator": {"type": "string"},
+                                        "updater": {"type": "string"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:r")
 async def tool_resources_detailed(request):
-    """
-    获取工具的资源详情（需要工具查看权限）
-
-    query参数:
-        - name: 工具名称    str
-    """
     tool_name = request.json.get("name")
     if not tool_name:
         raise CustomError(ErrorCode.ParameterError)
@@ -668,26 +1112,59 @@ async def tool_resources_detailed(request):
 
 
 @tools_bp.post("/resource/update")
+@openapi.definition(
+    summary="更新工具资源",
+    description="更新工具资源（需要工具更新权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["tool_name", "name"],
+                "properties": {
+                    "tool_name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "资源名称"
+                    },
+                    "engine": {
+                        "type": "string",
+                        "description": "资源执行引擎"
+                    },
+                    "resources": {
+                        "type": "object",
+                        "description": "资源模板"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:u")
 async def update_tool_resource(request):
-    """
-    更新工具资源（需要工具更新权限）
-
-    query参数:
-        - tool_name: 工具名称    str\
-        - name: 资源名称    str  不可修改，修改其他值的凭证
-        - engine: 资源执行引擎    str    可选
-        - resources: 资源模板   dict    可选
-                {"Lizhu_username": {
-                        "order": 0,
-                        "options": "",
-                        "required": true,
-                        "data_type": "string",
-                        "description": "离朱安全验证平台登录用户名",
-                        "default_value": "admin",
-                        "value":"test"      这个是新增的值
-                }}
-    """
     tool_name = request.json.get("tool_name")
     name = request.json.get("name")
     engine = request.json.get("engine")
@@ -715,15 +1192,51 @@ async def update_tool_resource(request):
 
 
 @tools_bp.post("/resource/delete")
+@openapi.definition(
+    summary="删除工具资源",
+    description="删除工具资源（需要工具删除权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["tool_name", "name"],
+                "properties": {
+                    "tool_name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "资源名称"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:d")
 async def delete_tool_resource(request):
-    """
-    删除工具资源（需要工具删除权限）
-
-    query参数:
-        - tool_name: 工具名称    str
-        - name: 资源名称    str
-    """
     tool_name = request.json.get("tool_name")
     name = request.json.get("name")
     if not tool_name or not name:
@@ -765,14 +1278,31 @@ async def delete_tool_resource(request):
 
 
 @tools_bp.post("/download")
+@openapi.definition(
+    summary="下载工具 ZIP 文件",
+    description="下载工具 ZIP 文件接口（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["tool_id"],
+                "properties": {
+                    "tool_id": {
+                        "type": "string",
+                        "description": "工具ID"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "下载成功"
+        }
+    }
+)
 @requires_permission("tool:r")
 async def download_zip(request):
-    """
-    下载工具 ZIP 文件接口   （需要工具查看权限）
-
-    请求参数:
-        - tool_id: 工具ID
-    """
     tool_id = request.json.get("tool_id")
     if not tool_id:
         raise CustomError(ErrorCode.ParameterError)
@@ -798,18 +1328,72 @@ async def download_zip(request):
 
 
 @tools_bp.post("/action/permissions/add")
+@openapi.definition(
+    summary="新增工具动作权限",
+    description="新增工具动作权限（需要工具更新权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "resource_id", "users_id", "roles_id"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    },
+                    "resource_id": {
+                        "type": "string",
+                        "description": "资源id"
+                    },
+                    "actions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "动作名称，默认all"
+                    },
+                    "users_id": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "用户ID列表"
+                    },
+                    "roles_id": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "角色ID列表"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "新增成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:u")
 async def add_permission(request):
-    """
-    新增工具动作权限（需要工具更新权限）
-
-    query参数:
-        - name: 工具名称    str
-        - resource_id: 资源id    str
-        - actions: 动作名称    list    可选，默认all
-        - users_id: 用户ID列表    list
-        - roles_id: 角色ID列表    list
-    """
     name = request.json.get("name")
     resource_id = request.json.get("resource_id")
     actions = request.json.get("actions", ["all"])
@@ -870,16 +1454,74 @@ async def add_permission(request):
 
 
 @tools_bp.post("/action/permissions/select")
+@openapi.definition(
+    summary="获取工具全部动作权限",
+    description="获取工具全部动作权限（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "resource_id"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    },
+                    "resource_id": {
+                        "type": "string",
+                        "description": "资源id"
+                    },
+                    "actions": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "动作名称，默认all"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                        "description": {"type": "string"},
+                                        "users_id": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "roles_id": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:r")
 async def select_permission_all(request):
-    """
-    获取工具全部动作权限（需要工具查看权限）
-
-    query参数:
-        - name: 工具名称    str
-        - resource_id: 资源id    str
-        - actions: 动作名称    list    可选，默认all
-    """
     name = request.json.get("name")
     resource_id = request.json.get("resource_id")
     actions = request.json.get("actions", ["all"])
@@ -937,22 +1579,78 @@ async def select_permission_all(request):
 
 
 @tools_bp.post("/action/permissions/judge")
+@openapi.definition(
+    summary="多资源权限判断接口",
+    description="多资源权限判断接口 (适配列表字典结构)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["actions"],
+                "properties": {
+                    "actions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["tool_name", "resource_id", "actions"],
+                            "properties": {
+                                "tool_name": {
+                                    "type": "string",
+                                    "description": "工具名称"
+                                },
+                                "resource_id": {
+                                    "type": "string",
+                                    "description": "资源ID"
+                                },
+                                "actions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "description": "动作列表"
+                                }
+                            }
+                        },
+                        "description": "工具-资源-动作列表"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "判断成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "tool_name": {"type": "string"},
+                                        "resource_id": {"type": "string"},
+                                        "permissions": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "boolean"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:r")
 async def judge_permission(request):
-    """
-    多资源权限判断接口 (适配列表字典结构)
-
-    请求体参数:
-        - actions: 工具-资源-动作列表
-            [
-                {
-                    "tool_name": "工具名称",
-                    "resource_id": "资源ID",
-                    "actions": ["动作1", "动作2"]
-                },
-                ...
-            ]
-    """
     action_groups = request.json.get("actions", [])
     if not action_groups or not isinstance(action_groups, list):
         raise CustomError(ErrorCode.ParameterError)
@@ -1027,15 +1725,54 @@ async def judge_permission(request):
 
 
 @tools_bp.post("/tag/add")
+@openapi.definition(
+    summary="新增工具标签",
+    description="新增工具标签（需要工具更新权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "tags"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "标签名称"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "新增成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:u")
 async def add_tag(request):
-    """
-    新增工具标签（需要工具更新权限）
-
-    query参数:
-        - name: 工具名称    str
-        - tags: 标签名称    list
-    """
     name = request.json.get("name")
     tags = request.json.get("tags", [])
     if not name or not tags:
@@ -1055,15 +1792,54 @@ async def add_tag(request):
 
 
 @tools_bp.post("/tag/delete")
+@openapi.definition(
+    summary="删除工具标签",
+    description="删除工具标签（需要工具更新权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "tags"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "工具名称"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "标签名称"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:u")
 async def delete_tag(request):
-    """
-    删除工具标签（需要工具更新权限）
-
-    query参数:
-        - name: 工具名称    str
-        - tags: 标签名称    list
-    """
     name = request.json.get("name")
     tags = request.json.get("tags", [])
     if not name or not tags:
@@ -1083,15 +1859,51 @@ async def delete_tag(request):
 
 
 @tools_bp.post("/health/check/config")
+@openapi.definition(
+    summary="修改工具健康检查配置信息",
+    description="修改工具健康检查配置信息（需要工具更新权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["switch"],
+                "properties": {
+                    "switch": {
+                        "type": "string",
+                        "description": "开关 on/off"
+                    },
+                    "cron": {
+                        "type": "string",
+                        "description": "定时任务 格式：分 时 日 月 周，如：0 48 14 ? * 1 表示每周一的14点48分执行一次(多个小时段表示用逗号分隔，周也是如此)"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "修改成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:c")
 async def health_check_config(request):
-    """
-    修改工具健康检查配置信息（需要工具更新权限）
-
-    query参数:
-        switch: 开关    str    on/off
-        cron: 定时任务    str    格式：分 时 日 月 周，如：0 48 14 ? * 1 表示每周一的14点48分执行一次(多个小时段表示用逗号分隔，周也是如此)
-    """
     switch = request.json.get("switch")
     cron = request.json.get("cron")
 
@@ -1107,28 +1919,87 @@ async def health_check_config(request):
 
 
 @tools_bp.post("/health/check/get")
+@openapi.definition(
+    summary="获取健康检测配置信息",
+    description="获取健康检测配置信息（需要工具查看权限）",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "switch": {"type": "string"},
+                                    "cron": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:r")
 async def health_check_get(request):
-    """
-    获取健康检测配置信息（需要工具查看权限）
-
-    请求参数：
-        无
-    """
     switch = await Config.get_or_none(key="health_check_switch")
     cron = await Config.get_or_none(key="health_check_cron")
     return response_ok({"switch": switch.value if switch else "off", "cron": cron.value if cron else ""})
 
 
 @tools_bp.post("/action/input")
+@openapi.definition(
+    summary="获取工具动作输入参数",
+    description="获取工具动作输入参数（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "动作ID"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {"type": "string"},
+                                        "type": {"type": "string"},
+                                        "required": {"type": "boolean"},
+                                        "description": {"type": "string"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:r")
 async def tool_action_input(request):
-    """
-    获取工具动作输入参数（需要工具查看权限）
-
-    query参数:
-        - id : 动作ID     int
-    """
     action_id = request.json.get("id")
     if not action_id:
         raise CustomError(ErrorCode.ParameterError)
@@ -1142,16 +2013,6 @@ async def tool_action_input(request):
 
 
 async def tool_action_update(data):
-    """
-    为动作绑定剧本id
-        - data   动作数据    dict
-            {
-                "剧本版本id": [
-                    "动作a id",
-                    "动作b id"
-                ]
-            }
-    """
     if not isinstance(data, dict):
         raise CustomError(ErrorCode.ParameterError)
 
@@ -1218,14 +2079,44 @@ async def tool_action_playbook_delete(data):
 
 
 @tools_bp.post("/tag/new")
+@openapi.definition(
+    summary="新建标签",
+    description="新建标签（需要工具新增权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "标签名称"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "新建成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:c")
 async def new_tag(request):
-    """
-    新建标签（需要工具新增权限）
-
-    请求参数：
-        - name: 标签名称    str
-    """
     name = request.json.get("name", "").strip()
     if not name:
         raise CustomError(ErrorCode.ParameterError)
@@ -1239,28 +2130,77 @@ async def new_tag(request):
 
 
 @tools_bp.post("/tag/list")
+@openapi.definition(
+    summary="获取标签列表",
+    description="获取标签列表（需要工具查看权限）",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:r")
 async def tag_list(request):
-    """
-    获取标签列表（需要工具查看权限）
-
-    请求参数：
-        无
-    """
     tags = await Tag.filter(type=1, deleted=False).all()
 
     return response_ok([tag.name for tag in tags])
 
 
 @tools_bp.post("/tag/remove")
+@openapi.definition(
+    summary="删除标签",
+    description="删除标签（需要工具删除权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "标签名称"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:d")
 async def remove_tag(request):
-    """
-    删除标签（需要工具删除权限）
-
-    请求参数：
-        - name: 标签名称    str
-    """
     name = request.json.get("name")
     if not name:
         raise CustomError(ErrorCode.ParameterError)
@@ -1272,14 +2212,33 @@ async def remove_tag(request):
 
 
 @tools_bp.post("/engine/list")
+@openapi.definition(
+    summary="获取执行引擎列表",
+    description="获取执行引擎列表（需要工具查看权限）",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:r")
 async def engine_list(request):
-    """
-    获取执行引擎列表（需要工具查看权限）
-
-    请求参数：
-        无
-    """
     c = caches.get("redis_action").client
     lion_keys = []
     async for key in c.scan_iter(match="lion_engine_*", count=100):
@@ -1289,29 +2248,79 @@ async def engine_list(request):
 
 
 @tools_bp.post("/health-check")
+@openapi.definition(
+    summary="进行资源健康检查",
+    description="进行资源健康检查（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "action_input": {
+                        "type": "object",
+                        "properties": {
+                            "type": {
+                                "type": "string",
+                                "description": "类型 flow/action"
+                            },
+                            "app_name": {
+                                "type": "string",
+                                "description": "应用名称，英文标识"
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "应用中文名称"
+                            },
+                            "app_ver": {
+                                "type": "string",
+                                "description": "应用版本号"
+                            },
+                            "main": {
+                                "type": "string",
+                                "description": "主程序文件名"
+                            },
+                            "action_input": {
+                                "type": "object",
+                                "description": "动作输入参数"
+                            },
+                            "node_name": {
+                                "type": "string",
+                                "description": "节点名称"
+                            },
+                            "action": {
+                                "type": "string",
+                                "description": "动作名称 英文标识"
+                            },
+                            "action_name": {
+                                "type": "string",
+                                "description": "动作名称 中文名称"
+                            },
+                            "retry_times": {
+                                "type": "integer",
+                                "description": "重试次数"
+                            },
+                            "timeout": {
+                                "type": "integer",
+                                "description": "超时时间,单位秒"
+                            },
+                            "resource": {
+                                "type": "string",
+                                "description": "进行资源检查的id"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "健康检查执行成功"
+        }
+    }
+)
 @requires_permission("tool:r")
 async def health_check(request):
-    """
-    进行资源健康检查（需要工具查看权限）
-
-    请求参数：
-        - action_input dict 动作输入参数 当type为action时必填
-            示例如下：
-            {
-                "type": "action",
-                "app_name":"huorong_edr",         应用名称，英文标识
-                "name": "中文名称",               应用中文名称
-                "app_ver":"v1746495758839",      应用版本号
-                "main":"huorong_edr.py",          主程序文件名  获取工具版本时会传
-                "action_input":{},
-                "node_name":"健康检查",    节点名称，定时任务模块中取动作描述
-                "action":"health_check",     动作名称 英文标识
-                "action_name":"健康检查",    动作名称 中文名称
-                "retry_times":1,             重试次数
-                "timeout":300,               超时时间,单位秒
-                "resource": "1111111111111" 进行资源检查的id
-            }
-    """
     resp = await request.respond(
         content_type="text/event-stream",
         headers={
@@ -1345,14 +2354,31 @@ async def health_check(request):
 
 
 @tools_bp.post("/debug")
+@openapi.definition(
+    summary="debug工具",
+    description="debug工具 用于工具开发时调试使用（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["data"],
+                "properties": {
+                    "data": {
+                        "type": "string",
+                        "description": "python脚本代码"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "调试执行成功"
+        }
+    }
+)
 @requires_permission("tool:r")
 async def tool_debug(request):
-    """
-    debug工具 用于工具开发时调试使用（需要工具查看权限）
-
-    请求参数：
-        data: python脚本代码   str 必填
-    """
     resp = await request.respond(
         content_type="text/event-stream",
         headers={
@@ -1404,24 +2430,81 @@ async def tool_debug(request):
 
 
 @tools_bp.post("/add-config")
+@openapi.definition(
+    summary="添加config配置",
+    description="添加config配置",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["key", "value", "module"],
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "键"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "值"
+                    },
+                    "module": {
+                        "type": "string",
+                        "description": "所属模块"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "添加成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:u")
 async def add_config(request):
-    """
-    添加config配置
-        key: 键
-        value: 值
-        module: 所属模块
-    """
     data = request.json
     await Config.update_or_create(key=data["key"], module=data["module"], defaults={"value": data["value"]})
     return response_ok("添加成功")
 
 
 @tools_bp.post("/health-check-result")
+@openapi.definition(
+    summary="获取健康检查结果",
+    description="获取健康检查结果（需要工具更新权限）",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("tool:u")
 async def get_health_check_result(request):
-    """
-    无请求参数
-    """
     result = await Config.get_or_none(key="health_check", module="tools")
     return response_ok(result.json if result else {})

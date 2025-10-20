@@ -2,6 +2,7 @@ import ast
 import os
 import uuid
 from datetime import datetime
+from urllib.parse import quote
 
 import aiofile
 import jwt
@@ -11,15 +12,15 @@ from aiocache import cached
 from sanic import Blueprint
 from sanic import json
 from sanic import response
+from sanic_ext import openapi
 from tortoise.transactions import in_transaction
-from urllib.parse import quote
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
-from models import AuditLog, Config, Variables
+from models import AuditLog, Config
 from services.event_ingestion.views import check_vector_config
 from settings import SECRET, SESSION_ENCODING_ALGORITHM, UPLOAD_DIR, BASE_DIR, VECTOR_CFG, COMMON_FILES_DIR, \
     AUTHENTICATION_SESSION_EXPIRATION
@@ -29,19 +30,64 @@ _all__ = ["system_bp"]
 
 
 @system_bp.post("/upload")
+@openapi.definition(
+    summary="保存系统定制配置",
+    description="保存系统定制配置（如果 system_version 存在则更新，否则创建），需要系统配置新增和修改权限",
+    body={
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "copyright": {
+                        "type": "string",
+                        "description": "版权"
+                    },
+                    "system_name": {
+                        "type": "string",
+                        "description": "系统名"
+                    },
+                    "system_version": {
+                        "type": "string",
+                        "description": "系统版本"
+                    },
+                    "background": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "背景图"
+                    },
+                    "webico": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "网页ico"
+                    },
+                    "logo": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "logo"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "保存成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("system:c")
 async def upload_image(request):
-    """
-    保存系统定制配置（如果 system_version 存在则更新，否则创建）  需要系统配置新增和修改权限
-
-    请求参数：
-        copyright: 版权,
-        system_name: 系统名,
-        system_version: 系统版本,
-        background: 背景图
-        webico: 网页ico
-        logo: logo
-    """
     copyright_text = request.form.get("copyright")
     system_name = request.form.get("system_name")
     system_version = request.form.get("system_version")
@@ -106,13 +152,35 @@ async def upload_image(request):
 
 
 @system_bp.get("/picture")
+@openapi.definition(
+    summary="获取自定义图片",
+    description="获取自定义图片",
+    parameter=[
+        {
+            "name": "type",
+            "in": "query",
+            "description": "图片类型: background, webico, logo",
+            "required": True,
+            "schema": {
+                "type": "string"
+            }
+        }
+    ],
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "image/*": {
+                    "schema": {
+                        "type": "string",
+                        "format": "binary"
+                    }
+                }
+            }
+        }
+    }
+)
 async def get_bgpic(request):
-    """
-    获取自定义图片
-
-    请求参数：
-        type: background, webico, logo
-    """
     pic_type = request.args.get("type")
     if pic_type not in ("background", "webico", "logo"):
         raise CustomError(ErrorCode.ParameterError)
@@ -125,12 +193,50 @@ async def get_bgpic(request):
 
 
 @system_bp.get("/platform")
+@openapi.definition(
+    summary="获取platform-config",
+    description="获取平台配置信息",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "Version": {"type": "string"},
+                            "Title": {"type": "string"},
+                            "Content": {"type": "string"},
+                            "FixedHeader": {"type": "boolean"},
+                            "HiddenSideBar": {"type": "boolean"},
+                            "MultiTagsCache": {"type": "boolean"},
+                            "KeepAlive": {"type": "boolean"},
+                            "Layout": {"type": "string"},
+                            "Theme": {"type": "string"},
+                            "DarkMode": {"type": "boolean"},
+                            "OverallStyle": {"type": "string"},
+                            "Grey": {"type": "boolean"},
+                            "Weak": {"type": "boolean"},
+                            "HideTabs": {"type": "boolean"},
+                            "HideFooter": {"type": "boolean"},
+                            "Stretch": {"type": "boolean"},
+                            "SidebarStatus": {"type": "boolean"},
+                            "EpThemeColor": {"type": "string"},
+                            "ShowLogo": {"type": "boolean"},
+                            "ShowModel": {"type": "string"},
+                            "MenuArrowIconNoTransition": {"type": "boolean"},
+                            "CachingAsyncRoutes": {"type": "boolean"},
+                            "TooltipEffect": {"type": "string"},
+                            "ResponsiveStorageNameSpace": {"type": "string"},
+                            "MenuSearchHistory": {"type": "integer"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 async def get_platform_config(request):
-    """
-    获取platform-config
-
-    无请求参数，直接调用
-    """
     cfg = await Config.get_or_none(key="platform_config", module="system")
     default = {
         "Version": "3.0.0",
@@ -167,14 +273,41 @@ async def get_platform_config(request):
 
 
 @system_bp.post("/status/all")
+@openapi.definition(
+    summary="获取全部系统状况",
+    description="获取全部系统状况，需要系统配置查看权限",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "host": {"type": "string"},
+                                        "name": {"type": "string"},
+                                        "status": {"type": "string"},
+                                        "start_time": {"type": "string"},
+                                        "check_time": {"type": "string"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("status:r")
 @cached(timeout=120)
 async def get_system_status(request):
-    """
-    获取全部系统状况    需要系统配置查看权限
-
-    无需参数直接请求则返回全部系统状况数据
-    """
     name_map = {
         'lion-mgmt': '控制台服务', 'lion-web': 'Web服务器', 'lion-db': '数据库服务', 'lion-kb': '数据库服务',
         'lion-redis': '缓存服务',
@@ -206,13 +339,32 @@ async def get_system_status(request):
 
 
 @system_bp.post("/oauth/status")
+@openapi.definition(
+    summary="获取SSO状态",
+    description="获取SSO状态",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "use_oauth2": {"type": "boolean"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 async def get_oauth_status(request):
-    """
-    获取SSO状态
-
-    无请求参数，直接调用，返回SSO状态
-    """
-
     if request.cookies.get("aioe-auth") and ':' not in request.cookies.get("aioe-auth"):
         try:
             token = request.cookies.get("aioe-auth")
@@ -231,13 +383,47 @@ async def get_oauth_status(request):
 
 
 @system_bp.post("/oauth/get")
+@openapi.definition(
+    summary="获取SSO配置",
+    description="获取SSO配置，需要sso:r权限",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "use_oauth2": {"type": "string"},
+                                    "auto_create": {"type": "string"},
+                                    "client_id": {"type": "string"},
+                                    "client_id_alias": {"type": "string"},
+                                    "client_secret": {"type": "string"},
+                                    "client_secret_alias": {"type": "string"},
+                                    "authorize_uri": {"type": "string"},
+                                    "token_uri": {"type": "string"},
+                                    "token_path": {"type": "string"},
+                                    "user_info_uri": {"type": "string"},
+                                    "user_id_path": {"type": "string"},
+                                    "display_name_path": {"type": "string"},
+                                    "email_path": {"type": "string"},
+                                    "phone_path": {"type": "string"},
+                                    "scopes": {"type": "string"}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("sso:r")
 async def get_oauth_config(request):
-    """
-    获取SSO配置
-
-    无请求参数，直接调用，返回SSO配置
-    """
     records = await Config.filter(module='sso').values('key', 'value')
     oauth_config = {c['key']: c['value'] for c in records}
     secret = oauth_config.get("client_secret", "")
@@ -261,29 +447,102 @@ async def get_oauth_config(request):
 
 
 @system_bp.post("/oauth/update")
+@openapi.definition(
+    summary="更新SSO配置",
+    description="更新SSO配置，需要sso:u权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["use_oauth2", "auto_create", "client_id", "client_secret", "authorize_uri", "token_uri", "user_info_uri", "user_id_path", "token_path"],
+                "properties": {
+                    "use_oauth2": {
+                        "type": "string",
+                        "description": "true 表示启用oauth认证, false 表示禁用"
+                    },
+                    "auto_create": {
+                        "type": "string",
+                        "description": "true 表示认证用户不存在的话自动新建, false 表示不新建"
+                    },
+                    "client_id": {
+                        "type": "string",
+                        "description": "客户端ID"
+                    },
+                    "client_id_alias": {
+                        "type": "string",
+                        "description": "客户端ID的名称，某些SSO可能叫app_id"
+                    },
+                    "client_secret": {
+                        "type": "string",
+                        "description": "客户端密钥"
+                    },
+                    "client_secret_alias": {
+                        "type": "string",
+                        "description": "客户端密钥的名称，某些SSO可能叫app_secret"
+                    },
+                    "authorize_uri": {
+                        "type": "string",
+                        "description": "获取授权码的URI"
+                    },
+                    "token_uri": {
+                        "type": "string",
+                        "description": "获取Token的URI"
+                    },
+                    "token_path": {
+                        "type": "string",
+                        "description": "Token的取值路径"
+                    },
+                    "user_info_uri": {
+                        "type": "string",
+                        "description": "获取用户信息的URI"
+                    },
+                    "user_id_path": {
+                        "type": "string",
+                        "description": "用户唯一标识的取值路径"
+                    },
+                    "display_name_path": {
+                        "type": "string",
+                        "description": "用户姓名的取值路径"
+                    },
+                    "email_path": {
+                        "type": "string",
+                        "description": "用户邮箱的取值路径"
+                    },
+                    "phone_path": {
+                        "type": "string",
+                        "description": "用户手机号的取值路径"
+                    },
+                    "scopes_alias": {
+                        "type": "string",
+                        "description": "请求资源范围的名称"
+                    },
+                    "scopes": {
+                        "type": "string",
+                        "description": "请求资源范围"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("sso:u")
 async def update_oauth_config(request):
-    """
-    更新SSO配置
-
-    请求参数：
-        use_oauth2: 字符串类型, true 表示启用oauth认证, false 表示禁用, 必填参数
-        auto_create: 字符串类型, true 表示认证用户不存在的话自动新建, false 表示不新建, 必填参数
-        client_id: 客户端ID, 必填参数
-        client_id_alias: 客户端ID的名称，某些SSO可能叫app_id，可选参数
-        client_secret: 客户端密钥, 必填参数
-        client_secret_alias：客户端密钥的名称，某些SSO可能叫app_secret，可选参数
-        authorize_uri: 获取授权码的URI, 必填参数
-        token_uri: 获取Token的URI, 必填参数
-        token_path: Token的取值路径, 必填参数
-        user_info_uri: 获取用户信息的URI, 必填参数
-        user_id_path: 用户唯一标识的取值路径, 必填参数
-        display_name_path: 用户姓名的取值路径, 可选参数
-        email_path: 用户邮箱的取值路径, 可选参数
-        phone_path: 用户手机号的取值路径, 可选参数
-        scopes_alias: 请求资源范围的名称, 可选参数
-        scopes: 请求资源范围, 可选参数
-    """
     params = request.json
     use_oauth2 = params.get("use_oauth2")
     if use_oauth2 not in ('true', 'false'):
@@ -342,15 +601,49 @@ async def update_oauth_config(request):
 
 
 @system_bp.post("/ai/update")
+@openapi.definition(
+    summary="设置AI参数",
+    description="设置AI参数，需要system:u权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "llm_host": {
+                        "type": "string",
+                        "description": "AI服务的Host（需带有协议，如 https://xxx.com）"
+                    },
+                    "llm_api_key": {
+                        "type": "string",
+                        "description": "AI服务的API Key（可选，留空则不更新，无密钥时传\"EMPTY\"）"
+                    },
+                    "llm_model": {
+                        "type": "string",
+                        "description": "AI服务的模型名称（可选，留空则不更新）"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "设置成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("system:u")
 async def set_ai(request):
-    """
-    设置AI参数
-    请求参数：
-        llm_host: 字符串类型, AI服务的Host（需带有协议，如 https://xxx.com）
-        llm_api_key: 字符串类型, AI服务的API Key（可选，留空则不更新，无密钥时传"EMPTY"）
-        llm_model: 字符串类型, AI服务的模型名称（可选，留空则不更新）
-    """
     params = request.json
     args = ["llm_host", "llm_api_key", "llm_model"]
 
@@ -364,11 +657,47 @@ async def set_ai(request):
 
 
 @system_bp.post('/transforms-update')
+@openapi.definition(
+    summary="更新transforms模型",
+    description="更新transforms模型",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": {"type": "string"},
+                                "value": {"type": "string"},
+                                "type": {"type": "string"}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 async def transforms_update(request):
-    """
-    更新transforms模型
-        data:[{"key":"", "value":"", "type":""}]
-    """
     for item in request.json.get("data"):
         await Config.update_or_create(key=item.get("key"),
                                       defaults={"value": item.get("value"), "type": item.get("type")},
@@ -378,19 +707,87 @@ async def transforms_update(request):
 
 
 @system_bp.post("/audit")
+@openapi.definition(
+    summary="查询审计日志",
+    description="查询审计日志，需要audit:r权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "username": {
+                        "type": "string",
+                        "description": "用户名"
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "description": "开始时间"
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "结束时间"
+                    },
+                    "ip": {
+                        "type": "string",
+                        "description": "ip"
+                    },
+                    "page": {
+                        "type": "integer",
+                        "description": "页码"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "description": "每页条数"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "查询成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "total": {"type": "integer"},
+                                    "page": {"type": "integer"},
+                                    "size": {"type": "integer"},
+                                    "total_pages": {"type": "integer"},
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "ctime": {"type": "string"},
+                                                "utime": {"type": "string"},
+                                                "username": {"type": "string"},
+                                                "display_name": {"type": "string"},
+                                                "client_ip": {"type": "string"},
+                                                "result": {"type": "string"},
+                                                "uri": {"type": "string"},
+                                                "client_ua": {"type": "string"},
+                                                "request_data": {"type": "object"}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("audit:r")
 async def search_audit(request):
-    """
-    查询审计日志
-
-    请求参数：
-        username: 用户名
-        start_time: 开始时间
-        end_time: 结束时间
-        ip: ip,
-        page: 页码
-        size: 每页条数
-    """
     page = int(request.json.get('page', 1))
     size = int(request.json.get("size", 15))
     offset = (page - 1) * size
@@ -423,24 +820,68 @@ async def search_audit(request):
 
 
 @system_bp.post("/outgoing")
+@openapi.definition(
+    summary="审计日志外发配置",
+    description="审计日志外发配置，需要audit:r权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "sink_type": {
+                            "type": "string",
+                            "description": "外发类型，可选kafka或syslog"
+                        },
+                        "sink_address": {
+                            "type": "string",
+                            "description": "外发地址，包括端口，多个地址用,分隔"
+                        },
+                        "sink_protocol": {
+                            "type": "string",
+                            "description": "外发协议，可选tcp或udp"
+                        },
+                        "kafka_topic": {
+                            "type": "string",
+                            "description": "kafka主题名称，可选"
+                        },
+                        "sasl_mechanism": {
+                            "type": "string",
+                            "description": "SASL机制，可选"
+                        },
+                        "sasl_username": {
+                            "type": "string",
+                            "description": "SASL用户名，可选"
+                        },
+                        "sasl_password": {
+                            "type": "string",
+                            "description": "SASL密码，可选"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "配置成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("audit:r")
 async def outgoing(request):
-    """
-    审计日志外发配置
-
-    请求参数：
-        [
-            {
-                sink_type: 外发类型，可选kafka或syslog
-                sink_address: 外发地址，包括端口，多个地址用,分隔
-                sink_protocol: 外发协议，可选tcp或udp
-                kafka_topic: kafka主题名称，可选
-                sasl_mechanism: SASL机制，可选
-                sasl_username: SASL用户名，可选
-                sasl_password: SASL密码，可选
-            }
-        ]
-    """
     data = {}
     yaml_file = os.path.join(VECTOR_CFG, "aioe_audit.yaml")
     with open(yaml_file, "r", encoding="utf-8") as f:
@@ -540,14 +981,42 @@ async def outgoing(request):
 
 
 @system_bp.post("/outgoing-config")
+@openapi.definition(
+    summary="获取审计日志外发配置",
+    description="获取审计日志外发配置，需要audit:r权限",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "sink_type": {"type": "string"},
+                                        "sink_address": {"type": "string"},
+                                        "sink_protocol": {"type": "string"},
+                                        "kafka_topic": {"type": "string"},
+                                        "sasl_mechanism": {"type": "string"},
+                                        "sasl_username": {"type": "string"},
+                                        "sasl_password": {"type": "string"}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("audit:r")
 async def get_outgoing_config(request):
-    """
-    获取审计日志外发配置
-
-    请求参数：
-        无
-    """
     config = await Config.get_or_none(key="outgoing_audit_log", module="audit_log")
     if not config:
         return response_ok([])
@@ -557,14 +1026,42 @@ async def get_outgoing_config(request):
 
 
 @system_bp.post("/up-mt")
+@openapi.definition(
+    summary="更新维护模式状态",
+    description="更新维护模式状态，需要audit:r权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["mt_status"],
+                "properties": {
+                    "mt_status": {
+                        "type": "integer",
+                        "description": "1表示开启维护模式，0表示关闭维护模式"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("audit:r")
 async def update_maintenance_mode_status(request):
-    """
-    更新维护模式状态
-
-    请求参数：
-        mt_status: 1表示开启维护模式，0表示关闭维护模式
-    """
     if request.json.get("mt_status") is None:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -580,14 +1077,58 @@ async def update_maintenance_mode_status(request):
 
 
 @system_bp.post("/up-file")
+@openapi.definition(
+    summary="上传文件",
+    description="上传文件，需要audit:r权限",
+    body={
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "字节流文件"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "上传成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "files": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "filename": {"type": "string"},
+                                                "file_id": {"type": "string"},
+                                                "size": {"type": "integer"},
+                                                "result": {"type": "string"}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
 @requires_permission("audit:r")
 async def update_file(request):
-    """
-    上传文件
-
-    请求参数：
-        "file": 字节流文件
-    """
     if not request.files or "file" not in request.files:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -598,7 +1139,7 @@ async def update_file(request):
         filename = f.name or f.filename
         ext = filename.split(".")[-1]
         file_id = str(uuid.uuid4())
-        save_path = os.path.join(COMMON_FILES_DIR, file_id+'.'+ext)
+        save_path = os.path.join(COMMON_FILES_DIR, file_id + '.' + ext)
 
         # 异步写入文件
         async with aiofile.AIOFile(save_path, 'wb') as zip_file:
@@ -606,7 +1147,7 @@ async def update_file(request):
 
         file_info = {
             "filename": filename,
-            "file_id": file_id+'.'+ext,
+            "file_id": file_id + '.' + ext,
             "size": len(f.body),
             "result": "success"
         }
@@ -616,14 +1157,44 @@ async def update_file(request):
 
 
 @system_bp.get("/down-file/<file_id>")
+@openapi.definition(
+    summary="下载文件",
+    description="下载文件",
+    parameter=[
+        {
+            "name": "file_id",
+            "in": "path",
+            "description": "文件名（上传时返回的 file_id）",
+            "required": True,
+            "schema": {
+                "type": "string"
+            }
+        },
+        {
+            "name": "download_name",
+            "in": "query",
+            "description": "下载文件名",
+            "required": False,
+            "schema": {
+                "type": "string"
+            }
+        }
+    ],
+    response={
+        "200": {
+            "description": "下载成功",
+            "content": {
+                "application/octet-stream": {
+                    "schema": {
+                        "type": "string",
+                        "format": "binary"
+                    }
+                }
+            }
+        }
+    }
+)
 async def download_file(request, file_id):
-    """
-    下载文件
-
-    请求参数：
-        - file_id: str 文件名（上传时返回的 file_id）
-        - download_name: str 下载文件名, 可选
-    """
     if not file_id:
         raise CustomError(ErrorCode.ParameterError)
     safe_name = os.path.basename(file_id)
@@ -651,4 +1222,3 @@ async def download_file(request, file_id):
         mime_type="application/octet-stream",
         headers=headers
     )
-
