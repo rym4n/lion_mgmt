@@ -1,20 +1,65 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
     <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>API文档说明</title>
         <style>
-            body {
-                margin: 0;
-                padding: 0;
+            :root {
+                --primary: #4f46e5;
+                --primary-dark: #4338ca;
+                --text: #1e293b;
+                --text-light: #64748b;
+                --bg: #ffffff;
+                --bg-secondary: #f8fafc;
+                --border: #e2e8f0;
             }
-            __HTML_CUSTOM_CSS__
+
+            body {
+                font-family: "Inter", system-ui, sans-serif;
+                margin: 0;
+                background: var(--bg);
+                color: var(--text);
+            }
+
+            .header {
+                background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+                color: white;
+                padding: 2rem;
+                text-align: center;
+            }
+
+            .container {
+                max-width: 1400px;
+                margin: 0 auto;
+                padding: 2rem;
+            }
         </style>
     </head>
     <body>
-        <redoc spec-url="/docs/openapi.json"></redoc>
+        <div class="header">
+            <h1>API文档</h1>
+        </div>
+        <div class="container">
+            <div id="redoc-container"></div>
+        </div>
+
         <script src="/redoc.standalone.js"></script>
+        <script>
+            Redoc.init(
+                "/docs/openapi.json",
+                {
+                    theme: {
+                        colors: {
+                            primary: { main: "#4f46e5" },
+                        },
+                        typography: {
+                            fontFamily: "Inter, system-ui, sans-serif",
+                        },
+                    },
+                },
+                document.getElementById("redoc-container")
+            );
+        </script>
     </body>
 </html>

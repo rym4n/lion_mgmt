@@ -1,15 +1,15 @@
 # coding=utf-8
 import ast
-import asyncio
 import traceback
 
 import orjson
+from aiocache import caches
 from sanic import Blueprint, Request, Websocket
-from sanic.log import logger
 from sanic import response
+from sanic.log import logger
+from sanic_ext import openapi
 from tortoise.expressions import Q
 from websockets import ConnectionClosed
-from aiocache import caches
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -18,13 +18,11 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import gen_run_id, gen_random_code
-from models import Approvement, Events, ToolAction, Tool, Runlog
+from models import Events, ToolAction, Tool, Runlog
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
 from services.timed.views import runlog_list
 from settings import KAFKA_SERVERS, TASK_TOPIC, WR_TOPIC, CACHE
-
-from sanic_ext import openapi
 
 warroom_bp = Blueprint('warroom', url_prefix='/warroom')
 __all__ = ['warroom_bp']
@@ -587,7 +585,6 @@ async def up_status(request):
 
 
 @warroom_bp.post("/run")
-@requires_permission("warroom:r")
 @openapi.definition(
     summary="运行剧本或动作",
     description="根据运行类型执行flow或action操作，需要作战室查看权限",
@@ -679,6 +676,7 @@ async def up_status(request):
         }
     }
 )
+@requires_permission("warroom:r")
 async def run(request):
     """
     运行剧本或动作（需要作战室创建权限）
@@ -830,7 +828,7 @@ async def activity(request, activityId):
         executorInstanceName = logs[0].playbook_name
         executorInstanceType = "PLAYBOOK"
     else:
-        actions = await ToolAction.filter(tool_name=logs[0].tool_name,version_number=logs[0].tool_version).all()
+        actions = await ToolAction.filter(tool_name=logs[0].tool_name, version_number=logs[0].tool_version).all()
         for action in actions:
             if action.action["func"] == logs[0].action_name and action.action["name"] == logs[0].action_display_name:
                 executorInstanceId = action.id
