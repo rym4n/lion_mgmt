@@ -1178,7 +1178,7 @@ async def assign_role_to_user(request):
     parameter=[
         {
             "name": "redirect",
-            "in": "query",
+            "location": "query",
             "description": "重定向地址",
             "required": False,
             "schema": {
@@ -1209,7 +1209,7 @@ async def oauth2_login(request):
     parameter=[
         {
             "name": "code",
-            "in": "query",
+            "location": "query",
             "description": "授权码",
             "required": True,
             "schema": {
@@ -1218,7 +1218,7 @@ async def oauth2_login(request):
         },
         {
             "name": "state",
-            "in": "query",
+            "location": "query",
             "description": "状态码",
             "required": True,
             "schema": {
