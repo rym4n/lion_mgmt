@@ -867,7 +867,7 @@ async def create_report(request):
         runlog = await Runlog.filter(run_id=run_id, deleted=False).order_by("-ctime").all()
         if runlog:
             for log in runlog:
-                if log.tool_name == "generate_docx_file" and log.action_name == "creat_docx_file":
+                if log.tool_name == "generate_docx_file" and log.action_name == "creat_docx_file" and str(log.result).startswith("{"):
                     data["result"] = orjson.loads(log.result)
                     data["status"] = "success" if log.status == 0 else "fail"
             if any(log.node_type == "end-node" for log in runlog):
