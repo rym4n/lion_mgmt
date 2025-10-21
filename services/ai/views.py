@@ -110,7 +110,7 @@ async def ai_question(request):
     # 剧本实现
     pv = await PlaybookVersion.filter(playbook_id="222222", deleted=False, status=1).order_by("-ctime").first()
     if not pv:
-        return response_ok("ai功能剧本缺失，请联系管理员处理")
+        return response_ok("ai功能剧本缺失或未发布，请联系管理员处理")
 
     params = {"flow_id": pv.id,
               "flow_input": {
