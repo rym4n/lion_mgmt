@@ -1,6 +1,8 @@
 # coding=utf-8
+import asyncio
 from datetime import datetime
 
+import orjson
 import pytz
 from sanic import Blueprint
 from sanic import response
@@ -9,11 +11,13 @@ from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
+from libs.chat import get_ai_config
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import gen_random_code, strip_timezone_to_seconds, gen_run_id
-from models import Events, Runlog, Room, Account, Role, EventsIngestion, ToolAction, ToolResources, Tool
+from models import Events, Runlog, Room, Account, Role, EventsIngestion, ToolAction, ToolResources, Tool, \
+    PlaybookVersion
 from services.timed.views import runlog_list
 from settings import KAFKA_SERVERS, TASK_TOPIC
 
@@ -801,3 +805,73 @@ async def update_event(request):
         await event.save(update_fields=update_fields)
 
     return response_ok("更新成功")
+
+
+@event_bp.post('/report')
+@openapi.definition(
+    summary="AI自动生成事件报告",
+    description="AI自动生成事件报告（需要事件创建权限）",
+    body={
+        "event_id": "事件id"
+    },
+    response={
+        "code": 0,
+        "data": {
+            "status": "success",
+            "result": {
+                "code": 0,
+                "msg": "",
+                "data": {
+                    "download_link": "https://192.168.12.254/api/system/down-file/9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx",
+                    "file_id": "9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx"
+                }
+            }
+        },
+        "message": "生成成功"
+    }
+)
+@requires_permission('event:c')
+async def create_report(request):
+    event_id = request.json.get("event_id")
+
+    if not event_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    user = request.ctx.session['account_info']
+
+    ai_config = await get_ai_config()
+
+    host = ai_config.get('llm_host')
+    if host is None:
+        return response_ok("当前未配置ai服务地址，请前往系统设置进行配置。")
+    model = ai_config.get('llm_model')
+    if model is None:
+        return response_ok("当前未配置ai服务模型，请前往系统设置进行配置。")
+
+    # 剧本实现
+    pv = await PlaybookVersion.filter(playbook_id="333333", deleted=False, status=1).order_by("-ctime").first()
+    if not pv:
+        return response_ok("生成事件报告剧本缺失或未发布，请联系管理员处理")
+
+    params = {"flow_id": pv.id,
+              "flow_input": {
+                  "event_id": event_id,
+                  "ai_config": orjson.dumps(ai_config).decode("utf-8")
+              },
+              "executor": user.id}
+    run_id = gen_run_id()
+    msg = {"run_type": "flow", "run_id": run_id, "run_args": params}
+    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    data = {}
+    while True:
+        runlog = await Runlog.filter(run_id=run_id, deleted=False).order_by("-ctime").all()
+        if runlog:
+            for log in runlog:
+                if log.tool_name == "generate_docx_file" and log.action_name == "creat_docx_file":
+                    data["result"] = orjson.loads(log.result)
+                    data["status"] = "success" if log.status == 0 else "fail"
+            if any(log.node_type == "end-node" for log in runlog):
+                break
+        await asyncio.sleep(1)
+
+    return response_ok(data)
