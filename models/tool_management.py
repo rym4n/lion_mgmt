@@ -119,6 +119,7 @@ class ToolResources(BaseModel):
     name: str = fields.CharField(max_length=255, description="资源名称")
     engine: str = fields.CharField(max_length=255, null=True, description="执行引擎")
     resources = EncryptedCharField(max_length=3000, null=False, description="资源配置")
+    internal: bool = fields.BooleanField(default=False, description="是否为维护模式资源")
     creator: str = fields.CharField(max_length=255, null=True, description="创建者")
     updater: str = fields.CharField(max_length=255, null=True, description="更新者")
 
