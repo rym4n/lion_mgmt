@@ -25,10 +25,6 @@ os.makedirs(SUPERVISOR_PATH, exist_ok=True)
 TOOLS_DIR = "./data/tools"
 os.makedirs(TOOLS_DIR, exist_ok=True)
 
-# 文件下载目录
-DOWNLOAD_DIR = "./data/download"
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
 # 存储许可文件的目录
 LICENSE_DIR = "./data/license"
 os.makedirs(LICENSE_DIR, exist_ok=True)
