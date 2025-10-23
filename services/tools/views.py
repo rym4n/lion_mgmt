@@ -1033,11 +1033,13 @@ async def add_tool_resource(request):
     if not tool_name or resources is None or not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    existing_resource = await ToolResources.get_or_none(name=name, deleted=False, tool_name=tool_name)
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    existing_resource = await ToolResources.get_or_none(name=name, deleted=False, tool_name=tool_name, internal=maintenance_mode)
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
 
     tr = await ToolResources.create(tool_name=tool_name, name=name, engine=engine, resources=orjson.dumps(resources).decode(),
+                                    internal=maintenance_mode if maintenance_mode else False,
                                     creator=request.ctx.session['account_info'].username,
                                     updater=request.ctx.session['account_info'].username)
 
@@ -1107,7 +1109,8 @@ async def tool_resources_detailed(request):
     if not tool_name:
         raise CustomError(ErrorCode.ParameterError)
 
-    resources = await ToolResources.filter(tool_name=tool_name, deleted=False).all()
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    resources = await ToolResources.filter(tool_name=tool_name, deleted=False, internal=maintenance_mode).all()
     return response_ok([r.json for r in resources])
 
 
@@ -1172,7 +1175,8 @@ async def update_tool_resource(request):
     if not tool_name or not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False)
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False, internal=maintenance_mode)
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
@@ -1242,7 +1246,8 @@ async def delete_tool_resource(request):
     if not tool_name or not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False)
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False, internal=maintenance_mode)
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
