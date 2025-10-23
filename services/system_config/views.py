@@ -146,7 +146,7 @@ async def upload_image(request):
 
             with open(file_path, "wb") as f:
                 f.write(file.body)
-            await Config.update_or_create(key=field, module="system", value=file_path)
+            await Config.update_or_create(key=field, module="system", defaults={"value": "file_path"})
 
     return response_ok("success")
 
