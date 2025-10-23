@@ -137,20 +137,19 @@ async def upload_image(request):
     for field in ["background", "logo"]:
         file = request.files.get(field)
         filename = ''
-        ext = None
         if file:
             original_name = file.name
             _, ext = os.path.splitext(original_name)
-        if field == "background":
-            filename = f"bg" + ext if ext else f"bg.png"
-        elif field == "logo":
-            filename = f"logo" + ext if ext else f"logo.png"
-        if file and filename:
-            file_path = os.path.join(UPLOAD_DIR, filename)
+            if field == "background":
+                filename = f"bg" + ext
+            elif field == "logo":
+                filename = f"logo" + ext
+            if file and filename:
+                file_path = os.path.join(UPLOAD_DIR, filename)
 
-            with open(file_path, "wb") as f:
-                f.write(file.body)
-            await Config.update_or_create(key=field, module="system", defaults={"value": "file_path"})
+                with open(file_path, "wb") as f:
+                    f.write(file.body)
+                await Config.update_or_create(key=field, module="system", defaults={"value": "file_path"})
 
     return response_ok("success")
 
