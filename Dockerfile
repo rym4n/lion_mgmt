@@ -36,7 +36,7 @@ RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove
 RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file models/
 RUN nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
 
-FROM timberio/vector:0.47.0-debian AS vector
+FROM timberio/vector:0.50.0-debian AS vector
 
 FROM python:3.11-slim AS runtime
 
