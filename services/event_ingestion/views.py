@@ -27,7 +27,7 @@ from libs import supervisor
 from libs.chat import get_ai_config
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import run_linux_command, setup_logs_template, setup_ilm_policy, delete_ilm_policy
+from libs.utils import run_linux_command, setup_logs_template, setup_ilm_policy
 from models import PlaybookVersion, Playbook, Config
 from models.event import EventsIngestion, EventRelatedScript
 from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
@@ -473,8 +473,6 @@ async def delete_event_ingestion(request):
         raise CustomError(ErrorCode.NotFound)
     if event.enabled_status == 1:
         return response_ok("事件已启用，禁止删除，请先禁用事件")
-
-    await delete_ilm_policy(f"logs_retention_policy-{event.event_ingestion_name}")
 
     async with in_transaction():
         event.deleted = True
