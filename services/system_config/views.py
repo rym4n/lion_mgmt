@@ -137,12 +137,14 @@ async def upload_image(request):
     for field in ["background", "logo"]:
         file = request.files.get(field)
         filename = ''
+        original_name = file.name or file.filename
+        _, ext = os.path.splitext(original_name)
         if field == "background":
-            filename = f"bg.png"
+            filename = f"bg"
         elif field == "logo":
-            filename = f"logo.svg"
+            filename = f"logo"
         if file and filename:
-            file_path = os.path.join(UPLOAD_DIR, filename)
+            file_path = os.path.join(UPLOAD_DIR, filename + ext)
 
             with open(file_path, "wb") as f:
                 f.write(file.body)
