@@ -4,6 +4,7 @@ import hashlib
 import io
 import os
 import random
+import shutil
 import string
 import subprocess
 import tempfile
@@ -30,7 +31,7 @@ from libs.security.authorization import requires_permission
 from libs.utils import run_linux_command, setup_logs_template, setup_ilm_policy
 from models import PlaybookVersion, Playbook, Config
 from models.event import EventsIngestion, EventRelatedScript
-from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS
+from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS, SUPERVISOR_PATH
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='/event-ingestion')
 _all__ = ["event_ingestion_bp"]
@@ -912,6 +913,9 @@ async def binding_event_ingestion_script(request):
                 process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
                 supervisor.stop_process(process_name)
                 supervisor.remove_process(process_name)
+                supervisor_path = os.path.join(SUPERVISOR_PATH, "{}.conf".format(process_name))
+                if os.path.exists(supervisor_path):
+                    shutil.rmtree(supervisor_path)
         await event_related_script.delete()
 
     data = orjson.loads(orjson.dumps(event.vector_config_raw))
