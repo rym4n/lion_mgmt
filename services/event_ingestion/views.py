@@ -410,7 +410,7 @@ async def get_all_events_ingestion(request):
     if request.json.get("name"):
         filters["event_ingestion_name__icontains"] = request.json.get("name")
 
-    events = await EventsIngestion.filter(**filters).offset(offset).select_related("creator", "updator").limit(
+    events = await EventsIngestion.filter(**filters).order_by("-ctime").offset(offset).select_related("creator", "updator").limit(
         limit).all()
     total = await EventsIngestion.filter(**filters).count()
 
