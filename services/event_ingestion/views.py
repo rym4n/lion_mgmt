@@ -614,6 +614,7 @@ async def update_event_ingestion(request):
         data["sources"][event.vector_name]["bootstrap_servers"] = ",".join(event_source_address)
     if communication_type:
         data["sources"][event.vector_name]["mode"] = communication_type
+        event.syslog_config = communication_type + event.syslog_config[3:]
     if kafka_group_id:
         data["sources"][event.vector_name]["group_id"] = kafka_group_id
     if transforms_type:
