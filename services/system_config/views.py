@@ -191,7 +191,7 @@ async def get_bgpic(request):
     if cfg:
         async with aiofile.AIOFile(cfg.value, 'rb') as f:
             content = await f.read()
-            return response.raw(content, content_type="image/" + cfg.value.split('.')[-1])
+            return response.raw(content, content_type="image/png")
     return response.raw(b'', content_type="image/png")
 
 
