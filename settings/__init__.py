@@ -65,15 +65,15 @@ ES_USER = os.environ.get("ELASTIC_USER")
 ES_PASS = os.environ.get("ELASTIC_PASSWORD")
 
 # 对象存储设置
-S3_HOST = os.environ.get("S3_ENDPOINT")
+S3_HOST = os.environ.get("RY_FS_HOST")
 FS_AK = os.environ.get("RUSTFS_ACCESS_KEY")
 FS_SK = os.environ.get("RUSTFS_SECRET_KEY")
 
 # 系统文件专用存储桶，例如license、自定义图片配置等
-SYS_BUCKET = "system"
+RY_SYS_BUCKET = os.environ.get("RY_FS_SYS") or "system"
 
 # 用户文件专用存储桶
-USER_BUCKET = "user"
+RY_USER_BUCKET = os.environ.get("RY_FS_USER") or "user"
 
 OAS_UI_DEFAULT = "redoc"
 OAS_PATH_TO_REDOC_HTML = os.path.join(BASE_DIR, 'settings', 'apidoc.html')

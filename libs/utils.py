@@ -9,6 +9,7 @@ import random
 import secrets
 import subprocess
 import time
+import traceback
 import uuid
 import zipfile
 from io import BytesIO
@@ -420,3 +421,37 @@ async def upload_to_s3(file_content: bytes, bucket_name: str, file_name: str, pr
         # 上传文件
         await s3_client.put_object(Bucket=bucket_name, Key=s3_key, Body=file_content, ContentType=content_type or 'application/octet-stream')
         return f"/files/{bucket_name}/{s3_key}"
+
+
+async def delete_from_s3(bucket_name: str, file_name: str, prefix='') -> bool:
+    """
+    删除存储桶中的文件
+    bucket_name: 存储桶名称
+    file_name: 文件名称
+    prefix: 功能前缀
+    """
+    async with aioboto3.Session().client('s3', endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK,
+                                         config=Config(signature_version='s3v4')) as s3_client:
+        try:
+            await s3_client.delete_object(Bucket=bucket_name, Key=f"{prefix}/{file_name}")
+            return True
+        except Exception as e:
+            logger.error(f"删除文件失败: {e} | {traceback.format_exc()}")
+    return False
+
+
+async def get_from_s3(bucket_name: str, file_name: str, prefix='') -> bytes | None:
+    """
+    获取存储桶中的文件
+    bucket_name: 存储桶名称
+    file_name: 文件名称
+    prefix: 功能前缀
+    """
+    async with aioboto3.Session().client('s3', endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK,
+                                         config=Config(signature_version='s3v4')) as s3_client:
+        try:
+            obj = await s3_client.get_object(Bucket=bucket_name, Key=f"{prefix}/{file_name}")
+            return await obj['Body'].read()
+        except Exception as e:
+            logger.error(f"获取文件失败: {e} | {traceback.format_exc()}")
+    return None
