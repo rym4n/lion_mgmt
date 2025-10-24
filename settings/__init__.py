@@ -65,7 +65,7 @@ ES_USER = os.environ.get("ELASTIC_USER")
 ES_PASS = os.environ.get("ELASTIC_PASSWORD")
 
 # 对象存储设置
-S3_HOST = os.environ.get("S3_ENDPOINT") or "http://lion-fs:9000"
+S3_HOST = os.environ.get("S3_ENDPOINT")
 FS_AK = os.environ.get("RUSTFS_ACCESS_KEY")
 FS_SK = os.environ.get("RUSTFS_SECRET_KEY")
 

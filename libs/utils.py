@@ -408,6 +408,10 @@ def get_time():
 async def upload_to_s3(file_content: bytes, bucket_name: str, file_name: str, prefix='', content_type: Optional[str] = None) -> str:
     """
     上传文件到存储桶，返回下载的链接
+    file_content: 文件内容
+    bucket_name: 存储桶名称
+    file_name: 文件名称
+    prefix: 功能前缀
     """
     async with aioboto3.Session().client('s3', endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK,
                                          config=Config(signature_version='s3v4')) as s3_client:
