@@ -416,11 +416,14 @@ async def upload_to_s3(file_content: bytes, bucket_name: str, file_name: str, pr
     """
     async with aioboto3.Session().client('s3', endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK,
                                          config=Config(signature_version='s3v4')) as s3_client:
-        # 生成S3对象键（可以添加前缀如uploads/）
-        s3_key = f"{prefix}/{file_name}"
-        # 上传文件
-        await s3_client.put_object(Bucket=bucket_name, Key=s3_key, Body=file_content, ContentType=content_type or 'application/octet-stream')
-        return f"/files/{bucket_name}/{s3_key}"
+        try:
+            s3_key = f"{prefix}/{file_name}"
+            # 上传文件
+            await s3_client.put_object(Bucket=bucket_name, Key=s3_key, Body=file_content, ContentType=content_type or 'application/octet-stream')
+            return f"/files/{bucket_name}/{s3_key}"
+        except Exception as e:
+            logger.error(f"上传文件失败: {e} | {traceback.format_exc()}")
+    return ""
 
 
 async def delete_from_s3(bucket_name: str, file_name: str, prefix='') -> bool:
