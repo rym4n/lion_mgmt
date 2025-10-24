@@ -1034,7 +1034,7 @@ async def add_tool_resource(request):
         raise CustomError(ErrorCode.ParameterError)
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    existing_resource = await ToolResources.get_or_none(name=name, deleted=False, tool_name=tool_name, internal=maintenance_mode)
+    existing_resource = await ToolResources.get_or_none(name=name, deleted=False, tool_name=tool_name, internal=maintenance_mode if maintenance_mode else False)
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
 
@@ -1110,7 +1110,7 @@ async def tool_resources_detailed(request):
         raise CustomError(ErrorCode.ParameterError)
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    resources = await ToolResources.filter(tool_name=tool_name, deleted=False, internal=maintenance_mode).all()
+    resources = await ToolResources.filter(tool_name=tool_name, deleted=False, internal=maintenance_mode if maintenance_mode else False).all()
     return response_ok([r.json for r in resources])
 
 
@@ -1176,7 +1176,7 @@ async def update_tool_resource(request):
         raise CustomError(ErrorCode.ParameterError)
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False, internal=maintenance_mode)
+    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False, internal=maintenance_mode if maintenance_mode else False)
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
@@ -1247,7 +1247,7 @@ async def delete_tool_resource(request):
         raise CustomError(ErrorCode.ParameterError)
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False, internal=maintenance_mode)
+    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False, internal=maintenance_mode if maintenance_mode else False)
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
