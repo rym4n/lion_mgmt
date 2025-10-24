@@ -16,12 +16,14 @@ from pathlib import Path, PurePath
 from string import ascii_uppercase, digits
 from typing import Optional
 
+import aioboto3
 import aiofile
 import jwt
 import psutil
 import pytz
 from aiokafka import AIOKafkaConsumer, TopicPartition
 from argon2 import PasswordHasher
+from botocore.config import Config
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
@@ -33,7 +35,7 @@ from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from settings import RY_RES_KEY, ES_HOST, ES_USER, ES_PASS, REAL_IP_HEADER
+from settings import RY_RES_KEY, ES_HOST, ES_USER, ES_PASS, REAL_IP_HEADER, FS_AK, S3_HOST, FS_SK
 
 password_hasher: PasswordHasher = PasswordHasher()
 
@@ -401,3 +403,16 @@ def get_time():
         return now.strftime("%Y-%m-%dT%H:%M:%S%z")  # 带 +0800
     except Exception:
         return "1970-01-01T00:00:00+08:00"
+
+
+async def upload_to_s3(file_content: bytes, bucket_name: str, file_name: str, prefix='', content_type: Optional[str] = None) -> str:
+    """
+    上传文件到存储桶，返回下载的链接
+    """
+    async with aioboto3.Session().client('s3', endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK,
+                                         config=Config(signature_version='s3v4')) as s3_client:
+        # 生成S3对象键（可以添加前缀如uploads/）
+        s3_key = f"{prefix}/{file_name}"
+        # 上传文件
+        await s3_client.put_object(Bucket=bucket_name, Key=s3_key, Body=file_content, ContentType=content_type or 'application/octet-stream')
+        return f"/files/{bucket_name}/{s3_key}"

@@ -64,6 +64,17 @@ ES_HOST = os.environ.get("ELASTIC_HOST")
 ES_USER = os.environ.get("ELASTIC_USER")
 ES_PASS = os.environ.get("ELASTIC_PASSWORD")
 
+# 对象存储设置
+S3_HOST = os.environ.get("S3_ENDPOINT") or "http://lion-fs:9000"
+FS_AK = os.environ.get("RUSTFS_ACCESS_KEY")
+FS_SK = os.environ.get("RUSTFS_SECRET_KEY")
+
+# 系统文件专用存储桶，例如license、自定义图片配置等
+SYS_BUCKET = "system"
+
+# 用户文件专用存储桶
+USER_BUCKET = "user"
+
 OAS_UI_DEFAULT = "redoc"
 OAS_PATH_TO_REDOC_HTML = os.path.join(BASE_DIR, 'settings', 'apidoc.html')
 OAS_UI_REDOC = True
