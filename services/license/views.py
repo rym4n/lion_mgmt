@@ -17,7 +17,6 @@ from libs.security.authorization import requires_permission, load_license, get_l
 from libs.utils import verify_license
 from models import Tool, Playbook, Account, PermissionsMenu, Config
 from settings import LICENSE_DIR
-from sanic.log import logger
 
 license_bp = Blueprint('license', url_prefix='/license')
 _all__ = ["license_bp"]

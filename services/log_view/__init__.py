@@ -2,7 +2,6 @@
 # coding=utf-8
 
 import logging
-import traceback
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(filename)s:%(lineno)d:%(funcName)s] [%(levelname)s] %(message)s')

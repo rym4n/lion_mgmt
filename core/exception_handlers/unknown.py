@@ -1,5 +1,4 @@
 # coding=utf-8
-import elasticsearch
 from asyncpg.exceptions import UniqueViolationError
 from sanic import HTTPResponse, exceptions, MethodNotAllowed
 from sanic.log import logger

@@ -33,6 +33,7 @@ class BaseModel(Model):
     class Meta:
         abstract = True
 
+
 class EncryptedCharField(fields.CharField):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

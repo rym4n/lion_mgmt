@@ -309,21 +309,17 @@ async def count_apps(request):
 @requires_permission('dashboard:r')
 async def playbooks_success_rate(request):
     sql = """
-        SELECT
-            playbook_name,
-            ROUND(SUM(CASE WHEN has_fail = 0 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 2) AS success_rate
-        FROM (
-            SELECT
-                run_id,
-                playbook_name,
-                MAX(CASE WHEN status != 0 THEN 1 ELSE 0 END) AS has_fail
-            FROM runlog
-            WHERE playbook_name != '执行动作'
-            GROUP BY run_id, playbook_name
-        ) AS deduplicated
-        GROUP BY playbook_name
-        ORDER BY success_rate;
-    """
+          SELECT playbook_name,
+                 ROUND(SUM(CASE WHEN has_fail = 0 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 2) AS success_rate
+          FROM (SELECT run_id,
+                       playbook_name,
+                       MAX(CASE WHEN status != 0 THEN 1 ELSE 0 END) AS has_fail
+                FROM runlog
+                WHERE playbook_name != '执行动作'
+                GROUP BY run_id, playbook_name) AS deduplicated
+          GROUP BY playbook_name
+          ORDER BY success_rate; \
+          """
     async with in_transaction() as conn:
         rows = await conn.execute_query_dict(sql)
         for row in rows:

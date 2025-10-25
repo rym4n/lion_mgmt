@@ -3,8 +3,8 @@
 
 import abc
 
-from sanic.request import Request
 from sanic import HTTPResponse
+from sanic.request import Request
 
 
 class BaseExcHandler(metaclass=abc.ABCMeta):
