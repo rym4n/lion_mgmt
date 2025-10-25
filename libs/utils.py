@@ -261,7 +261,7 @@ async def fetch_latest_messages(bootstrap_servers, topic, num_messages=10):
         try:
             await consumer.stop()
         except asyncio.CancelledError:
-            logger.info("停止消费者时被取消")
+            logger.warning("停止消费者时被取消")
 
 
 def run_linux_command(command):
@@ -278,7 +278,6 @@ def run_linux_command(command):
         stderr=subprocess.PIPE,
         text=True
     )
-    logger.info(result)
     return {
         "stdout": result.stdout.strip() if result.stdout else "",
         "stderr": result.stderr.strip() if result.stderr else "",

@@ -1227,77 +1227,7 @@ async def run(request):
 
 
 @warroom_bp.post("/execution")
-@openapi.definition(
-    summary="运行剧本或动作（兼容老接口）",
-    deprecated=True,
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "required": ["eventId", "executorInstanceId", "executorInstanceType"],
-                "properties": {
-                    "eventId": {
-                        "type": "string",
-                        "description": "事件ID"
-                    },
-                    "executorInstanceId": {
-                        "type": "string",
-                        "description": "实例ID(剧本版本id或动作id)"
-                    },
-                    "executorInstanceName": {
-                        "type": "string",
-                        "description": "执行实例名称(剧本或者动作名字)"
-                    },
-                    "executorInstanceType": {
-                        "type": "string",
-                        "description": "运行类型，PLAYBOOK/ACTION"
-                    },
-                    "execMode": {
-                        "type": "string",
-                        "description": "执行模式，NORMAL 正常模式"
-                    },
-                    "executorActionAssetIds": {
-                        "type": "string",
-                        "description": "动作资源id,多个资源用,分割"
-                    },
-                    "params": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "key": {"type": "string"},
-                                "value": {"type": "string"}
-                            }
-                        },
-                        "description": "运行参数"
-                    }
-                }
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "Success",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer", "example": 0},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "activityId": {"type": "string", "example": "活动ID"}
-                                }
-                            },
-                            "result": {"type": "string", "example": "活动ID"}
-                        }
-                    }
-                }
-            }
-        }
-    }
-)
+@openapi.exclude()
 @requires_permission("warroom:r")
 async def execution(request):
     eventId = request.json.get("eventId")
@@ -1364,54 +1294,7 @@ async def execution(request):
 
 
 @warroom_bp.get("/activity/<activityId>")
-@openapi.definition(
-    summary="获取执行记录（兼容老接口）",
-    deprecated=True,
-    parameter={
-        "name": "activityId",
-        "description": "活动ID",
-        "required": True,
-        "in": "path"
-    },
-    response={
-        "200": {
-            "description": "Success",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer", "example": 0},
-                            "data": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "description": "执行记录"
-                                }
-                            },
-                            "result": {
-                                "type": "object",
-                                "properties": {
-                                    "id": {"type": "string"},
-                                    "activityId": {"type": "string"},
-                                    "eventId": {"type": "string"},
-                                    "executorInstanceId": {"type": "string"},
-                                    "executorInstanceName": {"type": "string"},
-                                    "executorInstanceType": {"type": "string"},
-                                    "execMode": {"type": "string"},
-                                    "postStatus": {"type": "string"},
-                                    "postCode": {"type": "string"},
-                                    "postMsg": {"type": "string"},
-                                    "excuteStatus": {"type": "string"}
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-)
+@openapi.exclude()
 @requires_permission("warroom:r")
 async def activity(request, activityId):
     if not activityId:

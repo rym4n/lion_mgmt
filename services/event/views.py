@@ -136,47 +136,7 @@ async def get_all_events(request):
 
 
 @event_bp.post('/artificial')
-@openapi.definition(
-    summary="人工创建事件（旧接口）",
-    description="人工创建事件（需要事件创建权限）（兼容老接口，请勿使用）",
-    deprecated=True,
-    body={
-        "eventName": "事件名称",
-        "ownerId": 1,
-        "eventSummary": "事件概要"
-    },
-    response={
-        "code": 0,
-        "data": {
-            "id": 1
-        },
-        "result": {
-            "id": 1,
-            "eventName": "事件名称",
-            "categoryName": "",
-            "categoryId": 0,
-            "ownerId": 1,
-            "eventSummary": "事件概要",
-            "eventStatus": "NEW",
-            "eventProcessStatus": "OPENED",
-            "sceneName": "",
-            "sceneDisplay": "",
-            "logId": "",
-            "relationEventId": 0,
-            "relationType": "UNKNOWN",
-            "eventSource": "MANUAL",
-            "bizName": "",
-            "openTime": None,
-            "resolvedTime": None,
-            "categoryDisplayName": None,
-            "resolvedBy": "",
-            "preBizModel": None,
-            "logModel": None,
-            "permissions": [],
-            "members": []
-        }
-    }
-)
+@openapi.exclude()
 @requires_permission('event:c')
 async def artificial_create_event(request):
     event_name = request.json.get("eventName")
@@ -249,47 +209,7 @@ async def artificial_create_event(request):
 
 
 @event_bp.post('/')
-@openapi.definition(
-    summary="人工创建事件（旧接口）",
-    description="人工创建事件（需要事件创建权限） （兼容老接口，请勿使用）",
-    deprecated=True,
-    body={
-        "eventName": "事件名称",
-        "ownerId": 1,
-        "eventSummary": "事件概要"
-    },
-    response={
-        "code": 0,
-        "data": {
-            "id": 1
-        },
-        "result": {
-            "id": 1,
-            "eventName": "事件名称",
-            "categoryName": "",
-            "categoryId": 0,
-            "ownerId": 1,
-            "eventSummary": "事件概要",
-            "eventStatus": "NEW",
-            "eventProcessStatus": "OPENED",
-            "sceneName": "",
-            "sceneDisplay": "",
-            "logId": "",
-            "relationEventId": 0,
-            "relationType": "UNKNOWN",
-            "eventSource": "MANUAL",
-            "bizName": "",
-            "openTime": None,
-            "resolvedTime": None,
-            "categoryDisplayName": None,
-            "resolvedBy": "",
-            "preBizModel": None,
-            "logModel": None,
-            "permissions": [],
-            "members": []
-        }
-    }
-)
+@openapi.exclude()
 @requires_permission('event:c')
 async def artificial_create_event_wuzhi(request):
     event_name = request.json.get("eventName")
@@ -362,27 +282,7 @@ async def artificial_create_event_wuzhi(request):
 
 
 @event_bp.post("/execution")
-@openapi.definition(
-    summary="运行剧本或动作",
-    description="运行剧本或动作（需要作战室创建权限）（兼容老接口，请勿使用）",
-    deprecated=True,
-    body={
-        "eventId": 1,
-        "executorInstanceId": 1,
-        "executorInstanceName": "执行实例名称",
-        "executorInstanceType": "PLAYBOOK/ACTION",
-        "execMode": "NORMAL",
-        "executorActionAssetIds": "资源id,多个资源用,分割",
-        "params": [{"key": "a", "value": "b"}]
-    },
-    response={
-        "code": 0,
-        "data": {
-            "activityId": "活动ID"
-        },
-        "result": "活动ID"
-    }
-)
+@openapi.exclude()
 @requires_permission("event:r")
 async def execution(request):
     eventId = request.json.get("eventId")
@@ -449,37 +349,7 @@ async def execution(request):
 
 
 @event_bp.get('/activity/<activityId>')
-@openapi.definition(
-    summary="获取剧本或动作的执行结果",
-    description="获取剧本或动作的执行结果（需要事件查看权限）",
-    deprecated=True,
-    parameter=[{
-        "name": "activityId",
-        "location": "path",
-        "description": "活动id",
-        "required": True,
-        "schema": {"type": "string"}
-    }],
-    response={
-        "code": 0,
-        "result": {
-            "activity": {
-                "eventId": 1,
-                "executorInstanceId": 1,
-                "executorActionParams": "",
-                "execMode": None,
-                "displayName": "",
-                "code": 200,
-                "msg": "",
-                "messageId": None,
-                "startTime": 0,
-                "finishTime": 0,
-                "excuteStatus": "RUNNING/WAITING_APPROVE/FAIL/SUCCESS"
-            },
-            "nodeResults": []
-        }
-    }
-)
+@openapi.exclude()
 @requires_permission('event:r')
 async def get_activity_result(request, activityId):
     if not activityId:
