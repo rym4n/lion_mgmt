@@ -44,6 +44,7 @@ class Tool(BaseModel):
     name: str = fields.CharField(max_length=255, null=True, description="工具名称")
     version: str = fields.CharField(max_length=50, null=True, description="工具版本号")
     path: str = fields.CharField(max_length=255, null=True, description="文件地址")
+    logo_path: str = fields.CharField(max_length=255, null=True, description="Logo地址")
     description: str = fields.CharField(max_length=255, null=True, description="工具描述")
     status: int = fields.IntField(default=0, description="是否有剧本使用它 1:有 0:无")
     creator: str = fields.CharField(max_length=255, null=True, description="创建者")
