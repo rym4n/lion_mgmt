@@ -1257,6 +1257,8 @@ async def execution(request):
         params["flow_input"] = input_data
     elif run_type == "action":
         action = await ToolAction.get_or_none(id=executorInstanceId, deleted=False)
+        if not action:
+            raise CustomError(ErrorCode.ActionNotFoundError)
         tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False)
         if executorParams:
             for param in executorParams:
@@ -1273,10 +1275,10 @@ async def execution(request):
         params["timeout"] = 300
         params["resource"] = ""
     params["executor"] = user.id
-    if executorActionAssetIds and type == "action":
+    if executorActionAssetIds and run_type == "action":
         params["resource"] = executorActionAssetIds
     run_id = gen_run_id()
-    msg = {"run_type": type, "run_id": run_id, "run_args": params}
+    msg = {"run_type": run_type, "run_id": run_id, "run_args": params}
     room = await Room.get_or_none(id=room_id)
     room.updator = user
     room.run_id.append(msg["run_id"])
