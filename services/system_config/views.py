@@ -113,7 +113,7 @@ async def upload_image(request):
             "MultiTagsCache": False,
             "KeepAlive": True,
             "Layout": "horizontal",
-            "Theme": "default",
+            "Theme": os.environ.get('RY_MGMT_THEME') or 'oceanBlue',
             "DarkMode": False,
             "OverallStyle": "default",
             "Grey": False,
