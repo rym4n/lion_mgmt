@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 # coding=utf-8
 import asyncio
-import datetime
 import re
 import time
 from collections import defaultdict
+from datetime import datetime
 
 import orjson
 import pytz
@@ -203,7 +203,15 @@ async def create_workflow(request):
                     "publish": {
                         "type": "integer",
                         "description": "搜索时使用，支持搜索发布状态, 0未发布 1已发布"
-                    }
+                    },
+                    "ctime": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "搜索时使用，支持搜索创建时间",
+                        "example": ["2025-10-19 00:00:00", "2025-10-29 00:00:00"]
+                    },
                 }
             }
         }
@@ -275,6 +283,13 @@ async def list_workflow(request):
         tags = await Tag.filter(name__in=json_params.get("tag")).all()
         if tags:
             condition = condition & Q(tags__in=tags)
+
+    if len(json_params.get("ctime") or []) == 2:
+        start_time = datetime.strptime(json_params["ctime"][0], '%Y-%m-%d %H:%M:%S')
+        start_time = pytz.timezone("Asia/Shanghai").localize(start_time)
+        end_time = datetime.strptime(json_params["ctime"][1], '%Y-%m-%d %H:%M:%S')
+        end_time = pytz.timezone("Asia/Shanghai").localize(end_time)
+        condition = condition & Q(ctime__range=(start_time, end_time))
 
     pv_condition = Q(playbook_versions__deleted=False)
     if json_params.get("publish") in (0, 1):
@@ -1006,7 +1021,7 @@ async def execute_action(request):
         }
     )
     beijing_tz = pytz.timezone("Asia/Shanghai")
-    utime = datetime.datetime.now(beijing_tz)
+    utime = datetime.now(beijing_tz)
     message = request.json
     if message.get("type") in ('flow', 'action', 'code'):
         if message.get("type") == "flow":

@@ -47,7 +47,15 @@ _all__ = ["approve_bp"]
                             "type": "integer"
                         },
                         "description": "处理状态，支持同时过滤多个状态，0代表待处理，1代表通过，2代表拒绝，3代表已过期"
-                    }
+                    },
+                    "ctime": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "搜索时使用，支持搜索创建时间",
+                        "example": ["2021-01-01T00:00:00Z", "2021-01-31T23:59:59Z"]
+                    },
                 }
             }
         }
@@ -120,11 +128,19 @@ async def all_approvement(request):
     condition = Q(approvers=request.ctx.session['account_info'].id)
     keyword = params.get("keyword")
     status = params.get("status")
+    ctime = params.get("ctime")
 
     if keyword:
         condition = Q(title__icontains=keyword) | Q(content__icontains=keyword)
     if status:
         condition = condition & Q(status__in=status)
+
+    if ctime and len(ctime) == 2:
+        start_time = datetime.strptime(ctime[0], '%Y-%m-%d %H:%M:%S')
+        start_time = pytz.timezone("Asia/Shanghai").localize(start_time)
+        end_time = datetime.strptime(ctime[1], '%Y-%m-%d %H:%M:%S')
+        end_time = pytz.timezone("Asia/Shanghai").localize(end_time)
+        condition = condition & Q(ctime__range=(start_time, end_time))
 
     await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
     total = await Approvement.filter(condition).count()

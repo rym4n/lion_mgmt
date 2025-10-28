@@ -57,11 +57,45 @@ NODE_TYPE = {
     summary="获取指定页数的事件列表",
     description="获取指定页数的事件（支持条件筛选）(需要事件查询权限)",
     body={
-        "page": 1,
-        "size": 15,
-        "event_name": "事件名称（支持模糊搜索）",
-        "event_process_status": "事件处理状态（精确匹配）",
-        "event_source": "事件来源（精确匹配）"
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "integer",
+                        "description": "页码（默认1）"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "description": "每页数量（默认15）"
+                    },
+                    "event_name": {
+                        "type": "string",
+                        "description": "事件名称（支持模糊搜索）"
+                    },
+                    "event_process_status": {
+                        "type": "array",
+                        "description": "事件处理状态（精确匹配）",
+                        "items": {
+                            "type": "string",
+                            "enum": ["已处理", "处理中", "待处理"]
+                        }
+                    },
+                    "event_source": {
+                        "type": "integer",
+                        "description": "事件来源（精确匹配）"
+                    },
+                    "ctime": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": '起止时间范围',
+                        "example": ["2025-10-19 00:00:00", "2025-10-29 00:00:00"]
+                    }
+                }
+            }
+        }
     },
     response={
         "events": [],
@@ -85,6 +119,12 @@ async def get_all_events(request):
         filters["event_process_status__in"] = request.json.get("event_process_status")
     if request.json.get("event_source"):
         filters["event_source"] = request.json.get("event_source")
+    if len(request.json.get("ctime") or []) == 2:
+        start_time = datetime.strptime(request.json.get("ctime")[0], '%Y-%m-%d %H:%M:%S')
+        start_time = pytz.timezone("Asia/Shanghai").localize(start_time)
+        end_time = datetime.strptime(request.json.get("ctime")[1], '%Y-%m-%d %H:%M:%S')
+        end_time = pytz.timezone("Asia/Shanghai").localize(end_time)
+        filters["ctime__range"] = (start_time, end_time)
 
     events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room", "creator",
                                                                                                "updator", "scene")
