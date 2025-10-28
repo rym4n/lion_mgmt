@@ -106,9 +106,9 @@ async def view_dashboard(request):
         raise CustomError(ErrorCode.ParameterError)
 
     start_time = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
-    start_time = pytz.timezone("Asia/Shanghai").localize(start_time)
+    start_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(start_time)
     end_time = datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
-    end_time = pytz.timezone("Asia/Shanghai").localize(end_time)
+    end_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(end_time)
     result = None
     q = Q(ctime__range=(start_time, end_time))
 

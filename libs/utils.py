@@ -398,7 +398,7 @@ async def setup_logs_template(alias_name, ilm_policy):
 
 def get_time():
     try:
-        tz = pytz.timezone("Asia/Shanghai")
+        tz = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai'))
         now = datetime.datetime.now(tz)
         return now.strftime("%Y-%m-%dT%H:%M:%S%z")  # 带 +0800
     except Exception:

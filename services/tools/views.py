@@ -2333,7 +2333,7 @@ async def health_check(request):
             "Connection": "keep-alive",
         }
     )
-    beijing_tz = pytz.timezone("Asia/Shanghai")
+    beijing_tz = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai'))
     utime = datetime.datetime.now(beijing_tz)
     message = request.json.get("action_input", {})
     if message.get("type") in ('flow', 'action'):

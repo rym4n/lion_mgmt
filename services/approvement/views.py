@@ -137,9 +137,9 @@ async def all_approvement(request):
 
     if ctime and len(ctime) == 2:
         start_time = datetime.strptime(ctime[0], '%Y-%m-%d %H:%M:%S')
-        start_time = pytz.timezone("Asia/Shanghai").localize(start_time)
+        start_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(start_time)
         end_time = datetime.strptime(ctime[1], '%Y-%m-%d %H:%M:%S')
-        end_time = pytz.timezone("Asia/Shanghai").localize(end_time)
+        end_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(end_time)
         condition = condition & Q(ctime__range=(start_time, end_time))
 
     await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)

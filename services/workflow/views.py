@@ -286,9 +286,9 @@ async def list_workflow(request):
 
     if len(json_params.get("ctime") or []) == 2:
         start_time = datetime.strptime(json_params["ctime"][0], '%Y-%m-%d %H:%M:%S')
-        start_time = pytz.timezone("Asia/Shanghai").localize(start_time)
+        start_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(start_time)
         end_time = datetime.strptime(json_params["ctime"][1], '%Y-%m-%d %H:%M:%S')
-        end_time = pytz.timezone("Asia/Shanghai").localize(end_time)
+        end_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(end_time)
         condition = condition & Q(ctime__range=(start_time, end_time))
 
     pv_condition = Q(playbook_versions__deleted=False)
@@ -1020,7 +1020,7 @@ async def execute_action(request):
             "Connection": "keep-alive",
         }
     )
-    beijing_tz = pytz.timezone("Asia/Shanghai")
+    beijing_tz = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai'))
     utime = datetime.now(beijing_tz)
     message = request.json
     if message.get("type") in ('flow', 'action', 'code'):

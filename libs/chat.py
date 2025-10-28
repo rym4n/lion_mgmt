@@ -1,6 +1,7 @@
 # coding=utf-8
 import asyncio
 import hashlib
+import os
 import time
 import traceback
 from datetime import datetime
@@ -450,7 +451,7 @@ class ChatManager:
                             await event.save()
                         elif log.get("node_type") == "end-node":
                             event.event_process_status = "已处理"
-                            event.close_time = pytz.timezone("Asia/Shanghai").localize(datetime.now())
+                            event.close_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(datetime.now())
                             await event.save()
                         log["event_id"] = event.id
                 to_insert.append(Runlog(**log))

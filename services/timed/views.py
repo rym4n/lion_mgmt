@@ -992,11 +992,11 @@ async def get_run_log(request):
 
     if start_time:
         start_time = datetime.datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
-        start_time = pytz.timezone("Asia/Shanghai").localize(start_time)
+        start_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(start_time)
         condition &= Q(start_time__gte=start_time)
     if end_time:
         end_time = datetime.datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
-        end_time = pytz.timezone("Asia/Shanghai").localize(end_time)
+        end_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(end_time)
         condition &= Q(start_time__lte=end_time)
     if status in [0, 1]:
         condition &= Q(status=int(status))
