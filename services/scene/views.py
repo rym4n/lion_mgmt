@@ -167,12 +167,12 @@ async def add_scene(request):
 )
 @requires_permission("scene:u")
 async def update_scene(request):
-    id = request.json.get('id')
+    scene_id = request.json.get('id')
     remark = (request.json.get('remark') or None)
-    if not id:
+    if not scene_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    scene = await Scene.get_or_none(id=id).prefetch_related('creator')
+    scene = await Scene.get_or_none(id=scene_id).prefetch_related('creator')
     if not scene:
         raise CustomError(ErrorCode.NotFound)
 
@@ -329,11 +329,11 @@ async def get_all_scene(request):
 )
 @requires_permission("scene:u")
 async def set_current_scene(request):
-    id = request.json.get('id')
-    if not id:
+    scene_id = request.json.get('id')
+    if not scene_id:
         raise CustomError(ErrorCode.ParameterError)
     await Scene.filter(status=1).update(status=0)
-    scene = await Scene.get_or_none(id=id)
+    scene = await Scene.get_or_none(id=scene_id)
     if not scene:
         raise CustomError(ErrorCode.NotFound)
 
@@ -383,11 +383,11 @@ async def set_current_scene(request):
 )
 @requires_permission("scene:d")
 async def remove_scene(request):
-    id = request.json.get('id')
-    if not id:
+    scene_id = request.json.get('id')
+    if not scene_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    scene = await Scene.get_or_none(id=id)
+    scene = await Scene.get_or_none(id=scene_id)
 
     if not scene:
         raise CustomError(ErrorCode.NotFound)

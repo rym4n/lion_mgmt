@@ -48,7 +48,7 @@ def get_client_ip(request) -> str:
         return request.ip
 
 
-def gen_random_code(digits_only: bool = True, length=6) -> str:
+def gen_random_code(length=6, digits_only: bool = True) -> str:
     return "".join(
         random.choice(("" if digits_only else ascii_uppercase) + digits)
         for _ in range(length)

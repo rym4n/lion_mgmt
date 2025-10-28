@@ -1035,7 +1035,7 @@ def runlog_list(all_logs):
     return run_logs
 
 
-async def timer_success_rate(timed: str):
+async def timer_success_rate(timed: Timed):
     logs = await Runlog.filter(timer_id=timed.id, deleted=False).order_by("-start_time").limit(10)
 
     # 计算成功率

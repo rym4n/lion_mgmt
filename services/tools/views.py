@@ -31,7 +31,7 @@ from libs.security.authorization import requires_permission, load_license
 from libs.utils import fix_zip_filename, gen_run_id
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion, \
     Runlog, Timed
-from settings import TOOLS_DIR, KAFKA_SERVERS, TASK_TOPIC
+from settings import TOOLS_DIR, KAFKA_SERVERS, TASK_TOPIC, TZ
 
 # 定义 Blueprint
 tools_bp = Blueprint("tools", url_prefix="/tools")
@@ -2332,8 +2332,7 @@ async def health_check(request):
             "Connection": "keep-alive",
         }
     )
-    beijing_tz = TZ
-    utime = datetime.datetime.now(beijing_tz)
+    utime = datetime.datetime.now(TZ)
     message = request.json.get("action_input", {})
     if message.get("type") in ('flow', 'action'):
         run_id = gen_run_id()
