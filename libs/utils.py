@@ -36,7 +36,7 @@ from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from settings import RY_RES_KEY, ES_HOST, ES_USER, ES_PASS, REAL_IP_HEADER, FS_AK, S3_HOST, FS_SK
+from settings import RY_RES_KEY, ES_HOST, ES_USER, ES_PASS, REAL_IP_HEADER, FS_AK, S3_HOST, FS_SK, TZ
 
 password_hasher: PasswordHasher = PasswordHasher()
 
@@ -398,8 +398,7 @@ async def setup_logs_template(alias_name, ilm_policy):
 
 def get_time():
     try:
-        tz = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai'))
-        now = datetime.datetime.now(tz)
+        now = datetime.datetime.now(TZ)
         return now.strftime("%Y-%m-%dT%H:%M:%S%z")  # 带 +0800
     except Exception:
         return "1970-01-01T00:00:00+08:00"

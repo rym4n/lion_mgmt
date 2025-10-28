@@ -15,7 +15,6 @@ from io import BytesIO
 
 import aiofile
 import orjson
-import pytz
 from aiocache import caches
 from sanic import Blueprint, response
 from sanic_ext import openapi
@@ -2333,7 +2332,7 @@ async def health_check(request):
             "Connection": "keep-alive",
         }
     )
-    beijing_tz = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai'))
+    beijing_tz = TZ
     utime = datetime.datetime.now(beijing_tz)
     message = request.json.get("action_input", {})
     if message.get("type") in ('flow', 'action'):

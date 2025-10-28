@@ -1,7 +1,6 @@
 # coding=utf-8
 from datetime import datetime
 
-import pytz
 from sanic import Blueprint
 from sanic_ext import openapi
 from tortoise.expressions import Q, RawSQL
@@ -13,6 +12,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import Events, Runlog, PlaybookVersion, ToolResources
+from settings import TZ
 
 dashboard_bp = Blueprint('dashboard', url_prefix='/dashboard')
 _all__ = ["dashboard_bp"]
@@ -106,9 +106,9 @@ async def view_dashboard(request):
         raise CustomError(ErrorCode.ParameterError)
 
     start_time = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
-    start_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(start_time)
+    start_time = TZ.localize(start_time)
     end_time = datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
-    end_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(end_time)
+    end_time = TZ.localize(end_time)
     result = None
     q = Q(ctime__range=(start_time, end_time))
 

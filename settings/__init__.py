@@ -2,6 +2,8 @@
 
 import os
 
+import pytz
+
 # 项目根路径
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -40,6 +42,8 @@ if os.environ.get("RY_ENV") == 'DEV':
         load_dotenv(os.path.join(BASE_DIR, 'settings/.env'))
     except:
         pass
+
+TZ = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai'))
 
 # 透传真实客户端IP的请求头
 REAL_IP_HEADER = os.environ.get("RY_REAL_IP_HEADER") or 'x-real-ip'

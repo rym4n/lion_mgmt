@@ -7,7 +7,6 @@ from collections import defaultdict
 from datetime import datetime
 
 import orjson
-import pytz
 from aiocache import caches
 from sanic import Blueprint
 from sanic_ext import openapi
@@ -25,7 +24,7 @@ from libs.utils import gen_run_id, strip_timezone_to_seconds
 from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, \
     EventRelatedScript, Timed
 from services.tools.views import tool_action_update, tool_action_playbook_delete
-from settings import KAFKA_SERVERS, TASK_TOPIC
+from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
 
 workflow_bp = Blueprint('workflow', url_prefix='/playbook')
 _all__ = ["workflow_bp"]
@@ -286,9 +285,9 @@ async def list_workflow(request):
 
     if len(json_params.get("ctime") or []) == 2:
         start_time = datetime.strptime(json_params["ctime"][0], '%Y-%m-%d %H:%M:%S')
-        start_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(start_time)
+        start_time = TZ.localize(start_time)
         end_time = datetime.strptime(json_params["ctime"][1], '%Y-%m-%d %H:%M:%S')
-        end_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(end_time)
+        end_time = TZ.localize(end_time)
         condition = condition & Q(ctime__range=(start_time, end_time))
 
     pv_condition = Q(playbook_versions__deleted=False)
@@ -1020,8 +1019,7 @@ async def execute_action(request):
             "Connection": "keep-alive",
         }
     )
-    beijing_tz = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai'))
-    utime = datetime.now(beijing_tz)
+    utime = datetime.now(TZ)
     message = request.json
     if message.get("type") in ('flow', 'action', 'code'):
         if message.get("type") == "flow":

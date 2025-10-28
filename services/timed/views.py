@@ -2,7 +2,6 @@
 
 import datetime
 
-import pytz
 from croniter import croniter
 from sanic import Blueprint
 from sanic.log import logger
@@ -17,7 +16,7 @@ from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
 from models import Timed, Playbook, ToolAction, Runlog, PlaybookVersion, PlaybookPermissions, ActionPermissions
 from services.workflow.views import get_playbook_input
-from settings import KAFKA_SERVERS, TASK_TOPIC
+from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
 
 timed_bp = Blueprint('timed', url_prefix='/timed')
 _all__ = ["timed_bp"]
@@ -992,11 +991,11 @@ async def get_run_log(request):
 
     if start_time:
         start_time = datetime.datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
-        start_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(start_time)
+        start_time = TZ.localize(start_time)
         condition &= Q(start_time__gte=start_time)
     if end_time:
         end_time = datetime.datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
-        end_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(end_time)
+        end_time = TZ.localize(end_time)
         condition &= Q(start_time__lte=end_time)
     if status in [0, 1]:
         condition &= Q(status=int(status))

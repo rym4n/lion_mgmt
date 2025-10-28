@@ -19,7 +19,7 @@ from libs.utils import gen_random_code, strip_timezone_to_seconds, gen_run_id
 from models import Events, Runlog, Room, Account, Role, EventsIngestion, ToolAction, ToolResources, Tool, \
     PlaybookVersion
 from services.timed.views import runlog_list
-from settings import KAFKA_SERVERS, TASK_TOPIC
+from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
 
 TYPE_DICT = {
     "PLAYBOOK": "flow",
@@ -120,11 +120,8 @@ async def get_all_events(request):
     if request.json.get("event_source"):
         filters["event_source"] = request.json.get("event_source")
     if len(request.json.get("ctime") or []) == 2:
-        start_time = datetime.strptime(request.json.get("ctime")[0], '%Y-%m-%d %H:%M:%S')
-        start_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(start_time)
-        end_time = datetime.strptime(request.json.get("ctime")[1], '%Y-%m-%d %H:%M:%S')
-        end_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(end_time)
-        filters["ctime__range"] = (start_time, end_time)
+        ctime = [TZ.localize(datetime.strptime(t, '%Y-%m-%d %H:%M:%S')) for t in request.json.get("ctime")]
+        filters["ctime__range"] = ctime
 
     events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room", "creator",
                                                                                                "updator", "scene")
@@ -687,7 +684,7 @@ async def update_event(request):
     if status := params.get("event_process_status"):
         event.event_process_status = status
         if status == "已处理":
-            event.close_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(datetime.now())
+            event.close_time = TZ.localize(datetime.now())
             update_fields.append("close_time")
         update_fields.append("event_process_status")
 

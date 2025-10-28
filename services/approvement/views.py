@@ -14,7 +14,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from models import Approvement
-from settings import KAFKA_SERVERS, TASK_TOPIC
+from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
 
 approve_bp = Blueprint('approve', url_prefix='/approve')
 _all__ = ["approve_bp"]
@@ -136,11 +136,7 @@ async def all_approvement(request):
         condition = condition & Q(status__in=status)
 
     if ctime and len(ctime) == 2:
-        start_time = datetime.strptime(ctime[0], '%Y-%m-%d %H:%M:%S')
-        start_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(start_time)
-        end_time = datetime.strptime(ctime[1], '%Y-%m-%d %H:%M:%S')
-        end_time = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai')).localize(end_time)
-        condition = condition & Q(ctime__range=(start_time, end_time))
+        condition = condition & Q(ctime__range=[datetime.strptime(TZ.localize(t), '%Y-%m-%d %H:%M:%S') for t in ctime])
 
     await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
     total = await Approvement.filter(condition).count()
