@@ -242,7 +242,7 @@ async def get_bgpic(request):
 async def get_platform_config(request):
     cfg = await Config.get_or_none(key="platform_config", module="system")
     default = {
-        "Version": "3.0.0",
+        "Version": "V3.0",
         "Title": "AIOE智能运营与自动化系统",
         "Content": "Copyright © 2025 虹云数据",
         "FixedHeader": True,
@@ -252,7 +252,8 @@ async def get_platform_config(request):
         "Layout": "horizontal",
         "Theme": "default",
         "DarkMode": False,
-        "OverallStyle": "default",
+        # "OverallStyle": "default",
+        "OverallStyle": os.environ.get('RY_MGMT_THEME') or 'oceanBlue',
         "Grey": False,
         "Weak": False,
         "HideTabs": True,
