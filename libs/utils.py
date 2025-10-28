@@ -21,7 +21,6 @@ import aioboto3
 import aiofile
 import jwt
 import psutil
-import pytz
 from aiokafka import AIOKafkaConsumer, TopicPartition
 from argon2 import PasswordHasher
 from botocore.config import Config
@@ -36,7 +35,7 @@ from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from settings import RY_RES_KEY, ES_HOST, ES_USER, ES_PASS, REAL_IP_HEADER, FS_AK, S3_HOST, FS_SK, TZ
+from settings import RY_RES_KEY, ES_HOST, ES_USER, ES_PASS, REAL_IP_HEADER, FS_AK, S3_HOST, FS_SK
 
 password_hasher: PasswordHasher = PasswordHasher()
 
@@ -394,14 +393,6 @@ async def setup_logs_template(alias_name, ilm_policy):
         }
         await es.indices.put_index_template(name=f"template-{alias_name}", index_patterns=[alias_name + "-*"], priority=500,
                                             data_stream=None, template=template)
-
-
-def get_time():
-    try:
-        now = datetime.datetime.now(TZ)
-        return now.strftime("%Y-%m-%dT%H:%M:%S%z")  # 带 +0800
-    except Exception:
-        return "1970-01-01T00:00:00+08:00"
 
 
 async def upload_to_s3(file_content: bytes, bucket_name: str, file_name: str, prefix='', content_type: Optional[str] = None) -> str:

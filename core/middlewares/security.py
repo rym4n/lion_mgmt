@@ -1,12 +1,13 @@
 # coding=utf-8
 import uuid
+from datetime import datetime
 
 from sanic import Request, HTTPResponse
 
 from libs.kafka import aproduce
 from libs.security.authentication import authenticate
-from libs.utils import get_client_ip, get_time
-from settings import KAFKA_SERVERS, AUDIT_TOPIC
+from libs.utils import get_client_ip
+from settings import KAFKA_SERVERS, AUDIT_TOPIC, TZ
 from .base import BaseMiddleware
 
 
@@ -67,8 +68,7 @@ class SecurityMiddleware(BaseMiddleware):
                 "request_data": params
             }
         if data is not None:
-            data["ctime"] = get_time()
-            data["utime"] = get_time()
+            data["ctime"] = data["utime"] = datetime.now(TZ).strftime("%Y-%m-%dT%H:%M:%S%z")
             data["id"] = str(uuid.uuid4())
             data["deleted"] = False
             await aproduce(KAFKA_SERVERS, AUDIT_TOPIC, data)
