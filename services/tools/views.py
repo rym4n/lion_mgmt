@@ -1337,7 +1337,7 @@ async def download_zip(request):
         raise CustomError(ErrorCode.NotDownloadError)
 
     file_url = await get_url_from_s3("system", f"{tool.name}/{tool.version}.zip", request.host.split(":")[0], "tools")
-
+    logger.info(file_url)
     return response_ok({"url": file_url})
 
 
