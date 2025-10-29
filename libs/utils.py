@@ -16,6 +16,7 @@ from io import BytesIO
 from pathlib import Path, PurePath
 from string import ascii_uppercase, digits
 from typing import Optional
+from urllib.parse import urlparse, urlunparse
 
 import aioboto3
 import aiofile
@@ -464,7 +465,9 @@ async def get_url_from_s3(bucket_name: str, file_name: str, host, prefix='') -> 
                 Params={'Bucket': bucket_name, 'Key': f'{prefix}/{file_name}'},
                 ExpiresIn=600  # 10 分钟有效期
             )
-            file_url = "http://{}:{}".format(host, file_url.split(":")[-1])
+            parsed = urlparse(file_url)
+            new_netloc = f"{host}:9001"
+            file_url = urlunparse(parsed._replace(netloc=new_netloc))
             return file_url
         except Exception as e:
             logger.error(f"获取文件失败: {e} | {traceback.format_exc()}")
