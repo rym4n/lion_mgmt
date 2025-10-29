@@ -1338,7 +1338,7 @@ async def download_zip(request):
 
     file_url = await get_url_from_s3("system", f"{tool.name}/{tool.version}.zip", request.host.split(":")[0], "tools")
 
-    return response_ok({"url": unquote(file_url)})
+    return response_ok({"url": file_url})
 
 
 @tools_bp.post("/action/permissions/add")
