@@ -187,8 +187,9 @@ async def get_bgpic(request):
         raise CustomError(ErrorCode.ParameterError)
     cfg = await Config.get_or_none(key=pic_type, module="system")
     if cfg:
-        if not await utils.get_from_s3("user", cfg.value.split("/")[-1], "system"):
-            return response_ok({"url": "http://{}:9001{}".format(request.host.split(":")[0], cfg.value)})
+        file_url = await utils.get_url_from_s3("user", cfg.value.split("/")[-1], request.host.split(":")[0], "system")
+        if file_url:
+            return response_ok({"url": file_url})
         async with aiofile.AIOFile(cfg.value, 'rb') as f:
             content = await f.read()
             return response.raw(content, content_type="image/png")

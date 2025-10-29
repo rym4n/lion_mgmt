@@ -449,7 +449,7 @@ async def get_from_s3(bucket_name: str, file_name: str, prefix='') -> bytes | No
     return None
 
 
-async def get_url_from_s3(bucket_name: str, file_name: str, prefix='') -> bytes | None:
+async def get_url_from_s3(bucket_name: str, file_name: str, host, prefix='') -> bytes | None:
     """
     获取存储桶中的文件的临时下载连接
     bucket_name: 存储桶名称
@@ -464,6 +464,7 @@ async def get_url_from_s3(bucket_name: str, file_name: str, prefix='') -> bytes 
                 Params={'Bucket': bucket_name, 'Key': f'{prefix}/{file_name}'},
                 ExpiresIn=600  # 10 分钟有效期
             )
+            file_url = "http://{}:{}".format(host, file_url.split(":")[-1])
             return file_url
         except Exception as e:
             logger.error(f"获取文件失败: {e} | {traceback.format_exc()}")
