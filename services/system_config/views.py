@@ -189,7 +189,7 @@ async def get_bgpic(request):
     if cfg:
         file_url = await utils.get_url_from_s3("user", cfg.value.split("/")[-1], request.host.split(":")[0], "system")
         if file_url:
-            return response_ok({"url": unquote(file_url)})
+            return {"url": unquote(file_url)}
         async with aiofile.AIOFile(cfg.value, 'rb') as f:
             content = await f.read()
             return response.raw(content, content_type="image/png")
