@@ -147,7 +147,7 @@ async def upload_image(request):
             elif field == "logo":
                 filename = f"logo" + ext
             if file and filename:
-                await utils.upload_to_s3(file.body, "user", filename, "system")
+                await utils.upload_to_s3(file.body, "user", filename, "custom")
                 await Config.update_or_create(key=field, module="system", defaults={"value": f"/user/system/{filename}"})
 
     return response_ok("success")
@@ -188,12 +188,11 @@ async def get_bgpic(request):
         raise CustomError(ErrorCode.ParameterError)
     cfg = await Config.get_or_none(key=pic_type, module="system")
     if cfg:
-        file_url = await utils.get_url_from_s3("user", cfg.value.split("/")[-1], request.host.split(":")[0], "system")
-        if file_url:
-            return response_ok({"url": file_url})
-        async with aiofile.AIOFile(cfg.value, 'rb') as f:
-            content = await f.read()
-            return response.raw(content, content_type="image/png")
+        if os.path.exists(cfg.value):
+            async with aiofile.AIOFile(cfg.value, 'rb') as f:
+                content = await f.read()
+                return response.raw(content, content_type="image/png")
+        return response_ok({"url": "http://{}:9001{}".format(request.host.split(":")[0], cfg.value)})
     return response.raw(b'', content_type="image/png")
 
 

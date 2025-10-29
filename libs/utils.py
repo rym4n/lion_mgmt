@@ -465,9 +465,7 @@ async def get_url_from_s3(bucket_name: str, file_name: str, host, prefix='') -> 
                 Params={'Bucket': bucket_name, 'Key': f'{prefix}/{file_name}'},
                 ExpiresIn=600  # 10 分钟有效期
             )
-            parsed = urlparse(file_url)
-            new_netloc = f"{host}:9001"
-            file_url = urlunparse(parsed._replace(netloc=new_netloc))
+            file_url = file_url.replace('http://lion-fs:9000', "https://" + host + '/files')
             return file_url
         except Exception as e:
             logger.error(f"获取文件失败: {e} | {traceback.format_exc()}")
