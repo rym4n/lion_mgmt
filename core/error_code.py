@@ -50,7 +50,7 @@ class ErrorCode(BaseErrorCode):
     MissingPyFileError = ErrorData(4031, "缺失py文件")
     ToolNotFoundError = ErrorData(4032, "应用未找到")
     ToolHasScriptError = ErrorData(4033, "该版本应用已在剧本中使用")
-    ToolAlreadyDeletedError = ErrorData(4034, "应用已删除")
+    ToolAlreadyDeletedError = ErrorData(4034, "应用删除失败")
     ResourcesModelNotFoundError = ErrorData(4035, "应用资源模板未找到")
     ResourcesNameExistsError = ErrorData(4036, "应用资源模板名称已存在")
     ConfigFileError = ErrorData(4037, "config文件内容错误")

@@ -17,6 +17,7 @@ from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
+from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
@@ -145,11 +146,8 @@ async def upload_image(request):
             elif field == "logo":
                 filename = f"logo" + ext
             if file and filename:
-                file_path = os.path.join(UPLOAD_DIR, filename)
-
-                with open(file_path, "wb") as f:
-                    f.write(file.body)
-                await Config.update_or_create(key=field, module="system", defaults={"value": file_path})
+                await utils.upload_to_s3(file.body, "user", filename, "system")
+                await Config.update_or_create(key=field, module="system", defaults={"value": f"/user/system/{filename}"})
 
     return response_ok("success")
 
@@ -189,6 +187,8 @@ async def get_bgpic(request):
         raise CustomError(ErrorCode.ParameterError)
     cfg = await Config.get_or_none(key=pic_type, module="system")
     if cfg:
+        if not await utils.get_from_s3("user", cfg.value.split("/")[-1], "system"):
+            return response_ok({"url": "http://{}:9001{}".format(request.host.split(":")[0], cfg.value)})
         async with aiofile.AIOFile(cfg.value, 'rb') as f:
             content = await f.read()
             return response.raw(content, content_type="image/png")

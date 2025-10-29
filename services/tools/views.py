@@ -15,6 +15,7 @@ from io import BytesIO
 
 import aiofile
 import orjson
+import pytz
 from aiocache import caches
 from sanic import Blueprint, response
 from sanic_ext import openapi
@@ -28,10 +29,10 @@ from libs import utils
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license
-from libs.utils import fix_zip_filename, gen_run_id
+from libs.utils import fix_zip_filename, gen_run_id, get_url_from_s3
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion, \
     Runlog, Timed
-from settings import TOOLS_DIR, KAFKA_SERVERS, TASK_TOPIC, TZ
+from settings import KAFKA_SERVERS, TASK_TOPIC, TZ, TOOLS_DIR
 
 # 定义 Blueprint
 tools_bp = Blueprint("tools", url_prefix="/tools")
@@ -141,17 +142,9 @@ async def upload_and_extract_zip(request):
         if total_up_value != 99999 and total_count >= total_up_value:
             return response_ok({"error": "应用数量已达到上限"})
 
-        header = zip_file.body[:4]
-        if header[:2] != b'PK' or header[2:] != b'\x03\x04' or not zip_file.name.lower().endswith('.zip'):
-            results.append({"tool": zip_file.name, "msg": "此文件不是标准ZIP文件，请重新上传"})
-            data += 1
-            percent = int((data * single_progress))
-            success_progress = percent
-            await resp.send(f"data: 解压进度：{percent}%\n\n")
-            continue
-
         config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, resp,
-                                                           success_progress, request.app.ctx.cache_client, request.ctx.session["id"])
+                                                           success_progress, request.app.ctx.cache_client,
+                                                           request.ctx.session["id"])
         if msg != "success":
             results.append({"tool": tool_name, "msg": msg})
             data += 1
@@ -186,7 +179,11 @@ async def upload_and_extract_zip(request):
                                            users=[])
         configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False)
         if not configuration or configuration.resources != config_data.get("resource"):
-            trm = await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {}, status=1 if (config_data.get("resource") and any(field.get("required") is True for field in config_data.get("resource").values())) else 0, health_check=health_check)
+            trm = await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {},
+                                                  status=1 if (config_data.get("resource") and any(
+                                                      field.get("required") is True for field in
+                                                      config_data.get("resource").values())) else 0,
+                                                  health_check=health_check)
             if health_check == 1:
                 trm.version = version
                 await trm.save()
@@ -211,161 +208,165 @@ async def upload_and_extract_zip(request):
 
 
 async def unzip(zip_data, creator, single_progress, resp, success_progress, redis_client, token_id):
-    data = 0
-    zip_buffer = BytesIO(zip_data)
+    try:
+        data = 0
+        zip_buffer = BytesIO(zip_data)
 
-    with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
-        version = None
+        with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
+            version = None
 
-        files_info = zip_ref.infolist()
+            files_info = zip_ref.infolist()
 
-        actual_files = {os.path.basename(fix_zip_filename(f.filename)) for f in files_info if not f.is_dir()}
-        py_files_dict = {os.path.basename(f.filename): f for f in files_info if f.filename.endswith(".py")}
-        config_path = next((f for f in files_info if os.path.basename(f.filename) == "config.json"), None)
+            actual_files = {os.path.basename(fix_zip_filename(f.filename)) for f in files_info if not f.is_dir()}
+            py_files_dict = {os.path.basename(f.filename): f for f in files_info if f.filename.endswith(".py")}
+            config_path = next((f for f in files_info if os.path.basename(f.filename) == "config.json"), None)
 
-        single_progress = single_progress / 10
+            single_progress = single_progress / 10
 
-        with zip_ref.open(config_path) as config_file:
-            config_data = orjson.loads(config_file.read().decode())
+            with zip_ref.open(config_path) as config_file:
+                config_data = orjson.loads(config_file.read().decode())
 
-        tool_name = config_data.get("name")
-        pattern = r'^[A-Za-z][A-Za-z0-9_]*$'
-        if not bool(re.match(pattern, tool_name)):
-            return config_data, version, tool_name, "工具名称不合法"
+            tool_name = config_data.get("name")
+            pattern = r'^[A-Za-z][A-Za-z0-9_]*$'
+            if not bool(re.match(pattern, tool_name)):
+                return config_data, version, tool_name, "工具名称不合法"
 
-        if "description" not in config_data.keys():
-            return config_data, version, tool_name, "config文件内容错误，缺失description字段"
+            for info in files_info:
+                if ".." in info.filename or info.filename.startswith("/"):
+                    return config_data, version, tool_name, "文件名包含非法字符"
 
-        hash_func = getattr(hashlib, "md5", None)
-        if hash_func is None:
-            return config_data, version, tool_name, "Unsupported hash type. Use 'md5', 'sha1', 'sha256', or 'sha512'."
-        data += 1
-        percent = int(data * single_progress) + success_progress
-        await resp.send(f"data: 解压进度：{percent}%\n\n")
+            if "description" not in config_data.keys():
+                return config_data, version, tool_name, "config文件内容错误，缺失description字段"
 
-        hasher = hash_func()
-        zip_buffer.seek(0)  # 确保从头开始读取数据
-        for chunk in iter(lambda: zip_buffer.read(4096), b""):
-            hasher.update(chunk)
+            hash_func = getattr(hashlib, "md5", None)
+            if hash_func is None:
+                return config_data, version, tool_name, "Unsupported hash type. Use 'md5', 'sha1', 'sha256', or 'sha512'."
+            data += 1
+            percent = int(data * single_progress) + success_progress
+            await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-        if not config_path:
-            return config_data, version, tool_name, "缺失config文件"
-        data += 1
-        percent = int(data * single_progress) + success_progress
-        await resp.send(f"data: 解压进度：{percent}%\n\n")
+            hasher = hash_func()
+            zip_buffer.seek(0)  # 确保从头开始读取数据
+            for chunk in iter(lambda: zip_buffer.read(4096), b""):
+                hasher.update(chunk)
 
-        missing_files = set(EXPECTED_STRUCTURE["required_files"]) - actual_files
-        if missing_files:
-            return config_data, version, tool_name, "缺失config文件"
-        data += 1
-        percent = int(data * single_progress) + success_progress
-        await resp.send(f"data: 解压进度：{percent}%\n\n")
+            if not config_path:
+                return config_data, version, tool_name, "缺失config文件"
+            data += 1
+            percent = int(data * single_progress) + success_progress
+            await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-        name = config_data.get("name")
-        py_file_name = config_data.get("main")
-        logo_name = config_data.get("logo")
-        if "/" in logo_name:
-            logo_name = logo_name.split("/")[1]
+            missing_files = set(EXPECTED_STRUCTURE["required_files"]) - actual_files
+            if missing_files:
+                return config_data, version, tool_name, "缺失config文件"
+            data += 1
+            percent = int(data * single_progress) + success_progress
+            await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-        if "actions" in config_data.keys():
-            action_key = "actions"
-        else:
-            return config_data, version, tool_name, "config文件内容错误，缺失actions字段"
-        class_name_list = [action.get("func") for action in config_data.get(action_key, [])]
+            name = config_data.get("name")
+            py_file_name = config_data.get("main")
+            logo_name = config_data.get("logo")
+            if "/" in logo_name:
+                logo_name = logo_name.split("/")[-1]
 
-        for action in config_data.get(action_key, []):
-            if not all(k in action for k in ["func", "name", "input"]):
-                return config_data, version, tool_name, "actions字段内容错误"
+            if "actions" in config_data.keys():
+                action_key = "actions"
+            else:
+                return config_data, version, tool_name, "config文件内容错误，缺失actions字段"
+            class_name_list = [action.get("func") for action in config_data.get(action_key, [])]
 
-            inputs = action.get("input")
-            if not isinstance(inputs, list):
-                return config_data, version, tool_name, "input字段内容错误"
+            for action in config_data.get(action_key, []):
+                if not all(k in action for k in ["func", "name", "input"]):
+                    return config_data, version, tool_name, "actions字段内容错误"
 
-            for input_item in inputs:
-                if not all(k in input_item for k in ["key", "type", "required", "description"]):
+                inputs = action.get("input")
+                if not isinstance(inputs, list):
                     return config_data, version, tool_name, "input字段内容错误"
 
-                if any(input_item[k] in (None, "") for k in ["key", "type", "required", "description"]):
-                    return config_data, version, tool_name, "input字段内容错误"
+                for input_item in inputs:
+                    if not all(k in input_item for k in ["key", "type", "required", "description"]):
+                        return config_data, version, tool_name, "input字段内容错误"
 
-        if not py_file_name:
-            return config_data, version, tool_name, "config文件内容错误"
-        data += 1
-        percent = int(data * single_progress) + success_progress
-        await resp.send(f"data: 解压进度：{percent}%\n\n")
+                    if any(input_item[k] in (None, "") for k in ["key", "type", "required", "description"]):
+                        return config_data, version, tool_name, "input字段内容错误"
 
-        if py_file_name not in py_files_dict:
-            return config_data, version, tool_name, "缺失py文件"
-        data += 1
-        percent = int(data * single_progress) + success_progress
-        await resp.send(f"data: 解压进度：{percent}%\n\n")
+            if not py_file_name:
+                return config_data, version, tool_name, "config文件内容错误"
+            data += 1
+            percent = int(data * single_progress) + success_progress
+            await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-        if logo_name not in actual_files:
-            return config_data, version, tool_name, "缺少logo文件"
+            if py_file_name not in py_files_dict:
+                return config_data, version, tool_name, "缺失py文件"
+            data += 1
+            percent = int(data * single_progress) + success_progress
+            await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-        logo_found = False
-        for file_info in files_info:
-            if file_info.filename.lower().endswith((".png", ".jpg", ".jpeg", ".ico")):
-                logo_found = True
-                with zip_ref.open(file_info) as logo_file:
-                    if not check_file_size(logo_file):
-                        return config_data, version, tool_name, "logo文件大小超过5KB限制，请压缩后重新上传"
+            if logo_name not in actual_files:
+                return config_data, version, tool_name, "缺少logo文件"
 
-        if not logo_found:
-            return config_data, version, tool_name, "缺少logo文件"
+            logo_found = False
+            for file_info in files_info:
+                if file_info.filename.lower().endswith((".png", ".jpg", ".jpeg", ".ico")):
+                    logo_found = True
+                    with zip_ref.open(file_info) as logo_file:
+                        if not check_file_size(logo_file):
+                            return config_data, version, tool_name, "logo文件大小超过5KB限制，请压缩后重新上传"
+                        logo_data = logo_file.read()
 
-        data += 1
-        percent = int(data * single_progress) + success_progress
-        await resp.send(f"data: 解压进度：{percent}%\n\n")
+            if not logo_found:
+                return config_data, version, tool_name, "缺少logo文件"
 
-        with zip_ref.open(py_files_dict[py_file_name]) as py_file:
-            py_data = py_file.read().decode()
+            data += 1
+            percent = int(data * single_progress) + success_progress
+            await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-        if any(f"def {class_name}(" not in py_data for class_name in class_name_list):
-            return config_data, version, tool_name, "Python文件内容错误"
-        data += 1
-        percent = int(data * single_progress) + success_progress
-        await resp.send(f"data: 解压进度：{percent}%\n\n")
+            with zip_ref.open(py_files_dict[py_file_name]) as py_file:
+                py_data = py_file.read().decode()
 
-        configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False).first().values("resources")
-        if configuration and configuration["resources"] != config_data.get("resource", {}):
-            return config_data, version, tool_name, "工具资源不一致，请新建工具或删除原工具后再次上传"
-        data += 1
-        percent = int(data * single_progress) + success_progress
-        await resp.send(f"data: 解压进度：{percent}%\n\n")
+            if any(f"def {class_name}(" not in py_data for class_name in class_name_list):
+                return config_data, version, tool_name, "Python文件内容错误"
+            data += 1
+            percent = int(data * single_progress) + success_progress
+            await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-        hash_values = await Tool.filter(name=name, deleted=False).all().values("hash_value")
-        hash_set = {entry["hash_value"] for entry in hash_values}
-        if hash_values and hasher.hexdigest() in hash_set:
-            return config_data, version, tool_name, "工具已存在"
-        data += 1
-        percent = int(data * single_progress) + success_progress
-        await resp.send(f"data: 解压进度：{percent}%\n\n")
+            configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False).first().values("resources")
+            if configuration and configuration["resources"] != config_data.get("resource", {}):
+                return config_data, version, tool_name, "工具资源不一致，请新建工具或删除原工具后再次上传"
+            data += 1
+            percent = int(data * single_progress) + success_progress
+            await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-        version = "v" + str(int(time.time() * 1000))
+            hash_values = await Tool.filter(name=name, deleted=False).all().values("hash_value")
+            hash_set = {entry["hash_value"] for entry in hash_values}
+            if hash_values and hasher.hexdigest() in hash_set:
+                return config_data, version, tool_name, "工具已存在"
+            data += 1
+            percent = int(data * single_progress) + success_progress
+            await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-        extra_path = os.path.join(TOOLS_DIR, name, version)
-        os.makedirs(extra_path, exist_ok=True)
+            version = "v" + str(int(time.time() * 1000))
+            suffix = logo_name.split(".")[-1]
+            save_path = await utils.upload_to_s3(zip_data, "system", f"{tool_name}/{version}.zip", "tools")
+            await utils.upload_to_s3(logo_data, "user", f"{tool_name}.{suffix}", "tools")
 
-        await utils.unzip(zip_data, extra_path)
+            maintenance_mode = await redis_client.get(token_id)
+            tool = await Tool.create(
+                name=name, version=version, path=save_path, logo_path=f"/user/tools/{tool_name}.{suffix}",
+                description=config_data.get("description"),
+                creator=creator, updater=creator,
+                hash_value=hasher.hexdigest(),
+                internal=config_data.get("internal", False),
+                main=py_file_name,
+                maintain=maintenance_mode if maintenance_mode else False
+            )
 
-        config_parent_dir = os.path.dirname(config_path.filename)
-        save_path = os.path.join(extra_path, config_parent_dir).replace("\\", "/")
-        maintenance_mode = await redis_client.get(token_id)
-        tool = await Tool.create(
-            name=name, version=version, path=save_path,
-            description=config_data.get("description"),
-            creator=creator, updater=creator,
-            hash_value=hasher.hexdigest(),
-            internal=config_data.get("internal", False),
-            main=py_file_name,
-            maintain=maintenance_mode if maintenance_mode else False
-        )
+            # 将config数据存入redis
+            await redis_client.set(name + "_" + version, config_data, 2592000)
 
-        # 将config数据存入redis
-        await redis_client.set(name + "_" + version, config_data, 2592000)
-
-        return config_data, version, tool.name, "success"
+            return config_data, version, tool.name, "success"
+    except zipfile.BadZipFile as e:
+        return config_data, version, tool_name, str(e)
 
 
 @tools_bp.post("/all")
@@ -493,6 +494,8 @@ async def all_tools(request):
     for tool in latest_tools:
         if int(request.json.get("logo", 1)) == 1:
             tool["logo"] = await enrich_tool(tool, request.app.ctx.cache_client)
+        if int(request.json.get("logo", 1)) == 1 and tool["logo_path"]:
+            tool["logo"] = "http://{}:9001{}".format(request.host.split(":")[0], tool["logo_path"])
         tool.pop("path", None)
         trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"])
         if trm:
@@ -591,7 +594,8 @@ async def all_versions(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tools = await Tool.filter(name=name, deleted=False, maintain=maintenance_mode if maintenance_mode else False).order_by("-ctime").values()
+    tools = await Tool.filter(name=name, deleted=False,
+                              maintain=maintenance_mode if maintenance_mode else False).order_by("-ctime").values()
 
     for tool in tools:
         tool.pop("path")
@@ -697,7 +701,8 @@ async def tool_actions(request):
         if action.get("playbook"):
             for pv_id in action.get("playbook"):
                 pv = await PlaybookVersion.get_or_none(id=pv_id, deleted=False).prefetch_related("playbook")
-                pv_list.append({"id": pv.playbook.id, "pv_id": pv_id, "name": pv.playbook.name, "version": pv.version, "status": pv.status})
+                pv_list.append({"id": pv.playbook.id, "pv_id": pv_id, "name": pv.playbook.name, "version": pv.version,
+                                "status": pv.status})
         action.get("action")["playbook"] = pv_list
         action_list.append(action.get("action"))
 
@@ -824,7 +829,7 @@ async def delete_tool(request):
     async with in_transaction():
         tool = await Tool.get(name=name, version=version, deleted=False)
         if not tool:
-            raise CustomError(ErrorCode.ToolAlreadyDeletedError)
+            return response_ok({"message": "工具删除成功"})
 
         if tool.status == 1:
             raise CustomError(ErrorCode.ToolHasScriptError)
@@ -835,6 +840,8 @@ async def delete_tool(request):
         tool_path = os.path.join(TOOLS_DIR, name, version)
         if os.path.exists(tool_path):
             shutil.rmtree(tool_path)
+
+        await utils.delete_from_s3("system", f"{name}/{version}.zip", "tools")
 
         await ToolAction.filter(tool_name=name, version_number=version, deleted=False).update(deleted=True)
         tool.deleted = True
@@ -901,6 +908,9 @@ async def delete_tool_all(request):
         tool_path = os.path.join(TOOLS_DIR, name)
         if os.path.exists(tool_path):
             shutil.rmtree(tool_path)
+
+        for tool in await Tool.filter(name=name, deleted=False).all():
+            await utils.delete_from_s3("system", f"{name}/{tool.version}.zip", "tools")
 
         await ToolAction.filter(tool_name=name, deleted=False).update(deleted=True)
         await ToolResourcesModel.filter(tool_name=name, deleted=False).update(deleted=True)
@@ -1033,11 +1043,13 @@ async def add_tool_resource(request):
         raise CustomError(ErrorCode.ParameterError)
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    existing_resource = await ToolResources.get_or_none(name=name, deleted=False, tool_name=tool_name, internal=maintenance_mode if maintenance_mode else False)
+    existing_resource = await ToolResources.get_or_none(name=name, deleted=False, tool_name=tool_name,
+                                                        internal=maintenance_mode if maintenance_mode else False)
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
 
-    tr = await ToolResources.create(tool_name=tool_name, name=name, engine=engine, resources=orjson.dumps(resources).decode(),
+    tr = await ToolResources.create(tool_name=tool_name, name=name, engine=engine,
+                                    resources=orjson.dumps(resources).decode(),
                                     internal=maintenance_mode if maintenance_mode else False,
                                     creator=request.ctx.session['account_info'].username,
                                     updater=request.ctx.session['account_info'].username)
@@ -1109,7 +1121,8 @@ async def tool_resources_detailed(request):
         raise CustomError(ErrorCode.ParameterError)
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    resources = await ToolResources.filter(tool_name=tool_name, deleted=False, internal=maintenance_mode if maintenance_mode else False).all()
+    resources = await ToolResources.filter(tool_name=tool_name, deleted=False,
+                                           internal=maintenance_mode if maintenance_mode else False).all()
     return response_ok([r.json for r in resources])
 
 
@@ -1175,7 +1188,8 @@ async def update_tool_resource(request):
         raise CustomError(ErrorCode.ParameterError)
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False, internal=maintenance_mode if maintenance_mode else False)
+    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False,
+                                                    internal=maintenance_mode if maintenance_mode else False)
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
@@ -1246,7 +1260,8 @@ async def delete_tool_resource(request):
         raise CustomError(ErrorCode.ParameterError)
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False, internal=maintenance_mode if maintenance_mode else False)
+    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False,
+                                                    internal=maintenance_mode if maintenance_mode else False)
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
@@ -1320,15 +1335,9 @@ async def download_zip(request):
     if tool.internal:
         raise CustomError(ErrorCode.NotDownloadError)
 
-    zip_path = os.path.abspath(os.path.join(os.path.dirname(tool.path), f"SourceFile.zip"))
+    file_url = await get_url_from_s3("system", f"{tool.name}/{tool.version}.zip", "tools")
 
-    tool_name = tool.name
-    version = tool.version
-
-    if not os.path.exists(zip_path):
-        raise CustomError(ErrorCode.ToolNotFoundError)
-
-    return await response.file(zip_path, filename=f"{tool_name}_{version}.zip", mime_type="application/zip")
+    return response_ok({"file_url": file_url})
 
 
 @tools_bp.post("/action/permissions/add")
