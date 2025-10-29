@@ -1,4 +1,5 @@
 import ast
+import logging
 import os
 import uuid
 from datetime import datetime
@@ -189,7 +190,6 @@ async def get_bgpic(request):
     if cfg:
         file_url = await utils.get_url_from_s3("user", cfg.value.split("/")[-1], request.host.split(":")[0], "system")
         if file_url:
-            logger.info(file_url)
             return response_ok({"url": file_url})
         async with aiofile.AIOFile(cfg.value, 'rb') as f:
             content = await f.read()
