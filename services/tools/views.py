@@ -10,15 +10,11 @@ import shutil
 import time
 import zipfile
 from collections import defaultdict
-from email.quoprimime import unquote
-from sanic.log import logger
 from functools import reduce
 from io import BytesIO
 
 import aiofile
-import aiohttp
 import orjson
-import pytz
 from aiocache import caches
 from sanic import Blueprint, response
 from sanic_ext import openapi
@@ -32,7 +28,7 @@ from libs import utils
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license
-from libs.utils import fix_zip_filename, gen_run_id, get_url_from_s3, get_from_s3
+from libs.utils import fix_zip_filename, gen_run_id, get_from_s3
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion, \
     Runlog, Timed
 from settings import KAFKA_SERVERS, TASK_TOPIC, TZ, TOOLS_DIR
@@ -498,9 +494,7 @@ async def all_tools(request):
         if int(request.json.get("logo", 1)) == 1:
             tool["logo"] = await enrich_tool(tool, request.app.ctx.cache_client)
         if int(request.json.get("logo", 1)) == 1 and tool["logo_path"]:
-            content = await get_from_s3("user", tool["logo_path"].split("/")[-1], "tools")
-            if content:
-                tool["logo"] = base64.b64encode(content).decode()
+            tool["logo"] = "http://{}:9001{}".format(request.host.split(":")[0], tool["logo_path"])
         tool.pop("path", None)
         trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"])
         if trm:
@@ -1340,34 +1334,9 @@ async def download_zip(request):
     if tool.internal:
         raise CustomError(ErrorCode.NotDownloadError)
 
-    zip_path = os.path.abspath(os.path.join(os.path.dirname(tool.path), f"SourceFile.zip"))
+    file_url = await utils.get_url_from_s3("system", f"{tool.name}/{tool.version}.zip", request.host, "tools")
 
-    tool_name = tool.name
-    version = tool.version
-
-    if os.path.exists(zip_path):
-        return await response.file(zip_path, filename=f"{tool_name}_{version}.zip", mime_type="application/zip")
-
-    content = await get_from_s3("system", f"{tool.name}/{tool.version}.zip", "tools")
-
-    if content:
-        tmp_path = os.path.join("/tmp", tool.name, f"{tool.version}.zip")
-        os.makedirs(os.path.dirname(tmp_path), exist_ok=True)
-
-        async with aiofile.AIOFile(tmp_path, 'wb') as afp:
-            await afp.write(content)
-
-        try:
-            return await response.file(
-                tmp_path,
-                filename=f"{tool.name}_{tool.version}.zip",
-                mime_type="application/zip"
-            )
-        finally:
-            await asyncio.to_thread(os.remove, tmp_path)
-
-    return response_ok("下载失败")
-
+    return response_ok({"url": file_url})
 
 
 @tools_bp.post("/action/permissions/add")
