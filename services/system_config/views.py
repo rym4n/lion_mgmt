@@ -23,7 +23,7 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import strip_timezone_to_seconds, get_from_s3
+from libs.utils import strip_timezone_to_seconds, get_from_s3, upload_to_s3
 from models import AuditLog, Config
 from services.event_ingestion.views import check_vector_config
 from settings import SECRET, SESSION_ENCODING_ALGORITHM, UPLOAD_DIR, BASE_DIR, VECTOR_CFG, COMMON_FILES_DIR, \
@@ -1146,15 +1146,14 @@ async def update_file(request):
         filename = f.name or f.filename
         ext = filename.split(".")[-1]
         file_id = str(uuid.uuid4())
-        save_path = os.path.join(COMMON_FILES_DIR, file_id + '.' + ext)
+        s3_filename = file_id + '.' + ext
 
         # 异步写入文件
-        async with aiofile.AIOFile(save_path, 'wb') as zip_file:
-            await zip_file.write(f.body)
+        await utils.upload_to_s3(f.body, "user", s3_filename, "common_files")
 
         file_info = {
             "filename": filename,
-            "file_id": file_id + '.' + ext,
+            "file_id": s3_filename,
             "size": len(f.body),
             "result": "success"
         }

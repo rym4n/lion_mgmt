@@ -1349,14 +1349,22 @@ async def download_zip(request):
         return await response.file(zip_path, filename=f"{tool_name}_{version}.zip", mime_type="application/zip")
 
     content = await get_from_s3("system", f"{tool.name}/{tool.version}.zip", "tools")
+
     if content:
-        return await response.raw(
-            content,
-            headers={
-                "Content-Type": "application/zip",
-                "Content-Disposition": f'attachment; filename="{tool_name}_{version}.zip"'
-            }
-        )
+        tmp_path = os.path.join("/tmp", tool.name, f"{tool.version}.zip")
+        os.makedirs(os.path.dirname(tmp_path), exist_ok=True)
+
+        async with aiofile.AIOFile(tmp_path, 'wb') as afp:
+            await afp.write(content)
+
+        try:
+            return await response.file(
+                tmp_path,
+                filename=f"{tool.name}_{tool.version}.zip",
+                mime_type="application/zip"
+            )
+        finally:
+            await asyncio.to_thread(os.remove, tmp_path)
 
     return response_ok("下载失败")
 
