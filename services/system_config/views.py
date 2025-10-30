@@ -191,10 +191,6 @@ async def get_bgpic(request):
         raise CustomError(ErrorCode.ParameterError)
     cfg = await Config.get_or_none(key=pic_type, module="system")
     if cfg:
-        if os.path.exists(cfg.value):
-            async with aiofile.AIOFile(cfg.value, 'rb') as f:
-                content = await f.read()
-                return response.raw(content, content_type="image/png")
         return response_ok({"url": "http://{}:9001{}".format(request.host.split(":")[0], cfg.value)})
     return response.raw(b'', content_type="image/png")
 
