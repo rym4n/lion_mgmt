@@ -195,11 +195,9 @@ async def get_bgpic(request):
                 content = await f.read()
                 return response.raw(content, content_type="image/png")
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get("http://{}:9001{}".format(request.host.split(":")[0], cfg.value)) as resp:
-                if resp.status == 200:
-                    content = await resp.read()
-                    return response.raw(content, content_type="image/png")
+        resp = request.get("http://{}:9001{}".format(request.host.split(":")[0], cfg.value))
+        if resp.status == 200:
+            return response.raw(resp.content, content_type="image/png")
 
     return response.raw(b'', content_type="image/png")
 

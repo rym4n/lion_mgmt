@@ -498,11 +498,9 @@ async def all_tools(request):
         if int(request.json.get("logo", 1)) == 1:
             tool["logo"] = await enrich_tool(tool, request.app.ctx.cache_client)
         if int(request.json.get("logo", 1)) == 1 and tool["logo_path"]:
-            async with aiohttp.ClientSession() as session:
-                async with session.get("http://{}:9001{}".format(request.host.split(":")[0], tool["logo_path"])) as resp:
-                    if resp.status == 200:
-                        content = await resp.read()
-                        tool["logo"] = base64.b64encode(content).decode()
+                resp = request.get("http://{}:9001{}".format(request.host.split(":")[0], tool["logo_path"]))
+                if resp.status == 200:
+                    tool["logo"] = base64.b64encode(resp.content).decode()
         tool.pop("path", None)
         trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"])
         if trm:
@@ -1352,23 +1350,17 @@ async def download_zip(request):
 
     file_url = await get_url_from_s3("system", f"{tool.name}/{tool.version}.zip", request.host, "tools")
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(file_url) as resp:
-                if resp.status == 200:
-                    content = await resp.read()
-                    return await response.raw(
-                        content,
-                        headers={
-                            "Content-Type": "application/zip",
-                            "Content-Disposition": f'attachment; filename="{tool_name}_{version}.zip"'
-                        }
-                    )
-                else:
-                    return response.json({"error": f"无法访问S3文件，HTTP {resp.status}"}, status=502)
-    except Exception as e:
-        logger.info(f"S3访问异常: {e}")
-        return response_ok("下载失败")
+    resp = request.get(file_url)
+    if resp.status == 200:
+        return await response.raw(
+            resp.content,
+            headers={
+                "Content-Type": "application/zip",
+                "Content-Disposition": f'attachment; filename="{tool_name}_{version}.zip"'
+            }
+        )
+
+    return response_ok("下载失败")
 
 
 
