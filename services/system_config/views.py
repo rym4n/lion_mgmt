@@ -151,7 +151,7 @@ async def upload_image(request):
                 filename = f"logo" + ext
             if file and filename:
                 await utils.upload_to_s3(file.body, "user", filename, "custom")
-                await Config.update_or_create(key=field, module="system", defaults={"value": f"/user/system/{filename}"})
+                await Config.update_or_create(key=field, module="system", defaults={"value": f"/user/custom/{filename}"})
 
     return response_ok("success")
 
