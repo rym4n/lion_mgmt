@@ -1,4 +1,5 @@
 import ast
+import asyncio
 import logging
 import os
 import uuid
@@ -1204,27 +1205,38 @@ async def download_file(request, file_id):
     if not file_id:
         raise CustomError(ErrorCode.ParameterError)
     safe_name = os.path.basename(file_id)
-    file_path = os.path.join(COMMON_FILES_DIR, safe_name)
 
-    # 检查文件是否存在
-    if not os.path.exists(file_path):
-        raise CustomError(ErrorCode.FileNotFound)
-    download_name = request.args.get("download_name") or safe_name
+    content = await get_from_s3("user", file_id, "common_files")
 
-    if "." not in download_name and "." in safe_name:
-        ext = safe_name.split(".")[-1]
-        download_name += "." + ext
+    if content:
+        tmp_path = os.path.join("/tmp", file_id)
+        os.makedirs(os.path.dirname(tmp_path), exist_ok=True)
 
-    # 对中文文件名进行编码（RFC 5987）
-    quoted_filename = quote(download_name)
-    headers = {
-        "Content-Disposition": f"attachment; filename=\"{download_name}\";filename*=UTF-8''{quoted_filename}",
-        "Content-Type": "application/octet-stream; charset=utf-8"
-    }
+        async with aiofile.AIOFile(tmp_path, 'wb') as afp:
+            await afp.write(content)
 
-    # 异步流式返回文件
-    return await response.file(
-        file_path,
-        mime_type="application/octet-stream",
-        headers=headers
-    )
+        download_name = request.args.get("download_name") or safe_name
+
+        if "." not in download_name and "." in safe_name:
+            ext = safe_name.split(".")[-1]
+            download_name += "." + ext
+
+        # 对中文文件名进行编码（RFC 5987）
+        quoted_filename = quote(download_name)
+        headers = {
+            "Content-Disposition": f"attachment; filename=\"{download_name}\";filename*=UTF-8''{quoted_filename}",
+            "Content-Type": "application/octet-stream; charset=utf-8"
+        }
+
+        try:
+            return await response.file(
+                tmp_path,
+                mime_type="application/octet-stream",
+                headers=headers
+            )
+        finally:
+            await asyncio.to_thread(os.remove, tmp_path)
+    else:
+        return response_ok("文件不存在")
+
+
