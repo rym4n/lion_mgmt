@@ -11,10 +11,12 @@ import time
 import zipfile
 from collections import defaultdict
 from email.quoprimime import unquote
+from sanic.log import logger
 from functools import reduce
 from io import BytesIO
 
 import aiofile
+import aiohttp
 import orjson
 import pytz
 from aiocache import caches
@@ -496,7 +498,11 @@ async def all_tools(request):
         if int(request.json.get("logo", 1)) == 1:
             tool["logo"] = await enrich_tool(tool, request.app.ctx.cache_client)
         if int(request.json.get("logo", 1)) == 1 and tool["logo_path"]:
-            tool["logo"] = "http://{}:9001{}".format(request.host.split(":")[0], tool["logo_path"])
+            async with aiohttp.ClientSession() as session:
+                async with session.get("http://{}:9001{}".format(request.host.split(":")[0], tool["logo_path"])) as resp:
+                    if resp.status == 200:
+                        content = await resp.read()
+                        tool["logo"] = base64.b64encode(content).decode()
         tool.pop("path", None)
         trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"])
         if trm:
@@ -1336,9 +1342,34 @@ async def download_zip(request):
     if tool.internal:
         raise CustomError(ErrorCode.NotDownloadError)
 
+    zip_path = os.path.abspath(os.path.join(os.path.dirname(tool.path), f"SourceFile.zip"))
+
+    tool_name = tool.name
+    version = tool.version
+
+    if os.path.exists(zip_path):
+        return await response.file(zip_path, filename=f"{tool_name}_{version}.zip", mime_type="application/zip")
+
     file_url = await get_url_from_s3("system", f"{tool.name}/{tool.version}.zip", request.host, "tools")
 
-    return response_ok({"url": file_url})
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(file_url) as resp:
+                if resp.status == 200:
+                    content = await resp.read()
+                    return await response.raw(
+                        content,
+                        headers={
+                            "Content-Type": "application/zip",
+                            "Content-Disposition": f'attachment; filename="{tool_name}_{version}.zip"'
+                        }
+                    )
+                else:
+                    return response.json({"error": f"无法访问S3文件，HTTP {resp.status}"}, status=502)
+    except Exception as e:
+        logger.info(f"S3访问异常: {e}")
+        return response_ok("下载失败")
+
 
 
 @tools_bp.post("/action/permissions/add")

@@ -4,6 +4,8 @@ import os
 import uuid
 from datetime import datetime
 from urllib.parse import quote
+
+import aiohttp
 from sanic.log import logger
 import aiofile
 import jwt
@@ -192,7 +194,13 @@ async def get_bgpic(request):
             async with aiofile.AIOFile(cfg.value, 'rb') as f:
                 content = await f.read()
                 return response.raw(content, content_type="image/png")
-        return response_ok({"url": "http://{}:9001{}".format(request.host.split(":")[0], cfg.value)})
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get("http://{}:9001{}".format(request.host.split(":")[0], cfg.value)) as resp:
+                if resp.status == 200:
+                    content = await resp.read()
+                    return response.raw(content, content_type="image/png")
+
     return response.raw(b'', content_type="image/png")
 
 

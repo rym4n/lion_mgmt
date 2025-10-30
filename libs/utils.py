@@ -457,7 +457,7 @@ async def get_url_from_s3(bucket_name: str, file_name: str, host, prefix='') -> 
     file_name: 文件名称
     prefix: 功能前缀
     """
-    async with aioboto3.Session().client('s3', endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK,
+    async with aioboto3.Session().client('s3', endpoint_url="https://" + host, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK,
                                          config=Config(signature_version='s3v4')) as s3_client:
         try:
             file_url = await s3_client.generate_presigned_url(
@@ -465,7 +465,7 @@ async def get_url_from_s3(bucket_name: str, file_name: str, host, prefix='') -> 
                 Params={'Bucket': bucket_name, 'Key': f'{prefix}/{file_name}'},
                 ExpiresIn=600  # 10 分钟有效期
             )
-            file_url = file_url.replace('http://lion-fs:9000', "https://" + host + '/files')
+            file_url = file_url.replace("https://" + host, "https://" + host + '/files')
             return file_url
         except Exception as e:
             logger.error(f"获取文件失败: {e} | {traceback.format_exc()}")
