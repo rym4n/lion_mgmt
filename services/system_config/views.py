@@ -23,7 +23,7 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import strip_timezone_to_seconds
+from libs.utils import strip_timezone_to_seconds, get_from_s3
 from models import AuditLog, Config
 from services.event_ingestion.views import check_vector_config
 from settings import SECRET, SESSION_ENCODING_ALGORITHM, UPLOAD_DIR, BASE_DIR, VECTOR_CFG, COMMON_FILES_DIR, \
@@ -194,10 +194,9 @@ async def get_bgpic(request):
             async with aiofile.AIOFile(cfg.value, 'rb') as f:
                 content = await f.read()
                 return response.raw(content, content_type="image/png")
-
-        resp = request.get("http://{}:9001{}".format(request.host.split(":")[0], cfg.value))
-        if resp.status == 200:
-            return response.raw(resp.content, content_type="image/png")
+        content = await get_from_s3("user", cfg.value.split("/")[-1], "custom")
+        if content:
+            return response.raw(content, content_type="image/png")
 
     return response.raw(b'', content_type="image/png")
 

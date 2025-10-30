@@ -32,7 +32,7 @@ from libs import utils
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license
-from libs.utils import fix_zip_filename, gen_run_id, get_url_from_s3
+from libs.utils import fix_zip_filename, gen_run_id, get_url_from_s3, get_from_s3
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion, \
     Runlog, Timed
 from settings import KAFKA_SERVERS, TASK_TOPIC, TZ, TOOLS_DIR
@@ -498,9 +498,9 @@ async def all_tools(request):
         if int(request.json.get("logo", 1)) == 1:
             tool["logo"] = await enrich_tool(tool, request.app.ctx.cache_client)
         if int(request.json.get("logo", 1)) == 1 and tool["logo_path"]:
-                resp = request.get("http://{}:9001{}".format(request.host.split(":")[0], tool["logo_path"]))
-                if resp.status == 200:
-                    tool["logo"] = base64.b64encode(resp.content).decode()
+            content = await get_from_s3("user", tool["logo_path"].split("/")[-1], "tools")
+            if content:
+                tool["logo"] = base64.b64encode(content).decode()
         tool.pop("path", None)
         trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"])
         if trm:
@@ -1348,12 +1348,10 @@ async def download_zip(request):
     if os.path.exists(zip_path):
         return await response.file(zip_path, filename=f"{tool_name}_{version}.zip", mime_type="application/zip")
 
-    file_url = await get_url_from_s3("system", f"{tool.name}/{tool.version}.zip", request.host, "tools")
-
-    resp = request.get(file_url)
-    if resp.status == 200:
+    content = await get_from_s3("system", f"{tool.name}/{tool.version}.zip", "tools")
+    if content:
         return await response.raw(
-            resp.content,
+            content,
             headers={
                 "Content-Type": "application/zip",
                 "Content-Disposition": f'attachment; filename="{tool_name}_{version}.zip"'
