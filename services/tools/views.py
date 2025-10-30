@@ -347,11 +347,11 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
             version = "v" + str(int(time.time() * 1000))
             suffix = logo_name.split(".")[-1]
             save_path = await utils.upload_to_s3(zip_data, "system", f"{tool_name}/{version}.zip", "tools")
-            await utils.upload_to_s3(logo_data, "user", f"{tool_name}.{suffix}", "tools")
+            logo_path = await utils.upload_to_s3(logo_data, "user", f"{tool_name}.{suffix}", "tools")
 
             maintenance_mode = await redis_client.get(token_id)
             tool = await Tool.create(
-                name=name, version=version, path=save_path, logo_path=f"/user/tools/{tool_name}.{suffix}",
+                name=name, version=version, path=save_path, logo_path=logo_path,
                 description=config_data.get("description"),
                 creator=creator, updater=creator,
                 hash_value=hasher.hexdigest(),
@@ -491,10 +491,8 @@ async def all_tools(request):
         .limit(size) \
         .values()
     for tool in latest_tools:
-        if int(request.json.get("logo", 1)) == 1:
-            tool["logo"] = await enrich_tool(tool, request.app.ctx.cache_client)
         if int(request.json.get("logo", 1)) == 1 and tool["logo_path"]:
-            tool["logo"] = "http://{}:9001{}".format(request.host.split(":")[0], tool["logo_path"])
+            tool["logo"] = tool["logo_path"]
         tool.pop("path", None)
         trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"])
         if trm:
@@ -513,27 +511,6 @@ async def all_tools(request):
     })
 
 
-async def enrich_tool(tool, cache_client):
-    cache_key = f"{tool['name']}_{tool['version']}"
-    data = await cache_client.get(cache_key)
-
-    if not data:
-        config_path = os.path.join(tool["path"], "config.json")
-        async with aiofile.AIOFile(config_path, 'r', encoding='utf-8') as f:
-            data = await f.read()
-            await cache_client.set(cache_key, data, 2592000)
-        data = orjson.loads(data)
-    else:
-        if isinstance(data, (str, bytes)):
-            data = orjson.loads(data)
-
-    logo_path = os.path.join(tool["path"], data.get("logo"))
-    if os.path.exists(logo_path):
-        async with aiofile.AIOFile(logo_path, 'rb') as logo_file:
-            logo_data = await logo_file.read()
-            return base64.b64encode(logo_data).decode()
-    else:
-        return None
 
 
 @tools_bp.post("/versions")
@@ -1335,6 +1312,8 @@ async def download_zip(request):
         raise CustomError(ErrorCode.NotDownloadError)
 
     file_url = await utils.get_url_from_s3("system", f"{tool.name}/{tool.version}.zip", request.host, "tools")
+
+    file_url = file_url.replace("https://" + request.host, "")
 
     return response_ok({"url": file_url})
 

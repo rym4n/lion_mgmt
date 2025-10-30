@@ -1005,7 +1005,7 @@ async def get_run_log(request):
     run_ids = await Runlog.filter(condition).distinct().order_by('-run_id').offset((page - 1) * size).limit(size).values_list('run_id', flat=True)
     run_logs = []
     if run_ids:
-        all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).order_by('ctime').prefetch_related("timer", "playbook_version").all()
+        all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).order_by('-ctime').prefetch_related("timer", "playbook_version").all()
         run_logs = runlog_list(all_logs)
 
     return response_ok({
