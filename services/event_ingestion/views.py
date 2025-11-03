@@ -4,7 +4,6 @@ import hashlib
 import io
 import os
 import random
-import shutil
 import string
 import subprocess
 import tempfile
@@ -189,6 +188,10 @@ async def build_kafka_file_configuration_file(output_path, sources, topic, event
                         "type": "integer",
                         "description": "日志端口 事件来源类型为syslog时才传，默认为None"
                     },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "单条消息的最大长度，单位为KB，默认100KB"
+                    },
                     "event_source_address": {
                         "type": "array",
                         "items": {
@@ -274,6 +277,7 @@ async def event_ingestion(request):
     enabled_status = int(data.get('enabled_status', 1))
     linked_execution = int(data.get('linked_execution', 0))
     retention_days = int(data.get('retention_days', 7))
+    max_length = int(data.get('max_length', 100))
 
     syslog_config = None
     if syslog_port and communication_type:
@@ -301,6 +305,7 @@ async def event_ingestion(request):
         sources = {vector_name: {
             "type": event_source_type,
             "address": f"0.0.0.0:{syslog_port}",
+            "max_length": f"{max_length * 1024}",
             "mode": communication_type
         }}
         event_source_type = "syslog"
@@ -915,7 +920,7 @@ async def binding_event_ingestion_script(request):
                 supervisor.remove_process(process_name)
                 supervisor_path = os.path.join(SUPERVISOR_PATH, "{}.conf".format(process_name))
                 if os.path.exists(supervisor_path):
-                    shutil.rmtree(supervisor_path)
+                    os.remove(supervisor_path)
         await event_related_script.delete()
 
     data = orjson.loads(orjson.dumps(event.vector_config_raw))
