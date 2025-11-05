@@ -514,6 +514,10 @@ async def delete_event_ingestion(request):
                         },
                         "description": "事件来源地址 事件来源类型为kafka时才传 非必填"
                     },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "单条消息的最大长度，单位为KB，默认100KB"
+                    },
                     "syslog_port": {
                         "type": "integer",
                         "description": "日志端口 端口范围500-2000 事件来源类型为syslog时才传，默认为None 非必填"
@@ -611,6 +615,7 @@ async def update_event_ingestion(request):
     key_value_delimiter = data.get('key_value_delimiter', None)
     kafka_topic = data.get('kafka_topic', [])
     event = await EventsIngestion.get(id=event_id)
+    max_length = int(data.get('max_length', 100))
 
     data = event.vector_config_raw
 
@@ -648,6 +653,8 @@ async def update_event_ingestion(request):
     if syslog_port:
         data["sources"][event.vector_name]["address"] = f"0.0.0.0:{syslog_port}"
         event.syslog_config = event.syslog_config[:3] + str(syslog_port)
+    if max_length:
+        data["sources"][event.vector_name]["max_length"] = f"{max_length * 1024}"
     if sasl_mechanism:
         data["sources"][event.vector_name].setdefault("sasl", {})["enabled"] = True
         data["sources"][event.vector_name]["sasl"]["mechanism"] = sasl_mechanism
@@ -744,8 +751,13 @@ async def get_event_ingestion_detail(request):
     event = await EventsIngestion.get(id=event_id).prefetch_related("creator", "updator")
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
-
-    return response_ok({"event": event.json, "sources": event.vector_config.get("sources", {})})
+    sources = event.vector_config.get("sources", {})
+    max_length = sources.get(event.vector_name, {}).get("max_length")
+    if max_length:
+        max_length = int(max_length) / 1024
+    data = event.json
+    data["max_length"] = max_length if max_length else 100
+    return response_ok({"event": event.json, "sources": sources})
 
 
 # noinspection PyTypeChecker
