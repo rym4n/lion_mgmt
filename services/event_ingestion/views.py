@@ -757,7 +757,7 @@ async def get_event_ingestion_detail(request):
         max_length = int(max_length) / 1024
     data = event.json
     data["max_length"] = max_length if max_length else 100
-    return response_ok({"event": event.json, "sources": sources})
+    return response_ok({"event": data, "sources": sources})
 
 
 # noinspection PyTypeChecker
