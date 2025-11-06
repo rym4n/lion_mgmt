@@ -305,7 +305,7 @@ async def event_ingestion(request):
         sources = {vector_name: {
             "type": event_source_type,
             "address": f"0.0.0.0:{syslog_port}",
-            "max_length": f"{max_length * 1024}",
+            "max_length": max_length * 1024,
             "mode": communication_type
         }}
         event_source_type = "syslog"
@@ -654,7 +654,7 @@ async def update_event_ingestion(request):
         data["sources"][event.vector_name]["address"] = f"0.0.0.0:{syslog_port}"
         event.syslog_config = event.syslog_config[:3] + str(syslog_port)
     if max_length:
-        data["sources"][event.vector_name]["max_length"] = f"{max_length * 1024}"
+        data["sources"][event.vector_name]["max_length"] = max_length * 1024
     if sasl_mechanism:
         data["sources"][event.vector_name].setdefault("sasl", {})["enabled"] = True
         data["sources"][event.vector_name]["sasl"]["mechanism"] = sasl_mechanism
