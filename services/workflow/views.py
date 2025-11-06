@@ -1266,9 +1266,7 @@ async def get_playbook_input(playbook_id):
         for param_key in unique_matches:
             if param_key in param_map:
                 input_list.append({
-                    param_key: {
-                        "input": param_map[param_key]
-                    }
+                    param_key: param_map[param_key]
                 })
 
     return input_list
