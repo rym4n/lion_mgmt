@@ -77,6 +77,8 @@ async def view_dashboard(request):
         raise CustomError(ErrorCode.ParameterError)
 
     result = None
+    start_time = datetime.strptime(start_time, '%Y-%m-%d')
+    end_time = datetime.strptime(end_time, '%Y-%m-%d')
 
     async with in_transaction() as tconn:
         if static_type == "events_day":
