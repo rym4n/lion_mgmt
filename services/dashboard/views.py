@@ -3,7 +3,6 @@ from datetime import datetime
 
 from sanic import Blueprint
 from sanic_ext import openapi
-from tortoise.expressions import Q, RawSQL
 from tortoise.functions import Count
 from tortoise.transactions import in_transaction
 
@@ -11,8 +10,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Events, Runlog, PlaybookVersion, ToolResources
-from settings import TZ
+from models import PlaybookVersion, ToolResources
 
 dashboard_bp = Blueprint('dashboard', url_prefix='/dashboard')
 _all__ = ["dashboard_bp"]
@@ -26,31 +24,11 @@ _all__ = ["dashboard_bp"]
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["table_name", "conditions", "start_time", "end_time"],
+                "required": ["static_type", "start_time", "end_time"],
                 "properties": {
-                    "table_name": {
-                        "type": "string",
-                        "description": "表名，可选值：events, runlog"
-                    },
-                    "conditions": {
-                        "type": "object",
-                        "description": "查询条件"
-                    },
                     "static_type": {
                         "type": "string",
-                        "description": "统计类型，可选值：count(数量), value(全部字段的值)"
-                    },
-                    "group_by": {
-                        "type": "string",
-                        "description": "分组字段，events表可选字段：event_name, event_process_status, event_source, owner, room, updator, creator；runlog表可选字段：playbook_name"
-                    },
-                    "count_key": {
-                        "type": "string",
-                        "description": "分组统计的时候按什么字段做统计"
-                    },
-                    "count_distinct": {
-                        "type": "boolean",
-                        "description": "是否统计数量的不同值，默认值：True"
+                        "description": "统计类型，可选值：events_day，events_status，runlog_playbook，runlog_action"
                     },
                     "start_time": {
                         "type": "string",
@@ -90,46 +68,29 @@ _all__ = ["dashboard_bp"]
 @requires_permission('dashboard:r')
 async def view_dashboard(request):
     params = request.json
-    table_dict = {
-        "events": Events,
-        "runlog": Runlog
-    }
-    conditions = params.get("conditions")
+
     start_time = params.get("start_time")
     end_time = params.get("end_time")
-    table_name = params.get("table_name")
     static_type = params.get("static_type")
-    group_by = params.get("group_by")
-    count_key = params.get("count_key")
 
-    if not start_time or not end_time or table_name not in table_dict or (not static_type and not group_by) or (group_by and not count_key):
+    if not start_time or not end_time or not static_type:
         raise CustomError(ErrorCode.ParameterError)
 
-    start_time = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
-    start_time = TZ.localize(start_time)
-    end_time = datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
-    end_time = TZ.localize(end_time)
     result = None
-    q = Q(ctime__range=(start_time, end_time))
 
-    if conditions and isinstance(conditions, dict):
-        q &= Q(**conditions)
-
-    if static_type == "count":
-        result = await table_dict.get(table_name).filter(q).count()
-    elif static_type == "value":
-        result = await table_dict.get(table_name).filter(q).values()
-    elif group_by:
-        if group_by == 'ctime':
-            result = await table_dict.get(table_name).filter(q).annotate(
-                day=RawSQL("TO_CHAR(DATE_TRUNC('day', ctime), 'YYYY-MM-DD')")
-            ).group_by('day').annotate(
-                counts=Count(count_key, distinct=params.get('count_distinct', True))
-            ).order_by("-counts").values("day", "counts")
-        else:
-            result = await table_dict.get(table_name).filter(q).annotate(
-                counts=Count(count_key, distinct=params.get('count_distinct', True))
-            ).group_by(group_by).order_by("-counts").values(group_by, "counts")
+    async with in_transaction() as tconn:
+        if static_type == "events_day":
+            records = await tconn.execute_query_dict("SELECT day, total FROM events_day WHERE day >= $1 AND day <= $2", (start_time, end_time))
+            result = [{"day": row["day"], "counts": row["total"]} for row in records]
+        elif static_type == "events_status":
+            records = await tconn.execute_query_dict("SELECT event_process_status, SUM(total) FROM events_status WHERE day >= $1 AND day <= $2 GROUP BY event_process_status", (start_time, end_time))
+            result = [{"event_process_status": row["event_process_status"], "counts": row["total"]} for row in records]
+        elif static_type == "runlog_playbook":
+            records = await tconn.execute_query_dict("SELECT playbook_name, total FROM runlog_playbook WHERE day >= $1 AND day <= $2 GROUP BY playbook_name", (start_time, end_time))
+            result = [{"playbook_name": row["playbook_name"], "counts": row["total"]} for row in records]
+        elif static_type == "runlog_action":
+            records = await tconn.execute_query_dict("SELECT action_display_name, total FROM runlog_action WHERE day >= $1 AND day <= $2 GROUP BY action_display_name", (start_time, end_time))
+            result = [{"action_display_name": row["action_display_name"], "counts": row["total"]} for row in records]
 
     return response_ok(result)
 

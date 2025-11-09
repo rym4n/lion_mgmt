@@ -23,7 +23,7 @@ class Runlog(BaseModel):
     tool_display_name = fields.CharField(null=True, max_length=255, description="工具中文名称")
 
     action_name = fields.CharField(null=True, max_length=255, description="动作标识")
-    action_display_name = fields.CharField(null=True, max_length=255, description="动作中文名称")
+    action_display_name = fields.CharField(null=True, max_length=255, index=True, description="动作中文名称")
 
     status = fields.IntField(default=0, description="执行状态")
     args = fields.JSONField(null=True, description="执行入参")
@@ -34,7 +34,7 @@ class Runlog(BaseModel):
 
     executor = fields.CharField(null=True, max_length=36, description="执行者ID")
     resource_name = fields.CharField(null=True, max_length=36, description="资源名称")
-    playbook_name = fields.CharField(null=True, max_length=36, description="剧本名称")
+    playbook_name = fields.CharField(null=True, max_length=255, index=True, description="剧本名称")
 
     playbook_version = fields.ForeignKeyField("models.PlaybookVersion", null=True, related_name="playbook_runlog",
                                               description="关联剧本版本", on_delete=fields.SET_NULL)
