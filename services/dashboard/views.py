@@ -82,15 +82,19 @@ async def view_dashboard(request):
         if static_type == "events_day":
             records = await tconn.execute_query_dict("SELECT day, total FROM events_day WHERE day >= $1 AND day <= $2", (start_time, end_time))
             result = [{"day": row["day"], "counts": row["total"]} for row in records]
+            await tconn.execute_query("REFRESH MATERIALIZED VIEW events_day")
         elif static_type == "events_status":
             records = await tconn.execute_query_dict("SELECT event_process_status, SUM(total) FROM events_status WHERE day >= $1 AND day <= $2 GROUP BY event_process_status", (start_time, end_time))
             result = [{"event_process_status": row["event_process_status"], "counts": row["total"]} for row in records]
+            await tconn.execute_query("REFRESH MATERIALIZED VIEW events_status")
         elif static_type == "runlog_playbook":
             records = await tconn.execute_query_dict("SELECT playbook_name, total FROM runlog_playbook WHERE day >= $1 AND day <= $2 GROUP BY playbook_name", (start_time, end_time))
             result = [{"playbook_name": row["playbook_name"], "counts": row["total"]} for row in records]
+            await tconn.execute_query("REFRESH MATERIALIZED VIEW runlog_playbook")
         elif static_type == "runlog_action":
             records = await tconn.execute_query_dict("SELECT action_display_name, total FROM runlog_action WHERE day >= $1 AND day <= $2 GROUP BY action_display_name", (start_time, end_time))
             result = [{"action_display_name": row["action_display_name"], "counts": row["total"]} for row in records]
+            await tconn.execute_query("REFRESH MATERIALIZED VIEW runlog_action")
 
     return response_ok(result)
 
@@ -279,7 +283,7 @@ async def playbooks_success_rate(request):
                 WHERE playbook_name != '执行动作'
                 GROUP BY run_id, playbook_name) AS deduplicated
           GROUP BY playbook_name
-          ORDER BY success_rate; \
+          ORDER BY success_rate;
           """
     async with in_transaction() as conn:
         rows = await conn.execute_query_dict(sql)
