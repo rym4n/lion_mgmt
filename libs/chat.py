@@ -20,7 +20,7 @@ from models import Runlog, Approvement, Events, Config, ToolAction, ToolResource
     PlaybookVersion
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC, WR_TOPIC, AUTHENTICATION_SESSION_EXPIRATION
+from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC, WR_TOPIC, AUTHENTICATION_SESSION_EXPIRATION, TZ
 
 
 async def fetch_completion(host, api_key, model, messages):

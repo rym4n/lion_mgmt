@@ -644,7 +644,7 @@ async def update_event_ingestion(request):
             "key_delimiter_value": key_delimiter_value
         }
         value = config.value
-        if '{' in value:
+        if '{' in value and transforms_type in ["kv", "grok"]:
             value = value.format(**args)
 
         data["transforms"][first_transform]["source"] = value
