@@ -261,7 +261,7 @@ async def update_approvement(request):
     approvement_id = param.get("id")
     agree = param.get("agree")
     remark = param.get("remark", "")
-    params = param.get("params", [])
+    params = param.get("params") or []
     if not approvement_id or not isinstance(agree, bool) or not isinstance(remark, str) or not isinstance(params, list):
         raise CustomError(ErrorCode.ParameterError)
 
@@ -303,6 +303,113 @@ async def update_approvement(request):
         "run_args": {
             "flow_id": approve.flow_id, "flow_input": params, "approval_node_id": approve.audit_node, "approval_status": approve.status,
             "executor": ",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session['account_info'].id
+        }
+    }
+    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+
+    return response_ok('success')
+
+
+@approve_bp.post("/callback", name="approve_callback_post")
+@approve_bp.get("/callback", name="approve_callback_get")
+@openapi.definition(
+    summary="外部系统审核结果回调",
+    description="接受三方系统的审核结果，同时支持POST/GET",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["token", "agree"],
+                "properties": {
+                    "token": {
+                        "type": "string",
+                        "description": "审核的唯一token"
+                    },
+                    "agree": {
+                        "type": "boolean",
+                        "description": "布尔类型：True/False，同意或拒绝"
+                    },
+                    "remark": {
+                        "type": "string",
+                        "description": "审批备注信息"
+                    },
+                    "params": {
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        },
+                        "description": "自定义参数的内容信息"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
+@requires_permission("approve:u")
+async def update_approvement(request):
+    param = request.json if request.method.upper() == "POST" else dict(request.args)
+
+    token = param.get("token")
+    agree = param.get("agree")
+    remark = param.get("remark", "")
+    params = param.get("params") or []
+    if not token or not isinstance(agree, bool) or not isinstance(remark, str) or not isinstance(params, list):
+        raise CustomError(ErrorCode.ParameterError)
+
+    approve = await Approvement.filter(callback_token=token).select_for_update().prefetch_related("approvers").first()
+    if not approve:
+        raise CustomError(ErrorCode.NotFound)
+
+    if approve.status != 0:
+        raise CustomError(ErrorCode.ApprovementStatusError)
+
+    if params:
+        approve.params = params
+
+    approve.results = {
+        **approve.results,
+        token: {
+            "username": 'callback',
+            "display_name": '外部回调',
+            "agree": agree,
+            "remark": remark,
+            "approve_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+    }
+
+    if agree:
+        if approve.approve_type == 2:
+            # 如果是会签，只有所有审批人都同意了，才进行下一步
+            if len(approve.results) == len(approve.approvers):
+                approve.status = 1
+        else:
+            approve.status = 1
+    else:
+        approve.status = 2
+
+    await approve.save()
+
+    msg = {
+        "run_type": 'flow', "run_id": approve.run_id,
+        "run_args": {
+            "flow_id": approve.flow_id, "flow_input": params, "approval_node_id": approve.audit_node, "approval_status": approve.status,
+            "executor": ",".join([p.id for p in approve.approvers])
         }
     }
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)

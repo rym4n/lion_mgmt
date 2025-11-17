@@ -22,6 +22,7 @@ class Approvement(BaseModel):
     created_at = fields.DatetimeField(description="审核触发的时间")
     params = fields.JSONField(default=[], description="自定义参数")
     results = fields.JSONField(default={}, description="处理记录")
+    callback_token = fields.CharField(max_length=16, description="外部回调token")
 
     def validate(self) -> None:
         raise NotImplementedError

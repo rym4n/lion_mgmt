@@ -1,14 +1,12 @@
 # coding=utf-8
 import asyncio
 import hashlib
-import os
 import time
 import traceback
 from datetime import datetime
 
 import httpx
 import orjson
-import pytz
 from aiocache import caches
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
@@ -429,7 +427,8 @@ class ChatManager:
                 approve = await Approvement.create(title=log['node_name'], flow_id=log['flow_id'], run_id=log['run_id'],
                                                    content=log['content'], params=log['params'], status=log['status'],
                                                    expire_time=log['expire_time'], created_at=log['created_at'],
-                                                   audit_node=log['audit_app'], approve_type=int(log['approve_type']))
+                                                   audit_node=log['audit_app'], approve_type=int(log['approve_type']),
+                                                   callback_token=log.get('callback_token'))
                 if log.get('users'):
                     users = await Account.filter(id__in=log['users'].split(',')).all()
                     await approve.approvers.add(*users)
