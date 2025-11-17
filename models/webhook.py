@@ -13,7 +13,6 @@ class PlaybookWebhook(BaseModel):
     """
     playbook_version = fields.ForeignKeyField("models.PlaybookVersion", related_name="webhooks", description="剧本版本")
     webhook_token = fields.CharField(max_length=16, unique=True, description="webhook唯一标识令牌")
-    enabled = fields.BooleanField(default=True, description="webhook是否启用")
     creator = fields.ForeignKeyField("models.Account", related_name="created_webhooks", description="创建人")
     description = fields.TextField(null=True, description="描述")
 
@@ -25,8 +24,7 @@ class PlaybookWebhook(BaseModel):
         return {
             "id": self.id,
             "playbook_version_id": self.playbook_version.id,
-            "webhook_token": self.webhook_token,
-            "enabled": self.enabled,
+            "webhook_url": f"/webhook/execute/{self.webhook_token}",
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
             "creator": {

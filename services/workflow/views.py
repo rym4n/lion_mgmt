@@ -1633,7 +1633,6 @@ async def select_permission_all(request):
                                 "type": "object",
                                 "properties": {
                                     "id": {"type": "string"},
-                                    "webhook_token": {"type": "string"},
                                     "webhook_url": {"type": "string"},
                                     "description": {"type": "string"}
                                 }
@@ -1670,18 +1669,14 @@ async def create_webhook(request):
         description=description
     )
 
-    # 构造webhook URL，假设基础URL从环境配置中获取
-    webhook_url = f"/webhook/execute/{webhook_token}"
-
     return response_ok({
         "id": webhook.id,
-        "webhook_token": webhook_token,
-        "webhook_url": webhook_url,
+        "webhook_url": f"/webhook/execute/{webhook_token}",
         "description": description
     })
 
 
-@workflow_bp.post("/webhook/list")
+@workflow_bp.post("/webhook/get")
 @openapi.definition(
     summary="获取剧本版本的Webhook列表",
     description="获取指定剧本版本的所有webhook",
@@ -1732,9 +1727,9 @@ async def list_webhook(request):
     if not pv:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
-    webhooks = await PlaybookWebhook.filter(playbook_version_id=flow_id, deleted=False).all().prefetch_related("creator")
+    webhook = await PlaybookWebhook.get_or_none(playbook_version_id=flow_id, deleted=False).prefetch_related("creator")
 
-    return response_ok([webhook.json for webhook in webhooks])
+    return response_ok(webhook.json if webhook else {})
 
 
 @workflow_bp.post("/webhook/delete")
@@ -1830,11 +1825,7 @@ async def execute_webhook(request, webhook_token):
     POST请求：body中的flow_input作为参数
     """
     # 查找webhook
-    webhook = await PlaybookWebhook.get_or_none(
-        webhook_token=webhook_token,
-        enabled=True,
-        deleted=False
-    ).prefetch_related("playbook_version", "playbook_version__playbook", "creator")
+    webhook = await PlaybookWebhook.get_or_none(webhook_token=webhook_token, deleted=False).prefetch_related("playbook_version", "playbook_version__playbook", "creator")
 
     if not webhook:
         raise CustomError(ErrorCode.ParameterError)

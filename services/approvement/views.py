@@ -285,23 +285,19 @@ async def update_approvement(request):
             "approve_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
     }
-    do_action = False
 
     if agree:
         if approve.approve_type == 2:
             # 如果是会签，只有所有审批人都同意了，才进行下一步
             if len(approve.results) == len(approve.approvers):
                 approve.status = 1
-                do_action = True
         else:
             approve.status = 1
-            do_action = True
     else:
         approve.status = 2
 
     await approve.save()
 
-    # if do_action:
     msg = {
         "run_type": 'flow', "run_id": approve.run_id,
         "run_args": {
