@@ -46,3 +46,4 @@ logs/
 .onedev-buildspec.yml
 
 data/
+.claude/

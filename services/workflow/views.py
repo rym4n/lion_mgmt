@@ -2,6 +2,7 @@
 # coding=utf-8
 import asyncio
 import re
+import secrets
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -22,7 +23,7 @@ from libs.security.authorization import requires_permission, load_license, playb
     check_playbook_permission
 from libs.utils import gen_run_id, strip_timezone_to_seconds
 from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, \
-    EventRelatedScript, Timed
+    EventRelatedScript, Timed, PlaybookWebhook
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
 
@@ -1595,3 +1596,297 @@ async def select_permission_all(request):
     pps = await PlaybookPermissions.filter(pb_id=playbook_id).all().prefetch_related("users", "roles")
 
     return response_ok([pp.json for pp in pps])
+
+
+@workflow_bp.post("/webhook/create")
+@openapi.definition(
+    summary="生成剧本Webhook URL",
+    description="为指定剧本版本生成webhook URL，用于外部系统触发剧本执行",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["flow_id"],
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "剧本版本ID"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "webhook描述"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "创建成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "webhook_token": {"type": "string"},
+                                    "webhook_url": {"type": "string"},
+                                    "description": {"type": "string"}
+                                }
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
+@requires_permission("workflow:u")
+@playbook_permission("u")
+async def create_webhook(request):
+    flow_id = request.json.get("flow_id")
+    description = request.json.get("description", "")
+
+    if not flow_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    pv = await PlaybookVersion.get_or_none(id=flow_id).prefetch_related("playbook")
+    if not pv:
+        raise CustomError(ErrorCode.PlaybookNotFound)
+
+    # 生成唯一的webhook token
+    webhook_token = secrets.token_urlsafe(10)
+
+    webhook = await PlaybookWebhook.create(
+        playbook_version=pv,
+        webhook_token=webhook_token,
+        enabled=True,
+        creator=request.ctx.session['account_info'],
+        description=description
+    )
+
+    # 构造webhook URL，假设基础URL从环境配置中获取
+    webhook_url = f"/webhook/execute/{webhook_token}"
+
+    return response_ok({
+        "id": webhook.id,
+        "webhook_token": webhook_token,
+        "webhook_url": webhook_url,
+        "description": description
+    })
+
+
+@workflow_bp.post("/webhook/list")
+@openapi.definition(
+    summary="获取剧本版本的Webhook列表",
+    description="获取指定剧本版本的所有webhook",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["flow_id"],
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "剧本版本ID"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {"type": "object"}
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
+@requires_permission("workflow:r")
+@playbook_permission("r")
+async def list_webhook(request):
+    flow_id = request.json.get("flow_id")
+
+    if not flow_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    pv = await PlaybookVersion.get_or_none(id=flow_id)
+    if not pv:
+        raise CustomError(ErrorCode.PlaybookNotFound)
+
+    webhooks = await PlaybookWebhook.filter(playbook_version_id=flow_id, deleted=False).all().prefetch_related("creator")
+
+    return response_ok([webhook.json for webhook in webhooks])
+
+
+@workflow_bp.post("/webhook/delete")
+@openapi.definition(
+    summary="删除Webhook",
+    description="删除指定的webhook",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["webhook_id"],
+                "properties": {
+                    "webhook_id": {
+                        "type": "string",
+                        "description": "WebhookID"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
+@requires_permission("workflow:u")
+@playbook_permission("u")
+async def delete_webhook(request):
+    webhook_id = request.json.get("webhook_id")
+
+    if not webhook_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    webhook = await PlaybookWebhook.get_or_none(id=webhook_id)
+    if not webhook:
+        raise CustomError(ErrorCode.ParameterError)
+
+    await webhook.delete()
+
+    return response_ok("Webhook已删除")
+
+
+# 无需权限验证的webhook执行接口，通过webhook_token验证
+@workflow_bp.post("/webhook/execute/<webhook_token>", name="execute_webhook_post")
+@workflow_bp.get("/webhook/execute/<webhook_token>", name="execute_webhook_get")
+@openapi.definition(
+    summary="执行剧本（通过Webhook）",
+    description="通过webhook token直接执行剧本，支持GET和POST调用",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "flow_input": {
+                        "type": "object",
+                        "description": "剧本输入参数"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "执行成功",
+            "content": {
+                "text/event-stream": {
+                    "schema": {
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    }
+)
+async def execute_webhook(request, webhook_token):
+    """
+    通过webhook token执行剧本
+    支持GET和POST请求
+    GET请求：query parameters作为flow_input
+    POST请求：body中的flow_input作为参数
+    """
+    # 查找webhook
+    webhook = await PlaybookWebhook.get_or_none(
+        webhook_token=webhook_token,
+        enabled=True,
+        deleted=False
+    ).prefetch_related("playbook_version", "playbook_version__playbook", "creator")
+
+    if not webhook:
+        raise CustomError(ErrorCode.ParameterError)
+
+    pv = webhook.playbook_version
+
+    # 获取flow_input
+    flow_input = {}
+    if request.method.upper() == "POST":
+        json_data = request.json or {}
+        flow_input = json_data.get("flow_input", {})
+    elif request.method.upper() == "GET":
+        # GET请求从query parameters中获取
+        flow_input = dict(request.args)
+
+    resp = await request.respond(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
+
+    utime = datetime.now(TZ)
+
+    # 构造执行消息
+    run_id = gen_run_id()
+    message = {
+        "type": "flow",
+        "flow_id": pv.id,
+        "flow_input": flow_input,
+        "executor": webhook.creator_id
+    }
+
+    msg = {"run_type": "flow", "run_id": run_id, "run_args": message}
+    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+
+    sent_id = []
+    for i in range(60):
+        logs = await Runlog.filter(run_id=run_id, utime__gte=utime).all()
+        if logs:
+            utime = logs[0].utime
+            for log in logs:
+                if log.id not in sent_id:
+                    sent_id.append(log.id)
+                    await resp.send(f"data: [{orjson.dumps(log.json).decode()}]\n\n")
+            if any(log.node_type == "end-node" for log in logs):
+                break
+            if any(log.status in [-1, 2] for log in logs):
+                break
+        await asyncio.sleep(1)
+
+    await resp.eof()
+
+    return resp
