@@ -7,17 +7,17 @@ from xmlrpc.client import Fault, ServerProxy  # Python 3
 from settings import SUPERVISOR_PATH, RY_JOB_SERVER
 
 
-def write_process_config(process_name, command):
+def write_process_config(process_name, command, concurrency):
     """写入 supervisor 配置文件"""
     config_path = os.path.join(SUPERVISOR_PATH, "{}.conf".format(process_name))
     with open(config_path, "w") as f:
-        f.write("""[program:{}]\ncommand={}\nautostart=true\nautorestart=true\nredirect_stderr=true\nstdout_logfile=/dev/null""".format(process_name, command))
+        f.write("""[program:{}]\ncommand={}\nnumprocs={}\nprocess_name=%(program_name)s_%(process_num)02d\nautostart=true\nautorestart=true\nredirect_stderr=true\nstdout_logfile=/dev/null\n""".format(process_name, command, concurrency))
     logging.info("写入配置文件: {}".format(config_path))
 
 
-def add_process(process_name, command):
+def add_process(process_name, command, concurrency):
     """添加 supervisor 进程（写入配置 + reload + add）"""
-    write_process_config(process_name, command)
+    write_process_config(process_name, command, concurrency)
     try:
         server = ServerProxy(RY_JOB_SERVER)
         server.supervisor.reloadConfig()

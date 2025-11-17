@@ -269,6 +269,10 @@ async def get_platform_config(request):
         "MenuSearchHistory": 6
     }
 
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    if maintenance_mode:
+        default["Theme"] = "maintenance"
+
     if cfg:
         return json(orjson.loads(cfg.value), dumps=orjson.dumps)
     else:

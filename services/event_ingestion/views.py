@@ -66,19 +66,19 @@ def get_conditional_statements(conditions):
     conditional_statements = ""
     for index, condition in enumerate(conditions):
         if condition["type"] in ["==", "!="]:
-            conditional_statements += f""".log.{condition["name"]} {condition['type']} "{condition['value']}" """
+            conditional_statements += f""".log."{condition["name"]}" {condition['type']} "{condition['value']}" """
         elif condition["type"] in [">", "<", ">=", "<="]:
-            conditional_statements += f"""(to_int(.log.{condition["name"]}) ?? 0) {condition['type']} {int(condition['value'])}"""
+            conditional_statements += f"""(to_int(.log."{condition["name"]}") ?? 0) {condition['type']} {int(condition['value'])}"""
         elif condition["type"] in ["!contains", "contains"]:
-            conditional_statements += f"""{condition['type']}(string!(.log.{condition['name']}), "{condition['value']}")"""
+            conditional_statements += f"""{condition['type']}(string!(.log."{condition['name']}"), "{condition['value']}")"""
         elif condition["type"] in ["includes", "!includes"]:
-            conditional_statements += f"""{condition['type']}({condition['value']}, string!(.log.{condition['name']}))"""
+            conditional_statements += f"""{condition['type']}({condition['value']}, string!(.log."{condition['name']}"))"""
         elif condition["type"] in ["exists", "!exists"]:
-            conditional_statements += f"""{condition['type']}(.log.{condition['name']})"""
+            conditional_statements += f"""{condition['type']}(.log."{condition['name']}")"""
         elif condition["type"] in ["is_empty", "!is_empty"]:
-            conditional_statements += f"""{condition['type']}(to_string!(.log.{condition['name']}))"""
+            conditional_statements += f"""{condition['type']}(to_string!(.log."{condition['name']}"))"""
         elif condition["type"] == "match":
-            conditional_statements += f"""match(string!(.log.{condition['name']}), r'{condition['value']}')"""
+            conditional_statements += f"""match(string!(.log."{condition['name']}"), r'{condition['value']}')"""
         else:
             raise CustomError(ErrorCode.ParameterError)
         connect_type = condition["connect_type"] if condition.get("connect_type") in ["&&", "||"] else None
@@ -891,6 +891,10 @@ async def get_event_ingestion_kafka_sample(request):
                                     "type": "array",
                                     "items": {"type": "string"},
                                     "description": "字段 非必填，选择去重时才填写"
+                                },
+                                "Concurrency": {
+                                    "type": "integer",
+                                    "description": "并发数量，默认是1，最大是4"
                                 }
                             }
                         }
@@ -1027,10 +1031,13 @@ del(.datetime_str)
                     process_name = hashlib.md5(f"{event.id}_{script_id}".encode()).hexdigest()
                     supervisor.stop_process(process_name)
             else:
+                concurrency = int(request.json.get("Concurrency", 1))
+                if concurrency > 4:
+                    concurrency = 4
                 for script_id in script_ids:
                     process_name = hashlib.md5(f"{event.id}_{script_id}".encode()).hexdigest()
                     command = f"python start.py -m auto -f {script_id} -t {topic}"
-                    supervisor.add_process(process_name, command)
+                    supervisor.add_process(process_name, command, concurrency)
                     result = supervisor.start_process(process_name)
                     if result:
                         event.execution_health_status = "healthy"
