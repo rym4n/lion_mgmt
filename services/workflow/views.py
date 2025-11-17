@@ -1791,8 +1791,8 @@ async def delete_webhook(request):
 
 
 # 无需权限验证的webhook执行接口，通过webhook_token验证
-@workflow_bp.post("/webhook/execute/<webhook_token>")
-@workflow_bp.get("/webhook/execute/<webhook_token>")
+@workflow_bp.post("/webhook/execute/<webhook_token>", name="execute_webhook_post")
+@workflow_bp.get("/webhook/execute/<webhook_token>", name="execute_webhook_get")
 @openapi.definition(
     summary="执行剧本（通过Webhook）",
     description="通过webhook token直接执行剧本，支持GET和POST调用",
