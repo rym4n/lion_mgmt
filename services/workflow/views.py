@@ -1671,7 +1671,7 @@ async def create_webhook(request):
 
     return response_ok({
         "id": webhook.id,
-        "webhook_url": f"/webhook/execute/{webhook_token}",
+        "webhook_url": f"/webhook/execute?key={webhook_token}",
         "description": description
     })
 
@@ -1786,8 +1786,8 @@ async def delete_webhook(request):
 
 
 # 无需权限验证的webhook执行接口，通过webhook_token验证
-@workflow_bp.post("/webhook/execute/<webhook_token>", name="execute_webhook_post")
-@workflow_bp.get("/webhook/execute/<webhook_token>", name="execute_webhook_get")
+@workflow_bp.post("/webhook/execute", name="execute_webhook_post")
+@workflow_bp.get("/webhook/execute", name="execute_webhook_get")
 @openapi.definition(
     summary="执行剧本（通过Webhook）",
     description="通过webhook token直接执行剧本，支持GET和POST调用",
@@ -1796,6 +1796,10 @@ async def delete_webhook(request):
             "schema": {
                 "type": "object",
                 "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "回调的唯一标识"
+                    },
                     "flow_input": {
                         "type": "object",
                         "description": "剧本输入参数"
@@ -1817,7 +1821,7 @@ async def delete_webhook(request):
         }
     }
 )
-async def execute_webhook(request, webhook_token):
+async def execute_webhook(request):
     """
     通过webhook token执行剧本
     支持GET和POST请求
@@ -1825,6 +1829,10 @@ async def execute_webhook(request, webhook_token):
     POST请求：body中的flow_input作为参数
     """
     # 查找webhook
+    webhook_token = request.args.get('key')
+    if not webhook_token:
+        raise CustomError(ErrorCode.ParameterError)
+
     webhook = await PlaybookWebhook.get_or_none(webhook_token=webhook_token, deleted=False).prefetch_related("playbook_version", "playbook_version__playbook", "creator")
 
     if not webhook:
