@@ -590,9 +590,11 @@ async def update_event_ingestion(request):
     event = await EventsIngestion.get(id=event_id)
     max_length = int(data.get('max_length', 100))
 
-    file_path = event.file_path
     if enabled_status == 0:
-        os.remove(file_path)
+        if os.path.exists(event.file_path):
+            os.remove(event.file_path)
+        event.enabled_status = 0
+        await event.save()
         return response_ok("禁用成功")
 
     data = event.vector_config_raw
