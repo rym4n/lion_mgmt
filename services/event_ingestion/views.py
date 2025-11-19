@@ -316,7 +316,7 @@ async def event_ingestion(request):
                                                     file_path=output_path.replace("\\", "/"),
                                                     linked_execution=linked_execution, syslog_config=syslog_config, vector_name=vector_name,
                                                     vector_config=vector_config, vector_config_raw=vector_config,
-                                                    enabled_health_status="healthy", retention_days=retention_days)
+                                                    enabled_health_status="healthy", retention_days=retention_days, project_id=project_id)
 
     return response_ok(events_ingestion.json)
 
