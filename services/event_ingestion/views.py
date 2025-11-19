@@ -114,7 +114,7 @@ async def gen_vector_config(output_path, sources, topic, project_id):
                 "request": {
                     "headers": {
                         "AccountID": "1",
-                        "ProjectID": project_id
+                        "ProjectID": str(project_id)
                     }
                 }
             }
