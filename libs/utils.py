@@ -339,7 +339,7 @@ def decrypt_aes256_gcm(encrypted_data: str) -> str:
         raise ValueError("解密失败: 密码错误或数据损坏") from e
 
 
-async def query_vlog(query, limit, start=None, end=None):
+async def query_vlog(query, limit, project_id, start=None, end=None):
     # 构建VictoriaLogs查询参数
     params = {
         'query': query,
@@ -350,10 +350,15 @@ async def query_vlog(query, limit, start=None, end=None):
     if end:
         params['end'] = end
 
+    header = {
+        "AccountID": 1,
+        "ProjectID": project_id,
+    }
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             # VictoriaLogs查询接口: /select/logsql/query
-            resp = await client.get(f"{VL_HOST}/select/logsql/query", params=params)
+            resp = await client.get(f"{VL_HOST}/select/logsql/query", headers=header, params=params)
             resp.raise_for_status()
             result = []
             for line in resp.text.strip().splitlines():

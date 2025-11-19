@@ -74,10 +74,11 @@ async def get_logs_by_sql(request):
         raise CustomError(ErrorCode.ParameterError)
 
     limit = request.json.get('limit', 1000)
+    project_id = request.json.get('project_id', 1000)
     start = request.json.get('start')
     end = request.json.get('end')
 
-    result = await query_vlog(query, limit, start, end)
+    result = await query_vlog(query, limit, project_id, start, end)
     return response_ok(result) if result is not None else response_fail(ErrorCode.VictoriaLogsError)
 
 
