@@ -268,7 +268,7 @@ async def event_ingestion(request):
     vector_name = ''.join(random.choices(string.ascii_letters, k=12))
 
     max_project_id = await EventsIngestion.all().annotate(max_pid=Max("project_id")).values_list("max_pid", flat=True)
-    project_id = max_project_id[0] if max_project_id else 1
+    project_id = max_project_id[0] if max_project_id and max_project_id[0] else 1
 
     output_path = os.path.join(VECTOR_CFG, vector_name + ".yaml")
 
