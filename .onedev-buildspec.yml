@@ -10,7 +10,7 @@ jobs:
       commands: |
         NEW_VER=@tag@
         sed -i -E "s#(reg\-test\.hongcloud\.net/lion_mgmt:)v[0-9]+\.[0-9]+\.[0-9]+#\1${NEW_VER}#" /opt/lion/docker-compose.yml
-        docker-compose -f /opt/lion/docker-compose.yml --env-file /opt/lion/.env up -d
+        docker-compose -f /opt/lion/docker-compose.yml --env-file /opt/lion/.env up -d --pull always
     useTTY: true
     condition: SUCCESSFUL
     optional: false
