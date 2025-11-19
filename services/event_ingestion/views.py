@@ -778,21 +778,22 @@ async def get_event_ingestion_detail(request):
 async def get_event_ingestion_kafka_sample(request):
     data = request.json
     event_id = data.get('id')
-    size = data.get("size", 15)
-    if size < 1:
-        raise CustomError(ErrorCode.ParameterError)
+    size = data.get('size', 10)
+    try:
+        size = int(size)
+    except:
+        raise CustomError(ErrorCode.ParamError)
 
     event = await EventsIngestion.get_or_none(id=event_id, deleted=False)
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    messages = await query_vlog("* | first 1 by (_time desc)", size, event.project_id)
+    messages = await query_vlog(f"* | first {size} by (_time desc)", event.project_id)
 
     if not messages:
         return response_ok("当前不存在日志")
 
     data = messages[0]
-
     if "_msg" in data.keys():
         event.enabled_health_status = "healthy"
     else:
@@ -804,7 +805,8 @@ async def get_event_ingestion_kafka_sample(request):
         event.convert_health_status = "unhealthy"
 
     await event.save()
-    return response_ok(data["_msg"])
+
+    return response_ok(messages)
 
 
 @event_ingestion_bp.post('/binding')

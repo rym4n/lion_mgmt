@@ -339,11 +339,10 @@ def decrypt_aes256_gcm(encrypted_data: str) -> str:
         raise ValueError("解密失败: 密码错误或数据损坏") from e
 
 
-async def query_vlog(query, limit, project_id, start=None, end=None):
+async def query_vlog(query, project_id, start=None, end=None):
     # 构建VictoriaLogs查询参数
     params = {
-        'query': query,
-        'limit': limit
+        'query': query
     }
     if start:
         params['start'] = start
