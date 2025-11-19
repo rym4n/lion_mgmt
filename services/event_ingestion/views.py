@@ -779,7 +779,7 @@ async def get_event_ingestion_kafka_sample(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    messages = await query_vlog(query="*", limit=size)
+    messages = await query_vlog(query="* | first 1 by (_time desc)", limit=size)
 
     if not messages:
         return response_ok("当前不存在日志")
