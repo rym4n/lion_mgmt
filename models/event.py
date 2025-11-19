@@ -73,7 +73,7 @@ class EventsIngestion(BaseModel):
     execution_health_status: str = fields.CharField(max_length=255, null=True, description="联动执行健康状态")
     convert_health_status: str = fields.CharField(max_length=255, null=True, description="转换配置健康状态")
     retention_days: int = fields.IntField(default=7, null=True, description="数据保存天数")
-    project_id: int = fields.IntField(null=True, generated=True, description="关联VL的项目id")
+    project_id: int = fields.IntField(null=True, unique=True, description="关联VL的项目id")
 
     def validate(self) -> None:
         raise NotImplementedError

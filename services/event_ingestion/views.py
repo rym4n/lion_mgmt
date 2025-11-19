@@ -18,7 +18,7 @@ from openai import OpenAI
 from sanic import Blueprint, response
 from sanic.log import logger
 from sanic_ext import openapi
-from tortoise.transactions import in_transaction
+from tortoise.functions import Max
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -267,13 +267,8 @@ async def event_ingestion(request):
 
     vector_name = ''.join(random.choices(string.ascii_letters, k=12))
 
-    events_ingestion = await EventsIngestion.create(event_ingestion_name=event_name, event_ingestion_describe=event_describe,
-                                                    event_source_type=event_source_type, enabled_status=enabled_status,
-                                                    creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'],
-                                                    # file_path=output_path.replace("\\", "/"),
-                                                    linked_execution=linked_execution, syslog_config=syslog_config, vector_name=vector_name,
-                                                    # vector_config=vector_config, vector_config_raw=vector_config,
-                                                    enabled_health_status="healthy", retention_days=retention_days)
+    max_project_id = await EventsIngestion.all().annotate(max_pid=Max("project_id")).values_list("max_pid", flat=True)
+    project_id = max_project_id[0] if max_project_id else 1
 
     output_path = os.path.join(VECTOR_CFG, vector_name + ".yaml")
 
@@ -289,7 +284,7 @@ async def event_ingestion(request):
             "max_length": max_length * 1024,
             "mode": communication_type
         }}
-        vector_config = await gen_vector_config(output_path, sources, vector_name, events_ingestion.project_id)
+        vector_config = await gen_vector_config(output_path, sources, vector_name, project_id)
     elif event_source_type == "kafka":
         if sasl_mechanism:
             sources = {vector_name: {
@@ -310,17 +305,18 @@ async def event_ingestion(request):
                 "group_id": kafka_group_id,
                 "topics": kafka_topic
             }}
-        vector_config = await gen_vector_config(output_path, sources, vector_name, events_ingestion.project_id)
+        vector_config = await gen_vector_config(output_path, sources, vector_name, project_id)
 
     if vector_config is None:
-        await events_ingestion.delete()
         raise CustomError(ErrorCode.ConfigFileGenerateError)
 
-    events_ingestion.event_source_type = event_source_type
-    events_ingestion.file_path = output_path
-    events_ingestion.vector_config = vector_config
-    events_ingestion.vector_config_raw = vector_config
-    await events_ingestion.save()
+    events_ingestion = await EventsIngestion.create(event_ingestion_name=event_name, event_ingestion_describe=event_describe,
+                                                    event_source_type=event_source_type, enabled_status=enabled_status,
+                                                    creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'],
+                                                    file_path=output_path.replace("\\", "/"),
+                                                    linked_execution=linked_execution, syslog_config=syslog_config, vector_name=vector_name,
+                                                    vector_config=vector_config, vector_config_raw=vector_config,
+                                                    enabled_health_status="healthy", retention_days=retention_days)
 
     return response_ok(events_ingestion.json)
 
@@ -455,11 +451,7 @@ async def delete_event_ingestion(request):
     if event.enabled_status == 1:
         return response_ok("请先禁用事件接入再删除")
 
-    async with in_transaction():
-        event.deleted = True
-        event.file_path = None
-        event.updator = request.ctx.session["account_info"]
-        await event.save()
+    await event.delete()
 
     return response_ok("事件删除成功")
 
@@ -1625,13 +1617,13 @@ async def grok_ai(request):
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"提供给你的日志样例是：{log}"}
     ]
-    response = client.chat.completions.create(
+    resp = client.chat.completions.create(
         model=model,
         messages=messages,
         max_tokens=4000,
         temperature=0.7
     )
 
-    full_response = response.choices[0].message.content if response.choices else ""
+    full_response = resp.choices[0].message.content if resp.choices else ""
 
     return full_response
