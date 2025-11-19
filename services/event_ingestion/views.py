@@ -451,7 +451,7 @@ async def delete_event_ingestion(request):
     if not event:
         raise CustomError(ErrorCode.NotFound)
     if event.enabled_status == 1:
-        return response_ok("事件已启用，禁止删除，请先禁用事件")
+        return response_ok("请先禁用事件接入再删除")
 
     async with in_transaction():
         event.deleted = True
@@ -590,6 +590,11 @@ async def update_event_ingestion(request):
     event = await EventsIngestion.get(id=event_id)
     max_length = int(data.get('max_length', 100))
 
+    file_path = event.file_path
+    if enabled_status == 0:
+        os.remove(file_path)
+        return response_ok("禁用成功")
+
     data = event.vector_config_raw
 
     if kafka_topic:
@@ -648,17 +653,7 @@ async def update_event_ingestion(request):
         event.event_ingestion_describe = event_describe
     if transforms_type:
         event.transforms_type = transforms_type
-    if enabled_status in [0, 1]:
-        file_path = event.file_path
-        if enabled_status == 0:
-            os.remove(file_path)
-        else:
-            result = check_vector_config(data)
-            if not result:
-                raise CustomError(ErrorCode.ConfigFileGenerateError)
-            async with aiofile.AIOFile(event.file_path, 'w', encoding='utf-8') as f:
-                yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
-                await f.write(yaml_str)
+    if enabled_status == 1:
         event.enabled_status = enabled_status
 
     if retention_days:
