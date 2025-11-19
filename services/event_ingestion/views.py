@@ -103,6 +103,9 @@ async def build_kafka_file_configuration_file(output_path, sources, topic, event
                 "doc_type": "_doc",
                 "endpoints": [f"{VL_HOST}/insert/elasticsearch/"],
                 "mode": "bulk",
+                "health": {
+                    "enabled": False,
+                },
                 "query": {
                     '_msg_field': "message",
                     '_time_field': "@timestamp",

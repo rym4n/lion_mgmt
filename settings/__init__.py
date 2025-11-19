@@ -63,11 +63,6 @@ RUNLOG_TOPIC = os.environ.get("RY_RUNLOG_TOPIC")
 WR_TOPIC = os.environ.get("RY_WR_TOPIC")
 AUDIT_TOPIC = os.environ.get("RY_AUDIT_TOPIC")
 
-# ES配置
-ES_HOST = os.environ.get("ELASTIC_HOST")
-ES_USER = os.environ.get("ELASTIC_USER")
-ES_PASS = os.environ.get("ELASTIC_PASSWORD")
-
 # VictoriaLogs配置
 VL_HOST = os.environ.get("VLOGS_HOST", "http://lion-vl:9428")
 
