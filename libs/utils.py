@@ -351,8 +351,8 @@ async def query_vlog(query, limit, project_id, start=None, end=None):
         params['end'] = end
 
     header = {
-        "AccountID": 1,
-        "ProjectID": project_id,
+        "AccountID": '1',
+        "ProjectID": 'project_id',
     }
 
     async with httpx.AsyncClient(timeout=30.0) as client:
