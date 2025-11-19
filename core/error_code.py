@@ -125,3 +125,5 @@ class ErrorCode(BaseErrorCode):
     MaintenanceModeError = ErrorData(4091, "当前用户不支持查看维护模式")
 
     VictoriaLogsError = ErrorData(4092, "日志查询错误")
+
+    PortError = ErrorData(4092, "端口已被占用，请重新选择")

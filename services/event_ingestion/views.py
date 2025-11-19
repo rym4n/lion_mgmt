@@ -91,7 +91,7 @@ def check_vector_config(vector_config, vector_config_yaml=None):
 
 # 生成配置文件
 # noinspection PyTypeChecker
-async def build_kafka_file_configuration_file(output_path, sources, topic, event_name):
+async def gen_vector_config(output_path, sources, topic, project_id):
     config = {
         "sources": sources,
         "sinks": {
@@ -109,7 +109,13 @@ async def build_kafka_file_configuration_file(output_path, sources, topic, event
                 "query": {
                     '_msg_field': "message",
                     '_time_field': "@timestamp",
-                    "_stream_fields": f"logs-{event_name}"
+                    "_stream_fields": ['host', 'source_type']
+                },
+                "request": {
+                    "headers": {
+                        "AccountID": "1",
+                        "ProjectID": project_id
+                    }
                 }
             }
         },
@@ -239,40 +245,42 @@ async def event_ingestion(request):
     event_name = data.get('event_name')
     event_describe = data.get('event_describe')
     event_source_type = data.get('event_source_type')
-    syslog_port = data.get('syslog_port', None)
+    syslog_port = data.get('syslog_port')
     event_source_address = data.get('event_source_address') or []
-    communication_type = data.get('communication_type', None)
+    communication_type = data.get('communication_type')
     kafka_group_id = data.get('kafka_group_id', "Aioe_lion_ship")
     kafka_topic = data.get('kafka_topic') or []
-    sasl_mechanism = data.get('sasl_mechanism', None)
-    sasl_username = data.get('sasl_username', None)
-    sasl_password = data.get('sasl_password', None)
+    sasl_mechanism = data.get('sasl_mechanism')
+    sasl_username = data.get('sasl_username')
+    sasl_password = data.get('sasl_password')
     enabled_status = int(data.get('enabled_status', 1))
     linked_execution = int(data.get('linked_execution', 0))
     retention_days = int(data.get('retention_days', 7))
     max_length = int(data.get('max_length', 100))
 
+    if event_source_type not in ["syslog", "socket", "kafka"]:
+        raise CustomError(ErrorCode.ParameterError)
+
     syslog_config = None
     if syslog_port and communication_type:
         syslog_config = communication_type + str(syslog_port)
-        existing_ports = await EventsIngestion.filter(deleted=False).values("syslog_config")
-        if {"syslog_config": syslog_config} in existing_ports:
-            raise CustomError(ErrorCode.DataAlreadyExists)
 
-    letters = string.ascii_letters  # 包含 a-zA-Z
-    vector_name = ''.join(random.choices(letters, k=12))
+    vector_name = ''.join(random.choices(string.ascii_letters, k=12))
 
-    if vector_name:
-        vector_names = await EventsIngestion.filter(deleted=False).values("vector_name")
-        if {"vector_name": vector_name} in vector_names:
-            raise CustomError(ErrorCode.DataAlreadyExists)
+    events_ingestion = await EventsIngestion.create(event_ingestion_name=event_name, event_ingestion_describe=event_describe,
+                                                    event_source_type=event_source_type, enabled_status=enabled_status,
+                                                    creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'],
+                                                    # file_path=output_path.replace("\\", "/"),
+                                                    linked_execution=linked_execution, syslog_config=syslog_config, vector_name=vector_name,
+                                                    # vector_config=vector_config, vector_config_raw=vector_config,
+                                                    enabled_health_status="healthy", retention_days=retention_days)
 
     output_path = os.path.join(VECTOR_CFG, vector_name + ".yaml")
 
-    topic = vector_name
-
     # await setup_ilm_policy(f"logs_retention_policy-{event_name}", f"{retention_days}d")
     # await setup_logs_template(f"logs-{event_name}", f"logs_retention_policy-{event_name}")
+
+    vector_config = None
 
     if event_source_type in ["syslog", "socket"]:
         sources = {vector_name: {
@@ -281,9 +289,7 @@ async def event_ingestion(request):
             "max_length": max_length * 1024,
             "mode": communication_type
         }}
-        event_source_type = "syslog"
-        vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
-                                                                  topic=topic, event_name=event_name)
+        vector_config = await gen_vector_config(output_path, sources, vector_name, events_ingestion.project_id)
     elif event_source_type == "kafka":
         if sasl_mechanism:
             sources = {vector_name: {
@@ -304,21 +310,17 @@ async def event_ingestion(request):
                 "group_id": kafka_group_id,
                 "topics": kafka_topic
             }}
-        vector_config = await build_kafka_file_configuration_file(output_path=output_path, sources=sources,
-                                                                  topic=topic, event_name=event_name)
-    else:
-        raise CustomError(ErrorCode.ParameterError)
+        vector_config = await gen_vector_config(output_path, sources, vector_name, events_ingestion.project_id)
 
     if vector_config is None:
+        await events_ingestion.delete()
         raise CustomError(ErrorCode.ConfigFileGenerateError)
 
-    events_ingestion = await EventsIngestion.create(event_ingestion_name=event_name, event_ingestion_describe=event_describe,
-                                                    event_source_type=event_source_type, enabled_status=enabled_status,
-                                                    creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'],
-                                                    file_path=output_path.replace("\\", "/"),
-                                                    linked_execution=linked_execution, syslog_config=syslog_config, vector_name=vector_name,
-                                                    vector_config=vector_config, vector_config_raw=vector_config,
-                                                    enabled_health_status="healthy", retention_days=retention_days)
+    events_ingestion.event_source_type = event_source_type
+    events_ingestion.file_path = output_path
+    events_ingestion.vector_config = vector_config
+    events_ingestion.vector_config_raw = vector_config
+    await events_ingestion.save()
 
     return response_ok(events_ingestion.json)
 
@@ -572,20 +574,20 @@ async def delete_event_ingestion(request):
 async def update_event_ingestion(request):
     data = request.json  # 只解析一次
     event_id = data.get('id')
-    event_describe = data.get('event_describe', None)
-    syslog_port = data.get('syslog_port', None)
+    event_describe = data.get('event_describe')
+    syslog_port = data.get('syslog_port')
     event_source_address = data.get('event_source_address', [])
-    communication_type = data.get('communication_type', None)
-    kafka_group_id = data.get('kafka_group_id', None)
-    transforms_type = data.get('transforms_type', None)
-    transformsconfig = data.get('transforms_config', None)
-    sasl_mechanism = data.get('sasl_mechanism', None)
-    sasl_username = data.get('sasl_username', None)
-    sasl_password = data.get('sasl_password', None)
-    enabled_status = data.get('enabled_status', None)
+    communication_type = data.get('communication_type')
+    kafka_group_id = data.get('kafka_group_id')
+    transforms_type = data.get('transforms_type')
+    transformsconfig = data.get('transforms_config')
+    sasl_mechanism = data.get('sasl_mechanism')
+    sasl_username = data.get('sasl_username')
+    sasl_password = data.get('sasl_password')
+    enabled_status = data.get('enabled_status')
     retention_days = data.get('retention_days')
-    key_delimiter_value = data.get('key_delimiter_value', None)
-    key_value_delimiter = data.get('key_value_delimiter', None)
+    key_delimiter_value = data.get('key_delimiter_value')
+    key_value_delimiter = data.get('key_value_delimiter')
     kafka_topic = data.get('kafka_topic', [])
     event = await EventsIngestion.get(id=event_id)
     max_length = int(data.get('max_length', 100))
@@ -785,7 +787,7 @@ async def get_event_ingestion_kafka_sample(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    messages = await query_vlog(query=f"logs-{event.event_ingestion_name}", limit=size)
+    messages = await query_vlog(query="*", limit=size)
 
     if not messages:
         return response_ok("当前不存在日志")
