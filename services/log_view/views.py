@@ -1,15 +1,16 @@
 # coding=utf-8
 
-from elasticsearch import AsyncElasticsearch
+import httpx
 from sanic import Blueprint
 from sanic.log import logger
 from sanic_ext import openapi
 
 from core.error_code import ErrorCode
-from core.response import response_ok
+from core.response import response_ok, response_fail
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from settings import ES_HOST, ES_PASS, ES_USER
+from libs.utils import query_vlog
+from settings import VICTORIA_LOGS_HOST
 
 logs_bp = Blueprint('logs', url_prefix='/logs')
 _all__ = ["logs_bp"]
@@ -17,17 +18,30 @@ _all__ = ["logs_bp"]
 
 @logs_bp.route('/query', methods=['POST'])
 @openapi.definition(
-    summary="查询ES日志数据",
-    description="通过SQL语句查询Elasticsearch中的日志数据",
+    summary="查询VictoriaLogs日志数据",
+    description="通过LogsQL语句查询VictoriaLogs中的日志数据",
     body={
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["sql"],
+                "required": ["query"],
                 "properties": {
-                    "sql": {
+                    "query": {
                         "type": "string",
-                        "description": "查询语句"
+                        "description": "LogsQL查询语句"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回结果数量限制",
+                        "default": 1000
+                    },
+                    "start": {
+                        "type": "string",
+                        "description": "查询开始时间(RFC3339格式或Unix时间戳)"
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "查询结束时间(RFC3339格式或Unix时间戳)"
                     }
                 }
             }
@@ -44,7 +58,7 @@ _all__ = ["logs_bp"]
                             "code": {"type": "integer", "example": 0},
                             "data": {
                                 "type": "object",
-                                "description": "ES查询结果"
+                                "description": "VictoriaLogs查询结果"
                             }
                         }
                     }
@@ -55,23 +69,22 @@ _all__ = ["logs_bp"]
 )
 @requires_permission('logs:r')
 async def get_logs_by_sql(request):
-    sql = request.json.get('sql')
-    if not sql:
+    query = request.json.get('query')
+    if not query:
         raise CustomError(ErrorCode.ParameterError)
 
-    async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS)) as es:
-        try:
-            resp = await es.sql.query(body={"query": sql})
-            return response_ok(resp.body)
-        except Exception as e:
-            logger.warning(e)
-            return response_ok([])
+    limit = request.json.get('limit', 1000)
+    start = request.json.get('start')
+    end = request.json.get('end')
+
+    result = await query_vlog(query, limit, start, end)
+    return response_ok(result) if result is not None else response_fail(ErrorCode.VictoriaLogsError)
 
 
 @logs_bp.route('/indexes', methods=['POST'])
 @openapi.definition(
-    summary="获取索引列表",
-    description="获取所有事件接入原始数据的索引别名列表",
+    summary="获取日志流列表",
+    description="获取VictoriaLogs中所有可用的日志流(streams)列表",
     response={
         "200": {
             "description": "获取成功",
@@ -86,7 +99,7 @@ async def get_logs_by_sql(request):
                                 "items": {
                                     "type": "string"
                                 },
-                                "description": "索引别名列表"
+                                "description": "日志流列表"
                             }
                         }
                     }
@@ -97,29 +110,32 @@ async def get_logs_by_sql(request):
 )
 @requires_permission('logs:r')
 async def get_index_list(request):
-    async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS)) as es:
-        resp = await es.cat.aliases(format='json')
-        result = [i['alias'] for i in resp.body if i.get('alias', '').startswith('logs-')]
-        # resp = await es.cat.indices(index='logs-*', format='json')
-        return response_ok(list(set(result)))
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            # VictoriaLogs获取streams接口: /select/logsql/streams
+            resp = await client.get(f"{VICTORIA_LOGS_HOST}/select/logsql/streams")
+            resp.raise_for_status()
+            data = resp.json()
 
+            # 提取stream名称列表
+            streams = []
+            if isinstance(data, dict) and 'streams' in data:
+                streams = [stream.get('_stream', '') for stream in data['streams'] if stream.get('_stream')]
+            elif isinstance(data, list):
+                streams = [item.get('_stream', '') for item in data if item.get('_stream')]
 
-def extract_fields(mapping, prefix=''):
-    fields = {}
-    for field, props in mapping.items():
-        full_path = f"{prefix}.{field}" if prefix else field
-        if 'properties' in props:  # 嵌套字段递归处理
-            nested_fields = extract_fields(props['properties'], full_path)
-            fields.update(nested_fields)
-        elif 'type' in props:  # 基础字段记录类型
-            fields[full_path] = props['type']
-    return fields
+            # 过滤以logs-开头的流(保持与原有逻辑一致)
+            result = [s for s in streams if s.startswith('logs-')]
+            return response_ok(list(set(result)))
+        except Exception as e:
+            logger.warning(f"VictoriaLogs get streams error: {e}")
+            return response_ok([])
 
 
 @logs_bp.route('/fields', methods=['POST'])
 @openapi.definition(
-    summary="获取索引字段列表",
-    description="获取指定索引的字段列表及其数据类型",
+    summary="获取日志流字段列表",
+    description="获取指定日志流的字段列表及其数据类型",
     body={
         "application/json": {
             "schema": {
@@ -128,7 +144,7 @@ def extract_fields(mapping, prefix=''):
                 "properties": {
                     "index": {
                         "type": "string",
-                        "description": "索引别名"
+                        "description": "日志流名称"
                     }
                 }
             }
@@ -156,17 +172,34 @@ def extract_fields(mapping, prefix=''):
 )
 @requires_permission('logs:r')
 async def get_field_list(request):
-    index_name = request.json.get('index')
-    if not index_name:
+    stream_name = request.json.get('index')
+    if not stream_name:
         raise CustomError(ErrorCode.ParameterError)
-    async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS)) as es:
-        alias_info = await es.indices.get_alias(name=index_name)
-        indices = list(alias_info.keys())  # 提取索引名列表
 
-        all_fields = {}
-        for index in indices:
-            mapping = await es.indices.get_mapping(index=index)
-            index_mapping = mapping[index]['mappings']['properties']
-            tmp = extract_fields(index_mapping)
-            all_fields[index_name] = {**tmp, **all_fields.get(index_name, {})}
-        return response_ok(all_fields)
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            # VictoriaLogs获取字段信息接口: /select/logsql/field_names
+            params = {'query': f'_stream:{stream_name}'}
+            resp = await client.get(
+                f"{VICTORIA_LOGS_HOST}/select/logsql/field_names",
+                params=params
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            # 构建字段信息字典
+            # VictoriaLogs返回的是字段名列表，类型信息需要通过查询推断或统一设置
+            fields = {}
+            if isinstance(data, dict) and 'fields' in data:
+                # 假设返回格式为 {"fields": ["field1", "field2", ...]}
+                for field in data['fields']:
+                    fields[field] = "text"  # VictoriaLogs默认为文本类型
+            elif isinstance(data, list):
+                # 假设返回格式为 ["field1", "field2", ...]
+                for field in data:
+                    fields[field] = "text"
+
+            return response_ok({stream_name: fields})
+        except Exception as e:
+            logger.warning(f"VictoriaLogs get fields error: {e}")
+            return response_ok({stream_name: {}})

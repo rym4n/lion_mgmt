@@ -14,7 +14,6 @@ import zipfile
 import aiofile
 import orjson
 import yaml
-from elasticsearch import AsyncElasticsearch
 from openai import OpenAI
 from sanic import Blueprint, response
 from sanic.log import logger
@@ -27,39 +26,13 @@ from libs import supervisor
 from libs.chat import get_ai_config
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import run_linux_command, setup_logs_template, setup_ilm_policy
+from libs.utils import run_linux_command, query_vlog
 from models import PlaybookVersion, Playbook, Config
 from models.event import EventsIngestion, EventRelatedScript
-from settings import VECTOR_CFG, KAFKA_SERVERS, ES_HOST, ES_USER, ES_PASS, SUPERVISOR_PATH
+from settings import VECTOR_CFG, KAFKA_SERVERS, SUPERVISOR_PATH, VL_HOST
 
 event_ingestion_bp = Blueprint('event_ingestion', url_prefix='/event-ingestion')
 _all__ = ["event_ingestion_bp"]
-
-
-async def get_event_ingestion_list(size, index):
-    messages = []
-    async with AsyncElasticsearch(ES_HOST, http_auth=(ES_USER, ES_PASS), ) as es:
-        query = {
-            "query": {
-                "match_all": {}
-            },
-            "size": size,
-            "sort": [
-                {"timestamp": "desc"}
-            ]
-        }
-        index = index
-        if not await es.indices.exists(index=index):
-            return False
-
-        result = await es.search(index=index, body=query)
-
-        if result:
-            for hit in result["hits"]["hits"]:
-                source = hit["_source"]
-                source.pop("timestamp", None)
-                messages.append(source)
-    return messages
 
 
 def get_conditional_statements(conditions):
@@ -125,18 +98,15 @@ async def build_kafka_file_configuration_file(output_path, sources, topic, event
             f"{topic}_sample_sinks": {
                 "type": "elasticsearch",
                 "inputs": [f"{topic}_date_transforms"],
-                "api_version": "auto",
-                "compression": "none",
+                "api_version": "v8",
+                "compression": "gzip",
                 "doc_type": "_doc",
-                "endpoints": [ES_HOST],
+                "endpoints": [f"{VL_HOST}/insert/elasticsearch/"],
                 "mode": "bulk",
-                "auth": {
-                    "strategy": "basic",
-                    "user": ES_USER,
-                    "password": urllib.parse.quote(ES_PASS)
-                },
-                "bulk": {
-                    "index": f"logs-{event_name}-%Y%m%d"
+                "query": {
+                    '_msg_field': "message",
+                    '_time_field': "@timestamp",
+                    "_stream_fields": f"logs-{event_name}"
                 }
             }
         },
@@ -298,8 +268,8 @@ async def event_ingestion(request):
 
     topic = vector_name
 
-    await setup_ilm_policy(f"logs_retention_policy-{event_name}", f"{retention_days}d")
-    await setup_logs_template(f"logs-{event_name}", f"logs_retention_policy-{event_name}")
+    # await setup_ilm_policy(f"logs_retention_policy-{event_name}", f"{retention_days}d")
+    # await setup_logs_template(f"logs-{event_name}", f"logs_retention_policy-{event_name}")
 
     if event_source_type in ["syslog", "socket"]:
         sources = {vector_name: {
@@ -690,7 +660,6 @@ async def update_event_ingestion(request):
 
     if retention_days:
         event.retention_days = retention_days
-        await setup_ilm_policy(f"logs_retention_policy-{event.event_ingestion_name}", f"{retention_days}d")
 
     event.updator = request.ctx.session["account_info"]
 
@@ -1406,7 +1375,7 @@ async def parse_log(request):
     if not result:
         raise CustomError(ErrorCode.LogParseError)
 
-    messages = await get_event_ingestion_list(1, f"logs-{event.event_ingestion_name}")
+    messages = await query_vlog("* | top(1)", 1)
 
     if not messages:
         return response_ok("当前不存在日志")

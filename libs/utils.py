@@ -16,11 +16,12 @@ from io import BytesIO
 from pathlib import Path, PurePath
 from string import ascii_uppercase, digits
 from typing import Optional
-from urllib.parse import urlparse, urlunparse
 
 import aioboto3
 import aiofile
+import httpx
 import jwt
+import orjson
 import psutil
 from aiokafka import AIOKafkaConsumer, TopicPartition
 from argon2 import PasswordHasher
@@ -31,12 +32,11 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from elasticsearch import AsyncElasticsearch, NotFoundError
 from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from settings import RY_RES_KEY, ES_HOST, ES_USER, ES_PASS, REAL_IP_HEADER, FS_AK, S3_HOST, FS_SK
+from settings import RY_RES_KEY, REAL_IP_HEADER, FS_AK, S3_HOST, FS_SK, VL_HOST
 
 password_hasher: PasswordHasher = PasswordHasher()
 
@@ -339,61 +339,90 @@ def decrypt_aes256_gcm(encrypted_data: str) -> str:
         raise ValueError("解密失败: 密码错误或数据损坏") from e
 
 
-async def setup_ilm_policy(policy_name, retention_age="180d"):
-    """设置ILM策略"""
-    async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
-        policy = {
-            "phases": {
-                "hot": {
-                    "min_age": "0ms",
-                    "actions": {
-                        "set_priority": {
-                            "priority": 100
-                        }
-                    }
-                },
-                "delete": {
-                    "min_age": retention_age,
-                    "actions": {
-                        "delete": {}
-                    }
-                }
-            }
-        }
-        await es.ilm.put_lifecycle(name=policy_name, policy=policy)
+async def query_vlog(query, limit, start=None, end=None):
+    # 构建VictoriaLogs查询参数
+    params = {
+        'query': query,
+        'limit': limit
+    }
+    if start:
+        params['start'] = start
+    if end:
+        params['end'] = end
 
-
-async def delete_ilm_policy(policy_name):
-    """删除ILM策略"""
-    async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            await es.ilm.delete_lifecycle(name=policy_name)
-        except NotFoundError:
-            pass
+            # VictoriaLogs查询接口: /select/logsql/query
+            resp = await client.get(f"{VL_HOST}/select/logsql/query", params=params)
+            resp.raise_for_status()
+            result = []
+            for line in resp.text.strip().splitlines():
+                if line:
+                    result.append(orjson.loads(line))
+            return result
+        except httpx.HTTPStatusError as e:
+            logger.error(f"VictoriaLogs HTTP error: {e.response.status_code} - {e.response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"VictoriaLogs query error: {e}")
+            return None
 
 
-async def setup_logs_template(alias_name, ilm_policy):
-    async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
-        template = {
-            "aliases": {alias_name: {}},
-            "settings": {
-                "number_of_shards": 1, "number_of_replicas": 0, "index.refresh_interval": "5s",
-                "index.lifecycle.name": ilm_policy
-            },
-            "mappings": {
-                "dynamic_templates": [
-                    {"strings_as_keywords": {"match_mapping_type": "string", "mapping": {"type": "keyword"}}},
-                    {"longs_as_numbers": {"match_mapping_type": "long", "mapping": {"type": "long"}}}
-                ],
-                "properties": {
-                    "message": {
-                        "type": "text"
-                    }
-                }
-            }
-        }
-        await es.indices.put_index_template(name=f"template-{alias_name}", index_patterns=[alias_name + "-*"], priority=500,
-                                            data_stream=None, template=template)
+# async def setup_ilm_policy(policy_name, retention_age="180d"):
+#     """设置ILM策略"""
+#     async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
+#         policy = {
+#             "phases": {
+#                 "hot": {
+#                     "min_age": "0ms",
+#                     "actions": {
+#                         "set_priority": {
+#                             "priority": 100
+#                         }
+#                     }
+#                 },
+#                 "delete": {
+#                     "min_age": retention_age,
+#                     "actions": {
+#                         "delete": {}
+#                     }
+#                 }
+#             }
+#         }
+#         await es.ilm.put_lifecycle(name=policy_name, policy=policy)
+#
+#
+# async def delete_ilm_policy(policy_name):
+#     """删除ILM策略"""
+#     async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
+#         try:
+#             await es.ilm.delete_lifecycle(name=policy_name)
+#         except NotFoundError:
+#             pass
+#
+#
+# async def setup_logs_template(alias_name, ilm_policy):
+#     async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
+#         template = {
+#             "aliases": {alias_name: {}},
+#             "settings": {
+#                 "number_of_shards": 1, "number_of_replicas": 0, "index.refresh_interval": "5s",
+#                 "index.lifecycle.name": ilm_policy
+#             },
+#             "mappings": {
+#                 "dynamic_templates": [
+#                     {"strings_as_keywords": {"match_mapping_type": "string", "mapping": {"type": "keyword"}}},
+#                     {"longs_as_numbers": {"match_mapping_type": "long", "mapping": {"type": "long"}}}
+#                 ],
+#                 "properties": {
+#                     "message": {
+#                         "type": "text"
+#                     }
+#                 }
+#             }
+#         }
+#         await es.indices.put_index_template(name=f"template-{alias_name}", index_patterns=[alias_name + "-*"], priority=500,
+#                                             data_stream=None, template=template)
 
 
 async def upload_to_s3(file_content: bytes, bucket_name: str, file_name: str, prefix='', content_type: Optional[str] = None) -> str:

@@ -68,6 +68,9 @@ ES_HOST = os.environ.get("ELASTIC_HOST")
 ES_USER = os.environ.get("ELASTIC_USER")
 ES_PASS = os.environ.get("ELASTIC_PASSWORD")
 
+# VictoriaLogs配置
+VL_HOST = os.environ.get("VLOGS_HOST", "http://lion-vl:9428")
+
 # 对象存储设置
 S3_HOST = os.environ.get("RY_FS_HOST")
 FS_AK = os.environ.get("RUSTFS_ACCESS_KEY")
