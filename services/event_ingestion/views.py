@@ -785,7 +785,7 @@ async def get_event_ingestion_kafka_sample(request):
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
-    messages = await get_event_ingestion_list(size, f"logs-{event.event_ingestion_name}")
+    messages = await query_vlog(query=f"logs-{event.event_ingestion_name}", limit=size)
 
     if not messages:
         return response_ok("当前不存在日志")
@@ -1359,7 +1359,7 @@ async def parse_log(request):
     config = await Config.get_or_none(key=transforms_type, module="transforms")
     if not config:
         raise CustomError(ErrorCode.TypeNotSupportedError)
-    event = await EventsIngestion.get_or_none(id=request.json.get('id'), deleted=False)
+    # event = await EventsIngestion.get_or_none(id=request.json.get('id'), deleted=False)
     args = {
         "transformsconfig": transformsconfig,
         "key_value_delimiter": key_value_delimiter,
@@ -1375,7 +1375,7 @@ async def parse_log(request):
     if not result:
         raise CustomError(ErrorCode.LogParseError)
 
-    messages = await query_vlog("* | top(1)", 1)
+    messages = await query_vlog("*", 1)
 
     if not messages:
         return response_ok("当前不存在日志")

@@ -10,7 +10,7 @@ from core.response import response_ok, response_fail
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import query_vlog
-from settings import VICTORIA_LOGS_HOST
+from settings import VL_HOST
 
 logs_bp = Blueprint('logs', url_prefix='/logs')
 _all__ = ["logs_bp"]
@@ -113,7 +113,7 @@ async def get_index_list(request):
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             # VictoriaLogs获取streams接口: /select/logsql/streams
-            resp = await client.get(f"{VICTORIA_LOGS_HOST}/select/logsql/streams")
+            resp = await client.get(f"{VL_HOST}/select/logsql/streams")
             resp.raise_for_status()
             data = resp.json()
 
@@ -180,10 +180,7 @@ async def get_field_list(request):
         try:
             # VictoriaLogs获取字段信息接口: /select/logsql/field_names
             params = {'query': f'_stream:{stream_name}'}
-            resp = await client.get(
-                f"{VICTORIA_LOGS_HOST}/select/logsql/field_names",
-                params=params
-            )
+            resp = await client.get(f"{VL_HOST}/select/logsql/field_names", params=params)
             resp.raise_for_status()
             data = resp.json()
 
