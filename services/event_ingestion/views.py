@@ -784,21 +784,20 @@ async def get_event_ingestion_kafka_sample(request):
     if not messages:
         return response_ok("当前不存在日志")
 
-    if messages:
-        data = messages[0]
+    data = messages[0]
 
-        if "message" in data.keys():
-            event.enabled_health_status = "healthy"
-        else:
-            event.enabled_health_status = "unhealthy"
+    if "_msg" in data.keys():
+        event.enabled_health_status = "healthy"
+    else:
+        event.enabled_health_status = "unhealthy"
 
-        if "log" in data.keys():
-            event.convert_health_status = "healthy"
-        else:
-            event.convert_health_status = "unhealthy"
+    if "log" in data.keys():
+        event.convert_health_status = "healthy"
+    else:
+        event.convert_health_status = "unhealthy"
 
-        await event.save()
-    return response_ok(messages)
+    await event.save()
+    return response_ok(data["_msg"])
 
 
 @event_ingestion_bp.post('/binding')
