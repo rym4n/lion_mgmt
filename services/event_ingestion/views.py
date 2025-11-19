@@ -161,7 +161,7 @@ async def gen_vector_config(output_path, sources, topic, project_id):
                     },
                     "event_source_type": {
                         "type": "string",
-                        "description": "事件来源类型 目前支持kafka、socket"
+                        "description": "事件来源类型 目前支持kafka、syslog"
                     },
                     "syslog_port": {
                         "type": "integer",
@@ -258,7 +258,7 @@ async def event_ingestion(request):
     retention_days = int(data.get('retention_days', 7))
     max_length = int(data.get('max_length', 100))
 
-    if event_source_type not in ["syslog", "socket", "kafka"]:
+    if event_source_type not in ["syslog", "kafka"]:
         raise CustomError(ErrorCode.ParameterError)
 
     syslog_config = None
@@ -277,34 +277,41 @@ async def event_ingestion(request):
 
     vector_config = None
 
-    if event_source_type in ["syslog", "socket"]:
-        sources = {vector_name: {
-            "type": event_source_type,
-            "address": f"0.0.0.0:{syslog_port}",
-            "max_length": max_length * 1024,
-            "mode": communication_type
-        }}
+    if event_source_type == "syslog":
+        sources = {
+            vector_name: {
+                "type": 'socket',
+                "address": f"0.0.0.0:{syslog_port}",
+                "max_length": max_length * 1024,
+                "mode": communication_type
+            }
+        }
         vector_config = await gen_vector_config(output_path, sources, vector_name, project_id)
     elif event_source_type == "kafka":
         if sasl_mechanism:
-            sources = {vector_name: {
-                "type": "kafka",
-                "bootstrap_servers": ",".join(event_source_address),
-                "group_id": kafka_group_id,
-                "topics": kafka_topic,
-                "sasl": {
-                    "enabled": True,
-                    "mechanism": sasl_mechanism,
-                    "username": sasl_username,
-                    "password": urllib.parse.quote(sasl_password)
-                }}}
+            sources = {
+                vector_name: {
+                    "type": "kafka",
+                    "bootstrap_servers": ",".join(event_source_address),
+                    "group_id": kafka_group_id,
+                    "topics": kafka_topic,
+                    "sasl": {
+                        "enabled": True,
+                        "mechanism": sasl_mechanism,
+                        "username": sasl_username,
+                        "password": urllib.parse.quote(sasl_password)
+                    }
+                }
+            }
         else:
-            sources = {vector_name: {
-                "type": "kafka",
-                "bootstrap_servers": ",".join(event_source_address),
-                "group_id": kafka_group_id,
-                "topics": kafka_topic
-            }}
+            sources = {
+                vector_name: {
+                    "type": "kafka",
+                    "bootstrap_servers": ",".join(event_source_address),
+                    "group_id": kafka_group_id,
+                    "topics": kafka_topic
+                }
+            }
         vector_config = await gen_vector_config(output_path, sources, vector_name, project_id)
 
     if vector_config is None:
@@ -1177,8 +1184,8 @@ async def export_event_ingestion_script(request):
 
 @event_ingestion_bp.post('/import')
 @openapi.definition(
-    summary="导入事件",
-    description="导入事件",
+    summary="导入事件接入配置",
+    description="导入事件接入配置",
     body={
         "multipart/form-data": {
             "schema": {
@@ -1229,13 +1236,11 @@ async def import_event_ingestion_script(request):
                     continue
                 vector_config = orjson.loads(zf.read(name))
 
-                if await EventsIngestion.filter(event_ingestion_name=vector_config.get("event_ingestion_name"),
-                                                deleted=False).exists():
+                if await EventsIngestion.filter(event_ingestion_name=vector_config.get("event_ingestion_name"), deleted=False).exists():
                     file_results.append({f"{vector_config['event_ingestion_name']}": "已存在相同名称的事件接入"})
                     continue
 
-                if await EventsIngestion.filter(syslog_config=vector_config.get("syslog_config"),
-                                                deleted=False).exists():
+                if await EventsIngestion.filter(syslog_config=vector_config.get("syslog_config"), deleted=False).exists():
                     file_results.append({f"{vector_config['event_ingestion_name']}": "当前已存在端口一致的事件接入了"})
                     continue
 
@@ -1266,8 +1271,7 @@ async def import_event_ingestion_script(request):
                                              linked_execution=vector_config.get("linked_execution"),
                                              syslog_config=vector_config.get("syslog_config"), vector_name=vector_name,
                                              vector_config_raw=vector_config.get("vector_config_raw"),
-                                             vector_config=data,
-                                             convert_health_status=vector_config.get("convert_health_status"),
+                                             vector_config=data, convert_health_status=vector_config.get("convert_health_status"),
                                              enabled_health_status=vector_config.get("enabled_health_status"),
                                              execution_health_status=vector_config.get("execution_health_status"))
 
