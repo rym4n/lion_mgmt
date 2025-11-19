@@ -109,7 +109,7 @@ async def gen_vector_config(output_path, sources, topic, project_id):
                 "query": {
                     '_msg_field': "message",
                     '_time_field': "@timestamp",
-                    "_stream_fields": ['host', 'source_type']
+                    "_stream_fields": 'host,source_type'
                 },
                 "request": {
                     "headers": {
