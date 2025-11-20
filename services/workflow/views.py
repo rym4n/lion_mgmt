@@ -1736,7 +1736,7 @@ async def list_webhook(request):
     if not pv:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
-    webhook = await PlaybookWebhook.get_or_none(playbook_version_id=flow_id, deleted=False).prefetch_related("creator")
+    webhook = await PlaybookWebhook.filter(playbook_version_id=flow_id, deleted=False).prefetch_related("creator").first()
 
     return response_ok(webhook.json if webhook else {})
 
