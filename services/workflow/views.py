@@ -1634,7 +1634,9 @@ async def select_permission_all(request):
                                 "properties": {
                                     "id": {"type": "string"},
                                     "webhook_url": {"type": "string"},
-                                    "description": {"type": "string"}
+                                    "description": {"type": "string"},
+                                    "creator": {"type": "string"},
+                                    "ctime": {"type": "string"}
                                 }
                             },
                             "message": {"type": "string"}
@@ -1672,11 +1674,7 @@ async def create_webhook(request):
         description=description
     )
 
-    return response_ok({
-        "id": webhook.id,
-        "webhook_url": f"/webhook/execute?key={webhook_token}",
-        "description": description
-    })
+    return response_ok(webhook.json)
 
 
 @workflow_bp.post("/webhook/get")
