@@ -126,4 +126,5 @@ class ErrorCode(BaseErrorCode):
 
     VictoriaLogsError = ErrorData(4092, "日志查询错误")
 
-    PortError = ErrorData(4092, "端口已被占用，请重新选择")
+    PortError = ErrorData(4093, "端口已被占用，请重新选择")
+    WebhookExists = ErrorData(4094, "已有webhook，请勿重复创建")

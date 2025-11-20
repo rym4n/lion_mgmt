@@ -1658,6 +1658,9 @@ async def create_webhook(request):
     if not pv:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
+    if await PlaybookWebhook.filter(playbook_version=pv, deleted=False).exists():
+        raise CustomError(ErrorCode.WebhookExists)
+
     # 生成唯一的webhook token
     webhook_token = secrets.token_urlsafe(10)
 
@@ -1678,8 +1681,8 @@ async def create_webhook(request):
 
 @workflow_bp.post("/webhook/get")
 @openapi.definition(
-    summary="获取剧本版本的Webhook列表",
-    description="获取指定剧本版本的所有webhook",
+    summary="获取剧本版本的Webhook",
+    description="获取指定剧本版本的webhook",
     body={
         "application/json": {
             "schema": {
@@ -1704,8 +1707,14 @@ async def create_webhook(request):
                         "properties": {
                             "code": {"type": "integer"},
                             "data": {
-                                "type": "array",
-                                "items": {"type": "object"}
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "webhook_url": {"type": "string"},
+                                    "description": {"type": "string"},
+                                    "creator": {"type": "object"},
+                                    "playbook_version_id": {"type": "string"}
+                                }
                             },
                             "message": {"type": "string"}
                         }
@@ -1833,7 +1842,7 @@ async def execute_webhook(request):
     if not webhook_token:
         raise CustomError(ErrorCode.ParameterError)
 
-    webhook = await PlaybookWebhook.get_or_none(webhook_token=webhook_token, deleted=False).prefetch_related("playbook_version", "playbook_version__playbook", "creator")
+    webhook = await PlaybookWebhook.filter(webhook_token=webhook_token, deleted=False).prefetch_related("playbook_version", "playbook_version__playbook", "creator").first()
 
     if not webhook:
         raise CustomError(ErrorCode.ParameterError)
