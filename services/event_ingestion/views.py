@@ -1380,7 +1380,7 @@ async def parse_log(request):
     if not result:
         raise CustomError(ErrorCode.LogParseError)
 
-    messages = await query_vlog("*", 1, event.project_id)
+    messages = await query_vlog(f"* | first 1 by (_time desc)", event.project_id)
 
     if not messages:
         return response_ok("当前不存在日志")
@@ -1401,7 +1401,7 @@ async def parse_log(request):
 
             proc = subprocess.Popen(["vector", "--config", tmp_path], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 
-            proc.stdin.write((messages[0].get("message") + "\n").encode())
+            proc.stdin.write((messages[0].get("_msg") + "\n").encode())
             proc.stdin.flush()
 
             output = proc.stdout.readline().strip()
