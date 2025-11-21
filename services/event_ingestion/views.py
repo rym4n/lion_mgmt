@@ -863,7 +863,7 @@ async def get_event_ingestion_kafka_sample(request):
                                     "items": {"type": "string"},
                                     "description": "字段 非必填，选择去重时才填写"
                                 },
-                                "Concurrency": {
+                                "concurrency": {
                                     "type": "integer",
                                     "description": "并发数量，默认是1，最大是4"
                                 }
@@ -989,7 +989,7 @@ del(.datetime_str)
         if not result:
             raise CustomError(ErrorCode.ConfigFileGenerateError)
 
-        concurrency = int(request.json.get("Concurrency", 1))
+        concurrency = int(request.json.get("concurrency", 1))
         if concurrency > 4:
             concurrency = 4
 
