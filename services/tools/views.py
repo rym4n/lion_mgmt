@@ -1,6 +1,5 @@
 # coding=utf-8
 import asyncio
-import base64
 import datetime
 import hashlib
 import operator
@@ -13,10 +12,9 @@ from collections import defaultdict
 from functools import reduce
 from io import BytesIO
 
-import aiofile
 import orjson
 from aiocache import caches
-from sanic import Blueprint, response
+from sanic import Blueprint
 from sanic_ext import openapi
 from tortoise.expressions import Q
 from tortoise.functions import Max
@@ -28,7 +26,7 @@ from libs import utils
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license
-from libs.utils import fix_zip_filename, gen_run_id, get_from_s3
+from libs.utils import gen_run_id
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion, \
     Runlog, Timed
 from settings import KAFKA_SERVERS, TASK_TOPIC, TZ, TOOLS_DIR
@@ -132,6 +130,7 @@ async def upload_and_extract_zip(request):
 
     for zip_file in zip_files:
         total_count = await Tool.filter(deleted=False).count()
+        zip_filename = zip_file.name
 
         for key, item in lic["grouplist"].items():
             if key == "应用集成":
@@ -145,7 +144,7 @@ async def upload_and_extract_zip(request):
                                                            success_progress, request.app.ctx.cache_client,
                                                            request.ctx.session["id"])
         if msg != "success":
-            results.append({"tool": tool_name, "msg": msg})
+            results.append({"tool": zip_filename, "msg": msg})
             data += 1
             percent = int((data * single_progress))
             success_progress = percent
@@ -155,7 +154,7 @@ async def upload_and_extract_zip(request):
         if "actions" in config_data.keys():
             action_key = "actions"
         else:
-            results.append({"tool": tool_name, "msg": "config文件内容错误，缺失actions字段"})
+            results.append({"tool": zip_filename, "msg": "config文件内容错误，缺失actions字段"})
             data += 1
             percent = int((data * single_progress))
             success_progress = percent
@@ -192,7 +191,7 @@ async def upload_and_extract_zip(request):
                 configuration.version = version
                 await configuration.save()
 
-        results.append({"tool": tool_name, "msg": msg})
+        results.append({"tool": zip_filename, "msg": msg})
 
         data += 1
         percent = int((data * single_progress))
@@ -211,14 +210,20 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
         data = 0
         zip_buffer = BytesIO(zip_data)
 
-        with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
+        with zipfile.ZipFile(zip_buffer, 'r', metadata_encoding='utf-8') as zip_ref:
             version = None
 
             files_info = zip_ref.infolist()
 
-            actual_files = {os.path.basename(fix_zip_filename(f.filename)) for f in files_info if not f.is_dir()}
+            actual_files = {os.path.basename(f.filename) for f in files_info if not f.is_dir()}
             py_files_dict = {os.path.basename(f.filename): f for f in files_info if f.filename.endswith(".py")}
             config_path = next((f for f in files_info if os.path.basename(f.filename) == "config.json"), None)
+
+            if config_path is None:
+                return None, None, None, "config文件不存在"
+
+            if config_path.filename.replace("\\", "/") != "config.json":
+                return None, None, None, "config文件需要在最外层目录下"
 
             single_progress = single_progress / 10
 
@@ -509,8 +514,6 @@ async def all_tools(request):
         "size": size,
         "total_pages": (total_count + size - 1) // size
     })
-
-
 
 
 @tools_bp.post("/versions")

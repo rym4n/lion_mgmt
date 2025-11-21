@@ -98,49 +98,6 @@ def ip_in_list(ip_str: str, ip_list: list) -> bool:
     return False
 
 
-async def unzip(zip_data, extra_path):
-    """
-    解压 ZIP 文件，需要传入zip文件字节流数据已经存储路径
-    """
-    zip_buffer = BytesIO(zip_data)
-
-    if not zipfile.is_zipfile(zip_buffer):
-        raise CustomError(ErrorCode.ZipFileFormatError)
-
-    original_zip_path = os.path.join(str(extra_path), "SourceFile.zip")
-    async with aiofile.AIOFile(original_zip_path, 'wb') as zip_file:
-        await zip_file.write(zip_data)
-
-    with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
-        files_info = zip_ref.infolist()
-
-        for in_file in files_info:
-            file_name = in_file.filename
-            file_new_name = fix_zip_filename(file_name)
-            unpack_filename_path = Path(str(PurePath(extra_path, file_new_name)))
-
-            if in_file.is_dir():
-                unpack_filename_path.mkdir(parents=True, exist_ok=True)
-            else:
-                unpack_filename_path.parent.mkdir(parents=True, exist_ok=True)
-                with zip_ref.open(file_name) as file_data:
-                    async with aiofile.async_open(str(unpack_filename_path), 'wb+') as out:
-                        await out.write(file_data.read())
-
-
-def fix_zip_filename(filename: str) -> str:
-    """
-    修复中文编码问题
-    """
-    try:
-        return filename.encode('cp437').decode('gbk')
-    except UnicodeDecodeError:
-        try:
-            return filename.encode('cp437').decode('utf-8')
-        except:
-            return filename
-
-
 def gen_run_id(length=4):
     """
     生成版本号，按时间顺序

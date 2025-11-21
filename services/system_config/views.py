@@ -571,6 +571,8 @@ async def update_oauth_config(request):
         all_keys = required_fields + optional_fields
         updates = {key: params.get(key, '') for key in all_keys}
         updates['use_oauth2'] = 'true'
+        if "******" in params.get("client_secret", ''):
+            updates.pop("client_secret")
 
         # 使用事务保证原子性
         async with in_transaction():  # 假设 ORM 支持异步事务
