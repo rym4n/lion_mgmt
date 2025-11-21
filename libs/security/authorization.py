@@ -108,7 +108,7 @@ def playbook_permission(*required_permissions: str):
             if not playbook_id:
                 playbook_id = request.json.get("flow_id")  # 获取剧本版本id
                 if not playbook_id:
-                    raise CustomError(ErrorCode.ParameterError)
+                    raise CustomError(ErrorCode.PlaybookUnauthorized)
 
             user = request.ctx.session.get('account_info')
             if not user:
@@ -192,7 +192,7 @@ def load_license():
         for file in files:
             filename, ext = os.path.splitext(file)
             full_path = os.path.join(root, file)
-            with open(full_path, "r") as f:
+            with open(full_path, "r", encoding='utf-8') as f:
                 data = f.read()
                 if filename == hashlib.md5(f"{data}".encode()).hexdigest():
                     try:

@@ -1634,7 +1634,9 @@ async def select_permission_all(request):
                                 "properties": {
                                     "id": {"type": "string"},
                                     "webhook_url": {"type": "string"},
-                                    "description": {"type": "string"}
+                                    "description": {"type": "string"},
+                                    "creator": {"type": "string"},
+                                    "ctime": {"type": "string"}
                                 }
                             },
                             "message": {"type": "string"}
@@ -1672,11 +1674,7 @@ async def create_webhook(request):
         description=description
     )
 
-    return response_ok({
-        "id": webhook.id,
-        "webhook_url": f"/webhook/execute?key={webhook_token}",
-        "description": description
-    })
+    return response_ok(webhook.json)
 
 
 @workflow_bp.post("/webhook/get")
@@ -1751,6 +1749,10 @@ async def list_webhook(request):
                 "type": "object",
                 "required": ["webhook_id"],
                 "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "剧本版本ID"
+                    },
                     "webhook_id": {
                         "type": "string",
                         "description": "WebhookID"
@@ -1781,11 +1783,11 @@ async def list_webhook(request):
 @playbook_permission("u")
 async def delete_webhook(request):
     webhook_id = request.json.get("webhook_id")
-
+    flow_id = request.json.get("flow_id")
     if not webhook_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    webhook = await PlaybookWebhook.get_or_none(id=webhook_id)
+    webhook = await PlaybookWebhook.get_or_none(id=webhook_id, playbook_version_id=flow_id, deleted=False)
     if not webhook:
         raise CustomError(ErrorCode.ParameterError)
 

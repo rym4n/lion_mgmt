@@ -799,7 +799,7 @@ async def get_event_ingestion_kafka_sample(request):
     else:
         event.enabled_health_status = "unhealthy"
 
-    if "log" in data.keys():
+    if any([i.startswith("log.") for i in data.keys()]):
         event.convert_health_status = "healthy"
     else:
         event.convert_health_status = "unhealthy"

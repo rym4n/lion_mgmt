@@ -128,3 +128,4 @@ class ErrorCode(BaseErrorCode):
 
     PortError = ErrorData(4093, "端口已被占用，请重新选择")
     WebhookExists = ErrorData(4094, "已有webhook，请勿重复创建")
+    PlaybookUnauthorized = ErrorData(4005, "缺少剧本权限")
