@@ -989,11 +989,16 @@ del(.datetime_str)
         if not result:
             raise CustomError(ErrorCode.ConfigFileGenerateError)
 
+        concurrency = int(request.json.get("Concurrency", 1))
+        if concurrency > 4:
+            concurrency = 4
+
         event_related_script = await EventRelatedScript.create(condition=conditions,
                                                                event_ingestion_id=event_ingestion_id,
                                                                script_id=script_ids, topic=topic,
                                                                event_name=event_name,
                                                                numbers=request_data.get('numbers'),
+                                                               concurrency=concurrency,
                                                                fields=request_data.get('fields'))
 
         if linked_execution in [0, 1]:
@@ -1002,9 +1007,6 @@ del(.datetime_str)
                     process_name = hashlib.md5(f"{event.id}_{script_id}".encode()).hexdigest()
                     supervisor.stop_process(process_name)
             else:
-                concurrency = int(request.json.get("Concurrency", 1))
-                if concurrency > 4:
-                    concurrency = 4
                 for script_id in script_ids:
                     process_name = hashlib.md5(f"{event.id}_{script_id}".encode()).hexdigest()
                     command = f"python start.py -m auto -f {script_id} -t {topic}"

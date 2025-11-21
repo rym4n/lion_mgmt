@@ -120,6 +120,7 @@ class EventRelatedScript(BaseModel):
     event_name: str = fields.CharField(max_length=255, null=True, description="自定义事件名称")
     status: int = fields.IntField(max_length=50, default=0, description="是否开启联动执行")
     numbers: int = fields.IntField(max_length=50, null=True, description="去重数量")
+    concurrency: int = fields.IntField(max_length=50, null=True, description="并行数量")
     fields: list[str] = fields.JSONField(null=True, description="去重字段")
 
     def validate(self) -> None:
@@ -138,6 +139,7 @@ class EventRelatedScript(BaseModel):
             "event_name": self.event_name,
             "status": self.status,
             "numbers": self.numbers,
+            "concurrency": self.concurrency,
             "fields": self.fields
         }
 
