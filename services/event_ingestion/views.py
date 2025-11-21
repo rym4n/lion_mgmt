@@ -989,7 +989,7 @@ del(.datetime_str)
         if not result:
             raise CustomError(ErrorCode.ConfigFileGenerateError)
 
-        concurrency = int(request.json.get("concurrency", 1))
+        concurrency = int(request_data.get("concurrency", 1))
         if concurrency > 4:
             concurrency = 4
 
@@ -1171,10 +1171,12 @@ async def export_event_ingestion_script(request):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for event in events:
+            event_related_scripts = await EventRelatedScript.filter(event_ingestion=event.id, deleted=False).all()
             event_data = event.json
             event_data["vector_config"] = str(event.vector_config)
             event_data.pop("file_path", None)
             event_data["vector_config_raw"] = event.vector_config_raw
+            event_data["event_related_scripts"] = [ers.json for ers in event_related_scripts]
 
             filename = f"{sanitize_filename(event.event_ingestion_name or 'unnamed')}.json"
             zipf.writestr(filename, orjson.dumps(event_data))
@@ -1265,7 +1267,7 @@ async def import_event_ingestion_script(request):
                     yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
                     await f.write(yaml_str)
 
-                await EventsIngestion.create(event_ingestion_name=vector_config.get("event_ingestion_name"),
+                ei = await EventsIngestion.create(event_ingestion_name=vector_config.get("event_ingestion_name"),
                                              event_ingestion_describe=vector_config.get("event_ingestion_describe"),
                                              event_source_type=vector_config.get("event_source_type"),
                                              transforms_type=vector_config.get("transforms_type"),
@@ -1278,6 +1280,24 @@ async def import_event_ingestion_script(request):
                                              vector_config=data, convert_health_status=vector_config.get("convert_health_status"),
                                              enabled_health_status=vector_config.get("enabled_health_status"),
                                              execution_health_status=vector_config.get("execution_health_status"))
+
+                for ers in vector_config.get("event_related_scripts", []):
+                    topic = ers["topic"]
+                    await EventRelatedScript.create(condition=ers["condition"],
+                                                    event_ingestion_id=ei.id,
+                                                    script_id=ers["script_ids"], topic=topic,
+                                                    event_name=ers["event_name"],
+                                                    status=ers["status"],
+                                                    numbers=ers["numbers"],
+                                                    concurrency=ers["concurrency"],
+                                                    fields=ers["fields"])
+
+                    if int(ers["status"]) == 1:
+                        for script_id in ers["script_ids"]:
+                            process_name = hashlib.md5(f"{ei.id}_{script_id}".encode()).hexdigest()
+                            command = f"python start.py -m auto -f {script_id} -t {topic}"
+                            supervisor.add_process(process_name, command, ers["concurrency"])
+                            supervisor.start_process(process_name)
 
                 file_results.append({f"{vector_config['event_ingestion_name']}": "上传成功"})
 
