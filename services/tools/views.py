@@ -1177,6 +1177,10 @@ async def update_tool_resource(request):
         tool_resource.engine = engine
 
     if resources:
+        resources_old = orjson.loads(tool_resource.resources)
+        for key, resource in resources.items():
+            if resource.get("data_type") == "password" and resource.get("value") == "******":
+                resource["value"] = resources_old[key]["value"]
         tool_resource.resources = orjson.dumps(resources).decode()
         r = {k: resources[k].get('value') or resources[k].get('default_value', '') for k in resources}
         r[tool_resource.id + "_name"] = name
