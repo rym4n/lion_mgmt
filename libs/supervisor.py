@@ -68,7 +68,7 @@ def start_process(process_name):
             logging.info("process_info：", process_info)
             if process_info['statename'] == 'STARTING':
                 logging.info("进程 {} 正在启动中".format(p))
-                time.sleep(1)
+                time.sleep(0.5)
                 process_info = server.supervisor.getProcessInfo(p)
                 if process_info['statename'] != 'RUNNING':
                     server.supervisor.startProcess(p)

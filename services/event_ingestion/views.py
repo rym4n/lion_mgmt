@@ -1174,7 +1174,7 @@ async def export_event_ingestion_script(request):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for event in events:
-            event_related_scripts = await EventRelatedScript.filter(event_ingestion=event.id, deleted=False).all()
+            event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event.id, deleted=False).all()
             event_data = event.json
             event_data["vector_config"] = str(event.vector_config)
             event_data.pop("file_path", None)
