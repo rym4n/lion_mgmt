@@ -1,13 +1,10 @@
 import ast
 import asyncio
-import logging
 import os
 import uuid
 from datetime import datetime
 from urllib.parse import quote
 
-import aiohttp
-from sanic.log import logger
 import aiofile
 import jwt
 import orjson
@@ -24,11 +21,12 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import strip_timezone_to_seconds, get_from_s3, upload_to_s3
-from models import AuditLog, Config
+from libs.utils import strip_timezone_to_seconds, get_from_s3, gen_run_id
+from models import AuditLog, Config, Playbook, Role, PlaybookPermissions, PlaybookVersion
 from services.event_ingestion.views import check_vector_config
-from settings import SECRET, SESSION_ENCODING_ALGORITHM, UPLOAD_DIR, BASE_DIR, VECTOR_CFG, COMMON_FILES_DIR, \
-    AUTHENTICATION_SESSION_EXPIRATION
+from services.tools.views import tool_action_update
+from services.workflow.views import statistics_data
+from settings import SECRET, SESSION_ENCODING_ALGORITHM, BASE_DIR, VECTOR_CFG, AUTHENTICATION_SESSION_EXPIRATION
 
 system_bp = Blueprint('system', url_prefix='/system')
 _all__ = ["system_bp"]
@@ -191,7 +189,7 @@ async def get_bgpic(request):
         raise CustomError(ErrorCode.ParameterError)
     cfg = await Config.get_or_none(key=pic_type, module="system")
     if cfg:
-        return response_ok({"url":  cfg.value})
+        return response_ok({"url": cfg.value})
     return response.raw(b'', content_type="image/png")
 
 
@@ -456,7 +454,8 @@ async def get_oauth_config(request):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["use_oauth2", "auto_create", "client_id", "client_secret", "authorize_uri", "token_uri", "user_info_uri", "user_id_path", "token_path"],
+                "required": ["use_oauth2", "auto_create", "client_id", "client_secret", "authorize_uri", "token_uri",
+                             "user_info_uri", "user_id_path", "token_path"],
                 "properties": {
                     "use_oauth2": {
                         "type": "string",
@@ -1236,3 +1235,84 @@ async def download_file(request, file_id):
         return response_ok("文件不存在")
 
 
+@system_bp.post("/new")
+@openapi.definition(
+    summary="初始化剧本",
+    description="初始化剧本",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "flow_json_list"],
+                "properties": {
+                    "flow_list": {
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        },
+                        "description": "剧本列表"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "创建成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
+async def create_workflow(request):
+    data = request.json
+    if not data.get("name") or not data.get("flow_json_list"):
+        raise CustomError(ErrorCode.ParameterError)
+
+    for flow_data in data.get("flow_list"):
+        # 判断name是否已经存在，如果存在的话要抛出异常
+        if await Playbook.filter(name=flow_data.get("name"), deleted=False).exists():
+            raise CustomError(ErrorCode.PlaybookNameExists)
+
+        flow_json_list = flow_data.get("flow_json_list") or []
+        creator = request.ctx.session['account_info']
+        admin = await Role.get(id="111111")
+        async with in_transaction():
+            playbook = await Playbook.create(
+                id=str(flow_data.get("flow_id")),
+                name=flow_data.get("name"),
+                remark="",
+                creator=creator,
+                internal=True,
+            )
+            await PlaybookPermissions.create(pb=playbook, users=creator, roles=None,
+                                             permissions=["r", "u", "d", "e", "p"])
+            await PlaybookPermissions.create(pb=playbook, users=None, roles=admin,
+                                             permissions=["r", "u", "d", "e", "p"])
+
+            for flow_json in flow_json_list:
+                pv = await PlaybookVersion.create(
+                    playbook=playbook,
+                    version=gen_run_id(),
+                    status=0,
+                    change_desc="",
+                    flow_json=flow_json,
+                    creator=creator,
+                    updator=creator,
+                    flow_timeout=300
+                )
+
+                action_ids = await statistics_data(flow_json)
+                await tool_action_update({pv.id: action_ids})
+
+    return response_ok('success')
