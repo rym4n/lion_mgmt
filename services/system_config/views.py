@@ -1274,6 +1274,7 @@ async def download_file(request, file_id):
         }
     }
 )
+@requires_permission("workflow:c")
 async def create_workflow(request):
     data = request.json
     if not data.get("flow_list"):
