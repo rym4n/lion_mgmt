@@ -7,6 +7,31 @@ from xmlrpc.client import Fault, ServerProxy  # Python 3
 from settings import SUPERVISOR_PATH, RY_JOB_SERVER
 
 
+def _get_all_processes(server, process_name):
+    """
+    获取某个 program 的所有子进程，例如：
+    my_worker → [my_worker:my_worker_00, my_worker:my_worker_01, ...]
+    对于单进程，列表中就只有 [my_worker]
+    """
+    all_processes = []
+    process_info_list = server.supervisor.getAllProcessInfo()
+
+    for p in process_info_list:
+        name = p["name"]  # 例如 my_worker, my_worker_00
+        group = p["group"]  # 例如 my_worker
+
+        # 同一个 group 下的所有 process
+        if group == process_name:
+            full_name = f"{group}:{name}" if ":" not in name else name
+            all_processes.append(full_name)
+
+        # 单进程 program（例：program 本身叫 my_api）
+        if name == process_name:
+            all_processes.append(process_name)
+
+    return sorted(set(all_processes))
+
+
 def write_process_config(process_name, command, concurrency):
     """写入 supervisor 配置文件"""
     config_path = os.path.join(SUPERVISOR_PATH, "{}.conf".format(process_name))
@@ -34,22 +59,27 @@ def start_process(process_name):
     """启动进程（如果未运行则启动）"""
     try:
         server = ServerProxy(RY_JOB_SERVER)
-        process_info = server.supervisor.getProcessInfo(process_name)
-        logging.info("process_info", process_info)
-        if process_info['statename'] == 'STARTING':
-            logging.info("进程 {} 正在启动中".format(process_name))
-            time.sleep(1)
-            process_info = server.supervisor.getProcessInfo(process_name)
-            if process_info['statename'] != 'RUNNING':
+        all_processes = _get_all_processes(server, process_name)
+        if not all_processes:
+            logging.info("进程 {} 不存在，无法启动".format(process_name))
+            return False
+        for p in all_processes:
+            process_info = server.supervisor.getProcessInfo(p)
+            logging.info("process_info", process_info)
+            if process_info['statename'] == 'STARTING':
+                logging.info("进程 {} 正在启动中".format(process_name))
+                time.sleep(1)
+                process_info = server.supervisor.getProcessInfo(process_name)
+                if process_info['statename'] != 'RUNNING':
+                    server.supervisor.startProcess(process_name)
+                    logging.info("进程 {} 启动成功".format(process_name))
+                else:
+                    logging.info("进程 {} 已经在运行中".format(process_name))
+            elif process_info['statename'] == 'RUNNING':
+                logging.info("进程 {} 已经在运行中".format(process_name))
+            else:
                 server.supervisor.startProcess(process_name)
                 logging.info("进程 {} 启动成功".format(process_name))
-            else:
-                logging.info("进程 {} 已经在运行中".format(process_name))
-        elif process_info['statename'] == 'RUNNING':
-            logging.info("进程 {} 已经在运行中".format(process_name))
-        else:
-            server.supervisor.startProcess(process_name)
-            logging.info("进程 {} 启动成功".format(process_name))
         return True
     except Fault as e:
         if "BAD_NAME" in e.faultString or "UNKNOWN" in e.faultString:
@@ -62,8 +92,13 @@ def stop_process(process_name):
     """停止进程"""
     try:
         server = ServerProxy(RY_JOB_SERVER)
-        server.supervisor.stopProcess(process_name)
-        logging.info("进程 {} 已停止".format(process_name))
+        all_processes = _get_all_processes(server, process_name)
+        if not all_processes:
+            logging.info("进程 {} 不存在，无法启动".format(process_name))
+            return False
+        for p in all_processes:
+            server.supervisor.stopProcess(p)
+            logging.info("进程 {} 已停止".format(p))
     except Fault as e:
         if "NOT_RUNNING" in e.faultString:
             logging.info("进程 {} 当前未运行".format(process_name))
