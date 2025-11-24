@@ -1292,7 +1292,7 @@ async def import_event_ingestion_script(request):
                     topic = ers["topic"]
                     await EventRelatedScript.create(condition=ers["condition"],
                                                     event_ingestion_id=ei.id,
-                                                    script_id=ers["script_ids"], topic=topic,
+                                                    script_id=ers["script_id"], topic=topic,
                                                     event_name=ers["event_name"],
                                                     status=ers["status"],
                                                     numbers=ers["numbers"],
