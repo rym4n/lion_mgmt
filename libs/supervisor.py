@@ -65,21 +65,21 @@ def start_process(process_name):
             return False
         for p in all_processes:
             process_info = server.supervisor.getProcessInfo(p)
-            logging.info("process_info", process_info)
+            logging.info("process_info：", process_info)
             if process_info['statename'] == 'STARTING':
-                logging.info("进程 {} 正在启动中".format(process_name))
+                logging.info("进程 {} 正在启动中".format(p))
                 time.sleep(1)
-                process_info = server.supervisor.getProcessInfo(process_name)
+                process_info = server.supervisor.getProcessInfo(p)
                 if process_info['statename'] != 'RUNNING':
-                    server.supervisor.startProcess(process_name)
-                    logging.info("进程 {} 启动成功".format(process_name))
+                    server.supervisor.startProcess(p)
+                    logging.info("进程 {} 启动成功".format(p))
                 else:
-                    logging.info("进程 {} 已经在运行中".format(process_name))
+                    logging.info("进程 {} 已经在运行中".format(p))
             elif process_info['statename'] == 'RUNNING':
-                logging.info("进程 {} 已经在运行中".format(process_name))
+                logging.info("进程 {} 已经在运行中".format(p))
             else:
-                server.supervisor.startProcess(process_name)
-                logging.info("进程 {} 启动成功".format(process_name))
+                server.supervisor.startProcess(p)
+                logging.info("进程 {} 启动成功".format(p))
         return True
     except Fault as e:
         if "BAD_NAME" in e.faultString or "UNKNOWN" in e.faultString:

@@ -918,6 +918,9 @@ async def binding_event_ingestion_script(request):
         event_name = request_data.get('event_name')
         linked_execution = request_data.get('linked_execution')
 
+        if linked_execution == 1 and not script_ids:
+            raise CustomError(ErrorCode.NotScriptError)
+
         timestamp_int = str(int(time.time() * 1000))
         topic = f"{event.vector_name}_{timestamp_int}"
         # 如果选择去重则添加去重transforms
