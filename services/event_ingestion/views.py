@@ -1300,7 +1300,7 @@ async def import_event_ingestion_script(request):
                                                     fields=ers["fields"])
 
                     if int(ers["status"]) == 1:
-                        for script_id in ers["script_ids"]:
+                        for script_id in ers["script_id"]:
                             process_name = hashlib.md5(f"{ei.id}_{script_id}".encode()).hexdigest()
                             command = f"python start.py -m auto -f {script_id} -t {topic}"
                             supervisor.add_process(process_name, command, ers["concurrency"])
