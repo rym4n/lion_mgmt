@@ -447,16 +447,20 @@ async def get_all_events_ingestion(request):
 async def delete_event_ingestion(request):
     event_id = request.json.get('id')
     event = await EventsIngestion.get(id=event_id)
+    if not event:
+        raise CustomError(ErrorCode.NotFound)
+    if event.enabled_status == 1:
+        return response_ok("请先禁用事件接入再删除")
     es = await EventRelatedScript.get_or_none(event_ingestion_id=event_id)
     if es:
         for script_id in es.script_id:
             process_name = hashlib.md5(f"{es.event_ingestion_id}_{script_id}".encode()).hexdigest()
             supervisor.stop_process(process_name)
+            supervisor.remove_process(process_name)
+            supervisor_path = os.path.join(SUPERVISOR_PATH, "{}.conf".format(process_name))
+            if os.path.exists(supervisor_path):
+                os.remove(supervisor_path)
         await es.delete()
-    if not event:
-        raise CustomError(ErrorCode.NotFound)
-    if event.enabled_status == 1:
-        return response_ok("请先禁用事件接入再删除")
 
     await event.delete()
 
