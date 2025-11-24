@@ -1243,7 +1243,7 @@ async def download_file(request, file_id):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["name", "flow_json_list"],
+                "required": ["flow_list"],
                 "properties": {
                     "flow_list": {
                         "type": "array",
@@ -1276,7 +1276,7 @@ async def download_file(request, file_id):
 )
 async def create_workflow(request):
     data = request.json
-    if not data.get("name") or not data.get("flow_json_list"):
+    if not data.get("flow_list"):
         raise CustomError(ErrorCode.ParameterError)
 
     for flow_data in data.get("flow_list"):
