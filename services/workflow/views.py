@@ -23,7 +23,7 @@ from libs.security.authorization import requires_permission, load_license, playb
     check_playbook_permission
 from libs.utils import gen_run_id, strip_timezone_to_seconds
 from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, \
-    EventRelatedScript, Timed, PlaybookWebhook
+    EventRelatedScript, Timed, PlaybookWebhook, Account
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
 
@@ -1543,8 +1543,18 @@ async def add_permission(request):
 @requires_permission("workflow:r")
 async def select_my_permission(request):
     pps = await PlaybookPermissions.filter(users__id=request.ctx.session['sub']).all()
+    account = await Account.get(id=request.ctx.session['sub'], deleted=False).prefetch_related('roles')
+    account_roles = [role.id for role in account.roles]
+    account_pps = await PlaybookPermissions.filter(roles__id__in=account_roles).all()
+    data = [{"id": pp.pb_id, "permissions": pp.permissions} for pp in account_pps] + [{"id": pp.pb_id, "permissions": pp.permissions} for pp in pps]
+    seen = set()
+    result = []
+    for item in data:
+        if item["id"] not in seen:
+            seen.add(item["id"])
+            result.append(item)
 
-    return response_ok([{"id": pp.pb_id, "permissions": pp.permissions} for pp in pps])
+    return response_ok(result)
 
 
 @workflow_bp.post("/permissions/select")
