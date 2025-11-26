@@ -393,7 +393,9 @@ class ChatManager:
                     msg = orjson.loads(message['data'])
                     # 处理待办消息
                     if "approval" in msg.keys():
-                        await self.active_connections[msg.get("user")]["conn"].send(msg.get("approval").decode())
+                        for k in self.active_connections:
+                            if k == msg.get("user"):
+                                await self.active_connections[msg.get("user")]["conn"].send(orjson.dumps(msg.get("approval")).decode())
                         continue
                     # 处理作战室产生的runlog
                     if "log" in msg.keys():
