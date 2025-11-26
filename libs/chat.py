@@ -7,6 +7,7 @@ from datetime import datetime
 
 import httpx
 import orjson
+import pytz
 from aiocache import caches
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
@@ -390,6 +391,11 @@ class ChatManager:
                     if message.get('type') != 'message':
                         continue
                     msg = orjson.loads(message['data'])
+                    # 处理待办消息
+                    if "approval" in msg.keys():
+                        await self.active_connections[msg.get("user")]["conn"].send(msg.get("approval").decode())
+                        continue
+                    # 处理作战室产生的runlog
                     if "log" in msg.keys():
                         if msg["log"].get("type") == "approval-info":
                             continue
@@ -435,6 +441,29 @@ class ChatManager:
                 if log.get('roles'):
                     users = await Account.filter(roles__id__in=log['roles'].split(',')).all()
                     await approve.approvers.add(*users)
+                for user in approve.approvers.all():
+                    message_data = {
+                        "type": "message",
+                        "approval": {
+                            "type": "approval-info",
+                            "message_id": str(approve.id),
+                            "sender_id": log.get('creator_id'),
+                            "sender_name": log.get('creator_name'),
+                            "sender_display_name": log.get('creator_name'),
+                            "content": {
+                                "title": approve.title,
+                                "approve_type": approve.approve_type,
+                                "content": approve.content,
+                                "created_at": approve.created_at.astimezone(pytz.timezone('Asia/Shanghai')).strftime("%Y-%m-%d %H:%M:%S"),
+                                "expire_time": approve.expire_time.astimezone(pytz.timezone('Asia/Shanghai')).strftime("%Y-%m-%d %H:%M:%S"),
+                            },
+                            "image_content": "",
+                            "timestamp": "",
+                            "room_id": ""
+                        },
+                        "user": user.id
+                    }
+                    await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
             else:
                 key = log.get('run_id', '')
 
