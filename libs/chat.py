@@ -397,6 +397,11 @@ class ChatManager:
                             if k == msg.get("user"):
                                 await self.active_connections[msg.get("user")]["conn"].send(orjson.dumps(msg.get("approval")).decode())
                         continue
+                    if "mention" in msg.keys():
+                        for k in self.active_connections:
+                            if k == msg.get("user"):
+                                await self.active_connections[msg.get("user")]["conn"].send(orjson.dumps(msg.get("mention")).decode())
+                        continue
                     # 处理作战室产生的runlog
                     if "log" in msg.keys():
                         if msg["log"].get("type") == "approval-info":
@@ -445,7 +450,6 @@ class ChatManager:
                     await approve.approvers.add(*users)
                 for user in await approve.approvers.all():
                     message_data = {
-                        "type": "message",
                         "approval": {
                             "type": "approval-info",
                             "message_id": str(approve.id),
@@ -564,8 +568,23 @@ class ChatManager:
             for specify_user in specify_users:
                 # 指定用户发送消息
                 sf_user = await Account.filter(id=specify_user).first()
-                await MessageAccount.create(message=message, account_id=specify_user)
+                message = await MessageAccount.create(message=message, account_id=specify_user)
                 await sf_user.star_rooms.add(room)
+                msg = {
+                    "mention": {
+                        "type": "mention",
+                        "message_id": str(message.id),
+                        "sender_id": user.id,
+                        "sender_name": user.username,
+                        "sender_display_name": user.display_name,
+                        "content": message.json,
+                        "image_content": image_content,
+                        "timestamp": str(message.ctime),
+                        "room_id": current_room_id
+                    },
+                    "user": specify_user
+                }
+                await self.msg_pub.publish(WR_TOPIC, orjson.dumps(msg).decode())
 
         # 广播
         message_data = {
