@@ -441,7 +441,7 @@ class ChatManager:
                 if log.get('roles'):
                     users = await Account.filter(roles__id__in=log['roles'].split(',')).all()
                     await approve.approvers.add(*users)
-                for user in approve.approvers.all():
+                for user in await approve.approvers.all():
                     message_data = {
                         "type": "message",
                         "approval": {
