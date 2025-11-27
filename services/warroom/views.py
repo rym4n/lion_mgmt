@@ -16,7 +16,7 @@ from core.response import response_ok
 from libs.chat import get_or_create_private_chat_room, chat_manager
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import requires_permission
+from libs.security.authorization import requires_permission, check_wildcard
 from libs.utils import gen_run_id, gen_random_code
 from models import Events, ToolAction, Tool, Runlog
 from models.user import Account
@@ -35,7 +35,6 @@ TYPE_DICT = {
 
 @warroom_bp.websocket('/ws')
 @openapi.exclude()
-@requires_permission('warroom:r')
 async def warroom_ws(request: Request, ws: Websocket):
     account = None
     try:
@@ -52,8 +51,17 @@ async def warroom_ws(request: Request, ws: Websocket):
             raise CustomError(ErrorCode.SessionInvalid)
         # 建立连接
         await chat_manager.connect(account, ws)
-        # 持续接收和处理消息f
+        has_perm = False
+        if not has_perm:
+            for role in account.roles:
+                for role_permission in role.permissions:
+                    if check_wildcard(role_permission, 'warroom:r'):
+                        has_perm = True
+        # 持续接收和处理消息
         async for msg in ws:
+            if not has_perm and orjson.loads(msg).get("type") != "ping":
+                await ws.send(orjson.dumps({"type": "error", "message": "无权限访问作战室"}).decode())
+                continue
             try:
                 message = orjson.loads(msg)
                 await chat_manager.handle_message(account, ws, message)

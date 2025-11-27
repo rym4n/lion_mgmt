@@ -6,6 +6,7 @@ import time
 
 import jwt
 from sanic import Request
+from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
@@ -20,13 +21,19 @@ async def authenticate(request: Request):
     """
     payload = await token_decode(request)
     validate_token(payload, request)
+    account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
+    if not account:
+        logger.warning("redis里已经没有account信息了")
+        raise CustomError(ErrorCode.SessionInvalid)
+    request.ctx.session['account_info'] = account
 
 
 def validate_token(payload, request):
     if payload.get('exp', 0) < int(time.time()):
         raise CustomError(ErrorCode.SessionExpired)
 
-    if not request.path.endswith('/user/mfa-auth') and payload.get('mfa_enable') is True and payload.get('mfa_auth') is not True:
+    if not request.path.endswith('/user/mfa-auth') and payload.get('mfa_enable') is True and payload.get(
+            'mfa_auth') is not True:
         raise CustomError(ErrorCode.SecondFactorRequired)
 
     client_ip = get_client_ip(request)
@@ -62,7 +69,8 @@ def requires_authentication(arg=None):
     return decorator(arg) if callable(arg) else decorator
 
 
-def token_encode(account_id, username, display_name, mfa_enable, token_id: str, expiration=AUTHENTICATION_SESSION_EXPIRATION, secret=SECRET, **kwargs) -> str:
+def token_encode(account_id, username, display_name, mfa_enable, token_id: str,
+                 expiration=AUTHENTICATION_SESSION_EXPIRATION, secret=SECRET, **kwargs) -> str:
     """
     根据账号信息生成token
     """
