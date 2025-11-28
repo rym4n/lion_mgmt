@@ -1274,6 +1274,15 @@ async def import_event_ingestion_script(request):
                     yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
                     await f.write(yaml_str)
 
+                raw_config = vector_config["vector_config_raw"]
+                if isinstance(raw_config, str):
+                    raw_config_dict = ast.literal_eval(raw_config)
+                else:
+                    raw_config_dict = raw_config
+                json_str = orjson.dumps(raw_config_dict).decode()
+                json_str = json_str.replace(vector_config["vector_name"], vector_name)
+                data_raw = orjson.loads(json_str)
+
                 ei = await EventsIngestion.create(event_ingestion_name=vector_config.get("event_ingestion_name"),
                                              event_ingestion_describe=vector_config.get("event_ingestion_describe"),
                                              event_source_type=vector_config.get("event_source_type"),
@@ -1283,13 +1292,13 @@ async def import_event_ingestion_script(request):
                                              updator=request.ctx.session['account_info'], file_path=path,
                                              linked_execution=vector_config.get("linked_execution"),
                                              syslog_config=vector_config.get("syslog_config"), vector_name=vector_name,
-                                             vector_config_raw=vector_config.get("vector_config_raw"),
+                                             vector_config_raw=data_raw,
                                              vector_config=data, convert_health_status=vector_config.get("convert_health_status"),
                                              enabled_health_status=vector_config.get("enabled_health_status"),
                                              execution_health_status=vector_config.get("execution_health_status"))
 
                 for ers in vector_config.get("event_related_scripts", []):
-                    topic = ers["topic"]
+                    topic = ers["topic"].replace(vector_config["vector_name"], vector_name)
                     await EventRelatedScript.create(condition=ers["condition"],
                                                     event_ingestion_id=ei.id,
                                                     script_id=ers["script_id"], topic=topic,
