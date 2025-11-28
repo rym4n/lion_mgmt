@@ -39,7 +39,7 @@ def get_conditional_statements(conditions):
     conditional_statements = ""
     for index, condition in enumerate(conditions):
         if condition["type"] in ["==", "!="]:
-            conditional_statements += f""".log."{condition["name"]}" {condition['type']} "{condition['value']}" """
+            conditional_statements += f"""to_string!(.log."{condition["name"]}") {condition['type']} "{condition['value']}" """
         elif condition["type"] in [">", "<", ">=", "<="]:
             conditional_statements += f"""(to_int(.log."{condition["name"]}") ?? 0) {condition['type']} {int(condition['value'])}"""
         elif condition["type"] in ["!contains", "contains"]:
