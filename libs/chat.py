@@ -568,18 +568,18 @@ class ChatManager:
             for specify_user in specify_users:
                 # 指定用户发送消息
                 sf_user = await Account.filter(id=specify_user).first()
-                message = await MessageAccount.create(message=message, account_id=specify_user)
+                ma = await MessageAccount.create(message=message, account_id=specify_user)
                 await sf_user.star_rooms.add(room)
                 msg = {
                     "mention": {
                         "type": "mention",
-                        "message_id": str(message.id),
+                        "message_id": str(ma.id),
                         "sender_id": user.id,
                         "sender_name": user.username,
                         "sender_display_name": user.display_name,
-                        "content": message.json,
+                        "content": ma.json,
                         "image_content": image_content,
-                        "timestamp": str(message.ctime),
+                        "timestamp": str(ma.ctime),
                         "room_id": current_room_id
                     },
                     "user": specify_user

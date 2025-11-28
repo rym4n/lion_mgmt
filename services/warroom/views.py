@@ -1035,7 +1035,17 @@ async def query_messages(request: Request):
     body={
         "application/json": {
             "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "integer",
+                        "description": "页码, 默认1"
+                    },
+                    "size": {
+                        "type": "integer",
+                        "description": "每页大小, 默认20"
+                    }
+                }
             }
         }
     },
@@ -1070,15 +1080,20 @@ async def query_messages(request: Request):
 )
 @requires_permission("warroom:r")
 async def get_list(request):
+    page = request.json.get("page", 1)
+    size = request.json.get("size", 20)
+    offset = (page - 1) * size
+    limit = size
     message_list = []
     account = request.ctx.session['account_info']
-    messages = await MessageAccount.filter(account_id=account.id, status=0).all().prefetch_related("message__sender")
+    count = await MessageAccount.filter(account_id=account.id, status=0).count()
+    messages = await MessageAccount.filter(account_id=account.id, status=0).offset(offset).limit(limit).all().prefetch_related("message__sender")
     for message in messages:
         message_list.append(message.json)
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     if maintenance_mode:
-        return response_ok({"message_list": message_list, "maintenance_mode": True})
-    return response_ok({"message_list": message_list, "maintenance_mode": False})
+        return response_ok({"message_list": message_list, "maintenance_mode": True, "count": count})
+    return response_ok({"message_list": message_list, "maintenance_mode": False, "count": count})
 
 
 @warroom_bp.post("/up/status")
@@ -1120,6 +1135,10 @@ async def up_status(request):
     ids = request.json.get("ids")
     if not ids:
         raise CustomError(ErrorCode.ParamValueError)
+    if "*" in ids:
+        account = request.ctx.session['account_info']
+        await MessageAccount.filter(account_id=account.id, status=0).update(status=1)
+        return response_ok(True)
     await MessageAccount.filter(id__in=ids).update(status=1)
     return response_ok(True)
 
