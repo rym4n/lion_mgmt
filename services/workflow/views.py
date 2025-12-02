@@ -5,7 +5,7 @@ import re
 import secrets
 import time
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 import orjson
 from aiocache import caches
@@ -21,7 +21,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license, playbook_permission, \
     check_playbook_permission
-from libs.utils import gen_run_id, strip_timezone_to_seconds
+from libs.utils import gen_run_id, strip_timezone_to_seconds, query_vlog
 from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, \
     EventRelatedScript, Timed, PlaybookWebhook, Account
 from services.tools.views import tool_action_update, tool_action_playbook_delete
@@ -1910,3 +1910,140 @@ async def execute_webhook(request):
     await resp.eof()
 
     return resp
+
+
+@workflow_bp.post("/dashboard/statistics")
+@openapi.definition(
+    summary="获取剧本仪表盘统计数据",
+    description="获取指定剧本在指定时间范围内的执行统计数据",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["flow_id", "start", "end"],
+                "properties": {
+                    "flow_id": {
+                        "type": "string",
+                        "description": "剧本版本ID"
+                    },
+                    "start": {
+                        "type": "string",
+                        "description": "查询开始时间(RFC3339格式或Unix时间戳)"
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "查询结束时间(RFC3339格式或Unix时间戳)"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "total_runs": {"type": "integer"},
+                                    "success_count": {"type": "integer"},
+                                    "fail_count": {"type": "integer"},
+                                    "success_rate": {"type": "number"},
+                                    "avg_execution_time": {"type": "number"},
+                                    "min_execution_time": {"type": "number"},
+                                    "max_execution_time": {"type": "number"},
+                                    "last_execution_time": {"type": "string"},
+                                    "last_status": {"type": "string"}
+                                }
+                            },
+                            "message": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }
+    }
+)
+@requires_permission("workflow:r")
+@playbook_permission("r")
+async def dashboard_statistics(request):
+    data = request.json
+    flow_id = data.get("flow_id")
+    end = data.get("end")
+    start = data.get("start")
+
+    if not flow_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    query = "playbook_version_id:" + flow_id
+
+    logs = await query_vlog(query, project_id=1, start=start, end=end, account_id=0)
+
+    start_time_a = int(time.time())
+
+    run_status = defaultdict(lambda: {
+        "start": None,
+        "end": None,
+        "status": "success"
+    })
+
+    for log in logs:
+        run_id = log.get("_msg")
+        if not run_id:
+            continue
+
+        ts = datetime.strptime(log["timestamp"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+
+        status = log.get("status")
+
+        # 更新时间
+        if not run_status[run_id]["start"] or ts < run_status[run_id]["start"]:
+            run_status[run_id]["start"] = ts
+
+        if not run_status[run_id]["end"] or ts > run_status[run_id]["end"]:
+            run_status[run_id]["end"] = ts
+
+        if str(status) not in ("0", "1"):
+            run_status[run_id]["status"] = "fail"
+
+    daily_stats = defaultdict(lambda: {
+        "total_runs": 0,
+        "success_count": 0,
+        "fail_count": 0,
+        "exec_times": []
+    })
+
+    for run_id, info in run_status.items():
+        day = info["end"].date().isoformat()  # yyyy-mm-dd
+
+        daily_stats[day]["total_runs"] += 1
+
+        if info["status"] == "success":
+            daily_stats[day]["success_count"] += 1
+        else:
+            daily_stats[day]["fail_count"] += 1
+
+
+    result = []
+
+    for day, stat in sorted(daily_stats.items()):
+        total = stat["total_runs"]
+        succ = stat["success_count"]
+        fail = stat["fail_count"]
+
+        day_result = {
+            "date": day,
+            "total_runs": total,
+            "success_count": succ,
+            "fail_count": fail,
+            "success_rate": str((round(succ / total, 2) if total else 0) * 100) + "%",
+        }
+
+        result.append(day_result)
+
+    return response_ok(result)
