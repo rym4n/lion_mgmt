@@ -1047,7 +1047,7 @@ async def execute_action(request):
                         await resp.send(f"data: [{orjson.dumps(log.json).decode()}]\n\n")
                 if message.get("type") == "action" and len(sent_id) >= len(message.get('resource', '').split()):
                     break
-                if message.get("type") == "flow" and any(log.node_type == "end-node" for log in logs):
+                if message.get("type") == "flow" and any(log.node_type == "end-node" and log.playbook_version_id == message.get("flow_id") for log in logs):
                     break
                 if message.get('type') == "code":
                     break
@@ -1984,7 +1984,6 @@ async def dashboard_statistics(request):
 
     logs = await query_vlog(query, project_id=1, start=start, end=end, account_id=0)
 
-    start_time_a = int(time.time())
 
     run_status = defaultdict(lambda: {
         "start": None,
