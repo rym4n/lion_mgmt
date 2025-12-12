@@ -1,4 +1,5 @@
 # coding=utf-8
+from collections import defaultdict
 from datetime import datetime
 
 from sanic import Blueprint
@@ -10,6 +11,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
+from libs.utils import query_vlog
 from models import PlaybookVersion, ToolResources
 
 dashboard_bp = Blueprint('dashboard', url_prefix='/dashboard')
@@ -275,20 +277,38 @@ async def count_apps(request):
 )
 @requires_permission('dashboard:r')
 async def playbooks_success_rate(request):
-    sql = """
-          SELECT playbook_name,
-                 ROUND(SUM(CASE WHEN has_fail = 0 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 2) AS success_rate
-          FROM (SELECT run_id,
-                       playbook_name,
-                       MAX(CASE WHEN status != 0 THEN 1 ELSE 0 END) AS has_fail
-                FROM runlog
-                WHERE playbook_name != '执行动作'
-                GROUP BY run_id, playbook_name) AS deduplicated
-          GROUP BY playbook_name
-          ORDER BY success_rate;
-          """
-    async with in_transaction() as conn:
-        rows = await conn.execute_query_dict(sql)
-        for row in rows:
-            row["success_rate"] = float(row["success_rate"])
-        return response_ok(rows)
+    query = 'playbook_name: !"执行动作"'
+    logs = await query_vlog(query, project_id=1, account_id=0)
+
+    grouped = {}
+    for log in logs:
+        playbook_name = log.get("playbook_name")
+        msg_id = log.get("_msg")
+
+        if not playbook_name or not msg_id:
+            continue
+
+        if log.get("result") in ["执行中", "等待审核"]:
+            continue
+
+        status = log.get("status")
+        grouped.setdefault(playbook_name, {}).setdefault(msg_id, []).append(status)
+
+    results = []
+    for playbook_name, executions in grouped.items():
+        total = len(executions)
+        success = 0
+
+        for msg_id, statuses in executions.items():
+            if any(s != "0" for s in statuses):
+                continue
+            success += 1
+
+        success_rate = round(success / total, 2) if total > 0 else 0
+
+        results.append({
+            "playbook_name": playbook_name,
+            "success_rate": success_rate
+        })
+    results = sorted(results, key=lambda x: x["success_rate"])
+    return response_ok(results)

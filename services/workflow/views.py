@@ -1984,7 +1984,6 @@ async def dashboard_statistics(request):
 
     logs = await query_vlog(query, project_id=1, start=start, end=end, account_id=0)
 
-
     run_status = defaultdict(lambda: {
         "start": None,
         "end": None,
@@ -2026,7 +2025,6 @@ async def dashboard_statistics(request):
             daily_stats[day]["success_count"] += 1
         else:
             daily_stats[day]["fail_count"] += 1
-
 
     result = []
 
