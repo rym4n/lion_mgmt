@@ -1,4 +1,5 @@
 # coding=utf-8
+import time
 from collections import defaultdict
 from datetime import datetime
 
@@ -277,38 +278,52 @@ async def count_apps(request):
 )
 @requires_permission('dashboard:r')
 async def playbooks_success_rate(request):
-    query = 'playbook_name: !"执行动作"'
+    # 构建高效的查询条件
+    query = 'playbook_name: !"执行动作" AND result: !"执行中" AND result: !"等待审核"'
     logs = await query_vlog(query, project_id=1, account_id=0)
 
-    grouped = {}
+    if not logs:
+        return response_ok([])
+
+    # 使用单个字典存储统计数据
+    stats = {}  # {playbook_name: {'total': int, 'success': int}}
+
     for log in logs:
         playbook_name = log.get("playbook_name")
         msg_id = log.get("_msg")
 
-        if not playbook_name or not msg_id:
-            continue
-
-        if log.get("result") in ["执行中", "等待审核"]:
+        if not (playbook_name and msg_id):
             continue
 
         status = log.get("status")
-        grouped.setdefault(playbook_name, {}).setdefault(msg_id, []).append(status)
 
-    results = []
-    for playbook_name, executions in grouped.items():
-        total = len(executions)
-        success = 0
+        # 使用复合键实现高效的分组和统计
+        key = f"{playbook_name}:{msg_id}"
 
-        for msg_id, statuses in executions.items():
-            if any(s != "0" for s in statuses):
-                continue
-            success += 1
+        if key not in stats:
+            if playbook_name not in stats:
+                stats[playbook_name] = {"total": 0, "success": 0, "msg_ids": set()}
 
-        success_rate = round(success / total, 2) if total > 0 else 0
+            stats[playbook_name]["msg_ids"].add(msg_id)
+            stats[playbook_name]["total"] += 1
+            # 初始假设成功
+            stats[playbook_name]["success"] += 1
 
-        results.append({
+        # 如果状态不为 "0"，则该消息失败
+        if status != "0":
+            if stats[playbook_name]["msg_ids"] and msg_id in stats[playbook_name]["msg_ids"]:
+                stats[playbook_name]["success"] -= 1
+
+    # 构建结果并排序
+    results = [
+        {
             "playbook_name": playbook_name,
-            "success_rate": success_rate
-        })
+            "success_rate": round(
+                data["success"] / data["total"], 2
+            ) if data["total"] > 0 else 0
+        }
+        for playbook_name, data in stats.items()
+    ]
     results = sorted(results, key=lambda x: x["success_rate"])
+
     return response_ok(results)
