@@ -13,7 +13,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
-from libs.utils import strip_timezone_to_seconds, time_conversion, query_vlog
+from libs.utils import strip_timezone_to_seconds
 from models import Timed, Playbook, ToolAction, Runlog, PlaybookVersion, PlaybookPermissions, ActionPermissions
 from services.workflow.views import get_playbook_input
 from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
