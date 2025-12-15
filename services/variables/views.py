@@ -141,12 +141,13 @@ async def new_variable(request):
 )
 @requires_permission("var:r")
 async def all_variables(request):
-    page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 15))
+    req_json = request.json or {}
+    page = int(req_json.get("page", 1))
+    size = int(req_json.get("size", 15))
     offset = (page - 1) * size
     limit = size
     condition = Q(type="global")
-    keyword = request.json.get("keyword")
+    keyword = req_json.get("keyword")
     if keyword:
         condition = Q(name__icontains=keyword) | Q(value__contains=[keyword])
     total = await Variables.filter(condition).count()

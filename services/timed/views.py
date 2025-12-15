@@ -383,9 +383,10 @@ async def get_timed_permissions(request, filtered_items):
 )
 @requires_permission("timed:r")
 async def get_all(request):
-    page = int(request.json.get("page") or 1)
-    size = int(request.json.get("size") or 15)
-    keyword = request.json.get("keyword", "").strip()
+    req_json = request.json or {}
+    page = int(req_json.get("page") or 1)
+    size = int(req_json.get("size") or 15)
+    keyword = req_json.get("keyword", "").strip()
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     # 获取全部（后续在 Python 层过滤）
     all_items = await Timed.filter(deleted=False, internal=maintenance_mode if maintenance_mode else False).prefetch_related("action", "playbook", "creator", "updator")
@@ -981,12 +982,13 @@ async def delete_timed(request):
 )
 @requires_permission("timed:r")
 async def get_run_log(request):
-    timed_id = request.json.get("id")
-    page = int(request.json.get("page") or 1)
-    size = int(request.json.get("size") or 15)
-    start_time = request.json.get("start_time")
-    end_time = request.json.get("end_time")
-    status = request.json.get("status")
+    req_json = request.json or {}
+    timed_id = req_json.get("id")
+    page = int(req_json.get("page") or 1)
+    size = int(req_json.get("size") or 15)
+    start_time = req_json.get("start_time")
+    end_time = req_json.get("end_time")
+    status = req_json.get("status")
 
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)

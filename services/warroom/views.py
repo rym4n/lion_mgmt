@@ -416,12 +416,13 @@ async def get_room_list(request: Request):
 )
 @requires_permission('warroom:r')
 async def get_all_rooms(request: Request):
-    page = request.json.get("page", 1)
-    size = request.json.get("size", 10)
+    req_json = request.json or {}
+    page = req_json.get("page", 1)
+    size = req_json.get("size", 10)
     offset = (page - 1) * size
     limit = size
     condition = Q()
-    keyword = request.json.get("keyword")
+    keyword = req_json.get("keyword")
     if keyword:
         condition = condition & Q(name__icontains=keyword)
 
@@ -1080,8 +1081,9 @@ async def query_messages(request: Request):
 )
 @requires_permission("warroom:r")
 async def get_list(request):
-    page = request.json.get("page", 1)
-    size = request.json.get("size", 20)
+    req_json = request.json or {}
+    page = req_json.get("page", 1)
+    size = req_json.get("size", 20)
     offset = (page - 1) * size
     limit = size
     message_list = []

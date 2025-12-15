@@ -240,8 +240,9 @@ async def new_user(request):
 )
 @requires_permission("user:r")
 async def all_users(request):
-    page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 15))
+    req_json = request.json or {}
+    page = int(req_json.get("page", 1))
+    size = int(req_json.get("size", 15))
     offset = (page - 1) * size
     limit = size
     # 分页查询Account，返回总数和数据
@@ -249,8 +250,8 @@ async def all_users(request):
         "deleted": False,
         "type": "user"
     }
-    if request.json.get("username"):
-        condition["username"] = request.json.get("username")
+    if req_json.get("username"):
+        condition["username"] = req_json.get("username")
     total = await Account.filter(**condition).count()
     users = await Account.filter(**condition).offset(offset).limit(limit).all().prefetch_related('roles')
 
@@ -448,13 +449,14 @@ async def create_api_user(request):
 )
 @requires_permission("user:r")
 async def list_api_users(request):
-    page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 15))
+    req_json = request.json or {}
+    page = int(req_json.get("page", 1))
+    size = int(req_json.get("size", 15))
     offset = (page - 1) * size
     limit = size
     # 分页查询ApiUserToken，返回总数和数据
     condition = Q(type="api") & Q(deleted=False)
-    keyword = request.json.get("keyword")
+    keyword = req_json.get("keyword")
     if keyword:
         condition = condition & Q(username__icontains=keyword) | Q(display_name=keyword)
 
