@@ -10,6 +10,7 @@ class Playbook(BaseModel):
     """
     剧本模型
     """
+
     name = fields.CharField(max_length=255, unique=True, description="剧本名称")
     remark = fields.TextField(description="描述")
     tags = fields.ManyToManyField("models.Tag", through="playbook_tag")
@@ -30,7 +31,7 @@ class Playbook(BaseModel):
             "remark": self.remark,
             "tags": [tag.name for tag in self.tags] if self.tags else [],
             "scenes": [scene.name for scene in self.scenes] if self.scenes else [],
-            "internal": self.internal
+            "internal": self.internal,
         }
 
     class Meta:
@@ -44,6 +45,7 @@ class PlaybookVersion(BaseModel):
     """
     剧本版本模型
     """
+
     playbook = fields.ForeignKeyField("models.Playbook", related_name="playbook_versions")
     change_desc = fields.TextField(null=True, description="变更说明")
     version = fields.CharField(max_length=30, description="版本号，每次publish都会生成新纪录，用于版本回溯")
@@ -71,7 +73,7 @@ class PlaybookVersion(BaseModel):
             "version": self.version,
             "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
             "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
-            "internal": self.playbook.internal
+            "internal": self.playbook.internal,
         }
 
     class Meta:
@@ -87,10 +89,8 @@ class PlaybookPermissions(BaseModel):
     """
 
     pb = fields.ForeignKeyField("models.Playbook", unique=True, related_name="playbook_permissions", description="剧本")
-    users = fields.ForeignKeyField("models.Account", null=True, related_name="playbook_permissions_user",
-                                   description="用户")
-    roles = fields.ForeignKeyField("models.Role", null=True, related_name="playbook_permissions_role",
-                                   description="角色")
+    users = fields.ForeignKeyField("models.Account", null=True, related_name="playbook_permissions_user", description="用户")
+    roles = fields.ForeignKeyField("models.Role", null=True, related_name="playbook_permissions_role", description="角色")
     permissions = fields.JSONField(null=True)
 
     def validate(self) -> None:
@@ -102,10 +102,9 @@ class PlaybookPermissions(BaseModel):
             "id": self.id,
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
-            "users": {"id": self.users_id, "username": self.users.username,
-                      "display_name": self.users.display_name} if self.users else None,
+            "users": {"id": self.users_id, "username": self.users.username, "display_name": self.users.display_name} if self.users else None,
             "roles": {"id": self.roles_id, "name": self.roles.name} if self.roles else None,
-            "permissions": self.permissions
+            "permissions": self.permissions,
         }
 
     class Meta:

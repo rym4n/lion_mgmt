@@ -10,6 +10,7 @@ class Runlog(BaseModel):
     """
     所有节点的执行记录
     """
+
     run_id = fields.CharField(max_length=36, description="每次运行的唯一ID")
     timer = fields.ForeignKeyField("models.Timed", null=True, related_name="timer_runlog", description="关联定时任务")
     event_id = fields.CharField(max_length=36, null=True, description="事件id")
@@ -36,8 +37,7 @@ class Runlog(BaseModel):
     resource_name = fields.CharField(null=True, max_length=36, description="资源名称")
     playbook_name = fields.CharField(null=True, max_length=255, index=True, description="剧本名称")
 
-    playbook_version = fields.ForeignKeyField("models.PlaybookVersion", null=True, related_name="playbook_runlog",
-                                              description="关联剧本版本", on_delete=fields.SET_NULL)
+    playbook_version = fields.ForeignKeyField("models.PlaybookVersion", null=True, related_name="playbook_runlog", description="关联剧本版本", on_delete=fields.SET_NULL)
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -73,9 +73,7 @@ class Runlog(BaseModel):
         table = "runlog"
         ordering = ["-ctime"]
 
-        unique_together = (
-            ("run_id", "node_id", "node_name", "resource_name")
-        )
+        unique_together = ("run_id", "node_id", "node_name", "resource_name")
 
         # indexes = [
         #     indexes.Index("run_id", "node_id", "node_name", "resource_name", name="uniq_runlog")

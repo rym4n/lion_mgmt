@@ -28,7 +28,7 @@ class Config(BaseModel):
             "key": self.key,
             "value": self.value,
             "type": self.type,
-            "module": self.module
+            "module": self.module,
         }
 
     class Meta:

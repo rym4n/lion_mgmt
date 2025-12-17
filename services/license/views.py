@@ -18,7 +18,7 @@ from libs.utils import verify_license
 from models import Tool, Playbook, Account, PermissionsMenu, Config
 from settings import LICENSE_DIR
 
-license_bp = Blueprint('license', url_prefix='/license')
+license_bp = Blueprint("license", url_prefix="/license")
 _all__ = ["license_bp"]
 
 Prompt_Word_Dict = {
@@ -34,7 +34,7 @@ Prompt_Word_Dict = {
     3: """你是一位智能安全专家助手，能够根据用户输入的内容来判断是否可以通过动作列表中的某个动作来实现，如果可以则返回动作id以及输入参数（支持返回多个动作id，根据适配度排序，如果返回动作则严格按照返回示例的格式），按照格式输出文本，示例：3,4,5，如果动作列表中实在找不出合适选项实现，则再去尝试回答用户问题（注意：回答时不要用markdown格式）。
 
 # 动作列表
-"""
+""",
 }
 
 
@@ -158,10 +158,7 @@ async def get_all_license(request: Request):
     """
     获取所有license文件信息用于页面展示
     """
-    consume_info = {
-        "应用集成": await Tool.filter(deleted=False).count(),
-        "剧本编排": await Playbook.filter(deleted=False).count()
-    }
+    consume_info = {"应用集成": await Tool.filter(deleted=False).count(), "剧本编排": await Playbook.filter(deleted=False).count()}
 
     menu_dict = dict()
     lic = load_license()

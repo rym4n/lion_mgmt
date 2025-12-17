@@ -11,7 +11,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission, load_license
 from models import Role, Account, PermissionsMenu
 
-role_bp = Blueprint('role', url_prefix='/role')
+role_bp = Blueprint("role", url_prefix="/role")
 _all__ = ["role_bp"]
 
 
@@ -25,22 +25,10 @@ _all__ = ["role_bp"]
                 "type": "object",
                 "required": ["name"],
                 "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "角色名"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "描述"
-                    },
-                    "permissions": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "权限列表"
-                    }
-                }
+                    "name": {"type": "string", "description": "角色名"},
+                    "description": {"type": "string", "description": "描述"},
+                    "permissions": {"type": "array", "items": {"type": "string"}, "description": "权限列表"},
+                },
             }
         }
     },
@@ -61,22 +49,17 @@ _all__ = ["role_bp"]
                                     "utime": {"type": "string"},
                                     "name": {"type": "string"},
                                     "description": {"type": "string"},
-                                    "permissions": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "string"
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                                    "permissions": {"type": "array", "items": {"type": "string"}},
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
-@requires_permission('role:c')
+@requires_permission("role:c")
 async def add_role(request):
     name = request.json.get("name")
     description = request.json.get("description", "")
@@ -90,23 +73,7 @@ async def add_role(request):
 @openapi.definition(
     summary="查找全部角色",
     description="查找全部角色，需要角色查看权限",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "page": {
-                        "type": "integer",
-                        "description": "页码"
-                    },
-                    "size": {
-                        "type": "integer",
-                        "description": "页容量"
-                    }
-                }
-            }
-        }
-    },
+    body={"application/json": {"schema": {"type": "object", "properties": {"page": {"type": "integer", "description": "页码"}, "size": {"type": "integer", "description": "页容量"}}}}},
     response={
         "200": {
             "description": "获取成功",
@@ -129,63 +96,39 @@ async def add_role(request):
                                                 "utime": {"type": "string"},
                                                 "name": {"type": "string"},
                                                 "description": {"type": "string"},
-                                                "permissions": {
-                                                    "type": "array",
-                                                    "items": {
-                                                        "type": "string"
-                                                    }
-                                                }
-                                            }
-                                        }
+                                                "permissions": {"type": "array", "items": {"type": "string"}},
+                                            },
+                                        },
                                     },
                                     "total": {"type": "integer"},
                                     "page": {"type": "integer"},
                                     "size": {"type": "integer"},
-                                    "total_pages": {"type": "integer"}
-                                }
-                            }
-                        }
+                                    "total_pages": {"type": "integer"},
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
-@requires_permission('role:r')
+@requires_permission("role:r")
 async def find_all(request):
-    page = int(request.json.get('page', 1))
+    page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 15))
     offset = (page - 1) * size
     limit = size
     roles = await Role.filter(deleted=False).offset(offset).limit(limit).values()
     total = await Role.filter(deleted=False).count()
-    return response_ok({
-        'roles': roles,
-        'total': total,
-        'page': page,
-        'size': size,
-        'total_pages': (total + size - 1) // size
-    })
+    return response_ok({"roles": roles, "total": total, "page": page, "size": size, "total_pages": (total + size - 1) // size})
 
 
 @role_bp.post("/details")
 @openapi.definition(
     summary="查找具体角色信息",
     description="查找具体角色信息，需要角色查看权限",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "required": ["role_id"],
-                "properties": {
-                    "role_id": {
-                        "type": "string",
-                        "description": "角色id"
-                    }
-                }
-            }
-        }
-    },
+    body={"application/json": {"schema": {"type": "object", "required": ["role_id"], "properties": {"role_id": {"type": "string", "description": "角色id"}}}}},
     response={
         "200": {
             "description": "获取成功",
@@ -210,28 +153,20 @@ async def find_all(request):
                                             "properties": {
                                                 "model": {"type": "string"},
                                                 "model_description": {"type": "string"},
-                                                "sp": {
-                                                    "type": "array",
-                                                    "items": {
-                                                        "type": "object",
-                                                        "additionalProperties": {
-                                                            "type": "string"
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                                                "sp": {"type": "array", "items": {"type": "object", "additionalProperties": {"type": "string"}}},
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
-@requires_permission('role:r')
+@requires_permission("role:r")
 async def find_role(request):
     role_id = request.json.get("role_id")
     role = await Role.get_or_none(id=role_id, deleted=False)
@@ -240,13 +175,7 @@ async def find_role(request):
 
     permissions_data = await PermissionsMenu.all().values()
 
-    permission_map = {
-        p["model"]: {
-            "description": p["description"],
-            "values": {perm["value"]: perm["label"] for perm in p.get("Permissions", [])}
-        }
-        for p in permissions_data
-    }
+    permission_map = {p["model"]: {"description": p["description"], "values": {perm["value"]: perm["label"] for perm in p.get("Permissions", [])}} for p in permissions_data}
 
     structured_permissions = []
 
@@ -261,15 +190,9 @@ async def find_role(request):
         for action in actions:
             label = perm_info["values"].get(action)
             if label:
-                action_labels.append({
-                    action: label
-                })
+                action_labels.append({action: label})
 
-        structured_permissions.append({
-            "model": model,
-            "model_description": perm_info["description"],
-            "sp": action_labels
-        })
+        structured_permissions.append({"model": model, "model_description": perm_info["description"], "sp": action_labels})
 
     data = role.json
     data["permissions"] = structured_permissions
@@ -280,40 +203,10 @@ async def find_role(request):
 @openapi.definition(
     summary="删除指定角色",
     description="删除指定角色，需要角色删除权限",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "required": ["role_id"],
-                "properties": {
-                    "role_id": {
-                        "type": "string",
-                        "description": "角色id"
-                    }
-                }
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "删除成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    body={"application/json": {"schema": {"type": "object", "required": ["role_id"], "properties": {"role_id": {"type": "string", "description": "角色id"}}}}},
+    response={"200": {"description": "删除成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
-@requires_permission('role:d')
+@requires_permission("role:d")
 async def delete_role(request):
     role_id = request.json.get("role_id")
     exists = await Account.filter(roles__id=role_id).exists()
@@ -337,26 +230,11 @@ async def delete_role(request):
                 "type": "object",
                 "required": ["role_id"],
                 "properties": {
-                    "role_id": {
-                        "type": "string",
-                        "description": "角色id"
-                    },
-                    "name": {
-                        "type": "string",
-                        "description": "新的角色名"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "新的描述"
-                    },
-                    "permissions": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "新的权限"
-                    }
-                }
+                    "role_id": {"type": "string", "description": "角色id"},
+                    "name": {"type": "string", "description": "新的角色名"},
+                    "description": {"type": "string", "description": "新的描述"},
+                    "permissions": {"type": "array", "items": {"type": "string"}, "description": "新的权限"},
+                },
             }
         }
     },
@@ -377,22 +255,17 @@ async def delete_role(request):
                                     "utime": {"type": "string"},
                                     "name": {"type": "string"},
                                     "description": {"type": "string"},
-                                    "permissions": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "string"
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                                    "permissions": {"type": "array", "items": {"type": "string"}},
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
-@requires_permission('role:u')
+@requires_permission("role:u")
 async def update_role(request):
     role_id = request.json.get("role_id")
     name = request.json.get("name")
@@ -438,29 +311,20 @@ async def update_role(request):
                                                 "model": {"type": "string"},
                                                 "bp": {"type": "string"},
                                                 "description": {"type": "string"},
-                                                "Permissions": {
-                                                    "type": "array",
-                                                    "items": {
-                                                        "type": "object",
-                                                        "properties": {
-                                                            "value": {"type": "string"},
-                                                            "label": {"type": "string"}
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
+                                                "Permissions": {"type": "array", "items": {"type": "object", "properties": {"value": {"type": "string"}, "label": {"type": "string"}}}},
+                                            },
+                                        },
                                     }
-                                }
-                            }
-                        }
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
-@requires_permission('role:r')
+@requires_permission("role:r")
 async def all_permission(request):
     menu_dict = {}
     lic = load_license()
@@ -482,6 +346,8 @@ async def all_permission(request):
     for permission in permissions:
         if menu_dict[permission["bp"]]:
             permission_list.append(permission)
-    return response_ok({
-        'permissions': permission_list,
-    })
+    return response_ok(
+        {
+            "permissions": permission_list,
+        }
+    )

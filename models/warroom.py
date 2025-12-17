@@ -10,6 +10,7 @@ class Room(BaseModel):
     """
     作战室房间模型
     """
+
     name: str = fields.CharField(null=False, max_length=50, description="作战室名称")
     creator = fields.ForeignKeyField(model_name="models.Account", related_name="created_room", description="房主")
     users = fields.ManyToManyField(model_name="models.Account", through="room_accounts")
@@ -27,7 +28,7 @@ class Room(BaseModel):
             "utime": strip_timezone_to_seconds(self.utime),
             "name": self.name,
             "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
-            "users": [{"username": user.username, "display_name": user.display_name} for user in self.users]
+            "users": [{"username": user.username, "display_name": user.display_name} for user in self.users],
         }
 
     class Meta:
@@ -39,6 +40,7 @@ class Message(BaseModel):
     """
     作战室消息模型
     """
+
     content: str = fields.TextField(null=False, description="文本消息内容")
     image_content: str = fields.TextField(default=None, description="图片消息内容")
     type = fields.CharField(null=False, max_length=20, description="消息类型，public群聊private私聊/system系统/announcement公告")
@@ -64,7 +66,7 @@ class Message(BaseModel):
             "receiver": self.receiver.username if self.receiver else "",
             "room": self.room.name if self.room else "",
             "is_recalled": self.is_recalled,
-            "is_pinned": self.is_pinned
+            "is_pinned": self.is_pinned,
         }
 
     class Meta:
@@ -76,6 +78,7 @@ class MessageAccount(BaseModel):
     """
     消息与用户关系表
     """
+
     message = fields.ForeignKeyField(model_name="models.Message", related_name="msg_account", description="消息")
     account_id = fields.CharField(null=False, max_length=255, description="用户")
     status = fields.IntField(default=0, description="阅读状态，0代表未读，1代表已读")

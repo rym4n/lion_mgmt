@@ -18,7 +18,7 @@ from models import Timed, Playbook, ToolAction, Runlog, PlaybookVersion, Playboo
 from services.workflow.views import get_playbook_input
 from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
 
-timed_bp = Blueprint('timed', url_prefix='/timed')
+timed_bp = Blueprint("timed", url_prefix="/timed")
 _all__ = ["timed_bp"]
 
 # 枚举类型
@@ -47,43 +47,16 @@ def build_timer_rule(status, tactics, end_time):
                 "type": "object",
                 "required": ["name", "type", "status", "tactics"],
                 "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "定时任务名称"
-                    },
-                    "type": {
-                        "type": "integer",
-                        "description": "执行操作类型 0为执行剧本，1为执行动作"
-                    },
-                    "playbook_id": {
-                        "type": "string",
-                        "description": "剧本id 当type为0时必填"
-                    },
-                    "playbook_input": {
-                        "type": "object",
-                        "description": "剧本输入参数 当type为0时必填"
-                    },
-                    "action_id": {
-                        "type": "string",
-                        "description": "动作id 当type为1时必填"
-                    },
-                    "action_input": {
-                        "type": "object",
-                        "description": "动作输入参数 当type为1时必填"
-                    },
-                    "status": {
-                        "type": "integer",
-                        "description": "执行类型 0为单次执行，1为周期执行"
-                    },
-                    "tactics": {
-                        "type": "string",
-                        "description": "执行策略 如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数"
-                    },
-                    "end_time": {
-                        "type": "string",
-                        "description": "结束时间 为周期执行时填写，格式为2025-12-12 00:00:00"
-                    }
-                }
+                    "name": {"type": "string", "description": "定时任务名称"},
+                    "type": {"type": "integer", "description": "执行操作类型 0为执行剧本，1为执行动作"},
+                    "playbook_id": {"type": "string", "description": "剧本id 当type为0时必填"},
+                    "playbook_input": {"type": "object", "description": "剧本输入参数 当type为0时必填"},
+                    "action_id": {"type": "string", "description": "动作id 当type为1时必填"},
+                    "action_input": {"type": "object", "description": "动作输入参数 当type为1时必填"},
+                    "status": {"type": "integer", "description": "执行类型 0为单次执行，1为周期执行"},
+                    "tactics": {"type": "string", "description": "执行策略 如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数"},
+                    "end_time": {"type": "string", "description": "结束时间 为周期执行时填写，格式为2025-12-12 00:00:00"},
+                },
             }
         }
     },
@@ -115,28 +88,16 @@ def build_timer_rule(status, tactics, end_time):
                                     "result": {"type": "string"},
                                     "success_rate": {"type": "string"},
                                     "internal": {"type": "boolean"},
-                                    "creator": {
-                                        "type": "object",
-                                        "properties": {
-                                            "username": {"type": "string"},
-                                            "display_name": {"type": "string"}
-                                        }
-                                    },
-                                    "updator": {
-                                        "type": "object",
-                                        "properties": {
-                                            "username": {"type": "string"},
-                                            "display_name": {"type": "string"}
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                                    "creator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                    "updator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 @requires_permission("timed:c")
 async def add_timed(request):
@@ -192,9 +153,7 @@ async def add_timed(request):
         if not action:
             raise CustomError(ErrorCode.ActionNotFoundError)
         action_input["executor"] = request.ctx.session.get("account_info").id
-        if any(key not in action_input for key in
-               ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name", "action",
-                "executor", "retry_times", "timeout"]):
+        if any(key not in action_input for key in ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name", "action", "executor", "retry_times", "timeout"]):
             raise CustomError(ErrorCode.ActionInputError)
         msg["run_type"] = "action"
         msg["run_args"] = action_input
@@ -209,11 +168,22 @@ async def add_timed(request):
                 raise CustomError(ErrorCode.CronExpressionError)
             timer_rule["crontab"] = tactics
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    timed = await Timed.create(name=name, type=operate_type, playbook=playbook, playbook_input=playbook_input,
-                               action=action, playbook_version=playbook_version.version if playbook_version else None,
-                               action_input=action_input, status=status, tactics=tactics, end_time=end_time, enable=1,
-                               internal=maintenance_mode if maintenance_mode else False,
-                               creator=request.ctx.session['account_info'], updator=request.ctx.session['account_info'])
+    timed = await Timed.create(
+        name=name,
+        type=operate_type,
+        playbook=playbook,
+        playbook_input=playbook_input,
+        action=action,
+        playbook_version=playbook_version.version if playbook_version else None,
+        action_input=action_input,
+        status=status,
+        tactics=tactics,
+        end_time=end_time,
+        enable=1,
+        internal=maintenance_mode if maintenance_mode else False,
+        creator=request.ctx.session["account_info"],
+        updator=request.ctx.session["account_info"],
+    )
     msg["timer_id"] = timed.id
     msg["timer_rule"] = timer_rule
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
@@ -238,7 +208,7 @@ async def get_playbook_permissions(pb_id, subject, cache_client, is_user: bool =
 async def get_timed_permissions(request, filtered_items):
     result = []
     timed_permissions = {}
-    user = request.ctx.session['account_info']
+    user = request.ctx.session["account_info"]
     user_id = user.id
     user_roles = set(str(role.id) for role in user.roles)
     cache_client = request.app.ctx.cache_client
@@ -260,11 +230,7 @@ async def get_timed_permissions(request, filtered_items):
                     break
         else:
             # 动作权限处理
-            permissions = await ActionPermissions.filter(
-                tool_name=item.action_input["app_name"],
-                action_name__in=[item.action_input["action"], "all"],
-                deleted=False
-            )
+            permissions = await ActionPermissions.filter(tool_name=item.action_input["app_name"], action_name__in=[item.action_input["action"], "all"], deleted=False)
 
             resource = item.action_input["resource"]
             if not resource:
@@ -278,13 +244,13 @@ async def get_timed_permissions(request, filtered_items):
                 resources = [resource]
             for permission in permissions:
                 for resource in resources:
-                    for res_dict in (permission.users or []):
+                    for res_dict in permission.users or []:
                         if resource in res_dict and user_id in map(str, res_dict[resource]):
                             result.append(item)
                             timed_permissions[item.id] = ["r", "e"]
                             break
                     else:  # 只有用户不满足时再检查角色
-                        for res_dict in (permission.roles or []):
+                        for res_dict in permission.roles or []:
                             if resource in res_dict and not user_roles.isdisjoint(map(str, res_dict[resource])):
                                 result.append(item)
                                 timed_permissions[item.id] = ["r", "e"]
@@ -301,19 +267,10 @@ async def get_timed_permissions(request, filtered_items):
             "schema": {
                 "type": "object",
                 "properties": {
-                    "page": {
-                        "type": "integer",
-                        "description": "页码，默认1"
-                    },
-                    "size": {
-                        "type": "integer",
-                        "description": "页大小，默认10"
-                    },
-                    "keyword": {
-                        "type": "string",
-                        "description": "搜索关键字，目前支持任务名称，动作名称，剧本名称搜索"
-                    }
-                }
+                    "page": {"type": "integer", "description": "页码，默认1"},
+                    "size": {"type": "integer", "description": "页大小，默认10"},
+                    "keyword": {"type": "string", "description": "搜索关键字，目前支持任务名称，动作名称，剧本名称搜索"},
+                },
             }
         }
     },
@@ -349,37 +306,20 @@ async def get_timed_permissions(request, filtered_items):
                                                 "action": {"type": "string"},
                                                 "enable": {"type": "integer"},
                                                 "end_time": {"type": "string"},
-                                                "creator": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                        "username": {"type": "string"},
-                                                        "display_name": {"type": "string"}
-                                                    }
-                                                },
-                                                "updator": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                        "username": {"type": "string"},
-                                                        "display_name": {"type": "string"}
-                                                    }
-                                                },
-                                                "permissions": {
-                                                    "type": "array",
-                                                    "items": {
-                                                        "type": "string"
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                                                "creator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                                "updator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                                "permissions": {"type": "array", "items": {"type": "string"}},
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 @requires_permission("timed:r")
 async def get_all(request):
@@ -419,60 +359,41 @@ async def get_all(request):
     end = start + size
     paged_items = result[start:end]
 
-    items = [{
-        "id": item.id,
-        "ctime": strip_timezone_to_seconds(item.ctime),
-        "utime": strip_timezone_to_seconds(item.utime),
-        "name": item.name,
-        "type": item.type,
-        "status": item.status,
-        "tactics": item.tactics,
-        "result": item.result,
-        "playbook_remark": item.playbook.name if item.playbook else "",
-        "action": item.action.action["name"] if item.action else "",
-        "enable": item.enable,
-        "end_time": item.end_time,
-        "creator": {
-            "username": item.creator.username,
-            "display_name": item.creator.display_name,
-        },
-        "updator": {
-            "username": item.updator.username,
-            "display_name": item.updator.display_name,
-        },
-        "permissions": permissions.get(item.id, [])
-    }
+    items = [
+        {
+            "id": item.id,
+            "ctime": strip_timezone_to_seconds(item.ctime),
+            "utime": strip_timezone_to_seconds(item.utime),
+            "name": item.name,
+            "type": item.type,
+            "status": item.status,
+            "tactics": item.tactics,
+            "result": item.result,
+            "playbook_remark": item.playbook.name if item.playbook else "",
+            "action": item.action.action["name"] if item.action else "",
+            "enable": item.enable,
+            "end_time": item.end_time,
+            "creator": {
+                "username": item.creator.username,
+                "display_name": item.creator.display_name,
+            },
+            "updator": {
+                "username": item.updator.username,
+                "display_name": item.updator.display_name,
+            },
+            "permissions": permissions.get(item.id, []),
+        }
         for item in paged_items
     ]
 
-    return response_ok({
-        "page": page,
-        "size": size,
-        "total": total,
-        "items": items
-    })
+    return response_ok({"page": page, "size": size, "total": total, "items": items})
 
 
 @timed_bp.post("/success")
 @openapi.definition(
     summary="获取定时任务成功率",
     description="获取定时任务成功率，需要定时任务查看权限",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "ids": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "定时任务的id列表"
-                    }
-                }
-            }
-        }
-    },
+    body={"application/json": {"schema": {"type": "object", "properties": {"ids": {"type": "array", "items": {"type": "string"}, "description": "定时任务的id列表"}}}}},
     response={
         "200": {
             "description": "获取成功",
@@ -482,23 +403,13 @@ async def get_all(request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer"},
-                            "data": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "id": {"type": "string"},
-                                        "result": {"type": "string"},
-                                        "success_rate": {"type": "string"}
-                                    }
-                                }
-                            }
-                        }
+                            "data": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "result": {"type": "string"}, "success_rate": {"type": "string"}}}},
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 @requires_permission("timed:r")
 async def get_success_rate(request):
@@ -510,20 +421,7 @@ async def get_success_rate(request):
 @openapi.definition(
     summary="获取单个定时任务详情",
     description="获取单个定时任务详情",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "required": ["id"],
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "定时任务id"
-                    }
-                }
-            }
-        }
-    },
+    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "定时任务id"}}}}},
     response={
         "200": {
             "description": "获取成功",
@@ -557,37 +455,20 @@ async def get_success_rate(request):
                                                 "result": {"type": "string"},
                                                 "success_rate": {"type": "string"},
                                                 "internal": {"type": "boolean"},
-                                                "creator": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                        "username": {"type": "string"},
-                                                        "display_name": {"type": "string"}
-                                                    }
-                                                },
-                                                "updator": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                        "username": {"type": "string"},
-                                                        "display_name": {"type": "string"}
-                                                    }
-                                                },
-                                                "input_args": {
-                                                    "type": "array",
-                                                    "items": {
-                                                        "type": "object"
-                                                    }
-                                                }
-                                            }
-                                        }
+                                                "creator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                                "updator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                                "input_args": {"type": "array", "items": {"type": "object"}},
+                                            },
+                                        },
                                     }
-                                }
-                            }
-                        }
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 @requires_permission("timed:r")
 async def get_timed_detail(request):
@@ -605,8 +486,7 @@ async def get_timed_detail(request):
         input_args = await get_playbook_input(timed.playbook_input["flow_id"])
         data["input_args"] = input_args
     if timed.action_input:
-        actions = await ToolAction.filter(tool_name=timed.action_input.get("app_name"), deleted=False,
-                                          version_number=timed.action_input.get("app_ver")).all()
+        actions = await ToolAction.filter(tool_name=timed.action_input.get("app_name"), deleted=False, version_number=timed.action_input.get("app_ver")).all()
         for action in actions:
             if action.action["func"] == timed.action_input["action"]:
                 input_args = []
@@ -628,47 +508,17 @@ async def get_timed_detail(request):
                 "type": "object",
                 "required": ["id"],
                 "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "定时任务id"
-                    },
-                    "type": {
-                        "type": "integer",
-                        "description": "执行操作类型 0为执行剧本，1为执行动作"
-                    },
-                    "playbook_id": {
-                        "type": "string",
-                        "description": "剧本id 当type为0时必填"
-                    },
-                    "playbook_input": {
-                        "type": "object",
-                        "description": "剧本输入参数 当type为0时必填"
-                    },
-                    "action_id": {
-                        "type": "string",
-                        "description": "动作id 当type为1时必填"
-                    },
-                    "action_input": {
-                        "type": "object",
-                        "description": "动作输入参数 当type为1时必填"
-                    },
-                    "status": {
-                        "type": "integer",
-                        "description": "执行类型 0为单次执行，1为周期执行"
-                    },
-                    "tactics": {
-                        "type": "string",
-                        "description": "执行策略 如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数"
-                    },
-                    "enable": {
-                        "type": "integer",
-                        "description": "是否启用 0为禁用，1为启用"
-                    },
-                    "end_time": {
-                        "type": "string",
-                        "description": "结束时间 为周期执行时填写，格式为2025-12-12 00:00:00"
-                    }
-                }
+                    "id": {"type": "string", "description": "定时任务id"},
+                    "type": {"type": "integer", "description": "执行操作类型 0为执行剧本，1为执行动作"},
+                    "playbook_id": {"type": "string", "description": "剧本id 当type为0时必填"},
+                    "playbook_input": {"type": "object", "description": "剧本输入参数 当type为0时必填"},
+                    "action_id": {"type": "string", "description": "动作id 当type为1时必填"},
+                    "action_input": {"type": "object", "description": "动作输入参数 当type为1时必填"},
+                    "status": {"type": "integer", "description": "执行类型 0为单次执行，1为周期执行"},
+                    "tactics": {"type": "string", "description": "执行策略 如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数"},
+                    "enable": {"type": "integer", "description": "是否启用 0为禁用，1为启用"},
+                    "end_time": {"type": "string", "description": "结束时间 为周期执行时填写，格式为2025-12-12 00:00:00"},
+                },
             }
         }
     },
@@ -700,28 +550,16 @@ async def get_timed_detail(request):
                                     "result": {"type": "string"},
                                     "success_rate": {"type": "string"},
                                     "internal": {"type": "boolean"},
-                                    "creator": {
-                                        "type": "object",
-                                        "properties": {
-                                            "username": {"type": "string"},
-                                            "display_name": {"type": "string"}
-                                        }
-                                    },
-                                    "updator": {
-                                        "type": "object",
-                                        "properties": {
-                                            "username": {"type": "string"},
-                                            "display_name": {"type": "string"}
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                                    "creator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                    "updator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 @requires_permission("timed:u")
 async def update_timed(request):
@@ -730,8 +568,7 @@ async def update_timed(request):
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    timed = await Timed.get(id=timed_id, deleted=False).prefetch_related("action", "playbook", "creator",
-                                                                         "updator")
+    timed = await Timed.get(id=timed_id, deleted=False).prefetch_related("action", "playbook", "creator", "updator")
     result, permissions = await get_timed_permissions(request, [timed])
 
     if not result:
@@ -783,9 +620,7 @@ async def update_timed(request):
         timed.action = await ToolAction.get_or_none(id=action_id, deleted=False)
 
         action_input["executor"] = request.ctx.session.get("account_info").id
-        if any(key not in action_input for key in
-               ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name", "action",
-                "executor", "retry_times", "timeout"]):
+        if any(key not in action_input for key in ["app_name", "name", "app_ver", "main", "action_input", "resource", "node_name", "action_name", "action", "executor", "retry_times", "timeout"]):
             raise CustomError(ErrorCode.ActionInputError)
 
         timed.action_input = action_input
@@ -822,38 +657,8 @@ async def update_timed(request):
 @openapi.definition(
     summary="删除定时任务",
     description="删除定时任务，需要定时任务删除权限",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "required": ["id"],
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "定时任务id"
-                    }
-                }
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "删除成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "定时任务id"}}}}},
+    response={"200": {"description": "删除成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
 @requires_permission("timed:d")
 async def delete_timed(request):
@@ -894,31 +699,13 @@ async def delete_timed(request):
                 "type": "object",
                 "required": ["id", "page", "size"],
                 "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "定时任务id"
-                    },
-                    "page": {
-                        "type": "integer",
-                        "description": "页码，默认1"
-                    },
-                    "size": {
-                        "type": "integer",
-                        "description": "页大小，默认10"
-                    },
-                    "start_time": {
-                        "type": "string",
-                        "description": "开始时间，格式为2025-12-12 00:00:00"
-                    },
-                    "end_time": {
-                        "type": "string",
-                        "description": "结束时间，格式为2025-12-12 00:00:00"
-                    },
-                    "status": {
-                        "type": "integer",
-                        "description": "状态 0为成功，1为失败"
-                    }
-                }
+                    "id": {"type": "string", "description": "定时任务id"},
+                    "page": {"type": "integer", "description": "页码，默认1"},
+                    "size": {"type": "integer", "description": "页大小，默认10"},
+                    "start_time": {"type": "string", "description": "开始时间，格式为2025-12-12 00:00:00"},
+                    "end_time": {"type": "string", "description": "结束时间，格式为2025-12-12 00:00:00"},
+                    "status": {"type": "integer", "description": "状态 0为成功，1为失败"},
+                },
             }
         }
     },
@@ -966,19 +753,19 @@ async def delete_timed(request):
                                                     "resource_name": {"type": "string"},
                                                     "playbook_name": {"type": "string"},
                                                     "playbook_version_id": {"type": "string"},
-                                                    "timer_id": {"type": "string"}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                                                    "timer_id": {"type": "string"},
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 @requires_permission("timed:r")
 async def get_run_log(request):
@@ -1006,30 +793,25 @@ async def get_run_log(request):
     condition = Q(timer_id=timed_id, deleted=False)
 
     if start_time:
-        start_time = datetime.datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
+        start_time = datetime.datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
         start_time = TZ.localize(start_time)
         condition &= Q(start_time__gte=start_time)
     if end_time:
-        end_time = datetime.datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
+        end_time = datetime.datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
         end_time = TZ.localize(end_time)
         condition &= Q(start_time__lte=end_time)
     if status in [0, 1]:
         condition &= Q(status=int(status))
 
-    total = await Runlog.filter(condition).order_by('-run_id').distinct().values_list('run_id', flat=True)
+    total = await Runlog.filter(condition).order_by("-run_id").distinct().values_list("run_id", flat=True)
 
-    run_ids = await Runlog.filter(condition).distinct().order_by('-run_id').offset((page - 1) * size).limit(size).values_list('run_id', flat=True)
+    run_ids = await Runlog.filter(condition).distinct().order_by("-run_id").offset((page - 1) * size).limit(size).values_list("run_id", flat=True)
     run_logs = []
     if run_ids:
-        all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).order_by('-ctime').prefetch_related("timer", "playbook_version").all()
+        all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).order_by("-ctime").prefetch_related("timer", "playbook_version").all()
         run_logs = runlog_list(all_logs)
 
-    return response_ok({
-        "page": page,
-        "size": size,
-        "total": len(total),
-        "data": run_logs
-    })
+    return response_ok({"page": page, "size": size, "total": len(total), "data": run_logs})
 
 
 # 用于统一处理runlog返回格式

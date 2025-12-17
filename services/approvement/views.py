@@ -16,7 +16,7 @@ from libs.security.authorization import requires_permission
 from models import Approvement
 from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
 
-approve_bp = Blueprint('approve', url_prefix='/approve')
+approve_bp = Blueprint("approve", url_prefix="/approve")
 _all__ = ["approve_bp"]
 
 
@@ -29,34 +29,12 @@ _all__ = ["approve_bp"]
             "schema": {
                 "type": "object",
                 "properties": {
-                    "page": {
-                        "type": "integer",
-                        "description": "页码"
-                    },
-                    "size": {
-                        "type": "integer",
-                        "description": "每页数量"
-                    },
-                    "keyword": {
-                        "type": "string",
-                        "description": "关键字，模糊搜索审核标题或者审核内容"
-                    },
-                    "status": {
-                        "type": "array",
-                        "items": {
-                            "type": "integer"
-                        },
-                        "description": "处理状态，支持同时过滤多个状态，0代表待处理，1代表通过，2代表拒绝，3代表已过期"
-                    },
-                    "ctime": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "搜索时使用，支持搜索创建时间",
-                        "example": ["2021-01-01T00:00:00Z", "2021-01-31T23:59:59Z"]
-                    },
-                }
+                    "page": {"type": "integer", "description": "页码"},
+                    "size": {"type": "integer", "description": "每页数量"},
+                    "keyword": {"type": "string", "description": "关键字，模糊搜索审核标题或者审核内容"},
+                    "status": {"type": "array", "items": {"type": "integer"}, "description": "处理状态，支持同时过滤多个状态，0代表待处理，1代表通过，2代表拒绝，3代表已过期"},
+                    "ctime": {"type": "array", "items": {"type": "string"}, "description": "搜索时使用，支持搜索创建时间", "example": ["2021-01-01T00:00:00Z", "2021-01-31T23:59:59Z"]},
+                },
             }
         }
     },
@@ -97,26 +75,19 @@ _all__ = ["approve_bp"]
                                                 "flow_id": {"type": "string"},
                                                 "approvers": {
                                                     "type": "array",
-                                                    "items": {
-                                                        "type": "object",
-                                                        "properties": {
-                                                            "id": {"type": "string"},
-                                                            "username": {"type": "string"},
-                                                            "display_name": {"type": "string"}
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                                                    "items": {"type": "object", "properties": {"id": {"type": "string"}, "username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                                },
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 @requires_permission("approve:r")
 async def all_approvement(request):
@@ -125,7 +96,7 @@ async def all_approvement(request):
     size = int(params.get("size", 15))
     offset = (page - 1) * size
 
-    condition = Q(approvers=request.ctx.session['account_info'].id)
+    condition = Q(approvers=request.ctx.session["account_info"].id)
     keyword = params.get("keyword")
     status = params.get("status")
     ctime = params.get("ctime")
@@ -136,7 +107,7 @@ async def all_approvement(request):
         condition = condition & Q(status__in=status)
 
     if ctime and len(ctime) == 2:
-        condition = condition & Q(ctime__range=[datetime.strptime(TZ.localize(t), '%Y-%m-%d %H:%M:%S') for t in ctime])
+        condition = condition & Q(ctime__range=[datetime.strptime(TZ.localize(t), "%Y-%m-%d %H:%M:%S") for t in ctime])
 
     await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
     total = await Approvement.filter(condition).count()
@@ -144,13 +115,7 @@ async def all_approvement(request):
     if total > 0:
         records = await Approvement.filter(condition).offset(offset).limit(size).prefetch_related("flow", "approvers").all()
 
-    return response_ok({
-        "total": total,
-        "page": page,
-        "size": size,
-        "total_pages": (total + size - 1) // size,
-        "data": [r.json for r in records]
-    })
+    return response_ok({"total": total, "page": page, "size": size, "total_pages": (total + size - 1) // size, "data": [r.json for r in records]})
 
 
 @approve_bp.post("/todolist")
@@ -175,16 +140,16 @@ async def all_approvement(request):
                                         "content": {"type": "string"},
                                         "expire_time": {"type": "string"},
                                         "created_at": {"type": "string"},
-                                        "approve_type": {"type": "integer"}
-                                    }
-                                }
-                            }
-                        }
+                                        "approve_type": {"type": "integer"},
+                                    },
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 async def todo_approvement(request):
     # 修改过期任务状态,后端就不做定时任务了
@@ -200,8 +165,8 @@ async def todo_approvement(request):
     async with in_transaction() as conn:
         rows = await conn.execute_query_dict(sql)
         for row in rows:
-            row["created_at"] = row["created_at"].astimezone(pytz.timezone('Asia/Shanghai')).strftime("%Y-%m-%d %H:%M:%S")
-            row["expire_time"] = row["expire_time"].astimezone(pytz.timezone('Asia/Shanghai')).strftime("%Y-%m-%d %H:%M:%S")
+            row["created_at"] = row["created_at"].astimezone(pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+            row["expire_time"] = row["expire_time"].astimezone(pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
         return response_ok(rows)
 
 
@@ -215,45 +180,15 @@ async def todo_approvement(request):
                 "type": "object",
                 "required": ["id", "agree"],
                 "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "审核id"
-                    },
-                    "agree": {
-                        "type": "boolean",
-                        "description": "布尔类型：True/False，同意或拒绝"
-                    },
-                    "remark": {
-                        "type": "string",
-                        "description": "审批备注信息"
-                    },
-                    "params": {
-                        "type": "array",
-                        "items": {
-                            "type": "object"
-                        },
-                        "description": "自定义参数的内容信息"
-                    }
-                }
+                    "id": {"type": "string", "description": "审核id"},
+                    "agree": {"type": "boolean", "description": "布尔类型：True/False，同意或拒绝"},
+                    "remark": {"type": "string", "description": "审批备注信息"},
+                    "params": {"type": "array", "items": {"type": "object"}, "description": "自定义参数的内容信息"},
+                },
             }
         }
     },
-    response={
-        "200": {
-            "description": "更新成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {"type": "string"}
-                        }
-                    }
-                }
-            }
-        }
-    }
+    response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
 @requires_permission("approve:u")
 async def update_approvement(request):
@@ -274,16 +209,10 @@ async def update_approvement(request):
 
     if params:
         approve.params = params
-    account_info = request.ctx.session['account_info']
+    account_info = request.ctx.session["account_info"]
     approve.results = {
         **approve.results,
-        account_info.id: {
-            "username": account_info.username,
-            "display_name": account_info.display_name,
-            "agree": agree,
-            "remark": remark,
-            "approve_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
+        account_info.id: {"username": account_info.username, "display_name": account_info.display_name, "agree": agree, "remark": remark, "approve_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
     }
 
     if agree:
@@ -299,15 +228,19 @@ async def update_approvement(request):
     await approve.save()
 
     msg = {
-        "run_type": 'flow', "run_id": approve.run_id,
+        "run_type": "flow",
+        "run_id": approve.run_id,
         "run_args": {
-            "flow_id": approve.flow_id, "flow_input": params, "approval_node_id": approve.audit_node, "approval_status": approve.status,
-            "executor": ",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session['account_info'].id
-        }
+            "flow_id": approve.flow_id,
+            "flow_input": params,
+            "approval_node_id": approve.audit_node,
+            "approval_status": approve.status,
+            "executor": ",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session["account_info"].id,
+        },
     }
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
-    return response_ok('success')
+    return response_ok("success")
 
 
 @approve_bp.post("/callback", name="approve_callback_post")
@@ -321,45 +254,15 @@ async def update_approvement(request):
                 "type": "object",
                 "required": ["token", "agree"],
                 "properties": {
-                    "token": {
-                        "type": "string",
-                        "description": "审核的唯一token"
-                    },
-                    "agree": {
-                        "type": "boolean",
-                        "description": "布尔类型：True/False，同意或拒绝"
-                    },
-                    "remark": {
-                        "type": "string",
-                        "description": "审批备注信息"
-                    },
-                    "params": {
-                        "type": "array",
-                        "items": {
-                            "type": "object"
-                        },
-                        "description": "自定义参数的内容信息"
-                    }
-                }
+                    "token": {"type": "string", "description": "审核的唯一token"},
+                    "agree": {"type": "boolean", "description": "布尔类型：True/False，同意或拒绝"},
+                    "remark": {"type": "string", "description": "审批备注信息"},
+                    "params": {"type": "array", "items": {"type": "object"}, "description": "自定义参数的内容信息"},
+                },
             }
         }
     },
-    response={
-        "200": {
-            "description": "更新成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {"type": "string"}
-                        }
-                    }
-                }
-            }
-        }
-    }
+    response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
 @requires_permission("approve:u")
 async def update_approvement(request):
@@ -382,36 +285,26 @@ async def update_approvement(request):
     if params:
         approve.params = params
 
-    approve.results = {
-        **approve.results,
-        token: {
-            "username": 'callback',
-            "display_name": '外部回调',
-            "agree": agree,
-            "remark": remark,
-            "approve_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-    }
+    approve.results = {**approve.results, token: {"username": "callback", "display_name": "外部回调", "agree": agree, "remark": remark, "approve_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}}
 
     if agree:
-        if approve.approve_type == 2:
-            # 如果是会签，只有所有审批人都同意了，才进行下一步
-            if len(approve.results) == len(approve.approvers):
-                approve.status = 1
-        else:
-            approve.status = 1
+        approve.status = 1
     else:
         approve.status = 2
 
     await approve.save()
 
     msg = {
-        "run_type": 'flow', "run_id": approve.run_id,
+        "run_type": "flow",
+        "run_id": approve.run_id,
         "run_args": {
-            "flow_id": approve.flow_id, "flow_input": params, "approval_node_id": approve.audit_node, "approval_status": approve.status,
-            "executor": ",".join([p.id for p in approve.approvers])
-        }
+            "flow_id": approve.flow_id,
+            "flow_input": params,
+            "approval_node_id": approve.audit_node,
+            "approval_status": approve.status,
+            "executor": ",".join([p.id for p in approve.approvers]),
+        },
     }
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
-    return response_ok('success')
+    return response_ok("success")

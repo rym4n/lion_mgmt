@@ -28,7 +28,7 @@ from services.tools.views import tool_action_update
 from services.workflow.views import statistics_data
 from settings import SECRET, SESSION_ENCODING_ALGORITHM, BASE_DIR, VECTOR_CFG, AUTHENTICATION_SESSION_EXPIRATION
 
-system_bp = Blueprint('system', url_prefix='/system')
+system_bp = Blueprint("system", url_prefix="/system")
 _all__ = ["system_bp"]
 
 
@@ -41,53 +41,17 @@ _all__ = ["system_bp"]
             "schema": {
                 "type": "object",
                 "properties": {
-                    "copyright": {
-                        "type": "string",
-                        "description": "版权"
-                    },
-                    "system_name": {
-                        "type": "string",
-                        "description": "系统名"
-                    },
-                    "system_version": {
-                        "type": "string",
-                        "description": "系统版本"
-                    },
-                    "background": {
-                        "type": "string",
-                        "format": "binary",
-                        "description": "背景图"
-                    },
-                    "webico": {
-                        "type": "string",
-                        "format": "binary",
-                        "description": "网页ico"
-                    },
-                    "logo": {
-                        "type": "string",
-                        "format": "binary",
-                        "description": "logo"
-                    }
-                }
+                    "copyright": {"type": "string", "description": "版权"},
+                    "system_name": {"type": "string", "description": "系统名"},
+                    "system_version": {"type": "string", "description": "系统版本"},
+                    "background": {"type": "string", "format": "binary", "description": "背景图"},
+                    "webico": {"type": "string", "format": "binary", "description": "网页ico"},
+                    "logo": {"type": "string", "format": "binary", "description": "logo"},
+                },
             }
         }
     },
-    response={
-        "200": {
-            "description": "保存成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {"type": "string"}
-                        }
-                    }
-                }
-            }
-        }
-    }
+    response={"200": {"description": "保存成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
 @requires_permission("system:c")
 async def upload_image(request):
@@ -116,7 +80,7 @@ async def upload_image(request):
             "MultiTagsCache": False,
             "KeepAlive": True,
             "Layout": "horizontal",
-            "Theme": os.environ.get('RY_MGMT_THEME') or 'oceanBlue',
+            "Theme": os.environ.get("RY_MGMT_THEME") or "oceanBlue",
             "DarkMode": False,
             "OverallStyle": "default",
             "Grey": False,
@@ -132,14 +96,14 @@ async def upload_image(request):
             "CachingAsyncRoutes": False,
             "TooltipEffect": "default",
             "ResponsiveStorageNameSpace": "responsive-",
-            "MenuSearchHistory": 6
+            "MenuSearchHistory": 6,
         }
         await Config.create(key="platform_config", module="system", value=orjson.dumps(default).decode())
 
     # 处理文件上传
     for field in ["background", "logo"]:
         file = request.files.get(field)
-        filename = ''
+        filename = ""
         if file:
             original_name = file.name
             _, ext = os.path.splitext(original_name)
@@ -158,30 +122,8 @@ async def upload_image(request):
 @openapi.definition(
     summary="获取自定义图片",
     description="获取自定义图片",
-    parameter=[
-        {
-            "name": "type",
-            "in": "query",
-            "description": "图片类型: background, webico, logo",
-            "required": True,
-            "schema": {
-                "type": "string"
-            }
-        }
-    ],
-    response={
-        "200": {
-            "description": "获取成功",
-            "content": {
-                "image/*": {
-                    "schema": {
-                        "type": "string",
-                        "format": "binary"
-                    }
-                }
-            }
-        }
-    }
+    parameter=[{"name": "type", "in": "query", "description": "图片类型: background, webico, logo", "required": True, "schema": {"type": "string"}}],
+    response={"200": {"description": "获取成功", "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}}}},
 )
 async def get_bgpic(request):
     pic_type = request.args.get("type")
@@ -190,7 +132,7 @@ async def get_bgpic(request):
     cfg = await Config.get_or_none(key=pic_type, module="system")
     if cfg:
         return response_ok({"url": cfg.value})
-    return response.raw(b'', content_type="image/png")
+    return response.raw(b"", content_type="image/png")
 
 
 @system_bp.get("/platform")
@@ -229,13 +171,13 @@ async def get_bgpic(request):
                             "CachingAsyncRoutes": {"type": "boolean"},
                             "TooltipEffect": {"type": "string"},
                             "ResponsiveStorageNameSpace": {"type": "string"},
-                            "MenuSearchHistory": {"type": "integer"}
-                        }
+                            "MenuSearchHistory": {"type": "integer"},
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 async def get_platform_config(request):
     cfg = await Config.get_or_none(key="platform_config", module="system")
@@ -248,7 +190,7 @@ async def get_platform_config(request):
         "MultiTagsCache": False,
         "KeepAlive": True,
         "Layout": "horizontal",
-        "Theme": os.environ.get('RY_MGMT_THEME') or 'oceanBlue',
+        "Theme": os.environ.get("RY_MGMT_THEME") or "oceanBlue",
         "DarkMode": False,
         "OverallStyle": "default",
         "Grey": False,
@@ -264,7 +206,7 @@ async def get_platform_config(request):
         "CachingAsyncRoutes": False,
         "TooltipEffect": "default",
         "ResponsiveStorageNameSpace": "responsive-",
-        "MenuSearchHistory": 6
+        "MenuSearchHistory": 6,
     }
 
     if cfg:
@@ -295,44 +237,53 @@ async def get_platform_config(request):
                                         "name": {"type": "string"},
                                         "status": {"type": "string"},
                                         "start_time": {"type": "string"},
-                                        "check_time": {"type": "string"}
-                                    }
-                                }
-                            }
-                        }
+                                        "check_time": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 @requires_permission("status:r")
 @cached(timeout=120)
 async def get_system_status(request):
     name_map = {
-        'lion-mgmt': '控制台服务', 'lion-web': 'Web服务器', 'lion-db': '数据库服务', 'lion-kb': '数据库服务',
-        'lion-redis': '缓存服务', 'lion-ship': 'ETL服务', 'lion-job': '任务调度服务', 'lion-worker': '执行引擎',
-        'lion-kafka': '消息队列', 'lion-ai': 'AI服务', 'lion-fs': '文件存储服务', 'lion-vl': '日志存储服务',
-        'lion-es': '日志存储服务'
+        "lion-mgmt": "控制台服务",
+        "lion-web": "Web服务器",
+        "lion-db": "数据库服务",
+        "lion-kb": "数据库服务",
+        "lion-redis": "缓存服务",
+        "lion-ship": "ETL服务",
+        "lion-job": "任务调度服务",
+        "lion-worker": "执行引擎",
+        "lion-kafka": "消息队列",
+        "lion-ai": "AI服务",
+        "lion-fs": "文件存储服务",
+        "lion-vl": "日志存储服务",
+        "lion-es": "日志存储服务",
     }
     # 遍历目录获取 status_ 开头的json文件
-    data_dir = os.path.join(BASE_DIR, 'data')
-    status_files = [f for f in os.listdir(data_dir) if f.startswith('status_') and f.endswith('.json')]
+    data_dir = os.path.join(BASE_DIR, "data")
+    status_files = [f for f in os.listdir(data_dir) if f.startswith("status_") and f.endswith(".json")]
     if not status_files:
         raise CustomError(ErrorCode.CheckStatusNotFound)
     result = []
     for file in status_files:
-        ip = file.split('_')[1].strip('.json')
+        ip = file.split("_")[1].strip(".json")
         file_path = os.path.join(data_dir, file)
         modify_time = datetime.strftime(datetime.fromtimestamp(os.path.getmtime(file_path)), "%Y-%m-%d %H:%M:%S")
-        async with aiofile.AIOFile(file_path, 'r', encoding='utf-8') as f:
+        async with aiofile.AIOFile(file_path, "r", encoding="utf-8") as f:
             content = await f.read()
             data = orjson.loads(content)
             for item in data:
-                item['host'] = ip
-                item['name'] = name_map.get(item['name'], item['name'])
-                item['start_time'] = strip_timezone_to_seconds(item['start_time'])
-                item['check_time'] = modify_time
+                item["host"] = ip
+                item["name"] = name_map.get(item["name"], item["name"])
+                item["start_time"] = strip_timezone_to_seconds(item["start_time"])
+                item["check_time"] = modify_time
                 result.append(item)
 
     return response_ok(result)
@@ -345,41 +296,24 @@ async def get_system_status(request):
     response={
         "200": {
             "description": "获取成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "use_oauth2": {"type": "boolean"}
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"use_oauth2": {"type": "boolean"}}}}}}},
         }
-    }
+    },
 )
 async def get_oauth_status(request):
-    if request.cookies.get("aioe-auth") and ':' not in request.cookies.get("aioe-auth"):
+    if request.cookies.get("aioe-auth") and ":" not in request.cookies.get("aioe-auth"):
         try:
             token = request.cookies.get("aioe-auth")
             payload = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
             account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
             if account:
                 resp = account.json
-                resp['use_oauth2'] = request.app.ctx.oauth_cfg.get('use_oauth2') == 'true'
+                resp["use_oauth2"] = request.app.ctx.oauth_cfg.get("use_oauth2") == "true"
                 return response_ok(resp)
         except Exception:
             pass
 
-    return response_ok({
-        "use_oauth2": request.app.ctx.oauth_cfg.get('use_oauth2') == 'true'
-    })
+    return response_ok({"use_oauth2": request.app.ctx.oauth_cfg.get("use_oauth2") == "true"})
 
 
 @system_bp.post("/oauth/get")
@@ -412,38 +346,40 @@ async def get_oauth_status(request):
                                     "display_name_path": {"type": "string"},
                                     "email_path": {"type": "string"},
                                     "phone_path": {"type": "string"},
-                                    "scopes": {"type": "string"}
-                                }
-                            }
-                        }
+                                    "scopes": {"type": "string"},
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 @requires_permission("sso:r")
 async def get_oauth_config(request):
-    records = await Config.filter(module='sso').values('key', 'value')
-    oauth_config = {c['key']: c['value'] for c in records}
+    records = await Config.filter(module="sso").values("key", "value")
+    oauth_config = {c["key"]: c["value"] for c in records}
     secret = oauth_config.get("client_secret", "")
-    return response_ok({
-        "use_oauth2": oauth_config.get("use_oauth2", "false"),
-        "auto_create": oauth_config.get("auto_create", "false"),
-        "client_id": oauth_config.get("client_id", ""),
-        "client_id_alias": oauth_config.get("client_id_alias", ""),
-        "client_secret": secret[:3] + "******" + secret[-3:] if secret else "",
-        "client_secret_alias": oauth_config.get("client_secret_alias", ""),
-        "authorize_uri": oauth_config.get("authorize_uri", ""),
-        "token_uri": oauth_config.get("token_uri", ""),
-        "token_path": oauth_config.get("token_path", ""),
-        "user_info_uri": oauth_config.get("user_info_uri", ""),
-        "user_id_path": oauth_config.get("user_id_path", ""),
-        "display_name_path": oauth_config.get("display_name_path", ""),
-        "email_path": oauth_config.get("email_path", ""),
-        "phone_path": oauth_config.get("phone_path", ""),
-        "scopes": oauth_config.get("scopes", ""),
-    })
+    return response_ok(
+        {
+            "use_oauth2": oauth_config.get("use_oauth2", "false"),
+            "auto_create": oauth_config.get("auto_create", "false"),
+            "client_id": oauth_config.get("client_id", ""),
+            "client_id_alias": oauth_config.get("client_id_alias", ""),
+            "client_secret": secret[:3] + "******" + secret[-3:] if secret else "",
+            "client_secret_alias": oauth_config.get("client_secret_alias", ""),
+            "authorize_uri": oauth_config.get("authorize_uri", ""),
+            "token_uri": oauth_config.get("token_uri", ""),
+            "token_path": oauth_config.get("token_path", ""),
+            "user_info_uri": oauth_config.get("user_info_uri", ""),
+            "user_id_path": oauth_config.get("user_id_path", ""),
+            "display_name_path": oauth_config.get("display_name_path", ""),
+            "email_path": oauth_config.get("email_path", ""),
+            "phone_path": oauth_config.get("phone_path", ""),
+            "scopes": oauth_config.get("scopes", ""),
+        }
+    )
 
 
 @system_bp.post("/oauth/update")
@@ -454,102 +390,38 @@ async def get_oauth_config(request):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["use_oauth2", "auto_create", "client_id", "client_secret", "authorize_uri", "token_uri",
-                             "user_info_uri", "user_id_path", "token_path"],
+                "required": ["use_oauth2", "auto_create", "client_id", "client_secret", "authorize_uri", "token_uri", "user_info_uri", "user_id_path", "token_path"],
                 "properties": {
-                    "use_oauth2": {
-                        "type": "string",
-                        "description": "true 表示启用oauth认证, false 表示禁用"
-                    },
-                    "auto_create": {
-                        "type": "string",
-                        "description": "true 表示认证用户不存在的话自动新建, false 表示不新建"
-                    },
-                    "client_id": {
-                        "type": "string",
-                        "description": "客户端ID"
-                    },
-                    "client_id_alias": {
-                        "type": "string",
-                        "description": "客户端ID的名称，某些SSO可能叫app_id"
-                    },
-                    "client_secret": {
-                        "type": "string",
-                        "description": "客户端密钥"
-                    },
-                    "client_secret_alias": {
-                        "type": "string",
-                        "description": "客户端密钥的名称，某些SSO可能叫app_secret"
-                    },
-                    "authorize_uri": {
-                        "type": "string",
-                        "description": "获取授权码的URI"
-                    },
-                    "token_uri": {
-                        "type": "string",
-                        "description": "获取Token的URI"
-                    },
-                    "token_path": {
-                        "type": "string",
-                        "description": "Token的取值路径"
-                    },
-                    "user_info_uri": {
-                        "type": "string",
-                        "description": "获取用户信息的URI"
-                    },
-                    "user_id_path": {
-                        "type": "string",
-                        "description": "用户唯一标识的取值路径"
-                    },
-                    "display_name_path": {
-                        "type": "string",
-                        "description": "用户姓名的取值路径"
-                    },
-                    "email_path": {
-                        "type": "string",
-                        "description": "用户邮箱的取值路径"
-                    },
-                    "phone_path": {
-                        "type": "string",
-                        "description": "用户手机号的取值路径"
-                    },
-                    "scopes_alias": {
-                        "type": "string",
-                        "description": "请求资源范围的名称"
-                    },
-                    "scopes": {
-                        "type": "string",
-                        "description": "请求资源范围"
-                    }
-                }
+                    "use_oauth2": {"type": "string", "description": "true 表示启用oauth认证, false 表示禁用"},
+                    "auto_create": {"type": "string", "description": "true 表示认证用户不存在的话自动新建, false 表示不新建"},
+                    "client_id": {"type": "string", "description": "客户端ID"},
+                    "client_id_alias": {"type": "string", "description": "客户端ID的名称，某些SSO可能叫app_id"},
+                    "client_secret": {"type": "string", "description": "客户端密钥"},
+                    "client_secret_alias": {"type": "string", "description": "客户端密钥的名称，某些SSO可能叫app_secret"},
+                    "authorize_uri": {"type": "string", "description": "获取授权码的URI"},
+                    "token_uri": {"type": "string", "description": "获取Token的URI"},
+                    "token_path": {"type": "string", "description": "Token的取值路径"},
+                    "user_info_uri": {"type": "string", "description": "获取用户信息的URI"},
+                    "user_id_path": {"type": "string", "description": "用户唯一标识的取值路径"},
+                    "display_name_path": {"type": "string", "description": "用户姓名的取值路径"},
+                    "email_path": {"type": "string", "description": "用户邮箱的取值路径"},
+                    "phone_path": {"type": "string", "description": "用户手机号的取值路径"},
+                    "scopes_alias": {"type": "string", "description": "请求资源范围的名称"},
+                    "scopes": {"type": "string", "description": "请求资源范围"},
+                },
             }
         }
     },
-    response={
-        "200": {
-            "description": "更新成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {"type": "string"}
-                        }
-                    }
-                }
-            }
-        }
-    }
+    response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
 @requires_permission("sso:u")
 async def update_oauth_config(request):
     params = request.json
     use_oauth2 = params.get("use_oauth2")
-    if use_oauth2 not in ('true', 'false'):
+    if use_oauth2 not in ("true", "false"):
         raise CustomError(ErrorCode.ParameterError)
 
-    if use_oauth2 == 'false':
+    if use_oauth2 == "false":
         old = await Config.get_or_none(key="use_oauth2")
         if old:
             old.value = "false"
@@ -557,10 +429,8 @@ async def update_oauth_config(request):
         else:
             await Config.create(key="use_oauth2", value="false", module="sso")
     else:
-        required_fields = ["auto_create", "client_id", "client_secret", "authorize_uri", "token_uri", "user_info_uri",
-                           "user_id_path", "token_path"]
-        optional_fields = ["display_name_path", "email_path", "phone_path", "scopes", "client_id_alias",
-                           "client_secret_alias", "scopes_alias"]
+        required_fields = ["auto_create", "client_id", "client_secret", "authorize_uri", "token_uri", "user_info_uri", "user_id_path", "token_path"]
+        optional_fields = ["display_name_path", "email_path", "phone_path", "scopes", "client_id_alias", "client_secret_alias", "scopes_alias"]
         # 校验必填字段是否为空或不存在
         for field in required_fields:
             if not params.get(field):
@@ -568,9 +438,9 @@ async def update_oauth_config(request):
 
         # 收集所有要更新的键值对
         all_keys = required_fields + optional_fields
-        updates = {key: params.get(key, '') for key in all_keys}
-        updates['use_oauth2'] = 'true'
-        if "******" in params.get("client_secret", ''):
+        updates = {key: params.get(key, "") for key in all_keys}
+        updates["use_oauth2"] = "true"
+        if "******" in params.get("client_secret", ""):
             updates.pop("client_secret")
 
         # 使用事务保证原子性
@@ -589,18 +459,18 @@ async def update_oauth_config(request):
                     config.value = value
                     to_update.append(config)
                 else:
-                    to_create.append(Config(key=key, value=value, module='sso'))
+                    to_create.append(Config(key=key, value=value, module="sso"))
 
             # 批量更新
             if to_update:
-                await Config.bulk_update(to_update, fields=['value'])
+                await Config.bulk_update(to_update, fields=["value"])
 
             # 批量创建
             if to_create:
                 await Config.bulk_create(to_create)
 
     request.app.m.restart(zero_downtime=True, all_workers=True)
-    return response_ok('success')
+    return response_ok("success")
 
 
 @system_bp.post("/ai/update")
@@ -612,38 +482,14 @@ async def update_oauth_config(request):
             "schema": {
                 "type": "object",
                 "properties": {
-                    "llm_host": {
-                        "type": "string",
-                        "description": "AI服务的Host（需带有协议，如 https://xxx.com）"
-                    },
-                    "llm_api_key": {
-                        "type": "string",
-                        "description": "AI服务的API Key（可选，留空则不更新，无密钥时传\"EMPTY\"）"
-                    },
-                    "llm_model": {
-                        "type": "string",
-                        "description": "AI服务的模型名称（可选，留空则不更新）"
-                    }
-                }
+                    "llm_host": {"type": "string", "description": "AI服务的Host（需带有协议，如 https://xxx.com）"},
+                    "llm_api_key": {"type": "string", "description": 'AI服务的API Key（可选，留空则不更新，无密钥时传"EMPTY"）'},
+                    "llm_model": {"type": "string", "description": "AI服务的模型名称（可选，留空则不更新）"},
+                },
             }
         }
     },
-    response={
-        "200": {
-            "description": "设置成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {"type": "string"}
-                        }
-                    }
-                }
-            }
-        }
-    }
+    response={"200": {"description": "设置成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
 @requires_permission("system:u")
 async def set_ai(request):
@@ -654,12 +500,12 @@ async def set_ai(request):
         if params.get(a):
             await Config.update_or_create(key=a, defaults={"value": params[a]}, module="ai")
     ai_cfg = {a: params[a] for a in args}
-    await request.app.ctx.cache_client.set('ai_config', ai_cfg, 60 * 60 * 24)
+    await request.app.ctx.cache_client.set("ai_config", ai_cfg, 60 * 60 * 24)
 
-    return response_ok('success')
+    return response_ok("success")
 
 
-@system_bp.post('/transforms-update')
+@system_bp.post("/transforms-update")
 @openapi.definition(
     summary="更新transforms模型",
     description="更新transforms模型",
@@ -667,44 +513,15 @@ async def set_ai(request):
         "application/json": {
             "schema": {
                 "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "key": {"type": "string"},
-                                "value": {"type": "string"},
-                                "type": {"type": "string"}
-                            }
-                        }
-                    }
-                }
+                "properties": {"data": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}, "type": {"type": "string"}}}}},
             }
         }
     },
-    response={
-        "200": {
-            "description": "更新成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {"type": "string"}
-                        }
-                    }
-                }
-            }
-        }
-    }
+    response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
 async def transforms_update(request):
     for item in request.json.get("data"):
-        await Config.update_or_create(key=item.get("key"),
-                                      defaults={"value": item.get("value"), "type": item.get("type")},
-                                      module="transforms")
+        await Config.update_or_create(key=item.get("key"), defaults={"value": item.get("value"), "type": item.get("type")}, module="transforms")
 
     return response_ok("添加成功")
 
@@ -718,31 +535,13 @@ async def transforms_update(request):
             "schema": {
                 "type": "object",
                 "properties": {
-                    "username": {
-                        "type": "string",
-                        "description": "用户名"
-                    },
-                    "start_time": {
-                        "type": "string",
-                        "description": "开始时间"
-                    },
-                    "end_time": {
-                        "type": "string",
-                        "description": "结束时间"
-                    },
-                    "ip": {
-                        "type": "string",
-                        "description": "ip"
-                    },
-                    "page": {
-                        "type": "integer",
-                        "description": "页码"
-                    },
-                    "size": {
-                        "type": "integer",
-                        "description": "每页条数"
-                    }
-                }
+                    "username": {"type": "string", "description": "用户名"},
+                    "start_time": {"type": "string", "description": "开始时间"},
+                    "end_time": {"type": "string", "description": "结束时间"},
+                    "ip": {"type": "string", "description": "ip"},
+                    "page": {"type": "integer", "description": "页码"},
+                    "size": {"type": "integer", "description": "每页条数"},
+                },
             }
         }
     },
@@ -776,22 +575,22 @@ async def transforms_update(request):
                                                 "result": {"type": "string"},
                                                 "uri": {"type": "string"},
                                                 "client_ua": {"type": "string"},
-                                                "request_data": {"type": "object"}
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                                                "request_data": {"type": "object"},
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 @requires_permission("audit:r")
 async def search_audit(request):
-    page = int(request.json.get('page', 1))
+    page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 15))
     offset = (page - 1) * size
     limit = size
@@ -802,9 +601,9 @@ async def search_audit(request):
     ip = request.json.get("ip")
     filters = {}
     if start_time:
-        filters["ctime__gte"] = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
+        filters["ctime__gte"] = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
     if end_time:
-        filters["ctime__lte"] = datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
+        filters["ctime__lte"] = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
     if ip:
         filters["client_ip"] = ip
     if username:
@@ -813,13 +612,7 @@ async def search_audit(request):
     total = await AuditLog.filter(**filters).count()
     data = await AuditLog.filter(**filters).offset(offset).limit(limit)
 
-    return response_ok({
-        "total": total,
-        "page": page,
-        "size": size,
-        "total_pages": (total + size - 1) // size,
-        "data": [item.json for item in data]
-    })
+    return response_ok({"total": total, "page": page, "size": size, "total_pages": (total + size - 1) // size, "data": [item.json for item in data]})
 
 
 @system_bp.post("/outgoing")
@@ -833,55 +626,19 @@ async def search_audit(request):
                 "items": {
                     "type": "object",
                     "properties": {
-                        "sink_type": {
-                            "type": "string",
-                            "description": "外发类型，可选kafka或syslog"
-                        },
-                        "sink_address": {
-                            "type": "string",
-                            "description": "外发地址，包括端口，多个地址用,分隔"
-                        },
-                        "sink_protocol": {
-                            "type": "string",
-                            "description": "外发协议，可选tcp或udp"
-                        },
-                        "kafka_topic": {
-                            "type": "string",
-                            "description": "kafka主题名称，可选"
-                        },
-                        "sasl_mechanism": {
-                            "type": "string",
-                            "description": "SASL机制，可选"
-                        },
-                        "sasl_username": {
-                            "type": "string",
-                            "description": "SASL用户名，可选"
-                        },
-                        "sasl_password": {
-                            "type": "string",
-                            "description": "SASL密码，可选"
-                        }
-                    }
-                }
+                        "sink_type": {"type": "string", "description": "外发类型，可选kafka或syslog"},
+                        "sink_address": {"type": "string", "description": "外发地址，包括端口，多个地址用,分隔"},
+                        "sink_protocol": {"type": "string", "description": "外发协议，可选tcp或udp"},
+                        "kafka_topic": {"type": "string", "description": "kafka主题名称，可选"},
+                        "sasl_mechanism": {"type": "string", "description": "SASL机制，可选"},
+                        "sasl_username": {"type": "string", "description": "SASL用户名，可选"},
+                        "sasl_password": {"type": "string", "description": "SASL密码，可选"},
+                    },
+                },
             }
         }
     },
-    response={
-        "200": {
-            "description": "配置成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {"type": "string"}
-                        }
-                    }
-                }
-            }
-        }
-    }
+    response={"200": {"description": "配置成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
 @requires_permission("audit:r")
 async def outgoing(request):
@@ -924,49 +681,26 @@ async def outgoing(request):
             password = item.get("sasl_password")
             if not topic:
                 raise CustomError(ErrorCode.ParameterError)
-            data["sinks"]["kafka_sinks_" + str(m)] = {
-                "type": "kafka",
-                "inputs": ["aioe_kafka_audit"],
-                "bootstrap_servers": ",".join(sink_address),
-                "topic": topic,
-                "encoding": {
-                    "codec": "json"
-                }
-            }
+            data["sinks"]["kafka_sinks_" + str(m)] = {"type": "kafka", "inputs": ["aioe_kafka_audit"], "bootstrap_servers": ",".join(sink_address), "topic": topic, "encoding": {"codec": "json"}}
             if mechanism:
-                data["sinks"]["kafka_sinks"]["sasl"] = {
-                    "enabled": True,
-                    "mechanism": mechanism,
-                    "username": username,
-                    "password": password
-                }
+                data["sinks"]["kafka_sinks"]["sasl"] = {"enabled": True, "mechanism": mechanism, "username": username, "password": password}
         if sink_type == "syslog":
             mode = item.get("sink_protocol")
             if not mode:
                 raise CustomError(ErrorCode.ParameterError)
             for address in sink_address:
-                data["sinks"]["syslog_sinks_" + str(m)] = {
-                    "type": "socket",
-                    "inputs": ["aioe_kafka_audit"],
-                    "address": address,
-                    "mode": mode,
-                    "encoding": {
-                        "codec": "json"
-                    }
-                }
+                data["sinks"]["syslog_sinks_" + str(m)] = {"type": "socket", "inputs": ["aioe_kafka_audit"], "address": address, "mode": mode, "encoding": {"codec": "json"}}
         m += 1
 
     class QuotedString(str):
         pass
 
     def quoted_presenter(dumper, data):
-        return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='"')
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
 
     yaml.add_representer(QuotedString, quoted_presenter)
 
-    data['sinks']['aioe_pg_audit']['endpoint'] = QuotedString(
-        data['sinks']['aioe_pg_audit']['endpoint']
-    )
+    data["sinks"]["aioe_pg_audit"]["endpoint"] = QuotedString(data["sinks"]["aioe_pg_audit"]["endpoint"])
 
     yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
@@ -975,7 +709,7 @@ async def outgoing(request):
     if not result:
         raise CustomError(ErrorCode.OutboundFileConfigurationFailed)
 
-    async with aiofile.AIOFile(yaml_file, mode='w', encoding='utf-8') as file:
+    async with aiofile.AIOFile(yaml_file, mode="w", encoding="utf-8") as file:
         await file.write(yaml_str)
 
     await Config.update_or_create(key="outgoing_audit_log", module="audit_log", defaults={"value": str(json_data)})
@@ -1007,16 +741,16 @@ async def outgoing(request):
                                         "kafka_topic": {"type": "string"},
                                         "sasl_mechanism": {"type": "string"},
                                         "sasl_username": {"type": "string"},
-                                        "sasl_password": {"type": "string"}
-                                    }
-                                }
-                            }
-                        }
+                                        "sasl_password": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 @requires_permission("audit:r")
 async def get_outgoing_config(request):
@@ -1032,36 +766,8 @@ async def get_outgoing_config(request):
 @openapi.definition(
     summary="更新维护模式状态",
     description="更新维护模式状态，需要audit:r权限",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "required": ["mt_status"],
-                "properties": {
-                    "mt_status": {
-                        "type": "integer",
-                        "description": "1表示开启维护模式，0表示关闭维护模式"
-                    }
-                }
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "更新成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {"type": "string"}
-                        }
-                    }
-                }
-            }
-        }
-    }
+    body={"application/json": {"schema": {"type": "object", "required": ["mt_status"], "properties": {"mt_status": {"type": "integer", "description": "1表示开启维护模式，0表示关闭维护模式"}}}}},
+    response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
 @requires_permission("audit:r")
 async def update_maintenance_mode_status(request):
@@ -1083,20 +789,7 @@ async def update_maintenance_mode_status(request):
 @openapi.definition(
     summary="上传文件",
     description="上传文件，需要audit:r权限",
-    body={
-        "multipart/form-data": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "file": {
-                        "type": "string",
-                        "format": "binary",
-                        "description": "字节流文件"
-                    }
-                }
-            }
-        }
-    },
+    body={"multipart/form-data": {"schema": {"type": "object", "properties": {"file": {"type": "string", "format": "binary", "description": "字节流文件"}}}}},
     response={
         "200": {
             "description": "上传成功",
@@ -1113,22 +806,17 @@ async def update_maintenance_mode_status(request):
                                         "type": "array",
                                         "items": {
                                             "type": "object",
-                                            "properties": {
-                                                "filename": {"type": "string"},
-                                                "file_id": {"type": "string"},
-                                                "size": {"type": "integer"},
-                                                "result": {"type": "string"}
-                                            }
-                                        }
+                                            "properties": {"filename": {"type": "string"}, "file_id": {"type": "string"}, "size": {"type": "integer"}, "result": {"type": "string"}},
+                                        },
                                     }
-                                }
-                            }
-                        }
+                                },
+                            },
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
 @requires_permission("audit:r")
 async def update_file(request):
@@ -1142,17 +830,12 @@ async def update_file(request):
         filename = f.name or f.filename
         ext = filename.split(".")[-1]
         file_id = str(uuid.uuid4())
-        s3_filename = file_id + '.' + ext
+        s3_filename = file_id + "." + ext
 
         # 异步写入文件
         await utils.upload_to_s3(f.body, "user", s3_filename, "common_files")
 
-        file_info = {
-            "filename": filename,
-            "file_id": s3_filename,
-            "size": len(f.body),
-            "result": "success"
-        }
+        file_info = {"filename": filename, "file_id": s3_filename, "size": len(f.body), "result": "success"}
         saved_files.append(file_info)
 
     return response_ok({"files": saved_files})
@@ -1163,38 +846,10 @@ async def update_file(request):
     summary="下载文件",
     description="下载文件",
     parameter=[
-        {
-            "name": "file_id",
-            "in": "path",
-            "description": "文件名（上传时返回的 file_id）",
-            "required": True,
-            "schema": {
-                "type": "string"
-            }
-        },
-        {
-            "name": "download_name",
-            "in": "query",
-            "description": "下载文件名",
-            "required": False,
-            "schema": {
-                "type": "string"
-            }
-        }
+        {"name": "file_id", "in": "path", "description": "文件名（上传时返回的 file_id）", "required": True, "schema": {"type": "string"}},
+        {"name": "download_name", "in": "query", "description": "下载文件名", "required": False, "schema": {"type": "string"}},
     ],
-    response={
-        "200": {
-            "description": "下载成功",
-            "content": {
-                "application/octet-stream": {
-                    "schema": {
-                        "type": "string",
-                        "format": "binary"
-                    }
-                }
-            }
-        }
-    }
+    response={"200": {"description": "下载成功", "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}}}},
 )
 async def download_file(request, file_id):
     if not file_id:
@@ -1207,7 +862,7 @@ async def download_file(request, file_id):
         tmp_path = os.path.join("/tmp", file_id)
         os.makedirs(os.path.dirname(tmp_path), exist_ok=True)
 
-        async with aiofile.AIOFile(tmp_path, 'wb') as afp:
+        async with aiofile.AIOFile(tmp_path, "wb") as afp:
             await afp.write(content)
 
         download_name = request.args.get("download_name") or safe_name
@@ -1218,17 +873,10 @@ async def download_file(request, file_id):
 
         # 对中文文件名进行编码（RFC 5987）
         quoted_filename = quote(download_name)
-        headers = {
-            "Content-Disposition": f"attachment; filename=\"{download_name}\";filename*=UTF-8''{quoted_filename}",
-            "Content-Type": "application/octet-stream; charset=utf-8"
-        }
+        headers = {"Content-Disposition": f"attachment; filename=\"{download_name}\";filename*=UTF-8''{quoted_filename}", "Content-Type": "application/octet-stream; charset=utf-8"}
 
         try:
-            return await response.file(
-                tmp_path,
-                mime_type="application/octet-stream",
-                headers=headers
-            )
+            return await response.file(tmp_path, mime_type="application/octet-stream", headers=headers)
         finally:
             await asyncio.to_thread(os.remove, tmp_path)
     else:
@@ -1239,40 +887,13 @@ async def download_file(request, file_id):
 @openapi.definition(
     summary="初始化剧本",
     description="初始化剧本",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "required": ["flow_list"],
-                "properties": {
-                    "flow_list": {
-                        "type": "array",
-                        "items": {
-                            "type": "object"
-                        },
-                        "description": "剧本列表"
-                    }
-                }
-            }
-        }
-    },
+    body={"application/json": {"schema": {"type": "object", "required": ["flow_list"], "properties": {"flow_list": {"type": "array", "items": {"type": "object"}, "description": "剧本列表"}}}}},
     response={
         "200": {
             "description": "创建成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {"type": "string"},
-                            "message": {"type": "string"}
-                        }
-                    }
-                }
-            }
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
         }
-    }
+    },
 )
 @requires_permission("workflow:c")
 async def create_workflow(request):
@@ -1286,7 +907,7 @@ async def create_workflow(request):
             raise CustomError(ErrorCode.PlaybookNameExists)
 
         flow_json_list = flow_data.get("flow_json_list") or []
-        creator = request.ctx.session['account_info']
+        creator = request.ctx.session["account_info"]
         admin = await Role.get(id="111111")
         async with in_transaction():
             playbook = await Playbook.create(
@@ -1296,24 +917,13 @@ async def create_workflow(request):
                 creator=creator,
                 internal=True,
             )
-            await PlaybookPermissions.create(pb=playbook, users=creator, roles=None,
-                                             permissions=["r", "u", "d", "e", "p"])
-            await PlaybookPermissions.create(pb=playbook, users=None, roles=admin,
-                                             permissions=["r", "u", "d", "e", "p"])
+            await PlaybookPermissions.create(pb=playbook, users=creator, roles=None, permissions=["r", "u", "d", "e", "p"])
+            await PlaybookPermissions.create(pb=playbook, users=None, roles=admin, permissions=["r", "u", "d", "e", "p"])
 
             for flow_json in flow_json_list:
-                pv = await PlaybookVersion.create(
-                    playbook=playbook,
-                    version=gen_run_id(),
-                    status=0,
-                    change_desc="",
-                    flow_json=flow_json,
-                    creator=creator,
-                    updator=creator,
-                    flow_timeout=300
-                )
+                pv = await PlaybookVersion.create(playbook=playbook, version=gen_run_id(), status=0, change_desc="", flow_json=flow_json, creator=creator, updator=creator, flow_timeout=300)
 
                 action_ids = await statistics_data(flow_json)
                 await tool_action_update({pv.id: action_ids})
 
-    return response_ok('success')
+    return response_ok("success")

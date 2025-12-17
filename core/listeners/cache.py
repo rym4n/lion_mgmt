@@ -18,13 +18,13 @@ class CacheListener(BaseListener):
     async def after_server_start(self, app: Sanic, loop: BaseEventLoop) -> None:
         """app绑定内存/Redis"""
         caches.set_config(CACHE)
-        app.ctx.cache_client = caches.get('redis_mgmt')
+        app.ctx.cache_client = caches.get("redis_mgmt")
         logger.info("使用Redis作为缓存")
 
-        records = await Config.filter(module='sso').values('key', 'value')
-        app.ctx.oauth_cfg = {c['key']: c['value'] for c in records}
+        records = await Config.filter(module="sso").values("key", "value")
+        app.ctx.oauth_cfg = {c["key"]: c["value"] for c in records}
 
-        if app.ctx.oauth_cfg.get('use_oauth2') == 'true':
+        if app.ctx.oauth_cfg.get("use_oauth2") == "true":
             logger.info("启用OAuth2认证")
             client_id = app.ctx.oauth_cfg.get("client_id")
             client_secret = app.ctx.oauth_cfg.get("client_secret")
@@ -36,15 +36,9 @@ class CacheListener(BaseListener):
                 return
 
             scopes = app.ctx.oauth_cfg.get("scopes")
-            base_scopes = scopes.split(',') if scopes else None
+            base_scopes = scopes.split(",") if scopes else None
 
-            app.ctx.oauth2 = OAuth2(
-                client_id,
-                client_secret,
-                authorize_uri,
-                token_uri,
-                base_scopes=base_scopes
-            )
+            app.ctx.oauth2 = OAuth2(client_id, client_secret, authorize_uri, token_uri, base_scopes=base_scopes)
 
         app.add_task(chat_manager.msg_listener, name="chat_msg_listener")
         app.add_task(chat_manager.log_listener, name="run_log_listener")
@@ -57,7 +51,7 @@ class CacheListener(BaseListener):
         except Exception as e:
             logger.warning(f"释放资源异常: {e}")
         finally:
-            cache_client = getattr(app.ctx, 'cache_client', None)
+            cache_client = getattr(app.ctx, "cache_client", None)
             if cache_client:
                 await cache_client.close()
                 logger.info("Redis closed.")
