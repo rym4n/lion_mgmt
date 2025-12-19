@@ -19,13 +19,7 @@ class Tag(BaseModel):
 
     @property
     def json(self) -> dict:
-        return {
-            "id": self.id,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-            "utime": strip_timezone_to_seconds(self.utime),
-            "name": self.name,
-            "type": self.type
-        }
+        return {"id": self.id, "ctime": strip_timezone_to_seconds(self.ctime), "utime": strip_timezone_to_seconds(self.utime), "name": self.name, "type": self.type}
 
     class Meta:
         table = "tag"

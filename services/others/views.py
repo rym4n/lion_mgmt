@@ -51,11 +51,7 @@ async def activity(request, activityId):
     else:
         result["excuteStatus"] = "SUCCESS"
 
-    return response.json({
-        "code": 0,
-        "data": [log.json for log in logs],
-        "result": result
-    })
+    return response.json({"code": 0, "data": [log.json for log in logs], "result": result})
 
 
 @openapi.exclude()
@@ -80,38 +76,27 @@ async def playbook_list(request):
             "grade": None,
             "playbookCategory": "COMMONEVENT",
             "sceneList": [
-                {
-                    "id": scene.id,
-                    "name": scene.name,
-                    "display": scene.remark,
-                    "severity": str(scene.status),
-                    "effective": True if scene.status == 1 else False
-                }
-                for scene in pv.playbook.scenes
+                {"id": scene.id, "name": scene.name, "display": scene.remark, "severity": str(scene.status), "effective": True if scene.status == 1 else False} for scene in pv.playbook.scenes
             ],
-            "labelList": [
-                {
-                    "id": tag.id,
-                    "name": tag.name
-                }
-                for tag in pv.playbook.tags
-            ]
+            "labelList": [{"id": tag.id, "name": tag.name} for tag in pv.playbook.tags],
         }
         content.append(data)
     total = await PlaybookVersion.filter(deleted=False).count()
 
-    return response.json({
-        "code": 0,
-        "result": {
-            "content": content,
-            "page": page,
-            "first": True if page == 1 else False,
-            "last": True if page * size >= total else False,
-            "size": size,
-            "totalElements": total,
-            "empty": False if content else True
+    return response.json(
+        {
+            "code": 0,
+            "result": {
+                "content": content,
+                "page": page,
+                "first": True if page == 1 else False,
+                "last": True if page * size >= total else False,
+                "size": size,
+                "totalElements": total,
+                "empty": False if content else True,
+            },
         }
-    })
+    )
 
 
 @openapi.exclude()
@@ -152,8 +137,9 @@ async def all_apps(request):
                     "multiSelected": False,
                     "concat": None,
                     "order": value.get("order"),
-                    "array": False
-                } for key, value in resource_model.resources.items()
+                    "array": False,
+                }
+                for key, value in resource_model.resources.items()
             ],
             "appActionList": [
                 {
@@ -183,21 +169,14 @@ async def all_apps(request):
                             "multiSelected": False,
                             "concat": None,
                             "order": None,
-                            "array": False
+                            "array": False,
                         }
                         for param in action.action.get("input")
                     ],
-                    "resultVariableList": [
-                        {
-                            "description": None,
-                            "valueType": None,
-                            "dataPath": None,
-                            "exampleValues": None
-                        }
-                    ],
+                    "resultVariableList": [{"description": None, "valueType": None, "dataPath": None, "exampleValues": None}],
                     "isTest": False,
                     "resultDisplayTmptType": None,
-                    "quartz": False
+                    "quartz": False,
                 }
                 for action in actions
             ],
@@ -220,25 +199,27 @@ async def all_apps(request):
                     "actionPermissionMap": {},
                     "lastHealthCheckTime": None,
                     "healthStatus": None,
-                    "actionEngineType": resource.engine
+                    "actionEngineType": resource.engine,
                 }
                 for resource in resources
             ],
             "logicContent": None,
             "requireAsset": True if resource_model.status == 1 else False,
-            "actionEngineType": None
+            "actionEngineType": None,
         }
         content.append(data)
     total = await Tool.filter(deleted=False).count()
-    return response.json({
-        "code": 0,
-        "result": {
-            "content": content,
-            "page": page,
-            "first": True if page == 1 else False,
-            "last": True if page * size >= total else False,
-            "size": size,
-            "totalElements": total,
-            "empty": False if content else True
+    return response.json(
+        {
+            "code": 0,
+            "result": {
+                "content": content,
+                "page": page,
+                "first": True if page == 1 else False,
+                "last": True if page * size >= total else False,
+                "size": size,
+                "totalElements": total,
+                "empty": False if content else True,
+            },
         }
-    })
+    )

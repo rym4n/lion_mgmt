@@ -8,45 +8,45 @@ import pytz
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 日志文件路径
-LOG_PATH = os.path.join(BASE_DIR, 'data/logs')
+LOG_PATH = os.path.join(BASE_DIR, "data/logs")
 os.makedirs(LOG_PATH, exist_ok=True)
 
 # vector配置目录
-VECTOR_CFG = os.path.join(BASE_DIR, 'data/ship')
+VECTOR_CFG = os.path.join(BASE_DIR, "data/ship")
 os.makedirs(VECTOR_CFG, exist_ok=True)
 
 # 文件上传的目录
-UPLOAD_DIR = os.path.join(BASE_DIR, 'data/upload')
+UPLOAD_DIR = os.path.join(BASE_DIR, "data/upload")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # 子进程配置文件输出目录
-SUPERVISOR_PATH = os.path.join(BASE_DIR, 'data/action')
+SUPERVISOR_PATH = os.path.join(BASE_DIR, "data/action")
 os.makedirs(SUPERVISOR_PATH, exist_ok=True)
 
 # 存储上传APP包的目录
-TOOLS_DIR = os.path.join(BASE_DIR, 'data/tools')
+TOOLS_DIR = os.path.join(BASE_DIR, "data/tools")
 os.makedirs(TOOLS_DIR, exist_ok=True)
 
 # 存储许可文件的目录
-LICENSE_DIR = os.path.join(BASE_DIR, 'data/license')
+LICENSE_DIR = os.path.join(BASE_DIR, "data/license")
 os.makedirs(LICENSE_DIR, exist_ok=True)
 
 # 存储通用文件的目录
-COMMON_FILES_DIR = os.path.join(BASE_DIR, 'data/common_files')
+COMMON_FILES_DIR = os.path.join(BASE_DIR, "data/common_files")
 os.makedirs(COMMON_FILES_DIR, exist_ok=True)
 
-if os.environ.get("RY_ENV") == 'DEV':
+if os.environ.get("RY_ENV") == "DEV":
     try:
         from dotenv import load_dotenv
 
-        load_dotenv(os.path.join(BASE_DIR, 'settings/.env'))
+        load_dotenv(os.path.join(BASE_DIR, "settings/.env"))
     except:
         pass
 
-TZ = pytz.timezone(os.environ.get('TZ', 'Asia/Shanghai'))
+TZ = pytz.timezone(os.environ.get("TZ", "Asia/Shanghai"))
 
 # 透传真实客户端IP的请求头
-REAL_IP_HEADER = os.environ.get("RY_REAL_IP_HEADER") or 'x-real-ip'
+REAL_IP_HEADER = os.environ.get("RY_REAL_IP_HEADER") or "x-real-ip"
 
 # 应用资源配置加密密钥
 RY_RES_KEY = os.environ.get("RY_RES_KEY")
@@ -78,18 +78,18 @@ RY_SYS_BUCKET = os.environ.get("RY_FS_SYS") or "system"
 RY_USER_BUCKET = os.environ.get("RY_FS_USER") or "user"
 
 OAS_UI_DEFAULT = "redoc"
-OAS_PATH_TO_REDOC_HTML = os.path.join(BASE_DIR, 'settings', 'apidoc.html')
+OAS_PATH_TO_REDOC_HTML = os.path.join(BASE_DIR, "settings", "apidoc.html")
 OAS_UI_REDOC = True
 OAS_UI_SWAGGER = False
 
 # 安全相关
-SECRET = os.environ.get("RY_SECRET_KEY", '5tdPY^zTX6I$akvNtLXey3y#gFEG@^46f!iLUdSy$Y')
+SECRET = os.environ.get("RY_SECRET_KEY", "5tdPY^zTX6I$akvNtLXey3y#gFEG@^46f!iLUdSy$Y")
 
 SESSION_SAMESITE = None
 SESSION_SECURE = True
 SESSION_HTTPONLY = True
 SESSION_DOMAIN = None
-SESSION_ENCODING_ALGORITHM = 'HS256'
+SESSION_ENCODING_ALGORITHM = "HS256"
 MAX_CHALLENGE_ATTEMPTS = 5
 AUTHENTICATION_SESSION_EXPIRATION = 60 * 5
 AUTHENTICATION_REFRESH_EXPIRATION = 60 * 60 * 8
@@ -97,14 +97,14 @@ AUTHENTICATION_REFRESH_EXPIRATION = 60 * 60 * 8
 # 健康检查相关
 HEALTH = True
 HEALTH_ENDPOINT = True
-HEALTH_URL_PREFIX = '/health'
+HEALTH_URL_PREFIX = "/health"
 
 # 跨域相关
 ENABLE_CORS: bool = os.environ.get("RY_CORS", True)
 CORS_SUPPORTS_CREDENTIALS: bool = os.environ.get("RY_CORS_CREDENTIAL", True)
 
 # Websocket
-WEBSOCKET_MAX_SIZE = 2 ** 20  # 消息最大1MB
+WEBSOCKET_MAX_SIZE = 2**20  # 消息最大1MB
 WEBSOCKET_PING_INTERVAL = 45
 RESPONSE_TIMEOUT = 600
 REQUEST_TIMEOUT = 600
@@ -114,48 +114,40 @@ WEBSOCKET_PING_TIMEOUT = 60
 
 # 日志配置
 BASE_LOGGING = {
-    'version': 1,
-    'loggers': {
-        '': {
-            'level': 'INFO',
-            'handlers': ['console', 'info_file', 'error_file'],
-            'propagate': False
-        },
-        'sanic': {
-            'level': 'INFO',
-            'handlers': ['console', 'info_file', 'error_file'],
-            'propagate': False
-        },
+    "version": 1,
+    "loggers": {
+        "": {"level": "INFO", "handlers": ["console", "info_file", "error_file"], "propagate": False},
+        "sanic": {"level": "INFO", "handlers": ["console", "info_file", "error_file"], "propagate": False},
     },
-    'formatters': {
-        'default': {
-            'format': '%(asctime)s [%(filename)s:%(lineno)d:%(funcName)s] [%(levelname)s] %(message)s',
-            'datefmt': '%Y-%m-%d %H:%M:%S',
+    "formatters": {
+        "default": {
+            "format": "%(asctime)s [%(filename)s:%(lineno)d:%(funcName)s] [%(levelname)s] %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
         }
     },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'level': 'INFO',
-            'formatter': 'default',
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "level": "INFO",
+            "formatter": "default",
         },
-        'info_file': {
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': os.path.join(LOG_PATH, 'info.log'),
-            'maxBytes': 100 * 1024 * 1024,
-            'backupCount': 3,
-            'encoding': 'utf8',
-            'level': 'INFO',
-            'formatter': 'default',
+        "info_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": os.path.join(LOG_PATH, "info.log"),
+            "maxBytes": 100 * 1024 * 1024,
+            "backupCount": 3,
+            "encoding": "utf8",
+            "level": "INFO",
+            "formatter": "default",
         },
-        'error_file': {
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': os.path.join(LOG_PATH, 'error.log'),
-            'maxBytes': 100 * 1024 * 1024,
-            'backupCount': 3,
-            'encoding': 'utf8',
-            'level': 'ERROR',
-            'formatter': 'default',
+        "error_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": os.path.join(LOG_PATH, "error.log"),
+            "maxBytes": 100 * 1024 * 1024,
+            "backupCount": 3,
+            "encoding": "utf8",
+            "level": "ERROR",
+            "formatter": "default",
         },
     },
 }
@@ -174,8 +166,8 @@ TORTOISE = {
                 "maxsize": 50,
                 "minsize": 5,
                 # 关闭池中非活动连接的秒数。通过 0 则禁用此机制。
-                "max_inactive_connection_lifetime": 60
-            }
+                "max_inactive_connection_lifetime": 60,
+            },
         }
     },
     "apps": {
@@ -190,48 +182,37 @@ TORTOISE = {
 }
 
 CACHE = {
-    'default': {
-        'cache': "aiocache.SimpleMemoryCache",
-        'serializer': {
-            'class': "aiocache.serializers.PickleSerializer"
-        }
+    "default": {"cache": "aiocache.SimpleMemoryCache", "serializer": {"class": "aiocache.serializers.PickleSerializer"}},
+    "redis_mgmt": {
+        "cache": "aiocache.RedisCache",
+        "serializer": {"class": "aiocache.serializers.PickleSerializer"},
+        "namespace": "lion_mgmt",
+        "timeout": 2,
+        "endpoint": os.environ.get("RY_REDIS_HOST"),
+        "port": os.environ.get("RY_REDIS_PORT"),
+        "db": os.environ.get("RY_REDIS_DB"),
+        "password": os.environ.get("RY_REDIS_PASS", ""),
+        "pool_max_size": 50,
     },
-    'redis_mgmt': {
-        'cache': "aiocache.RedisCache",
-        'serializer': {
-            'class': "aiocache.serializers.PickleSerializer"
-        },
-        'namespace': 'lion_mgmt',
-        'timeout': 2,
-        'endpoint': os.environ.get('RY_REDIS_HOST'),
-        'port': os.environ.get('RY_REDIS_PORT'),
-        'db': os.environ.get('RY_REDIS_DB'),
-        'password': os.environ.get('RY_REDIS_PASS', ''),
-        'pool_max_size': 50
+    "redis_chat": {
+        "cache": "aiocache.RedisCache",
+        "serializer": {"class": "aiocache.serializers.MsgPackSerializer"},
+        "timeout": 2,
+        "endpoint": os.environ.get("RY_REDIS_HOST"),
+        "port": os.environ.get("RY_REDIS_PORT"),
+        "db": os.environ.get("RY_CHAT_DB"),
+        "password": os.environ.get("RY_REDIS_PASS", ""),
+        "pool_max_size": 50,
     },
-    'redis_chat': {
-        'cache': "aiocache.RedisCache",
-        'serializer': {
-            'class': "aiocache.serializers.MsgPackSerializer"
-        },
-        'timeout': 2,
-        'endpoint': os.environ.get('RY_REDIS_HOST'),
-        'port': os.environ.get('RY_REDIS_PORT'),
-        'db': os.environ.get('RY_CHAT_DB'),
-        'password': os.environ.get('RY_REDIS_PASS', ''),
-        'pool_max_size': 50
+    "redis_action": {
+        "cache": "aiocache.RedisCache",
+        "serializer": {"class": "aiocache.serializers.MsgPackSerializer"},
+        "namespace": "lion_mgmt",
+        "timeout": 2,
+        "endpoint": os.environ.get("RY_REDIS_HOST"),
+        "port": os.environ.get("RY_REDIS_PORT"),
+        "db": os.environ.get("RY_ACTION_CACHE"),
+        "password": os.environ.get("RY_REDIS_PASS", ""),
+        "pool_max_size": 2,
     },
-    'redis_action': {
-        'cache': "aiocache.RedisCache",
-        'serializer': {
-            'class': "aiocache.serializers.MsgPackSerializer"
-        },
-        'namespace': 'lion_mgmt',
-        'timeout': 2,
-        'endpoint': os.environ.get('RY_REDIS_HOST'),
-        'port': os.environ.get('RY_REDIS_PORT'),
-        'db': os.environ.get('RY_ACTION_CACHE'),
-        'password': os.environ.get('RY_REDIS_PASS', ''),
-        'pool_max_size': 2
-    }
 }

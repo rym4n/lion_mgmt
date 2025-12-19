@@ -11,6 +11,7 @@ class AuditLog(BaseModel):
     """
     操作审计记录
     """
+
     username: str = fields.CharField(max_length=32, index=True, description="用户名")
     display_name: str = fields.CharField(max_length=32, null=True, description="用户姓名")
     result: str = fields.CharField(max_length=20, description="结果")
@@ -33,7 +34,7 @@ class AuditLog(BaseModel):
             "client_ip": self.client_ip,
             "client_ua": self.client_ua,
             "uri": self.uri,
-            "request_data": self.request_data
+            "request_data": self.request_data,
         }
 
     class Meta:

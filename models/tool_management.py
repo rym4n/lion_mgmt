@@ -28,7 +28,7 @@ class ToolAction(BaseModel):
             "tool_name": self.tool_name,
             "version_number": self.version_number,
             "action": self.action,
-            "playbook": self.playbook
+            "playbook": self.playbook,
         }
 
     class Meta:
@@ -73,7 +73,7 @@ class Tool(BaseModel):
             "hash_value": self.hash_value,
             "internal": self.internal,
             "tag": self.tag,
-            "main": self.main
+            "main": self.main,
         }
 
     class Meta:
@@ -103,7 +103,7 @@ class ToolResourcesModel(BaseModel):
             "utime": strip_timezone_to_seconds(self.utime),
             "tool_name": self.tool_name,
             "resources": self.resources,
-            "status": self.status
+            "status": self.status,
         }
 
     class Meta:
@@ -143,7 +143,7 @@ class ToolResources(BaseModel):
             "resources": self.resources,
             "creator": self.creator,
             "updater": self.updater,
-            "engine": self.engine
+            "engine": self.engine,
         }
 
     class Meta:

@@ -15,11 +15,11 @@ from libs.security.authorization import requires_permission
 from libs.utils import query_vlog
 from models import PlaybookVersion, ToolResources
 
-dashboard_bp = Blueprint('dashboard', url_prefix='/dashboard')
+dashboard_bp = Blueprint("dashboard", url_prefix="/dashboard")
 _all__ = ["dashboard_bp"]
 
 
-@dashboard_bp.post('/view')
+@dashboard_bp.post("/view")
 @openapi.definition(
     summary="获取仪表盘数据",
     description="获取仪表盘数据，需要dashboard:r权限",
@@ -29,19 +29,10 @@ _all__ = ["dashboard_bp"]
                 "type": "object",
                 "required": ["static_type", "start_time", "end_time"],
                 "properties": {
-                    "static_type": {
-                        "type": "string",
-                        "description": "统计类型，可选值：events_day，events_status，runlog_playbook，runlog_action"
-                    },
-                    "start_time": {
-                        "type": "string",
-                        "description": "统计的起始时间，格式：YYYY-MM-DD HH:MM:SS"
-                    },
-                    "end_time": {
-                        "type": "string",
-                        "description": "统计的结束时间，格式：YYYY-MM-DD HH:MM:SS"
-                    }
-                }
+                    "static_type": {"type": "string", "description": "统计类型，可选值：events_day，events_status，runlog_playbook，runlog_action"},
+                    "start_time": {"type": "string", "description": "统计的起始时间，格式：YYYY-MM-DD HH:MM:SS"},
+                    "end_time": {"type": "string", "description": "统计的结束时间，格式：YYYY-MM-DD HH:MM:SS"},
+                },
             }
         }
     },
@@ -49,26 +40,12 @@ _all__ = ["dashboard_bp"]
         "200": {
             "description": "获取成功",
             "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {
-                                "oneOf": [
-                                    {"type": "integer"},
-                                    {"type": "array"},
-                                    {"type": "object"}
-                                ]
-                            }
-                        }
-                    }
-                }
-            }
+                "application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"oneOf": [{"type": "integer"}, {"type": "array"}, {"type": "object"}]}}}}
+            },
         }
-    }
+    },
 )
-@requires_permission('dashboard:r')
+@requires_permission("dashboard:r")
 async def view_dashboard(request):
     params = request.json
 
@@ -80,8 +57,8 @@ async def view_dashboard(request):
         raise CustomError(ErrorCode.ParameterError)
 
     result = None
-    start_time = datetime.strptime(start_time, '%Y-%m-%d')
-    end_time = datetime.strptime(end_time, '%Y-%m-%d')
+    start_time = datetime.strptime(start_time, "%Y-%m-%d")
+    end_time = datetime.strptime(end_time, "%Y-%m-%d")
 
     async with in_transaction() as tconn:
         if static_type == "events_day":
@@ -104,7 +81,7 @@ async def view_dashboard(request):
     return response_ok(result)
 
 
-@dashboard_bp.post('/mttr')
+@dashboard_bp.post("/mttr")
 @openapi.definition(
     summary="获取MTTR数据",
     description="获取MTTR数据，需要dashboard:r权限",
@@ -114,15 +91,9 @@ async def view_dashboard(request):
                 "type": "object",
                 "required": ["start_time", "end_time"],
                 "properties": {
-                    "start_time": {
-                        "type": "string",
-                        "description": "统计的起始时间，格式：YYYY-MM-DD HH:MM:SS"
-                    },
-                    "end_time": {
-                        "type": "string",
-                        "description": "统计的结束时间，格式：YYYY-MM-DD HH:MM:SS"
-                    }
-                }
+                    "start_time": {"type": "string", "description": "统计的起始时间，格式：YYYY-MM-DD HH:MM:SS"},
+                    "end_time": {"type": "string", "description": "统计的结束时间，格式：YYYY-MM-DD HH:MM:SS"},
+                },
             }
         }
     },
@@ -135,25 +106,15 @@ async def view_dashboard(request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer"},
-                            "data": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "day": {"type": "string"},
-                                        "counts": {"type": "number"},
-                                        "event_count": {"type": "integer"}
-                                    }
-                                }
-                            }
-                        }
+                            "data": {"type": "array", "items": {"type": "object", "properties": {"day": {"type": "string"}, "counts": {"type": "number"}, "event_count": {"type": "integer"}}}},
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
-@requires_permission('dashboard:r')
+@requires_permission("dashboard:r")
 async def count_mttr(request):
     params = request.json
     start_time = params.get("start_time")
@@ -161,8 +122,8 @@ async def count_mttr(request):
 
     # 判断时间参数是否合法的时间格式
     try:
-        start_time = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
-        end_time = datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
+        start_time = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
+        end_time = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
     except ValueError:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -176,77 +137,36 @@ async def count_mttr(request):
             "AND ctime >= $1 AND ctime <= $2 "
             "GROUP BY DATE(ctime) "
             "ORDER BY day",
-            (start_time, end_time)
+            (start_time, end_time),
         )
-        return response_ok([
-            {
-                "day": row["day"].strftime("%Y-%m-%d"),
-                "counts": round((float(row["avg_seconds"]) or 0) / 3600, 2),
-                "event_count": row["event_count"]
-            }
-            for row in results
-        ])
+        return response_ok([{"day": row["day"].strftime("%Y-%m-%d"), "counts": round((float(row["avg_seconds"]) or 0) / 3600, 2), "event_count": row["event_count"]} for row in results])
 
 
-@dashboard_bp.post('/playbooks')
+@dashboard_bp.post("/playbooks")
 @openapi.definition(
     summary="获取已发布的剧本数量",
     description="获取已发布的剧本数量，需要dashboard:r权限",
-    response={
-        "200": {
-            "description": "获取成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {"type": "integer"}
-                        }
-                    }
-                }
-            }
-        }
-    }
+    response={"200": {"description": "获取成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "integer"}}}}}}},
 )
-@requires_permission('dashboard:r')
+@requires_permission("dashboard:r")
 async def count_playbooks(request):
-    result = await PlaybookVersion.filter(status=1).annotate(
-        counts=Count('playbook_id', distinct=True)
-    ).values("counts")
+    result = await PlaybookVersion.filter(status=1).annotate(counts=Count("playbook_id", distinct=True)).values("counts")
     return response_ok(result[0].get("counts"))
 
 
-@dashboard_bp.post('/apps')
+@dashboard_bp.post("/apps")
 @openapi.definition(
     summary="获取已配置资源的应用数量",
     description="获取已配置资源的应用数量，需要dashboard:r权限",
-    response={
-        "200": {
-            "description": "获取成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {"type": "integer"}
-                        }
-                    }
-                }
-            }
-        }
-    }
+    response={"200": {"description": "获取成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "integer"}}}}}}},
 )
-@requires_permission('dashboard:r')
+@requires_permission("dashboard:r")
 async def count_apps(request):
-    result = await ToolResources.annotate(
-        counts=Count('tool_name', distinct=True)
-    ).values("counts")
+    result = await ToolResources.annotate(counts=Count("tool_name", distinct=True)).values("counts")
     return response_ok(result[0].get("counts"))
 
 
-@dashboard_bp.post('/success-rate')
+@dashboard_bp.post("/success-rate")
 @openapi.definition(
     summary="获取剧本的成功率排行",
     description="获取剧本的成功率排行（修复成功率计算），需要dashboard:r权限",
@@ -259,24 +179,15 @@ async def count_apps(request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer"},
-                            "data": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "playbook_name": {"type": "string"},
-                                        "success_rate": {"type": "number"}
-                                    }
-                                }
-                            }
-                        }
+                            "data": {"type": "array", "items": {"type": "object", "properties": {"playbook_name": {"type": "string"}, "success_rate": {"type": "number"}}}},
+                        },
                     }
                 }
-            }
+            },
         }
-    }
+    },
 )
-@requires_permission('dashboard:r')
+@requires_permission("dashboard:r")
 async def playbooks_success_rate(request):
     # 构建高效的查询条件
     query = 'playbook_name: !"执行动作" AND result: !"执行中" AND result: !"等待审核"'
@@ -315,15 +226,7 @@ async def playbooks_success_rate(request):
                 stats[playbook_name]["success"] -= 1
 
     # 构建结果并排序
-    results = [
-        {
-            "playbook_name": playbook_name,
-            "success_rate": round(
-                data["success"] / data["total"], 2
-            ) if data["total"] > 0 else 0
-        }
-        for playbook_name, data in stats.items()
-    ]
+    results = [{"playbook_name": playbook_name, "success_rate": round(data["success"] / data["total"], 2) if data["total"] > 0 else 0} for playbook_name, data in stats.items()]
     results = sorted(results, key=lambda x: x["success_rate"])
 
     return response_ok(results)

@@ -10,6 +10,7 @@ class Approvement(BaseModel):
     人工审核模型
     字段：
     """
+
     title: str = fields.CharField(max_length=50, index=True, description="审核标题")
     flow = fields.ForeignKeyField("models.PlaybookVersion", description="关联剧本")
     run_id = fields.CharField(max_length=20, description="关联运行ID")

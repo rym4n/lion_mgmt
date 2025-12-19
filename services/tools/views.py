@@ -449,9 +449,10 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 )
 @requires_permission("tool:r")
 async def all_tools(request):
-    page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 15))
-    key = request.json.get("key", "").strip()
+    req_json = request.json or {}
+    page = int(req_json.get("page", 1))
+    size = int(req_json.get("size", 15))
+    key = req_json.get("key", "").strip()
 
     if size > 50:
         raise CustomError(ErrorCode.RequestTooManyError)
@@ -476,8 +477,8 @@ async def all_tools(request):
             for name, version in tool_name_version_set:
                 cond |= Q(name=name, version=version)
         subquery = subquery.filter(cond)
-    if request.json.get("tag"):
-        subquery = subquery.filter(tag__contains=[request.json.get("tag")])
+    if req_json.get("tag"):
+        subquery = subquery.filter(tag__contains=[req_json.get("tag")])
     subquery_results = await subquery.values("name", "max_version")
     if not subquery_results:
         return response_ok({
@@ -496,7 +497,7 @@ async def all_tools(request):
         .limit(size) \
         .values()
     for tool in latest_tools:
-        if int(request.json.get("logo", 1)) == 1 and tool["logo_path"]:
+        if int(req_json.get("logo", 1)) == 1 and tool["logo_path"]:
             tool["logo"] = tool["logo_path"]
         tool.pop("path", None)
         trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"])

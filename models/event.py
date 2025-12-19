@@ -11,6 +11,7 @@ class Events(BaseModel):
     """
     事件列表
     """
+
     event_name: str = fields.CharField(max_length=255, description="事件名称")
     event_process_status: str = fields.CharField(max_length=50, index=True, description="事件处理状态")
     event_source: str = fields.CharField(max_length=255, null=True, description="事件来源")
@@ -43,7 +44,7 @@ class Events(BaseModel):
             "room": self.room_id,
             "creator": {"username": self.creator.username, "display_name": self.creator.display_name} if self.creator else None,
             "updator": {"username": self.updator.username, "display_name": self.updator.display_name} if self.updator else None,
-            "close_time": strip_timezone_to_seconds(self.close_time) if self.close_time else None
+            "close_time": strip_timezone_to_seconds(self.close_time) if self.close_time else None,
         }
 
     class Meta:
@@ -55,6 +56,7 @@ class EventsIngestion(BaseModel):
     """
     事件接入列表
     """
+
     event_ingestion_name: str = fields.CharField(max_length=255, null=True, description="事件接入名称")
     event_ingestion_describe: str = fields.CharField(max_length=255, null=True, description="事件接入描述")
     event_source_type: str = fields.CharField(max_length=255, null=True, description="事件来源类型")
@@ -100,7 +102,7 @@ class EventsIngestion(BaseModel):
             "convert_health_status": self.convert_health_status,
             "retention_days": self.retention_days,
             "config_info": self.config_info,
-            "project_id": self.project_id
+            "project_id": self.project_id,
         }
 
     class Meta:
@@ -140,7 +142,7 @@ class EventRelatedScript(BaseModel):
             "status": self.status,
             "numbers": self.numbers,
             "concurrency": self.concurrency,
-            "fields": self.fields
+            "fields": self.fields,
         }
 
     class Meta:

@@ -50,10 +50,7 @@ def get_client_ip(request) -> str:
 
 
 def gen_random_code(length=6, digits_only: bool = True) -> str:
-    return "".join(
-        random.choice(("" if digits_only else ascii_uppercase) + digits)
-        for _ in range(length)
-    )
+    return "".join(random.choice(("" if digits_only else ascii_uppercase) + digits) for _ in range(length))
 
 
 def get_expiration_date(seconds: int) -> datetime.datetime:
@@ -61,12 +58,12 @@ def get_expiration_date(seconds: int) -> datetime.datetime:
 
 
 def validate_ips(ip_str):
-    for ip in ip_str.split(','):
+    for ip in ip_str.split(","):
         cleaned_ip = ip.strip()
         if not cleaned_ip:
             return False
         try:
-            if '/' in cleaned_ip:
+            if "/" in cleaned_ip:
                 ipaddress.IPv4Network(cleaned_ip, strict=True)
             else:
                 ipaddress.IPv4Address(cleaned_ip)
@@ -84,7 +81,7 @@ def ip_in_list(ip_str: str, ip_list: list) -> bool:
         ip_item = ip_item.strip()  # 去除可能的空白字符
         try:
             # 如果是 CIDR 格式
-            if '/' in ip_item:
+            if "/" in ip_item:
                 network = ipaddress.ip_network(ip_item, strict=False)
                 if target_ip in network:
                     return True
@@ -102,9 +99,9 @@ def gen_run_id(length=4):
     """
     生成版本号，按时间顺序
     """
-    number = gen_random_code(True, length)
+    number = gen_random_code(length)
     times = time.strftime("%Y%m%d%H%M%S", time.localtime(time.time()))
-    return str(times) + '' + str(number)
+    return str(times) + "" + str(number)
 
 
 def strip_timezone_to_seconds(dt_str):
@@ -129,22 +126,12 @@ def rsa_chunk_decrypt(ciphertext: bytes, rsa_priv_key: rsa.RSAPrivateKey) -> byt
     if len(ciphertext) % block_size != 0:
         raise ValueError("密文长度不是 RSA 块大小的整数倍，可能被篡改或截断")
 
-    blocks = [
-        ciphertext[i:i + block_size]
-        for i in range(0, len(ciphertext), block_size)
-    ]
+    blocks = [ciphertext[i : i + block_size] for i in range(0, len(ciphertext), block_size)]
 
     plaintext = b""
     for idx, block in enumerate(blocks, 1):
         try:
-            decrypted_block = rsa_priv_key.decrypt(
-                block,
-                padding.OAEP(
-                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                    algorithm=hashes.SHA256(),
-                    label=None
-                )
-            )
+            decrypted_block = rsa_priv_key.decrypt(block, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
             plaintext += decrypted_block
         except ValueError as e:
             print(f"[Error] 解密第 {idx} 块失败，块大小 {len(block)} 字节:", e)
@@ -155,13 +142,13 @@ def rsa_chunk_decrypt(ciphertext: bytes, rsa_priv_key: rsa.RSAPrivateKey) -> byt
 def verify_license(data: bytes):
     try:
         lic_enc = base64.b32decode(data)
-        pkey = serialization.load_pem_private_key(base64.b64decode('AIOE_LICENSE_KEY'), password=None)
+        pkey = serialization.load_pem_private_key(base64.b64decode("AIOE_LICENSE_KEY"), password=None)
         decrypted = rsa_chunk_decrypt(lic_enc, pkey)
         machine_id = generate_mac_uuid()
         lic = jwt.decode(decrypted, str(machine_id), "HS256")
         if lic.get("expireTime", 0) > int(time.time() * 1000):
-            for m in lic['moduleList']:
-                m['expireTime'] = lic['grouplist'][m['group']]['expireTime']
+            for m in lic["moduleList"]:
+                m["expireTime"] = lic["grouplist"][m["group"]]["expireTime"]
             return lic
         else:
             raise CustomError(ErrorCode.LicenseExpired)
@@ -175,17 +162,12 @@ def generate_mac_uuid():
             if addr.family == psutil.AF_LINK and addr.address != "00:00:00:00:00:00":
                 mac_address = addr.address.replace("-", ":").upper()
                 return str(uuid.uuid5(uuid.NAMESPACE_DNS, mac_address))
-    return ''
+    return ""
 
 
 # 获取kafka指定主题最新消息
 async def fetch_latest_messages(bootstrap_servers, topic, num_messages=10):
-    consumer = AIOKafkaConsumer(
-        bootstrap_servers=bootstrap_servers,
-        group_id=None,
-        enable_auto_commit=False,
-        auto_offset_reset="latest"
-    )
+    consumer = AIOKafkaConsumer(bootstrap_servers=bootstrap_servers, group_id=None, enable_auto_commit=False, auto_offset_reset="latest")
 
     try:
         await consumer.start()
@@ -212,7 +194,7 @@ async def fetch_latest_messages(bootstrap_servers, topic, num_messages=10):
                 if len(messages) >= num_messages:
                     break
 
-        return [m.value.decode(errors='ignore') for m in messages]
+        return [m.value.decode(errors="ignore") for m in messages]
 
     finally:
         try:
@@ -228,29 +210,13 @@ def run_linux_command(command):
     :param command: 字符串或字符串列表，表示要执行的命令。
     :return: 字典，包含 stdout、stderr 和 returncode。
     """
-    result = subprocess.run(
-        command,
-        shell=isinstance(command, str),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
-    return {
-        "stdout": result.stdout.strip() if result.stdout else "",
-        "stderr": result.stderr.strip() if result.stderr else "",
-        "code": result.returncode
-    }
+    result = subprocess.run(command, shell=isinstance(command, str), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return {"stdout": result.stdout.strip() if result.stdout else "", "stderr": result.stderr.strip() if result.stderr else "", "code": result.returncode}
 
 
 def derive_key(password: str, salt: bytes) -> bytes:
     """使用PBKDF2HMAC从密码派生密钥"""
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=5000,
-        backend=default_backend()
-    )
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=5000, backend=default_backend())
     return kdf.derive(password.encode())
 
 
@@ -270,16 +236,16 @@ def encrypt_aes256_gcm(plaintext: Optional[str | bytes]) -> str:
     encryptor = cipher.encryptor()
     ciphertext = encryptor.update(plaintext) + encryptor.finalize()
 
-    return base64.b64encode(ciphertext + b'.....' + nonce + b'.....' + salt + b'.....' + encryptor.tag).decode()
+    return base64.b64encode(ciphertext + b"....." + nonce + b"....." + salt + b"....." + encryptor.tag).decode()
 
 
 def decrypt_aes256_gcm(encrypted_data: str) -> str:
     """AES-GCM解密，输入为字典格式"""
     try:
         data = base64.b64decode(encrypted_data.encode())
-        if b'.....' not in data:
+        if b"....." not in data:
             return data.decode()
-        ciphertext, nonce, salt, tag = data.split(b'.....')
+        ciphertext, nonce, salt, tag = data.split(b".....")
 
         key = derive_key(RY_RES_KEY, salt)
         # 创建解密器
@@ -298,13 +264,11 @@ def decrypt_aes256_gcm(encrypted_data: str) -> str:
 
 async def query_vlog(query, project_id, start=None, end=None, account_id="1"):
     # 构建VictoriaLogs查询参数
-    params = {
-        'query': query
-    }
+    params = {"query": query}
     if start:
-        params['start'] = start
+        params["start"] = start
     if end:
-        params['end'] = end
+        params["end"] = end
 
     header = {
         "AccountID": str(account_id),
@@ -386,7 +350,7 @@ async def query_vlog(query, project_id, start=None, end=None, account_id="1"):
 #                                             data_stream=None, template=template)
 
 
-async def upload_to_s3(file_content: bytes, bucket_name: str, file_name: str, prefix='', content_type: Optional[str] = None) -> str:
+async def upload_to_s3(file_content: bytes, bucket_name: str, file_name: str, prefix="", content_type: Optional[str] = None) -> str:
     """
     上传文件到存储桶，返回下载的链接
     file_content: 文件内容
@@ -394,27 +358,25 @@ async def upload_to_s3(file_content: bytes, bucket_name: str, file_name: str, pr
     file_name: 文件名称
     prefix: 功能前缀
     """
-    async with aioboto3.Session().client('s3', endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK,
-                                         config=Config(signature_version='s3v4')) as s3_client:
+    async with aioboto3.Session().client("s3", endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK, config=Config(signature_version="s3v4")) as s3_client:
         try:
             s3_key = f"{prefix}/{file_name}"
             # 上传文件
-            await s3_client.put_object(Bucket=bucket_name, Key=s3_key, Body=file_content, ContentType=content_type or 'application/octet-stream')
+            await s3_client.put_object(Bucket=bucket_name, Key=s3_key, Body=file_content, ContentType=content_type or "application/octet-stream")
             return f"/files/{bucket_name}/{s3_key}"
         except Exception as e:
             logger.error(f"上传文件失败: {e} | {traceback.format_exc()}")
     return ""
 
 
-async def delete_from_s3(bucket_name: str, file_name: str, prefix='') -> bool:
+async def delete_from_s3(bucket_name: str, file_name: str, prefix="") -> bool:
     """
     删除存储桶中的文件
     bucket_name: 存储桶名称
     file_name: 文件名称
     prefix: 功能前缀
     """
-    async with aioboto3.Session().client('s3', endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK,
-                                         config=Config(signature_version='s3v4')) as s3_client:
+    async with aioboto3.Session().client("s3", endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK, config=Config(signature_version="s3v4")) as s3_client:
         try:
             await s3_client.delete_object(Bucket=bucket_name, Key=f"{prefix}/{file_name}")
             return True
@@ -423,39 +385,33 @@ async def delete_from_s3(bucket_name: str, file_name: str, prefix='') -> bool:
     return False
 
 
-async def get_from_s3(bucket_name: str, file_name: str, prefix='') -> bytes | None:
+async def get_from_s3(bucket_name: str, file_name: str, prefix="") -> bytes | None:
     """
     获取存储桶中的文件
     bucket_name: 存储桶名称
     file_name: 文件名称
     prefix: 功能前缀
     """
-    async with aioboto3.Session().client('s3', endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK,
-                                         config=Config(signature_version='s3v4')) as s3_client:
+    async with aioboto3.Session().client("s3", endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK, config=Config(signature_version="s3v4")) as s3_client:
         try:
             obj = await s3_client.get_object(Bucket=bucket_name, Key=f"{prefix}/{file_name}")
-            return await obj['Body'].read()
+            return await obj["Body"].read()
         except Exception as e:
             logger.error(f"获取文件失败: {e} | {traceback.format_exc()}")
     return None
 
 
-async def get_url_from_s3(bucket_name: str, file_name: str, host, prefix='') -> bytes | None:
+async def get_url_from_s3(bucket_name: str, file_name: str, host, prefix="") -> bytes | None:
     """
     获取存储桶中的文件的临时下载连接
     bucket_name: 存储桶名称
     file_name: 文件名称
     prefix: 功能前缀
     """
-    async with aioboto3.Session().client('s3', endpoint_url="https://" + host, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK,
-                                         config=Config(signature_version='s3v4')) as s3_client:
+    async with aioboto3.Session().client("s3", endpoint_url="https://" + host, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK, config=Config(signature_version="s3v4")) as s3_client:
         try:
-            file_url = await s3_client.generate_presigned_url(
-                ClientMethod='get_object',
-                Params={'Bucket': bucket_name, 'Key': f'{prefix}/{file_name}'},
-                ExpiresIn=600  # 10 分钟有效期
-            )
-            file_url = file_url.replace("https://" + host, "https://" + host + '/files')
+            file_url = await s3_client.generate_presigned_url(ClientMethod="get_object", Params={"Bucket": bucket_name, "Key": f"{prefix}/{file_name}"}, ExpiresIn=600)  # 10 分钟有效期
+            file_url = file_url.replace("https://" + host, "https://" + host + "/files")
             return file_url
         except Exception as e:
             logger.error(f"获取文件失败: {e} | {traceback.format_exc()}")

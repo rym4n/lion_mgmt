@@ -30,7 +30,7 @@ class Scene(BaseModel):
             "remark": self.remark,
             "status": self.status,
             "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
-            "updator": {"username": self.updator.username, "display_name": self.updator.display_name}
+            "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
         }
 
     # 指定name+type作为唯一性约束

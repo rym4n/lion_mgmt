@@ -18,6 +18,7 @@ class BaseModel(Model):
         utime (datetime): 更新时间
         deleted (bool): 删除标识
     """
+
     id: str = fields.CharField(pk=True, max_length=36, default=lambda: str(uuid.uuid4()))
     ctime = fields.DatetimeField(null=False, auto_now_add=True, description="创建时间")
     utime = fields.DatetimeField(null=False, auto_now=True, description="更新时间")
