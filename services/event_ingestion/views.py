@@ -482,14 +482,14 @@ async def update_event_ingestion(request):
             data["sources"][event.vector_name].pop("address", None)
             data["sources"][event.vector_name].pop("mode", None)
             data["sources"][event.vector_name].pop("max_length", None)
-    if kafka_topic:
+    if kafka_topic and event_source_type == "kafka":
         data["sources"][event.vector_name]["topics"] = kafka_topic
-    if event_source_address:
+    if event_source_address and event_source_type == "kafka":
         data["sources"][event.vector_name]["bootstrap_servers"] = ",".join(event_source_address)
-    if communication_type:
+    if communication_type and event_source_type == "syslog":
         data["sources"][event.vector_name]["mode"] = communication_type
         event.syslog_config = communication_type + event.syslog_config[3:]
-    if kafka_group_id:
+    if kafka_group_id and event_source_type == "kafka":
         data["sources"][event.vector_name]["group_id"] = kafka_group_id
     if transforms_type:
         first_transform = f"{event.vector_name}_transforms"
@@ -509,17 +509,17 @@ async def update_event_ingestion(request):
         data["transforms"][first_transform]["source"] = value
         event.config_info = {transforms_type: args}
 
-    if syslog_port:
+    if syslog_port and event_source_type == "syslog":
         data["sources"][event.vector_name]["address"] = f"0.0.0.0:{syslog_port}"
         event.syslog_config = event.syslog_config[:3] + str(syslog_port)
-    if max_length:
+    if max_length and event_source_type == "syslog":
         data["sources"][event.vector_name]["max_length"] = max_length * 1024
-    if sasl_mechanism:
+    if sasl_mechanism and event_source_type == "kafka":
         data["sources"][event.vector_name].setdefault("sasl", {})["enabled"] = True
         data["sources"][event.vector_name]["sasl"]["mechanism"] = sasl_mechanism
-    if sasl_username:
+    if sasl_username and event_source_type == "kafka":
         data["sources"][event.vector_name]["sasl"]["username"] = sasl_username
-    if sasl_password:
+    if sasl_password and event_source_type == "kafka":
         data["sources"][event.vector_name]["sasl"]["password"] = urllib.parse.quote(sasl_password)
 
     result = check_vector_config(data)
