@@ -8,7 +8,7 @@ import pytz
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 日志文件路径
-LOG_PATH = os.path.join(BASE_DIR, "data/logs")
+LOG_PATH = os.path.join(BASE_DIR, "logs")
 os.makedirs(LOG_PATH, exist_ok=True)
 
 # vector配置目录
