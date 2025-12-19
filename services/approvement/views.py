@@ -243,30 +243,21 @@ async def update_approvement(request):
     return response_ok("success")
 
 
-@approve_bp.post("/callback", name="approve_callback_post")
 @approve_bp.get("/callback", name="approve_callback_get")
 @openapi.definition(
     summary="外部系统审核结果回调",
     description="接受三方系统的审核结果，同时支持POST/GET",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "required": ["token", "agree"],
-                "properties": {
-                    "token": {"type": "string", "description": "审核的唯一token"},
-                    "agree": {"type": "boolean", "description": "布尔类型：True/False，同意或拒绝"},
-                    "remark": {"type": "string", "description": "审批备注信息"},
-                    "params": {"type": "array", "items": {"type": "object"}, "description": "自定义参数的内容信息"},
-                },
-            }
-        }
-    },
+    parameters=[
+        {"name": "token", "in": "query", "description": "审核的唯一token", "required": True, "schema": {"type": "string"}},
+        {"name": "agree", "in": "query", "description": "布尔类型：True/False，同意或拒绝", "required": True, "schema": {"type": "boolean"}},
+        {"name": "remark", "in": "query", "description": "审批备注信息", "required": False, "schema": {"type": "string"}},
+        {"name": "params", "in": "query", "description": "自定义参数的内容信息", "required": False, "schema": {"type": "array", "items": {"type": "object"}}},
+    ],
     response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
 @requires_permission("approve:u")
 async def update_approvement(request):
-    param = request.json if request.method.upper() == "POST" else dict(request.args)
+    param = dict(request.args)
 
     token = param.get("token")
     agree = param.get("agree")
