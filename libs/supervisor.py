@@ -84,8 +84,12 @@ def start_process(process_name):
     except Fault as e:
         if "BAD_NAME" in e.faultString or "UNKNOWN" in e.faultString:
             logging.info("进程 {} 不存在，无法启动".format(process_name))
+            return False
+        elif "ALREADY_STARTED" in e.faultString:
+            return True
         else:
             logging.info("启动进程时发生错误: {}".format(e.faultString))
+            return False
 
 
 def stop_process(process_name):
