@@ -248,7 +248,7 @@ async def update_approvement(request):
 @openapi.definition(
     summary="外部系统审核结果回调",
     description="接受三方系统的审核结果，同时支持POST/GET",
-    parameters=[
+    parameter=[
         {"name": "token", "in": "query", "description": "审核的唯一token", "required": True, "schema": {"type": "string"}},
         {"name": "agree", "in": "query", "description": "布尔类型：True/False，同意或拒绝", "required": True, "schema": {"type": "boolean"}},
         {"name": "remark", "in": "query", "description": "审批备注信息", "required": False, "schema": {"type": "string"}},
