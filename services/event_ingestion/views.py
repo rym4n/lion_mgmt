@@ -349,24 +349,85 @@ async def delete_event_ingestion(request):
                 "type": "object",
                 "required": ["id"],
                 "properties": {
-                    "id": {"type": "string", "description": "事件ID"},
-                    "event_describe": {"type": "string", "description": "事件描述 非必填"},
-                    "event_source_address": {"type": "array", "items": {"type": "string"}, "description": "事件来源地址 事件来源类型为kafka时才传 非必填"},
-                    "max_length": {"type": "integer", "description": "单条消息的最大长度，单位为KB，默认100KB"},
-                    "syslog_port": {"type": "integer", "description": "日志端口 端口范围500-2000 事件来源类型为syslog时才传，默认为None 非必填"},
-                    "communication_type": {"type": "string", "description": "通信类型 事件来源类型为syslog时才传，默认为None 非必填"},
-                    "kafka_group_id": {"type": "string", "description": "kafka消费组ID 事件来源类型为kafka时才传，默认为None 非必填"},
-                    "kafka_topic": {"type": "array", "items": {"type": "string"}, "description": "kafka主题 事件来源类型为kafka时才传，默认为None 非必填"},
-                    "transforms_type": {"type": "string", "description": "转换类型 目前支持Grok、CEF、key-value、JSON、Delimiter(分割符) 非必填"},
-                    "transforms_config": {"type": "string", "description": "转换配置 只有Grok时需要填写，默认情况下为None 非必填"},
-                    "key_value_delimiter": {"type": "string", "description": "键值对分隔符 只有key-value时需要填写，默认情况下为None 非必填"},
-                    "key_delimiter_value": {"type": "string", "description": "键值分隔符 只有key-value时需要填写，默认情况下为None 非必填"},
-                    "sasl_mechanism": {"type": "string", "description": "sasl机制 事件来源类型为kafka时才传，默认为None 非必填"},
-                    "sasl_username": {"type": "string", "description": "sasl用户名 事件来源类型为kafka时才传，默认为None 非必填"},
-                    "sasl_password": {"type": "string", "description": "sasl密码 事件来源类型为kafka时才传，默认为None 非必填"},
-                    "enabled_status": {"type": "integer", "description": "上游接入 启用为 1 ，禁用为 0 非必填"},
-                    "retention_days": {"type": "integer", "description": "日志数据的保留天数, 默认为 7"},
-                },
+                    "id": {
+                        "type": "string",
+                        "description": "事件ID"
+                    },
+                    "event_describe": {
+                        "type": "string",
+                        "description": "事件描述 非必填"
+                    },
+                    "event_source_address": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "事件来源地址 事件来源类型为kafka时才传 非必填"
+                    },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "单条消息的最大长度，单位为KB，默认100KB"
+                    },
+                    "syslog_port": {
+                        "type": "integer",
+                        "description": "日志端口 端口范围500-2000 事件来源类型为syslog时才传，默认为None 非必填"
+                    },
+                    "communication_type": {
+                        "type": "string",
+                        "description": "通信类型 事件来源类型为syslog时才传，默认为None 非必填"
+                    },
+                    "kafka_group_id": {
+                        "type": "string",
+                        "description": "kafka消费组ID 事件来源类型为kafka时才传，默认为None 非必填"
+                    },
+                    "kafka_topic": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "kafka主题 事件来源类型为kafka时才传，默认为None 非必填"
+                    },
+                    "transforms_type": {
+                        "type": "string",
+                        "description": "转换类型 目前支持Grok、CEF、key-value、JSON、Delimiter(分割符) 非必填"
+                    },
+                    "transforms_config": {
+                        "type": "string",
+                        "description": "转换配置 只有Grok时需要填写，默认情况下为None 非必填"
+                    },
+                    "key_value_delimiter": {
+                        "type": "string",
+                        "description": "键值对分隔符 只有key-value时需要填写，默认情况下为None 非必填"
+                    },
+                    "key_delimiter_value": {
+                        "type": "string",
+                        "description": "键值分隔符 只有key-value时需要填写，默认情况下为None 非必填"
+                    },
+                    "sasl_mechanism": {
+                        "type": "string",
+                        "description": "sasl机制 事件来源类型为kafka时才传，默认为None 非必填"
+                    },
+                    "sasl_username": {
+                        "type": "string",
+                        "description": "sasl用户名 事件来源类型为kafka时才传，默认为None 非必填"
+                    },
+                    "sasl_password": {
+                        "type": "string",
+                        "description": "sasl密码 事件来源类型为kafka时才传，默认为None 非必填"
+                    },
+                    "event_source_type": {
+                        "type": "string",
+                        "description": "事件来源类型 目前支持kafka、syslog"
+                    },
+                    "enabled_status": {
+                        "type": "integer",
+                        "description": "上游接入 启用为 1 ，禁用为 0 非必填"
+                    },
+                    "retention_days": {
+                        "type": "integer",
+                        "description": "日志数据的保留天数, 默认为 7"
+                    }
+                }
             }
         }
     },
@@ -397,7 +458,8 @@ async def update_event_ingestion(request):
     key_value_delimiter = data.get("key_value_delimiter")
     kafka_topic = data.get("kafka_topic", [])
     event = await EventsIngestion.get(id=event_id)
-    max_length = int(data.get("max_length", 100))
+    max_length = int(data.get('max_length', 100))
+    event_source_type = data.get('event_source_type')
 
     if enabled_status == 0:
         if os.path.exists(event.file_path):
@@ -408,14 +470,26 @@ async def update_event_ingestion(request):
 
     data = event.vector_config_raw
 
-    if kafka_topic:
+    if event_source_type:
+        if event_source_type == "syslog":
+            data["sources"][event.vector_name]["type"] = "socket"
+            data["sources"][event.vector_name].pop("bootstrap_servers", None)
+            data["sources"][event.vector_name].pop("group_id", None)
+            data["sources"][event.vector_name].pop("topics", None)
+            data["sources"][event.vector_name].pop("sasl", None)
+        elif event_source_type == "kafka":
+            data["sources"][event.vector_name]["type"] = "kafka"
+            data["sources"][event.vector_name].pop("address", None)
+            data["sources"][event.vector_name].pop("mode", None)
+            data["sources"][event.vector_name].pop("max_length", None)
+    if kafka_topic and event_source_type == "kafka":
         data["sources"][event.vector_name]["topics"] = kafka_topic
-    if event_source_address:
+    if event_source_address and event_source_type == "kafka":
         data["sources"][event.vector_name]["bootstrap_servers"] = ",".join(event_source_address)
-    if communication_type:
+    if communication_type and event_source_type == "syslog":
         data["sources"][event.vector_name]["mode"] = communication_type
         event.syslog_config = communication_type + event.syslog_config[3:]
-    if kafka_group_id:
+    if kafka_group_id and event_source_type == "kafka":
         data["sources"][event.vector_name]["group_id"] = kafka_group_id
     if transforms_type:
         first_transform = f"{event.vector_name}_transforms"
@@ -435,17 +509,17 @@ async def update_event_ingestion(request):
         data["transforms"][first_transform]["source"] = value
         event.config_info = {transforms_type: args}
 
-    if syslog_port:
+    if syslog_port and event_source_type == "syslog":
         data["sources"][event.vector_name]["address"] = f"0.0.0.0:{syslog_port}"
         event.syslog_config = event.syslog_config[:3] + str(syslog_port)
-    if max_length:
+    if max_length and event_source_type == "syslog":
         data["sources"][event.vector_name]["max_length"] = max_length * 1024
-    if sasl_mechanism:
+    if sasl_mechanism and event_source_type == "kafka":
         data["sources"][event.vector_name].setdefault("sasl", {})["enabled"] = True
         data["sources"][event.vector_name]["sasl"]["mechanism"] = sasl_mechanism
-    if sasl_username:
+    if sasl_username and event_source_type == "kafka":
         data["sources"][event.vector_name]["sasl"]["username"] = sasl_username
-    if sasl_password:
+    if sasl_password and event_source_type == "kafka":
         data["sources"][event.vector_name]["sasl"]["password"] = urllib.parse.quote(sasl_password)
 
     result = check_vector_config(data)
@@ -558,11 +632,6 @@ async def get_event_ingestion_kafka_sample(request):
         event.enabled_health_status = "healthy"
     else:
         event.enabled_health_status = "unhealthy"
-
-    if any([i.startswith("log.") for i in data.keys()]):
-        event.convert_health_status = "healthy"
-    else:
-        event.convert_health_status = "unhealthy"
 
     await event.save()
 
@@ -1058,6 +1127,9 @@ async def parse_log(request):
     else:
         await EventsIngestion.update_or_create(id=request.json.get("id"), deleted=False, defaults={"convert_health_status": "unhealthy"})
         log = "日志解析失败，请修改解析类型"
+
+    if log != "日志解析失败，请修改解析类型":
+        event.convert_health_status = "healthy"
 
     return response_ok(log)
 
