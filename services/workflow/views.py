@@ -1216,25 +1216,22 @@ async def delete_webhook(request):
 
 
 # 无需权限验证的webhook执行接口，通过webhook_token验证
-@workflow_bp.post("/webhook/execute", name="execute_webhook_post")
 @workflow_bp.get("/webhook/execute", name="execute_webhook_get")
 @openapi.definition(
     summary="执行剧本（通过Webhook）",
     description="通过webhook token直接执行剧本，支持GET和POST调用",
-    body={
-        "application/json": {"schema": {"type": "object", "properties": {"key": {"type": "string", "description": "回调的唯一标识"}, "flow_input": {"type": "object", "description": "剧本输入参数"}}}}
-    },
+    parameters=[
+        {"name": "token", "in": "query", "description": "webhook唯一标识令牌", "required": True, "schema": {"type": "string"}},
+        {"name": "params", "in": "query", "description": "剧本输入参数，json格式字符串", "required": False, "schema": {"type": "string"}},
+    ],
     response={"200": {"description": "执行成功", "content": {"text/event-stream": {"schema": {"type": "string"}}}}},
 )
 async def execute_webhook(request):
     """
     通过webhook token执行剧本
-    支持GET和POST请求
-    GET请求：query parameters作为flow_input
-    POST请求：body中的flow_input作为参数
     """
     # 查找webhook
-    webhook_token = request.args.get("key")
+    webhook_token = request.args.get("token")
     if not webhook_token:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -1246,13 +1243,12 @@ async def execute_webhook(request):
     pv = webhook.playbook_version
 
     # 获取flow_input
-    flow_input = {}
-    if request.method.upper() == "POST":
-        json_data = request.json or {}
-        flow_input = json_data.get("flow_input", {})
-    elif request.method.upper() == "GET":
-        # GET请求从query parameters中获取
-        flow_input = dict(request.args)
+    flow_input = request.args.get("params")
+    if flow_input:
+        try:
+            flow_input = orjson.loads(flow_input)
+        except orjson.JSONDecodeError:
+            raise CustomError(ErrorCode.ParameterError)
 
     resp = await request.respond(
         content_type="text/event-stream",
@@ -1266,9 +1262,8 @@ async def execute_webhook(request):
 
     # 构造执行消息
     run_id = gen_run_id()
-    message = {"type": "flow", "flow_id": pv.id, "flow_input": flow_input, "executor": webhook.creator_id}
 
-    msg = {"run_type": "flow", "run_id": run_id, "run_args": message}
+    msg = {"run_type": "flow", "run_id": run_id, "run_args": {"type": "flow", "flow_id": pv.id, "flow_input": flow_input, "executor": webhook.creator_id}}
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
     sent_id = []

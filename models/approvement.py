@@ -21,7 +21,7 @@ class Approvement(BaseModel):
     approvers = fields.ManyToManyField(model_name="models.Account", related_name="approvers", through="approve_accounts", description="审核人员")
     audit_node = fields.CharField(max_length=36, description="审核节点ID")
     created_at = fields.DatetimeField(description="审核触发的时间")
-    params = fields.JSONField(default=[], description="自定义参数")
+    params = fields.JSONField(null=True, description="自定义参数")
     results = fields.JSONField(default={}, description="处理记录")
     callback_token = fields.CharField(max_length=16, description="外部回调token")
 

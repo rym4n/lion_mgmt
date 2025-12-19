@@ -2,6 +2,7 @@
 # coding=utf-8
 from datetime import datetime
 
+import orjson
 import pytz
 from sanic import Blueprint
 from sanic_ext import openapi
@@ -251,7 +252,7 @@ async def update_approvement(request):
         {"name": "token", "in": "query", "description": "审核的唯一token", "required": True, "schema": {"type": "string"}},
         {"name": "agree", "in": "query", "description": "布尔类型：True/False，同意或拒绝", "required": True, "schema": {"type": "boolean"}},
         {"name": "remark", "in": "query", "description": "审批备注信息", "required": False, "schema": {"type": "string"}},
-        {"name": "params", "in": "query", "description": "自定义参数的内容信息", "required": False, "schema": {"type": "array", "items": {"type": "object"}}},
+        {"name": "params", "in": "query", "description": "自定义参数的内容信息，json格式字符串", "required": False, "schema": {"type": "string"}},
     ],
     response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
@@ -262,9 +263,16 @@ async def update_approvement(request):
     token = param.get("token")
     agree = param.get("agree")
     remark = param.get("remark", "")
-    params = param.get("params") or []
-    if not token or not isinstance(agree, bool) or not isinstance(remark, str) or not isinstance(params, list):
+    flow_input = param.get("params")
+
+    if not token or not isinstance(agree, bool) or not isinstance(remark, str):
         raise CustomError(ErrorCode.ParameterError)
+
+    if flow_input:
+        try:
+            flow_input = orjson.loads(flow_input)
+        except orjson.JSONDecodeError:
+            raise CustomError(ErrorCode.ParameterError)
 
     approve = await Approvement.filter(callback_token=token).select_for_update().prefetch_related("approvers").first()
     if not approve:
@@ -272,9 +280,9 @@ async def update_approvement(request):
 
     if approve.status != 0:
         raise CustomError(ErrorCode.ApprovementStatusError)
-
-    if params:
-        approve.params = params
+    
+    if flow_input:
+        approve.params = flow_input
 
     approve.results = {**approve.results, token: {"username": "callback", "display_name": "外部回调", "agree": agree, "remark": remark, "approve_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}}
 
@@ -290,7 +298,7 @@ async def update_approvement(request):
         "run_id": approve.run_id,
         "run_args": {
             "flow_id": approve.flow_id,
-            "flow_input": params,
+            "flow_input": flow_input,
             "approval_node_id": approve.audit_node,
             "approval_status": approve.status,
             "executor": ",".join([p.id for p in approve.approvers]),
