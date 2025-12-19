@@ -1220,7 +1220,7 @@ async def delete_webhook(request):
 @openapi.definition(
     summary="执行剧本（通过Webhook）",
     description="通过webhook token直接执行剧本，支持GET和POST调用",
-    parameters=[
+    parameter=[
         {"name": "token", "in": "query", "description": "webhook唯一标识令牌", "required": True, "schema": {"type": "string"}},
         {"name": "params", "in": "query", "description": "剧本输入参数，json格式字符串", "required": False, "schema": {"type": "string"}},
     ],
