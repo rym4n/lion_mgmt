@@ -543,6 +543,10 @@ async def delete_event_ingestion(request):
                         "type": "string",
                         "description": "sasl密码 事件来源类型为kafka时才传，默认为None 非必填"
                     },
+                    "event_source_type": {
+                        "type": "string",
+                        "description": "事件来源类型 目前支持kafka、syslog"
+                    },
                     "enabled_status": {
                         "type": "integer",
                         "description": "上游接入 启用为 1 ，禁用为 0 非必填"
@@ -594,6 +598,7 @@ async def update_event_ingestion(request):
     kafka_topic = data.get('kafka_topic', [])
     event = await EventsIngestion.get(id=event_id)
     max_length = int(data.get('max_length', 100))
+    event_source_type = data.get('event_source_type')
 
     if enabled_status == 0:
         if os.path.exists(event.file_path):
@@ -604,6 +609,18 @@ async def update_event_ingestion(request):
 
     data = event.vector_config_raw
 
+    if event_source_type:
+        if event_source_type == "syslog":
+            data["sources"][event.vector_name]["type"] = "socket"
+            data["sources"][event.vector_name].pop("bootstrap_servers", None)
+            data["sources"][event.vector_name].pop("group_id", None)
+            data["sources"][event.vector_name].pop("topics", None)
+            data["sources"][event.vector_name].pop("sasl", None)
+        elif event_source_type == "kafka":
+            data["sources"][event.vector_name]["type"] = "kafka"
+            data["sources"][event.vector_name].pop("address", None)
+            data["sources"][event.vector_name].pop("mode", None)
+            data["sources"][event.vector_name].pop("max_length", None)
     if kafka_topic:
         data["sources"][event.vector_name]["topics"] = kafka_topic
     if event_source_address:
