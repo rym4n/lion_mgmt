@@ -233,7 +233,7 @@ async def update_approvement(request):
         "run_id": approve.run_id,
         "run_args": {
             "flow_id": approve.flow_id,
-            "flow_input": params,
+            "flow_input": {p["name"]: p["value"] for p in params},
             "approval_node_id": approve.audit_node,
             "approval_status": approve.status,
             "executor": ",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session["account_info"].id,
@@ -280,7 +280,7 @@ async def update_approvement(request):
 
     if approve.status != 0:
         raise CustomError(ErrorCode.ApprovementStatusError)
-    
+
     if flow_input:
         approve.params = flow_input
 
