@@ -633,11 +633,6 @@ async def get_event_ingestion_kafka_sample(request):
     else:
         event.enabled_health_status = "unhealthy"
 
-    if any([i.startswith("log.") for i in data.keys()]):
-        event.convert_health_status = "healthy"
-    else:
-        event.convert_health_status = "unhealthy"
-
     await event.save()
 
     return response_ok(messages)
@@ -1132,6 +1127,9 @@ async def parse_log(request):
     else:
         await EventsIngestion.update_or_create(id=request.json.get("id"), deleted=False, defaults={"convert_health_status": "unhealthy"})
         log = "日志解析失败，请修改解析类型"
+
+    if log != "日志解析失败，请修改解析类型":
+        event.convert_health_status = "healthy"
 
     return response_ok(log)
 
