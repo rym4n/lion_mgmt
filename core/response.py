@@ -1,4 +1,9 @@
 # coding=utf-8
+"""
+响应工具模块
+
+提供统一的接口响应封装函数，包括成功和失败返回格式。
+"""
 from typing import Any, Optional
 
 import orjson

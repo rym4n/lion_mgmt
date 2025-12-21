@@ -193,6 +193,22 @@ async def todo_approvement(request):
 )
 @requires_permission("approve:u")
 async def update_approvement(request):
+    """
+    更新审批任务状态并发送 Kafka 消息。
+
+    参数:
+        request: Sanic 请求对象，需包含 JSON 字段：
+            - id (str): 审批任务 ID
+            - agree (bool): 审批结果，True 表示通过，False 表示拒绝
+            - remark (str, 可选): 审批备注
+            - params (list, 可选): 自定义参数列表，每个元素需包含 name/value/required 字段
+
+    返回:
+        成功时返回 response_ok("success")
+
+    异常:
+        CustomError: 参数缺失或格式错误、审批任务不存在、任务状态非待处理
+    """
     param = request.json
     approvement_id = param.get("id")
     agree = param.get("agree")
@@ -267,7 +283,7 @@ async def update_approvement(request):
     response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
 @requires_permission("approve:u")
-async def update_approvement(request):
+async def update_approvement_callback(request):
     param = dict(request.args)
 
     token = param.get("token")

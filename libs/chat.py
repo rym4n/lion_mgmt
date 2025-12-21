@@ -22,6 +22,18 @@ from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC, WR_TOPIC, AUTHENTICATIO
 
 
 async def fetch_completion(host, api_key, model, messages):
+    """
+    异步调用大模型接口，获取对话补全结果。
+
+    参数:
+        host (str): 大模型服务地址
+        api_key (str): 授权密钥
+        model (str): 使用的模型名称
+        messages (list[dict]): 对话历史，格式为 [{"role": "system|user|assistant", "content": "..."}]
+
+    返回:
+        str: 模型返回的补全内容；若请求失败或解析异常则返回空字符串
+    """
     url = f"{host}/chat/completions"
 
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -342,9 +354,9 @@ class ChatManager:
 
     async def disconnect(self, user_id):
         """处理用户断开连接"""
-        if user_id in self.active_connections.keys():
+        if user_id in self.active_connections:
             self.active_connections.pop(user_id, None)
-        if user_id in self.run_connections.keys():
+        if user_id in self.run_connections:
             self.run_connections.pop(user_id, None)
         await self.cache_client.delete(f"room_online_{user_id}")
         logger.info(f"用户 {user_id} 断开连接")
@@ -376,11 +388,11 @@ class ChatManager:
                             continue
                         message["data"] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"], redis=self.redis))
                     room_id = msg.get("room_id")
-                    for k in self.active_connections:
-                        if room_id and self.active_connections[k]["current_room"] == room_id:
-                            await self.active_connections[k]["conn"].send(message["data"].decode())
+                    for k, v in self.active_connections.items():
+                        if room_id and v["current_room"] == room_id:
+                            await v["conn"].send(message["data"].decode())
                         elif room_id is None:
-                            await self.active_connections[k]["conn"].send(message["data"].decode())
+                            await v["conn"].send(message["data"].decode())
                 except orjson.JSONDecodeError:
                     logger.error(f"JSONDecodeError | {message.get('data')}")
                 except WebsocketClosed:
