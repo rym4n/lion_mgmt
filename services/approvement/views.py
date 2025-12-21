@@ -235,12 +235,15 @@ async def update_approvement(request):
 
     await approve.save()
 
+    flow_input = {p["name"]: p["value"] for p in args}
+    flow_input["approval_result"] = approve.results
+
     msg = {
         "run_type": "flow",
         "run_id": approve.run_id,
         "run_args": {
             "flow_id": approve.flow_id,
-            "flow_input": {p["name"]: p["value"] for p in args},
+            "flow_input": flow_input,
             "approval_node_id": approve.audit_node,
             "approval_status": approve.status,
             "executor": ",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session["account_info"].id,
@@ -299,6 +302,8 @@ async def update_approvement(request):
         approve.status = 2
 
     await approve.save()
+
+    flow_input["approval_result"] = approve.results
 
     msg = {
         "run_type": "flow",
