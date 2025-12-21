@@ -197,9 +197,16 @@ async def update_approvement(request):
     approvement_id = param.get("id")
     agree = param.get("agree")
     remark = param.get("remark", "")
-    params = param.get("params") or []
-    if not approvement_id or not isinstance(agree, bool) or not isinstance(remark, str) or not isinstance(params, list):
+    args = param.get("params") or []
+    if not approvement_id or not isinstance(agree, bool) or not isinstance(remark, str) or not isinstance(args, list):
         raise CustomError(ErrorCode.ParameterError)
+
+    for p in args:
+        if not p.get("name") or not p.get("value"):
+            raise CustomError(ErrorCode.ParameterError)
+
+        if p.get("required") is True and not p.get("value"):
+            raise CustomError(ErrorCode.ParameterError)
 
     approve = await Approvement.filter(id=approvement_id).select_for_update().prefetch_related("approvers").first()
     if not approve:
@@ -208,8 +215,8 @@ async def update_approvement(request):
     if approve.status != 0:
         raise CustomError(ErrorCode.ApprovementStatusError)
 
-    if params:
-        approve.params = params
+    if args:
+        approve.params = args
     account_info = request.ctx.session["account_info"]
     approve.results = {
         **approve.results,
@@ -233,7 +240,7 @@ async def update_approvement(request):
         "run_id": approve.run_id,
         "run_args": {
             "flow_id": approve.flow_id,
-            "flow_input": {p["name"]: p["value"] for p in params},
+            "flow_input": {p["name"]: p["value"] for p in args},
             "approval_node_id": approve.audit_node,
             "approval_status": approve.status,
             "executor": ",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session["account_info"].id,
