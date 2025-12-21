@@ -10,15 +10,14 @@ from sanic.log import logger
 
 async def aproduce(servers, topic, value, key=None, partition=None, max_request_size=1048576):
     try:
-        async with AIOKafkaProducer(bootstrap_servers=servers.split(','), max_request_size=max_request_size) as producer:
+        async with AIOKafkaProducer(bootstrap_servers=servers.split(","), max_request_size=max_request_size) as producer:
             _ = await producer.send_and_wait(topic, orjson.dumps(value), key, partition)
     except Exception as err:
         logger.error(err)
 
 
 async def aconsume(servers, topic, group_id, callback_func=None, consume_records=500):
-    async with AIOKafkaConsumer(topic, bootstrap_servers=servers.split(','), group_id=group_id, enable_auto_commit=False,
-                                max_poll_interval_ms=60000, value_deserializer=orjson.loads) as consumer:
+    async with AIOKafkaConsumer(topic, bootstrap_servers=servers.split(","), group_id=group_id, enable_auto_commit=False, max_poll_interval_ms=60000, value_deserializer=orjson.loads) as consumer:
         while True:
             try:
                 msg_set = await consumer.getmany(max_records=int(consume_records))

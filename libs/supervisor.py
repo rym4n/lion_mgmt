@@ -35,8 +35,12 @@ def _get_all_processes(server, process_name):
 def write_process_config(process_name, command, concurrency):
     """写入 supervisor 配置文件"""
     config_path = os.path.join(SUPERVISOR_PATH, "{}.conf".format(process_name))
-    with open(config_path, "w", encoding='utf-8') as f:
-        f.write("""[program:{}]\ncommand={}\nnumprocs={}\nprocess_name=%(program_name)s_%(process_num)02d\nautostart=true\nautorestart=true\nredirect_stderr=true\nstdout_logfile=/dev/null\n""".format(process_name, command, concurrency))
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write(
+            """[program:{}]\ncommand={}\nnumprocs={}\nprocess_name=%(program_name)s_%(process_num)02d\nautostart=true\nautorestart=true\nredirect_stderr=true\nstdout_logfile=/dev/null\n""".format(
+                process_name, command, concurrency
+            )
+        )
     logging.info("写入配置文件: {}".format(config_path))
 
 
@@ -66,16 +70,16 @@ def start_process(process_name):
         for p in all_processes:
             process_info = server.supervisor.getProcessInfo(p)
             logging.info("process_info：", process_info)
-            if process_info['statename'] == 'STARTING':
+            if process_info["statename"] == "STARTING":
                 logging.info("进程 {} 正在启动中".format(p))
                 time.sleep(0.5)
                 process_info = server.supervisor.getProcessInfo(p)
-                if process_info['statename'] != 'RUNNING':
+                if process_info["statename"] != "RUNNING":
                     server.supervisor.startProcess(p)
                     logging.info("进程 {} 启动成功".format(p))
                 else:
                     logging.info("进程 {} 已经在运行中".format(p))
-            elif process_info['statename'] == 'RUNNING':
+            elif process_info["statename"] == "RUNNING":
                 logging.info("进程 {} 已经在运行中".format(p))
             else:
                 server.supervisor.startProcess(p)
@@ -128,7 +132,7 @@ def process_status(process_name):
     try:
         server = ServerProxy(RY_JOB_SERVER)
         process_info = server.supervisor.getProcessInfo(process_name)
-        if process_info['statename'] == 'RUNNING':
+        if process_info["statename"] == "RUNNING":
             return "healthy"
         else:
             return "unhealthy"
