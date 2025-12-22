@@ -1,7 +1,6 @@
 import ast
 import asyncio
 import os
-import time
 import uuid
 from datetime import datetime
 from urllib.parse import quote
@@ -11,23 +10,20 @@ import jwt
 import orjson
 import yaml
 from aiocache import cached
-from sanic import Blueprint
-from sanic import json
-from sanic import response
+from sanic import Blueprint, json, response
 from sanic_ext import openapi
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
-from libs import utils
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import strip_timezone_to_seconds, get_from_s3, gen_run_id
-from models import AuditLog, Config, Playbook, Role, PlaybookPermissions, PlaybookVersion
+from libs.utils import (get_from_s3, query_vlog, strip_timezone_to_seconds,
+                        upload_to_s3)
+from models import Config
 from services.event_ingestion.views import check_vector_config
-from services.tools.views import tool_action_update
-from services.workflow.views import statistics_data
-from settings import SECRET, SESSION_ENCODING_ALGORITHM, BASE_DIR, VECTOR_CFG, AUTHENTICATION_SESSION_EXPIRATION
+from settings import (AUTHENTICATION_SESSION_EXPIRATION, BASE_DIR, SECRET,
+                      SESSION_ENCODING_ALGORITHM, VECTOR_CFG)
 
 system_bp = Blueprint("system", url_prefix="/system")
 _all__ = ["system_bp"]
@@ -109,11 +105,11 @@ async def upload_image(request):
             original_name = file.name
             _, ext = os.path.splitext(original_name)
             if field == "background":
-                filename = f"bg" + ext
+                filename = "bg" + ext
             elif field == "logo":
-                filename = f"logo" + ext
+                filename = "logo" + ext
             if file and filename:
-                file_url = await utils.upload_to_s3(file.body, "user", filename, "custom")
+                file_url = await upload_to_s3(file.body, "user", filename, "custom")
                 await Config.update_or_create(key=field, module="system", defaults={"value": file_url})
 
     return response_ok("success")
@@ -537,8 +533,8 @@ async def transforms_update(request):
                 "type": "object",
                 "properties": {
                     "username": {"type": "string", "description": "用户名"},
-                    "start_time": {"type": "string", "description": "开始时间"},
-                    "end_time": {"type": "string", "description": "结束时间"},
+                    "start_time": {"type": "string", "description": "开始时间, 格式为2025-01-01 00:00:00"},
+                    "end_time": {"type": "string", "description": "结束时间, 格式为2025-01-01 00:00:00"},
                     "ip": {"type": "string", "description": "ip"},
                     "page": {"type": "integer", "description": "页码"},
                     "size": {"type": "integer", "description": "每页条数"},
@@ -594,26 +590,66 @@ async def search_audit(request):
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 15))
     offset = (page - 1) * size
-    limit = size
 
     username = request.json.get("username")
     start_time = request.json.get("start_time")
     end_time = request.json.get("end_time")
     ip = request.json.get("ip")
-    filters = {}
-    if start_time:
-        filters["ctime__gte"] = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
-    if end_time:
-        filters["ctime__lte"] = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
-    if ip:
-        filters["client_ip"] = ip
+
+    query = 'topic:"lion_audit"'
     if username:
-        filters["username"] = username
+        query += f' AND username:"{username}"'
+    if ip:
+        query += f' AND client_ip:"{ip}"'
 
-    total = await AuditLog.filter(**filters).count()
-    data = await AuditLog.filter(**filters).offset(offset).limit(limit)
+    # 获取总数
+    count_query = f"{query} | stats count()"
+    count_task = query_vlog(count_query, project_id=0, start=start_time, end=end_time)
 
-    return response_ok({"total": total, "page": page, "size": size, "total_pages": (total + size - 1) // size, "data": [item.json for item in data]})
+    # 获取数据
+    data_query = f"{query} | sort(_time desc)"
+    # 由于VictoriaLogs不支持offset，需要查询 offset + size 条数据后在内存中切片
+    fetch_limit = offset + size
+    data_task = query_vlog(data_query, project_id=0, start=start_time, end=end_time, limit=fetch_limit)
+
+    count_res, data_res = await asyncio.gather(count_task, data_task)
+
+    total = 0
+    if count_res:
+        # stats count() 通常返回 [{"count": N}]
+        total = int(count_res[0].get("count", 0))
+
+    data = []
+    if data_res:
+        # 内存分页
+        page_data = data_res[offset:]
+        for item in page_data:
+            # 格式化时间，VictoriaLogs返回的_time通常是RFC3339格式，如果原来AuditLog.json返回的是格式化后的时间，这里需要处理
+            # 假设前端能处理RFC3339，或者我们转换一下
+            ctime = item.get("ctime") or item.get("_time")
+            if ctime and "T" in ctime:
+                try:
+                    # 简单转换为 "YYYY-MM-DD HH:MM:SS"
+                    dt = datetime.strptime(ctime[:19], "%Y-%m-%dT%H:%M:%S")
+                    ctime = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    pass
+
+            data.append(
+                {
+                    "id": item.get("id", ""),
+                    "ctime": ctime,
+                    "username": item.get("username", ""),
+                    "display_name": item.get("display_name", ""),
+                    "client_ip": item.get("client_ip", ""),
+                    "result": item.get("result", ""),
+                    "uri": item.get("uri", ""),
+                    "client_ua": item.get("client_ua", ""),
+                    "request_data": item.get("request_data", {}),
+                }
+            )
+
+    return response_ok({"total": total, "page": page, "size": size, "total_pages": (total + size - 1) // size, "data": data})
 
 
 @system_bp.post("/outgoing")
@@ -834,7 +870,7 @@ async def update_file(request):
         s3_filename = file_id + "." + ext
 
         # 异步写入文件
-        await utils.upload_to_s3(f.body, "user", s3_filename, "common_files")
+        await upload_to_s3(f.body, "user", s3_filename, "common_files")
 
         file_info = {"filename": filename, "file_id": s3_filename, "size": len(f.body), "result": "success"}
         saved_files.append(file_info)

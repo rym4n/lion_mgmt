@@ -37,7 +37,7 @@ _all__ = ["event_ingestion_bp"]
 
 def get_conditional_statements(conditions):
     conditional_statements = ""
-    for index, condition in enumerate(conditions):
+    for _, condition in enumerate(conditions):
         if condition["type"] in ["==", "!="]:
             conditional_statements += f"""to_string!(.log."{condition["name"]}") {condition['type']} "{condition['value']}" """
         elif condition["type"] in [">", "<", ">=", "<="]:
@@ -102,7 +102,7 @@ async def gen_vector_config(output_path, sources, topic, project_id):
                     "enabled": False,
                 },
                 "query": {"_msg_field": "message", "_time_field": "@timestamp", "_stream_fields": "host,source_type"},
-                "request": {"headers": {"AccountID": "1", "ProjectID": str(project_id)}},
+                "request": {"headers": {"AccountID": "0", "ProjectID": str(project_id)}},
             }
         },
         "transforms": {
@@ -329,7 +329,7 @@ async def delete_event_ingestion(request):
             process_name = hashlib.md5(f"{es.event_ingestion_id}_{script_id}".encode()).hexdigest()
             supervisor.stop_process(process_name)
             supervisor.remove_process(process_name)
-            supervisor_path = os.path.join(SUPERVISOR_PATH, "{}.conf".format(process_name))
+            supervisor_path = os.path.join(SUPERVISOR_PATH, f"{process_name}.conf")
             if os.path.exists(supervisor_path):
                 os.remove(supervisor_path)
         await es.delete()
@@ -349,85 +349,25 @@ async def delete_event_ingestion(request):
                 "type": "object",
                 "required": ["id"],
                 "properties": {
-                    "id": {
-                        "type": "string",
-                        "description": "事件ID"
-                    },
-                    "event_describe": {
-                        "type": "string",
-                        "description": "事件描述 非必填"
-                    },
-                    "event_source_address": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "事件来源地址 事件来源类型为kafka时才传 非必填"
-                    },
-                    "max_length": {
-                        "type": "integer",
-                        "description": "单条消息的最大长度，单位为KB，默认100KB"
-                    },
-                    "syslog_port": {
-                        "type": "integer",
-                        "description": "日志端口 端口范围500-2000 事件来源类型为syslog时才传，默认为None 非必填"
-                    },
-                    "communication_type": {
-                        "type": "string",
-                        "description": "通信类型 事件来源类型为syslog时才传，默认为None 非必填"
-                    },
-                    "kafka_group_id": {
-                        "type": "string",
-                        "description": "kafka消费组ID 事件来源类型为kafka时才传，默认为None 非必填"
-                    },
-                    "kafka_topic": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "kafka主题 事件来源类型为kafka时才传，默认为None 非必填"
-                    },
-                    "transforms_type": {
-                        "type": "string",
-                        "description": "转换类型 目前支持Grok、CEF、key-value、JSON、Delimiter(分割符) 非必填"
-                    },
-                    "transforms_config": {
-                        "type": "string",
-                        "description": "转换配置 只有Grok时需要填写，默认情况下为None 非必填"
-                    },
-                    "key_value_delimiter": {
-                        "type": "string",
-                        "description": "键值对分隔符 只有key-value时需要填写，默认情况下为None 非必填"
-                    },
-                    "key_delimiter_value": {
-                        "type": "string",
-                        "description": "键值分隔符 只有key-value时需要填写，默认情况下为None 非必填"
-                    },
-                    "sasl_mechanism": {
-                        "type": "string",
-                        "description": "sasl机制 事件来源类型为kafka时才传，默认为None 非必填"
-                    },
-                    "sasl_username": {
-                        "type": "string",
-                        "description": "sasl用户名 事件来源类型为kafka时才传，默认为None 非必填"
-                    },
-                    "sasl_password": {
-                        "type": "string",
-                        "description": "sasl密码 事件来源类型为kafka时才传，默认为None 非必填"
-                    },
-                    "event_source_type": {
-                        "type": "string",
-                        "description": "事件来源类型 目前支持kafka、syslog"
-                    },
-                    "enabled_status": {
-                        "type": "integer",
-                        "description": "上游接入 启用为 1 ，禁用为 0 非必填"
-                    },
-                    "retention_days": {
-                        "type": "integer",
-                        "description": "日志数据的保留天数, 默认为 7"
-                    }
-                }
+                    "id": {"type": "string", "description": "事件ID"},
+                    "event_describe": {"type": "string", "description": "事件描述 非必填"},
+                    "event_source_address": {"type": "array", "items": {"type": "string"}, "description": "事件来源地址 事件来源类型为kafka时才传 非必填"},
+                    "max_length": {"type": "integer", "description": "单条消息的最大长度，单位为KB，默认100KB"},
+                    "syslog_port": {"type": "integer", "description": "日志端口 端口范围500-2000 事件来源类型为syslog时才传，默认为None 非必填"},
+                    "communication_type": {"type": "string", "description": "通信类型 事件来源类型为syslog时才传，默认为None 非必填"},
+                    "kafka_group_id": {"type": "string", "description": "kafka消费组ID 事件来源类型为kafka时才传，默认为None 非必填"},
+                    "kafka_topic": {"type": "array", "items": {"type": "string"}, "description": "kafka主题 事件来源类型为kafka时才传，默认为None 非必填"},
+                    "transforms_type": {"type": "string", "description": "转换类型 目前支持Grok、CEF、key-value、JSON、Delimiter(分割符) 非必填"},
+                    "transforms_config": {"type": "string", "description": "转换配置 只有Grok时需要填写，默认情况下为None 非必填"},
+                    "key_value_delimiter": {"type": "string", "description": "键值对分隔符 只有key-value时需要填写，默认情况下为None 非必填"},
+                    "key_delimiter_value": {"type": "string", "description": "键值分隔符 只有key-value时需要填写，默认情况下为None 非必填"},
+                    "sasl_mechanism": {"type": "string", "description": "sasl机制 事件来源类型为kafka时才传，默认为None 非必填"},
+                    "sasl_username": {"type": "string", "description": "sasl用户名 事件来源类型为kafka时才传，默认为None 非必填"},
+                    "sasl_password": {"type": "string", "description": "sasl密码 事件来源类型为kafka时才传，默认为None 非必填"},
+                    "event_source_type": {"type": "string", "description": "事件来源类型 目前支持kafka、syslog"},
+                    "enabled_status": {"type": "integer", "description": "上游接入 启用为 1 ，禁用为 0 非必填"},
+                    "retention_days": {"type": "integer", "description": "日志数据的保留天数, 默认为 7"},
+                },
             }
         }
     },
@@ -458,8 +398,8 @@ async def update_event_ingestion(request):
     key_value_delimiter = data.get("key_value_delimiter")
     kafka_topic = data.get("kafka_topic", [])
     event = await EventsIngestion.get(id=event_id)
-    max_length = int(data.get('max_length', 100))
-    event_source_type = data.get('event_source_type')
+    max_length = int(data.get("max_length", 100))
+    event_source_type = data.get("event_source_type")
 
     if enabled_status == 0:
         if os.path.exists(event.file_path):
@@ -695,7 +635,7 @@ async def binding_event_ingestion_script(request):
                 process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
                 supervisor.stop_process(process_name)
                 supervisor.remove_process(process_name)
-                supervisor_path = os.path.join(SUPERVISOR_PATH, "{}.conf".format(process_name))
+                supervisor_path = os.path.join(SUPERVISOR_PATH, f"{process_name}.conf")
                 if os.path.exists(supervisor_path):
                     os.remove(supervisor_path)
         await event_related_script.delete()
@@ -747,21 +687,19 @@ async def binding_event_ingestion_script(request):
                     else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])
                 )
             ),
-            "source": """
+            "source": f"""
 .aioe_event_id = uuid_v4()
 .log_data = to_string(encode_json(.log))
 .id = .aioe_event_id
 .ctime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
 .utime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
 .deleted = false
-.event_name = {}
+.event_name = {event_name}
 .event_process_status = "待处理"
-.event_source = "{}"
-.event_ingestion_id = "{}"
+.event_source = "{event.event_ingestion_name}"
+.event_ingestion_id = "{event_ingestion_id}"
 del(.datetime_str)
-""".format(
-                event_name, event.event_ingestion_name, event_ingestion_id
-            ),
+"""
         }
 
         data["sinks"][f"{topic}_sinks"] = {"inputs": [f"{topic}_event_transforms"], "type": "kafka", "bootstrap_servers": KAFKA_SERVERS, "topic": topic, "encoding": {"codec": "json"}}
@@ -1098,7 +1036,7 @@ async def parse_log(request):
     if not result:
         raise CustomError(ErrorCode.LogParseError)
 
-    messages = await query_vlog(f"* | first 1 by (_time desc)", event.project_id)
+    messages = await query_vlog("* | first 1 by (_time desc)", event.project_id)
 
     if not messages:
         return response_ok("当前不存在日志")
@@ -1239,7 +1177,7 @@ async def transforms_list(request):
 )
 async def grok_ai(request):
     log = request.json.get("log")
-    SYSTEM_PROMPT = """
+    system_prompt = """
 # 角色
 你是一位日志解析专家，擅长使用vecotr工具,能够根据提供的日志样例生成 *单个* Grok 表达式。
 
@@ -1270,7 +1208,7 @@ async def grok_ai(request):
         return response_ok("当前未配置ai服务模型，请前往系统设置进行配置。")
 
     client = OpenAI(base_url=host, api_key=api_key)
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": f"提供给你的日志样例是：{log}"}]
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": f"提供给你的日志样例是：{log}"}]
     resp = client.chat.completions.create(model=model, messages=messages, max_tokens=4000, temperature=0.7)
 
     full_response = resp.choices[0].message.content if resp.choices else ""

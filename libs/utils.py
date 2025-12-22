@@ -3,22 +3,16 @@ import asyncio
 import base64
 import datetime
 import ipaddress
-import os
-import os.path
 import random
 import secrets
 import subprocess
 import time
 import traceback
 import uuid
-import zipfile
-from io import BytesIO
-from pathlib import Path, PurePath
 from string import ascii_uppercase, digits
 from typing import Optional
 
 import aioboto3
-import aiofile
 import httpx
 import jwt
 import orjson
@@ -210,7 +204,7 @@ def run_linux_command(command):
     :param command: 字符串或字符串列表，表示要执行的命令。
     :return: 字典，包含 stdout、stderr 和 returncode。
     """
-    result = subprocess.run(command, shell=isinstance(command, str), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    result = subprocess.run(command, shell=isinstance(command, str), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
     return {"stdout": result.stdout.strip() if result.stdout else "", "stderr": result.stderr.strip() if result.stderr else "", "code": result.returncode}
 
 
@@ -262,13 +256,20 @@ def decrypt_aes256_gcm(encrypted_data: str) -> str:
         raise ValueError("解密失败: 密码错误或数据损坏") from e
 
 
-async def query_vlog(query, project_id, start=None, end=None, account_id="1", limit=None):
+def time_conversion(original_time):
+    dt = datetime.datetime.strptime(original_time, "%Y-%m-%d %H:%M:%S")
+    dt_utc = dt.replace(tzinfo=datetime.timezone.utc)
+    rfc3339 = dt_utc.isoformat().replace("+00:00", "Z")
+    return rfc3339
+
+
+async def query_vlog(query, project_id, start=None, end=None, account_id=0, limit=None):
     # 构建VictoriaLogs查询参数
     params = {"query": query}
     if start:
-        params["start"] = start
+        params["start"] = time_conversion(start)
     if end:
-        params["end"] = end
+        params["end"] = time_conversion(end)
     if limit:
         params["limit"] = limit
 
@@ -418,12 +419,3 @@ async def get_url_from_s3(bucket_name: str, file_name: str, host, prefix="") -> 
         except Exception as e:
             logger.error(f"获取文件失败: {e} | {traceback.format_exc()}")
     return None
-
-
-# 将%Y-%m-%d %H:%M:%S转换成VL查询可以时间格式
-def time_conversion(original_time):
-    dt = datetime.datetime.strptime(original_time, "%Y-%m-%d %H:%M:%S")
-    dt_utc = dt.replace(tzinfo=datetime.timezone.utc)
-    rfc3339 = dt_utc.isoformat().replace("+00:00", "Z")
-
-    return rfc3339

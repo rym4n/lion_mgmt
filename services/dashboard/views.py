@@ -1,6 +1,5 @@
 # coding=utf-8
-import time
-from collections import defaultdict
+
 from datetime import datetime
 
 from sanic import Blueprint
@@ -12,7 +11,6 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import query_vlog
 from models import PlaybookVersion, ToolResources
 
 dashboard_bp = Blueprint("dashboard", url_prefix="/dashboard")

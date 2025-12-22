@@ -16,10 +16,7 @@ class SecurityMiddleware(BaseMiddleware):
 
     async def before_request(self, request: Request) -> None:
         # 判断请求URI是否需要身份验证
-        white_urls = [
-            "/user/login", "/health", '/system/oauth/status', '/system/platform', '/system/picture',
-            '/user/oauth/login', '/user/oauth/callback', '/user/local-auth'
-        ]
+        white_urls = ["/user/login", "/health", "/system/oauth/status", "/system/platform", "/system/picture", "/user/oauth/login", "/user/oauth/callback", "/user/local-auth"]
         if request.path not in white_urls:
             await authenticate(request)
 
@@ -27,48 +24,50 @@ class SecurityMiddleware(BaseMiddleware):
         """统一记录操作日志"""
         data = None
         if hasattr(request.ctx, "session"):
-            params = request.json if 'multipart' not in request.content_type else None
+            params = request.json if "multipart" not in request.content_type else None
             if params:
-                for key in ['password', 'code', 'token']:
+                for key in ["password", "code", "token"]:
                     if key in params:
-                        params[key] = '******'
+                        params[key] = "******"
             data = {
-                "username": request.ctx.session['name'],
-                "display_name": request.ctx.session['display_name'],
-                "client_ip": request.ctx.session['ip'],
+                "username": request.ctx.session["name"],
+                "display_name": request.ctx.session["display_name"],
+                "tenant_id": request.ctx.session["tenant_id"] if "tenant_id" in request.ctx.session else 0,
+                "client_ip": request.ctx.session["ip"],
                 "result": "成功" if response.status == 200 else "失败",
                 "uri": request.path,
-                "client_ua": request.headers.get('User-Agent', ''),
-                "request_data": request.json if 'multipart' not in request.content_type else None
+                "client_ua": request.headers.get("User-Agent", ""),
+                "request_data": request.json if "multipart" not in request.content_type else None,
             }
-        elif request.path == '/user/login' and request.method == 'POST':
+        elif request.path == "/user/login" and request.method == "POST":
             params = request.json
             if params:
-                params['password'] = '******'
+                params["password"] = "******"
             data = {
-                "username": request.json.get('username', ''),
-                "display_name": request.json.get('username', ''),
+                "username": request.json.get("username", ""),
+                "display_name": request.json.get("username", ""),
+                "tenant_id": request.json.get("tenant_id", 0),
                 "client_ip": get_client_ip(request),
                 "result": "成功" if response.status == 200 else "失败",
                 "uri": request.path,
-                "client_ua": request.headers.get('User-Agent', ''),
-                "request_data": params
+                "client_ua": request.headers.get("User-Agent", ""),
+                "request_data": params,
             }
-        elif request.path == '/user/oauth/callback':
+        elif request.path == "/user/oauth/callback":
             params = request.args
             if params:
-                params['code'] = '******'
+                params["code"] = "******"
             data = {
-                "username": '',
-                "display_name": '',
+                "username": "",
+                "display_name": "",
+                "tenant_id": request.json.get("tenant_id", 0),
                 "client_ip": get_client_ip(request),
                 "result": "成功" if response.status < 400 else "失败",
                 "uri": request.path,
-                "client_ua": request.headers.get('User-Agent', ''),
-                "request_data": params
+                "client_ua": request.headers.get("User-Agent", ""),
+                "request_data": params,
             }
         if data is not None:
-            data["ctime"] = data["utime"] = datetime.now(TZ).strftime("%Y-%m-%dT%H:%M:%S%z")
+            data["ctime"] = datetime.now(TZ).strftime("%Y-%m-%dT%H:%M:%S%z")
             data["id"] = str(uuid.uuid4())
-            data["deleted"] = False
             await aproduce(KAFKA_SERVERS, AUDIT_TOPIC, data)

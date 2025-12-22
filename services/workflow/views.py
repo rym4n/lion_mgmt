@@ -22,7 +22,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license, playbook_permission, \
     check_playbook_permission
-from libs.utils import gen_run_id, strip_timezone_to_seconds, query_vlog, time_conversion
+from libs.utils import gen_run_id, strip_timezone_to_seconds, query_vlog
 from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, \
     EventRelatedScript, Timed, PlaybookWebhook, Account
 from services.tools.views import tool_action_update, tool_action_playbook_delete
@@ -684,7 +684,7 @@ async def execute_action(request):
             playbook_id = pv.playbook_id
             has_access = await check_playbook_permission(request=request, user=request.ctx.session["account_info"], playbook_id=playbook_id, required_permissions=["e"])
             if not has_access:
-                await resp.send(f"data: 缺少剧本执行权限，执行失败\n\n")
+                await resp.send("data: 缺少剧本执行权限，执行失败\n\n")
                 await resp.eof()
                 return resp
         run_id = gen_run_id()
@@ -692,7 +692,7 @@ async def execute_action(request):
         msg = {"run_type": message["type"], "run_id": run_id, "run_args": message}
         await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
         sent_id = []
-        for i in range(60):
+        for _ in range(60):
             logs = await Runlog.filter(run_id=run_id, utime__gte=utime).all()
             if logs:
                 utime = logs[0].utime
@@ -781,7 +781,7 @@ async def run_history(request):
     all_run_ids = await Runlog.filter(playbook_id=playbook_id, deleted=False).order_by("-utime").values_list("run_id", "utime")
     seen = set()
     run_ids_query = []
-    for run_id, utime in all_run_ids:
+    for run_id, _ in all_run_ids:
         if run_id not in seen:
             seen.add(run_id)
             run_ids_query.append(run_id)
@@ -1269,7 +1269,7 @@ async def execute_webhook(request):
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
 
     sent_id = []
-    for i in range(60):
+    for _ in range(60):
         logs = await Runlog.filter(run_id=run_id, utime__gte=utime).all()
         if logs:
             utime = logs[0].utime
@@ -1348,8 +1348,6 @@ async def dashboard_statistics(request):
         raise CustomError(ErrorCode.ParameterError)
 
     query = "playbook_version_id:" + flow_id
-    start = time_conversion(start)
-    end = time_conversion(end)
     logs = await query_vlog(query, project_id=1, start=start, end=end, account_id=0)
 
     run_status = defaultdict(lambda: {"start": None, "end": None, "status": "success"})
@@ -1458,4 +1456,3 @@ async def import_workflow(request):
                 await tool_action_update({pv.id: action_ids})
 
     return response_ok("success")
-
