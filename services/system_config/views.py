@@ -13,7 +13,6 @@ import orjson
 import yaml
 from aiocache import cached
 from sanic import Blueprint, json, response
-from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.transactions import in_transaction
 
@@ -615,9 +614,7 @@ async def search_audit(request):
 
     total = 0
     if count_res:
-        # stats count() 通常返回 [{"count": N}]
-        logger.info("count_res: %s", count_res)
-        total = int(count_res[0].get("count", 0))
+        total = int(count_res[0].get("count(*)", 0))
 
     data = []
     if data_res:
