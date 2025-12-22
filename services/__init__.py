@@ -45,9 +45,9 @@ def create_app() -> Sanic:
 
 
 def register_blueprints(app: Sanic) -> None:
-    app.add_route(activity, '/activity/<activityId>')
-    app.add_route(playbook_list, '/playbooks', methods=['POST'])
-    app.add_route(all_apps, '/apps', methods=['POST'])
+    app.add_route(activity, "/activity/<activityId>")
+    app.add_route(playbook_list, "/playbooks", methods=["POST"])
+    app.add_route(all_apps, "/apps", methods=["POST"])
     app.blueprint(license_bp)
     app.blueprint(user_bp)
     app.blueprint(scene_bp)
@@ -69,7 +69,7 @@ def register_blueprints(app: Sanic) -> None:
             "ai_bp": ai_bp,
         }
         license_data = load_license()
-        if license_data and 'moduleList' in license_data:
+        if license_data and "moduleList" in license_data:
             for item in license_data["moduleList"]:
                 if item["auth"] and int(item["expireTime"]) > int(time.time() * 1000):
                     if item["module"] not in bp_dict:
@@ -84,7 +84,7 @@ def register_blueprints(app: Sanic) -> None:
 def register_listener(app: Sanic) -> None:
     for listener_cls in LISTENER_TUPLE:
         listener: BaseListener = listener_cls()
-        for event in ('before_server_start', 'after_server_start', 'before_server_stop', 'after_server_stop'):
+        for event in ("before_server_start", "after_server_start", "before_server_stop", "after_server_stop"):
             if hasattr(listener, event):
                 app.register_listener(getattr(listener, event), event)
     return None
@@ -93,10 +93,10 @@ def register_listener(app: Sanic) -> None:
 def register_middleware(app: Sanic):
     for middle_cls in MIDDLEWARE_TUPLE:
         middle: BaseMiddleware = middle_cls()
-        if hasattr(middle, 'before_request'):
-            app.register_middleware(middle.before_request, attach_to='request')
-        if hasattr(middle, 'before_response'):
-            app.register_middleware(middle.before_response, attach_to='response')
+        if hasattr(middle, "before_request"):
+            app.register_middleware(middle.before_request, attach_to="request")
+        if hasattr(middle, "before_response"):
+            app.register_middleware(middle.before_response, attach_to="response")
 
 
 def register_exception_handler(app: Sanic):
