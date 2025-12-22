@@ -18,12 +18,10 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import (get_from_s3, query_vlog, strip_timezone_to_seconds,
-                        upload_to_s3)
+from libs.utils import get_from_s3, query_vlog, strip_timezone_to_seconds, upload_to_s3
 from models import Config
 from services.event_ingestion.views import check_vector_config
-from settings import (AUTHENTICATION_SESSION_EXPIRATION, BASE_DIR, SECRET,
-                      SESSION_ENCODING_ALGORITHM, VECTOR_CFG)
+from settings import AUTHENTICATION_SESSION_EXPIRATION, BASE_DIR, SECRET, SESSION_ENCODING_ALGORITHM, VECTOR_CFG
 
 system_bp = Blueprint("system", url_prefix="/system")
 _all__ = ["system_bp"]
@@ -608,9 +606,8 @@ async def search_audit(request):
 
     # 获取数据
     data_query = f"{query} | sort(_time desc)"
-    # 由于VictoriaLogs不支持offset，需要查询 offset + size 条数据后在内存中切片
-    fetch_limit = offset + size
-    data_task = query_vlog(data_query, project_id=0, start=start_time, end=end_time, limit=fetch_limit)
+    # 由于VictoriaLogs不支持offset，最多查询1000条数据
+    data_task = query_vlog(data_query, project_id=0, start=start_time, end=end_time, limit=1000)
 
     count_res, data_res = await asyncio.gather(count_task, data_task)
 
@@ -624,14 +621,13 @@ async def search_audit(request):
         # 内存分页
         page_data = data_res[offset:]
         for item in page_data:
-            # 格式化时间，VictoriaLogs返回的_time通常是RFC3339格式，如果原来AuditLog.json返回的是格式化后的时间，这里需要处理
-            # 假设前端能处理RFC3339，或者我们转换一下
+            # 格式化时间，VictoriaLogs返回的_time通常是RFC3339格式，这里需要处理
             ctime = item.get("ctime") or item.get("_time")
             if ctime and "T" in ctime:
                 try:
-                    # 简单转换为 "YYYY-MM-DD HH:MM:SS"
+                    # 转换为本地时区时间
                     dt = datetime.strptime(ctime[:19], "%Y-%m-%dT%H:%M:%S")
-                    ctime = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    ctime = dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
                 except Exception:
                     pass
 
@@ -677,7 +673,7 @@ async def search_audit(request):
     },
     response={"200": {"description": "配置成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
 )
-@requires_permission("audit:r")
+@requires_permission("audit:u")
 async def outgoing(request):
     data = {}
     yaml_file = os.path.join(VECTOR_CFG, "aioe_audit.yaml")
