@@ -336,7 +336,11 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 
             configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False).first().values("resources")
             if configuration and configuration["resources"] != config_data.get("resource", {}):
-                return config_data, version, tool_name, "工具资源不一致，请新建工具或删除原工具后再次上传"
+                for key in config_data.get("resource", {}).keys():
+                    if key not in configuration["resources"].keys() and config_data.get("resource", {})[key].get("required") is True:
+                        return config_data, version, tool_name, "工具资源不一致，请新建工具或删除原工具后再次上传"
+                    if key in configuration["resources"].keys() and config_data.get("resource", {})[key].get("data_type") != configuration["resources"][key].get("data_type"):
+                        return config_data, version, tool_name, "工具资源不一致，请新建工具或删除原工具后再次上传"
             data += 1
             percent = int(data * single_progress) + success_progress
             await resp.send(f"data: 解压进度：{percent}%\n\n")
