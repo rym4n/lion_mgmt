@@ -25,6 +25,9 @@ class SecurityMiddleware(BaseMiddleware):
         """统一记录操作日志"""
         data = None
         if hasattr(request.ctx, "session"):
+            param = None
+            if "multipart" not in request.content_type:
+                param = request.body.decode() if isinstance(request.body, bytes) else request.body
             data = {
                 "username": request.ctx.session["name"],
                 "display_name": request.ctx.session["display_name"],
@@ -33,7 +36,7 @@ class SecurityMiddleware(BaseMiddleware):
                 "result": "成功" if response.status == 200 else "失败",
                 "uri": request.path,
                 "client_ua": request.headers.get("User-Agent", ""),
-                "request_data": str(request.body) if "multipart" not in request.content_type else None,
+                "request_data": param,
             }
         elif request.path == "/user/login" and request.method == "POST":
             params = request.json
