@@ -189,44 +189,20 @@ async def count_apps(request):
 )
 @requires_permission("dashboard:r")
 async def playbooks_success_rate(request):
-    # 构建高效的查询条件
-    query = 'playbook_name: !"执行动作" AND result: !"执行中" AND result: !"等待审核"'
-    logs = await query_vlog(query, project_id=1, account_id=0)
-
-    if not logs:
-        return response_ok([])
-
-    # 使用单个字典存储统计数据
-    stats = {}  # {playbook_name: {'total': int, 'success': int}}
-
-    for log in logs:
-        playbook_name = log.get("playbook_name")
-        msg_id = log.get("_msg")
-
-        if not (playbook_name and msg_id):
-            continue
-
-        status = log.get("status")
-
-        # 使用复合键实现高效的分组和统计
-        key = f"{playbook_name}:{msg_id}"
-
-        if key not in stats:
-            if playbook_name not in stats:
-                stats[playbook_name] = {"total": 0, "success": 0, "msg_ids": set()}
-
-            stats[playbook_name]["msg_ids"].add(msg_id)
-            stats[playbook_name]["total"] += 1
-            # 初始假设成功
-            stats[playbook_name]["success"] += 1
-
-        # 如果状态不为 "0"，则该消息失败
-        if status != "0":
-            if stats[playbook_name]["msg_ids"] and msg_id in stats[playbook_name]["msg_ids"]:
-                stats[playbook_name]["success"] -= 1
-
-    # 构建结果并排序
-    results = [{"playbook_name": playbook_name, "success_rate": round(data["success"] / data["total"], 2) if data["total"] > 0 else 0} for playbook_name, data in stats.items()]
-    results = sorted(results, key=lambda x: x["success_rate"])
-
-    return response_ok(results)
+    sql = """
+          SELECT playbook_name,
+                 ROUND(SUM(CASE WHEN has_fail = 0 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 2) AS success_rate
+          FROM (SELECT run_id,
+                       playbook_name,
+                       MAX(CASE WHEN status != 0 THEN 1 ELSE 0 END) AS has_fail
+                FROM runlog
+                WHERE playbook_name != '执行动作'
+                GROUP BY run_id, playbook_name) AS deduplicated
+          GROUP BY playbook_name
+          ORDER BY success_rate;
+          """
+    async with in_transaction() as conn:
+        rows = await conn.execute_query_dict(sql)
+        for row in rows:
+            row["success_rate"] = float(row["success_rate"])
+        return response_ok(rows)

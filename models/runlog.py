@@ -75,6 +75,4 @@ class Runlog(BaseModel):
 
         unique_together = ("run_id", "node_id", "node_name", "resource_name")
 
-        # indexes = [
-        #     indexes.Index("run_id", "node_id", "node_name", "resource_name", name="uniq_runlog")
-        # ]
+        indexes = [("playbook_name", "run_id", "status")]
