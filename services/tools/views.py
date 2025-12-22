@@ -176,7 +176,7 @@ async def upload_and_extract_zip(request):
                                            action_description="动作全部动作权限", roles=[],
                                            users=[])
         configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False)
-        if not configuration or configuration.resources != config_data.get("resource"):
+        if not configuration:
             trm = await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {},
                                                   status=1 if (config_data.get("resource") and any(
                                                       field.get("required") is True for field in
@@ -189,7 +189,8 @@ async def upload_and_extract_zip(request):
             if configuration.health_check != 1 and health_check == 1:
                 configuration.health_check = health_check
                 configuration.version = version
-                await configuration.save()
+            configuration.resources = config_data.get("resource")
+            await configuration.save()
 
         results.append({"tool": zip_filename, "msg": msg})
 
