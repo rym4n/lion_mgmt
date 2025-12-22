@@ -10,6 +10,7 @@ from urllib.parse import quote
 import aiofile
 import jwt
 import orjson
+import pytz
 import yaml
 from aiocache import cached
 from sanic import Blueprint, json, response
@@ -24,7 +25,7 @@ from libs.security.authorization import requires_permission
 from libs.utils import get_from_s3, query_vlog, strip_timezone_to_seconds, upload_to_s3
 from models import Config
 from services.event_ingestion.views import check_vector_config
-from settings import AUTHENTICATION_SESSION_EXPIRATION, BASE_DIR, SECRET, SESSION_ENCODING_ALGORITHM, VECTOR_CFG
+from settings import AUTHENTICATION_SESSION_EXPIRATION, BASE_DIR, SECRET, SESSION_ENCODING_ALGORITHM, VECTOR_CFG, TZ
 
 system_bp = Blueprint("system", url_prefix="/system")
 _all__ = ["system_bp"]
@@ -626,19 +627,13 @@ async def search_audit(request):
         for item in page_data:
             logger.info(f"item {item}")
             # 格式化时间，VictoriaLogs返回的_time通常是RFC3339格式，这里需要处理
-            ctime = item.get("ctime") or item.get("_time")
-            if ctime and "T" in ctime:
-                try:
-                    # 转换为本地时区时间
-                    dt = datetime.strptime(ctime[:19], "%Y-%m-%dT%H:%M:%S")
-                    ctime = dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
-                except Exception:
-                    pass
+            utc_str = item.get("_time")
+            utc_time = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
 
             data.append(
                 {
                     "id": item.get("id", ""),
-                    "ctime": ctime,
+                    "ctime": utc_time.astimezone(TZ),
                     "username": item.get("username", ""),
                     "display_name": item.get("display_name", ""),
                     "client_ip": item.get("client_ip", ""),

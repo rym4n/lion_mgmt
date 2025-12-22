@@ -33,7 +33,7 @@ class SecurityMiddleware(BaseMiddleware):
                 "result": "成功" if response.status == 200 else "失败",
                 "uri": request.path,
                 "client_ua": request.headers.get("User-Agent", ""),
-                "request_data": request.body if "multipart" not in request.content_type else None,
+                "request_data": str(request.body) if "multipart" not in request.content_type else None,
             }
         elif request.path == "/user/login" and request.method == "POST":
             params = request.json
