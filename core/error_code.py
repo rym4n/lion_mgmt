@@ -130,3 +130,5 @@ class ErrorCode(BaseErrorCode):
     WebhookExists = ErrorData(4094, "已有webhook，请勿重复创建")
     NotScriptError = ErrorData(4095, "缺少执行剧本")
     PlaybookUnauthorized = ErrorData(4096, "缺少剧本权限")
+
+    OutOfPage = ErrorData(4097, "最多可查看前1000条数据，请使用条件搜索缩小数据范围")

@@ -15,13 +15,15 @@ from sanic_ext import openapi
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
-from core.response import response_ok
+from core.response import response_fail, response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import get_from_s3, query_vlog, strip_timezone_to_seconds, upload_to_s3
+from libs.utils import (get_from_s3, query_vlog, strip_timezone_to_seconds,
+                        upload_to_s3)
 from models import Config
 from services.event_ingestion.views import check_vector_config
-from settings import AUTHENTICATION_SESSION_EXPIRATION, BASE_DIR, SECRET, SESSION_ENCODING_ALGORITHM, VECTOR_CFG
+from settings import (AUTHENTICATION_SESSION_EXPIRATION, BASE_DIR, SECRET,
+                      SESSION_ENCODING_ALGORITHM, VECTOR_CFG)
 
 system_bp = Blueprint("system", url_prefix="/system")
 _all__ = ["system_bp"]
@@ -563,14 +565,13 @@ async def transforms_update(request):
                                             "properties": {
                                                 "id": {"type": "string"},
                                                 "ctime": {"type": "string"},
-                                                "utime": {"type": "string"},
                                                 "username": {"type": "string"},
                                                 "display_name": {"type": "string"},
                                                 "client_ip": {"type": "string"},
                                                 "result": {"type": "string"},
                                                 "uri": {"type": "string"},
                                                 "client_ua": {"type": "string"},
-                                                "request_data": {"type": "object"},
+                                                "request_data": {"type": "string"},
                                             },
                                         },
                                     },
@@ -619,6 +620,8 @@ async def search_audit(request):
     data = []
     if data_res:
         # 内存分页
+        if offset >= total:
+            return response_fail(CustomError(ErrorCode.OutOfPage))
         page_data = data_res[offset:]
         for item in page_data:
             # 格式化时间，VictoriaLogs返回的_time通常是RFC3339格式，这里需要处理
@@ -641,7 +644,7 @@ async def search_audit(request):
                     "result": item.get("result", ""),
                     "uri": item.get("uri", ""),
                     "client_ua": item.get("client_ua", ""),
-                    "request_data": item.get("request_data", {}),
+                    "request_data": item.get("request_data", ""),
                 }
             )
 
