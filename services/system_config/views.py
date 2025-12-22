@@ -14,7 +14,6 @@ import pytz
 import yaml
 from aiocache import cached
 from sanic import Blueprint, json, response
-from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.transactions import in_transaction
 
@@ -592,6 +591,9 @@ async def search_audit(request):
     size = int(request.json.get("size", 15))
     offset = (page - 1) * size
 
+    if offset >= 1000:
+        return response_fail(ErrorCode.OutOfPage)
+
     username = request.json.get("username")
     start_time = request.json.get("start_time")
     end_time = request.json.get("end_time")
@@ -621,11 +623,8 @@ async def search_audit(request):
     data = []
     if data_res:
         # 内存分页
-        if offset >= total:
-            return response_fail(ErrorCode.OutOfPage)
         page_data = data_res[offset : offset + size]
         for item in page_data:
-            logger.info(f"item {item}")
             # 格式化时间，VictoriaLogs返回的_time通常是RFC3339格式，这里需要处理
             utc_str = item.get("_time")
             utc_time = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
