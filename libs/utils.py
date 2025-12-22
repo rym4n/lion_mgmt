@@ -262,13 +262,15 @@ def decrypt_aes256_gcm(encrypted_data: str) -> str:
         raise ValueError("解密失败: 密码错误或数据损坏") from e
 
 
-async def query_vlog(query, project_id, start=None, end=None, account_id="1"):
+async def query_vlog(query, project_id, start=None, end=None, account_id="1", limit=None):
     # 构建VictoriaLogs查询参数
     params = {"query": query}
     if start:
         params["start"] = start
     if end:
         params["end"] = end
+    if limit:
+        params["limit"] = limit
 
     header = {
         "AccountID": str(account_id),
@@ -416,3 +418,12 @@ async def get_url_from_s3(bucket_name: str, file_name: str, host, prefix="") -> 
         except Exception as e:
             logger.error(f"获取文件失败: {e} | {traceback.format_exc()}")
     return None
+
+
+# 将%Y-%m-%d %H:%M:%S转换成VL查询可以时间格式
+def time_conversion(original_time):
+    dt = datetime.datetime.strptime(original_time, "%Y-%m-%d %H:%M:%S")
+    dt_utc = dt.replace(tzinfo=datetime.timezone.utc)
+    rfc3339 = dt_utc.isoformat().replace("+00:00", "Z")
+
+    return rfc3339

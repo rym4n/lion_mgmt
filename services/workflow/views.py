@@ -4,6 +4,7 @@ import asyncio
 import re
 import secrets
 import time
+import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -19,9 +20,11 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import requires_permission, load_license, playbook_permission, check_playbook_permission
-from libs.utils import gen_run_id, strip_timezone_to_seconds, query_vlog
-from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, EventRelatedScript, Timed, PlaybookWebhook, Account
+from libs.security.authorization import requires_permission, load_license, playbook_permission, \
+    check_playbook_permission
+from libs.utils import gen_run_id, strip_timezone_to_seconds, query_vlog, time_conversion
+from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, \
+    EventRelatedScript, Timed, PlaybookWebhook, Account
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
 
@@ -197,7 +200,7 @@ async def list_workflow(request):
     if json_params.get("keyword"):
         # 模糊搜索name字段和remark字段
         keyword = json_params.get("keyword")
-        condition = condition & (Q(name__icontains=keyword) | Q(remark__icontains=keyword))
+        condition = condition & (Q(name__icontains=keyword) | Q(remark__icontains=keyword) | Q(id=keyword))
     if json_params.get("scene"):
         scenes = await Scene.filter(name__in=json_params.get("scene")).all()
         if scenes:
@@ -366,7 +369,6 @@ async def export_workflow(request):
             "status": p.status,
             "version": p.version,
             "flow_json": p.flow_json,
-            "internal": p.playbook.internal,
         }
         for p in pv
     ]
@@ -1297,8 +1299,8 @@ async def execute_webhook(request):
                 "required": ["flow_id", "start", "end"],
                 "properties": {
                     "flow_id": {"type": "string", "description": "剧本版本ID"},
-                    "start": {"type": "string", "description": "查询开始时间(RFC3339格式或Unix时间戳)"},
-                    "end": {"type": "string", "description": "查询结束时间(RFC3339格式或Unix时间戳)"},
+                    "start": {"type": "string", "description": "查询开始时间,格式为2025-12-12 00:00:00"},
+                    "end": {"type": "string", "description": "查询结束时间,格式为2025-12-12 00:00:00"},
                 },
             }
         }
@@ -1346,7 +1348,8 @@ async def dashboard_statistics(request):
         raise CustomError(ErrorCode.ParameterError)
 
     query = "playbook_version_id:" + flow_id
-
+    start = time_conversion(start)
+    end = time_conversion(end)
     logs = await query_vlog(query, project_id=1, start=start, end=end, account_id=0)
 
     run_status = defaultdict(lambda: {"start": None, "end": None, "status": "success"})
@@ -1400,3 +1403,59 @@ async def dashboard_statistics(request):
         result.append(day_result)
 
     return response_ok(result)
+
+
+@workflow_bp.post("/import")
+@openapi.definition(
+    summary="初始化剧本",
+    description="初始化剧本",
+    body={"application/json": {"schema": {"type": "object", "required": ["flow_list"], "properties": {"flow_list": {"type": "array", "items": {"type": "object"}, "description": "剧本列表"}}}}},
+    response={
+        "200": {
+            "description": "创建成功",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+        }
+    },
+)
+@requires_permission("workflow:c")
+async def import_workflow(request):
+    data = request.json
+    if not data.get("flow_list"):
+        raise CustomError(ErrorCode.ParameterError)
+
+    for flow_data in data.get("flow_list"):
+        # 判断name是否已经存在，如果存在的话要抛出异常
+        if await Playbook.filter(name=flow_data.get("name"), deleted=False).exists():
+            flow_data["name"] = f"{flow_data.get('name')}_{time.time()}"
+
+        flow_json_list = flow_data.get("data") or []
+        creator = request.ctx.session["account_info"]
+        admin = await Role.get(id="111111")
+        maintenance_mode = flow_data.get("maintenance_mode") if flow_data.get("maintenance_mode") else await request.app.ctx.cache_client.get(request.ctx.session["id"])
+        async with in_transaction():
+            playbook = await Playbook.create(
+                id=str(flow_data.get("flow_id")) if flow_data.get("flow_id") else str(uuid.uuid4()),
+                name=flow_data.get("name"),
+                remark=flow_data.get("remark", ""),
+                creator=creator,
+                internal=maintenance_mode if maintenance_mode else False,
+            )
+            await PlaybookPermissions.create(pb=playbook, users=creator, roles=None, permissions=["r", "u", "d", "e", "p"])
+            await PlaybookPermissions.create(pb=playbook, users=None, roles=admin, permissions=["r", "u", "d", "e", "p"])
+
+            if flow_data.get("tags"):
+                tags = await Tag.filter(name__in=flow_data.get("tags")).all()
+                await playbook.tags.add(*tags)
+            if flow_data.get("scenes"):
+                scenes = await Scene.filter(name__in=flow_data.get("scenes")).all()
+                await playbook.scenes.add(*scenes)
+                await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
+
+            for flow_json in flow_json_list:
+                pv = await PlaybookVersion.create(playbook=playbook, version=gen_run_id(), status=0, change_desc="", flow_json=flow_json, creator=creator, updator=creator, flow_timeout=flow_data.get("flow_timeout", 300))
+
+                action_ids = await statistics_data(flow_json)
+                await tool_action_update({pv.id: action_ids})
+
+    return response_ok("success")
+
