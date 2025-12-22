@@ -2,6 +2,7 @@
 import uuid
 from datetime import datetime
 
+import orjson
 from sanic import Request, HTTPResponse
 
 from libs.kafka import aproduce
@@ -24,11 +25,6 @@ class SecurityMiddleware(BaseMiddleware):
         """统一记录操作日志"""
         data = None
         if hasattr(request.ctx, "session"):
-            params = request.json if "multipart" not in request.content_type else None
-            if params:
-                for key in ["password", "code", "token"]:
-                    if key in params:
-                        params[key] = "******"
             data = {
                 "username": request.ctx.session["name"],
                 "display_name": request.ctx.session["display_name"],
@@ -37,7 +33,7 @@ class SecurityMiddleware(BaseMiddleware):
                 "result": "成功" if response.status == 200 else "失败",
                 "uri": request.path,
                 "client_ua": request.headers.get("User-Agent", ""),
-                "request_data": request.json if "multipart" not in request.content_type else None,
+                "request_data": request.body if "multipart" not in request.content_type else None,
             }
         elif request.path == "/user/login" and request.method == "POST":
             params = request.json
@@ -51,12 +47,9 @@ class SecurityMiddleware(BaseMiddleware):
                 "result": "成功" if response.status == 200 else "失败",
                 "uri": request.path,
                 "client_ua": request.headers.get("User-Agent", ""),
-                "request_data": params,
+                "request_data": orjson.dumps(params).decode(),
             }
         elif request.path == "/user/oauth/callback":
-            params = request.args
-            if params:
-                params["code"] = "******"
             data = {
                 "username": "",
                 "display_name": "",
@@ -65,7 +58,7 @@ class SecurityMiddleware(BaseMiddleware):
                 "result": "成功" if response.status < 400 else "失败",
                 "uri": request.path,
                 "client_ua": request.headers.get("User-Agent", ""),
-                "request_data": params,
+                "request_data": "",
             }
         if data is not None:
             data["ctime"] = datetime.now(TZ).strftime("%Y-%m-%dT%H:%M:%S%z")
