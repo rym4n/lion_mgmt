@@ -683,14 +683,14 @@ class ChatManager:
             node_ids = data.get("node_id", [])
             room_id = data.get("room_id")
             sender = await Account.get(username="system")
-            approvements = await Approvement.filter(status=0, expire_time__lt=datetime.now(), audit_node__in=node_ids).all()
+            approvements = await Approvement.filter(expire_time__lt=datetime.now(), audit_node__in=node_ids).all()
             if approvements:
                 for approvement in approvements:
-                    runlog = await Runlog.filter(node_id=approvement.audit_node, status=2, run_id=approvement.run_id).first()
+                    runlog = await Runlog.filter(node_id=approvement.audit_node, run_id=approvement.run_id).first()
                     if approvement.status != 3:
                         approvement.status = 3
                         await approvement.save()
-                    if runlog:
+                    if runlog.status == 2:
                         runlog.status = 3
                         runlog.result = "审批已超时"
                         await runlog.save()
