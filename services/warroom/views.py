@@ -582,7 +582,7 @@ async def query_messages(request: Request):
                 if run_id not in run_id_list:
                     run_id_list.append(run_id)
                     runlogs = await Runlog.filter(run_id=run_id, deleted=False).order_by("ctime").all()
-                    run_logs = runlog_list(runlogs)
+                    run_logs = await runlog_list(runlogs)
                     content = "[已撤回]" if msg.is_recalled else run_logs
                 else:
                     continue

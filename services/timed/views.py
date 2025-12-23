@@ -14,7 +14,8 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
-from models import Timed, Playbook, ToolAction, Runlog, PlaybookVersion, PlaybookPermissions, ActionPermissions
+from models import Timed, Playbook, ToolAction, Runlog, PlaybookVersion, PlaybookPermissions, ActionPermissions, \
+    Approvement
 from services.workflow.views import get_playbook_input
 from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
 
@@ -809,13 +810,13 @@ async def get_run_log(request):
     run_logs = []
     if run_ids:
         all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).order_by("-ctime").prefetch_related("timer", "playbook_version").all()
-        run_logs = runlog_list(all_logs)
+        run_logs = await runlog_list(all_logs)
 
     return response_ok({"page": page, "size": size, "total": len(total), "data": run_logs})
 
 
 # 用于统一处理runlog返回格式
-def runlog_list(all_logs):
+async def runlog_list(all_logs):
     run_logs = []
     logs_by_run_id = {}
     for log in all_logs:
@@ -823,6 +824,17 @@ def runlog_list(all_logs):
             logs_by_run_id[log.run_id][(log.run_id, log.node_id)] = [log.json]
         else:
             logs_by_run_id[log.run_id][(log.run_id, log.node_id)].append(log.json)
+
+        # 处理runlog中的过期的审核节点
+        if log.node_type == "approval-node" and log.result == "等待审核":
+            approvement = await Approvement.filter(expire_time__lt=datetime.datetime.now(), run_id=log.run_id, audit_node=log.node_id).first()
+            if approvement:
+                if approvement.status != 3:
+                    approvement.status = 3
+                    await approvement.save()
+                log.result = "审核已超时"
+                log.status = 3
+                await log.save()
 
     for value in logs_by_run_id.values():
         data = []
