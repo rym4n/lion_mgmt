@@ -10,6 +10,7 @@ from urllib.parse import quote
 import aiofile
 import jwt
 import orjson
+import pytz
 import yaml
 from aiocache import cached
 from sanic import Blueprint, json, response
@@ -23,7 +24,7 @@ from libs.security.authorization import requires_permission
 from libs.utils import get_from_s3, query_vlog, strip_timezone_to_seconds, upload_to_s3
 from models import Config
 from services.event_ingestion.views import check_vector_config
-from settings import AUTHENTICATION_SESSION_EXPIRATION, BASE_DIR, SECRET, SESSION_ENCODING_ALGORITHM, VECTOR_CFG
+from settings import AUTHENTICATION_SESSION_EXPIRATION, BASE_DIR, SECRET, SESSION_ENCODING_ALGORITHM, VECTOR_CFG, TZ
 
 system_bp = Blueprint("system", url_prefix="/system")
 _all__ = ["system_bp"]
@@ -571,7 +572,7 @@ async def transforms_update(request):
                                                 "result": {"type": "string"},
                                                 "uri": {"type": "string"},
                                                 "client_ua": {"type": "string"},
-                                                "request_data": {"type": "string"},
+                                                "request_data": {"type": "object"},
                                             },
                                         },
                                     },
@@ -589,6 +590,9 @@ async def search_audit(request):
     page = int(request.json.get("page", 1))
     size = int(request.json.get("size", 15))
     offset = (page - 1) * size
+
+    if offset >= 1000:
+        return response_fail(ErrorCode.OutOfPage)
 
     username = request.json.get("username")
     start_time = request.json.get("start_time")
@@ -619,31 +623,23 @@ async def search_audit(request):
     data = []
     if data_res:
         # 内存分页
-        if offset >= total:
-            return response_fail(ErrorCode.OutOfPage)
-        page_data = data_res[offset:]
+        page_data = data_res[offset : offset + size]
         for item in page_data:
             # 格式化时间，VictoriaLogs返回的_time通常是RFC3339格式，这里需要处理
-            ctime = item.get("ctime") or item.get("_time")
-            if ctime and "T" in ctime:
-                try:
-                    # 转换为本地时区时间
-                    dt = datetime.strptime(ctime[:19], "%Y-%m-%dT%H:%M:%S")
-                    ctime = dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
-                except Exception:
-                    pass
+            utc_str = item.get("_time")
+            utc_time = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
 
             data.append(
                 {
                     "id": item.get("id", ""),
-                    "ctime": ctime,
+                    "ctime": utc_time.astimezone(TZ),
                     "username": item.get("username", ""),
                     "display_name": item.get("display_name", ""),
                     "client_ip": item.get("client_ip", ""),
                     "result": item.get("result", ""),
                     "uri": item.get("uri", ""),
                     "client_ua": item.get("client_ua", ""),
-                    "request_data": item.get("request_data", ""),
+                    "request_data": item.get("request_data", {}),
                 }
             )
 
@@ -677,71 +673,63 @@ async def search_audit(request):
 )
 @requires_permission("audit:u")
 async def outgoing(request):
-    data = {}
     yaml_file = os.path.join(VECTOR_CFG, "aioe_audit.yaml")
-    with open(yaml_file, "r", encoding="utf-8") as f:
-        old_data = yaml.safe_load(f)  # 转换成 Python 对象
+    async with aiofile.AIOFile(yaml_file, "r", encoding="utf-8") as f:
+        content = await f.read()
+        old_data = yaml.safe_load(content)
 
-    data["sources"] = old_data["sources"]
-    data.setdefault("sinks", {})["aioe_pg_audit"] = old_data["sinks"]["aioe_pg_audit"]
-
-    # 校验重复项
-    address_sum = []
-    # 避免重名
-    m = 0
+    data = {"sources": old_data["sources"], "sinks": {}}
+    data["sinks"]["aioe_default_audit"] = old_data["sinks"]["aioe_default_audit"]
     json_data = request.json
-    for item in json_data:
+    seen_addresses = set()
+
+    for i, item in enumerate(json_data):
         sink_type = item.get("sink_type")
-        sink_address = item.get("sink_address")
-        if not sink_address and not sink_type:
+        raw_address = item.get("sink_address")
+
+        if not raw_address and not sink_type:
             raise CustomError(ErrorCode.ParameterError)
 
-        sink_address = sink_address.split(",")
-        if len(sink_address) > 1 and sink_type == "syslog":
+        addresses = raw_address.split(",")
+        if len(addresses) > 1 and sink_type == "syslog":
             raise CustomError(ErrorCode.MultipleSyslogAddressNotSupported)
 
-        for a in sink_address:
-            if int(a.split(":")[-1]) < 1 or int(a.split(":")[-1]) > 65535:
+        for addr in addresses:
+            try:
+                port = int(addr.split(":")[-1])
+                if not (1 <= port <= 65535):
+                    raise CustomError(ErrorCode.InvalidPortError)
+            except (ValueError, IndexError):
                 raise CustomError(ErrorCode.InvalidPortError)
 
-            if a not in address_sum:
-                address_sum.append(a)
-            else:
+            if addr in seen_addresses:
                 raise CustomError(ErrorCode.OutboundAddressCanNotBeRepeated)
+            seen_addresses.add(addr)
+
+        sink_key_suffix = str(i)
+        common_config = {"inputs": ["aioe_audit_mask"], "encoding": {"codec": "json"}}
 
         if sink_type == "kafka":
             topic = item.get("kafka_topic")
-            mechanism = item.get("sasl_mechanism")
-            username = item.get("sasl_username")
-            password = item.get("sasl_password")
             if not topic:
                 raise CustomError(ErrorCode.ParameterError)
-            data["sinks"]["kafka_sinks_" + str(m)] = {"type": "kafka", "inputs": ["aioe_kafka_audit"], "bootstrap_servers": ",".join(sink_address), "topic": topic, "encoding": {"codec": "json"}}
-            if mechanism:
-                data["sinks"]["kafka_sinks"]["sasl"] = {"enabled": True, "mechanism": mechanism, "username": username, "password": password}
-        if sink_type == "syslog":
+
+            sink_config = {"type": "kafka", "bootstrap_servers": raw_address, "topic": topic, **common_config}
+
+            if mechanism := item.get("sasl_mechanism"):
+                sink_config["sasl"] = {"enabled": True, "mechanism": mechanism, "username": item.get("sasl_username"), "password": item.get("sasl_password")}
+            data["sinks"][f"kafka_sinks_{sink_key_suffix}"] = sink_config
+
+        elif sink_type == "syslog":
             mode = item.get("sink_protocol")
             if not mode:
                 raise CustomError(ErrorCode.ParameterError)
-            for address in sink_address:
-                data["sinks"]["syslog_sinks_" + str(m)] = {"type": "socket", "inputs": ["aioe_kafka_audit"], "address": address, "mode": mode, "encoding": {"codec": "json"}}
-        m += 1
 
-    class QuotedString(str):
-        pass
-
-    def quoted_presenter(dumper, data):
-        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
-
-    yaml.add_representer(QuotedString, quoted_presenter)
-
-    data["sinks"]["aioe_pg_audit"]["endpoint"] = QuotedString(data["sinks"]["aioe_pg_audit"]["endpoint"])
+            data["sinks"][f"syslog_sinks_{sink_key_suffix}"] = {"type": "socket", "address": addresses[0], "mode": mode, **common_config}
 
     yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
-    result = check_vector_config(data, vector_config_yaml=yaml_str)
-
-    if not result:
+    if not check_vector_config(data, vector_config_yaml=yaml_str):
         raise CustomError(ErrorCode.OutboundFileConfigurationFailed)
 
     async with aiofile.AIOFile(yaml_file, mode="w", encoding="utf-8") as file:
