@@ -683,7 +683,7 @@ class ChatManager:
             run_node_ids = data.get("run_node_id", {})
             room_id = data.get("room_id")
             sender = await Account.get(username="system")
-            run_logs = await Runlog.filter(node_id=list(run_node_ids.keys()), run_id=list(run_node_ids.values())).all()
+            run_logs = await Runlog.filter(run_id__in=list(run_node_ids.keys()), node_id__in=list(run_node_ids.values())).all()
 
             for runlog in run_logs:
                 message_data = {
