@@ -163,8 +163,21 @@ async def todo_approvement(request):
           JOIN approve_accounts b ON a.id = b.approvement_id AND b.account_id = '{request.ctx.session["sub"]}'
           WHERE a.status = 0 AND NOT a.results ? '{request.ctx.session["sub"]}'
         """
+
+    runlog_sql = f"""
+        UPDATE runlog r
+        SET status = 3,
+            result = '审核已超时'
+        FROM approvement a
+        WHERE r.run_id = a.run_id
+          AND r.node_id = a.audit_node
+          AND r.node_type = 'approval-node'
+          AND r.status = 2
+          AND a.expire_time < $1
+    """
     async with in_transaction() as conn:
         rows = await conn.execute_query_dict(sql)
+        await conn.execute_query(runlog_sql, [datetime.now()])
         for row in rows:
             row["created_at"] = row["created_at"].astimezone(pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
             row["expire_time"] = row["expire_time"].astimezone(pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
