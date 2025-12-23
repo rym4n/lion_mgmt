@@ -686,18 +686,19 @@ class ChatManager:
             run_logs = await Runlog.filter(run_id__in=list(run_node_ids.keys()), node_id__in=list(run_node_ids.values())).all()
 
             for runlog in run_logs:
-                message_data = {
-                    "type": "runlog",
-                    "message_id": "",
-                    "sender_id": sender.id,
-                    "sender_name": sender.username,
-                    "sender_display_name": sender.display_name,
-                    "content": [runlog.json],
-                    "timestamp": "",
-                    "room_id": room_id,
-                }
+                if runlog.status == 3:
+                    message_data = {
+                        "type": "runlog",
+                        "message_id": "",
+                        "sender_id": sender.id,
+                        "sender_name": sender.username,
+                        "sender_display_name": sender.display_name,
+                        "content": [runlog.json],
+                        "timestamp": "",
+                        "room_id": room_id,
+                    }
 
-                await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+                    await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
             raise Exception("查询超时审批失败")
