@@ -820,11 +820,6 @@ async def runlog_list(all_logs):
     run_logs = []
     logs_by_run_id = {}
     for log in all_logs:
-        if (log.run_id, log.node_id) not in logs_by_run_id.setdefault(log.run_id, {}).keys():
-            logs_by_run_id[log.run_id][(log.run_id, log.node_id)] = [log.json]
-        else:
-            logs_by_run_id[log.run_id][(log.run_id, log.node_id)].append(log.json)
-
         # 处理runlog中的过期的审核节点
         if log.node_type == "approval-node" and log.result == "等待审核":
             approvement = await Approvement.filter(expire_time__lt=datetime.datetime.now(), run_id=log.run_id, audit_node=log.node_id).first()
@@ -836,6 +831,11 @@ async def runlog_list(all_logs):
                     log.result = "审核已超时"
                     log.status = 3
                     await log.save()
+
+        if (log.run_id, log.node_id) not in logs_by_run_id.setdefault(log.run_id, {}).keys():
+            logs_by_run_id[log.run_id][(log.run_id, log.node_id)] = [log.json]
+        else:
+            logs_by_run_id[log.run_id][(log.run_id, log.node_id)].append(log.json)
 
     for value in logs_by_run_id.values():
         data = []
