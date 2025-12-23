@@ -14,8 +14,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
-from models import Timed, Playbook, ToolAction, Runlog, PlaybookVersion, PlaybookPermissions, ActionPermissions, \
-    Approvement
+from models import Timed, Playbook, ToolAction, Runlog, PlaybookVersion, PlaybookPermissions, ActionPermissions, Approvement
 from services.workflow.views import get_playbook_input
 from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
 
@@ -780,16 +779,6 @@ async def get_run_log(request):
 
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
-
-    # 按页获取timer_id:d464da04-5a6f-4080-896b-3fff31ba5cf5 | offset 0
-    # query = "timer_id:" + timed_id
-    # if start_time:
-    #     start_time = time_conversion(start_time)
-    # if end_time:
-    #     end_time = time_conversion(end_time)
-    # logs = await query_vlog(query, project_id=1, start=start_time, end=end_time, account_id=0, limit=size)
-    # logs = await query_vlog(f"{query} | count({query})", project_id=1, start=start_time, end=end_time, account_id=0, limit=page * size)
-    # print(logs)
 
     condition = Q(timer_id=timed_id, deleted=False)
 
