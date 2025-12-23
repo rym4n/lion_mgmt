@@ -490,6 +490,8 @@ class ChatManager:
                 await self._handle_public_message(user, data)
             elif message_type == "private":
                 await self._handle_private_message(user, data)
+            elif message_type == "audit":
+                await self._handle_audit_message(user, data)
             elif message_type == "recall":
                 await self._handle_recall_message(user, data)
                 await ws.send(orjson.dumps({"type": "recall_success", "message_id": data.get("message_id")}).decode())
@@ -674,6 +676,41 @@ class ChatManager:
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
             raise Exception("发送私聊消息失败")
+
+    async def _handle_audit_message(self, user: Account, data: dict):
+        """处理发送私聊消息"""
+        try:
+            node_ids = data.get("node_id", [])
+            room_id = data.get("room_id")
+            sender = await Account.get(username="system")
+            approvements = await Approvement.filter(status=0, expire_time__lt=datetime.now(), audit_node__in=node_ids).all()
+            if approvements:
+                for approvement in approvements:
+                    runlog = await Runlog.filter(node_id=approvement.audit_node, status=2, run_id=approvement.run_id).first()
+                    if approvement.status != 3:
+                        approvement.status = 3
+                        await approvement.save()
+                    if runlog:
+                        runlog.status = 3
+                        runlog.result = "审批已超时"
+                        await runlog.save()
+
+                        # 构建消息数据
+                        message_data = {
+                            "type": "runlog",
+                            "message_id": "",
+                            "sender_id": sender.id,
+                            "sender_name": sender.username,
+                            "sender_display_name": sender.display_name,
+                            "content": [runlog.json],
+                            "timestamp": "",
+                            "room_id": room_id,
+                        }
+
+                        await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+        except Exception as e:
+            logger.error(f"{e} | {traceback.format_exc()}")
+            raise Exception("查询超时审批失败")
 
     async def _handle_recall_message(self, user: Account, data: dict):
         """处理消息撤回"""

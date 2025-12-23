@@ -827,14 +827,15 @@ async def runlog_list(all_logs):
 
         # 处理runlog中的过期的审核节点
         if log.node_type == "approval-node" and log.result == "等待审核":
-            approvement = await Approvement.filter(expire_time__lt=datetime.datetime.now(), run_id=log.run_id, audit_node=log.node_id).first()
+            approvement = await Approvement.filter(status=0, expire_time__lt=datetime.datetime.now(), run_id=log.run_id, audit_node=log.node_id).first()
             if approvement:
                 if approvement.status != 3:
                     approvement.status = 3
                     await approvement.save()
-                log.result = "审核已超时"
-                log.status = 3
-                await log.save()
+                if log.status == 2:
+                    log.result = "审核已超时"
+                    log.status = 3
+                    await log.save()
 
     for value in logs_by_run_id.values():
         data = []
