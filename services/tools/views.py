@@ -203,8 +203,6 @@ async def upload_and_extract_zip(request):
         await resp.send(f"data: {results}\n\n")
         await resp.eof()
 
-    return resp
-
 
 async def unzip(zip_data, creator, single_progress, resp, success_progress, redis_client, token_id):
     try:

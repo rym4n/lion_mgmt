@@ -403,6 +403,7 @@ class ChatManager:
             await msg_sub.unsubscribe(WR_TOPIC)
 
     async def log_listener(self):
+        logger.info("启动runlog消费任务")
         await aconsume(KAFKA_SERVERS, RUNLOG_TOPIC, "lion_mgmt_listener", self.handle_runlog, 500)
 
     async def handle_runlog(self, logs):

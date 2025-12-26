@@ -1443,11 +1443,13 @@ async def import_workflow(request):
 
             if flow_data.get("tags"):
                 tags = await Tag.filter(name__in=flow_data.get("tags")).all()
-                await playbook.tags.add(*tags)
+                if tags:
+                    await playbook.tags.add(*tags)
             if flow_data.get("scenes"):
                 scenes = await Scene.filter(name__in=flow_data.get("scenes")).all()
-                await playbook.scenes.add(*scenes)
-                await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
+                if scenes:
+                    await playbook.scenes.add(*scenes)
+                    await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
 
             for flow_json in flow_json_list:
                 pv = await PlaybookVersion.create(playbook=playbook, version=gen_run_id(), status=0, change_desc="", flow_json=flow_json, creator=creator, updator=creator, flow_timeout=flow_data.get("flow_timeout", 300))
