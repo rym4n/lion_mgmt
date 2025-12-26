@@ -484,7 +484,7 @@ async def login(request):
                 resp["mfa_uri"] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name="AIOE")
         tmp_resp = response_ok(resp)
         tmp_resp.cookies.add_cookie(
-            f"aioe-auth",
+            "aioe-auth",
             token,
             httponly=SESSION_HTTPONLY,
             samesite=SESSION_SAMESITE,
@@ -532,7 +532,7 @@ async def refresh_session_token(request):
 
     resp_ok = response_ok("success")
     resp_ok.cookies.add_cookie(
-        f"aioe-auth",
+        "aioe-auth",
         new_token,
         httponly=SESSION_HTTPONLY,
         samesite=SESSION_SAMESITE,
@@ -558,7 +558,7 @@ async def logout(request):
     else:
         resp = response_ok("登出成功")
 
-    resp.cookies.add_cookie(f"aioe-auth", "", httponly=SESSION_HTTPONLY, samesite=SESSION_SAMESITE, secure=SESSION_SECURE, expires=get_expiration_date(-60))
+    resp.cookies.add_cookie("aioe-auth", "", httponly=SESSION_HTTPONLY, samesite=SESSION_SAMESITE, secure=SESSION_SECURE, expires=get_expiration_date(-60))
     return resp
 
 
@@ -589,7 +589,7 @@ async def mfa_auth(request):
     new_token = refresh_token(request.ctx.session, id=str(uuid.uuid4()), mfa_auth=True)
     resp = response_ok({"aioe-token": new_token})
     resp.cookies.add_cookie(
-        f"aioe-auth",
+        "aioe-auth",
         new_token,
         httponly=SESSION_HTTPONLY,
         samesite=SESSION_SAMESITE,
@@ -877,7 +877,7 @@ async def oauth2_callback(request):
 
     resp = response.redirect(redirect_url)
     resp.cookies.add_cookie(
-        f"aioe-auth",
+        "aioe-auth",
         aioe_token,
         httponly=SESSION_HTTPONLY,
         samesite=SESSION_SAMESITE,
