@@ -89,6 +89,7 @@ async def get_license(request: Request):
 
     menu_dict = {}
     ai_type = 0
+    language = request.json.get("language", "SCN")
     for role in user.roles:
         perm_models = set()
         if role.permissions:
@@ -118,13 +119,13 @@ async def get_license(request: Request):
             if not permission_data:
                 continue
 
-            key = permission_data["url"]["path"]
+            key = permission_data["url"][language]["path"]
             if key not in menu_dict:
-                menu_dict[key] = permission_data["url"]
+                menu_dict[key] = permission_data["url"][language]
             else:
                 # 合并 children 去重
                 existing = {c["path"] for c in menu_dict[key]["children"]}
-                for child in permission_data["url"]["children"]:
+                for child in permission_data["url"][language]["children"]:
                     if child["path"] not in existing:
                         menu_dict[key]["children"].append(child)
                         existing.add(child["path"])
@@ -135,15 +136,15 @@ async def get_license(request: Request):
                     menu_dict[key]["ai"] = True
 
     # 菜单处理排序逻辑
-    system_dict = {"产品许可": 0, "账号管理": 1, "角色管理": 2, "SSO集成": 3, "审计日志": 4, "个性化设置": 5, "系统状态": 6}
-    event_dict = {"事件列表": 0, "事件接入": 1}
+    system_dict = {"产品许可": 0, "账号管理": 1, "角色管理": 2, "SSO集成": 3, "审计日志": 4, "个性化设置": 5, "系统状态": 6, "個性化設置": 5, "Personalization": 5, "審計日誌": 4, "Audit Logs": 4, "System Status": 6, "系統狀態": 6, "SSO Integration": 3, "Role Management": 2, "產品許可": 0, "License": 0, "賬號管理": 1, "Account Management": 1}
+    event_dict = {"事件列表": 0, "事件接入": 1, "事件清單": 0, "Event List": 0, "Event Ingestion": 1}
 
     menus = list(menu_dict.values())
     for menu in menus:
         children = menu["children"]
-        if menu["meta"]["title"] == "系统设置":
+        if menu["meta"]["title"] in ["系统设置", "系統設置", "System Settings"]:
             menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
-        elif menu["meta"]["title"] == "事件管理":
+        elif menu["meta"]["title"] in ["事件管理", "Event Management"]:
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
     if ai_type in [1, 2, 3]:
         await Config.update_or_create(key="PROMPT_WORD", defaults={"value": Prompt_Word_Dict.get(ai_type)}, module="ai")
