@@ -142,7 +142,7 @@ async def create_workflow(request):
                 "properties": {
                     "page": {"type": "integer", "description": "分页的页码，默认1"},
                     "size": {"type": "integer", "description": "分页的大小，默认10"},
-                    "keyword": {"type": "string", "description": "搜索时使用，支持搜索名称或备注"},
+                    "keyword": {"type": "string", "description": "搜索时使用，支持搜索名称、备注、ID"},
                     "scene": {"type": "array", "items": {"type": "string"}, "description": "搜索时使用，支持搜索场景"},
                     "tag": {"type": "string", "description": "搜索时使用，支持搜索标签"},
                     "publish": {"type": "integer", "description": "搜索时使用，支持搜索发布状态, 0未发布 1已发布"},
@@ -1405,8 +1405,8 @@ async def dashboard_statistics(request):
 
 @workflow_bp.post("/import")
 @openapi.definition(
-    summary="初始化剧本",
-    description="初始化剧本",
+    summary="导入剧本",
+    description="导入剧本",
     body={"application/json": {"schema": {"type": "object", "required": ["flow_list"], "properties": {"flow_list": {"type": "array", "items": {"type": "object"}, "description": "剧本列表"}}}}},
     response={
         "200": {

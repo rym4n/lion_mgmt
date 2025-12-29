@@ -34,7 +34,7 @@ __all__ = ['ai_bp']
                     },
                     "ai_type": {
                         "type": "string",
-                        "description": "获取动作或者剧本，可选action或flow"
+                        "description": "获取动作或者剧本，可选action、flow、event"
                     }
                 }
             }
@@ -62,6 +62,7 @@ __all__ = ['ai_bp']
 async def ai_question(request):
     room_id = request.json.get("room_id")
     content = request.json.get("content")
+    ai_type = request.json.get("ai_type")
     user = request.ctx.session['account_info']
 
     room = await Room.get(id=room_id, deleted=False)
@@ -88,27 +89,8 @@ async def ai_question(request):
 
     await chat_manager.publish_ai_message(message_data)
 
-    sender = await Account.get(username="system")
-
-    ai_config = await get_ai_config()
-
-    message_data["sender_id"] = sender.id
-    message_data["sender_name"] = sender.username
-    message_data["type"] = "ai"
-
-    host = ai_config.get('llm_host')
-    if host is None:
-        message_data["content"] = "当前未配置ai服务地址，请前往系统设置进行配置。"
-        await chat_manager.publish_ai_message(message_data)
-        return None
-    model = ai_config.get('llm_model')
-    if model is None:
-        message_data["content"] = "当前未配置ai服务模型，请前往系统设置进行配置。"
-        await chat_manager.publish_ai_message(message_data)
-        return None
-
     # 剧本实现
-    pv = await PlaybookVersion.filter(playbook_id="222222", deleted=False, status=1).order_by("-ctime").first()
+    pv = await PlaybookVersion.filter(playbook__name="AI", deleted=False, status=1).order_by("-ctime").first()
     if not pv:
         return response_ok("ai功能剧本缺失或未发布，请联系管理员处理")
 
@@ -116,9 +98,7 @@ async def ai_question(request):
               "flow_input": {
                   "msg": content,
                   "room_id": room_id,
-                  "user_id": sender.id,
-                  "ai_config": orjson.dumps(ai_config).decode("utf-8"),
-                  "ai_type": request.json.get("ai_type", "action")
+                  "ai_type": ai_type
               },
               "executor": user.id}
     run_id = gen_run_id()
