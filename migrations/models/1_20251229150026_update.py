@@ -5,12 +5,12 @@ RUN_IN_TRANSACTION = True
 
 async def upgrade(db: BaseDBAsyncClient) -> str:
     return """
-        DROP TABLE IF EXISTS "audit_log";"""
+        ALTER TABLE "tool_resources" ALTER COLUMN "resources" TYPE VARCHAR(5000) USING "resources"::VARCHAR(5000);"""
 
 
 async def downgrade(db: BaseDBAsyncClient) -> str:
     return """
-        """
+        ALTER TABLE "tool_resources" ALTER COLUMN "resources" TYPE VARCHAR(3000) USING "resources"::VARCHAR(3000);"""
 
 
 MODELS_STATE = (
@@ -167,13 +167,13 @@ MODELS_STATE = (
     "q/C4dfkooKrk7FiL6T5qigg9lYwsogHXLwR0MqOtOab5dCq+gHBbyF/QeDvLtEvnyOHtl1"
     "VvN8zXGRyWXiU9KCt+1j82cvZTFUcIlx49NPJ9esBwog41VnHe4PakYRwV2nLaxuzBwh3s"
     "4brm0gaWNrC0gaUNLG1gaQNLG1iU6gCCG8GXWxyQ3QIJCCx++DrkrGpBJWZnEwpl/YIFVH"
-    "bSvY7eyklOl2R22kV4X4Ve9LTHILXWGsqlxdLj5UL3E2d8H6w1RenC4ECz5k0suXn1oSZp"
-    "URxENjeqo2dVwAMlYLtEpNVQxgDKGMATO/TZcRUo3CGjbt7CtZtTBE/S6rY7y7PaZhJncD"
-    "3JtGNaEHbMyfvUiUoOSHJAkgOSHJDkgCQHJDkgUagKwTmgC8+iZdMGDIVEACOXhFlDeWrT"
-    "AuxTF3Jtvq0w/dBCazT78NvYjD5O/NG4jXy7evb08nxrtJ9MaTQCD1TcNl2Susj8LyQwLi"
-    "0DsRc7qv7AyYwPyNkcHlbeA/JqwlUa8S6LCYT66SkoSSTNmpHe0BEsBfnF6XpDEDP9Vyda"
-    "Q7/Uhl/kN2/bjPLHQrMulvgCDiEwPB38BppvA+vqFY4BTCpkw13FID3sQl/B0pFkpRkejC"
-    "JTUS1ouXCKz0kWeI0ckcBeZw/aqd6F3MJv6NBc2tAUFAwmKlAjzaPcJH61JX3Aqfpv1/+1"
-    "ku+QfIfkOyTfIfkOyXdcB98xb0BGz/Owb6qbAmGs6oYqFM0WdVMBisms6ZvfP1UX+DLEnW"
-    "tRTG1HE7g4FJi2n51Hqt++CqPH8nyAyc4HkIXBRywMPjyh8PW/ulHolw=="
+    "bSvY7eyklOl2R22kV4X4Ve9LTHILXWGsqlxdLj5UL3E2d8P/5G6cbgKG0cjvIcioikRXEQ"
+    "2dyojp5VAQ+UgO0SkVZDGQMoYwBP7NBnx1WgcIeMunkL125OETxJq9vuLM9qm0mcwfUk04"
+    "5pQdgxJ+9TJyo5IMkBSQ5IckCSA5IckOSARKEqBOeALjyLlk0bMBQSAYxcEmYN5alNC7BP"
+    "Xci1+bbC9EMLrdHsw29jM/o48UfjNvLt6tnTy/Ot0X4ypdEIPFBx23RJ6iLzv5DAuLQMxF"
+    "7sqPoDJzM+IGdzeFh5D8irCVdpxLssJhDqp6egJJE0a0Z6Q0ewFOQXp+sNQcz0X51oDf1S"
+    "G36R37xtM8ofC826WOILOITA8HTwG2i+DayrVzgGMKmQDXcVg/SwC30FS0eSlWZ4MIpMRb"
+    "Wg5cIpPidZ4DVyRAJ7nT1op3oXcgu/oUNzaUNTUDCYqECNNI9yk/jVlvQBp+q/Xf/XSr5D"
+    "8h2S75B8h+Q7JN9xHXzHvAEZPc/DvqluCoSxqhuqUDRb1E0FKCazpm9+/1Rd4MsQd65FMb"
+    "UdTeDiUGDafnYeqX77Kowey/MBJjsfQBYGH7Ew+PCEwtf/Apdg6J0="
 )
