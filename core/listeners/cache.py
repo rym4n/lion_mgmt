@@ -1,4 +1,5 @@
 # coding=utf-8
+import traceback
 from asyncio.base_events import BaseEventLoop
 
 from aiocache import caches
@@ -49,7 +50,7 @@ class CacheListener(BaseListener):
             await app.cancel_task("chat_msg_listener")
             await app.cancel_task("run_log_listener")
         except Exception as e:
-            logger.warning(f"释放资源异常: {e}")
+            logger.warning(f"释放资源异常: {e} | {traceback.format_exc()}")
         finally:
             cache_client = getattr(app.ctx, "cache_client", None)
             if cache_client:

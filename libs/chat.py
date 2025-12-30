@@ -345,9 +345,9 @@ class ChatManager:
     #
     #         return message_data
 
-    async def connect(self, user: Account, ws):
+    async def connect(self, user: Account, ws, session_id):
         """处理用户连接"""
-        self.active_connections[user.id] = {"conn": ws, "current_room": None, "run_id": None}
+        self.active_connections[user.id] = {session_id: {"conn": ws, "current_room": None, "run_id": None}}
         status_message = {"type": "user_status", "user_id": user.id, "username": user.username, "online": True, "timestamp": str(datetime.now())}
         await self.cache_client.set(f"room_online_{user.id}", int(time.time()), AUTHENTICATION_SESSION_EXPIRATION)
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(status_message).decode())
@@ -388,11 +388,12 @@ class ChatManager:
                             continue
                         message["data"] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"], redis=self.redis))
                     room_id = msg.get("room_id")
-                    for k, v in self.active_connections.items():
-                        if room_id and v["current_room"] == room_id:
-                            await v["conn"].send(message["data"].decode())
-                        elif room_id is None:
-                            await v["conn"].send(message["data"].decode())
+                    for key, values in self.active_connections.items():
+                        for k,v in values.items():
+                            if room_id and v["current_room"] == room_id:
+                                await v["conn"].send(message["data"].decode())
+                            elif room_id is None:
+                                await v["conn"].send(message["data"].decode())
                 except orjson.JSONDecodeError:
                     logger.error(f"JSONDecodeError | {message.get('data')}")
                 except WebsocketClosed:
@@ -403,6 +404,7 @@ class ChatManager:
             await msg_sub.unsubscribe(WR_TOPIC)
 
     async def log_listener(self):
+        logger.info("启动runlog消费任务")
         await aconsume(KAFKA_SERVERS, RUNLOG_TOPIC, "lion_mgmt_listener", self.handle_runlog, 500)
 
     async def handle_runlog(self, logs):
@@ -678,7 +680,7 @@ class ChatManager:
             raise Exception("发送私聊消息失败")
 
     async def _handle_audit_message(self, user: Account, data: dict):
-        """处理发送私聊消息"""
+        """处理发送审批消息"""
         try:
             run_node_ids = data.get("run_node_id", {})
             room_id = data.get("room_id")

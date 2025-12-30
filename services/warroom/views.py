@@ -16,6 +16,7 @@ from core.response import response_ok
 from libs.chat import get_or_create_private_chat_room, chat_manager
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
+from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission, check_wildcard
 from libs.utils import gen_run_id, gen_random_code
 from models import Events, ToolAction, Tool, Runlog
@@ -47,7 +48,9 @@ async def warroom_ws(request: Request, ws: Websocket):
             logger.warning("redis里已经没有account信息了")
             raise CustomError(ErrorCode.SessionInvalid)
         # 建立连接
-        await chat_manager.connect(account, ws)
+        payload = await token_decode(request)
+        session_id = payload.get("id")
+        await chat_manager.connect(account, ws, session_id)
         has_perm = False
         if not has_perm:
             for role in account.roles:

@@ -142,7 +142,7 @@ async def create_workflow(request):
                 "properties": {
                     "page": {"type": "integer", "description": "分页的页码，默认1"},
                     "size": {"type": "integer", "description": "分页的大小，默认10"},
-                    "keyword": {"type": "string", "description": "搜索时使用，支持搜索名称或备注"},
+                    "keyword": {"type": "string", "description": "搜索时使用，支持搜索名称、备注、ID"},
                     "scene": {"type": "array", "items": {"type": "string"}, "description": "搜索时使用，支持搜索场景"},
                     "tag": {"type": "string", "description": "搜索时使用，支持搜索标签"},
                     "publish": {"type": "integer", "description": "搜索时使用，支持搜索发布状态, 0未发布 1已发布"},
@@ -181,7 +181,7 @@ async def create_workflow(request):
 @requires_permission("workflow:r")
 async def list_workflow(request):
     json_params = request.json
-    page = int(json_params.get("page", 1))
+    page = int(json_params.get("page", 1)) if int(json_params.get("page", 1)) != 0 else 1
     size = int(json_params.get("size", 15))
     offset = (page - 1) * size
     limit = size
@@ -1405,8 +1405,8 @@ async def dashboard_statistics(request):
 
 @workflow_bp.post("/import")
 @openapi.definition(
-    summary="初始化剧本",
-    description="初始化剧本",
+    summary="导入剧本",
+    description="导入剧本",
     body={"application/json": {"schema": {"type": "object", "required": ["flow_list"], "properties": {"flow_list": {"type": "array", "items": {"type": "object"}, "description": "剧本列表"}}}}},
     response={
         "200": {
@@ -1443,11 +1443,13 @@ async def import_workflow(request):
 
             if flow_data.get("tags"):
                 tags = await Tag.filter(name__in=flow_data.get("tags")).all()
-                await playbook.tags.add(*tags)
+                if tags:
+                    await playbook.tags.add(*tags)
             if flow_data.get("scenes"):
                 scenes = await Scene.filter(name__in=flow_data.get("scenes")).all()
-                await playbook.scenes.add(*scenes)
-                await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
+                if scenes:
+                    await playbook.scenes.add(*scenes)
+                    await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
 
             for flow_json in flow_json_list:
                 pv = await PlaybookVersion.create(playbook=playbook, version=gen_run_id(), status=0, change_desc="", flow_json=flow_json, creator=creator, updator=creator, flow_timeout=flow_data.get("flow_timeout", 300))

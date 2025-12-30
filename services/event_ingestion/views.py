@@ -19,6 +19,7 @@ from sanic import Blueprint, response
 from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.functions import Max
+from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -28,7 +29,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import run_linux_command, query_vlog
 from models import PlaybookVersion, Playbook, Config
-from models.event import EventsIngestion, EventRelatedScript
+from models.event import EventsIngestion, EventRelatedScript, Events
 from settings import VECTOR_CFG, KAFKA_SERVERS, SUPERVISOR_PATH, VL_HOST
 
 event_ingestion_bp = Blueprint("event_ingestion", url_prefix="/event-ingestion")
@@ -318,23 +319,27 @@ async def get_all_events_ingestion(request):
 @requires_permission("ingestion:d")
 async def delete_event_ingestion(request):
     event_id = request.json.get("id")
-    event = await EventsIngestion.get(id=event_id)
-    if not event:
-        raise CustomError(ErrorCode.NotFound)
-    if event.enabled_status == 1:
-        return response_ok("请先禁用事件接入再删除")
-    es = await EventRelatedScript.get_or_none(event_ingestion_id=event_id)
-    if es:
-        for script_id in es.script_id:
-            process_name = hashlib.md5(f"{es.event_ingestion_id}_{script_id}".encode()).hexdigest()
-            supervisor.stop_process(process_name)
-            supervisor.remove_process(process_name)
-            supervisor_path = os.path.join(SUPERVISOR_PATH, f"{process_name}.conf")
-            if os.path.exists(supervisor_path):
-                os.remove(supervisor_path)
-        await es.delete()
 
-    await event.delete()
+    async with in_transaction():
+        event = await EventsIngestion.get(id=event_id)
+        if not event:
+            raise CustomError(ErrorCode.NotFound)
+        if event.enabled_status == 1:
+            return response_ok("请先禁用事件接入再删除")
+        es = await EventRelatedScript.get_or_none(event_ingestion_id=event_id)
+        if es:
+            for script_id in es.script_id:
+                process_name = hashlib.md5(f"{es.event_ingestion_id}_{script_id}".encode()).hexdigest()
+                supervisor.stop_process(process_name)
+                supervisor.remove_process(process_name)
+                supervisor_path = os.path.join(SUPERVISOR_PATH, f"{process_name}.conf")
+                if os.path.exists(supervisor_path):
+                    os.remove(supervisor_path)
+            await es.delete()
+
+        await Events.filter(event_ingestion_id=event.id).delete()
+
+        await event.delete()
 
     return response_ok("事件删除成功")
 
@@ -461,6 +466,22 @@ async def update_event_ingestion(request):
         data["sources"][event.vector_name]["sasl"]["username"] = sasl_username
     if sasl_password and event_source_type == "kafka":
         data["sources"][event.vector_name]["sasl"]["password"] = urllib.parse.quote(sasl_password)
+
+    # 更新事件接入sinks部分，将旧版本的es转换成vl
+    if event.project_id:
+        project_id = event.project_id
+    else:
+        max_project_id = await EventsIngestion.all().annotate(max_pid=Max("project_id")).values_list("max_pid", flat=True)
+        project_id = max_project_id[0] + 1 if max_project_id and max_project_id[0] else 1
+
+    data["sinks"][f"{event.vector_name}_sample_sinks"]["query"] = {"_msg_field": "message", "_time_field": "@timestamp", "_stream_fields": "host,source_type"}
+    data["sinks"][f"{event.vector_name}_sample_sinks"]["request"] = {"headers": {"AccountID": "0", "ProjectID": str(project_id)}}
+    data["sinks"][f"{event.vector_name}_sample_sinks"]["api_version"] = "v8"
+    data["sinks"][f"{event.vector_name}_sample_sinks"]["compression"] = "gzip"
+    data["sinks"][f"{event.vector_name}_sample_sinks"]["endpoints"] = [f"{VL_HOST}/insert/elasticsearch/"]
+    data["sinks"][f"{event.vector_name}_sample_sinks"]["healthcheck"] = {"enabled": False}
+    data["sinks"][f"{event.vector_name}_sample_sinks"].pop("auth", None)
+    data["sinks"][f"{event.vector_name}_sample_sinks"].pop("bulk", None)
 
     result = check_vector_config(data)
     if not result:

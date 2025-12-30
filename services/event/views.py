@@ -649,23 +649,12 @@ async def create_report(request):
     if not event_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    user = request.ctx.session["account_info"]
-
-    ai_config = await get_ai_config()
-
-    host = ai_config.get("llm_host")
-    if host is None:
-        return response_ok("当前未配置ai服务地址，请前往系统设置进行配置。")
-    model = ai_config.get("llm_model")
-    if model is None:
-        return response_ok("当前未配置ai服务模型，请前往系统设置进行配置。")
-
     # 剧本实现
-    pv = await PlaybookVersion.filter(playbook_id="333333", deleted=False, status=1).order_by("-ctime").first()
+    pv = await PlaybookVersion.filter(playbook__name="AI", deleted=False, status=1).order_by("-ctime").first()
     if not pv:
         return response_ok("生成事件报告剧本缺失或未发布，请联系管理员处理")
 
-    params = {"flow_id": pv.id, "flow_input": {"event_id": event_id, "ai_config": orjson.dumps(ai_config).decode("utf-8")}, "executor": user.id}
+    params = {"flow_id": pv.id, "flow_input": {"event_id": event_id, "ai_type": "event"}}
     run_id = gen_run_id()
     msg = {"run_type": "flow", "run_id": run_id, "run_args": params}
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)

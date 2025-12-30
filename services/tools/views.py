@@ -203,8 +203,6 @@ async def upload_and_extract_zip(request):
         await resp.send(f"data: {results}\n\n")
         await resp.eof()
 
-    return resp
-
 
 async def unzip(zip_data, creator, single_progress, resp, success_progress, redis_client, token_id):
     try:
@@ -821,6 +819,11 @@ async def delete_tool(request):
 
         if tool.maintain:
             raise CustomError(ErrorCode.InternalDeleteError)
+
+        if await Tool.filter(name=name, deleted=False).count() == 1:
+            await ToolResourcesModel.filter(tool_name=name, deleted=False).update(deleted=True)
+            await ToolResources.filter(tool_name=name, deleted=False).delete()
+            await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
 
         tool_path = os.path.join(TOOLS_DIR, name, version)
         if os.path.exists(tool_path):
