@@ -820,6 +820,11 @@ async def delete_tool(request):
         if tool.maintain:
             raise CustomError(ErrorCode.InternalDeleteError)
 
+        if await Tool.filter(name=name, deleted=False).count() == 1:
+            await ToolResourcesModel.filter(tool_name=name, deleted=False).update(deleted=True)
+            await ToolResources.filter(tool_name=name, deleted=False).delete()
+            await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
+
         tool_path = os.path.join(TOOLS_DIR, name, version)
         if os.path.exists(tool_path):
             shutil.rmtree(tool_path)
