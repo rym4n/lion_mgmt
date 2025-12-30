@@ -181,7 +181,7 @@ async def create_workflow(request):
 @requires_permission("workflow:r")
 async def list_workflow(request):
     json_params = request.json
-    page = int(json_params.get("page", 1))
+    page = int(json_params.get("page", 1)) if int(json_params.get("page", 1)) != 0 else 1
     size = int(json_params.get("size", 15))
     offset = (page - 1) * size
     limit = size
