@@ -1,10 +1,11 @@
 # coding=utf-8
-import orjson
+import datetime
+
 from sanic import Blueprint
 from sanic_ext import openapi
 
 from core.response import response_ok
-from libs.chat import chat_manager, get_ai_config, get_prompt_words, get_playbook_prompt_words
+from libs.chat import chat_manager, get_prompt_words, get_playbook_prompt_words
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import gen_run_id
@@ -132,6 +133,10 @@ async def ai_question(request):
                     "type": {
                         "type": "string",
                         "description": "消息类型"
+                    },
+                    "create": {
+                        "type": "boolean",
+                        "description": "是否创建历史消息"
                     }
                 }
             }
@@ -176,24 +181,26 @@ async def create_msg(request):
     msg_type = request.json.get("type")
     user = await Account.get(id=user_id, deleted=False)
     room = await Room.get(id=room_id, deleted=False)
-    message = await Message.create(
-        type=msg_type,
-        sender=user,
-        room=room,
-        content=content,
-        image_content="",
-        receiver=user  # 群聊消息设为发送者自己作为占位符
-    )
+    message = None
+    if request.json.get("create"):
+        message = await Message.create(
+            type=msg_type,
+            sender=user,
+            room=room,
+            content=content,
+            image_content="",
+            receiver=user  # 群聊消息设为发送者自己作为占位符
+        )
 
     message_data = {
         "type": msg_type,
-        "message_id": str(message.id),
+        "message_id": str(message.id) if message else "",
         "sender_id": user.id,
         "sender_name": user.username,
         "sender_display_name": user.display_name,
         "content": content,
         "image_content": "",
-        "timestamp": str(message.ctime),
+        "timestamp": str(message.ctime) if message else datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
         "room_id": room_id
     }
 
