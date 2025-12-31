@@ -132,3 +132,10 @@ class ErrorCode(BaseErrorCode):
     PlaybookUnauthorized = ErrorData(4096, "缺少剧本权限")
 
     OutOfPage = ErrorData(4097, "最多可查看前1000条数据，请使用条件搜索缩小数据范围")
+
+    # MCP Error Codes
+    MCPAgentIdRequired = ErrorData(4100, "Missing agent_id")
+    MCPActionRequired = ErrorData(4101, "Missing action")
+    MCPInvalidAction = ErrorData(4102, "Invalid action")
+    MCPExecutionFailed = ErrorData(4103, "Execution failed")
+    MCPRateLimitExceeded = ErrorData(4104, "Rate limit exceeded")

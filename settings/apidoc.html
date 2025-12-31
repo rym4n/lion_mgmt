@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-    <meta name="description" content="API文档"/>
-    <title>API文档说明</title>
+    <meta name="description" content="API Documentation"/>
+    <title>API Documentation</title>
     <style>
-        /* 现代化色彩系统 - 深蓝主色与中性色阶 */
+        /* Modern color system - Deep blue primary and neutral grays */
         :root {
             --primary-50: #eff6ff;
             --primary-100: #dbeafe;
@@ -25,11 +25,11 @@
             --border: var(--gray-400);
         }
 
-        /* 使用系统字体栈替代Google Fonts */
+        /* Use system font stack instead of Google Fonts */
         @font-face {
             font-family: "SystemUI";
             src: local("Segoe UI"), local("San Francisco"), local(".AppleSystemUIFont"), local("Roboto"), local("Ubuntu"), local("Helvetica Neue");
-            font-display: swap; /* 确保文本始终可见 */
+            font-display: swap; /* Ensure text is always visible */
         }
 
         body {
@@ -43,7 +43,7 @@
             -moz-osx-font-smoothing: grayscale;
         }
 
-        /* 代码字体使用系统等宽字体 */
+        /* Use system monospace font for code */
         code,
         pre {
             font-family: "SF Mono", "Monaco", "Cascadia Code", "Roboto Mono", "Consolas", "Liberation Mono", "Courier New", monospace;
@@ -51,7 +51,7 @@
 
         .container {
             margin: 0 auto;
-            padding: 0; /* 移除内边距，让 Redoc 自行处理 */
+            padding: 0; /* Remove padding, let Redoc handle it */
             height: 100vh;
         }
     </style>
@@ -88,14 +88,14 @@
                     },
                 },
                 typography: {
-                    // 使用系统字体栈
+                    // Use system font stack
                     fontFamily: "'SystemUI', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
                     headings: {
                         fontWeight: "600",
                         lineHeight: 1.25,
                     },
                     code: {
-                        // 使用系统等宽字体
+                        // Use system monospace font
                         fontFamily: "'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', 'Consolas', monospace",
                         fontSize: "14px",
                         fontWeight: "500",
@@ -110,7 +110,7 @@
                     width: "40%",
                 },
             },
-            // 功能优化
+            // Feature optimization
             lazyRendering: false,
             nativeScrollbars: true,
             expandResponses: "all",

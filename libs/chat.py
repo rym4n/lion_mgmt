@@ -18,7 +18,7 @@ from libs.kafka import aconsume
 from models import Runlog, Approvement, Events, Config, ToolAction, ToolResourcesModel, ToolResources, Playbook, PlaybookVersion
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import KAFKA_SERVERS, CACHE, RUNLOG_TOPIC, WR_TOPIC, AUTHENTICATION_SESSION_EXPIRATION, TZ
+from settings import CACHE, RUNLOG_TOPIC, WR_TOPIC, AUTHENTICATION_SESSION_EXPIRATION, TZ
 
 
 async def fetch_completion(host, api_key, model, messages):
@@ -370,7 +370,7 @@ class ChatManager:
             await msg_sub.subscribe(WR_TOPIC)
             async for message in msg_sub.listen():
                 try:
-                    logger.info(message)
+                    # logger.info(message)
                     if message.get("type") != "message":
                         continue
                     msg = orjson.loads(message["data"])
@@ -411,7 +411,7 @@ class ChatManager:
 
     async def log_listener(self):
         logger.info("启动runlog消费任务")
-        await aconsume(KAFKA_SERVERS, RUNLOG_TOPIC, "lion_mgmt_listener", self.handle_runlog, 500)
+        await aconsume(RUNLOG_TOPIC, "lion_mgmt_listener", self.handle_runlog, 500)
 
     async def handle_runlog(self, logs):
         """

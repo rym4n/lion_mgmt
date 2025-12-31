@@ -33,6 +33,7 @@ dependencies = [
     "croniter>=6.0.0",
     "jsonrpcserver>=5.0.9",
     "aioboto3>=15.4.0",
+    "mcp>=1.25.0",
 ]
 
 [build-system]

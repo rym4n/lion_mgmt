@@ -555,17 +555,11 @@ async def get_event_ingestion_detail(request):
 @openapi.definition(
     summary="获取事件接入处理后的日志样例",
     description="获取事件接入处理后的日志样例(需要事件查看权限)",
-    body={
-        "application/json": {
-            "schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "事件id"}, "size": {"type": "integer", "description": "每页条数，默认10"}}}
-        }
-    },
+    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "事件id"}, "size": {"type": "integer", "description": "每页条数，默认10"}}}}},
     response={
         "200": {
             "description": "获取成功",
-            "content": {
-                "application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}
-            },
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}},
         }
     },
 )
@@ -690,24 +684,12 @@ async def binding_event_ingestion_script(request):
             data.setdefault("transforms", {})[f"{topic}_transforms"] = {
                 "type": "filter",
                 # 如果之前配置了去重则用去重后的配置，否则用原始配置
-                "inputs": (
-                    [f"{topic}_dedupe_transforms"]
-                    if request_data.get("fields") and request_data.get("numbers")
-                    else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])
-                ),
+                "inputs": ([f"{topic}_dedupe_transforms"] if request_data.get("fields") and request_data.get("numbers") else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])),
                 "condition": f"{conditional_statements}",
             }
         data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
             "type": "remap",
-            "inputs": (
-                [f"{topic}_transforms"]
-                if conditions
-                else (
-                    [f"{topic}_dedupe_transforms"]
-                    if request_data.get("fields") and request_data.get("numbers")
-                    else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])
-                )
-            ),
+            "inputs": ([f"{topic}_transforms"] if conditions else ([f"{topic}_dedupe_transforms"] if request_data.get("fields") and request_data.get("numbers") else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]))),
             "source": f"""
 .aioe_event_id = uuid_v4()
 .log_data = to_string(encode_json(.log))
@@ -720,7 +702,7 @@ async def binding_event_ingestion_script(request):
 .event_source = "{event.event_ingestion_name}"
 .event_ingestion_id = "{event_ingestion_id}"
 del(.datetime_str)
-"""
+""",
         }
 
         data["sinks"][f"{topic}_sinks"] = {"inputs": [f"{topic}_event_transforms"], "type": "kafka", "bootstrap_servers": KAFKA_SERVERS, "topic": topic, "encoding": {"codec": "json"}}
@@ -898,9 +880,7 @@ async def export_event_ingestion_script(request):
     response={
         "200": {
             "description": "导入成功",
-            "content": {
-                "application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}
-            },
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}},
         }
     },
 )
@@ -1097,9 +1077,7 @@ async def parse_log(request):
     response={
         "200": {
             "description": "获取成功",
-            "content": {
-                "application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}
-            },
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}},
         }
     },
 )

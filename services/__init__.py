@@ -29,6 +29,7 @@ from services.user.views import user_bp
 from services.variables.views import var_bp
 from services.warroom.views import warroom_bp
 from services.workflow.views import workflow_bp
+from services.mcp.views import mcp_bp
 from settings import BASE_LOGGING, TORTOISE
 
 
@@ -55,6 +56,7 @@ def register_blueprints(app: Sanic) -> None:
     app.blueprint(system_bp)
     app.blueprint(warroom_bp)
     app.blueprint(approve_bp)
+    app.blueprint(mcp_bp)
 
     try:
         bp_dict = {

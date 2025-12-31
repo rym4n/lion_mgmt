@@ -23,7 +23,7 @@ from models import Events, ToolAction, Tool, Runlog
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
 from services.timed.views import runlog_list
-from settings import KAFKA_SERVERS, TASK_TOPIC, WR_TOPIC, CACHE
+from settings import TASK_TOPIC, WR_TOPIC, CACHE, KAFKA_CONFIG
 
 warroom_bp = Blueprint("warroom", url_prefix="/warroom")
 __all__ = ["warroom_bp"]
@@ -616,9 +616,7 @@ async def query_messages(request: Request):
         # 消息计数
         total_count = await Message.filter(type__in=["private", "ai", "runlog", "execute", "ai-question"], room_id=room_id).count()
         # 分页处理
-        messages = (
-            await Message.filter(type__in=["private", "ai", "runlog", "execute", "ai-question"], room_id=room_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related("sender", "receiver")
-        )
+        messages = await Message.filter(type__in=["private", "ai", "runlog", "execute", "ai-question"], room_id=room_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related("sender", "receiver")
         message_list = []
         for msg in reversed(messages):
             if msg.type == "runlog":
@@ -721,9 +719,7 @@ async def query_messages(request: Request):
 @warroom_bp.post("/get/list")
 @openapi.definition(
     summary="获取消息列表",
-    body={
-        "application/json": {"schema": {"type": "object", "properties": {"page": {"type": "integer", "description": "页码, 默认1"}, "size": {"type": "integer", "description": "每页大小, 默认20"}}}}
-    },
+    body={"application/json": {"schema": {"type": "object", "properties": {"page": {"type": "integer", "description": "页码, 默认1"}, "size": {"type": "integer", "description": "每页大小, 默认20"}}}}},
     response={
         "200": {
             "description": "Success",
@@ -846,7 +842,7 @@ async def run(request):
     room.run_id.append(msg["run_id"])
     await room.save()
     await request.app.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    await aproduce(TASK_TOPIC, msg)
 
     return response_ok("运行成功")
 
@@ -909,7 +905,7 @@ async def execution(request):
     room.run_id.append(msg["run_id"])
     await room.save()
     await request.app.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    await aproduce(TASK_TOPIC, msg)
 
     return response.json({"code": 0, "data": {"activityId": str(run_id)}, "result": str(run_id)})
 

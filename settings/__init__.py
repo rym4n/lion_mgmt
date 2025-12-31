@@ -56,6 +56,13 @@ RY_JOB_SERVER = os.environ.get("RY_JOB_SERVER")
 
 # kafka配置
 KAFKA_SERVERS = os.environ.get("RY_KAFKA_SERVERS")
+KAFKA_CONFIG = {
+    "bootstrap_servers": KAFKA_SERVERS,
+    "security_protocol": os.environ.get("RY_KAFKA_PROTOCOL") or "PLAINTEXT",
+    "sasl_mechanism": os.environ.get("RY_KAFKA_MECHANISM"),
+    "sasl_plain_username": os.environ.get("RY_KAFKA_USER"),
+    "sasl_plain_password": os.environ.get("RY_KAFKA_PASS"),
+}
 
 # 定时任务发送主题
 TASK_TOPIC = os.environ.get("RY_TASK_TOPIC")

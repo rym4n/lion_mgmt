@@ -20,13 +20,11 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import requires_permission, load_license, playbook_permission, \
-    check_playbook_permission
+from libs.security.authorization import requires_permission, load_license, playbook_permission, check_playbook_permission
 from libs.utils import gen_run_id, strip_timezone_to_seconds, query_vlog
-from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, \
-    EventRelatedScript, Timed, PlaybookWebhook, Account
+from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, EventRelatedScript, Timed, PlaybookWebhook, Account
 from services.tools.views import tool_action_update, tool_action_playbook_delete
-from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
+from settings import TASK_TOPIC, TZ, KAFKA_CONFIG
 
 workflow_bp = Blueprint("workflow", url_prefix="/playbook")
 _all__ = ["workflow_bp"]
@@ -222,14 +220,7 @@ async def list_workflow(request):
     if json_params.get("publish") in (0, 1):
         pv_condition = pv_condition & Q(playbook_versions__status=json_params.get("publish"))
 
-    playbooks = (
-        await Playbook.filter(condition)
-        .annotate(versions=Count("playbook_versions", _filter=pv_condition), max_flow_timeout=Max("playbook_versions__flow_timeout"))
-        .order_by("-utime")
-        .offset(offset)
-        .limit(limit)
-        .prefetch_related("scenes", "tags")
-    )
+    playbooks = await Playbook.filter(condition).annotate(versions=Count("playbook_versions", _filter=pv_condition), max_flow_timeout=Max("playbook_versions__flow_timeout")).order_by("-utime").offset(offset).limit(limit).prefetch_related("scenes", "tags")
 
     total = await Playbook.filter(condition).count()
 
@@ -286,12 +277,7 @@ async def list_workflow(request):
 @requires_permission("workflow:r")
 @playbook_permission("r")
 async def list_workflow_versions(request):
-    pv = (
-        await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False)
-        .only("id", "ctime", "utime", "playbook_id", "change_desc", "status", "version", "creator_id", "updator_id")
-        .all()
-        .prefetch_related("playbook", "creator", "updator")
-    )
+    pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False).only("id", "ctime", "utime", "playbook_id", "change_desc", "status", "version", "creator_id", "updator_id").all().prefetch_related("playbook", "creator", "updator")
     result = [
         {
             "playbook_id": p.playbook_id,
@@ -498,9 +484,7 @@ async def edit_workflow_flow(request):
     pv.updator = request.ctx.session["account_info"]
     # 已发布的剧本是不允许修改的
     if pv.status == 1:
-        pv = await PlaybookVersion.create(
-            playbook=pv.playbook, version=gen_run_id(), flow_json=pv.flow_json, change_desc=None, status=0, creator=request.ctx.session["account_info"], updator=request.ctx.session["account_info"]
-        )
+        pv = await PlaybookVersion.create(playbook=pv.playbook, version=gen_run_id(), flow_json=pv.flow_json, change_desc=None, status=0, creator=request.ctx.session["account_info"], updator=request.ctx.session["account_info"])
     else:
         await pv.save()
 
@@ -539,9 +523,7 @@ async def edit_workflow_flow(request):
 async def publish_workflow(request):
     if not request.json.get("flow_id") or not request.json.get("change_desc"):
         raise CustomError(ErrorCode.ParameterError)
-    await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0).update(
-        status=1, updator=request.ctx.session["account_info"], version=gen_run_id(), change_desc=request.json.get("change_desc")
-    )
+    await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0).update(status=1, updator=request.ctx.session["account_info"], version=gen_run_id(), change_desc=request.json.get("change_desc"))
     return response_ok("剧本发布成功")
 
 
@@ -634,7 +616,7 @@ async def delete_workflow_version(request):
 async def stop_workflow(request):
     run_id = request.json.get("run_id")
     msg = {"run_type": "kill", "run_id": run_id, "run_args": {"executor": request.ctx.session["account_info"].id}}
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    await aproduce(TASK_TOPIC, msg)
     return response_ok("success")
 
 
@@ -690,7 +672,7 @@ async def execute_action(request):
         run_id = gen_run_id()
         message["executor"] = request.ctx.session["account_info"].id
         msg = {"run_type": message["type"], "run_id": run_id, "run_args": message}
-        await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+        await aproduce(TASK_TOPIC, msg)
         sent_id = []
         for _ in range(60):
             logs = await Runlog.filter(run_id=run_id, utime__gte=utime).all()
@@ -823,9 +805,7 @@ async def run_history(request):
     response={
         "200": {
             "description": "获取成功",
-            "content": {
-                "application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}
-            },
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}},
         }
     },
 )
@@ -913,9 +893,7 @@ async def new_tag(request):
     response={
         "200": {
             "description": "获取成功",
-            "content": {
-                "application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "string"}}, "message": {"type": "string"}}}}
-            },
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "string"}}, "message": {"type": "string"}}}}},
         }
     },
 )
@@ -1049,9 +1027,7 @@ async def select_my_permission(request):
     response={
         "200": {
             "description": "获取成功",
-            "content": {
-                "application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}
-            },
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}},
         }
     },
 )
@@ -1266,7 +1242,7 @@ async def execute_webhook(request):
     run_id = gen_run_id()
 
     msg = {"run_type": "flow", "run_id": run_id, "run_args": {"type": "flow", "flow_id": pv.id, "flow_input": flow_input, "executor": webhook.creator_id}}
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    await aproduce(TASK_TOPIC, msg)
 
     sent_id = []
     for _ in range(60):

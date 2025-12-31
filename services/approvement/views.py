@@ -15,7 +15,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from models import Approvement
-from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
+from settings import TASK_TOPIC, TZ, KAFKA_CONFIG
 
 approve_bp = Blueprint("approve", url_prefix="/approve")
 _all__ = ["approve_bp"]
@@ -278,7 +278,7 @@ async def update_approvement(request):
             "executor": ",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session["account_info"].id,
         },
     }
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    await aproduce(TASK_TOPIC, msg)
 
     return response_ok("success")
 
@@ -345,6 +345,6 @@ async def update_approvement_callback(request):
             "executor": ",".join([p.id for p in approve.approvers]),
         },
     }
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    await aproduce(TASK_TOPIC, msg)
 
     return response_ok("success")

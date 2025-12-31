@@ -28,7 +28,7 @@ from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_run_id
 from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion, Runlog, Timed
-from settings import KAFKA_SERVERS, TASK_TOPIC, TZ, TOOLS_DIR
+from settings import TASK_TOPIC, TZ, TOOLS_DIR, KAFKA_CONFIG
 
 # 定义 Blueprint
 tools_bp = Blueprint("tools", url_prefix="/tools")
@@ -1232,7 +1232,7 @@ async def health_check(request):
         run_id = gen_run_id()
         message["executor"] = request.ctx.session["account_info"].id
         msg = {"run_type": message["type"], "run_id": run_id, "run_args": message}
-        await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+        await aproduce(TASK_TOPIC, msg)
         sent_id = []
         for i in range(60):
             log = await Runlog.get_or_none(run_id=run_id, utime__gte=utime)
@@ -1277,7 +1277,7 @@ async def tool_debug(request):
     params = {"resource": resource.id, "node_name": tool.description, "action": "run_python_script", "action_name": "执行python脚本", "app_name": "lion_mgmt", "name": tool.description, "app_ver": tool.version, "main": tool.main, "action_input": {"data": data}, "retry_times": 0, "timeout": 300, "executor": user.id}
     run_id = gen_run_id()
     msg = {"run_type": "action", "run_id": run_id, "run_args": params}
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    await aproduce(TASK_TOPIC, msg)
     sent_id = []
     for i in range(60):
         logs = await Runlog.filter(run_id=run_id).all()

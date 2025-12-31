@@ -11,15 +11,13 @@ from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
-from libs.chat import get_ai_config
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import gen_random_code, strip_timezone_to_seconds, gen_run_id
 from models import Events, Runlog, Room, Account, Role, EventsIngestion, ToolAction, ToolResources, Tool, PlaybookVersion
-from services.system_config.views import download_file
 from services.timed.views import runlog_list
-from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
+from settings import TASK_TOPIC, TZ, KAFKA_CONFIG
 
 TYPE_DICT = {"PLAYBOOK": "flow", "ACTION": "action"}
 
@@ -319,7 +317,7 @@ async def execution(request):
     room.run_id.append(msg["run_id"])
     await room.save()
     await request.app.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    await aproduce(TASK_TOPIC, msg)
 
     return response.json({"code": 0, "data": {"activityId": str(run_id)}, "result": str(run_id)})
 
@@ -635,7 +633,7 @@ async def create_ai_report(event_id):
     params = {"flow_id": pv.id, "flow_input": {"event_id": event_id, "ai_type": "event"}}
     run_id = gen_run_id()
     msg = {"run_type": "flow", "run_id": run_id, "run_args": params}
-    await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
+    await aproduce(TASK_TOPIC, msg)
     while True:
         runlog = await Runlog.filter(run_id=run_id, deleted=False).order_by("-ctime").all()
         if runlog:
@@ -679,4 +677,3 @@ async def get_report(request):
     event = await Events.get(id=event_id)
 
     return response_ok(event.download_url if event.download_url else "")
-
