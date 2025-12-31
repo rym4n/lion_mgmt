@@ -64,7 +64,7 @@ async def warroom_ws(request: Request, ws: Websocket):
                 continue
             try:
                 message = orjson.loads(msg)
-                await chat_manager.handle_message(account, ws, message)
+                await chat_manager.handle_message(account, ws, message, session_id)
             except Exception as e1:
                 logger.error(f"{e1} | {traceback.format_exc()}")
     except ConnectionClosed as e2:
@@ -74,7 +74,9 @@ async def warroom_ws(request: Request, ws: Websocket):
         await ws.send(orjson.dumps({"type": "error", "message": str(e)}).decode())
     finally:
         if account:
-            await chat_manager.disconnect(account.id)
+            payload = await token_decode(request)
+            session_id = payload.get("id")
+            await chat_manager.disconnect(account.id, session_id)
         await ws.close()
 
 

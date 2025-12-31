@@ -199,7 +199,6 @@ class ChatManager:
         self.cache_client = caches.get("redis_chat")
         self.msg_pub = self.cache_client.client
         self.active_connections: dict[str, dict] = {}
-        self.run_connections: dict[str, dict] = {}
 
     # 现在使用动作实现ai相关代码注释以防动作代码出问题可以进行对比维护
     #     async def stream_chat_completion(self, prompt: str, message_data: dict):
@@ -347,17 +346,21 @@ class ChatManager:
 
     async def connect(self, user: Account, ws, session_id):
         """处理用户连接"""
-        self.active_connections[user.id] = {session_id: {"conn": ws, "current_room": None, "run_id": None}}
+        if user.id not in self.active_connections.keys():
+            self.active_connections[user.id] = {session_id: {"conn": ws, "current_room": None, "run_id": None}}
+        else:
+            self.active_connections[user.id][session_id] = {"conn": ws, "current_room": None, "run_id": None}
         status_message = {"type": "user_status", "user_id": user.id, "username": user.username, "online": True, "timestamp": str(datetime.now())}
         await self.cache_client.set(f"room_online_{user.id}", int(time.time()), AUTHENTICATION_SESSION_EXPIRATION)
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(status_message).decode())
 
-    async def disconnect(self, user_id):
+    async def disconnect(self, user_id, session_id):
         """处理用户断开连接"""
         if user_id in self.active_connections:
-            self.active_connections.pop(user_id, None)
-        if user_id in self.run_connections:
-            self.run_connections.pop(user_id, None)
+            if len(list(self.active_connections[user_id].keys())) == 1:
+                self.active_connections.pop(user_id, None)
+            elif session_id in self.active_connections[user_id]:
+                self.active_connections[user_id].pop(session_id, None)
         await self.cache_client.delete(f"room_online_{user_id}")
         logger.info(f"用户 {user_id} 断开连接")
         # await self.msg_pub.publish(WR_TOPIC, orjson.dumps({"type": "system", "message": f"{user.username} 离开作战室"}).decode())
@@ -373,14 +376,17 @@ class ChatManager:
                     msg = orjson.loads(message["data"])
                     # 处理待办消息
                     if "approval" in msg.keys():
-                        for k in self.active_connections:
-                            if k == msg.get("user"):
-                                await self.active_connections[msg.get("user")]["conn"].send(orjson.dumps(msg.get("approval")).decode())
+                        for key, values in self.active_connections.items():
+                            if key == msg.get("user"):
+                                for k, v in values.items():
+                                    await v["conn"].send(orjson.dumps(msg.get("approval")).decode())
                         continue
+                    # 处理@消息
                     if "mention" in msg.keys():
-                        for k in self.active_connections:
-                            if k == msg.get("user"):
-                                await self.active_connections[msg.get("user")]["conn"].send(orjson.dumps(msg.get("mention")).decode())
+                        for key, values in self.active_connections.items():
+                            if key == msg.get("user"):
+                                for k, v in values.items():
+                                    await v["conn"].send(orjson.dumps(msg.get("mention")).decode())
                         continue
                     # 处理作战室产生的runlog
                     if "log" in msg.keys():
@@ -389,7 +395,7 @@ class ChatManager:
                         message["data"] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"], redis=self.redis))
                     room_id = msg.get("room_id")
                     for key, values in self.active_connections.items():
-                        for k,v in values.items():
+                        for k, v in values.items():
                             if room_id and v["current_room"] == room_id:
                                 await v["conn"].send(message["data"].decode())
                             elif room_id is None:
@@ -397,7 +403,7 @@ class ChatManager:
                 except orjson.JSONDecodeError:
                     logger.error(f"JSONDecodeError | {message.get('data')}")
                 except WebsocketClosed:
-                    await self.disconnect(k)
+                    await self.disconnect(k, key)
                 except Exception as e:
                     logger.error(f"{e} | {traceback.format_exc()}")
                     break
@@ -483,7 +489,7 @@ class ChatManager:
             logger.info(f"runlog消息：{to_insert}")
             logger.error(f"{e} | {traceback.format_exc()}")
 
-    async def handle_message(self, user: Account, ws, data: dict):
+    async def handle_message(self, user: Account, ws, data: dict, session_id):
         """消息处理"""
         try:
             message_type = data.get("type")
@@ -506,7 +512,7 @@ class ChatManager:
             elif message_type == "request_online_users":
                 online_users = await self._handle_request_online_users(data)
                 if user.id in self.active_connections:
-                    self.active_connections[user.id]["current_room"] = data["room_id"]
+                    self.active_connections[user.id][session_id]["current_room"] = data["room_id"]
                 # 发送在线状态列表
                 await ws.send(orjson.dumps({"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
             elif message_type == "ping":
