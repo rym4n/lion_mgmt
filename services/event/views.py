@@ -17,6 +17,7 @@ from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import gen_random_code, strip_timezone_to_seconds, gen_run_id
 from models import Events, Runlog, Room, Account, Role, EventsIngestion, ToolAction, ToolResources, Tool, PlaybookVersion
+from services.system_config.views import download_file
 from services.timed.views import runlog_list
 from settings import KAFKA_SERVERS, TASK_TOPIC, TZ
 
@@ -624,7 +625,7 @@ async def update_event(request):
     return response_ok("更新成功")
 
 
-@event_bp.post("/report")
+@event_bp.post("/ai-report")
 @openapi.definition(
     summary="AI自动生成事件报告",
     description="AI自动生成事件报告（需要事件创建权限）",
@@ -643,7 +644,7 @@ async def update_event(request):
     },
 )
 @requires_permission("event:c")
-async def create_report(request):
+async def create_ai_report(request):
     event_id = request.json.get("event_id")
 
     if not event_id:
@@ -653,7 +654,7 @@ async def create_report(request):
     pv = await PlaybookVersion.filter(playbook__name="AI", deleted=False, status=1).order_by("-ctime").first()
     if not pv:
         return response_ok("生成事件报告剧本缺失或未发布，请联系管理员处理")
-
+    download_link = ""
     params = {"flow_id": pv.id, "flow_input": {"event_id": event_id, "ai_type": "event"}}
     run_id = gen_run_id()
     msg = {"run_type": "flow", "run_id": run_id, "run_args": params}
@@ -664,10 +665,40 @@ async def create_report(request):
         if runlog:
             for log in runlog:
                 if log.tool_name == "generate_docx_file" and log.action_name == "creat_docx_file" and str(log.result).startswith("{"):
-                    data["result"] = orjson.loads(log.result)
-                    data["status"] = "success" if log.status == 0 else "fail"
+                    download_link = orjson.loads(log.result)["data"]["download_link"]
             if any(log.node_type == "end-node" for log in runlog):
                 break
         await asyncio.sleep(1)
-
+    await Events.filter(id=event_id, deleted=False).update(download_url=download_link)
     return response_ok(data)
+
+
+@event_bp.post("/report")
+@openapi.definition(
+    summary="获取报告下载链接",
+    description="获取报告下载链接",
+    body={"event_id": "事件id"},
+    response={
+        "code": 0,
+        "data": {
+            "status": "success",
+            "result": {
+                "code": 0,
+                "msg": "",
+                "data": {"download_link": "https://192.168.12.254/api/system/down-file/9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx", "file_id": "9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx"},
+            },
+        },
+        "message": "生成成功",
+    },
+)
+@requires_permission("event:c")
+async def get_report(request):
+    event_id = request.json.get("event_id")
+
+    if not event_id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    event = await Events.get(id=event_id)
+
+    return response_ok(event.download_url if event.download_url else "")
+
