@@ -376,14 +376,17 @@ class ChatManager:
                     msg = orjson.loads(message["data"])
                     # 处理待办消息
                     if "approval" in msg.keys():
-                        for k in self.active_connections:
-                            if k == msg.get("user"):
-                                await self.active_connections[msg.get("user")]["conn"].send(orjson.dumps(msg.get("approval")).decode())
+                        for key, values in self.active_connections.items():
+                            if key == msg.get("user"):
+                                for k, v in values.items():
+                                    await v["conn"].send(orjson.dumps(msg.get("approval")).decode())
                         continue
+                    # 处理@消息
                     if "mention" in msg.keys():
-                        for k in self.active_connections:
-                            if k == msg.get("user"):
-                                await self.active_connections[msg.get("user")]["conn"].send(orjson.dumps(msg.get("mention")).decode())
+                        for key, values in self.active_connections.items():
+                            if key == msg.get("user"):
+                                for k, v in values.items():
+                                    await v["conn"].send(orjson.dumps(msg.get("mention")).decode())
                         continue
                     # 处理作战室产生的runlog
                     if "log" in msg.keys():
@@ -486,7 +489,7 @@ class ChatManager:
             logger.info(f"runlog消息：{to_insert}")
             logger.error(f"{e} | {traceback.format_exc()}")
 
-    async def handle_message(self, user: Account, ws, data: dict):
+    async def handle_message(self, user: Account, ws, data: dict, session_id):
         """消息处理"""
         try:
             message_type = data.get("type")
@@ -509,7 +512,7 @@ class ChatManager:
             elif message_type == "request_online_users":
                 online_users = await self._handle_request_online_users(data)
                 if user.id in self.active_connections:
-                    self.active_connections[user.id]["current_room"] = data["room_id"]
+                    self.active_connections[user.id][session_id]["current_room"] = data["room_id"]
                 # 发送在线状态列表
                 await ws.send(orjson.dumps({"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
             elif message_type == "ping":
