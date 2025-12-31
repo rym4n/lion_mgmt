@@ -1179,7 +1179,7 @@ async def remove_tag(request):
 async def engine_list(request):
     c = caches.get("redis_action").client
     lion_keys = []
-    async for key in c.scan_iter(match="lion_engine_*", count=100):
+    async for key in c.scan_iter(match="agent_*", count=100):
         lion_keys.append(key.decode().replace("agent_", ""))
 
     return response_ok(lion_keys)
