@@ -357,7 +357,7 @@ class ChatManager:
     async def disconnect(self, user_id, session_id):
         """处理用户断开连接"""
         if user_id in self.active_connections:
-            if len(self.active_connections[user_id] == 1):
+            if len(list(self.active_connections[user_id].keys())) == 1:
                 self.active_connections.pop(user_id, None)
             elif session_id in self.active_connections[user_id]:
                 self.active_connections[user_id].pop(session_id, None)
