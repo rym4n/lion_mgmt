@@ -595,8 +595,10 @@ async def update_event(request):
     if status := params.get("event_process_status"):
         event.event_process_status = status
         if status == "已处理":
+            event.download_url = await create_ai_report(event.id)
             event.close_time = TZ.localize(datetime.now())
             update_fields.append("close_time")
+            update_fields.append("download_url")
         update_fields.append("event_process_status")
 
     if room_user_id := params.get("room_user_id"):
@@ -625,41 +627,15 @@ async def update_event(request):
     return response_ok("更新成功")
 
 
-@event_bp.post("/ai-report")
-@openapi.definition(
-    summary="AI自动生成事件报告",
-    description="AI自动生成事件报告（需要事件创建权限）",
-    body={"event_id": "事件id"},
-    response={
-        "code": 0,
-        "data": {
-            "status": "success",
-            "result": {
-                "code": 0,
-                "msg": "",
-                "data": {"download_link": "https://192.168.12.254/api/system/down-file/9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx", "file_id": "9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx"},
-            },
-        },
-        "message": "生成成功",
-    },
-)
-@requires_permission("event:c")
-async def create_ai_report(request):
-    event_id = request.json.get("event_id")
-
-    if not event_id:
-        raise CustomError(ErrorCode.ParameterError)
-
-    # 剧本实现
+async def create_ai_report(event_id):
     pv = await PlaybookVersion.filter(playbook__name="AI", deleted=False, status=1).order_by("-ctime").first()
     if not pv:
-        return response_ok("生成事件报告剧本缺失或未发布，请联系管理员处理")
+        return ""
     download_link = ""
     params = {"flow_id": pv.id, "flow_input": {"event_id": event_id, "ai_type": "event"}}
     run_id = gen_run_id()
     msg = {"run_type": "flow", "run_id": run_id, "run_args": params}
     await aproduce(KAFKA_SERVERS, TASK_TOPIC, msg)
-    data = {}
     while True:
         runlog = await Runlog.filter(run_id=run_id, deleted=False).order_by("-ctime").all()
         if runlog:
@@ -669,8 +645,8 @@ async def create_ai_report(request):
             if any(log.node_type == "end-node" for log in runlog):
                 break
         await asyncio.sleep(1)
-    await Events.filter(id=event_id, deleted=False).update(download_url=download_link)
-    return response_ok(data)
+
+    return download_link
 
 
 @event_bp.post("/report")
