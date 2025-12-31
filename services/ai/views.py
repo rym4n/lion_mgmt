@@ -98,7 +98,7 @@ async def ai_question(request):
     params = {"flow_id": pv.id,
               "flow_input": {
                   "msg": content,
-                  "room_id": room_id,
+                  "room_name": room.name,
                   "ai_type": ai_type
               },
               "executor": user.id}
@@ -176,11 +176,11 @@ async def ai_question(request):
 @requires_permission("warroom:r")
 async def create_msg(request):
     user_id = request.json.get("user_id")
-    room_id = request.json.get("room_id")
+    room_name = request.json.get("room_name")
     content = request.json.get("content")
     msg_type = request.json.get("type")
     user = await Account.get(id=user_id, deleted=False)
-    room = await Room.get(id=room_id, deleted=False)
+    room = await Room.get(name=room_name, deleted=False)
     message = None
     if request.json.get("create"):
         message = await Message.create(
@@ -201,7 +201,7 @@ async def create_msg(request):
         "content": content,
         "image_content": "",
         "timestamp": str(message.ctime) if message else datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
-        "room_id": room_id
+        "room_id": room.id
     }
 
     return response_ok(message_data)
