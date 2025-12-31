@@ -448,14 +448,14 @@ async def edit_workflow(request):
 
     playbook.name = params.get("name")
     playbook.remark = params.get("remark", "")
+    await playbook.scenes.clear()
     if params.get("scenes"):
         scenes = await Scene.filter(name__in=params.get("scenes"))
-        await playbook.scenes.clear()
         await playbook.scenes.add(*scenes)
         await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
+    await playbook.tags.clear()
     if params.get("tags"):
         tags = await Tag.filter(name__in=params.get("tags"))
-        await playbook.tags.clear()
         await playbook.tags.add(*tags)
     if params.get("flow_timeout"):
         if 300 > int(params.get("flow_timeout")) or int(params.get("flow_timeout")) > 259200:
