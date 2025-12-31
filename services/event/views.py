@@ -640,8 +640,10 @@ async def create_ai_report(event_id):
         runlog = await Runlog.filter(run_id=run_id, deleted=False).order_by("-ctime").all()
         if runlog:
             for log in runlog:
-                if log.tool_name == "generate_docx_file" and log.action_name == "creat_docx_file" and str(log.result).startswith("{"):
+                if "download_link" in log.result:
                     download_link = orjson.loads(log.result)["data"]["download_link"]
+                    return download_link
+
             if any(log.node_type == "end-node" for log in runlog):
                 break
         await asyncio.sleep(1)
