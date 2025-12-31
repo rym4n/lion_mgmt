@@ -89,7 +89,7 @@ async def get_license(request: Request):
 
     menu_dict = {}
     ai_type = 0
-    language = request.json.get("language", "SCN")
+    language = request.json.get("language", "CN")
     for role in user.roles:
         perm_models = set()
         if role.permissions:
