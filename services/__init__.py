@@ -1,4 +1,5 @@
 # coding=utf-8
+
 import time
 import traceback
 
@@ -19,6 +20,7 @@ from services.event.views import event_bp
 from services.event_ingestion.views import event_ingestion_bp
 from services.license.views import license_bp
 from services.log_view.views import logs_bp
+from services.mcp.views import mcp_bp
 from services.others.views import activity, playbook_list, all_apps
 from services.role.views import role_bp
 from services.scene.views import scene_bp
@@ -29,7 +31,6 @@ from services.user.views import user_bp
 from services.variables.views import var_bp
 from services.warroom.views import warroom_bp
 from services.workflow.views import workflow_bp
-from services.mcp.views import mcp_bp
 from settings import BASE_LOGGING, TORTOISE
 
 

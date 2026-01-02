@@ -1,124 +1,175 @@
-# AIOE后台管理服务
+# Lion Management Service (AIOE后台管理服务)
 
-# 开发环境
+## 开发环境
 
-- Python 3.11
+- Python 3.11+
 - uv 包管理
-- Aerich 数据库版本管理
+- Aerich 数据库版本管理 (Tortoise ORM)
+- Sanic Web Framework
 
-# 文件组织结构
+## 快速开始
+
+1.  **安装依赖**
+
+    ```bash
+    uv sync
+    ```
+
+2.  **配置环境变量**
+
+    在 `settings` 目录下创建 `.env` 文件，参照下文的[环境变量配置](#环境变量配置)进行配置。
+
+3.  **运行服务**
+
+    ```bash
+    python server.py
+    ```
+
+## 环境变量配置
+
+请在 `settings/.env` 中创建以下配置（值仅为示例，请根据实际环境修改）。
+
+### 基础配置
+```env
+# 运行环境: TEST, PROD, DEV
+RY_ENV=DEV
+# 时区
+TZ=Asia/Shanghai
+# 子网前缀 (可选，用于特定网络逻辑)
+SUBNET_PREFIX=172.18.0
+# 引擎名称/ID
+RY_ENGINE_NAME=lion_engine_01
+```
+
+### 数据库 (PostgreSQL)
+```env
+RY_DB_HOST=127.0.0.1
+RY_DB_PORT=5432
+RY_DB_USER=postgres
+RY_DB_NAME=lion_mgmt
+RY_DB_PASS=your_password
+```
+
+### Redis (缓存与消息)
+```env
+RY_REDIS_HOST=127.0.0.1
+RY_REDIS_PORT=6379
+RY_REDIS_PASS=your_redis_password
+RY_REDIS_USE_SSL=0
+
+# Redis 数据库索引定义
+RY_REDIS_DB=5       # 默认通用缓存
+RY_CHAT_DB=6        # 聊天记录存储
+RY_ACTION_CACHE=7   # Action 执行缓存
+RY_RPC_CACHE=8      # RPC 调用缓存
+```
+
+### Kafka (消息队列)
+```env
+RY_KAFKA_SERVERS=127.0.0.1:9092
+RY_KAFKA_USER=lion
+RY_KAFKA_PASS=your_kafka_password
+# 认证机制: PLAIN, SCRAM-SHA-256, SCRAM-SHA-512
+RY_KAFKA_MECHANISM=SCRAM-SHA-512
+# 协议: PLAINTEXT, SASL_PLAINTEXT, SASL_SSL
+RY_KAFKA_PROTOCOL=SASL_PLAINTEXT
+
+# Kafka Topics
+RY_TASK_TOPIC=lion_task
+RY_AUDIT_TOPIC=lion_audit
+RY_RUNLOG_TOPIC=lion_runlog
+RY_WR_TOPIC=lion_wr_chat
+```
+
+### 文件存储 (S3/MinIO)
+```env
+RY_FS_HOST=http://127.0.0.1:9000
+RUSTFS_ACCESS_KEY=minioadmin
+RUSTFS_SECRET_KEY=minioadmin
+```
+
+### 其他服务集成
+```env
+# 资源加密密钥 (32位字符)
+RY_RES_KEY=your_resource_key_32_chars_here
+# Job Server 地址
+RY_JOB_SERVER=http://lion-job:9001
+# 日志查看服务地址
+VLOGS_HOST=http://lion-vl:9428
+```
+
+## 文件组织结构
 
 ```
 .
-├── services                  # 接口业务逻辑
-│   ├── __init__.py
-│   ├── demo                  # demo模块
-│   │   ├── __init__.py
-│   │   └── views.py          # demo蓝图
-│   └── user                  # 用户模块
-│       ├── __init__.py
-│       └── views.py          # 用户蓝图
-├── models                    # 统一存放tortiose-orm模型
-│   ├── __init__.py           # 配置统一导入，便于aerich引用
-│   ├── user.py               # 定义具体模型
-├── settings
-│   ├── __init__.py           # 配置
-│   └── .env                  # 本地开发环境的环境变量配置
-├── core
-│   ├── error_code.py         # 错误码
-│   ├── exception_handlers    # 异常处理器
-│   │   ├── base.py           # 异常处理基类
-│   │   ├── error_code.py     # 错误码异常处理
-│   │   ├── __init__.py
-│   │   └── unknown.py        # 未知异常处理
-│   ├── __init__.py
-│   ├── listeners             # 监听
-│   │   ├── __init__.py
-│   │   ├── base.py           # 监听基类
-│   │   └── cache.py          # 缓存监听
-│   ├── middlewares           # 中间件
-│   │   ├── __init__.py
-│   │   ├── base.py           # 中间件基类
-│   │   ├── cache.py          # 内存或redis中间件
-│   │   └── timer.py          # 计时中间件
-│   └── response.py           # 响应函数
-├── libs                      # 公共库
-│   ├── config.py             # 配置文件处理方法
-│   ├── error_code            # 错误码处理
-│   │   ├── __init__.py
-│   │   ├── enum.py           # 错误码枚举
-│   │   └── exception.py      # 错误码异常
-│   └── __init__.py
-├── logs                      # 日志文件存储路径
-└── server.py                 # 启动文件
+├── core                    # 核心框架逻辑
+│   ├── exception_handlers  # 全局异常处理
+│   ├── listeners           # Sanic声明周期监听器
+│   ├── middlewares         # 中间件 (认证、日志、CORS等)
+│   └── response.py         # 统一响应格式
+├── libs                    # 公共工具库
+│   ├── security            # 安全认证 (Authentication, Authorization)
+│   ├── chat.py             # 聊天功能库
+│   ├── kafka.py            # Kafka 客户端封装
+│   ├── supervisor.py       # 进程管理相关
+│   └── utils.py            # 通用工具函数
+├── models                  # Tortoise ORM 数据模型
+│   ├── base.py             # 模型基类
+│   └── ...                 # 各业务实体模型
+├── services                # 业务逻辑模块 (Views & Services)
+│   ├── ai                  # AI 相关服务
+│   ├── approvement         # 审批服务
+│   ├── dashboard           # 仪表盘数据
+│   ├── event               # 事件处理
+│   ├── mcp                 # MCP (Model Context Protocol) 服务
+│   ├── user                # 用户与权限管理
+│   ├── workflow            # 工作流引擎
+│   └── ...
+├── settings                # 配置文件
+│   ├── __init__.py         # 配置加载逻辑
+│   └── .env                # 环境变量 (需自行创建)
+├── migrations              # 数据库迁移脚本 (Aerich)
+├── server.py               # 服务启动入口
+└── pyproject.toml          # 项目配置与依赖 (uv)
 ```
 
-本地配置开发环境的时候，自行在 `src/settings` 目录下创建 `.env` 文件，配置内容如下：
-```.env
-RY_DB_HOST=xxxxx
-RY_DB_PORT=5432
-RY_DB_USER=postgre
-RY_DB_PASS=xxxxx
-RY_DB_NAME=lion_mgmt
-```
+## 开发规范
 
-> 环境变量没有配置RY_REDIS_HOST的时候，默认会使用内存作为缓存空间，既方便在本地调试，也适用于一些不方便部署redis等缓存中间件的情况
-
-# 开发规范
-
-## 命名规范
+### 命名规范
 
 - 文件和文件夹使用小写字母和下划线（`snake_case`）。
 - 路由名称使用小写字母和连字符，例如 `/user-profile`。
 - 变量名和函数名使用小写字母和下划线（`snake_case`），类名使用大写字母开头的驼峰式（`CamelCase`）。
 - 常量使用大写字母和下划线（`UPPER_SNAKE_CASE`）。
 
-## 路由设计
+### 路由设计
 
-- 所有接口都统一用POST请求方法。
-- app下目录按按功能划分，避免单个文件过于庞大。
-- 所有接口按照统一格式返回，使用 response_ok、response_fail 方法，错误码要明确定义。
-- 避免在URL路径中包含参数，只有GET请求可以通过query param传参，其他请求只能通过body传参，且一般为json格式。
+- **请求方法**: 推荐所有业务接口统一使用 `POST` 请求方法（除特定资源获取可能使用 GET）。
+- **模块划分**: `services` 目录下按功能划分模块，避免单个文件过于庞大。
+- **响应格式**: 所有接口按照统一格式返回，使用 `core.response` 中的 `response_ok`, `response_fail` 方法。
+- **参数传递**: 避免在 URL 路径中包含参数，GET 请求通过 query param 传参，POST 请求通过 JSON body 传参。
 
-## 错误处理
+### 错误处理
 
-- 所有API应返回标准化的错误响应。
-- 自定义错误码统一定义在 `core/error_code.py`
+- 所有 API 应返回标准化的错误响应。
+- 自定义错误码统一定义在 `core/error_code.py` 或 `libs/error_code` 中。
+- 异常处理逻辑位于 `core/exception_handlers`。
 
-示例：
+### 数据库交互
 
-```python
-@demo.route("/error", methods=["GET"])
-async def error(request: Request) -> HTTPResponse:
-    """演示错误码异常"""
-    from core.error_code import ErrorCode
-    from libs.error_code import CustomError
-    raise CustomError(ErrorCode.Forbidden)
-```
-
-## 日志记录
-
-- 使用 sanic.log 模块的 logger 记录日志。
-- 配置日志记录等级为 `INFO`，对于重要错误或警告记录为 `ERROR`。
-
-示例：
-```python
-from sanic.log import logger
-
-@app.route('/log')
-async def log_example(request):
-    logger.info('This is an info log')
-    return json({"message": "Logged info"})
-```
-
-## 数据库交互
-
-- 使用tortoise-orm操作数据库，尽量避免sql直接操作。
+- 使用 `tortoise-orm` 操作数据库，尽量避免直接 SQL 操作。
 - 事务操作要确保处理失败时回滚。
 - 使用异步数据库操作来提高性能。
+- 数据库迁移使用 `aerich`：
+    - 生成迁移: `aerich migrate`
+    - 执行迁移: `aerich upgrade`
 
-## 代码风格
+### 日志记录
 
-- 按照 PEP8 标准进行编码，使用 4 个空格进行缩进。
-- 每个文件结尾不要有多余空行。
-- 使用类型注解提高代码可读性。
+- 使用 Sanic 或项目封装的 logger 记录日志。
+- 重要操作和错误必须记录日志。
+
+### 代码风格
+
+- 按照 PEP8 标准进行编码。
+- 使用类型注解 (Type Hints) 提高代码可读性。
