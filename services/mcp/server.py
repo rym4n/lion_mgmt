@@ -156,20 +156,13 @@ async def get_playbook_input_logic(playbook_version_id):
 
     if playbook.flow_json:
         nodes = playbook.flow_json.get("nodes", [])
-        if (
-            not nodes
-            or "properties" not in nodes[0]
-            or "start_params" not in nodes[0]["properties"]
-        ):
+        if not nodes or "properties" not in nodes[0] or "start_params" not in nodes[0]["properties"]:
             return input_list
 
         input_id = nodes[0]["id"]
         start_params = nodes[0]["properties"]["start_params"]
 
-        param_map = {
-            param["name"]: {"type": param["type"], "description": param["desc"]}
-            for param in start_params
-        }
+        param_map = {param["name"]: {"type": param["type"], "description": param["desc"]} for param in start_params}
 
         pattern = rf"{re.escape(input_id)}\.output\.([a-zA-Z0-9_\u4e00-\u9fff]+)(?=[\)}}])"
 
@@ -183,9 +176,7 @@ async def get_playbook_input_logic(playbook_version_id):
 
 
 @mcp_server.call_tool()
-async def handle_call_tool(
-    name: str, arguments: dict | None
-) -> list[TextContent | ImageContent | EmbeddedResource]:
+async def handle_call_tool(name: str, arguments: dict | None) -> list[TextContent | ImageContent | EmbeddedResource]:
     if name == "execute_script":
         if not arguments:
             raise ValueError("Missing arguments")
@@ -253,11 +244,7 @@ async def handle_call_tool(
 
         condition = Q(deleted=False)
         if keyword:
-            condition = condition & (
-                Q(name__icontains=keyword)
-                | Q(remark__icontains=keyword)
-                | Q(id=keyword)
-            )
+            condition = condition & (Q(name__icontains=keyword) | Q(remark__icontains=keyword) | Q(id=keyword))
 
         # Simplify: List all non-deleted playbooks (no complex permission filtering for MCP)
         playbooks = (
@@ -309,11 +296,7 @@ async def handle_call_tool(
 
         if not flow_id:
             # Find latest version for playbook_id
-            pv = (
-                await PlaybookVersion.filter(playbook__id=playbook_id, deleted=False)
-                .order_by("-version")
-                .first()
-            )
+            pv = await PlaybookVersion.filter(playbook__id=playbook_id, deleted=False).order_by("-version").first()
             if not pv:
                 raise ValueError(f"No versions found for playbook {playbook_id}")
             flow_id = pv.id
