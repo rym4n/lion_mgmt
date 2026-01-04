@@ -1,6 +1,5 @@
 # coding=utf-8
 
-import httpx
 from sanic import Blueprint
 from sanic.log import logger
 from sanic_ext import openapi
@@ -11,7 +10,6 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import query_vlog
 from models.event import EventsIngestion
-from settings import VL_HOST
 
 logs_bp = Blueprint("logs", url_prefix="/logs")
 _all__ = ["logs_bp"]
@@ -25,9 +23,10 @@ _all__ = ["logs_bp"]
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["query"],
+                "required": ["query", "project_id"],
                 "properties": {
                     "query": {"type": "string", "description": "LogsQL查询语句"},
+                    "project_id": {"type": "integer", "description": "项目ID"},
                     "limit": {"type": "integer", "description": "返回结果数量限制", "default": 1000},
                     "start": {"type": "string", "description": "查询开始时间(RFC3339格式或Unix时间戳)"},
                     "end": {"type": "string", "description": "查询结束时间(RFC3339格式或Unix时间戳)"},
@@ -44,14 +43,15 @@ _all__ = ["logs_bp"]
 )
 @requires_permission("logs:r")
 async def get_logs_by_sql(request):
-    query = request.json.get("query")
+    param = request.json
+    query = param.get("query")
     if not query:
         raise CustomError(ErrorCode.ParameterError)
 
-    limit = request.json.get("limit", 1000)
-    project_id = request.json.get("project_id", 1000)
-    start = request.json.get("start")
-    end = request.json.get("end")
+    limit = param.get("limit", 1000)
+    project_id = param.get("project_id", 1000)
+    start = param.get("start")
+    end = param.get("end")
 
     result = await query_vlog(query, project_id, start, end, limit=limit)
     return response_ok(result) if result is not None else response_fail(ErrorCode.VictoriaLogsError)
