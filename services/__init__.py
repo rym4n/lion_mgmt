@@ -59,9 +59,6 @@ def register_blueprints(app: Sanic) -> None:
     app.blueprint(approve_bp)
     app.blueprint(mcp_bp)
 
-    # todo: 测试后删除
-    app.blueprint(logs_bp)
-
     try:
         bp_dict = {
             "event_bp": event_bp,

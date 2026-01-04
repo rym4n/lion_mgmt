@@ -109,7 +109,11 @@ async def get_index_list(request):
     response={
         "200": {
             "description": "获取成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "object", "description": "字段信息，键为字段名，值为字段类型"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "object", "description": "字段信息，键为字段名，值为字段类型"}}}
+                }
+            },
         }
     },
 )
@@ -119,30 +123,20 @@ async def get_field_list(request):
     if not project_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            # VictoriaLogs获取字段信息接口: /select/logsql/field_names
-            # 使用AccountID和ProjectID头进行隔离查询
-            headers = {
-                "AccountID": "0",  # 默认AccountID
-                "ProjectID": str(project_id),
-            }
-            params = {"query": "*"}  # 查询该项目下所有日志的字段
-
-            resp = await client.get(f"{VL_HOST}/select/logsql/field_names", headers=headers, params=params)
-            resp.raise_for_status()
-            data = resp.json()
-
-            # 构建字段信息字典
-            fields = {}
-            if isinstance(data, dict) and "fields" in data:
-                for field in data["fields"]:
-                    fields[field] = "text"
-            elif isinstance(data, list):
-                for field in data:
-                    fields[field] = "text"
-
-            return response_ok(fields)
-        except Exception as e:
-            logger.warning(f"VictoriaLogs get fields error: {e}")
-            return response_ok({})
+    try:
+        # 由于VictoriaLogs可能没有直接获取字段列表的接口，这里通过查询最近的日志来推断字段
+        # 查询最近的50条日志，合并所有字段
+        logs = await query_vlog(query="*", project_id=project_id, limit=50)
+        
+        fields = {}
+        if logs:
+            for log in logs:
+                if isinstance(log, dict):
+                    for key in log.keys():
+                        # 过滤掉内部字段（可选，这里先保留所有）
+                        fields[key] = "text"
+        
+        return response_ok(fields)
+    except Exception as e:
+        logger.warning(f"VictoriaLogs get fields error: {e}")
+        return response_ok({})
