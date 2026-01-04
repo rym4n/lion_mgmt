@@ -27,7 +27,11 @@ _all__ = ["role_bp"]
                 "properties": {
                     "name": {"type": "string", "description": "角色名"},
                     "description": {"type": "string", "description": "描述"},
-                    "permissions": {"type": "array", "items": {"type": "string"}, "description": "权限列表"},
+                    "permissions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "权限列表",
+                    },
                 },
             }
         }
@@ -49,7 +53,10 @@ _all__ = ["role_bp"]
                                     "utime": {"type": "string"},
                                     "name": {"type": "string"},
                                     "description": {"type": "string"},
-                                    "permissions": {"type": "array", "items": {"type": "string"}},
+                                    "permissions": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
                                 },
                             },
                         },
@@ -73,7 +80,17 @@ async def add_role(request):
 @openapi.definition(
     summary="查找全部角色",
     description="查找全部角色，需要角色查看权限",
-    body={"application/json": {"schema": {"type": "object", "properties": {"page": {"type": "integer", "description": "页码"}, "size": {"type": "integer", "description": "页容量"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "integer", "description": "页码"},
+                    "size": {"type": "integer", "description": "页容量"},
+                },
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
@@ -96,7 +113,10 @@ async def add_role(request):
                                                 "utime": {"type": "string"},
                                                 "name": {"type": "string"},
                                                 "description": {"type": "string"},
-                                                "permissions": {"type": "array", "items": {"type": "string"}},
+                                                "permissions": {
+                                                    "type": "array",
+                                                    "items": {"type": "string"},
+                                                },
                                             },
                                         },
                                     },
@@ -121,14 +141,30 @@ async def find_all(request):
     limit = size
     roles = await Role.filter(deleted=False).offset(offset).limit(limit).values()
     total = await Role.filter(deleted=False).count()
-    return response_ok({"roles": roles, "total": total, "page": page, "size": size, "total_pages": (total + size - 1) // size})
+    return response_ok(
+        {
+            "roles": roles,
+            "total": total,
+            "page": page,
+            "size": size,
+            "total_pages": (total + size - 1) // size,
+        }
+    )
 
 
 @role_bp.post("/details")
 @openapi.definition(
     summary="查找具体角色信息",
     description="查找具体角色信息，需要角色查看权限",
-    body={"application/json": {"schema": {"type": "object", "required": ["role_id"], "properties": {"role_id": {"type": "string", "description": "角色id"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["role_id"],
+                "properties": {"role_id": {"type": "string", "description": "角色id"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
@@ -153,7 +189,13 @@ async def find_all(request):
                                             "properties": {
                                                 "model": {"type": "string"},
                                                 "model_description": {"type": "string"},
-                                                "sp": {"type": "array", "items": {"type": "object", "additionalProperties": {"type": "string"}}},
+                                                "sp": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "additionalProperties": {"type": "string"},
+                                                    },
+                                                },
                                             },
                                         },
                                     },
@@ -175,7 +217,13 @@ async def find_role(request):
 
     permissions_data = await PermissionsMenu.all().values()
 
-    permission_map = {p["model"]: {"description": p["description"], "values": {perm["value"]: perm["label"] for perm in p.get("Permissions", [])}} for p in permissions_data}
+    permission_map = {
+        p["model"]: {
+            "description": p["description"],
+            "values": {perm["value"]: perm["label"] for perm in p.get("Permissions", [])},
+        }
+        for p in permissions_data
+    }
 
     structured_permissions = []
 
@@ -192,7 +240,13 @@ async def find_role(request):
             if label:
                 action_labels.append({action: label})
 
-        structured_permissions.append({"model": model, "model_description": perm_info["description"], "sp": action_labels})
+        structured_permissions.append(
+            {
+                "model": model,
+                "model_description": perm_info["description"],
+                "sp": action_labels,
+            }
+        )
 
     data = role.json
     data["permissions"] = structured_permissions
@@ -203,8 +257,31 @@ async def find_role(request):
 @openapi.definition(
     summary="删除指定角色",
     description="删除指定角色，需要角色删除权限",
-    body={"application/json": {"schema": {"type": "object", "required": ["role_id"], "properties": {"role_id": {"type": "string", "description": "角色id"}}}}},
-    response={"200": {"description": "删除成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["role_id"],
+                "properties": {"role_id": {"type": "string", "description": "角色id"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("role:d")
 async def delete_role(request):
@@ -233,7 +310,11 @@ async def delete_role(request):
                     "role_id": {"type": "string", "description": "角色id"},
                     "name": {"type": "string", "description": "新的角色名"},
                     "description": {"type": "string", "description": "新的描述"},
-                    "permissions": {"type": "array", "items": {"type": "string"}, "description": "新的权限"},
+                    "permissions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "新的权限",
+                    },
                 },
             }
         }
@@ -255,7 +336,10 @@ async def delete_role(request):
                                     "utime": {"type": "string"},
                                     "name": {"type": "string"},
                                     "description": {"type": "string"},
-                                    "permissions": {"type": "array", "items": {"type": "string"}},
+                                    "permissions": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
                                 },
                             },
                         },
@@ -311,7 +395,16 @@ async def update_role(request):
                                                 "model": {"type": "string"},
                                                 "bp": {"type": "string"},
                                                 "description": {"type": "string"},
-                                                "Permissions": {"type": "array", "items": {"type": "object", "properties": {"value": {"type": "string"}, "label": {"type": "string"}}}},
+                                                "Permissions": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "value": {"type": "string"},
+                                                            "label": {"type": "string"},
+                                                        },
+                                                    },
+                                                },
                                             },
                                         },
                                     }

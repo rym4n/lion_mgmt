@@ -13,7 +13,11 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
-from libs.security.authorization import requires_permission, load_license, get_license_sha256
+from libs.security.authorization import (
+    requires_permission,
+    load_license,
+    get_license_sha256,
+)
 from libs.utils import verify_license
 from models import Tool, Playbook, Account, PermissionsMenu, Config
 from settings import LICENSE_DIR
@@ -136,8 +140,34 @@ async def get_license(request: Request):
                     menu_dict[key]["ai"] = True
 
     # 菜单处理排序逻辑
-    system_dict = {"产品许可": 0, "账号管理": 1, "角色管理": 2, "SSO集成": 3, "审计日志": 4, "个性化设置": 5, "系统状态": 6, "個性化設置": 5, "Personalization": 5, "審計日誌": 4, "Audit Logs": 4, "System Status": 6, "系統狀態": 6, "SSO Integration": 3, "Role Management": 2, "產品許可": 0, "License": 0, "賬號管理": 1, "Account Management": 1}
-    event_dict = {"事件列表": 0, "事件接入": 1, "事件清單": 0, "Event List": 0, "Event Ingestion": 1}
+    system_dict = {
+        "产品许可": 0,
+        "账号管理": 1,
+        "角色管理": 2,
+        "SSO集成": 3,
+        "审计日志": 4,
+        "个性化设置": 5,
+        "系统状态": 6,
+        "個性化設置": 5,
+        "Personalization": 5,
+        "審計日誌": 4,
+        "Audit Logs": 4,
+        "System Status": 6,
+        "系統狀態": 6,
+        "SSO Integration": 3,
+        "Role Management": 2,
+        "產品許可": 0,
+        "License": 0,
+        "賬號管理": 1,
+        "Account Management": 1,
+    }
+    event_dict = {
+        "事件列表": 0,
+        "事件接入": 1,
+        "事件清單": 0,
+        "Event List": 0,
+        "Event Ingestion": 1,
+    }
 
     menus = list(menu_dict.values())
     for menu in menus:
@@ -147,7 +177,11 @@ async def get_license(request: Request):
         elif menu["meta"]["title"] in ["事件管理", "Event Management"]:
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
     if ai_type in [1, 2, 3]:
-        await Config.update_or_create(key="PROMPT_WORD", defaults={"value": Prompt_Word_Dict.get(ai_type)}, module="ai")
+        await Config.update_or_create(
+            key="PROMPT_WORD",
+            defaults={"value": Prompt_Word_Dict.get(ai_type)},
+            module="ai",
+        )
         await Config.update_or_create(key="AI", defaults={"value": str(ai_type)}, module="ai")
 
     return response_ok(menus)
@@ -159,7 +193,10 @@ async def get_all_license(request: Request):
     """
     获取所有license文件信息用于页面展示
     """
-    consume_info = {"应用集成": await Tool.filter(deleted=False).count(), "剧本编排": await Playbook.filter(deleted=False).count()}
+    consume_info = {
+        "应用集成": await Tool.filter(deleted=False).count(),
+        "剧本编排": await Playbook.filter(deleted=False).count(),
+    }
 
     menu_dict = dict()
     lic = load_license()

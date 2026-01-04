@@ -27,9 +27,18 @@ _all__ = ["dashboard_bp"]
                 "type": "object",
                 "required": ["static_type", "start_time", "end_time"],
                 "properties": {
-                    "static_type": {"type": "string", "description": "统计类型，可选值：events_day，events_status，runlog_playbook，runlog_action"},
-                    "start_time": {"type": "string", "description": "统计的起始时间，格式：YYYY-MM-DD HH:MM:SS"},
-                    "end_time": {"type": "string", "description": "统计的结束时间，格式：YYYY-MM-DD HH:MM:SS"},
+                    "static_type": {
+                        "type": "string",
+                        "description": "统计类型，可选值：events_day，events_status，runlog_playbook，runlog_action",
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "description": "统计的起始时间，格式：YYYY-MM-DD HH:MM:SS",
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "统计的结束时间，格式：YYYY-MM-DD HH:MM:SS",
+                    },
                 },
             }
         }
@@ -38,7 +47,21 @@ _all__ = ["dashboard_bp"]
         "200": {
             "description": "获取成功",
             "content": {
-                "application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"oneOf": [{"type": "integer"}, {"type": "array"}, {"type": "object"}]}}}}
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "oneOf": [
+                                    {"type": "integer"},
+                                    {"type": "array"},
+                                    {"type": "object"},
+                                ]
+                            },
+                        },
+                    }
+                }
             },
         }
     },
@@ -60,20 +83,44 @@ async def view_dashboard(request):
 
     async with in_transaction() as tconn:
         if static_type == "events_day":
-            records = await tconn.execute_query_dict("SELECT day, total FROM events_day WHERE day >= $1 AND day <= $2", (start_time, end_time))
+            records = await tconn.execute_query_dict(
+                "SELECT day, total FROM events_day WHERE day >= $1 AND day <= $2",
+                (start_time, end_time),
+            )
             result = [{"day": row["day"], "counts": row["total"]} for row in records]
             await tconn.execute_query("REFRESH MATERIALIZED VIEW events_day")
         elif static_type == "events_status":
-            records = await tconn.execute_query_dict("SELECT event_process_status, SUM(total) FROM events_status WHERE day >= $1 AND day <= $2 GROUP BY event_process_status", (start_time, end_time))
-            result = [{"event_process_status": row["event_process_status"], "counts": int(row["sum"])} for row in records]
+            records = await tconn.execute_query_dict(
+                "SELECT event_process_status, SUM(total) FROM events_status WHERE day >= $1 AND day <= $2 GROUP BY event_process_status",
+                (start_time, end_time),
+            )
+            result = [
+                {
+                    "event_process_status": row["event_process_status"],
+                    "counts": int(row["sum"]),
+                }
+                for row in records
+            ]
             await tconn.execute_query("REFRESH MATERIALIZED VIEW events_status")
         elif static_type == "runlog_playbook":
-            records = await tconn.execute_query_dict("SELECT playbook_name, SUM(total) FROM runlog_playbook WHERE day >= $1 AND day <= $2 GROUP BY playbook_name", (start_time, end_time))
+            records = await tconn.execute_query_dict(
+                "SELECT playbook_name, SUM(total) FROM runlog_playbook WHERE day >= $1 AND day <= $2 GROUP BY playbook_name",
+                (start_time, end_time),
+            )
             result = [{"playbook_name": row["playbook_name"], "counts": int(row["sum"])} for row in records]
             await tconn.execute_query("REFRESH MATERIALIZED VIEW runlog_playbook")
         elif static_type == "runlog_action":
-            records = await tconn.execute_query_dict("SELECT action_display_name, SUM(total) FROM runlog_action WHERE day >= $1 AND day <= $2 GROUP BY action_display_name", (start_time, end_time))
-            result = [{"action_display_name": row["action_display_name"], "counts": int(row["sum"])} for row in records]
+            records = await tconn.execute_query_dict(
+                "SELECT action_display_name, SUM(total) FROM runlog_action WHERE day >= $1 AND day <= $2 GROUP BY action_display_name",
+                (start_time, end_time),
+            )
+            result = [
+                {
+                    "action_display_name": row["action_display_name"],
+                    "counts": int(row["sum"]),
+                }
+                for row in records
+            ]
             await tconn.execute_query("REFRESH MATERIALIZED VIEW runlog_action")
 
     return response_ok(result)
@@ -89,8 +136,14 @@ async def view_dashboard(request):
                 "type": "object",
                 "required": ["start_time", "end_time"],
                 "properties": {
-                    "start_time": {"type": "string", "description": "统计的起始时间，格式：YYYY-MM-DD HH:MM:SS"},
-                    "end_time": {"type": "string", "description": "统计的结束时间，格式：YYYY-MM-DD HH:MM:SS"},
+                    "start_time": {
+                        "type": "string",
+                        "description": "统计的起始时间，格式：YYYY-MM-DD HH:MM:SS",
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "统计的结束时间，格式：YYYY-MM-DD HH:MM:SS",
+                    },
                 },
             }
         }
@@ -104,7 +157,17 @@ async def view_dashboard(request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer"},
-                            "data": {"type": "array", "items": {"type": "object", "properties": {"day": {"type": "string"}, "counts": {"type": "number"}, "event_count": {"type": "integer"}}}},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "day": {"type": "string"},
+                                        "counts": {"type": "number"},
+                                        "event_count": {"type": "integer"},
+                                    },
+                                },
+                            },
                         },
                     }
                 }
@@ -127,24 +190,41 @@ async def count_mttr(request):
 
     async with in_transaction() as tconn:
         results = await tconn.execute_query_dict(
-            "SELECT DATE(ctime) AS day, "
-            "AVG(EXTRACT(EPOCH FROM (close_time - ctime))) AS avg_seconds, "
-            "COUNT(id) AS event_count "
-            "FROM events "
-            "WHERE close_time IS NOT NULL "
-            "AND ctime >= $1 AND ctime <= $2 "
-            "GROUP BY DATE(ctime) "
-            "ORDER BY day",
+            "SELECT DATE(ctime) AS day, " "AVG(EXTRACT(EPOCH FROM (close_time - ctime))) AS avg_seconds, " "COUNT(id) AS event_count " "FROM events " "WHERE close_time IS NOT NULL " "AND ctime >= $1 AND ctime <= $2 " "GROUP BY DATE(ctime) " "ORDER BY day",
             (start_time, end_time),
         )
-        return response_ok([{"day": row["day"].strftime("%Y-%m-%d"), "counts": round((float(row["avg_seconds"]) or 0) / 3600, 2), "event_count": row["event_count"]} for row in results])
+        return response_ok(
+            [
+                {
+                    "day": row["day"].strftime("%Y-%m-%d"),
+                    "counts": round((float(row["avg_seconds"]) or 0) / 3600, 2),
+                    "event_count": row["event_count"],
+                }
+                for row in results
+            ]
+        )
 
 
 @dashboard_bp.post("/playbooks")
 @openapi.definition(
     summary="获取已发布的剧本数量",
     description="获取已发布的剧本数量，需要dashboard:r权限",
-    response={"200": {"description": "获取成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "integer"}}}}}}},
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "integer"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("dashboard:r")
 async def count_playbooks(request):
@@ -156,7 +236,22 @@ async def count_playbooks(request):
 @openapi.definition(
     summary="获取已配置资源的应用数量",
     description="获取已配置资源的应用数量，需要dashboard:r权限",
-    response={"200": {"description": "获取成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "integer"}}}}}}},
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "integer"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("dashboard:r")
 async def count_apps(request):
@@ -177,7 +272,16 @@ async def count_apps(request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer"},
-                            "data": {"type": "array", "items": {"type": "object", "properties": {"playbook_name": {"type": "string"}, "success_rate": {"type": "number"}}}},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "playbook_name": {"type": "string"},
+                                        "success_rate": {"type": "number"},
+                                    },
+                                },
+                            },
                         },
                     }
                 }

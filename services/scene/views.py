@@ -26,7 +26,10 @@ _all__ = ["scene_bp"]
                 "properties": {
                     "name": {"type": "string", "description": "场景名称"},
                     "remark": {"type": "string", "description": "场景描述"},
-                    "status": {"type": "integer", "description": "场景状态 0-禁用 1-启用"},
+                    "status": {
+                        "type": "integer",
+                        "description": "场景状态 0-禁用 1-启用",
+                    },
                 },
             }
         }
@@ -49,8 +52,20 @@ _all__ = ["scene_bp"]
                                     "name": {"type": "string"},
                                     "remark": {"type": "string"},
                                     "status": {"type": "integer"},
-                                    "creator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
-                                    "updator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                    "creator": {
+                                        "type": "object",
+                                        "properties": {
+                                            "username": {"type": "string"},
+                                            "display_name": {"type": "string"},
+                                        },
+                                    },
+                                    "updator": {
+                                        "type": "object",
+                                        "properties": {
+                                            "username": {"type": "string"},
+                                            "display_name": {"type": "string"},
+                                        },
+                                    },
                                 },
                             },
                         },
@@ -75,7 +90,13 @@ async def add_scene(request):
         raise CustomError(ErrorCode.SceneExistsError)
     if status == 1:
         await Scene.filter(status=1).update(status=0)
-    scene = await Scene.create(name=name, remark=remark, status=status, creator=request.ctx.session["account_info"], updator=request.ctx.session["account_info"])
+    scene = await Scene.create(
+        name=name,
+        remark=remark,
+        status=status,
+        creator=request.ctx.session["account_info"],
+        updator=request.ctx.session["account_info"],
+    )
 
     return response_ok(scene.json)
 
@@ -86,7 +107,14 @@ async def add_scene(request):
     description="更新指定场景信息，需要场景更新权限",
     body={
         "application/json": {
-            "schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "场景id"}, "remark": {"type": "string", "description": "场景描述"}}}
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "场景id"},
+                    "remark": {"type": "string", "description": "场景描述"},
+                },
+            }
         }
     },
     response={
@@ -107,8 +135,20 @@ async def add_scene(request):
                                     "name": {"type": "string"},
                                     "remark": {"type": "string"},
                                     "status": {"type": "integer"},
-                                    "creator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
-                                    "updator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                    "creator": {
+                                        "type": "object",
+                                        "properties": {
+                                            "username": {"type": "string"},
+                                            "display_name": {"type": "string"},
+                                        },
+                                    },
+                                    "updator": {
+                                        "type": "object",
+                                        "properties": {
+                                            "username": {"type": "string"},
+                                            "display_name": {"type": "string"},
+                                        },
+                                    },
                                 },
                             },
                         },
@@ -147,9 +187,15 @@ async def update_scene(request):
                 "type": "object",
                 "properties": {
                     "page": {"type": "integer", "description": "页码，默认为1"},
-                    "page_size": {"type": "integer", "description": "每页数量，默认为10"},
+                    "page_size": {
+                        "type": "integer",
+                        "description": "每页数量，默认为10",
+                    },
                     "key": {"type": "string", "description": "搜索关键字"},
-                    "status": {"type": "integer", "description": "场景状态 0-禁用 1-启用"},
+                    "status": {
+                        "type": "integer",
+                        "description": "场景状态 0-禁用 1-启用",
+                    },
                 },
             }
         }
@@ -177,8 +223,20 @@ async def update_scene(request):
                                                 "name": {"type": "string"},
                                                 "remark": {"type": "string"},
                                                 "status": {"type": "integer"},
-                                                "creator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
-                                                "updator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                                "creator": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "username": {"type": "string"},
+                                                        "display_name": {"type": "string"},
+                                                    },
+                                                },
+                                                "updator": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "username": {"type": "string"},
+                                                        "display_name": {"type": "string"},
+                                                    },
+                                                },
                                             },
                                         },
                                     },
@@ -213,15 +271,45 @@ async def get_all_scene(request):
     if total > 0:
         scenes = await Scene.filter(condition).limit(page_size).offset((page - 1) * page_size).all().prefetch_related("creator", "updator")
 
-    return response_ok({"scenes": [s.json for s in scenes], "page": page, "page_size": page_size, "total": total})
+    return response_ok(
+        {
+            "scenes": [s.json for s in scenes],
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+        }
+    )
 
 
 @scene_bp.post("/current")
 @openapi.definition(
     summary="设置当前场景",
     description="设置指定场景为当前场景，需要场景更新权限",
-    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "场景id"}}}}},
-    response={"200": {"description": "设置成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "场景id"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "设置成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("scene:u")
 async def set_current_scene(request):
@@ -246,8 +334,31 @@ async def set_current_scene(request):
 @openapi.definition(
     summary="删除场景",
     description="删除指定场景，需要场景删除权限",
-    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "场景id"}}}}},
-    response={"200": {"description": "删除成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "场景id"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("scene:d")
 async def remove_scene(request):

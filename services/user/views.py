@@ -15,11 +15,28 @@ from tortoise.expressions import Q
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authentication import validate_password, token_encode, refresh_token, validate_username
+from libs.security.authentication import (
+    validate_password,
+    token_encode,
+    refresh_token,
+    validate_username,
+)
 from libs.security.authorization import requires_permission
-from libs.utils import password_hasher, ip_in_list, get_client_ip, validate_ips, get_expiration_date
+from libs.utils import (
+    password_hasher,
+    ip_in_list,
+    get_client_ip,
+    validate_ips,
+    get_expiration_date,
+)
 from models import Account, Role, Scene
-from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE
+from settings import (
+    AUTHENTICATION_SESSION_EXPIRATION,
+    MAX_CHALLENGE_ATTEMPTS,
+    SESSION_HTTPONLY,
+    SESSION_SAMESITE,
+    SESSION_SECURE,
+)
 
 user_bp = Blueprint("user", url_prefix="/user")
 _all__ = ["user_bp"]
@@ -43,8 +60,15 @@ _all__ = ["user_bp"]
                     "disabled": {"type": "boolean", "description": "是否禁用"},
                     "mfa_enable": {"type": "boolean", "description": "是否启用MFA"},
                     "mfa_key": {"type": "string", "description": "MFA密钥"},
-                    "role_names": {"type": "array", "items": {"type": "string"}, "description": "角色名称列表"},
-                    "permit_ip": {"type": "string", "description": "允许访问的IP列表，逗号分隔 192.168.1.1,192.168.1.2 如果为空则为全部ip"},
+                    "role_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "角色名称列表",
+                    },
+                    "permit_ip": {
+                        "type": "string",
+                        "description": "允许访问的IP列表，逗号分隔 192.168.1.1,192.168.1.2 如果为空则为全部ip",
+                    },
                 },
             }
         }
@@ -73,7 +97,17 @@ _all__ = ["user_bp"]
                                     "mfa_key": {"type": "string"},
                                     "mfa_uri": {"type": "string"},
                                     "permit_ip": {"type": "string"},
-                                    "roles": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}}}},
+                                    "roles": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "description": {"type": "string"},
+                                            },
+                                        },
+                                    },
                                 },
                             },
                         },
@@ -165,7 +199,14 @@ async def new_user(request):
                                                 "permit_ip": {"type": "string"},
                                                 "roles": {
                                                     "type": "array",
-                                                    "items": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}}},
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "id": {"type": "string"},
+                                                            "name": {"type": "string"},
+                                                            "description": {"type": "string"},
+                                                        },
+                                                    },
                                                 },
                                             },
                                         },
@@ -193,7 +234,15 @@ async def all_users(request):
     total = await Account.filter(**condition).count()
     users = await Account.filter(**condition).offset(offset).limit(limit).all().prefetch_related("roles")
 
-    return response_ok({"total": total, "page": page, "size": size, "total_pages": (total + size - 1) // size, "data": [u.json for u in users]})
+    return response_ok(
+        {
+            "total": total,
+            "page": page,
+            "size": size,
+            "total_pages": (total + size - 1) // size,
+            "data": [u.json for u in users],
+        }
+    )
 
 
 @user_bp.post("/new-token")
@@ -207,10 +256,20 @@ async def all_users(request):
                 "required": ["name", "expiration_time"],
                 "properties": {
                     "name": {"type": "string", "description": "用户名"},
-                    "expiration_time": {"type": "integer", "description": "过期时间，单位：秒"},
-                    "role_names": {"type": "array", "items": {"type": "string"}, "description": "角色名称列表，逗号分隔"},
+                    "expiration_time": {
+                        "type": "integer",
+                        "description": "过期时间，单位：秒",
+                    },
+                    "role_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "角色名称列表，逗号分隔",
+                    },
                     "description": {"type": "string", "description": "描述"},
-                    "permit_ip": {"type": "string", "description": "允许访问的IP列表，逗号分隔 192.168.1.1,192.168.1.2 如果为空则为全部ip"},
+                    "permit_ip": {
+                        "type": "string",
+                        "description": "允许访问的IP列表，逗号分隔 192.168.1.1,192.168.1.2 如果为空则为全部ip",
+                    },
                 },
             }
         }
@@ -236,7 +295,17 @@ async def all_users(request):
                                     "creator": {"type": "string"},
                                     "permit_ip": {"type": "string"},
                                     "token": {"type": "string"},
-                                    "roles": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}}}},
+                                    "roles": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "description": {"type": "string"},
+                                            },
+                                        },
+                                    },
                                 },
                             },
                         },
@@ -330,7 +399,14 @@ async def create_api_user(request):
                                                 "permit_ip": {"type": "string"},
                                                 "roles": {
                                                     "type": "array",
-                                                    "items": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}}},
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "id": {"type": "string"},
+                                                            "name": {"type": "string"},
+                                                            "description": {"type": "string"},
+                                                        },
+                                                    },
                                                 },
                                             },
                                         },
@@ -363,15 +439,46 @@ async def list_api_users(request):
     for u in api_users:
         data.append(u.api_json)
 
-    return response_ok({"total": total, "page": page, "size": size, "total_pages": (total + size - 1) // size, "data": data})
+    return response_ok(
+        {
+            "total": total,
+            "page": page,
+            "size": size,
+            "total_pages": (total + size - 1) // size,
+            "data": data,
+        }
+    )
 
 
 @user_bp.post("/del-token")
 @openapi.definition(
     summary="删除API用户信息",
     description="删除指定的API用户信息，需要user:d权限",
-    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "API用户ID"}}}}},
-    response={"200": {"description": "删除成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "API用户ID"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("user:d")
 async def update_api_user(request):
@@ -399,7 +506,10 @@ async def update_api_user(request):
             "schema": {
                 "type": "object",
                 "required": ["username", "password"],
-                "properties": {"username": {"type": "string", "description": "用户名"}, "password": {"type": "string", "description": "密码"}},
+                "properties": {
+                    "username": {"type": "string", "description": "用户名"},
+                    "password": {"type": "string", "description": "密码"},
+                },
             }
         }
     },
@@ -426,7 +536,17 @@ async def update_api_user(request):
                                     "mfa_enable": {"type": "boolean"},
                                     "mfa_uri": {"type": "string"},
                                     "permit_ip": {"type": "string"},
-                                    "roles": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}}}},
+                                    "roles": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "description": {"type": "string"},
+                                            },
+                                        },
+                                    },
                                 },
                             },
                         },
@@ -473,12 +593,23 @@ async def login(request):
             raise CustomError(ErrorCode.AccountDisabled)
         resp = account.json
         token_id = str(uuid.uuid4())
-        token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, token_id, ip=client_ip)
+        token = token_encode(
+            account.id,
+            account.username,
+            account.display_name,
+            account.mfa_enable,
+            token_id,
+            ip=client_ip,
+        )
         await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
         # resp['aioe-auth'] = token
         # 如果开启了MFA，缓存记录MFA密钥，便于mfa认证
         if account.mfa_enable and account.mfa_key:
-            await request.app.ctx.cache_client.set(f"mfa_key_{token_id}", account.mfa_key, AUTHENTICATION_SESSION_EXPIRATION)
+            await request.app.ctx.cache_client.set(
+                f"mfa_key_{token_id}",
+                account.mfa_key,
+                AUTHENTICATION_SESSION_EXPIRATION,
+            )
             # 如果是开启mfa之后的第一次登录，在mfa还没绑定的情况下，返回mfa_uri，供前端渲染二维码
             if not account.mfa_bind:
                 resp["mfa_uri"] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name="AIOE")
@@ -509,7 +640,15 @@ async def local_auth(request):
         raise CustomError(ErrorCode.IpForbidden)
 
     account = await Account.get(username=request.json.get("username", ""))
-    token = token_encode(account.id, account.username, account.display_name, False, str(uuid.uuid4()), AUTHENTICATION_SESSION_EXPIRATION, account.password)
+    token = token_encode(
+        account.id,
+        account.username,
+        account.display_name,
+        False,
+        str(uuid.uuid4()),
+        AUTHENTICATION_SESSION_EXPIRATION,
+        account.password,
+    )
     return response_ok({"token": account.id + ":" + token})
 
 
@@ -517,14 +656,33 @@ async def local_auth(request):
 @openapi.definition(
     summary="刷新token",
     description="刷新用户认证token",
-    response={"200": {"description": "刷新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    response={
+        "200": {
+            "description": "刷新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 async def refresh_session_token(request):
     new_token = refresh_token(request.ctx.session)
     account = await request.app.ctx.cache_client.get(f"account_{request.ctx.session['sub']}")
     if not account:
         account = await Account.get(id=request.ctx.session["sub"]).prefetch_related("roles")
-    await request.app.ctx.cache_client.set(f"account_{request.ctx.session['sub']}", account, AUTHENTICATION_SESSION_EXPIRATION)
+    await request.app.ctx.cache_client.set(
+        f"account_{request.ctx.session['sub']}",
+        account,
+        AUTHENTICATION_SESSION_EXPIRATION,
+    )
 
     # 更新维护模式redis缓存
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
@@ -546,7 +704,22 @@ async def refresh_session_token(request):
 @openapi.definition(
     summary="用户登出",
     description="用户登出系统",
-    response={"200": {"description": "登出成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    response={
+        "200": {
+            "description": "登出成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 async def logout(request):
     await request.app.ctx.cache_client.delete(f"account_{request.ctx.session['sub']}")
@@ -558,7 +731,14 @@ async def logout(request):
     else:
         resp = response_ok("登出成功")
 
-    resp.cookies.add_cookie("aioe-auth", "", httponly=SESSION_HTTPONLY, samesite=SESSION_SAMESITE, secure=SESSION_SECURE, expires=get_expiration_date(-60))
+    resp.cookies.add_cookie(
+        "aioe-auth",
+        "",
+        httponly=SESSION_HTTPONLY,
+        samesite=SESSION_SAMESITE,
+        secure=SESSION_SECURE,
+        expires=get_expiration_date(-60),
+    )
     return resp
 
 
@@ -566,11 +746,32 @@ async def logout(request):
 @openapi.definition(
     summary="用户二次验证",
     description="用户MFA二次验证",
-    body={"application/json": {"schema": {"type": "object", "required": ["code"], "properties": {"code": {"type": "string", "description": "MFA验证码"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["code"],
+                "properties": {"code": {"type": "string", "description": "MFA验证码"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "验证成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"aioe-token": {"type": "string"}}}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {"aioe-token": {"type": "string"}},
+                            },
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -612,12 +813,30 @@ async def mfa_auth(request):
                     "email": {"type": "string", "description": "邮箱"},
                     "phone": {"type": "string", "description": "电话"},
                     "password": {"type": "string", "description": "密码"},
-                    "permit_ip": {"type": "string", "description": "允许登录的IP地址，支持多个IP或CIDR格式（逗号分隔），例如 192.168.1.1,10.0.2.0/24"},
+                    "permit_ip": {
+                        "type": "string",
+                        "description": "允许登录的IP地址，支持多个IP或CIDR格式（逗号分隔），例如 192.168.1.1,10.0.2.0/24",
+                    },
                 },
             }
         }
     },
-    response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 async def update_user(request):
     data = dict()
@@ -647,9 +866,15 @@ async def update_user(request):
                     "email": {"type": "string", "description": "邮箱"},
                     "phone": {"type": "string", "description": "手机号"},
                     "password": {"type": "string", "description": "密码"},
-                    "mfa_enable": {"type": "boolean", "description": "是否启用二次认证"},
+                    "mfa_enable": {
+                        "type": "boolean",
+                        "description": "是否启用二次认证",
+                    },
                     "disabled": {"type": "boolean", "description": "是否禁用"},
-                    "permit_ip": {"type": "string", "description": "允许登录的IP地址，支持多个IP或CIDR格式（逗号分隔），例如 192.168.1.1,10.0.2.0/24"},
+                    "permit_ip": {
+                        "type": "string",
+                        "description": "允许登录的IP地址，支持多个IP或CIDR格式（逗号分隔），例如 192.168.1.1,10.0.2.0/24",
+                    },
                 },
             }
         }
@@ -678,7 +903,17 @@ async def update_user(request):
                                     "mfa_key": {"type": "string"},
                                     "mfa_uri": {"type": "string"},
                                     "permit_ip": {"type": "string"},
-                                    "roles": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}}}},
+                                    "roles": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "description": {"type": "string"},
+                                            },
+                                        },
+                                    },
                                 },
                             },
                         },
@@ -733,8 +968,31 @@ async def edit_user(request):
 @openapi.definition(
     summary="删除用户",
     description="删除指定用户，需要user:d权限",
-    body={"application/json": {"schema": {"type": "object", "required": ["username"], "properties": {"username": {"type": "string", "description": "用户名"}}}}},
-    response={"200": {"description": "删除成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["username"],
+                "properties": {"username": {"type": "string", "description": "用户名"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("user:d")
 async def delelte_user(request):
@@ -750,8 +1008,31 @@ async def delelte_user(request):
 @openapi.definition(
     summary="重置MFA密钥",
     description="重置指定用户的MFA密钥，需要user:u权限",
-    body={"application/json": {"schema": {"type": "object", "required": ["username"], "properties": {"username": {"type": "string", "description": "用户名"}}}}},
-    response={"200": {"description": "重置成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["username"],
+                "properties": {"username": {"type": "string", "description": "用户名"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "重置成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("user:u")
 async def refresh_mfa_key(request):
@@ -774,11 +1055,32 @@ async def refresh_mfa_key(request):
             "schema": {
                 "type": "object",
                 "required": ["username", "role_names"],
-                "properties": {"username": {"type": "string", "description": "用户名"}, "role_names": {"type": "string", "description": "角色名称，多个用英文逗号隔开"}},
+                "properties": {
+                    "username": {"type": "string", "description": "用户名"},
+                    "role_names": {
+                        "type": "string",
+                        "description": "角色名称，多个用英文逗号隔开",
+                    },
+                },
             }
         }
     },
-    response={"200": {"description": "分配成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    response={
+        "200": {
+            "description": "分配成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("user:u")
 async def assign_role_to_user(request):
@@ -804,7 +1106,15 @@ async def assign_role_to_user(request):
 @openapi.definition(
     summary="SSO登录",
     description="重定向用户到SSO登录页",
-    parameter=[{"name": "redirect", "location": "query", "description": "重定向地址", "required": False, "schema": {"type": "string"}}],
+    parameter=[
+        {
+            "name": "redirect",
+            "location": "query",
+            "description": "重定向地址",
+            "required": False,
+            "schema": {"type": "string"},
+        }
+    ],
     response={"302": {"description": "重定向到SSO登录页面"}},
 )
 async def oauth2_login(request):
@@ -822,8 +1132,20 @@ async def oauth2_login(request):
     summary="SSO登录回调",
     description="SSO登录回调接口",
     parameter=[
-        {"name": "code", "location": "query", "description": "授权码", "required": True, "schema": {"type": "string"}},
-        {"name": "state", "location": "query", "description": "状态码", "required": True, "schema": {"type": "string"}},
+        {
+            "name": "code",
+            "location": "query",
+            "description": "授权码",
+            "required": True,
+            "schema": {"type": "string"},
+        },
+        {
+            "name": "state",
+            "location": "query",
+            "description": "状态码",
+            "required": True,
+            "schema": {"type": "string"},
+        },
     ],
     response={"302": {"description": "重定向到应用页面"}},
 )
@@ -844,7 +1166,10 @@ async def oauth2_callback(request):
         raise CustomError(ErrorCode.GetAccessTokenError)
 
     async with request.app.ctx.oauth2.get_httpx_client() as c:
-        resp = await c.get(request.app.ctx.oauth_cfg["user_info_uri"], headers={"Authorization": f"Bearer {access_token[0]}"})
+        resp = await c.get(
+            request.app.ctx.oauth_cfg["user_info_uri"],
+            headers={"Authorization": f"Bearer {access_token[0]}"},
+        )
         user_info = resp.json()
         logger.info(f"user_info: {user_info}")
 
@@ -872,7 +1197,13 @@ async def oauth2_callback(request):
         )
         await account.fetch_related("roles")
 
-    aioe_token = token_encode(account.id, account.username, account.display_name, account.mfa_enable, str(uuid.uuid4()))
+    aioe_token = token_encode(
+        account.id,
+        account.username,
+        account.display_name,
+        account.mfa_enable,
+        str(uuid.uuid4()),
+    )
     await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
 
     resp = response.redirect(redirect_url)
@@ -894,7 +1225,20 @@ async def oauth2_callback(request):
     response={
         "200": {
             "description": "获取成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"scene": {"type": "string"}}}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {"scene": {"type": "string"}},
+                            },
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -921,7 +1265,14 @@ async def init_scene_list(request):
                                 "properties": {
                                     "users": {
                                         "type": "array",
-                                        "items": {"type": "object", "properties": {"id": {"type": "string"}, "username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "username": {"type": "string"},
+                                                "display_name": {"type": "string"},
+                                            },
+                                        },
                                     }
                                 },
                             },
@@ -950,7 +1301,21 @@ async def init_account_list(request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer"},
-                            "data": {"type": "object", "properties": {"roles": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}}}}}},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "roles": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "name": {"type": "string"},
+                                            },
+                                        },
+                                    }
+                                },
+                            },
                         },
                     }
                 }

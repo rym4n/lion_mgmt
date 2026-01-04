@@ -7,7 +7,14 @@ from sanic_ext import openapi
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Runlog, ToolAction, PlaybookVersion, Tool, ToolResourcesModel, ToolResources
+from models import (
+    Runlog,
+    ToolAction,
+    PlaybookVersion,
+    Tool,
+    ToolResourcesModel,
+    ToolResources,
+)
 
 
 @openapi.exclude()
@@ -76,7 +83,14 @@ async def playbook_list(request):
             "grade": None,
             "playbookCategory": "COMMONEVENT",
             "sceneList": [
-                {"id": scene.id, "name": scene.name, "display": scene.remark, "severity": str(scene.status), "effective": True if scene.status == 1 else False} for scene in pv.playbook.scenes
+                {
+                    "id": scene.id,
+                    "name": scene.name,
+                    "display": scene.remark,
+                    "severity": str(scene.status),
+                    "effective": True if scene.status == 1 else False,
+                }
+                for scene in pv.playbook.scenes
             ],
             "labelList": [{"id": tag.id, "name": tag.name} for tag in pv.playbook.tags],
         }
@@ -147,7 +161,7 @@ async def all_apps(request):
                     "appId": tool.id,
                     "name": action.action.get("func"),
                     "actionType": action.action.get("classify"),
-                    "readonly": False if action.action.get("classify") == "write" else True,
+                    "readonly": (False if action.action.get("classify") == "write" else True),
                     "description": action.action.get("name"),
                     "displayName": action.action.get("name"),
                     "classify": action.action.get("classify"),
@@ -173,7 +187,14 @@ async def all_apps(request):
                         }
                         for param in action.action.get("input")
                     ],
-                    "resultVariableList": [{"description": None, "valueType": None, "dataPath": None, "exampleValues": None}],
+                    "resultVariableList": [
+                        {
+                            "description": None,
+                            "valueType": None,
+                            "dataPath": None,
+                            "exampleValues": None,
+                        }
+                    ],
                     "isTest": False,
                     "resultDisplayTmptType": None,
                     "quartz": False,

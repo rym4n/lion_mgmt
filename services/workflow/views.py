@@ -20,9 +20,27 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import requires_permission, load_license, playbook_permission, check_playbook_permission
+from libs.security.authorization import (
+    requires_permission,
+    load_license,
+    playbook_permission,
+    check_playbook_permission,
+)
 from libs.utils import gen_run_id, strip_timezone_to_seconds, query_vlog
-from models import Playbook, Scene, ToolAction, Runlog, Tag, PlaybookVersion, Role, PlaybookPermissions, EventRelatedScript, Timed, PlaybookWebhook, Account
+from models import (
+    Playbook,
+    Scene,
+    ToolAction,
+    Runlog,
+    Tag,
+    PlaybookVersion,
+    Role,
+    PlaybookPermissions,
+    EventRelatedScript,
+    Timed,
+    PlaybookWebhook,
+    Account,
+)
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import TASK_TOPIC, TZ, KAFKA_CONFIG
 
@@ -42,10 +60,25 @@ _all__ = ["workflow_bp"]
                 "properties": {
                     "name": {"type": "string", "description": "剧本名"},
                     "remark": {"type": "string", "description": "备注"},
-                    "tags": {"type": "array", "items": {"type": "string"}, "description": "标签，列表格式"},
-                    "scenes": {"type": "array", "items": {"type": "string"}, "description": "场景，列表格式"},
-                    "flow_json_list": {"type": "array", "items": {"type": "object"}, "description": "流程图具体内容, 列表格式, 列表的每个元素是一个独立的剧本json"},
-                    "flow_timeout": {"type": "integer", "description": "剧本运行超时时间，最小5分钟最大3天，单位秒 默认300"},
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "标签，列表格式",
+                    },
+                    "scenes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "场景，列表格式",
+                    },
+                    "flow_json_list": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "流程图具体内容, 列表格式, 列表的每个元素是一个独立的剧本json",
+                    },
+                    "flow_timeout": {
+                        "type": "integer",
+                        "description": "剧本运行超时时间，最小5分钟最大3天，单位秒 默认300",
+                    },
                 },
             }
         }
@@ -53,7 +86,18 @@ _all__ = ["workflow_bp"]
     response={
         "200": {
             "description": "创建成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -99,7 +143,12 @@ async def create_workflow(request):
             creator=creator,
             internal=maintenance_mode if maintenance_mode else False,
         )
-        await PlaybookPermissions.create(pb=playbook, users=creator, roles=None, permissions=["r", "u", "d", "e", "p"])
+        await PlaybookPermissions.create(
+            pb=playbook,
+            users=creator,
+            roles=None,
+            permissions=["r", "u", "d", "e", "p"],
+        )
         await PlaybookPermissions.create(pb=playbook, users=None, roles=admin, permissions=["r", "u", "d", "e", "p"])
         if data.get("tags"):
             tags = await Tag.filter(name__in=data.get("tags")).all()
@@ -140,11 +189,29 @@ async def create_workflow(request):
                 "properties": {
                     "page": {"type": "integer", "description": "分页的页码，默认1"},
                     "size": {"type": "integer", "description": "分页的大小，默认10"},
-                    "keyword": {"type": "string", "description": "搜索时使用，支持搜索名称、备注、ID"},
-                    "scene": {"type": "array", "items": {"type": "string"}, "description": "搜索时使用，支持搜索场景"},
-                    "tag": {"type": "string", "description": "搜索时使用，支持搜索标签"},
-                    "publish": {"type": "integer", "description": "搜索时使用，支持搜索发布状态, 0未发布 1已发布"},
-                    "ctime": {"type": "array", "items": {"type": "string"}, "description": "搜索时使用，支持搜索创建时间", "example": ["2025-10-19 00:00:00", "2025-10-29 00:00:00"]},
+                    "keyword": {
+                        "type": "string",
+                        "description": "搜索时使用，支持搜索名称、备注、ID",
+                    },
+                    "scene": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "搜索时使用，支持搜索场景",
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "搜索时使用，支持搜索标签",
+                    },
+                    "publish": {
+                        "type": "integer",
+                        "description": "搜索时使用，支持搜索发布状态, 0未发布 1已发布",
+                    },
+                    "ctime": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "搜索时使用，支持搜索创建时间",
+                        "example": ["2025-10-19 00:00:00", "2025-10-29 00:00:00"],
+                    },
                 },
             }
         }
@@ -165,7 +232,10 @@ async def create_workflow(request):
                                     "page": {"type": "integer"},
                                     "size": {"type": "integer"},
                                     "total_pages": {"type": "integer"},
-                                    "data": {"type": "array", "items": {"type": "object"}},
+                                    "data": {
+                                        "type": "array",
+                                        "items": {"type": "object"},
+                                    },
                                 },
                             },
                             "message": {"type": "string"},
@@ -220,23 +290,55 @@ async def list_workflow(request):
     if json_params.get("publish") in (0, 1):
         pv_condition = pv_condition & Q(playbook_versions__status=json_params.get("publish"))
 
-    playbooks = await Playbook.filter(condition).annotate(versions=Count("playbook_versions", _filter=pv_condition), max_flow_timeout=Max("playbook_versions__flow_timeout")).order_by("-utime").offset(offset).limit(limit).prefetch_related("scenes", "tags")
+    playbooks = (
+        await Playbook.filter(condition)
+        .annotate(
+            versions=Count("playbook_versions", _filter=pv_condition),
+            max_flow_timeout=Max("playbook_versions__flow_timeout"),
+        )
+        .order_by("-utime")
+        .offset(offset)
+        .limit(limit)
+        .prefetch_related("scenes", "tags")
+    )
 
     total = await Playbook.filter(condition).count()
 
     # 组装数据
     data = []
     for p in playbooks:
-        data.append({**p.json, "flow_timeout": p.max_flow_timeout or 300, "versions": p.versions})
+        data.append(
+            {
+                **p.json,
+                "flow_timeout": p.max_flow_timeout or 300,
+                "versions": p.versions,
+            }
+        )
 
-    return response_ok({"total": total, "page": page, "size": size, "total_pages": (total + size - 1) // size, "data": data})
+    return response_ok(
+        {
+            "total": total,
+            "page": page,
+            "size": size,
+            "total_pages": (total + size - 1) // size,
+            "data": data,
+        }
+    )
 
 
 @workflow_bp.post("/versions")
 @openapi.definition(
     summary="获取剧本版本列表",
     description="获取剧本版本列表",
-    body={"application/json": {"schema": {"type": "object", "required": ["playbook_id"], "properties": {"playbook_id": {"type": "string", "description": "剧本id"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["playbook_id"],
+                "properties": {"playbook_id": {"type": "string", "description": "剧本id"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
@@ -260,8 +362,20 @@ async def list_workflow(request):
                                         "change_desc": {"type": "string"},
                                         "status": {"type": "integer"},
                                         "version": {"type": "string"},
-                                        "creator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
-                                        "updator": {"type": "object", "properties": {"username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                        "creator": {
+                                            "type": "object",
+                                            "properties": {
+                                                "username": {"type": "string"},
+                                                "display_name": {"type": "string"},
+                                            },
+                                        },
+                                        "updator": {
+                                            "type": "object",
+                                            "properties": {
+                                                "username": {"type": "string"},
+                                                "display_name": {"type": "string"},
+                                            },
+                                        },
                                         "internal": {"type": "boolean"},
                                     },
                                 },
@@ -277,7 +391,22 @@ async def list_workflow(request):
 @requires_permission("workflow:r")
 @playbook_permission("r")
 async def list_workflow_versions(request):
-    pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False).only("id", "ctime", "utime", "playbook_id", "change_desc", "status", "version", "creator_id", "updator_id").all().prefetch_related("playbook", "creator", "updator")
+    pv = (
+        await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False)
+        .only(
+            "id",
+            "ctime",
+            "utime",
+            "playbook_id",
+            "change_desc",
+            "status",
+            "version",
+            "creator_id",
+            "updator_id",
+        )
+        .all()
+        .prefetch_related("playbook", "creator", "updator")
+    )
     result = [
         {
             "playbook_id": p.playbook_id,
@@ -289,8 +418,14 @@ async def list_workflow_versions(request):
             "change_desc": p.change_desc,
             "status": p.status,
             "version": p.version,
-            "creator": {"username": p.creator.username, "display_name": p.creator.display_name},
-            "updator": {"username": p.updator.username, "display_name": p.updator.display_name},
+            "creator": {
+                "username": p.creator.username,
+                "display_name": p.creator.display_name,
+            },
+            "updator": {
+                "username": p.updator.username,
+                "display_name": p.updator.display_name,
+            },
             "internal": p.playbook.internal,
         }
         for p in pv
@@ -302,7 +437,15 @@ async def list_workflow_versions(request):
 @openapi.definition(
     summary="导出剧本版本",
     description="导出剧本版本",
-    body={"application/json": {"schema": {"type": "object", "required": ["playbook_id"], "properties": {"playbook_id": {"type": "string", "description": "剧本id"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["playbook_id"],
+                "properties": {"playbook_id": {"type": "string", "description": "剧本id"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
@@ -365,11 +508,32 @@ async def export_workflow(request):
 @openapi.definition(
     summary="获取剧本版本的flow_json",
     description="获取剧本版本的flow_json",
-    body={"application/json": {"schema": {"type": "object", "properties": {"flow_id": {"type": "string", "description": "剧本版本id"}, "playbook_id": {"type": "string", "description": "剧本ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "flow_id": {"type": "string", "description": "剧本版本id"},
+                    "playbook_id": {"type": "string", "description": "剧本ID"},
+                },
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "object"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -410,9 +574,20 @@ async def get_flow_json(request):
                     "playbook_id": {"type": "string", "description": "剧本ID"},
                     "name": {"type": "string", "description": "剧本名"},
                     "remark": {"type": "string", "description": "备注"},
-                    "scenes": {"type": "array", "items": {"type": "string"}, "description": "关联场景名称，列表格式"},
-                    "tags": {"type": "array", "items": {"type": "string"}, "description": "标签名称，列表格式"},
-                    "flow_timeout": {"type": "integer", "description": "剧本运行超时时间，最小5分钟最大3天，单位秒 默认300"},
+                    "scenes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "关联场景名称，列表格式",
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "标签名称，列表格式",
+                    },
+                    "flow_timeout": {
+                        "type": "integer",
+                        "description": "剧本运行超时时间，最小5分钟最大3天，单位秒 默认300",
+                    },
                 },
             }
         }
@@ -420,7 +595,18 @@ async def get_flow_json(request):
     response={
         "200": {
             "description": "修改成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "object"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -461,14 +647,28 @@ async def edit_workflow(request):
             "schema": {
                 "type": "object",
                 "required": ["flow_id", "flow_json"],
-                "properties": {"flow_id": {"type": "string", "description": "剧本版本ID"}, "flow_json": {"type": "object", "description": "流程图布局信息"}},
+                "properties": {
+                    "flow_id": {"type": "string", "description": "剧本版本ID"},
+                    "flow_json": {"type": "object", "description": "流程图布局信息"},
+                },
             }
         }
     },
     response={
         "200": {
             "description": "修改成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "object"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -484,7 +684,15 @@ async def edit_workflow_flow(request):
     pv.updator = request.ctx.session["account_info"]
     # 已发布的剧本是不允许修改的
     if pv.status == 1:
-        pv = await PlaybookVersion.create(playbook=pv.playbook, version=gen_run_id(), flow_json=pv.flow_json, change_desc=None, status=0, creator=request.ctx.session["account_info"], updator=request.ctx.session["account_info"])
+        pv = await PlaybookVersion.create(
+            playbook=pv.playbook,
+            version=gen_run_id(),
+            flow_json=pv.flow_json,
+            change_desc=None,
+            status=0,
+            creator=request.ctx.session["account_info"],
+            updator=request.ctx.session["account_info"],
+        )
     else:
         await pv.save()
 
@@ -507,14 +715,28 @@ async def edit_workflow_flow(request):
             "schema": {
                 "type": "object",
                 "required": ["flow_id", "change_desc"],
-                "properties": {"flow_id": {"type": "string", "description": "剧本版本ID"}, "change_desc": {"type": "string", "description": "版本变更说明"}},
+                "properties": {
+                    "flow_id": {"type": "string", "description": "剧本版本ID"},
+                    "change_desc": {"type": "string", "description": "版本变更说明"},
+                },
             }
         }
     },
     response={
         "200": {
             "description": "发布成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -523,7 +745,12 @@ async def edit_workflow_flow(request):
 async def publish_workflow(request):
     if not request.json.get("flow_id") or not request.json.get("change_desc"):
         raise CustomError(ErrorCode.ParameterError)
-    await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0).update(status=1, updator=request.ctx.session["account_info"], version=gen_run_id(), change_desc=request.json.get("change_desc"))
+    await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0).update(
+        status=1,
+        updator=request.ctx.session["account_info"],
+        version=gen_run_id(),
+        change_desc=request.json.get("change_desc"),
+    )
     return response_ok("剧本发布成功")
 
 
@@ -531,11 +758,30 @@ async def publish_workflow(request):
 @openapi.definition(
     summary="删除剧本",
     description="删除剧本",
-    body={"application/json": {"schema": {"type": "object", "required": ["playbook_id"], "properties": {"playbook_id": {"type": "string", "description": "剧本ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["playbook_id"],
+                "properties": {"playbook_id": {"type": "string", "description": "剧本ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "删除成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -571,11 +817,30 @@ async def delete_workflow(request):
 @openapi.definition(
     summary="删除剧本版本",
     description="删除剧本版本",
-    body={"application/json": {"schema": {"type": "object", "required": ["flow_id"], "properties": {"flow_id": {"type": "string", "description": "剧本版本ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["flow_id"],
+                "properties": {"flow_id": {"type": "string", "description": "剧本版本ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "删除成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -604,18 +869,41 @@ async def delete_workflow_version(request):
 @openapi.definition(
     summary="停止执行",
     description="停止执行",
-    body={"application/json": {"schema": {"type": "object", "required": ["run_id"], "properties": {"run_id": {"type": "string", "description": "运行ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["run_id"],
+                "properties": {"run_id": {"type": "string", "description": "运行ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "停止成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
 @requires_permission("workflow:u")
 async def stop_workflow(request):
     run_id = request.json.get("run_id")
-    msg = {"run_type": "kill", "run_id": run_id, "run_args": {"executor": request.ctx.session["account_info"].id}}
+    msg = {
+        "run_type": "kill",
+        "run_id": run_id,
+        "run_args": {"executor": request.ctx.session["account_info"].id},
+    }
     await aproduce(TASK_TOPIC, msg)
     return response_ok("success")
 
@@ -640,14 +928,22 @@ async def stop_workflow(request):
                     "resource": {"type": "string", "description": "资源名称"},
                     "node_name": {"type": "string", "description": "节点名称"},
                     "action": {"type": "string", "description": "动作名称 英文标识"},
-                    "action_name": {"type": "string", "description": "动作名称 中文名称"},
+                    "action_name": {
+                        "type": "string",
+                        "description": "动作名称 中文名称",
+                    },
                     "retry_times": {"type": "integer", "description": "重试次数"},
                     "timeout": {"type": "integer", "description": "超时时间,单位秒"},
                 },
             }
         }
     },
-    response={"200": {"description": "执行成功", "content": {"text/event-stream": {"schema": {"type": "string"}}}}},
+    response={
+        "200": {
+            "description": "执行成功",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        }
+    },
 )
 @requires_permission("workflow:u")
 async def execute_action(request):
@@ -664,7 +960,12 @@ async def execute_action(request):
         if message.get("type") == "flow":
             pv = await PlaybookVersion.get_or_none(id=message.get("flow_id"))
             playbook_id = pv.playbook_id
-            has_access = await check_playbook_permission(request=request, user=request.ctx.session["account_info"], playbook_id=playbook_id, required_permissions=["e"])
+            has_access = await check_playbook_permission(
+                request=request,
+                user=request.ctx.session["account_info"],
+                playbook_id=playbook_id,
+                required_permissions=["e"],
+            )
             if not has_access:
                 await resp.send("data: 缺少剧本执行权限，执行失败\n\n")
                 await resp.eof()
@@ -734,7 +1035,17 @@ async def execute_action(request):
                                     "fail": {"type": "integer"},
                                     "data": {
                                         "type": "array",
-                                        "items": {"type": "object", "properties": {"run_id": {"type": "string"}, "status": {"type": "string"}, "logs": {"type": "array", "items": {"type": "object"}}}},
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "run_id": {"type": "string"},
+                                                "status": {"type": "string"},
+                                                "logs": {
+                                                    "type": "array",
+                                                    "items": {"type": "object"},
+                                                },
+                                            },
+                                        },
                                     },
                                 },
                             },
@@ -794,18 +1105,46 @@ async def run_history(request):
     if not data:
         return response_ok({"total": total, "page": page, "size": size, "data": []})
 
-    return response_ok({"total": total, "page": page, "size": size, "success": success, "fail": fail, "data": data})
+    return response_ok(
+        {
+            "total": total,
+            "page": page,
+            "size": size,
+            "success": success,
+            "fail": fail,
+            "data": data,
+        }
+    )
 
 
 @workflow_bp.post("/input")
 @openapi.definition(
     summary="获取指定剧本的输入参数",
     description="获取指定剧本的输入参数",
-    body={"application/json": {"schema": {"type": "object", "required": ["flow_id"], "properties": {"flow_id": {"type": "string", "description": "剧本版本ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["flow_id"],
+                "properties": {"flow_id": {"type": "string", "description": "剧本版本ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "array", "items": {"type": "object"}},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -864,11 +1203,30 @@ async def statistics_data(flow_json):
 @openapi.definition(
     summary="新建标签",
     description="新建标签（需要剧本新增权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "description": "标签名称"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string", "description": "标签名称"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "新建成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -893,7 +1251,18 @@ async def new_tag(request):
     response={
         "200": {
             "description": "获取成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "string"}}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "array", "items": {"type": "string"}},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -907,11 +1276,30 @@ async def tag_list(request):
 @openapi.definition(
     summary="删除标签",
     description="删除标签（需要剧本删除权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "description": "标签名称"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string", "description": "标签名称"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "删除成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -937,8 +1325,14 @@ async def remove_tag(request):
                 "required": ["playbook_id"],
                 "properties": {
                     "playbook_id": {"type": "string", "description": "剧本id"},
-                    "users": {"type": "object", "description": '用户权限 {"id":["r","u","d","e","p"]}'},
-                    "roles": {"type": "object", "description": '角色权限 {"id":["r","u","d","e","p"]}'},
+                    "users": {
+                        "type": "object",
+                        "description": '用户权限 {"id":["r","u","d","e","p"]}',
+                    },
+                    "roles": {
+                        "type": "object",
+                        "description": '角色权限 {"id":["r","u","d","e","p"]}',
+                    },
                 },
             }
         }
@@ -946,7 +1340,18 @@ async def remove_tag(request):
     response={
         "200": {
             "description": "权限更新成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -968,13 +1373,21 @@ async def add_permission(request):
 
     # 处理用户权限
     for uid, perms in users.items():
-        await PlaybookPermissions.update_or_create(pb_id=playbook_id, users_id=uid, defaults={"permissions": perms, "roles_id": None})
+        await PlaybookPermissions.update_or_create(
+            pb_id=playbook_id,
+            users_id=uid,
+            defaults={"permissions": perms, "roles_id": None},
+        )
         await request.app.ctx.cache_client.set((playbook_id, uid), perms, ttl=2592000)
 
     # 处理角色权限
     for rid, perms in roles.items():
         if rid != "111111":
-            await PlaybookPermissions.update_or_create(pb_id=playbook_id, roles_id=rid, defaults={"permissions": perms, "users_id": None})
+            await PlaybookPermissions.update_or_create(
+                pb_id=playbook_id,
+                roles_id=rid,
+                defaults={"permissions": perms, "users_id": None},
+            )
         await request.app.ctx.cache_client.set((playbook_id, rid), perms, ttl=2592000)
 
     return response_ok("权限更新成功")
@@ -993,7 +1406,19 @@ async def add_permission(request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer"},
-                            "data": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "permissions": {"type": "array", "items": {"type": "string"}}}}},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "permissions": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                        },
+                                    },
+                                },
+                            },
                             "message": {"type": "string"},
                         },
                     }
@@ -1023,11 +1448,30 @@ async def select_my_permission(request):
 @openapi.definition(
     summary="获取剧本权限",
     description="获取剧本权限（需要剧本查看权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["playbook_id"], "properties": {"playbook_id": {"type": "string", "description": "剧本id"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["playbook_id"],
+                "properties": {"playbook_id": {"type": "string", "description": "剧本id"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "array", "items": {"type": "object"}},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -1052,7 +1496,10 @@ async def select_permission_all(request):
             "schema": {
                 "type": "object",
                 "required": ["flow_id"],
-                "properties": {"flow_id": {"type": "string", "description": "剧本版本ID"}, "description": {"type": "string", "description": "webhook描述"}},
+                "properties": {
+                    "flow_id": {"type": "string", "description": "剧本版本ID"},
+                    "description": {"type": "string", "description": "webhook描述"},
+                },
             }
         }
     },
@@ -1102,7 +1549,13 @@ async def create_webhook(request):
     # 生成唯一的webhook token
     webhook_token = secrets.token_urlsafe(10)
 
-    webhook = await PlaybookWebhook.create(playbook_version=pv, webhook_token=webhook_token, enabled=True, creator=request.ctx.session["account_info"], description=description)
+    webhook = await PlaybookWebhook.create(
+        playbook_version=pv,
+        webhook_token=webhook_token,
+        enabled=True,
+        creator=request.ctx.session["account_info"],
+        description=description,
+    )
 
     return response_ok(webhook.json)
 
@@ -1111,7 +1564,15 @@ async def create_webhook(request):
 @openapi.definition(
     summary="获取剧本版本的Webhook",
     description="获取指定剧本版本的webhook",
-    body={"application/json": {"schema": {"type": "object", "required": ["flow_id"], "properties": {"flow_id": {"type": "string", "description": "剧本版本ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["flow_id"],
+                "properties": {"flow_id": {"type": "string", "description": "剧本版本ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
@@ -1165,14 +1626,28 @@ async def list_webhook(request):
             "schema": {
                 "type": "object",
                 "required": ["webhook_id"],
-                "properties": {"flow_id": {"type": "string", "description": "剧本版本ID"}, "webhook_id": {"type": "string", "description": "WebhookID"}},
+                "properties": {
+                    "flow_id": {"type": "string", "description": "剧本版本ID"},
+                    "webhook_id": {"type": "string", "description": "WebhookID"},
+                },
             }
         }
     },
     response={
         "200": {
             "description": "删除成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -1199,10 +1674,27 @@ async def delete_webhook(request):
     summary="执行剧本（通过Webhook）",
     description="通过webhook token直接执行剧本，支持GET和POST调用",
     parameter=[
-        {"name": "token", "in": "query", "description": "webhook唯一标识令牌", "required": True, "schema": {"type": "string"}},
-        {"name": "params", "in": "query", "description": "剧本输入参数，json格式字符串", "required": False, "schema": {"type": "string"}},
+        {
+            "name": "token",
+            "in": "query",
+            "description": "webhook唯一标识令牌",
+            "required": True,
+            "schema": {"type": "string"},
+        },
+        {
+            "name": "params",
+            "in": "query",
+            "description": "剧本输入参数，json格式字符串",
+            "required": False,
+            "schema": {"type": "string"},
+        },
     ],
-    response={"200": {"description": "执行成功", "content": {"text/event-stream": {"schema": {"type": "string"}}}}},
+    response={
+        "200": {
+            "description": "执行成功",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        }
+    },
 )
 async def execute_webhook(request):
     """
@@ -1241,7 +1733,16 @@ async def execute_webhook(request):
     # 构造执行消息
     run_id = gen_run_id()
 
-    msg = {"run_type": "flow", "run_id": run_id, "run_args": {"type": "flow", "flow_id": pv.id, "flow_input": flow_input, "executor": webhook.creator_id}}
+    msg = {
+        "run_type": "flow",
+        "run_id": run_id,
+        "run_args": {
+            "type": "flow",
+            "flow_id": pv.id,
+            "flow_input": flow_input,
+            "executor": webhook.creator_id,
+        },
+    }
     await aproduce(TASK_TOPIC, msg)
 
     sent_id = []
@@ -1275,8 +1776,14 @@ async def execute_webhook(request):
                 "required": ["flow_id", "start", "end"],
                 "properties": {
                     "flow_id": {"type": "string", "description": "剧本版本ID"},
-                    "start": {"type": "string", "description": "查询开始时间,格式为2025-12-12 00:00:00"},
-                    "end": {"type": "string", "description": "查询结束时间,格式为2025-12-12 00:00:00"},
+                    "start": {
+                        "type": "string",
+                        "description": "查询开始时间,格式为2025-12-12 00:00:00",
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "查询结束时间,格式为2025-12-12 00:00:00",
+                    },
                 },
             }
         }
@@ -1383,11 +1890,36 @@ async def dashboard_statistics(request):
 @openapi.definition(
     summary="导入剧本",
     description="导入剧本",
-    body={"application/json": {"schema": {"type": "object", "required": ["flow_list"], "properties": {"flow_list": {"type": "array", "items": {"type": "object"}, "description": "剧本列表"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["flow_list"],
+                "properties": {
+                    "flow_list": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "剧本列表",
+                    }
+                },
+            }
+        }
+    },
     response={
         "200": {
             "description": "创建成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -1408,14 +1940,24 @@ async def import_workflow(request):
         maintenance_mode = flow_data.get("maintenance_mode") if flow_data.get("maintenance_mode") else await request.app.ctx.cache_client.get(request.ctx.session["id"])
         async with in_transaction():
             playbook = await Playbook.create(
-                id=str(flow_data.get("flow_id")) if flow_data.get("flow_id") else str(uuid.uuid4()),
+                id=(str(flow_data.get("flow_id")) if flow_data.get("flow_id") else str(uuid.uuid4())),
                 name=flow_data.get("name"),
                 remark=flow_data.get("remark", ""),
                 creator=creator,
                 internal=maintenance_mode if maintenance_mode else False,
             )
-            await PlaybookPermissions.create(pb=playbook, users=creator, roles=None, permissions=["r", "u", "d", "e", "p"])
-            await PlaybookPermissions.create(pb=playbook, users=None, roles=admin, permissions=["r", "u", "d", "e", "p"])
+            await PlaybookPermissions.create(
+                pb=playbook,
+                users=creator,
+                roles=None,
+                permissions=["r", "u", "d", "e", "p"],
+            )
+            await PlaybookPermissions.create(
+                pb=playbook,
+                users=None,
+                roles=admin,
+                permissions=["r", "u", "d", "e", "p"],
+            )
 
             if flow_data.get("tags"):
                 tags = await Tag.filter(name__in=flow_data.get("tags")).all()
@@ -1425,10 +1967,22 @@ async def import_workflow(request):
                 scenes = await Scene.filter(name__in=flow_data.get("scenes")).all()
                 if scenes:
                     await playbook.scenes.add(*scenes)
-                    await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
+                    await caches.get("redis_chat").set(
+                        f"workflow_scene_{playbook.id}",
+                        ",".join([s.id for s in scenes]),
+                    )
 
             for flow_json in flow_json_list:
-                pv = await PlaybookVersion.create(playbook=playbook, version=gen_run_id(), status=0, change_desc="", flow_json=flow_json, creator=creator, updator=creator, flow_timeout=flow_data.get("flow_timeout", 300))
+                pv = await PlaybookVersion.create(
+                    playbook=playbook,
+                    version=gen_run_id(),
+                    status=0,
+                    change_desc="",
+                    flow_json=flow_json,
+                    creator=creator,
+                    updator=creator,
+                    flow_timeout=flow_data.get("flow_timeout", 300),
+                )
 
                 action_ids = await statistics_data(flow_json)
                 await tool_action_update({pv.id: action_ids})

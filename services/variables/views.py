@@ -24,7 +24,13 @@ _all__ = ["var_bp"]
             "schema": {
                 "type": "object",
                 "required": ["name", "value"],
-                "properties": {"name": {"type": "string", "description": "变量名（唯一）"}, "value": {"type": "object", "description": "变量值，JSON格式对象，不是字符串"}},
+                "properties": {
+                    "name": {"type": "string", "description": "变量名（唯一）"},
+                    "value": {
+                        "type": "object",
+                        "description": "变量值，JSON格式对象，不是字符串",
+                    },
+                },
             }
         }
     },
@@ -63,7 +69,12 @@ async def new_variable(request):
     if not name or not value:
         raise CustomError(ErrorCode.ParameterError)
 
-    var = await Variables.create(name=request.json["name"], value=value, type="global", updator=request.ctx.session["account_info"])
+    var = await Variables.create(
+        name=request.json["name"],
+        value=value,
+        type="global",
+        updator=request.ctx.session["account_info"],
+    )
     await caches.get("redis_chat").set(f"global_{var.name}", value)
     return response_ok(var.json)
 
@@ -79,7 +90,10 @@ async def new_variable(request):
                 "properties": {
                     "page": {"type": "integer", "description": "页码"},
                     "size": {"type": "integer", "description": "每页数量"},
-                    "keyword": {"type": "string", "description": "可选参数，变量名 或 变量值（元素要完全匹配）"},
+                    "keyword": {
+                        "type": "string",
+                        "description": "可选参数，变量名 或 变量值（元素要完全匹配）",
+                    },
                 },
             }
         }
@@ -143,8 +157,31 @@ async def all_variables(request):
 @openapi.definition(
     summary="删除全局变量",
     description="删除指定的全局变量，需要var:d权限",
-    body={"application/json": {"schema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "description": "变量名"}}}}},
-    response={"200": {"description": "删除成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string", "description": "变量名"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("var:d")
 async def delelte_variable(request):
@@ -165,11 +202,29 @@ async def delelte_variable(request):
             "schema": {
                 "type": "object",
                 "required": ["name", "value"],
-                "properties": {"name": {"type": "string", "description": "变量名"}, "value": {"type": "object", "description": "变量值，JSON格式对象"}},
+                "properties": {
+                    "name": {"type": "string", "description": "变量名"},
+                    "value": {"type": "object", "description": "变量值，JSON格式对象"},
+                },
             }
         }
     },
-    response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("var:u")
 async def update_variable(request):

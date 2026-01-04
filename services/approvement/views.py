@@ -15,7 +15,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from models import Approvement
-from settings import TASK_TOPIC, TZ, KAFKA_CONFIG
+from settings import TASK_TOPIC, TZ
 
 approve_bp = Blueprint("approve", url_prefix="/approve")
 _all__ = ["approve_bp"]
@@ -32,9 +32,21 @@ _all__ = ["approve_bp"]
                 "properties": {
                     "page": {"type": "integer", "description": "页码"},
                     "size": {"type": "integer", "description": "每页数量"},
-                    "keyword": {"type": "string", "description": "关键字，模糊搜索审核标题或者审核内容"},
-                    "status": {"type": "array", "items": {"type": "integer"}, "description": "处理状态，支持同时过滤多个状态，0代表待处理，1代表通过，2代表拒绝，3代表已过期"},
-                    "ctime": {"type": "array", "items": {"type": "string"}, "description": "搜索时使用，支持搜索创建时间", "example": ["2021-01-01T00:00:00Z", "2021-01-31T23:59:59Z"]},
+                    "keyword": {
+                        "type": "string",
+                        "description": "关键字，模糊搜索审核标题或者审核内容",
+                    },
+                    "status": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "处理状态，支持同时过滤多个状态，0代表待处理，1代表通过，2代表拒绝，3代表已过期",
+                    },
+                    "ctime": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "搜索时使用，支持搜索创建时间",
+                        "example": ["2021-01-01T00:00:00Z", "2021-01-31T23:59:59Z"],
+                    },
                 },
             }
         }
@@ -76,7 +88,14 @@ _all__ = ["approve_bp"]
                                                 "flow_id": {"type": "string"},
                                                 "approvers": {
                                                     "type": "array",
-                                                    "items": {"type": "object", "properties": {"id": {"type": "string"}, "username": {"type": "string"}, "display_name": {"type": "string"}}},
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "id": {"type": "string"},
+                                                            "username": {"type": "string"},
+                                                            "display_name": {"type": "string"},
+                                                        },
+                                                    },
                                                 },
                                             },
                                         },
@@ -116,7 +135,15 @@ async def all_approvement(request):
     if total > 0:
         records = await Approvement.filter(condition).offset(offset).limit(size).prefetch_related("flow", "approvers").all()
 
-    return response_ok({"total": total, "page": page, "size": size, "total_pages": (total + size - 1) // size, "data": [r.json for r in records]})
+    return response_ok(
+        {
+            "total": total,
+            "page": page,
+            "size": size,
+            "total_pages": (total + size - 1) // size,
+            "data": [r.json for r in records],
+        }
+    )
 
 
 @approve_bp.post("/todolist")
@@ -195,14 +222,36 @@ async def todo_approvement(request):
                 "required": ["id", "agree"],
                 "properties": {
                     "id": {"type": "string", "description": "审核id"},
-                    "agree": {"type": "boolean", "description": "布尔类型：True/False，同意或拒绝"},
+                    "agree": {
+                        "type": "boolean",
+                        "description": "布尔类型：True/False，同意或拒绝",
+                    },
                     "remark": {"type": "string", "description": "审批备注信息"},
-                    "params": {"type": "array", "items": {"type": "object"}, "description": "自定义参数的内容信息"},
+                    "params": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "自定义参数的内容信息",
+                    },
                 },
             }
         }
     },
-    response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("approve:u")
 async def update_approvement(request):
@@ -249,7 +298,13 @@ async def update_approvement(request):
     account_info = request.ctx.session["account_info"]
     approve.results = {
         **approve.results,
-        account_info.id: {"username": account_info.username, "display_name": account_info.display_name, "agree": agree, "remark": remark, "approve_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
+        account_info.id: {
+            "username": account_info.username,
+            "display_name": account_info.display_name,
+            "agree": agree,
+            "remark": remark,
+            "approve_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        },
     }
 
     if agree:
@@ -275,7 +330,7 @@ async def update_approvement(request):
             "flow_input": flow_input,
             "approval_node_id": approve.audit_node,
             "approval_status": approve.status,
-            "executor": ",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session["account_info"].id,
+            "executor": (",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session["account_info"].id),
         },
     }
     await aproduce(TASK_TOPIC, msg)
@@ -288,12 +343,51 @@ async def update_approvement(request):
     summary="外部系统审核结果回调",
     description="接受三方系统的审核结果，同时支持POST/GET",
     parameter=[
-        {"name": "token", "in": "query", "description": "审核的唯一token", "required": True, "schema": {"type": "string"}},
-        {"name": "agree", "in": "query", "description": "布尔类型：True/False，同意或拒绝", "required": True, "schema": {"type": "boolean"}},
-        {"name": "remark", "in": "query", "description": "审批备注信息", "required": False, "schema": {"type": "string"}},
-        {"name": "params", "in": "query", "description": "自定义参数的内容信息，json格式字符串", "required": False, "schema": {"type": "string"}},
+        {
+            "name": "token",
+            "in": "query",
+            "description": "审核的唯一token",
+            "required": True,
+            "schema": {"type": "string"},
+        },
+        {
+            "name": "agree",
+            "in": "query",
+            "description": "布尔类型：True/False，同意或拒绝",
+            "required": True,
+            "schema": {"type": "boolean"},
+        },
+        {
+            "name": "remark",
+            "in": "query",
+            "description": "审批备注信息",
+            "required": False,
+            "schema": {"type": "string"},
+        },
+        {
+            "name": "params",
+            "in": "query",
+            "description": "自定义参数的内容信息，json格式字符串",
+            "required": False,
+            "schema": {"type": "string"},
+        },
     ],
-    response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("approve:u")
 async def update_approvement_callback(request):
@@ -323,7 +417,16 @@ async def update_approvement_callback(request):
     if flow_input:
         approve.params = flow_input
 
-    approve.results = {**approve.results, token: {"username": "callback", "display_name": "外部回调", "agree": agree, "remark": remark, "approve_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}}
+    approve.results = {
+        **approve.results,
+        token: {
+            "username": "callback",
+            "display_name": "外部回调",
+            "agree": agree,
+            "remark": remark,
+            "approve_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        },
+    }
 
     if agree:
         approve.status = 1

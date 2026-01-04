@@ -15,7 +15,18 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import gen_random_code, strip_timezone_to_seconds, gen_run_id
-from models import Events, Runlog, Room, Account, Role, EventsIngestion, ToolAction, ToolResources, Tool, PlaybookVersion
+from models import (
+    Events,
+    Runlog,
+    Room,
+    Account,
+    Role,
+    EventsIngestion,
+    ToolAction,
+    ToolResources,
+    Tool,
+    PlaybookVersion,
+)
 from services.timed.views import runlog_list
 from settings import TASK_TOPIC, TZ, KAFKA_CONFIG
 
@@ -37,7 +48,14 @@ STATUS = {
 }
 
 # 将aioe的节点状态映射成雾帜的节点状态
-NODE_TYPE = {"start-node": "START", "end-node": "END", "judge-node": "RULE", "action-node": "ACTION", "approval-node": "APPROVE", "subscript-node": "PLAYBOOK"}
+NODE_TYPE = {
+    "start-node": "START",
+    "end-node": "END",
+    "judge-node": "RULE",
+    "action-node": "ACTION",
+    "approval-node": "APPROVE",
+    "subscript-node": "PLAYBOOK",
+}
 
 
 @event_bp.post("/list")
@@ -51,10 +69,28 @@ NODE_TYPE = {"start-node": "START", "end-node": "END", "judge-node": "RULE", "ac
                 "properties": {
                     "page": {"type": "integer", "description": "页码（默认1）"},
                     "size": {"type": "integer", "description": "每页数量（默认15）"},
-                    "event_name": {"type": "string", "description": "事件名称（支持模糊搜索）"},
-                    "event_process_status": {"type": "array", "description": "事件处理状态（精确匹配）", "items": {"type": "string", "enum": ["已处理", "处理中", "待处理"]}},
-                    "event_source": {"type": "integer", "description": "事件来源（精确匹配）"},
-                    "ctime": {"type": "array", "items": {"type": "string"}, "description": "起止时间范围", "example": ["2025-10-19 00:00:00", "2025-10-29 00:00:00"]},
+                    "event_name": {
+                        "type": "string",
+                        "description": "事件名称（支持模糊搜索）",
+                    },
+                    "event_process_status": {
+                        "type": "array",
+                        "description": "事件处理状态（精确匹配）",
+                        "items": {
+                            "type": "string",
+                            "enum": ["已处理", "处理中", "待处理"],
+                        },
+                    },
+                    "event_source": {
+                        "type": "integer",
+                        "description": "事件来源（精确匹配）",
+                    },
+                    "ctime": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "起止时间范围",
+                        "example": ["2025-10-19 00:00:00", "2025-10-29 00:00:00"],
+                    },
                 },
             }
         }
@@ -111,12 +147,27 @@ async def get_all_events(request):
                 "transforms_type": event_ingestion.transforms_type,
                 "enabled": event_ingestion.enabled_status,
                 "ctime": event_ingestion.ctime.astimezone(pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S"),
-                "creator_id": {"username": event_ingestion.creator.username, "display_name": event_ingestion.creator.display_name} if event_ingestion.creator else {},
+                "creator_id": (
+                    {
+                        "username": event_ingestion.creator.username,
+                        "display_name": event_ingestion.creator.display_name,
+                    }
+                    if event_ingestion.creator
+                    else {}
+                ),
             }
 
         data.append(event_dict)
 
-    return response_ok({"events": data, "total": total, "page": page, "size": size, "total_pages": (total + size - 1) // size})
+    return response_ok(
+        {
+            "events": data,
+            "total": total,
+            "page": page,
+            "size": size,
+            "total_pages": (total + size - 1) // size,
+        }
+    )
 
 
 @event_bp.post("/artificial")
@@ -154,7 +205,16 @@ async def artificial_create_event(request):
 
         user_objs = await Account.filter(id__in=user_ids)
 
-        members = [{"eventId": event.id, "userId": u.id, "username": u.username, "eventName": event.event_name, "follow": True} for u in user_objs]
+        members = [
+            {
+                "eventId": event.id,
+                "userId": u.id,
+                "username": u.username,
+                "eventName": event.event_name,
+                "follow": True,
+            }
+            for u in user_objs
+        ]
     return response.json(
         {
             "code": 0,
@@ -183,7 +243,16 @@ async def artificial_create_event(request):
                 "resolvedBy": "",
                 "preBizModel": None,
                 "logModel": None,
-                "permissions": [{"id": None, "eventId": event.id, "ownerType": None, "ownerId": request.ctx.session["account_info"].id, "permissionBy": "EVENT_OWNER", "relationId": None}],
+                "permissions": [
+                    {
+                        "id": None,
+                        "eventId": event.id,
+                        "ownerType": None,
+                        "ownerId": request.ctx.session["account_info"].id,
+                        "permissionBy": "EVENT_OWNER",
+                        "relationId": None,
+                    }
+                ],
                 "members": members,
             },
         }
@@ -225,7 +294,16 @@ async def artificial_create_event_wuzhi(request):
 
         user_objs = await Account.filter(id__in=user_ids)
 
-        members = [{"eventId": event.id, "userId": u.id, "username": u.username, "eventName": event.event_name, "follow": True} for u in user_objs]
+        members = [
+            {
+                "eventId": event.id,
+                "userId": u.id,
+                "username": u.username,
+                "eventName": event.event_name,
+                "follow": True,
+            }
+            for u in user_objs
+        ]
     return response.json(
         {
             "code": 0,
@@ -254,7 +332,16 @@ async def artificial_create_event_wuzhi(request):
                 "resolvedBy": "",
                 "preBizModel": None,
                 "logModel": None,
-                "permissions": [{"id": None, "eventId": event.id, "ownerType": None, "ownerId": request.ctx.session["account_info"].id, "permissionBy": "EVENT_OWNER", "relationId": None}],
+                "permissions": [
+                    {
+                        "id": None,
+                        "eventId": event.id,
+                        "ownerType": None,
+                        "ownerId": request.ctx.session["account_info"].id,
+                        "permissionBy": "EVENT_OWNER",
+                        "relationId": None,
+                    }
+                ],
                 "members": members,
             },
         }
@@ -400,8 +487,8 @@ async def get_activity_result(request, activityId):
                 "nodeResultModel": {
                     "pnodeResultId": 0,
                     "mnodeResultId": 0,
-                    "playbookId": executorInstanceId if log.playbook_name != "执行动作" else None,
-                    "playbookName": executorInstanceName if log.playbook_name != "执行动作" else None,
+                    "playbookId": (executorInstanceId if log.playbook_name != "执行动作" else None),
+                    "playbookName": (executorInstanceName if log.playbook_name != "执行动作" else None),
                     "nodeId": log.node_id,
                     "nodeName": log.node_name,
                     "actionId": action_id,
@@ -437,8 +524,8 @@ async def get_activity_result(request, activityId):
                             {
                                 "nodeResultId": node.id,
                                 "assetResultId": node.id,
-                                "playbookId": executorInstanceId if log.playbook_name != "执行动作" else None,
-                                "playbookName": executorInstanceName if log.playbook_name != "执行动作" else None,
+                                "playbookId": (executorInstanceId if log.playbook_name != "执行动作" else None),
+                                "playbookName": (executorInstanceName if log.playbook_name != "执行动作" else None),
                                 "nodeId": node.node_id,
                                 "nodeName": node.node_name,
                                 "nodeDisplay": node.node_name,
@@ -471,7 +558,14 @@ async def get_activity_result(request, activityId):
 @openapi.definition(
     summary="创建事件",
     description="创建事件（需要事件创建权限）",
-    body={"event_name": "事件名称", "event_source": "事件来源", "owner": {"role": ["root"], "user": ["test"]}, "event_summary": "事件概要", "event_ingestion_id": "事件接入id", "log_data": "日志数据"},
+    body={
+        "event_name": "事件名称",
+        "event_source": "事件来源",
+        "owner": {"role": ["root"], "user": ["test"]},
+        "event_summary": "事件概要",
+        "event_ingestion_id": "事件接入id",
+        "log_data": "日志数据",
+    },
     response={"code": 0, "data": "创建成功", "message": "创建成功"},
 )
 @requires_permission("event:c")
@@ -505,7 +599,12 @@ async def create_event(request):
 
 
 @event_bp.post("/detail")
-@openapi.definition(summary="获取事件详情", description="获取事件详情（需要事件查询权限）", body={"id": "事件id"}, response={"code": 0, "data": {}, "message": "成功"})
+@openapi.definition(
+    summary="获取事件详情",
+    description="获取事件详情（需要事件查询权限）",
+    body={"id": "事件id"},
+    response={"code": 0, "data": {}, "message": "成功"},
+)
 @requires_permission("event:r")
 async def get_event_detail(request):
     event_id = request.json.get("id")
@@ -630,7 +729,10 @@ async def create_ai_report(event_id):
     if not pv:
         return ""
     download_link = ""
-    params = {"flow_id": pv.id, "flow_input": {"event_id": event_id, "ai_type": "event"}}
+    params = {
+        "flow_id": pv.id,
+        "flow_input": {"event_id": event_id, "ai_type": "event"},
+    }
     run_id = gen_run_id()
     msg = {"run_type": "flow", "run_id": run_id, "run_args": params}
     await aproduce(TASK_TOPIC, msg)
@@ -661,7 +763,10 @@ async def create_ai_report(event_id):
             "result": {
                 "code": 0,
                 "msg": "",
-                "data": {"download_link": "https://192.168.12.254/api/system/down-file/9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx", "file_id": "9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx"},
+                "data": {
+                    "download_link": "https://192.168.12.254/api/system/down-file/9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx",
+                    "file_id": "9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx",
+                },
             },
         },
         "message": "生成成功",

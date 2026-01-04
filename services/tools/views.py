@@ -27,8 +27,19 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_run_id
-from models import Tool, ToolAction, ToolResources, ToolResourcesModel, ActionPermissions, Config, Tag, PlaybookVersion, Runlog, Timed
-from settings import TASK_TOPIC, TZ, TOOLS_DIR, KAFKA_CONFIG
+from models import (
+    Tool,
+    ToolAction,
+    ToolResources,
+    ToolResourcesModel,
+    ActionPermissions,
+    Config,
+    Tag,
+    PlaybookVersion,
+    Runlog,
+    Timed,
+)
+from settings import TASK_TOPIC, TZ, TOOLS_DIR
 
 # 定义 Blueprint
 tools_bp = Blueprint("tools", url_prefix="/tools")
@@ -54,8 +65,50 @@ def check_file_size(file_obj, max_size_kb=5):
 @openapi.definition(
     summary="上传工具接口",
     description="上传ZIP格式的工具包（需要工具创建权限）",
-    body={"multipart/form-data": {"schema": {"type": "object", "properties": {"file": {"type": "string", "format": "binary", "description": "ZIP文件"}}}}},
-    response={"200": {"description": "上传成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"tools": {"type": "array", "items": {"type": "object", "properties": {"tool": {"type": "string"}, "msg": {"type": "string"}}}}}}}}}}}},
+    body={
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "ZIP文件",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "上传成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "tools": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "tool": {"type": "string"},
+                                                "msg": {"type": "string"},
+                                            },
+                                        },
+                                    }
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:c")
 async def upload_and_extract_zip(request):
@@ -95,7 +148,15 @@ async def upload_and_extract_zip(request):
         if total_up_value != 99999 and total_count >= total_up_value:
             return response_ok({"error": "应用数量已达到上限"})
 
-        config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, resp, success_progress, request.app.ctx.cache_client, request.ctx.session["id"])
+        config_data, version, tool_name, msg = await unzip(
+            zip_file.body,
+            creator,
+            single_progress,
+            resp,
+            success_progress,
+            request.app.ctx.cache_client,
+            request.ctx.session["id"],
+        )
         if msg != "success":
             results.append({"tool": zip_filename, "msg": msg})
             data += 1
@@ -121,11 +182,28 @@ async def upload_and_extract_zip(request):
             action_names = {action["action_name"] for action in actions}
 
             if action["func"] not in action_names:
-                await ActionPermissions.create(tool_name=tool_name, action_name=action["func"], action_description=action.get("name") or "", roles=[], users=[])
-            await ActionPermissions.create(tool_name=tool_name, action_name="all", action_description="动作全部动作权限", roles=[], users=[])
+                await ActionPermissions.create(
+                    tool_name=tool_name,
+                    action_name=action["func"],
+                    action_description=action.get("name") or "",
+                    roles=[],
+                    users=[],
+                )
+            await ActionPermissions.create(
+                tool_name=tool_name,
+                action_name="all",
+                action_description="动作全部动作权限",
+                roles=[],
+                users=[],
+            )
         configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False)
         if not configuration:
-            trm = await ToolResourcesModel.create(tool_name=tool_name, resources=config_data.get("resource") or {}, status=1 if (config_data.get("resource") and any(field.get("required") is True for field in config_data.get("resource").values())) else 0, health_check=health_check)
+            trm = await ToolResourcesModel.create(
+                tool_name=tool_name,
+                resources=config_data.get("resource") or {},
+                status=(1 if (config_data.get("resource") and any(field.get("required") is True for field in config_data.get("resource").values())) else 0),
+                health_check=health_check,
+            )
             if health_check == 1:
                 trm.version = version
                 await trm.save()
@@ -160,7 +238,10 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 
             actual_files = {os.path.basename(f.filename) for f in files_info if not f.is_dir()}
             py_files_dict = {os.path.basename(f.filename): f for f in files_info if f.filename.endswith(".py")}
-            config_path = next((f for f in files_info if os.path.basename(f.filename) == "config.json"), None)
+            config_path = next(
+                (f for f in files_info if os.path.basename(f.filename) == "config.json"),
+                None,
+            )
 
             if config_path is None:
                 return None, None, None, "config文件不存在"
@@ -183,11 +264,21 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
                     return config_data, version, tool_name, "文件名包含非法字符"
 
             if "description" not in config_data.keys():
-                return config_data, version, tool_name, "config文件内容错误，缺失description字段"
+                return (
+                    config_data,
+                    version,
+                    tool_name,
+                    "config文件内容错误，缺失description字段",
+                )
 
             hash_func = getattr(hashlib, "md5", None)
             if hash_func is None:
-                return config_data, version, tool_name, "Unsupported hash type. Use 'md5', 'sha1', 'sha256', or 'sha512'."
+                return (
+                    config_data,
+                    version,
+                    tool_name,
+                    "Unsupported hash type. Use 'md5', 'sha1', 'sha256', or 'sha512'.",
+                )
             data += 1
             percent = int(data * single_progress) + success_progress
             await resp.send(f"data: 解压进度：{percent}%\n\n")
@@ -219,7 +310,12 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
             if "actions" in config_data.keys():
                 action_key = "actions"
             else:
-                return config_data, version, tool_name, "config文件内容错误，缺失actions字段"
+                return (
+                    config_data,
+                    version,
+                    tool_name,
+                    "config文件内容错误，缺失actions字段",
+                )
             class_name_list = [action.get("func") for action in config_data.get(action_key, [])]
 
             for action in config_data.get(action_key, []):
@@ -258,7 +354,12 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
                     logo_found = True
                     with zip_ref.open(file_info) as logo_file:
                         if not check_file_size(logo_file):
-                            return config_data, version, tool_name, "logo文件大小超过5KB限制，请压缩后重新上传"
+                            return (
+                                config_data,
+                                version,
+                                tool_name,
+                                "logo文件大小超过5KB限制，请压缩后重新上传",
+                            )
                         logo_data = logo_file.read()
 
             if not logo_found:
@@ -281,9 +382,19 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
             if configuration and configuration["resources"] != config_data.get("resource", {}):
                 for key in config_data.get("resource", {}).keys():
                     if key not in configuration["resources"].keys() and config_data.get("resource", {})[key].get("required") is True:
-                        return config_data, version, tool_name, "工具资源不一致，请新建工具或删除原工具后再次上传"
+                        return (
+                            config_data,
+                            version,
+                            tool_name,
+                            "工具资源不一致，请新建工具或删除原工具后再次上传",
+                        )
                     if key in configuration["resources"].keys() and config_data.get("resource", {})[key].get("data_type") != configuration["resources"][key].get("data_type"):
-                        return config_data, version, tool_name, "工具资源不一致，请新建工具或删除原工具后再次上传"
+                        return (
+                            config_data,
+                            version,
+                            tool_name,
+                            "工具资源不一致，请新建工具或删除原工具后再次上传",
+                        )
             data += 1
             percent = int(data * single_progress) + success_progress
             await resp.send(f"data: 解压进度：{percent}%\n\n")
@@ -302,7 +413,19 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
             logo_path = await utils.upload_to_s3(logo_data, "user", f"{tool_name}.{suffix}", "tools")
 
             maintenance_mode = await redis_client.get(token_id)
-            tool = await Tool.create(name=name, version=version, path=save_path, logo_path=logo_path, description=config_data.get("description"), creator=creator, updater=creator, hash_value=hasher.hexdigest(), internal=config_data.get("internal", False), main=py_file_name, maintain=maintenance_mode if maintenance_mode else False)
+            tool = await Tool.create(
+                name=name,
+                version=version,
+                path=save_path,
+                logo_path=logo_path,
+                description=config_data.get("description"),
+                creator=creator,
+                updater=creator,
+                hash_value=hasher.hexdigest(),
+                internal=config_data.get("internal", False),
+                main=py_file_name,
+                maintain=maintenance_mode if maintenance_mode else False,
+            )
 
             # 将config数据存入redis
             await redis_client.set(name + "_" + version, config_data, 2592000)
@@ -316,7 +439,29 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 @openapi.definition(
     summary="获取所有工具列表",
     description="获取所有工具列表（仅显示每个工具的最新版本，并对工具名称进行模糊搜索），需要工具查看权限",
-    body={"application/json": {"schema": {"type": "object", "properties": {"page": {"type": "integer", "description": "页码（默认1）"}, "size": {"type": "integer", "description": "每页数量（默认10）"}, "key": {"type": "string", "description": "名称和描述的搜索（可选，模糊搜索）"}, "tag": {"type": "string", "description": "标签名称（可选，精确搜索）"}, "logo": {"type": "integer", "description": "是否需要logo数据 0为不需要，1为需要"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "integer", "description": "页码（默认1）"},
+                    "size": {"type": "integer", "description": "每页数量（默认10）"},
+                    "key": {
+                        "type": "string",
+                        "description": "名称和描述的搜索（可选，模糊搜索）",
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "标签名称（可选，精确搜索）",
+                    },
+                    "logo": {
+                        "type": "integer",
+                        "description": "是否需要logo数据 0为不需要，1为需要",
+                    },
+                },
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
@@ -328,7 +473,28 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
                             "code": {"type": "integer"},
                             "data": {
                                 "type": "object",
-                                "properties": {"tools": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "version": {"type": "string"}, "description": {"type": "string"}, "logo": {"type": "string"}, "required": {"type": "integer"}, "health_check": {"type": "integer"}, "health_check_version": {"type": "string"}}}}, "total": {"type": "integer"}, "page": {"type": "integer"}, "size": {"type": "integer"}, "total_pages": {"type": "integer"}},
+                                "properties": {
+                                    "tools": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "version": {"type": "string"},
+                                                "description": {"type": "string"},
+                                                "logo": {"type": "string"},
+                                                "required": {"type": "integer"},
+                                                "health_check": {"type": "integer"},
+                                                "health_check_version": {"type": "string"},
+                                            },
+                                        },
+                                    },
+                                    "total": {"type": "integer"},
+                                    "page": {"type": "integer"},
+                                    "size": {"type": "integer"},
+                                    "total_pages": {"type": "integer"},
+                                },
                             },
                         },
                     }
@@ -387,15 +553,61 @@ async def all_tools(request):
 
     total_count = await Tool.filter(condition).count()
 
-    return response_ok({"tools": latest_tools, "total": total_count, "page": page, "size": size, "total_pages": (total_count + size - 1) // size})
+    return response_ok(
+        {
+            "tools": latest_tools,
+            "total": total_count,
+            "page": page,
+            "size": size,
+            "total_pages": (total_count + size - 1) // size,
+        }
+    )
 
 
 @tools_bp.post("/versions")
 @openapi.definition(
     summary="获取具体工具的所有版本列表",
     description="获取具体工具的所有版本列表（需要工具查看权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "description": "工具名称"}}}}},
-    response={"200": {"description": "获取成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "version": {"type": "string"}, "description": {"type": "string"}, "creator": {"type": "string"}, "updater": {"type": "string"}, "ctime": {"type": "string"}, "utime": {"type": "string"}}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string", "description": "工具名称"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "name": {"type": "string"},
+                                        "version": {"type": "string"},
+                                        "description": {"type": "string"},
+                                        "creator": {"type": "string"},
+                                        "updater": {"type": "string"},
+                                        "ctime": {"type": "string"},
+                                        "utime": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:r")
 async def all_versions(request):
@@ -404,7 +616,15 @@ async def all_versions(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tools = await Tool.filter(name=name, deleted=False, maintain=maintenance_mode if maintenance_mode else False).order_by("-ctime").values()
+    tools = (
+        await Tool.filter(
+            name=name,
+            deleted=False,
+            maintain=maintenance_mode if maintenance_mode else False,
+        )
+        .order_by("-ctime")
+        .values()
+    )
 
     for tool in tools:
         tool.pop("path")
@@ -416,7 +636,18 @@ async def all_versions(request):
 @openapi.definition(
     summary="获取工具当前版本的所有动作列表",
     description="获取工具当前版本的所有动作列表（需要工具查看权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["name", "version"], "properties": {"name": {"type": "string", "description": "工具名称"}, "version": {"type": "string", "description": "工具版本号"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "version"],
+                "properties": {
+                    "name": {"type": "string", "description": "工具名称"},
+                    "version": {"type": "string", "description": "工具版本号"},
+                },
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
@@ -436,9 +667,32 @@ async def all_versions(request):
                                             "properties": {
                                                 "func": {"type": "string"},
                                                 "name": {"type": "string"},
-                                                "input": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "type": {"type": "string"}, "required": {"type": "boolean"}, "description": {"type": "string"}}}},
+                                                "input": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "key": {"type": "string"},
+                                                            "type": {"type": "string"},
+                                                            "required": {"type": "boolean"},
+                                                            "description": {"type": "string"},
+                                                        },
+                                                    },
+                                                },
                                                 "id": {"type": "string"},
-                                                "playbook": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "pv_id": {"type": "string"}, "name": {"type": "string"}, "version": {"type": "string"}, "status": {"type": "integer"}}}},
+                                                "playbook": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "id": {"type": "string"},
+                                                            "pv_id": {"type": "string"},
+                                                            "name": {"type": "string"},
+                                                            "version": {"type": "string"},
+                                                            "status": {"type": "integer"},
+                                                        },
+                                                    },
+                                                },
                                             },
                                         },
                                     }
@@ -470,7 +724,15 @@ async def tool_actions(request):
         if action.get("playbook"):
             for pv_id in action.get("playbook"):
                 pv = await PlaybookVersion.get_or_none(id=pv_id, deleted=False).prefetch_related("playbook")
-                pv_list.append({"id": pv.playbook.id, "pv_id": pv_id, "name": pv.playbook.name, "version": pv.version, "status": pv.status})
+                pv_list.append(
+                    {
+                        "id": pv.playbook.id,
+                        "pv_id": pv_id,
+                        "name": pv.playbook.name,
+                        "version": pv.version,
+                        "status": pv.status,
+                    }
+                )
         action.get("action")["playbook"] = pv_list
         action_list.append(action.get("action"))
 
@@ -481,8 +743,41 @@ async def tool_actions(request):
 @openapi.definition(
     summary="更新工具状态",
     description="更新工具状态（需要工具更新权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["name", "version", "status"], "properties": {"name": {"type": "string", "description": "工具名称"}, "version": {"type": "string", "description": "工具版本号"}, "status": {"type": "integer", "description": "工具状态（1:有 0:无）"}}}}},
-    response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"message": {"type": "string"}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "version", "status"],
+                "properties": {
+                    "name": {"type": "string", "description": "工具名称"},
+                    "version": {"type": "string", "description": "工具版本号"},
+                    "status": {
+                        "type": "integer",
+                        "description": "工具状态（1:有 0:无）",
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {"message": {"type": "string"}},
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:u")
 async def update_tool_status(request):
@@ -506,8 +801,37 @@ async def update_tool_status(request):
 @openapi.definition(
     summary="删除指定版本工具",
     description="删除指定版本工具（需要工具删除权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["name", "version"], "properties": {"name": {"type": "string", "description": "工具名称"}, "version": {"type": "string", "description": "工具版本号"}}}}},
-    response={"200": {"description": "删除成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"message": {"type": "string"}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "version"],
+                "properties": {
+                    "name": {"type": "string", "description": "工具名称"},
+                    "version": {"type": "string", "description": "工具版本号"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {"message": {"type": "string"}},
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:d")
 async def delete_tool(request):
@@ -548,7 +872,38 @@ async def delete_tool(request):
 
 
 @tools_bp.post("/delete/all")
-@openapi.definition(summary="删除工具全部版本", description="删除工具全部版本（需要工具删除权限）", body={"application/json": {"schema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "description": "工具名称"}}}}}, response={"200": {"description": "删除成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"message": {"type": "string"}}}}}}}}})
+@openapi.definition(
+    summary="删除工具全部版本",
+    description="删除工具全部版本（需要工具删除权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string", "description": "工具名称"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {"message": {"type": "string"}},
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 @requires_permission("tool:d")
 async def delete_tool_all(request):
     name = request.json.get("name")
@@ -582,8 +937,40 @@ async def delete_tool_all(request):
 @openapi.definition(
     summary="获取工具的资源模型",
     description="获取工具的资源模型（需要工具查看权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "description": "工具name"}}}}},
-    response={"200": {"description": "获取成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"id": {"type": "string"}, "ctime": {"type": "string"}, "utime": {"type": "string"}, "tool_name": {"type": "string"}, "resources": {"type": "object"}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string", "description": "工具name"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "ctime": {"type": "string"},
+                                    "utime": {"type": "string"},
+                                    "tool_name": {"type": "string"},
+                                    "resources": {"type": "object"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:r")
 async def tool_resource_model(request):
@@ -602,8 +989,42 @@ async def tool_resource_model(request):
 @openapi.definition(
     summary="新增工具资源",
     description="新增工具资源（需要工具创建权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["tool_name", "name", "resources"], "properties": {"tool_name": {"type": "string", "description": "工具名称"}, "name": {"type": "string", "description": "资源名称"}, "engine": {"type": "string", "description": "执行引擎"}, "resources": {"type": "object", "description": "资源模板"}}}}},
-    response={"200": {"description": "新增成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"message": {"type": "string"}, "id": {"type": "string"}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["tool_name", "name", "resources"],
+                "properties": {
+                    "tool_name": {"type": "string", "description": "工具名称"},
+                    "name": {"type": "string", "description": "资源名称"},
+                    "engine": {"type": "string", "description": "执行引擎"},
+                    "resources": {"type": "object", "description": "资源模板"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "新增成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"},
+                                    "id": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:c")
 async def add_tool_resource(request):
@@ -615,11 +1036,24 @@ async def add_tool_resource(request):
         raise CustomError(ErrorCode.ParameterError)
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    existing_resource = await ToolResources.get_or_none(name=name, deleted=False, tool_name=tool_name, internal=maintenance_mode if maintenance_mode else False)
+    existing_resource = await ToolResources.get_or_none(
+        name=name,
+        deleted=False,
+        tool_name=tool_name,
+        internal=maintenance_mode if maintenance_mode else False,
+    )
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
 
-    tr = await ToolResources.create(tool_name=tool_name, name=name, engine=engine, resources=orjson.dumps(resources).decode(), internal=maintenance_mode if maintenance_mode else False, creator=request.ctx.session["account_info"].username, updater=request.ctx.session["account_info"].username)
+    tr = await ToolResources.create(
+        tool_name=tool_name,
+        name=name,
+        engine=engine,
+        resources=orjson.dumps(resources).decode(),
+        internal=maintenance_mode if maintenance_mode else False,
+        creator=request.ctx.session["account_info"].username,
+        updater=request.ctx.session["account_info"].username,
+    )
 
     r = {k: resources[k].get("value") or resources[k].get("default_value", "") for k in resources}
     r[tr.id + "_name"] = name
@@ -632,8 +1066,47 @@ async def add_tool_resource(request):
 @openapi.definition(
     summary="获取工具的资源详情",
     description="获取工具的资源详情（需要工具查看权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "description": "工具名称"}}}}},
-    response={"200": {"description": "获取成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "ctime": {"type": "string"}, "utime": {"type": "string"}, "tool_name": {"type": "string"}, "name": {"type": "string"}, "engine": {"type": "string"}, "resources": {"type": "object"}, "creator": {"type": "string"}, "updater": {"type": "string"}}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string", "description": "工具名称"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "ctime": {"type": "string"},
+                                        "utime": {"type": "string"},
+                                        "tool_name": {"type": "string"},
+                                        "name": {"type": "string"},
+                                        "engine": {"type": "string"},
+                                        "resources": {"type": "object"},
+                                        "creator": {"type": "string"},
+                                        "updater": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:r")
 async def tool_resources_detailed(request):
@@ -642,7 +1115,11 @@ async def tool_resources_detailed(request):
         raise CustomError(ErrorCode.ParameterError)
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    resources = await ToolResources.filter(tool_name=tool_name, deleted=False, internal=maintenance_mode if maintenance_mode else False).all()
+    resources = await ToolResources.filter(
+        tool_name=tool_name,
+        deleted=False,
+        internal=maintenance_mode if maintenance_mode else False,
+    ).all()
     return response_ok([r.json for r in resources])
 
 
@@ -650,8 +1127,39 @@ async def tool_resources_detailed(request):
 @openapi.definition(
     summary="更新工具资源",
     description="更新工具资源（需要工具更新权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["tool_name", "name"], "properties": {"tool_name": {"type": "string", "description": "工具名称"}, "name": {"type": "string", "description": "资源名称"}, "engine": {"type": "string", "description": "资源执行引擎"}, "resources": {"type": "object", "description": "资源模板"}}}}},
-    response={"200": {"description": "更新成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"message": {"type": "string"}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["tool_name", "name"],
+                "properties": {
+                    "tool_name": {"type": "string", "description": "工具名称"},
+                    "name": {"type": "string", "description": "资源名称"},
+                    "engine": {"type": "string", "description": "资源执行引擎"},
+                    "resources": {"type": "object", "description": "资源模板"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {"message": {"type": "string"}},
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:u")
 async def update_tool_resource(request):
@@ -663,7 +1171,12 @@ async def update_tool_resource(request):
         raise CustomError(ErrorCode.ParameterError)
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False, internal=maintenance_mode if maintenance_mode else False)
+    tool_resource = await ToolResources.get_or_none(
+        tool_name=tool_name,
+        name=name,
+        deleted=False,
+        internal=maintenance_mode if maintenance_mode else False,
+    )
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
@@ -690,8 +1203,37 @@ async def update_tool_resource(request):
 @openapi.definition(
     summary="删除工具资源",
     description="删除工具资源（需要工具删除权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["tool_name", "name"], "properties": {"tool_name": {"type": "string", "description": "工具名称"}, "name": {"type": "string", "description": "资源名称"}}}}},
-    response={"200": {"description": "删除成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"message": {"type": "string"}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["tool_name", "name"],
+                "properties": {
+                    "tool_name": {"type": "string", "description": "工具名称"},
+                    "name": {"type": "string", "description": "资源名称"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {"message": {"type": "string"}},
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:d")
 async def delete_tool_resource(request):
@@ -701,7 +1243,12 @@ async def delete_tool_resource(request):
         raise CustomError(ErrorCode.ParameterError)
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    tool_resource = await ToolResources.get_or_none(tool_name=tool_name, name=name, deleted=False, internal=maintenance_mode if maintenance_mode else False)
+    tool_resource = await ToolResources.get_or_none(
+        tool_name=tool_name,
+        name=name,
+        deleted=False,
+        internal=maintenance_mode if maintenance_mode else False,
+    )
 
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
@@ -737,7 +1284,20 @@ async def delete_tool_resource(request):
 
 
 @tools_bp.post("/download")
-@openapi.definition(summary="下载工具 ZIP 文件", description="下载工具 ZIP 文件接口（需要工具查看权限）", body={"application/json": {"schema": {"type": "object", "required": ["tool_id"], "properties": {"tool_id": {"type": "string", "description": "工具ID"}}}}}, response={"200": {"description": "下载成功"}})
+@openapi.definition(
+    summary="下载工具 ZIP 文件",
+    description="下载工具 ZIP 文件接口（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["tool_id"],
+                "properties": {"tool_id": {"type": "string", "description": "工具ID"}},
+            }
+        }
+    },
+    response={"200": {"description": "下载成功"}},
+)
 @requires_permission("tool:r")
 async def download_zip(request):
     tool_id = request.json.get("tool_id")
@@ -766,10 +1326,50 @@ async def download_zip(request):
     description="新增工具动作权限（需要工具更新权限）",
     body={
         "application/json": {
-            "schema": {"type": "object", "required": ["name", "resource_id", "users_id", "roles_id"], "properties": {"name": {"type": "string", "description": "工具名称"}, "resource_id": {"type": "string", "description": "资源id"}, "actions": {"type": "array", "items": {"type": "string"}, "description": "动作名称，默认all"}, "users_id": {"type": "array", "items": {"type": "string"}, "description": "用户ID列表"}, "roles_id": {"type": "array", "items": {"type": "string"}, "description": "角色ID列表"}}}
+            "schema": {
+                "type": "object",
+                "required": ["name", "resource_id", "users_id", "roles_id"],
+                "properties": {
+                    "name": {"type": "string", "description": "工具名称"},
+                    "resource_id": {"type": "string", "description": "资源id"},
+                    "actions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "动作名称，默认all",
+                    },
+                    "users_id": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "用户ID列表",
+                    },
+                    "roles_id": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "角色ID列表",
+                    },
+                },
+            }
         }
     },
-    response={"200": {"description": "新增成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"message": {"type": "string"}}}}}}}}},
+    response={
+        "200": {
+            "description": "新增成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {"message": {"type": "string"}},
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:u")
 async def add_permission(request):
@@ -785,7 +1385,13 @@ async def add_permission(request):
 
     if "all" in actions:
         if not await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False).exists():
-            await ActionPermissions.create(tool_name=name, action_name="all", action_description="动作全部动作权限", roles=[], users=[])
+            await ActionPermissions.create(
+                tool_name=name,
+                action_name="all",
+                action_description="动作全部动作权限",
+                roles=[],
+                users=[],
+            )
         permissions = await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False).all()
     else:
         permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False).all()
@@ -834,8 +1440,56 @@ async def add_permission(request):
 @openapi.definition(
     summary="获取工具全部动作权限",
     description="获取工具全部动作权限（需要工具查看权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["name", "resource_id"], "properties": {"name": {"type": "string", "description": "工具名称"}, "resource_id": {"type": "string", "description": "资源id"}, "actions": {"type": "array", "items": {"type": "string"}, "description": "动作名称，默认all"}}}}},
-    response={"200": {"description": "获取成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "users_id": {"type": "array", "items": {"type": "string"}}, "roles_id": {"type": "array", "items": {"type": "string"}}}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "resource_id"],
+                "properties": {
+                    "name": {"type": "string", "description": "工具名称"},
+                    "resource_id": {"type": "string", "description": "资源id"},
+                    "actions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "动作名称，默认all",
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {"type": "string"},
+                                        "description": {"type": "string"},
+                                        "users_id": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                        },
+                                        "roles_id": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:r")
 async def select_permission_all(request):
@@ -847,7 +1501,13 @@ async def select_permission_all(request):
 
     if "all" in actions:
         if not await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False).exists():
-            await ActionPermissions.create(tool_name=name, action_name="all", action_description="动作全部动作权限", roles=[], users=[])
+            await ActionPermissions.create(
+                tool_name=name,
+                action_name="all",
+                action_description="动作全部动作权限",
+                roles=[],
+                users=[],
+            )
         permissions = await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False).all()
     else:
         permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False).all()
@@ -883,7 +1543,14 @@ async def select_permission_all(request):
         if roles_data and isinstance(roles_data[0], dict):
             role_ids = roles_data[0].get(resource_id, [])
 
-        permission_list.append({"name": permission.action_name, "description": permission.action_description, "users_id": user_ids, "roles_id": role_ids})
+        permission_list.append(
+            {
+                "name": permission.action_name,
+                "description": permission.action_description,
+                "users_id": user_ids,
+                "roles_id": role_ids,
+            }
+        )
 
     return response_ok(permission_list)
 
@@ -892,8 +1559,68 @@ async def select_permission_all(request):
 @openapi.definition(
     summary="多资源权限判断接口",
     description="多资源权限判断接口 (适配列表字典结构)",
-    body={"application/json": {"schema": {"type": "object", "required": ["actions"], "properties": {"actions": {"type": "array", "items": {"type": "object", "required": ["tool_name", "resource_id", "actions"], "properties": {"tool_name": {"type": "string", "description": "工具名称"}, "resource_id": {"type": "string", "description": "资源ID"}, "actions": {"type": "array", "items": {"type": "string"}, "description": "动作列表"}}}, "description": "工具-资源-动作列表"}}}}},
-    response={"200": {"description": "判断成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object", "properties": {"tool_name": {"type": "string"}, "resource_id": {"type": "string"}, "permissions": {"type": "object", "additionalProperties": {"type": "boolean"}}}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["actions"],
+                "properties": {
+                    "actions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["tool_name", "resource_id", "actions"],
+                            "properties": {
+                                "tool_name": {
+                                    "type": "string",
+                                    "description": "工具名称",
+                                },
+                                "resource_id": {
+                                    "type": "string",
+                                    "description": "资源ID",
+                                },
+                                "actions": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "动作列表",
+                                },
+                            },
+                        },
+                        "description": "工具-资源-动作列表",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "判断成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "tool_name": {"type": "string"},
+                                        "resource_id": {"type": "string"},
+                                        "permissions": {
+                                            "type": "object",
+                                            "additionalProperties": {"type": "boolean"},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:r")
 async def judge_permission(request):
@@ -956,7 +1683,13 @@ async def judge_permission(request):
 
             action_results[action] = user_allowed or role_allowed
 
-        result.append({"tool_name": tool_name, "resource_id": resource_id, "permissions": action_results})
+        result.append(
+            {
+                "tool_name": tool_name,
+                "resource_id": resource_id,
+                "permissions": action_results,
+            }
+        )
 
     return response_ok(result)
 
@@ -965,8 +1698,41 @@ async def judge_permission(request):
 @openapi.definition(
     summary="新增工具标签",
     description="新增工具标签（需要工具更新权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["name", "tags"], "properties": {"name": {"type": "string", "description": "工具名称"}, "tags": {"type": "array", "items": {"type": "string"}, "description": "标签名称"}}}}},
-    response={"200": {"description": "新增成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"message": {"type": "string"}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "tags"],
+                "properties": {
+                    "name": {"type": "string", "description": "工具名称"},
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "标签名称",
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "新增成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {"message": {"type": "string"}},
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:u")
 async def add_tag(request):
@@ -992,8 +1758,41 @@ async def add_tag(request):
 @openapi.definition(
     summary="删除工具标签",
     description="删除工具标签（需要工具更新权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["name", "tags"], "properties": {"name": {"type": "string", "description": "工具名称"}, "tags": {"type": "array", "items": {"type": "string"}, "description": "标签名称"}}}}},
-    response={"200": {"description": "删除成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"message": {"type": "string"}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name", "tags"],
+                "properties": {
+                    "name": {"type": "string", "description": "工具名称"},
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "标签名称",
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {"message": {"type": "string"}},
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:u")
 async def delete_tag(request):
@@ -1019,8 +1818,40 @@ async def delete_tag(request):
 @openapi.definition(
     summary="修改工具健康检查配置信息",
     description="修改工具健康检查配置信息（需要工具更新权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["switch"], "properties": {"switch": {"type": "string", "description": "开关 on/off"}, "cron": {"type": "string", "description": "定时任务 格式：分 时 日 月 周，如：0 48 14 ? * 1 表示每周一的14点48分执行一次(多个小时段表示用逗号分隔，周也是如此)"}}}}},
-    response={"200": {"description": "修改成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"message": {"type": "string"}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["switch"],
+                "properties": {
+                    "switch": {"type": "string", "description": "开关 on/off"},
+                    "cron": {
+                        "type": "string",
+                        "description": "定时任务 格式：分 时 日 月 周，如：0 48 14 ? * 1 表示每周一的14点48分执行一次(多个小时段表示用逗号分隔，周也是如此)",
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "修改成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {"message": {"type": "string"}},
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:c")
 async def health_check_config(request):
@@ -1039,20 +1870,84 @@ async def health_check_config(request):
 
 
 @tools_bp.post("/health/check/get")
-@openapi.definition(summary="获取健康检测配置信息", description="获取健康检测配置信息（需要工具查看权限）", response={"200": {"description": "获取成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object", "properties": {"switch": {"type": "string"}, "cron": {"type": "string"}}}}}}}}})
+@openapi.definition(
+    summary="获取健康检测配置信息",
+    description="获取健康检测配置信息（需要工具查看权限）",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "switch": {"type": "string"},
+                                    "cron": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 @requires_permission("tool:r")
 async def health_check_get(request):
     switch = await Config.get_or_none(key="health_check_switch")
     cron = await Config.get_or_none(key="health_check_cron")
-    return response_ok({"switch": switch.value if switch else "off", "cron": cron.value if cron else ""})
+    return response_ok(
+        {
+            "switch": switch.value if switch else "off",
+            "cron": cron.value if cron else "",
+        }
+    )
 
 
 @tools_bp.post("/action/input")
 @openapi.definition(
     summary="获取工具动作输入参数",
     description="获取工具动作输入参数（需要工具查看权限）",
-    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "integer", "description": "动作ID"}}}}},
-    response={"200": {"description": "获取成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "type": {"type": "string"}, "required": {"type": "boolean"}, "description": {"type": "string"}}}}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "integer", "description": "动作ID"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {"type": "string"},
+                                        "type": {"type": "string"},
+                                        "required": {"type": "boolean"},
+                                        "description": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:r")
 async def tool_action_input(request):
@@ -1135,7 +2030,35 @@ async def tool_action_playbook_delete(data):
 
 
 @tools_bp.post("/tag/new")
-@openapi.definition(summary="新建标签", description="新建标签（需要工具新增权限）", body={"application/json": {"schema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "description": "标签名称"}}}}}, response={"200": {"description": "新建成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}})
+@openapi.definition(
+    summary="新建标签",
+    description="新建标签（需要工具新增权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string", "description": "标签名称"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "新建成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 @requires_permission("tool:c")
 async def new_tag(request):
     name = request.json.get("name", "").strip()
@@ -1151,7 +2074,26 @@ async def new_tag(request):
 
 
 @tools_bp.post("/tag/list")
-@openapi.definition(summary="获取标签列表", description="获取标签列表（需要工具查看权限）", response={"200": {"description": "获取成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "string"}}}}}}}})
+@openapi.definition(
+    summary="获取标签列表",
+    description="获取标签列表（需要工具查看权限）",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "array", "items": {"type": "string"}},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 @requires_permission("tool:r")
 async def tag_list(request):
     tags = await Tag.filter(type=1, deleted=False).all()
@@ -1160,7 +2102,35 @@ async def tag_list(request):
 
 
 @tools_bp.post("/tag/remove")
-@openapi.definition(summary="删除标签", description="删除标签（需要工具删除权限）", body={"application/json": {"schema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string", "description": "标签名称"}}}}}, response={"200": {"description": "删除成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}})
+@openapi.definition(
+    summary="删除标签",
+    description="删除标签（需要工具删除权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {"name": {"type": "string", "description": "标签名称"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 @requires_permission("tool:d")
 async def remove_tag(request):
     name = request.json.get("name")
@@ -1174,7 +2144,26 @@ async def remove_tag(request):
 
 
 @tools_bp.post("/engine/list")
-@openapi.definition(summary="获取执行引擎列表", description="获取执行引擎列表（需要工具查看权限）", response={"200": {"description": "获取成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "string"}}}}}}}})
+@openapi.definition(
+    summary="获取执行引擎列表",
+    description="获取执行引擎列表（需要工具查看权限）",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "array", "items": {"type": "string"}},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 @requires_permission("tool:r")
 async def engine_list(request):
     c = caches.get("redis_action").client
@@ -1197,18 +2186,42 @@ async def engine_list(request):
                     "action_input": {
                         "type": "object",
                         "properties": {
-                            "type": {"type": "string", "description": "类型 flow/action"},
-                            "app_name": {"type": "string", "description": "应用名称，英文标识"},
+                            "type": {
+                                "type": "string",
+                                "description": "类型 flow/action",
+                            },
+                            "app_name": {
+                                "type": "string",
+                                "description": "应用名称，英文标识",
+                            },
                             "name": {"type": "string", "description": "应用中文名称"},
                             "app_ver": {"type": "string", "description": "应用版本号"},
                             "main": {"type": "string", "description": "主程序文件名"},
-                            "action_input": {"type": "object", "description": "动作输入参数"},
+                            "action_input": {
+                                "type": "object",
+                                "description": "动作输入参数",
+                            },
                             "node_name": {"type": "string", "description": "节点名称"},
-                            "action": {"type": "string", "description": "动作名称 英文标识"},
-                            "action_name": {"type": "string", "description": "动作名称 中文名称"},
-                            "retry_times": {"type": "integer", "description": "重试次数"},
-                            "timeout": {"type": "integer", "description": "超时时间,单位秒"},
-                            "resource": {"type": "string", "description": "进行资源检查的id"},
+                            "action": {
+                                "type": "string",
+                                "description": "动作名称 英文标识",
+                            },
+                            "action_name": {
+                                "type": "string",
+                                "description": "动作名称 中文名称",
+                            },
+                            "retry_times": {
+                                "type": "integer",
+                                "description": "重试次数",
+                            },
+                            "timeout": {
+                                "type": "integer",
+                                "description": "超时时间,单位秒",
+                            },
+                            "resource": {
+                                "type": "string",
+                                "description": "进行资源检查的id",
+                            },
                         },
                     }
                 },
@@ -1251,7 +2264,20 @@ async def health_check(request):
 
 
 @tools_bp.post("/debug")
-@openapi.definition(summary="debug工具", description="debug工具 用于工具开发时调试使用（需要工具查看权限）", body={"application/json": {"schema": {"type": "object", "required": ["data"], "properties": {"data": {"type": "string", "description": "python脚本代码"}}}}}, response={"200": {"description": "调试执行成功"}})
+@openapi.definition(
+    summary="debug工具",
+    description="debug工具 用于工具开发时调试使用（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["data"],
+                "properties": {"data": {"type": "string", "description": "python脚本代码"}},
+            }
+        }
+    },
+    response={"200": {"description": "调试执行成功"}},
+)
 @requires_permission("tool:r")
 async def tool_debug(request):
     resp = await request.respond(
@@ -1274,7 +2300,20 @@ async def tool_debug(request):
         raise response_ok("工具开发运行资源不存在，请联系管理员处理")
 
     user = request.ctx.session["account_info"]
-    params = {"resource": resource.id, "node_name": tool.description, "action": "run_python_script", "action_name": "执行python脚本", "app_name": "lion_mgmt", "name": tool.description, "app_ver": tool.version, "main": tool.main, "action_input": {"data": data}, "retry_times": 0, "timeout": 300, "executor": user.id}
+    params = {
+        "resource": resource.id,
+        "node_name": tool.description,
+        "action": "run_python_script",
+        "action_name": "执行python脚本",
+        "app_name": "lion_mgmt",
+        "name": tool.description,
+        "app_ver": tool.version,
+        "main": tool.main,
+        "action_input": {"data": data},
+        "retry_times": 0,
+        "timeout": 300,
+        "executor": user.id,
+    }
     run_id = gen_run_id()
     msg = {"run_type": "action", "run_id": run_id, "run_args": params}
     await aproduce(TASK_TOPIC, msg)
@@ -1304,8 +2343,35 @@ async def tool_debug(request):
 @openapi.definition(
     summary="添加config配置",
     description="添加config配置",
-    body={"application/json": {"schema": {"type": "object", "required": ["key", "value", "module"], "properties": {"key": {"type": "string", "description": "键"}, "value": {"type": "string", "description": "值"}, "module": {"type": "string", "description": "所属模块"}}}}},
-    response={"200": {"description": "添加成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["key", "value", "module"],
+                "properties": {
+                    "key": {"type": "string", "description": "键"},
+                    "value": {"type": "string", "description": "值"},
+                    "module": {"type": "string", "description": "所属模块"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "添加成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("tool:u")
 async def add_config(request):
@@ -1315,7 +2381,26 @@ async def add_config(request):
 
 
 @tools_bp.post("/health-check-result")
-@openapi.definition(summary="获取健康检查结果", description="获取健康检查结果（需要工具更新权限）", response={"200": {"description": "获取成功", "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object"}}}}}}})
+@openapi.definition(
+    summary="获取健康检查结果",
+    description="获取健康检查结果（需要工具更新权限）",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "object"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 @requires_permission("tool:u")
 async def get_health_check_result(request):
     result = await Config.get_or_none(key="health_check", module="tools")

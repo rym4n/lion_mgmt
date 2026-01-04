@@ -27,9 +27,19 @@ _all__ = ["logs_bp"]
                 "properties": {
                     "query": {"type": "string", "description": "LogsQL查询语句"},
                     "project_id": {"type": "integer", "description": "项目ID"},
-                    "limit": {"type": "integer", "description": "返回结果数量限制", "default": 1000},
-                    "start": {"type": "string", "description": "查询开始时间(RFC3339格式或Unix时间戳)"},
-                    "end": {"type": "string", "description": "查询结束时间(RFC3339格式或Unix时间戳)"},
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回结果数量限制",
+                        "default": 1000,
+                    },
+                    "start": {
+                        "type": "string",
+                        "description": "查询开始时间(RFC3339格式或Unix时间戳)",
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "查询结束时间(RFC3339格式或Unix时间戳)",
+                    },
                 },
             }
         }
@@ -37,7 +47,20 @@ _all__ = ["logs_bp"]
     response={
         "200": {
             "description": "查询成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "object", "description": "VictoriaLogs查询结果"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {
+                                "type": "object",
+                                "description": "VictoriaLogs查询结果",
+                            },
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -75,8 +98,14 @@ async def get_logs_by_sql(request):
                                 "items": {
                                     "type": "object",
                                     "properties": {
-                                        "id": {"type": "integer", "description": "项目ID"},
-                                        "name": {"type": "string", "description": "项目名称"},
+                                        "id": {
+                                            "type": "integer",
+                                            "description": "项目ID",
+                                        },
+                                        "name": {
+                                            "type": "string",
+                                            "description": "项目名称",
+                                        },
                                     },
                                 },
                                 "description": "项目列表",
@@ -94,7 +123,13 @@ async def get_index_list(request):
         # 获取所有已配置的项目
         projects = await EventsIngestion.filter(project_id__isnull=False).values("project_id", "event_ingestion_name")
 
-        result = [{"id": p["project_id"], "name": p["event_ingestion_name"] or f"Project {p['project_id']}"} for p in projects]
+        result = [
+            {
+                "id": p["project_id"],
+                "name": p["event_ingestion_name"] or f"Project {p['project_id']}",
+            }
+            for p in projects
+        ]
         return response_ok(result)
     except Exception as e:
         logger.error(f"Get project list error: {e}")
@@ -105,11 +140,32 @@ async def get_index_list(request):
 @openapi.definition(
     summary="获取日志字段列表",
     description="获取指定项目的日志字段列表",
-    body={"application/json": {"schema": {"type": "object", "required": ["project_id"], "properties": {"project_id": {"type": "integer", "description": "项目ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["project_id"],
+                "properties": {"project_id": {"type": "integer", "description": "项目ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "object", "description": "字段信息，键为字段名，值为字段类型"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {
+                                "type": "object",
+                                "description": "字段信息，键为字段名，值为字段类型",
+                            },
+                        },
+                    }
+                }
+            },
         }
     },
 )

@@ -102,7 +102,11 @@ async def gen_vector_config(output_path, sources, topic, project_id):
                 "healthcheck": {
                     "enabled": False,
                 },
-                "query": {"_msg_field": "message", "_time_field": "@timestamp", "_stream_fields": "host,source_type"},
+                "query": {
+                    "_msg_field": "message",
+                    "_time_field": "@timestamp",
+                    "_stream_fields": "host,source_type",
+                },
                 "request": {"headers": {"AccountID": "0", "ProjectID": str(project_id)}},
             }
         },
@@ -140,19 +144,60 @@ async def gen_vector_config(output_path, sources, topic, project_id):
                 "properties": {
                     "event_name": {"type": "string", "description": "事件名称"},
                     "event_describe": {"type": "string", "description": "事件描述"},
-                    "event_source_type": {"type": "string", "description": "事件来源类型 目前支持kafka、syslog"},
-                    "syslog_port": {"type": "integer", "description": "日志端口 事件来源类型为syslog时才传，默认为None"},
-                    "max_length": {"type": "integer", "description": "单条消息的最大长度，单位为KB，默认100KB"},
-                    "event_source_address": {"type": "array", "items": {"type": "string"}, "description": "事件来源地址 事件来源类型为kafka时才传 默认为None"},
-                    "communication_type": {"type": "string", "description": "通信类型 事件来源类型为syslog时才传，默认为None tcp/udp"},
-                    "kafka_group_id": {"type": "string", "description": "kafka消费组ID 事件来源类型为kafka时才传，默认为None"},
-                    "kafka_topic": {"type": "array", "items": {"type": "string"}, "description": "kafka主题 事件来源类型为kafka时才传，默认为None"},
-                    "sasl_mechanism": {"type": "string", "description": "sasl机制 事件来源类型为kafka时才传，默认为None"},
-                    "sasl_username": {"type": "string", "description": "sasl用户名 事件来源类型为kafka时才传，默认为None"},
-                    "sasl_password": {"type": "string", "description": "sasl密码 事件来源类型为kafka时才传，默认为None"},
-                    "enabled_status": {"type": "integer", "description": "上游接入 启用为 1 ，禁用为 0 默认启用"},
-                    "linked_execution": {"type": "integer", "description": "联动执行 启用为 1 ，禁用为 0 默认禁用"},
-                    "retention_days": {"type": "integer", "description": "日志数据的保留天数, 默认为 7"},
+                    "event_source_type": {
+                        "type": "string",
+                        "description": "事件来源类型 目前支持kafka、syslog",
+                    },
+                    "syslog_port": {
+                        "type": "integer",
+                        "description": "日志端口 事件来源类型为syslog时才传，默认为None",
+                    },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "单条消息的最大长度，单位为KB，默认100KB",
+                    },
+                    "event_source_address": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "事件来源地址 事件来源类型为kafka时才传 默认为None",
+                    },
+                    "communication_type": {
+                        "type": "string",
+                        "description": "通信类型 事件来源类型为syslog时才传，默认为None tcp/udp",
+                    },
+                    "kafka_group_id": {
+                        "type": "string",
+                        "description": "kafka消费组ID 事件来源类型为kafka时才传，默认为None",
+                    },
+                    "kafka_topic": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "kafka主题 事件来源类型为kafka时才传，默认为None",
+                    },
+                    "sasl_mechanism": {
+                        "type": "string",
+                        "description": "sasl机制 事件来源类型为kafka时才传，默认为None",
+                    },
+                    "sasl_username": {
+                        "type": "string",
+                        "description": "sasl用户名 事件来源类型为kafka时才传，默认为None",
+                    },
+                    "sasl_password": {
+                        "type": "string",
+                        "description": "sasl密码 事件来源类型为kafka时才传，默认为None",
+                    },
+                    "enabled_status": {
+                        "type": "integer",
+                        "description": "上游接入 启用为 1 ，禁用为 0 默认启用",
+                    },
+                    "linked_execution": {
+                        "type": "integer",
+                        "description": "联动执行 启用为 1 ，禁用为 0 默认禁用",
+                    },
+                    "retention_days": {
+                        "type": "integer",
+                        "description": "日志数据的保留天数, 默认为 7",
+                    },
                 },
             }
         }
@@ -160,7 +205,18 @@ async def gen_vector_config(output_path, sources, topic, project_id):
     response={
         "200": {
             "description": "创建成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "object"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "object"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -203,7 +259,14 @@ async def event_ingestion(request):
     vector_config = None
 
     if event_source_type == "syslog":
-        sources = {vector_name: {"type": "socket", "address": f"0.0.0.0:{syslog_port}", "max_length": max_length * 1024, "mode": communication_type}}
+        sources = {
+            vector_name: {
+                "type": "socket",
+                "address": f"0.0.0.0:{syslog_port}",
+                "max_length": max_length * 1024,
+                "mode": communication_type,
+            }
+        }
         vector_config = await gen_vector_config(output_path, sources, vector_name, project_id)
     elif event_source_type == "kafka":
         if sasl_mechanism:
@@ -213,11 +276,23 @@ async def event_ingestion(request):
                     "bootstrap_servers": ",".join(event_source_address),
                     "group_id": kafka_group_id,
                     "topics": kafka_topic,
-                    "sasl": {"enabled": True, "mechanism": sasl_mechanism, "username": sasl_username, "password": urllib.parse.quote(sasl_password)},
+                    "sasl": {
+                        "enabled": True,
+                        "mechanism": sasl_mechanism,
+                        "username": sasl_username,
+                        "password": urllib.parse.quote(sasl_password),
+                    },
                 }
             }
         else:
-            sources = {vector_name: {"type": "kafka", "bootstrap_servers": ",".join(event_source_address), "group_id": kafka_group_id, "topics": kafka_topic}}
+            sources = {
+                vector_name: {
+                    "type": "kafka",
+                    "bootstrap_servers": ",".join(event_source_address),
+                    "group_id": kafka_group_id,
+                    "topics": kafka_topic,
+                }
+            }
         vector_config = await gen_vector_config(output_path, sources, vector_name, project_id)
 
     if vector_config is None:
@@ -272,7 +347,10 @@ async def event_ingestion(request):
                             "data": {
                                 "type": "object",
                                 "properties": {
-                                    "events": {"type": "array", "items": {"type": "object"}},
+                                    "events": {
+                                        "type": "array",
+                                        "items": {"type": "object"},
+                                    },
                                     "total": {"type": "integer"},
                                     "page": {"type": "integer"},
                                     "size": {"type": "integer"},
@@ -301,18 +379,45 @@ async def get_all_events_ingestion(request):
     events = await EventsIngestion.filter(**filters).order_by("-ctime").offset(offset).select_related("creator", "updator").limit(limit).all()
     total = await EventsIngestion.filter(**filters).count()
 
-    return response_ok({"events": [event.json for event in events], "total": total, "page": page, "size": size, "total_pages": (total + size - 1) // size})
+    return response_ok(
+        {
+            "events": [event.json for event in events],
+            "total": total,
+            "page": page,
+            "size": size,
+            "total_pages": (total + size - 1) // size,
+        }
+    )
 
 
 @event_ingestion_bp.post("/delete")
 @openapi.definition(
     summary="删除事件接入",
     description="删除事件接入(需要事件删除权限)",
-    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "事件ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "事件ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "删除成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -355,23 +460,76 @@ async def delete_event_ingestion(request):
                 "required": ["id"],
                 "properties": {
                     "id": {"type": "string", "description": "事件ID"},
-                    "event_describe": {"type": "string", "description": "事件描述 非必填"},
-                    "event_source_address": {"type": "array", "items": {"type": "string"}, "description": "事件来源地址 事件来源类型为kafka时才传 非必填"},
-                    "max_length": {"type": "integer", "description": "单条消息的最大长度，单位为KB，默认100KB"},
-                    "syslog_port": {"type": "integer", "description": "日志端口 端口范围500-2000 事件来源类型为syslog时才传，默认为None 非必填"},
-                    "communication_type": {"type": "string", "description": "通信类型 事件来源类型为syslog时才传，默认为None 非必填"},
-                    "kafka_group_id": {"type": "string", "description": "kafka消费组ID 事件来源类型为kafka时才传，默认为None 非必填"},
-                    "kafka_topic": {"type": "array", "items": {"type": "string"}, "description": "kafka主题 事件来源类型为kafka时才传，默认为None 非必填"},
-                    "transforms_type": {"type": "string", "description": "转换类型 目前支持Grok、CEF、key-value、JSON、Delimiter(分割符) 非必填"},
-                    "transforms_config": {"type": "string", "description": "转换配置 只有Grok时需要填写，默认情况下为None 非必填"},
-                    "key_value_delimiter": {"type": "string", "description": "键值对分隔符 只有key-value时需要填写，默认情况下为None 非必填"},
-                    "key_delimiter_value": {"type": "string", "description": "键值分隔符 只有key-value时需要填写，默认情况下为None 非必填"},
-                    "sasl_mechanism": {"type": "string", "description": "sasl机制 事件来源类型为kafka时才传，默认为None 非必填"},
-                    "sasl_username": {"type": "string", "description": "sasl用户名 事件来源类型为kafka时才传，默认为None 非必填"},
-                    "sasl_password": {"type": "string", "description": "sasl密码 事件来源类型为kafka时才传，默认为None 非必填"},
-                    "event_source_type": {"type": "string", "description": "事件来源类型 目前支持kafka、syslog"},
-                    "enabled_status": {"type": "integer", "description": "上游接入 启用为 1 ，禁用为 0 非必填"},
-                    "retention_days": {"type": "integer", "description": "日志数据的保留天数, 默认为 7"},
+                    "event_describe": {
+                        "type": "string",
+                        "description": "事件描述 非必填",
+                    },
+                    "event_source_address": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "事件来源地址 事件来源类型为kafka时才传 非必填",
+                    },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "单条消息的最大长度，单位为KB，默认100KB",
+                    },
+                    "syslog_port": {
+                        "type": "integer",
+                        "description": "日志端口 端口范围500-2000 事件来源类型为syslog时才传，默认为None 非必填",
+                    },
+                    "communication_type": {
+                        "type": "string",
+                        "description": "通信类型 事件来源类型为syslog时才传，默认为None 非必填",
+                    },
+                    "kafka_group_id": {
+                        "type": "string",
+                        "description": "kafka消费组ID 事件来源类型为kafka时才传，默认为None 非必填",
+                    },
+                    "kafka_topic": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "kafka主题 事件来源类型为kafka时才传，默认为None 非必填",
+                    },
+                    "transforms_type": {
+                        "type": "string",
+                        "description": "转换类型 目前支持Grok、CEF、key-value、JSON、Delimiter(分割符) 非必填",
+                    },
+                    "transforms_config": {
+                        "type": "string",
+                        "description": "转换配置 只有Grok时需要填写，默认情况下为None 非必填",
+                    },
+                    "key_value_delimiter": {
+                        "type": "string",
+                        "description": "键值对分隔符 只有key-value时需要填写，默认情况下为None 非必填",
+                    },
+                    "key_delimiter_value": {
+                        "type": "string",
+                        "description": "键值分隔符 只有key-value时需要填写，默认情况下为None 非必填",
+                    },
+                    "sasl_mechanism": {
+                        "type": "string",
+                        "description": "sasl机制 事件来源类型为kafka时才传，默认为None 非必填",
+                    },
+                    "sasl_username": {
+                        "type": "string",
+                        "description": "sasl用户名 事件来源类型为kafka时才传，默认为None 非必填",
+                    },
+                    "sasl_password": {
+                        "type": "string",
+                        "description": "sasl密码 事件来源类型为kafka时才传，默认为None 非必填",
+                    },
+                    "event_source_type": {
+                        "type": "string",
+                        "description": "事件来源类型 目前支持kafka、syslog",
+                    },
+                    "enabled_status": {
+                        "type": "integer",
+                        "description": "上游接入 启用为 1 ，禁用为 0 非必填",
+                    },
+                    "retention_days": {
+                        "type": "integer",
+                        "description": "日志数据的保留天数, 默认为 7",
+                    },
                 },
             }
         }
@@ -379,7 +537,18 @@ async def delete_event_ingestion(request):
     response={
         "200": {
             "description": "更新成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -446,7 +615,11 @@ async def update_event_ingestion(request):
         config = await Config.get_or_none(key=transforms_type, module="transforms")
         if not config:
             raise CustomError(ErrorCode.TypeNotSupportedError)
-        args = {"transformsconfig": transformsconfig, "key_value_delimiter": key_value_delimiter, "key_delimiter_value": key_delimiter_value}
+        args = {
+            "transformsconfig": transformsconfig,
+            "key_value_delimiter": key_value_delimiter,
+            "key_delimiter_value": key_delimiter_value,
+        }
         value = config.value
         if "{" in value and transforms_type in ["kv", "grok"]:
             value = value.format(**args)
@@ -474,7 +647,11 @@ async def update_event_ingestion(request):
         max_project_id = await EventsIngestion.all().annotate(max_pid=Max("project_id")).values_list("max_pid", flat=True)
         project_id = max_project_id[0] + 1 if max_project_id and max_project_id[0] else 1
 
-    data["sinks"][f"{event.vector_name}_sample_sinks"]["query"] = {"_msg_field": "message", "_time_field": "@timestamp", "_stream_fields": "host,source_type"}
+    data["sinks"][f"{event.vector_name}_sample_sinks"]["query"] = {
+        "_msg_field": "message",
+        "_time_field": "@timestamp",
+        "_stream_fields": "host,source_type",
+    }
     data["sinks"][f"{event.vector_name}_sample_sinks"]["request"] = {"headers": {"AccountID": "0", "ProjectID": str(project_id)}}
     data["sinks"][f"{event.vector_name}_sample_sinks"]["api_version"] = "v8"
     data["sinks"][f"{event.vector_name}_sample_sinks"]["compression"] = "gzip"
@@ -516,7 +693,15 @@ async def update_event_ingestion(request):
 @openapi.definition(
     summary="获取事件接入详情",
     description="获取事件接入详情(需要事件查看权限)",
-    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "事件ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "事件ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
@@ -526,7 +711,13 @@ async def update_event_ingestion(request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer"},
-                            "data": {"type": "object", "properties": {"event": {"type": "object"}, "sources": {"type": "object"}}},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "event": {"type": "object"},
+                                    "sources": {"type": "object"},
+                                },
+                            },
                             "message": {"type": "string"},
                         },
                     }
@@ -555,11 +746,33 @@ async def get_event_ingestion_detail(request):
 @openapi.definition(
     summary="获取事件接入处理后的日志样例",
     description="获取事件接入处理后的日志样例(需要事件查看权限)",
-    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "事件id"}, "size": {"type": "integer", "description": "每页条数，默认10"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "事件id"},
+                    "size": {"type": "integer", "description": "每页条数，默认10"},
+                },
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "array", "items": {"type": "object"}},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -603,7 +816,10 @@ async def get_event_ingestion_kafka_sample(request):
                 "type": "object",
                 "required": ["event_ingestion_id", "binding_data"],
                 "properties": {
-                    "event_ingestion_id": {"type": "string", "description": "事件接入ID"},
+                    "event_ingestion_id": {
+                        "type": "string",
+                        "description": "事件接入ID",
+                    },
                     "binding_data": {
                         "type": "array",
                         "items": {
@@ -613,16 +829,41 @@ async def get_event_ingestion_kafka_sample(request):
                                     "type": "array",
                                     "items": {
                                         "type": "object",
-                                        "properties": {"type": {"type": "string"}, "name": {"type": "string"}, "value": {"type": "string"}, "connect_type": {"type": "string"}},
+                                        "properties": {
+                                            "type": {"type": "string"},
+                                            "name": {"type": "string"},
+                                            "value": {"type": "string"},
+                                            "connect_type": {"type": "string"},
+                                        },
                                     },
                                     "description": "条件",
                                 },
-                                "linked_execution": {"type": "integer", "description": "联动执行 启用为 1 ，禁用为 0 非必填"},
-                                "script_ids": {"type": "array", "items": {"type": "string"}, "description": "剧本ID 非必填，选择联动执行时必填"},
-                                "event_name": {"type": "string", "description": "事件名称 用户选择的事件名称，传default"},
-                                "numbers": {"type": "integer", "description": "去重条数 非必填，选择去重时才填写 默认5000, 最大10000"},
-                                "fields": {"type": "array", "items": {"type": "string"}, "description": "字段 非必填，选择去重时才填写"},
-                                "concurrency": {"type": "integer", "description": "并发数量，默认是1，最大是4"},
+                                "linked_execution": {
+                                    "type": "integer",
+                                    "description": "联动执行 启用为 1 ，禁用为 0 非必填",
+                                },
+                                "script_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "剧本ID 非必填，选择联动执行时必填",
+                                },
+                                "event_name": {
+                                    "type": "string",
+                                    "description": "事件名称 用户选择的事件名称，传default",
+                                },
+                                "numbers": {
+                                    "type": "integer",
+                                    "description": "去重条数 非必填，选择去重时才填写 默认5000, 最大10000",
+                                },
+                                "fields": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "字段 非必填，选择去重时才填写",
+                                },
+                                "concurrency": {
+                                    "type": "integer",
+                                    "description": "并发数量，默认是1，最大是4",
+                                },
                             },
                         },
                     },
@@ -633,7 +874,18 @@ async def get_event_ingestion_kafka_sample(request):
     response={
         "200": {
             "description": "绑定成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -673,7 +925,7 @@ async def binding_event_ingestion_script(request):
             data.setdefault("transforms", {})[f"{topic}_dedupe_transforms"] = {
                 "type": "dedupe",
                 # 如果之前配置了转换配置则用转换后的配置，否则用原始配置
-                "inputs": [f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name],
+                "inputs": ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]),
                 "cache": {"num_events": int(request_data["numbers"])},
                 "fields": {"match": request_data.get("fields")},
             }
@@ -705,9 +957,21 @@ del(.datetime_str)
 """,
         }
 
-        data["sinks"][f"{topic}_sinks"] = {"inputs": [f"{topic}_event_transforms"], "type": "kafka", "bootstrap_servers": KAFKA_SERVERS, "topic": topic, "encoding": {"codec": "json"}}
+        data["sinks"][f"{topic}_sinks"] = {
+            "inputs": [f"{topic}_event_transforms"],
+            "type": "kafka",
+            "bootstrap_servers": KAFKA_SERVERS,
+            "topic": topic,
+            "encoding": {"codec": "json"},
+        }
         endpoint = f'postgresql://{os.environ.get("RY_DB_USER")}:{urllib.parse.quote(os.environ.get("RY_DB_PASS"))}@{os.environ.get("RY_DB_HOST")}:{os.environ.get("RY_DB_PORT", 5432)}/{os.environ.get("RY_DB_NAME")}'
-        data["sinks"][f"{topic}_event_sinks"] = {"inputs": [f"{topic}_event_transforms"], "type": "postgres", "endpoint": endpoint, "table": "events", "pool_size": 20}
+        data["sinks"][f"{topic}_event_sinks"] = {
+            "inputs": [f"{topic}_event_transforms"],
+            "type": "postgres",
+            "endpoint": endpoint,
+            "table": "events",
+            "pool_size": 20,
+        }
         # "buffer": {
         #     "type": "memory",
         #     "max_events": 5000,
@@ -768,14 +1032,35 @@ del(.datetime_str)
             "schema": {
                 "type": "object",
                 "required": ["event_ingestion_id", "script_ids"],
-                "properties": {"event_ingestion_id": {"type": "string", "description": "事件接入ID"}, "script_ids": {"type": "array", "items": {"type": "string"}, "description": "剧本ID"}},
+                "properties": {
+                    "event_ingestion_id": {
+                        "type": "string",
+                        "description": "事件接入ID",
+                    },
+                    "script_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "剧本ID",
+                    },
+                },
             }
         }
     },
     response={
         "200": {
             "description": "解绑成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -841,8 +1126,27 @@ async def unbundled_event_ingestion_script(request):
 @openapi.definition(
     summary="导出事件接入",
     description="导出事件接入(需要事件查看权限)",
-    body={"application/json": {"schema": {"type": "object", "required": ["ids"], "properties": {"ids": {"type": "array", "items": {"type": "string"}, "description": "事件接入ID"}}}}},
-    response={"200": {"description": "导出成功", "content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["ids"],
+                "properties": {
+                    "ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "事件接入ID",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导出成功",
+            "content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}},
+        }
+    },
 )
 @requires_permission("ingestion:r")
 async def export_event_ingestion_script(request):
@@ -869,18 +1173,48 @@ async def export_event_ingestion_script(request):
             zipf.writestr(filename, orjson.dumps(event_data))
 
     buffer.seek(0)
-    return response.raw(buffer.read(), headers={"Content-Type": "application/zip", "Content-Disposition": f"attachment; filename=event_configs_{str(int(time.time()))}.zip"})
+    return response.raw(
+        buffer.read(),
+        headers={
+            "Content-Type": "application/zip",
+            "Content-Disposition": f"attachment; filename=event_configs_{str(int(time.time()))}.zip",
+        },
+    )
 
 
 @event_ingestion_bp.post("/import")
 @openapi.definition(
     summary="导入事件接入配置",
     description="导入事件接入配置",
-    body={"multipart/form-data": {"schema": {"type": "object", "properties": {"files": {"type": "string", "format": "binary", "description": "上传的文件"}}}}},
+    body={
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "files": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "上传的文件",
+                    }
+                },
+            }
+        }
+    },
     response={
         "200": {
             "description": "导入成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "array", "items": {"type": "object"}},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -899,7 +1233,10 @@ async def import_event_ingestion_script(request):
                     continue
                 vector_config = orjson.loads(zf.read(name))
 
-                if await EventsIngestion.filter(event_ingestion_name=vector_config.get("event_ingestion_name"), deleted=False).exists():
+                if await EventsIngestion.filter(
+                    event_ingestion_name=vector_config.get("event_ingestion_name"),
+                    deleted=False,
+                ).exists():
                     file_results.append({f"{vector_config['event_ingestion_name']}": "已存在相同名称的事件接入"})
                     continue
 
@@ -991,8 +1328,14 @@ async def import_event_ingestion_script(request):
                     "id": {"type": "string", "description": "事件接入id"},
                     "transforms_type": {"type": "string", "description": "转换类型"},
                     "transforms_config": {"type": "string", "description": "转换配置"},
-                    "key_value_delimiter": {"type": "string", "description": "键值对分隔符"},
-                    "key_delimiter_value": {"type": "string", "description": "键值分隔符"},
+                    "key_value_delimiter": {
+                        "type": "string",
+                        "description": "键值对分隔符",
+                    },
+                    "key_delimiter_value": {
+                        "type": "string",
+                        "description": "键值分隔符",
+                    },
                 },
             }
         }
@@ -1000,7 +1343,18 @@ async def import_event_ingestion_script(request):
     response={
         "200": {
             "description": "解析成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "string"}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -1012,7 +1366,16 @@ async def parse_log(request):
     key_value_delimiter = params.get("key_value_delimiter")
     key_delimiter_value = params.get("key_delimiter_value")
 
-    tmp_data = {"sources": {"tmp": {"type": "stdin"}}, "sinks": {"tmp_sink": {"encoding": {"codec": "json"}, "type": "console", "inputs": ["tmp_transforms"]}}}
+    tmp_data = {
+        "sources": {"tmp": {"type": "stdin"}},
+        "sinks": {
+            "tmp_sink": {
+                "encoding": {"codec": "json"},
+                "type": "console",
+                "inputs": ["tmp_transforms"],
+            }
+        },
+    }
 
     tmp_data.setdefault("transforms", {}).setdefault("tmp_transforms", {})["type"] = "remap"
     tmp_data["transforms"]["tmp_transforms"]["inputs"] = ["tmp"]
@@ -1026,9 +1389,20 @@ async def parse_log(request):
     if not event:
         raise CustomError(ErrorCode.ParameterError)
 
-    args = {"transformsconfig": transformsconfig, "key_value_delimiter": key_value_delimiter, "key_delimiter_value": key_delimiter_value}
+    args = {
+        "transformsconfig": transformsconfig,
+        "key_value_delimiter": key_value_delimiter,
+        "key_delimiter_value": key_delimiter_value,
+    }
     value = config.value
-    if any(key in value for key in ["{transformsconfig}", "{key_value_delimiter}", "{key_delimiter_value}"]):
+    if any(
+        key in value
+        for key in [
+            "{transformsconfig}",
+            "{key_value_delimiter}",
+            "{key_delimiter_value}",
+        ]
+    ):
         value = value.format(**args)
 
     tmp_data["transforms"]["tmp_transforms"]["source"] = value
@@ -1051,7 +1425,11 @@ async def parse_log(request):
 
             tmp_path = tmp_file.name
 
-            proc = subprocess.Popen(["vector", "--config", tmp_path], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+            proc = subprocess.Popen(
+                ["vector", "--config", tmp_path],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+            )
 
             proc.stdin.write((messages[0].get("_msg") + "\n").encode())
             proc.stdin.flush()
@@ -1061,7 +1439,11 @@ async def parse_log(request):
         os.unlink(tmp_path)
 
     if orjson.loads(output).get("log"):
-        await EventsIngestion.update_or_create(id=request.json.get("id"), deleted=False, defaults={"convert_health_status": "healthy"})
+        await EventsIngestion.update_or_create(
+            id=request.json.get("id"),
+            deleted=False,
+            defaults={"convert_health_status": "healthy"},
+        )
         log = orjson.loads(output).get("log")
     else:
         log = "日志解析失败，请修改解析类型"
@@ -1073,11 +1455,30 @@ async def parse_log(request):
 @openapi.definition(
     summary="获取事件接入配置列表",
     description="获取事件接入配置列表",
-    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "事件接入id"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "事件接入id"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer"}, "data": {"type": "array", "items": {"type": "object"}}, "message": {"type": "string"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "array", "items": {"type": "object"}},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -1120,7 +1521,16 @@ async def event_ingestion_config_list(request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer"},
-                            "data": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}}}},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "name": {"type": "string"},
+                                    },
+                                },
+                            },
                             "message": {"type": "string"},
                         },
                     }
@@ -1148,7 +1558,16 @@ async def playbook_list(request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer"},
-                            "data": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "type": {"type": "string"}}}},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {"type": "string"},
+                                        "type": {"type": "string"},
+                                    },
+                                },
+                            },
                             "message": {"type": "string"},
                         },
                     }
@@ -1167,8 +1586,21 @@ async def transforms_list(request):
 @openapi.definition(
     summary="使用AI进行日志解析生成grok表达式",
     description="使用ai进行日志解析生成grok表达式并返回",
-    body={"application/json": {"schema": {"type": "object", "required": ["log"], "properties": {"log": {"type": "string", "description": "日志内容"}}}}},
-    response={"200": {"description": "生成成功", "content": {"text/plain": {"schema": {"type": "string"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["log"],
+                "properties": {"log": {"type": "string", "description": "日志内容"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "生成成功",
+            "content": {"text/plain": {"schema": {"type": "string"}}},
+        }
+    },
 )
 async def grok_ai(request):
     log = request.json.get("log")
@@ -1203,7 +1635,10 @@ async def grok_ai(request):
         return response_ok("当前未配置ai服务模型，请前往系统设置进行配置。")
 
     client = OpenAI(base_url=host, api_key=api_key)
-    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": f"提供给你的日志样例是：{log}"}]
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"提供给你的日志样例是：{log}"},
+    ]
     resp = client.chat.completions.create(model=model, messages=messages, max_tokens=4000, temperature=0.7)
 
     full_response = resp.choices[0].message.content if resp.choices else ""

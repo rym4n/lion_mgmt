@@ -25,29 +25,28 @@ async def authenticate(request: Request):
     if not account:
         logger.warning("redis里已经没有account信息了")
         raise CustomError(ErrorCode.SessionInvalid)
-    request.ctx.session['account_info'] = account
+    request.ctx.session["account_info"] = account
 
 
 def validate_token(payload, request):
-    if payload.get('exp', 0) < int(time.time()):
+    if payload.get("exp", 0) < int(time.time()):
         raise CustomError(ErrorCode.SessionExpired)
 
-    if not request.path.endswith('/user/mfa-auth') and payload.get('mfa_enable') is True and payload.get(
-            'mfa_auth') is not True:
+    if not request.path.endswith("/user/mfa-auth") and payload.get("mfa_enable") is True and payload.get("mfa_auth") is not True:
         raise CustomError(ErrorCode.SecondFactorRequired)
 
     client_ip = get_client_ip(request)
 
-    if payload.get('ip'):
-        if payload.get('ip') != client_ip:
+    if payload.get("ip"):
+        if payload.get("ip") != client_ip:
             # 防止会话劫持
             raise CustomError(ErrorCode.SessionInvalid)
     else:
-        payload['ip'] = client_ip
+        payload["ip"] = client_ip
 
     # API访问时验证是否满足IP白名单
-    if payload.get('permit_ip'):
-        if ip_in_list(client_ip, payload['permit_ip'].split(',')) is False:
+    if payload.get("permit_ip"):
+        if ip_in_list(client_ip, payload["permit_ip"].split(",")) is False:
             raise CustomError(ErrorCode.IpForbidden)
 
     request.ctx.session = payload
@@ -69,21 +68,12 @@ def requires_authentication(arg=None):
     return decorator(arg) if callable(arg) else decorator
 
 
-def token_encode(account_id, username, display_name, mfa_enable, token_id: str,
-                 expiration=AUTHENTICATION_SESSION_EXPIRATION, secret=SECRET, **kwargs) -> str:
+def token_encode(account_id, username, display_name, mfa_enable, token_id: str, expiration=AUTHENTICATION_SESSION_EXPIRATION, secret=SECRET, **kwargs) -> str:
     """
     根据账号信息生成token
     """
     current = int(time.time())
-    data = {
-        "id": token_id,
-        "sub": account_id,
-        "name": username,
-        "display_name": display_name,
-        "iat": current,
-        "exp": current + expiration,
-        "mfa_enable": mfa_enable
-    }
+    data = {"id": token_id, "sub": account_id, "name": username, "display_name": display_name, "iat": current, "exp": current + expiration, "mfa_enable": mfa_enable}
     for key, value in kwargs.items():
         data[key] = value
     encoded_session = jwt.encode(data, secret, SESSION_ENCODING_ALGORITHM)
@@ -98,8 +88,8 @@ def refresh_token(old_data: dict, **kwargs) -> str:
     for key, value in kwargs.items():
         data[key] = value
     current = int(time.time())
-    data['iat'] = current
-    data['exp'] = current + AUTHENTICATION_SESSION_EXPIRATION
+    data["iat"] = current
+    data["exp"] = current + AUTHENTICATION_SESSION_EXPIRATION
     data.pop("account_info")
     token = jwt.encode(data, SECRET, SESSION_ENCODING_ALGORITHM)
     return token
@@ -109,9 +99,9 @@ async def token_decode(request: Request) -> dict:
     """
     将token解码成数据字典
     """
-    if request.cookies.get("aioe-auth") and ':' not in request.cookies.get("aioe-auth"):
+    if request.cookies.get("aioe-auth") and ":" not in request.cookies.get("aioe-auth"):
         token = request.cookies.get("aioe-auth")
-    elif request.headers.get("aioe-auth") and ':' in request.headers.get("aioe-auth"):
+    elif request.headers.get("aioe-auth") and ":" in request.headers.get("aioe-auth"):
         token = request.headers.get("aioe-auth")
     else:
         raise CustomError(ErrorCode.SessionInvalid)
@@ -122,7 +112,7 @@ async def token_decode(request: Request) -> dict:
             token = token.split(":")[1]
             account = await request.app.ctx.cache_client.get(f"account_{user_id}")
             if not account:
-                account = await Account.get(id=user_id, deleted=False).prefetch_related('roles')
+                account = await Account.get(id=user_id, deleted=False).prefetch_related("roles")
                 await request.app.ctx.cache_client.set(f"account_{account.id}", account, 7 * 24 * 3600)
             payload = jwt.decode(token, account.password, SESSION_ENCODING_ALGORITHM)
         else:

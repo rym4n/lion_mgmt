@@ -4,6 +4,4 @@
 from .base import BaseMiddleware
 from .security import SecurityMiddleware
 
-MIDDLEWARE_TUPLE: tuple[type[BaseMiddleware], ...] = (
-    SecurityMiddleware,
-)
+MIDDLEWARE_TUPLE: tuple[type[BaseMiddleware], ...] = (SecurityMiddleware,)

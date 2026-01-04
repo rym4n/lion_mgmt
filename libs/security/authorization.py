@@ -24,14 +24,14 @@ async def check_permissions(request: Request, *required_permissions: str) -> boo
     #     raise CustomError(ErrorCode.SessionInvalid)
     # request.ctx.session['account_info'] = account
     # roles = await account.roles.filter(deleted=False).all()
-    for role in request.ctx.session['account_info'].roles:
+    for role in request.ctx.session["account_info"].roles:
         for role_permission in role.permissions:
             for required_permission in required_permissions:
                 if check_wildcard(role_permission, required_permission):
                     return True
     pm = await PermissionsMenu.filter(model=request.path.split("/")[1]).first().values("description")
     module = pm.get("description") if pm else request.path.split("/")[1]
-    raise CustomError(ErrorData(4004, f'缺少{module}模块的操作权限'))
+    raise CustomError(ErrorData(4004, f"缺少{module}模块的操作权限"))
 
 
 def check_wildcard(wildcard: str, pattern: str):
@@ -55,7 +55,7 @@ def check_wildcard(wildcard: str, pattern: str):
         wildcard_part = wildcard_parts[i]
         if "*" not in wildcard_part and not wildcard_part.issuperset(pattern_part):
             return False
-    return all("*" in part for part in wildcard_parts[len(pattern_parts):])
+    return all("*" in part for part in wildcard_parts[len(pattern_parts) :])
 
 
 async def check_roles(request: Request, *required_roles: str) -> bool:
@@ -64,7 +64,7 @@ async def check_roles(request: Request, *required_roles: str) -> bool:
     if not account:
         logger.warning("redis里已经没有account信息了")
         raise CustomError(ErrorCode.SessionInvalid)
-    request.ctx.session['account_info'] = account
+    request.ctx.session["account_info"] = account
     if set(required_roles) & {role.name for role in account.roles}:
         return True
     raise CustomError(ErrorCode.Unauthorized)
@@ -110,16 +110,11 @@ def playbook_permission(*required_permissions: str):
                 if not playbook_id:
                     raise CustomError(ErrorCode.PlaybookUnauthorized)
 
-            user = request.ctx.session.get('account_info')
+            user = request.ctx.session.get("account_info")
             if not user:
                 raise CustomError(ErrorCode.AccountNotFound)
 
-            has_access = await check_playbook_permission(
-                request,
-                user,
-                playbook_id,
-                required_permissions
-            )
+            has_access = await check_playbook_permission(request, user, playbook_id, required_permissions)
 
             if not has_access:
                 raise CustomError(ErrorCode.Unauthorized)
@@ -192,7 +187,7 @@ def load_license():
         for file in files:
             filename, ext = os.path.splitext(file)
             full_path = os.path.join(root, file)
-            with open(full_path, "r", encoding='utf-8') as f:
+            with open(full_path, "r", encoding="utf-8") as f:
                 data = f.read()
                 if filename == hashlib.md5(f"{data}".encode()).hexdigest():
                     try:

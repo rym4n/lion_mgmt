@@ -4,10 +4,7 @@ from enum import EnumMeta, Enum, unique
 from types import DynamicClassAttribute
 from typing import NamedTuple
 
-__all__ = (
-    "ErrorData",
-    "BaseErrorCode"
-)
+__all__ = ("ErrorData", "BaseErrorCode")
 
 
 class ErrorData(NamedTuple):

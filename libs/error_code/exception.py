@@ -4,7 +4,7 @@
 class CustomError(Exception):
     """错误码异常类"""
 
-    __slots__ = ('enum',)
+    __slots__ = ("enum",)
 
     def __init__(self, enum):
         self.enum = enum

@@ -87,7 +87,12 @@ def register_blueprints(app: Sanic) -> None:
 def register_listener(app: Sanic) -> None:
     for listener_cls in LISTENER_TUPLE:
         listener: BaseListener = listener_cls()
-        for event in ("before_server_start", "after_server_start", "before_server_stop", "after_server_stop"):
+        for event in (
+            "before_server_start",
+            "after_server_start",
+            "before_server_stop",
+            "after_server_stop",
+        ):
             if hasattr(listener, event):
                 app.register_listener(getattr(listener, event), event)
     return None

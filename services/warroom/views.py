@@ -88,7 +88,14 @@ async def warroom_ws(request: Request, ws: Websocket):
             "schema": {
                 "type": "object",
                 "required": ["name"],
-                "properties": {"name": {"type": "string", "description": "作战室名称"}, "members": {"type": "array", "items": {"type": "string"}, "description": "邀请其他用户ID列表"}},
+                "properties": {
+                    "name": {"type": "string", "description": "作战室名称"},
+                    "members": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "邀请其他用户ID列表",
+                    },
+                },
             }
         }
     },
@@ -101,7 +108,13 @@ async def warroom_ws(request: Request, ws: Websocket):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer", "example": 0},
-                            "data": {"type": "object", "properties": {"room_id": {"type": "string", "example": "房间ID"}, "name": {"type": "string", "example": "作战室名称"}}},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "room_id": {"type": "string", "example": "房间ID"},
+                                    "name": {"type": "string", "example": "作战室名称"},
+                                },
+                            },
                         },
                     }
                 }
@@ -131,7 +144,15 @@ async def create_room(request: Request):
                 await member.star_rooms.add(room)
                 user_id.append(member.id)
 
-    await Events.create(event_name=room_name, event_process_status="待处理", event_source="人工", owner={"role": [], "user": user_id}, creator=creator, updator=creator, room=room)
+    await Events.create(
+        event_name=room_name,
+        event_process_status="待处理",
+        event_source="人工",
+        owner={"role": [], "user": user_id},
+        creator=creator,
+        updator=creator,
+        room=room,
+    )
 
     return response_ok({"room_id": str(room.id), "name": room.name})
 
@@ -144,14 +165,31 @@ async def create_room(request: Request):
             "schema": {
                 "type": "object",
                 "required": ["id", "members"],
-                "properties": {"id": {"type": "string", "description": "作战室ID"}, "members": {"type": "array", "items": {"type": "string"}, "description": "邀请用户ID列表"}},
+                "properties": {
+                    "id": {"type": "string", "description": "作战室ID"},
+                    "members": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "邀请用户ID列表",
+                    },
+                },
             }
         }
     },
     response={
         "200": {
             "description": "Success",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "string", "example": "邀请成功"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {"type": "string", "example": "邀请成功"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -171,11 +209,29 @@ async def invite_members(request: Request):
 @warroom_bp.post("/join")
 @openapi.definition(
     summary="加入指定作战室",
-    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "作战室ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "作战室ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "Success",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "string", "example": "成功加入作战室"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {"type": "string", "example": "成功加入作战室"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -194,11 +250,29 @@ async def join_room(request: Request):
 @warroom_bp.post("/quit")
 @openapi.definition(
     summary="退出指定作战室",
-    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "作战室ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "作战室ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "Success",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "string", "example": "成功退出作战室"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {"type": "string", "example": "成功退出作战室"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -218,7 +292,14 @@ async def quit_room(request: Request):
 @warroom_bp.post("/rooms_list")
 @openapi.definition(
     summary="获取当前用户所有作战室列表",
-    body={"application/json": {"schema": {"type": "object", "properties": {"keyword": {"type": "string", "description": "搜索作战室关键词"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {"keyword": {"type": "string", "description": "搜索作战室关键词"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "Success",
@@ -228,7 +309,18 @@ async def quit_room(request: Request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer", "example": 0},
-                            "data": {"type": "object", "properties": {"rooms": {"type": "array", "items": {"type": "object", "description": "作战室信息"}}}},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "rooms": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "description": "作战室信息",
+                                        },
+                                    }
+                                },
+                            },
                         },
                     }
                 }
@@ -272,7 +364,18 @@ async def get_room_list(request: Request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer", "example": 0},
-                            "data": {"type": "object", "properties": {"rooms": {"type": "array", "items": {"type": "object", "description": "作战室信息"}}}},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "rooms": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "description": "作战室信息",
+                                        },
+                                    }
+                                },
+                            },
                         },
                     }
                 }
@@ -300,7 +403,15 @@ async def get_all_rooms(request: Request):
 @warroom_bp.post("/members")
 @openapi.definition(
     summary="获取指定作战室的用户列表",
-    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "作战室ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "作战室ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "Success",
@@ -321,7 +432,10 @@ async def get_all_rooms(request: Request):
                                                 "id": {"type": "string"},
                                                 "username": {"type": "string"},
                                                 "display_name": {"type": "string"},
-                                                "roles": {"type": "array", "items": {"type": "string"}},
+                                                "roles": {
+                                                    "type": "array",
+                                                    "items": {"type": "string"},
+                                                },
                                             },
                                         },
                                     }
@@ -345,7 +459,14 @@ async def acquire_members(request: Request):
         # 获取用户角色（用户和角色是多对多的关系）
         user_roles = await user.roles.all()
         roles_list = [role.name for role in user_roles]
-        user_list.append({"id": str(user.id), "username": user.username, "display_name": user.display_name, "roles": roles_list})
+        user_list.append(
+            {
+                "id": str(user.id),
+                "username": user.username,
+                "display_name": user.display_name,
+                "roles": roles_list,
+            }
+        )
 
     return response_ok(data={"members": user_list})
 
@@ -353,7 +474,15 @@ async def acquire_members(request: Request):
 @warroom_bp.post("/get_private_room")
 @openapi.definition(
     summary="获取或创建与指定用户的私聊作战室",
-    body={"application/json": {"schema": {"type": "object", "required": ["partner_id"], "properties": {"partner_id": {"type": "string", "description": "私聊对象用户ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["partner_id"],
+                "properties": {"partner_id": {"type": "string", "description": "私聊对象用户ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "Success",
@@ -361,7 +490,13 @@ async def acquire_members(request: Request):
                 "application/json": {
                     "schema": {
                         "type": "object",
-                        "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "object", "properties": {"room_id": {"type": "string", "example": "房间ID"}}}},
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {
+                                "type": "object",
+                                "properties": {"room_id": {"type": "string", "example": "房间ID"}},
+                            },
+                        },
                     }
                 }
             },
@@ -386,7 +521,14 @@ async def get_private_room(request: Request):
 @warroom_bp.post("/get_star_rooms")
 @openapi.definition(
     summary="获取关注列表",
-    body={"application/json": {"schema": {"type": "object", "properties": {"keyword": {"type": "string", "description": "搜索关键词"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {"keyword": {"type": "string", "description": "搜索关键词"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "Success",
@@ -396,7 +538,18 @@ async def get_private_room(request: Request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer", "example": 0},
-                            "data": {"type": "object", "properties": {"star_rooms": {"type": "array", "items": {"type": "object", "description": "作战室信息"}}}},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "star_rooms": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "description": "作战室信息",
+                                        },
+                                    }
+                                },
+                            },
                         },
                     }
                 }
@@ -413,11 +566,29 @@ async def get_star_rooms(request: Request):
 @warroom_bp.post("/star_room")
 @openapi.definition(
     summary="关注指定作战室",
-    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "作战室ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "作战室ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "Success",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "string", "example": "成功关注"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {"type": "string", "example": "成功关注"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -437,11 +608,29 @@ async def star_room(request: Request):
 @warroom_bp.post("/unstar_room")
 @openapi.definition(
     summary="取消关注指定作战室",
-    body={"application/json": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "作战室ID"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "作战室ID"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "Success",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "string", "example": "成功取消关注"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {"type": "string", "example": "成功取消关注"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -461,7 +650,14 @@ async def unstar_room(request: Request):
 @warroom_bp.post("/user_rooms")
 @openapi.definition(
     summary="获取当前用户已加入的作战室列表",
-    body={"application/json": {"schema": {"type": "object", "properties": {"keyword": {"type": "string", "description": "搜索作战室关键词"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {"keyword": {"type": "string", "description": "搜索作战室关键词"}},
+            }
+        }
+    },
     response={
         "200": {
             "description": "Success",
@@ -532,7 +728,12 @@ async def get_user_rooms(request: Request):
                     "query_type": {
                         "type": "string",
                         "description": "查询类型: public_history, private_history, search_messages, announcements",
-                        "enum": ["public_history", "private_history", "search_messages", "announcements"],
+                        "enum": [
+                            "public_history",
+                            "private_history",
+                            "search_messages",
+                            "announcements",
+                        ],
                     },
                     "room_id": {"type": "string", "description": "作战室ID"},
                     "keyword": {"type": "string", "description": "搜索关键词"},
@@ -554,8 +755,21 @@ async def get_user_rooms(request: Request):
                             "data": {
                                 "type": "object",
                                 "properties": {
-                                    "messages": {"type": "array", "items": {"type": "object", "description": "消息列表"}},
-                                    "pagination": {"type": "object", "properties": {"total": {"type": "integer"}, "offset": {"type": "integer"}, "limit": {"type": "integer"}}},
+                                    "messages": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "description": "消息列表",
+                                        },
+                                    },
+                                    "pagination": {
+                                        "type": "object",
+                                        "properties": {
+                                            "total": {"type": "integer"},
+                                            "offset": {"type": "integer"},
+                                            "limit": {"type": "integer"},
+                                        },
+                                    },
                                 },
                             },
                         },
@@ -577,8 +791,20 @@ async def query_messages(request: Request):
     if query_type == "public_history" and keyword in ["", None]:
         if not room_id:
             raise CustomError(ErrorCode.ParamValueError)
-        total_count = await Message.filter(type__in=["public", "ai", "runlog", "execute", "ai-question"], room_id=room_id).count()
-        messages = await Message.filter(type__in=["public", "ai", "runlog", "execute", "ai-question"], room_id=room_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related("sender")
+        total_count = await Message.filter(
+            type__in=["public", "ai", "runlog", "execute", "ai-question"],
+            room_id=room_id,
+        ).count()
+        messages = (
+            await Message.filter(
+                type__in=["public", "ai", "runlog", "execute", "ai-question"],
+                room_id=room_id,
+            )
+            .order_by("-ctime")
+            .offset(offset)
+            .limit(limit)
+            .prefetch_related("sender")
+        )
         message_list = []
         run_id_list = []
         for msg in reversed(messages):
@@ -609,14 +835,31 @@ async def query_messages(request: Request):
                     "is_recalled": msg.is_recalled,
                 }
             )
-        return response_ok({"messages": message_list, "pagination": {"total": total_count, "offset": offset, "limit": limit}})
+        return response_ok(
+            {
+                "messages": message_list,
+                "pagination": {"total": total_count, "offset": offset, "limit": limit},
+            }
+        )
 
     # 私聊历史
     elif query_type == "private_history" and keyword in ["", None]:
         # 消息计数
-        total_count = await Message.filter(type__in=["private", "ai", "runlog", "execute", "ai-question"], room_id=room_id).count()
+        total_count = await Message.filter(
+            type__in=["private", "ai", "runlog", "execute", "ai-question"],
+            room_id=room_id,
+        ).count()
         # 分页处理
-        messages = await Message.filter(type__in=["private", "ai", "runlog", "execute", "ai-question"], room_id=room_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related("sender", "receiver")
+        messages = (
+            await Message.filter(
+                type__in=["private", "ai", "runlog", "execute", "ai-question"],
+                room_id=room_id,
+            )
+            .order_by("-ctime")
+            .offset(offset)
+            .limit(limit)
+            .prefetch_related("sender", "receiver")
+        )
         message_list = []
         for msg in reversed(messages):
             if msg.type == "runlog":
@@ -646,7 +889,12 @@ async def query_messages(request: Request):
                 }
             )
 
-        return response_ok({"messages": message_list, "pagination": {"total": total_count, "offset": offset, "limit": limit}})
+        return response_ok(
+            {
+                "messages": message_list,
+                "pagination": {"total": total_count, "offset": offset, "limit": limit},
+            }
+        )
 
     # 搜索消息
     elif keyword:
@@ -659,7 +907,12 @@ async def query_messages(request: Request):
             )
         # 传入私聊用户ID, 搜索私聊历史记录
         elif query_type == "private_history":
-            query = Message.filter(type="private", room_id=room_id, content__contains=keyword, is_recalled=False)
+            query = Message.filter(
+                type="private",
+                room_id=room_id,
+                content__contains=keyword,
+                is_recalled=False,
+            )
         else:
             raise CustomError(ErrorCode.ParamValueError)
 
@@ -685,7 +938,12 @@ async def query_messages(request: Request):
                 }
             )
 
-        return response_ok({"messages": message_list, "pagination": {"total": total_count, "offset": offset, "limit": limit}})
+        return response_ok(
+            {
+                "messages": message_list,
+                "pagination": {"total": total_count, "offset": offset, "limit": limit},
+            }
+        )
 
     # 获取公告列表
     elif query_type == "announcements":
@@ -711,7 +969,12 @@ async def query_messages(request: Request):
                 }
             )
 
-        return response_ok({"announcements": announcement_list, "pagination": {"total": total_count, "offset": offset, "limit": limit}})
+        return response_ok(
+            {
+                "announcements": announcement_list,
+                "pagination": {"total": total_count, "offset": offset, "limit": limit},
+            }
+        )
     else:
         raise CustomError(ErrorCode.ParamValueError)
 
@@ -719,7 +982,17 @@ async def query_messages(request: Request):
 @warroom_bp.post("/get/list")
 @openapi.definition(
     summary="获取消息列表",
-    body={"application/json": {"schema": {"type": "object", "properties": {"page": {"type": "integer", "description": "页码, 默认1"}, "size": {"type": "integer", "description": "每页大小, 默认20"}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "integer", "description": "页码, 默认1"},
+                    "size": {"type": "integer", "description": "每页大小, 默认20"},
+                },
+            }
+        }
+    },
     response={
         "200": {
             "description": "Success",
@@ -731,7 +1004,16 @@ async def query_messages(request: Request):
                             "code": {"type": "integer", "example": 0},
                             "data": {
                                 "type": "object",
-                                "properties": {"message_list": {"type": "array", "items": {"type": "object", "description": "消息列表"}}, "maintenance_mode": {"type": "boolean"}},
+                                "properties": {
+                                    "message_list": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "description": "消息列表",
+                                        },
+                                    },
+                                    "maintenance_mode": {"type": "boolean"},
+                                },
                             },
                         },
                     }
@@ -762,8 +1044,34 @@ async def get_list(request):
 @warroom_bp.post("/up/status")
 @openapi.definition(
     summary="更新消息阅读状态",
-    body={"application/json": {"schema": {"type": "object", "required": ["ids"], "properties": {"ids": {"type": "array", "items": {"type": "string"}, "description": "未读消息ID列表"}}}}},
-    response={"200": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "boolean", "example": True}}}}}},
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["ids"],
+                "properties": {
+                    "ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "未读消息ID列表",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "application/json": {
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "integer", "example": 0},
+                        "data": {"type": "boolean", "example": True},
+                    },
+                }
+            }
+        }
+    },
 )
 @requires_permission("warroom:u")
 async def up_status(request):
@@ -787,31 +1095,71 @@ async def up_status(request):
                 "type": "object",
                 "required": ["id", "type"],
                 "properties": {
-                    "id": {"type": "string", "description": "作战室ID", "example": "作战室123"},
-                    "type": {"type": "string", "description": "运行类型：flow/action", "enum": ["flow", "action"], "example": "flow"},
+                    "id": {
+                        "type": "string",
+                        "description": "作战室ID",
+                        "example": "作战室123",
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "运行类型：flow/action",
+                        "enum": ["flow", "action"],
+                        "example": "flow",
+                    },
                     "playbook_input": {
                         "type": "object",
                         "description": "剧本输入参数（当type为flow时必填）",
                         "properties": {
-                            "flow_id": {"type": "string", "description": "剧本版本ID", "example": "73ecfba0-1aa4-4128-b99a-b97fb08a14be"},
-                            "flow_input": {"type": "object", "description": "剧本输入参数"},
+                            "flow_id": {
+                                "type": "string",
+                                "description": "剧本版本ID",
+                                "example": "73ecfba0-1aa4-4128-b99a-b97fb08a14be",
+                            },
+                            "flow_input": {
+                                "type": "object",
+                                "description": "剧本输入参数",
+                            },
                         },
                     },
                     "action_input": {
                         "type": "object",
                         "description": "动作输入参数（当type为action时必填）",
                         "properties": {
-                            "app_name": {"type": "string", "description": "应用名称，英文标识"},
+                            "app_name": {
+                                "type": "string",
+                                "description": "应用名称，英文标识",
+                            },
                             "name": {"type": "string", "description": "应用中文名称"},
                             "app_ver": {"type": "string", "description": "应用版本号"},
                             "main": {"type": "string", "description": "主程序文件名"},
-                            "action_input": {"type": "object", "description": "动作输入参数"},
-                            "resource": {"type": "string", "description": "资源ID，多个时用逗号分割", "example": "11111,22222,33333"},
+                            "action_input": {
+                                "type": "object",
+                                "description": "动作输入参数",
+                            },
+                            "resource": {
+                                "type": "string",
+                                "description": "资源ID，多个时用逗号分割",
+                                "example": "11111,22222,33333",
+                            },
                             "node_name": {"type": "string", "description": "节点名称"},
-                            "action": {"type": "string", "description": "动作名称，英文标识"},
-                            "action_name": {"type": "string", "description": "动作名称，中文名称"},
-                            "retry_times": {"type": "integer", "description": "重试次数", "default": 1},
-                            "timeout": {"type": "integer", "description": "超时时间，单位秒", "default": 300},
+                            "action": {
+                                "type": "string",
+                                "description": "动作名称，英文标识",
+                            },
+                            "action_name": {
+                                "type": "string",
+                                "description": "动作名称，中文名称",
+                            },
+                            "retry_times": {
+                                "type": "integer",
+                                "description": "重试次数",
+                                "default": 1,
+                            },
+                            "timeout": {
+                                "type": "integer",
+                                "description": "超时时间，单位秒",
+                                "default": 300,
+                            },
                         },
                     },
                 },
@@ -821,7 +1169,17 @@ async def up_status(request):
     response={
         "200": {
             "description": "运行成功",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "string", "example": "运行成功"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {"type": "string", "example": "运行成功"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -977,7 +1335,17 @@ async def activity(request, activityId):
     response={
         "200": {
             "description": "Success",
-            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "string", "example": "发送成功"}}}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {"type": "string", "example": "发送成功"},
+                        },
+                    }
+                }
+            },
         }
     },
 )
@@ -994,12 +1362,24 @@ async def send_message(request):
     await sender.star_rooms.add(room)
     await partner.star_rooms.add(room)
 
-    data = {"type": "public", "content": request.json.get("msg"), "image_content": "", "room_id": room.id}
+    data = {
+        "type": "public",
+        "content": request.json.get("msg"),
+        "image_content": "",
+        "room_id": room.id,
+    }
 
     content = data.get("content", "")
     image_content = data.get("image_content", "")
 
-    message = await Message.create(type="private", sender=sender, room=room, content=content, image_content=image_content, receiver=partner)
+    message = await Message.create(
+        type="private",
+        sender=sender,
+        room=room,
+        content=content,
+        image_content=image_content,
+        receiver=partner,
+    )
 
     await MessageAccount.create(message=message, account_id=partner.id)
 
