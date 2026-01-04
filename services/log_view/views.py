@@ -109,11 +109,7 @@ async def get_index_list(request):
     response={
         "200": {
             "description": "获取成功",
-            "content": {
-                "application/json": {
-                    "schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "object", "description": "字段信息，键为字段名，值为字段类型"}}}
-                }
-            },
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "object", "description": "字段信息，键为字段名，值为字段类型"}}}}},
         }
     },
 )
@@ -127,7 +123,7 @@ async def get_field_list(request):
         # 由于VictoriaLogs可能没有直接获取字段列表的接口，这里通过查询最近的日志来推断字段
         # 查询最近的50条日志，合并所有字段
         logs = await query_vlog(query="*", project_id=project_id, limit=50)
-        
+
         fields = {}
         if logs:
             for log in logs:
@@ -135,7 +131,7 @@ async def get_field_list(request):
                     for key in log.keys():
                         # 过滤掉内部字段（可选，这里先保留所有）
                         fields[key] = "text"
-        
+
         return response_ok(fields)
     except Exception as e:
         logger.warning(f"VictoriaLogs get fields error: {e}")
