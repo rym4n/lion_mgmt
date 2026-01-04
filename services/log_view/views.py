@@ -10,6 +10,7 @@ from core.response import response_ok, response_fail
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import query_vlog
+from models.event import EventsIngestion
 from settings import VL_HOST
 
 logs_bp = Blueprint("logs", url_prefix="/logs")
@@ -37,9 +38,7 @@ _all__ = ["logs_bp"]
     response={
         "200": {
             "description": "查询成功",
-            "content": {
-                "application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "object", "description": "VictoriaLogs查询结果"}}}}
-            },
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "object", "description": "VictoriaLogs查询结果"}}}}},
         }
     },
 )
@@ -54,20 +53,36 @@ async def get_logs_by_sql(request):
     start = request.json.get("start")
     end = request.json.get("end")
 
-    result = await query_vlog(query, limit, project_id, start, end)
+    result = await query_vlog(query, project_id, start, end, limit=limit)
     return response_ok(result) if result is not None else response_fail(ErrorCode.VictoriaLogsError)
 
 
 @logs_bp.route("/indexes", methods=["POST"])
 @openapi.definition(
-    summary="获取日志流列表",
-    description="获取VictoriaLogs中所有可用的日志流(streams)列表",
+    summary="获取项目列表",
+    description="获取当前租户下的所有日志项目列表",
     response={
         "200": {
             "description": "获取成功",
             "content": {
                 "application/json": {
-                    "schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "array", "items": {"type": "string"}, "description": "日志流列表"}}}
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "integer", "description": "项目ID"},
+                                        "name": {"type": "string", "description": "项目名称"},
+                                    },
+                                },
+                                "description": "项目列表",
+                            },
+                        },
+                    }
                 }
             },
         }
@@ -75,71 +90,59 @@ async def get_logs_by_sql(request):
 )
 @requires_permission("logs:r")
 async def get_index_list(request):
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            # VictoriaLogs获取streams接口: /select/logsql/streams
-            resp = await client.get(f"{VL_HOST}/select/logsql/streams")
-            resp.raise_for_status()
-            data = resp.json()
+    try:
+        # 获取所有已配置的项目
+        projects = await EventsIngestion.filter(project_id__isnull=False).values("project_id", "event_ingestion_name")
 
-            # 提取stream名称列表
-            streams = []
-            if isinstance(data, dict) and "streams" in data:
-                streams = [stream.get("_stream", "") for stream in data["streams"] if stream.get("_stream")]
-            elif isinstance(data, list):
-                streams = [item.get("_stream", "") for item in data if item.get("_stream")]
-
-            # 过滤以logs-开头的流(保持与原有逻辑一致)
-            result = [s for s in streams if s.startswith("logs-")]
-            return response_ok(list(set(result)))
-        except Exception as e:
-            logger.warning(f"VictoriaLogs get streams error: {e}")
-            return response_ok([])
+        result = [{"id": p["project_id"], "name": p["event_ingestion_name"] or f"Project {p['project_id']}"} for p in projects]
+        return response_ok(result)
+    except Exception as e:
+        logger.error(f"Get project list error: {e}")
+        return response_ok([])
 
 
 @logs_bp.route("/fields", methods=["POST"])
 @openapi.definition(
-    summary="获取日志流字段列表",
-    description="获取指定日志流的字段列表及其数据类型",
-    body={"application/json": {"schema": {"type": "object", "required": ["index"], "properties": {"index": {"type": "string", "description": "日志流名称"}}}}},
+    summary="获取日志字段列表",
+    description="获取指定项目的日志字段列表",
+    body={"application/json": {"schema": {"type": "object", "required": ["project_id"], "properties": {"project_id": {"type": "integer", "description": "项目ID"}}}}},
     response={
         "200": {
             "description": "获取成功",
-            "content": {
-                "application/json": {
-                    "schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "object", "description": "字段信息，键为字段名，值为字段类型"}}}
-                }
-            },
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"code": {"type": "integer", "example": 0}, "data": {"type": "object", "description": "字段信息，键为字段名，值为字段类型"}}}}},
         }
     },
 )
 @requires_permission("logs:r")
 async def get_field_list(request):
-    stream_name = request.json.get("index")
-    if not stream_name:
+    project_id = request.json.get("project_id")
+    if not project_id:
         raise CustomError(ErrorCode.ParameterError)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             # VictoriaLogs获取字段信息接口: /select/logsql/field_names
-            params = {"query": f"_stream:{stream_name}"}
-            resp = await client.get(f"{VL_HOST}/select/logsql/field_names", params=params)
+            # 使用AccountID和ProjectID头进行隔离查询
+            headers = {
+                "AccountID": "0",  # 默认AccountID
+                "ProjectID": str(project_id),
+            }
+            params = {"query": "*"}  # 查询该项目下所有日志的字段
+
+            resp = await client.get(f"{VL_HOST}/select/logsql/field_names", headers=headers, params=params)
             resp.raise_for_status()
             data = resp.json()
 
             # 构建字段信息字典
-            # VictoriaLogs返回的是字段名列表，类型信息需要通过查询推断或统一设置
             fields = {}
             if isinstance(data, dict) and "fields" in data:
-                # 假设返回格式为 {"fields": ["field1", "field2", ...]}
                 for field in data["fields"]:
-                    fields[field] = "text"  # VictoriaLogs默认为文本类型
+                    fields[field] = "text"
             elif isinstance(data, list):
-                # 假设返回格式为 ["field1", "field2", ...]
                 for field in data:
                     fields[field] = "text"
 
-            return response_ok({stream_name: fields})
+            return response_ok(fields)
         except Exception as e:
             logger.warning(f"VictoriaLogs get fields error: {e}")
-            return response_ok({stream_name: {}})
+            return response_ok({})

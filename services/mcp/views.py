@@ -7,7 +7,7 @@ from mcp.types import JSONRPCMessage
 from sanic import Blueprint, Request, response
 from sanic.log import logger
 
-from .server import mcp_server
+from .server import create_mcp_server
 
 mcp_bp = Blueprint("mcp", url_prefix="/mcp")
 
@@ -48,18 +48,24 @@ async def handle_sse(request: Request):
         },
     )
 
-    # 1. Send endpoint event
-    await resp.send(f"event: endpoint\ndata: {endpoint_url}\n\n")
-
-    # 2. Start MCP Server in background
+    # 1. Start MCP Server in background
     # We need to run mcp_server.run(...)
     # It handles the protocol logic.
-
     async with anyio.create_task_group() as tg:
 
         async def run_server():
+            # Create a NEW server instance for this session to ensure isolation
+            server = create_mcp_server()
             try:
-                await mcp_server.run(read_stream, write_stream, mcp_server.create_initialization_options())
+                # Enable stateless mode to allow requests before initialization completes
+                # This fixes the "Received request before initialization was complete" warning
+                # when clients send requests immediately.
+                await server.run(
+                    read_stream,
+                    write_stream,
+                    server.create_initialization_options(),
+                    stateless=True,
+                )
             except Exception as e:
                 logger.error(f"MCP Server Error: {e}")
                 # Close streams?
@@ -69,6 +75,12 @@ async def handle_sse(request: Request):
                     pass
 
         tg.start_soon(run_server)
+
+        # Wait a bit to ensure server is ready to accept connections
+        await anyio.sleep(0.5)
+
+        # 2. Send endpoint event
+        await resp.send(f"event: endpoint\ndata: {endpoint_url}\n\n")
 
         # 3. Loop over write_stream and send to SSE
         try:

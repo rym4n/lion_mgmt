@@ -1,6 +1,5 @@
 # coding=utf-8
 
-
 import re
 
 from mcp.server import Server
@@ -14,11 +13,12 @@ from models import Room, Playbook, PlaybookVersion
 from models.user import Account
 from settings import TASK_TOPIC
 
+
 # Initialize MCP Server
-mcp_server = Server("lion-mgmt")
+# mcp_server = Server("lion-mgmt")
 
 
-@mcp_server.list_tools()
+# @mcp_server.list_tools()
 async def handle_list_tools() -> list[Tool]:
     return [
         Tool(
@@ -175,7 +175,7 @@ async def get_playbook_input_logic(playbook_version_id):
     return input_list
 
 
-@mcp_server.call_tool()
+# @mcp_server.call_tool()
 async def handle_call_tool(name: str, arguments: dict | None) -> list[TextContent | ImageContent | EmbeddedResource]:
     if name == "execute_script":
         if not arguments:
@@ -305,3 +305,10 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[TextConten
         return [TextContent(type="text", text=str(inputs))]
 
     raise ValueError(f"Unknown tool: {name}")
+
+
+def create_mcp_server():
+    server = Server("lion-mgmt", version="3.0")
+    server.list_tools()(handle_list_tools)
+    server.call_tool()(handle_call_tool)
+    return server
