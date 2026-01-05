@@ -137,7 +137,7 @@ async def upload_and_extract_zip(request):
         raise CustomError(ErrorCode.InvalidLicenseError)
 
     for zip_file in zip_files:
-        total_count = await Tool.filter(deleted=False).count()
+        total_count = await Tool.filter(deleted=False, maintain=False).count()
         zip_filename = zip_file.name
 
         for key, item in lic["grouplist"].items():
