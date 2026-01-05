@@ -1824,66 +1824,60 @@ async def execute_webhook(request):
 async def dashboard_statistics(request):
     data = request.json
     flow_id = data.get("flow_id")
-    end = data.get("end")
     start = data.get("start")
+    end = data.get("end")
+
+    start_dt = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
+    end_dt = datetime.strptime(end, "%Y-%m-%d %H:%M:%S")
 
     if not flow_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    query = "playbook_version_id:" + flow_id
-    logs = await query_vlog(query, project_id=1, start=start, end=end, account_id=0)
+    sql = """
+        SELECT
+            TO_CHAR(t.run_end, 'YYYY-MM-DD') as date,
+            COUNT(t.run_id) as total_runs,
+            SUM(CASE WHEN t.is_fail = 0 THEN 1 ELSE 0 END) as success_count,
+            SUM(CASE WHEN t.is_fail = 1 THEN 1 ELSE 0 END) as fail_count
+        FROM (
+            SELECT
+                run_id,
+                MAX(end_time) as run_end,
+                MAX(CASE WHEN status NOT IN (0, 1) THEN 1 ELSE 0 END) as is_fail
+            FROM runlog
+            WHERE playbook_version_id = $1
+              AND start_time BETWEEN $2 AND $3
+            GROUP BY run_id
+        ) as t
+        WHERE t.run_end IS NOT NULL
+        GROUP BY date
+        ORDER BY date ASC;
+    """
 
-    run_status = defaultdict(lambda: {"start": None, "end": None, "status": "success"})
+    async with in_transaction() as conn:
+        results = await conn.execute_query_dict(sql, [flow_id, start_dt, end_dt])
 
-    for log in logs:
-        run_id = log.get("_msg")
-        if not run_id:
-            continue
+    final_result = []
 
-        ts = datetime.strptime(log["timestamp"], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+    for row in results:
+        total = row['total_runs']
+        succ = int(row['success_count'])
+        fail = int(row['fail_count'])
+        day = row['date']
 
-        status = log.get("status")
-
-        # 更新时间
-        if not run_status[run_id]["start"] or ts < run_status[run_id]["start"]:
-            run_status[run_id]["start"] = ts
-
-        if not run_status[run_id]["end"] or ts > run_status[run_id]["end"]:
-            run_status[run_id]["end"] = ts
-
-        if str(status) not in ("0", "1"):
-            run_status[run_id]["status"] = "fail"
-
-    daily_stats = defaultdict(lambda: {"total_runs": 0, "success_count": 0, "fail_count": 0, "exec_times": []})
-
-    for run_id, info in run_status.items():
-        day = info["end"].date().isoformat()  # yyyy-mm-dd
-
-        daily_stats[day]["total_runs"] += 1
-
-        if info["status"] == "success":
-            daily_stats[day]["success_count"] += 1
-        else:
-            daily_stats[day]["fail_count"] += 1
-
-    result = []
-
-    for day, stat in sorted(daily_stats.items()):
-        total = stat["total_runs"]
-        succ = stat["success_count"]
-        fail = stat["fail_count"]
+        rate_val = round(succ / total, 2) if total else 0
+        success_rate = str(rate_val * 100) + "%"
 
         day_result = {
             "date": day,
             "total_runs": total,
             "success_count": succ,
             "fail_count": fail,
-            "success_rate": str((round(succ / total, 2) if total else 0) * 100) + "%",
+            "success_rate": success_rate,
         }
+        final_result.append(day_result)
 
-        result.append(day_result)
-
-    return response_ok(result)
+    return response_ok(final_result)
 
 
 @workflow_bp.post("/import")
