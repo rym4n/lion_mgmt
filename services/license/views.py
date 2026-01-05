@@ -194,8 +194,8 @@ async def get_all_license(request: Request):
     获取所有license文件信息用于页面展示
     """
     consume_info = {
-        "应用集成": await Tool.filter(deleted=False).count(),
-        "剧本编排": await Playbook.filter(deleted=False).count(),
+        "应用集成": await Tool.filter(deleted=False, maintain=False).count(),
+        "剧本编排": await Playbook.filter(deleted=False, internal=False).count(),
     }
 
     menu_dict = dict()

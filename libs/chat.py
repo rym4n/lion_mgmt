@@ -61,8 +61,9 @@ async def get_prompt_words(prompt_word):
     for tool in tools:
         if tool["tool_name"] not in tool_names:
             tool_names.append(tool["tool_name"])
-    if "lion_mgmt" in tool_names:
+    if "lion_mgmt" in tool_names or "lion_ai" in tool_names:
         tool_names.remove("lion_mgmt")
+        tool_names.remove("lion_ai")
 
     latest_versions = await ToolAction.filter(deleted=False, tool_name__in=tool_names).annotate(latest_version=Max("version_number")).group_by("tool_name").values("tool_name", "latest_version")
 
