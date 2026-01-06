@@ -42,7 +42,7 @@ class CacheListener(BaseListener):
             app.ctx.oauth2 = OAuth2(client_id, client_secret, authorize_uri, token_uri, base_scopes=base_scopes)
 
         app.add_task(chat_manager.msg_listener, name="chat_msg_listener")
-        app.add_task(chat_manager.log_listener, name="run_log_listener")
+        # app.add_task(chat_manager.log_listener, name="run_log_listener")
 
     async def before_server_stop(self, app: Sanic, loop: BaseEventLoop) -> None:
         """关闭后台任务，释放连接"""
