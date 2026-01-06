@@ -127,6 +127,27 @@ class PermissionsMenu(BaseModel):
             "permissions": self.Permissions,
         }
 
+
+class Tenant(BaseModel):
+    """
+    角色权限
+    """
+
+    name: str = fields.CharField(max_length=255, null=True, description="租户名称")
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
+            "name": self.name
+        }
+
     class Meta:
-        table = "permissions_menu"
+        table = "tenant"
         ordering = ["-utime"]
+
