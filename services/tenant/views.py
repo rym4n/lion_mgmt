@@ -77,7 +77,7 @@ async def get_tenant(request):
 @requires_permission("tenant:r")
 async def add_tenant(request):
     name = request.json.get("name")
-    if name:
+    if not name:
         raise CustomError(ErrorCode.ParameterError)
 
     if await Tenant.filter(name=name).exists():
@@ -115,7 +115,7 @@ async def add_tenant(request):
 @requires_permission("tenant:r")
 async def del_tenant(request):
     id = request.json.get("id")
-    if id:
+    if not id:
         raise CustomError(ErrorCode.ParameterError)
 
     tenant = await Tenant.get_or_none(id=id).prefetch_related("member")
@@ -150,7 +150,7 @@ async def del_tenant(request):
 @requires_permission("tenant:r")
 async def edit_tenant(request):
     id = request.json.get("id")
-    if id:
+    if not id:
         raise CustomError(ErrorCode.ParameterError)
 
     tenant = await Tenant.get_or_none(id=id).prefetch_related("member")
