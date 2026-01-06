@@ -68,12 +68,12 @@ def requires_authentication(arg=None):
     return decorator(arg) if callable(arg) else decorator
 
 
-def token_encode(account_id, username, display_name, mfa_enable, token_id: str, expiration=AUTHENTICATION_SESSION_EXPIRATION, secret=SECRET, **kwargs) -> str:
+def token_encode(account_id, username, display_name, mfa_enable, tenant_id, token_id: str,expiration=AUTHENTICATION_SESSION_EXPIRATION, secret=SECRET, **kwargs) -> str:
     """
     根据账号信息生成token
     """
     current = int(time.time())
-    data = {"id": token_id, "sub": account_id, "name": username, "display_name": display_name, "iat": current, "exp": current + expiration, "mfa_enable": mfa_enable}
+    data = {"id": token_id, "sub": account_id, "tenant_id": tenant_id, "name": username, "display_name": display_name, "iat": current, "exp": current + expiration, "mfa_enable": mfa_enable}
     for key, value in kwargs.items():
         data[key] = value
     encoded_session = jwt.encode(data, secret, SESSION_ENCODING_ALGORITHM)

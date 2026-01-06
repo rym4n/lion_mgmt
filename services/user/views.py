@@ -339,6 +339,7 @@ async def create_api_user(request):
         account.username,
         account.display_name,
         account.mfa_enable,
+        account.tenant_id,
         str(uuid.uuid4()),
         request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION),
         account.password,
@@ -598,6 +599,7 @@ async def login(request):
             account.username,
             account.display_name,
             account.mfa_enable,
+            account.tenant_id,
             token_id,
             ip=client_ip,
         )
@@ -645,6 +647,7 @@ async def local_auth(request):
         account.username,
         account.display_name,
         False,
+        account.tenant_id,
         str(uuid.uuid4()),
         AUTHENTICATION_SESSION_EXPIRATION,
         account.password,
@@ -1202,6 +1205,7 @@ async def oauth2_callback(request):
         account.username,
         account.display_name,
         account.mfa_enable,
+        account.tenant_id,
         str(uuid.uuid4()),
     )
     await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
