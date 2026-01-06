@@ -40,7 +40,7 @@ async def get_tenant(request):
     offset = (page - 1) * size
     limit = size
 
-    tenants = await Tenant.filter().offset(offset).limit(limit).all()
+    tenants = await Tenant.filter().offset(offset).limit(limit).all().prefetch_related("creator", "member")
     total = await Tenant.filter().count()
 
     data = [tenant.json for tenant in tenants]
@@ -140,7 +140,7 @@ async def del_tenant(request):
                 "properties": {
                     "id": {"type": "string", "description": "工作空间id"},
                     "name": {"type": "string", "description": "工作空间名称"},
-                    "member": {"type": "array", "items": {"type": "string"}, "description": "成员id列表,更新为覆盖更新,不传就不更新"}
+                    "members": {"type": "array", "items": {"type": "string"}, "description": "成员id列表,更新为覆盖更新,不传就不更新"}
                 },
             }
         }
@@ -161,12 +161,13 @@ async def edit_tenant(request):
     if request.json.get("name"):
         tenant.name = request.json.get("name")
 
-    if request.json.get("member"):
-        members = request.json.get("member")
+    if request.json.get("members"):
+        members = request.json.get("members")
         users = await Account.filter(id__in=members).all()
         await tenant.member.clear()
         await tenant.member.add(*users)
 
+    await tenant.save()
     return response_ok("更新成功")
 
 
