@@ -142,7 +142,7 @@ class Tenant(Model):
     ctime = fields.DatetimeField(null=False, auto_now_add=True, description="创建时间")
     utime = fields.DatetimeField(null=False, auto_now=True, description="更新时间")
     deleted: bool = fields.BooleanField(default=False, description="删除标识")
-    name: str = fields.CharField(max_length=255, null=True, description="工作空间名称")
+    name: str = fields.CharField(max_length=255, null=True, unique=True, description="工作空间名称")
     creator = fields.ForeignKeyField("models.Account", null=True, related_name="creator_tenant", description="创建人")
     member = fields.ManyToManyField(model_name="models.Account", related_name="member", through="tenant_member", description="工作空间成员")
 
