@@ -1,7 +1,8 @@
 # coding=utf-8
 import re
+import uuid
 
-from tortoise import fields
+from tortoise import fields, Model
 from tortoise.validators import RegexValidator
 
 from libs.utils import strip_timezone_to_seconds
@@ -132,12 +133,18 @@ class PermissionsMenu(BaseModel):
         ordering = ["-utime"]
 
 
-class Tenant(BaseModel):
+class Tenant(Model):
     """
-    角色权限
+    工作空间管理
     """
 
-    name: str = fields.CharField(max_length=255, null=True, description="租户名称")
+    id: str = fields.CharField(pk=True, max_length=36, default=lambda: str(uuid.uuid4()))
+    ctime = fields.DatetimeField(null=False, auto_now_add=True, description="创建时间")
+    utime = fields.DatetimeField(null=False, auto_now=True, description="更新时间")
+    deleted: bool = fields.BooleanField(default=False, description="删除标识")
+    name: str = fields.CharField(max_length=255, null=True, description="工作空间名称")
+    creator = fields.ForeignKeyField("models.Account", null=True, related_name="creator_tenant", description="创建人")
+    member = fields.ManyToManyField(model_name="models.Account", related_name="member", through="tenant_member", description="工作空间成员")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -148,7 +155,9 @@ class Tenant(BaseModel):
             "id": self.id,
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
-            "name": self.name
+            "name": self.name,
+            "creator": {"username": self.creator.username, "display_name": self.creator.display_name} if self.creator else {},
+            "member": [{"username": user.username, "display_name": user.display_name} for user in self.member] if self.member else [],
         }
 
     class Meta:
