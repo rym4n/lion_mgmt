@@ -127,6 +127,10 @@ class PermissionsMenu(BaseModel):
             "permissions": self.Permissions,
         }
 
+    class Meta:
+        table = "permissions_menu"
+        ordering = ["-utime"]
+
 
 class Tenant(BaseModel):
     """
