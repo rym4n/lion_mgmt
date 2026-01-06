@@ -25,6 +25,7 @@ from services.others.views import activity, playbook_list, all_apps
 from services.role.views import role_bp
 from services.scene.views import scene_bp
 from services.system_config.views import system_bp
+from services.tenant.views import tenant_bp
 from services.timed.views import timed_bp
 from services.tools.views import tools_bp
 from services.user.views import user_bp
@@ -59,6 +60,9 @@ def register_blueprints(app: Sanic) -> None:
     app.blueprint(approve_bp)
     app.blueprint(mcp_bp)
 
+    # 测试工作空间使用，未用产品许可控制
+    app.blueprint(tenant_bp)
+
     try:
         bp_dict = {
             "event_bp": event_bp,
@@ -70,6 +74,7 @@ def register_blueprints(app: Sanic) -> None:
             "workflow_bp": workflow_bp,
             "logs_bp": logs_bp,
             "ai_bp": ai_bp,
+            "tenant_bp": tenant_bp,
         }
         license_data = load_license()
         if license_data and "moduleList" in license_data:

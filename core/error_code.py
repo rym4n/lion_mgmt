@@ -139,3 +139,7 @@ class ErrorCode(BaseErrorCode):
     MCPInvalidAction = ErrorData(4102, "Invalid action")
     MCPExecutionFailed = ErrorData(4103, "Execution failed")
     MCPRateLimitExceeded = ErrorData(4104, "Rate limit exceeded")
+
+    TenantAlreadyExists = ErrorData(4105, "已存在同名工作空间")
+    TenantHasMembers = ErrorData(4106, "当前工作空间存在成员，禁止删除")
+    TenantNotFound = ErrorData(4107, "当前工作空间不存在")
