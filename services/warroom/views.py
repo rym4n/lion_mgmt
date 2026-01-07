@@ -1251,7 +1251,7 @@ async def run(request):
     },
 )
 @requires_permission("warroom:r")
-async def activity(request):
+async def get_runlog(request):
     if not request.json.get("run_id"):
         raise CustomError(ErrorCode.ParamValueError)
     logs = await Runlog.filter(run_id=request.json.get("run_id"), deleted=False).all()
