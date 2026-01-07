@@ -11,7 +11,7 @@ from .server import create_mcp_server
 
 mcp_bp = Blueprint("mcp", url_prefix="/mcp")
 
-# Store active sessions
+# 存储活跃会话
 # session_id -> MemoryObjectSendStream
 _write_stream_writers = {}
 
@@ -19,25 +19,25 @@ _write_stream_writers = {}
 @mcp_bp.get("/sse")
 async def handle_sse(request: Request):
     """
-    Handle SSE connection for MCP.
+    处理MCP的SSE连接。
     """
     session_id = uuid4()
 
-    # Create streams
-    # read_stream: server reads from this (client sends to this via POST)
+    # 创建流
+    # read_stream: 服务器从此读取（客户端通过POST发送到此）
     read_stream_writer, read_stream = anyio.create_memory_object_stream(100)
 
-    # write_stream: server writes to this (sent to client via SSE)
+    # write_stream: 服务器写入此流（通过SSE发送给客户端）
     write_stream, write_stream_reader = anyio.create_memory_object_stream(100)
 
     _write_stream_writers[session_id] = read_stream_writer
 
-    # Construct endpoint URL for POST messages
-    # Assuming the server is reachable at the same host
-    # We need the full URL or absolute path?
-    # MCP spec says: `endpoint` event with the URI to POST to.
-    # relative path is fine if client supports it, but full path is safer?
-    # Let's use relative path to /mcp/messages
+    # 为POST消息构建端点URL
+    # 假设服务器在同一主机上可访问
+    # 需要完整URL还是绝对路径？
+    # MCP规范说明：带有POST到的URI的`endpoint`事件。
+    # 如果客户端支持，相对路径也可以，但完整路径更安全。
+    # 让使用到/mcp/messages的相对路径
     endpoint_url = f"/mcp/messages?session_id={session_id.hex}"
 
     resp = await request.respond(
@@ -48,18 +48,18 @@ async def handle_sse(request: Request):
         },
     )
 
-    # 1. Start MCP Server in background
-    # We need to run mcp_server.run(...)
-    # It handles the protocol logic.
+    # 1. 在后台启动MCP服务器
+    # 需要运行mcp_server.run(...)
+    # 它处理协议逻辑。
     async with anyio.create_task_group() as tg:
 
         async def run_server():
-            # Create a NEW server instance for this session to ensure isolation
+            # 为该会话创建一个新的服务器实例以确保隔离
             server = create_mcp_server()
             try:
-                # Enable stateless mode to allow requests before initialization completes
-                # This fixes the "Received request before initialization was complete" warning
-                # when clients send requests immediately.
+                # 启用无状态模式以允许在初始化完成前接收请求
+                # 这将修复客户端立即发送请求时的
+                # "在初始化完成前收到请求"警告。
                 await server.run(
                     read_stream,
                     write_stream,
@@ -68,7 +68,7 @@ async def handle_sse(request: Request):
                 )
             except Exception as e:
                 logger.error(f"MCP Server Error: {e}")
-                # Close streams?
+                # 关闭流？
                 try:
                     await resp.eof()
                 except:
@@ -76,21 +76,21 @@ async def handle_sse(request: Request):
 
         tg.start_soon(run_server)
 
-        # Wait a bit to ensure server is ready to accept connections
+        # 等待片刻以确保服务器已准备好接受连接
         await anyio.sleep(0.5)
 
-        # 2. Send endpoint event
+        # 2. 发送端点事件
         await resp.send(f"event: endpoint\ndata: {endpoint_url}\n\n")
 
-        # 3. Loop over write_stream and send to SSE
+        # 3. 循环遍历write_stream并发送到SSE
         try:
             async for message in write_stream_reader:
                 if isinstance(message, Exception):
                     logger.error(f"MCP Error in stream: {message}")
                     break
 
-                # message is SessionMessage
-                # We need to serialize it
+                # message是SessionMessage
+                # 需要序列化它
                 data = message.message.model_dump_json(by_alias=True, exclude_none=True)
                 await resp.send(f"event: message\ndata: {data}\n\n")
         except Exception as e:
@@ -99,7 +99,7 @@ async def handle_sse(request: Request):
             logger.info(f"Closing session {session_id}")
             if session_id in _write_stream_writers:
                 del _write_stream_writers[session_id]
-            # Cancel server task? tg will wait/cancel
+            # 取消服务器任务？tg将等待/取消
             tg.cancel_scope.cancel()
 
     return resp
@@ -108,7 +108,7 @@ async def handle_sse(request: Request):
 @mcp_bp.post("/messages")
 async def handle_messages(request: Request):
     """
-    Handle client messages (JSON-RPC) via POST.
+    通过POST处理客户端消息(JSON-RPC)。
     """
     session_id_str = request.args.get("session_id")
     if not session_id_str:
@@ -124,25 +124,25 @@ async def handle_messages(request: Request):
         return response.text("Session not found", status=404)
 
     try:
-        # Parse body
+        # 解析请求体
         body = request.json
-        # Convert to MCP JSONRPCMessage
-        # Using model_validate (pydantic v2) or parse_obj (v1)?
-        # mcp library uses pydantic.
+        # 转换为MCP JSONRPCMessage
+        # 使用model_validate (pydantic v2)还是parse_obj (v1)？
+        # mcp库使用pydantic。
         if isinstance(body, str):
             body = orjson.loads(body)
 
         message = JSONRPCMessage.model_validate(body)
 
-        # Wrap in SessionMessage?
-        # mcp.server.Server.run expects stream of SessionMessage | Exception
-        # ServerMessageMetadata is needed?
-        # Not strictly required by type hint in run?
-        # Actually run expects `MemoryObjectReceiveStream[SessionMessage | Exception]`
+        # 包装为SessionMessage？
+        # mcp.server.Server.run期望SessionMessage | Exception的流
+        # 需要ServerMessageMetadata吗？
+        # run中的类型提示不是严格要求？
+        # 实际上run期望`MemoryObjectReceiveStream[SessionMessage | Exception]`
 
-        # We need to construct SessionMessage
-        # metadata = ServerMessageMetadata(request_context=request) # Request is not serializable/standard?
-        # Let's pass None for metadata if allowed, or simple dict
+        # 需要构造SessionMessage
+        # metadata = ServerMessageMetadata(request_context=request) # Request不可序列化/非标准？
+        # 如果允许，让为metadata传递None，或简单字典
 
         session_message = SessionMessage(message, metadata=None)
 
@@ -151,5 +151,5 @@ async def handle_messages(request: Request):
         return response.text("Accepted", status=202)
 
     except Exception as e:
-        logger.error(f"Message handling error: {e}")
+        logger.error(f"消息处理错误: {e}")
         return response.text(f"Error: {str(e)}", status=500)
