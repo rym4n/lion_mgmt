@@ -6,7 +6,7 @@ import secrets
 import time
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 
 import orjson
 from aiocache import caches
@@ -26,7 +26,7 @@ from libs.security.authorization import (
     playbook_permission,
     check_playbook_permission,
 )
-from libs.utils import gen_run_id, strip_timezone_to_seconds, query_vlog
+from libs.utils import gen_run_id, strip_timezone_to_seconds
 from models import (
     Playbook,
     Scene,
@@ -42,7 +42,7 @@ from models import (
     Account,
 )
 from services.tools.views import tool_action_update, tool_action_playbook_delete
-from settings import TASK_TOPIC, TZ, KAFKA_CONFIG
+from settings import TASK_TOPIC, TZ
 
 workflow_bp = Blueprint("workflow", url_prefix="/playbook")
 _all__ = ["workflow_bp"]
@@ -1860,10 +1860,10 @@ async def dashboard_statistics(request):
     final_result = []
 
     for row in results:
-        total = row['total_runs']
-        succ = int(row['success_count'])
-        fail = int(row['fail_count'])
-        day = row['date']
+        total = row["total_runs"]
+        succ = int(row["success_count"])
+        fail = int(row["fail_count"])
+        day = row["date"]
 
         rate_val = round(succ / total, 2) if total else 0
         success_rate = str(rate_val * 100) + "%"
