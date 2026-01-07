@@ -1231,7 +1231,18 @@ async def run(request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer", "example": 0},
-                            "data": {"type": "string", "example": "[...]"},
+                            "data": {
+                                "type": "list",
+                                "example": """[
+                                    [
+                                        [{....}]
+                                    ], 
+                                    [
+                                        [{....}, {....}], 
+                                        [{....}]
+                                    ]
+                                ]""",
+                                "description": "返回的runlog3层list含义，最外层对应的执行次数，中间对应的执行的不同节点，最里面对应不同资源的执行结果"},
                         },
                     }
                 }
