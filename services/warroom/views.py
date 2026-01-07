@@ -23,7 +23,7 @@ from models import Events, ToolAction, Tool, Runlog
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
 from services.timed.views import runlog_list
-from settings import TASK_TOPIC, WR_TOPIC, CACHE, KAFKA_CONFIG
+from settings import TASK_TOPIC, WR_TOPIC, CACHE
 
 warroom_bp = Blueprint("warroom", url_prefix="/warroom")
 __all__ = ["warroom_bp"]
@@ -1202,7 +1202,52 @@ async def run(request):
     await request.app.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
     await aproduce(TASK_TOPIC, msg)
 
-    return response_ok("运行成功")
+    return response_ok({"run_id": str(msg["run_id"])})
+
+
+@warroom_bp.post("/runlog")
+@openapi.definition(
+    summary="获取运行日志",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["run_id"],
+                "properties": {
+                    "run_id": {
+                        "type": "string",
+                        "description": "请求run接口返回的ID"
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "运行成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {"type": "string", "example": "[...]"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("warroom:r")
+async def activity(request):
+    if not request.json.get("run_id"):
+        raise CustomError(ErrorCode.ParamValueError)
+    logs = await Runlog.filter(run_id=request.json.get("run_id"), deleted=False).all()
+
+    run_logs = await runlog_list(logs)
+
+    return response.json({"code": 0, "data": run_logs})
 
 
 @warroom_bp.post("/execution")
