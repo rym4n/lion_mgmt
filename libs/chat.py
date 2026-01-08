@@ -397,14 +397,16 @@ class ChatManager:
                     room_id = msg.get("room_id")
                     for key, values in self.active_connections.items():
                         for k, v in values.items():
-                            if room_id and v["current_room"] == room_id:
-                                await v["conn"].send(message["data"].decode())
-                            elif room_id is None:
-                                await v["conn"].send(message["data"].decode())
+                            try:
+                                if room_id and v["current_room"] == room_id:
+                                    await v["conn"].send(message["data"].decode())
+                                elif room_id is None:
+                                    await v["conn"].send(message["data"].decode())
+                            except WebsocketClosed as e:
+                                logger.warning(f"{e} | 用户 {key} 的 {k} 会话的连接已关闭，正在移除连接")
+                                await self.disconnect(key, k)
                 except orjson.JSONDecodeError:
                     logger.error(f"JSONDecodeError | {message.get('data')}")
-                except WebsocketClosed:
-                    await self.disconnect(k, key)
                 except Exception as e:
                     logger.error(f"{e} | {traceback.format_exc()}")
                     break
