@@ -125,7 +125,14 @@ def rsa_chunk_decrypt(ciphertext: bytes, rsa_priv_key: rsa.RSAPrivateKey) -> byt
     plaintext = b""
     for idx, block in enumerate(blocks, 1):
         try:
-            decrypted_block = rsa_priv_key.decrypt(block, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+            decrypted_block = rsa_priv_key.decrypt(
+                block,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None,
+                ),
+            )
             plaintext += decrypted_block
         except ValueError as e:
             print(f"[Error] 解密第 {idx} 块失败，块大小 {len(block)} 字节:", e)
@@ -161,7 +168,12 @@ def generate_mac_uuid():
 
 # 获取kafka指定主题最新消息
 async def fetch_latest_messages(bootstrap_servers, topic, num_messages=10):
-    consumer = AIOKafkaConsumer(bootstrap_servers=bootstrap_servers, group_id=None, enable_auto_commit=False, auto_offset_reset="latest")
+    consumer = AIOKafkaConsumer(
+        bootstrap_servers=bootstrap_servers,
+        group_id=None,
+        enable_auto_commit=False,
+        auto_offset_reset="latest",
+    )
 
     try:
         await consumer.start()
@@ -204,13 +216,30 @@ def run_linux_command(command):
     :param command: 字符串或字符串列表，表示要执行的命令。
     :return: 字典，包含 stdout、stderr 和 returncode。
     """
-    result = subprocess.run(command, shell=isinstance(command, str), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
-    return {"stdout": result.stdout.strip() if result.stdout else "", "stderr": result.stderr.strip() if result.stderr else "", "code": result.returncode}
+    result = subprocess.run(
+        command,
+        shell=isinstance(command, str),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    return {
+        "stdout": result.stdout.strip() if result.stdout else "",
+        "stderr": result.stderr.strip() if result.stderr else "",
+        "code": result.returncode,
+    }
 
 
 def derive_key(password: str, salt: bytes) -> bytes:
     """使用PBKDF2HMAC从密码派生密钥"""
-    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=5000, backend=default_backend())
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=5000,
+        backend=default_backend(),
+    )
     return kdf.derive(password.encode())
 
 
@@ -353,7 +382,13 @@ async def query_vlog(query, project_id, start=None, end=None, account_id=0, limi
 #                                             data_stream=None, template=template)
 
 
-async def upload_to_s3(file_content: bytes, bucket_name: str, file_name: str, prefix="", content_type: Optional[str] = None) -> str:
+async def upload_to_s3(
+    file_content: bytes,
+    bucket_name: str,
+    file_name: str,
+    prefix="",
+    content_type: Optional[str] = None,
+) -> str:
     """
     上传文件到存储桶，返回下载的链接
     file_content: 文件内容
@@ -361,11 +396,22 @@ async def upload_to_s3(file_content: bytes, bucket_name: str, file_name: str, pr
     file_name: 文件名称
     prefix: 功能前缀
     """
-    async with aioboto3.Session().client("s3", endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK, config=Config(signature_version="s3v4")) as s3_client:
+    async with aioboto3.Session().client(
+        "s3",
+        endpoint_url=S3_HOST,
+        aws_access_key_id=FS_AK,
+        aws_secret_access_key=FS_SK,
+        config=Config(signature_version="s3v4"),
+    ) as s3_client:
         try:
             s3_key = f"{prefix}/{file_name}"
             # 上传文件
-            await s3_client.put_object(Bucket=bucket_name, Key=s3_key, Body=file_content, ContentType=content_type or "application/octet-stream")
+            await s3_client.put_object(
+                Bucket=bucket_name,
+                Key=s3_key,
+                Body=file_content,
+                ContentType=content_type or "application/octet-stream",
+            )
             return f"/files/{bucket_name}/{s3_key}"
         except Exception as e:
             logger.error(f"上传文件失败: {e} | {traceback.format_exc()}")
@@ -379,7 +425,13 @@ async def delete_from_s3(bucket_name: str, file_name: str, prefix="") -> bool:
     file_name: 文件名称
     prefix: 功能前缀
     """
-    async with aioboto3.Session().client("s3", endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK, config=Config(signature_version="s3v4")) as s3_client:
+    async with aioboto3.Session().client(
+        "s3",
+        endpoint_url=S3_HOST,
+        aws_access_key_id=FS_AK,
+        aws_secret_access_key=FS_SK,
+        config=Config(signature_version="s3v4"),
+    ) as s3_client:
         try:
             await s3_client.delete_object(Bucket=bucket_name, Key=f"{prefix}/{file_name}")
             return True
@@ -395,7 +447,13 @@ async def get_from_s3(bucket_name: str, file_name: str, prefix="") -> bytes | No
     file_name: 文件名称
     prefix: 功能前缀
     """
-    async with aioboto3.Session().client("s3", endpoint_url=S3_HOST, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK, config=Config(signature_version="s3v4")) as s3_client:
+    async with aioboto3.Session().client(
+        "s3",
+        endpoint_url=S3_HOST,
+        aws_access_key_id=FS_AK,
+        aws_secret_access_key=FS_SK,
+        config=Config(signature_version="s3v4"),
+    ) as s3_client:
         try:
             obj = await s3_client.get_object(Bucket=bucket_name, Key=f"{prefix}/{file_name}")
             return await obj["Body"].read()
@@ -411,9 +469,19 @@ async def get_url_from_s3(bucket_name: str, file_name: str, host, prefix="") -> 
     file_name: 文件名称
     prefix: 功能前缀
     """
-    async with aioboto3.Session().client("s3", endpoint_url="https://" + host, aws_access_key_id=FS_AK, aws_secret_access_key=FS_SK, config=Config(signature_version="s3v4")) as s3_client:
+    async with aioboto3.Session().client(
+        "s3",
+        endpoint_url="https://" + host,
+        aws_access_key_id=FS_AK,
+        aws_secret_access_key=FS_SK,
+        config=Config(signature_version="s3v4"),
+    ) as s3_client:
         try:
-            file_url = await s3_client.generate_presigned_url(ClientMethod="get_object", Params={"Bucket": bucket_name, "Key": f"{prefix}/{file_name}"}, ExpiresIn=600)  # 10 分钟有效期
+            file_url = await s3_client.generate_presigned_url(
+                ClientMethod="get_object",
+                Params={"Bucket": bucket_name, "Key": f"{prefix}/{file_name}"},
+                ExpiresIn=600,
+            )  # 10 分钟有效期
             file_url = file_url.replace("https://" + host, "https://" + host + "/files")
             return file_url
         except Exception as e:

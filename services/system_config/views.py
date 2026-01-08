@@ -606,62 +606,6 @@ async def update_oauth_config(request):
     return response_ok("success")
 
 
-@system_bp.post("/ai/update")
-@openapi.definition(
-    summary="设置AI参数",
-    description="设置AI参数，需要system:u权限",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "llm_host": {
-                        "type": "string",
-                        "description": "AI服务的Host（需带有协议，如 https://xxx.com）",
-                    },
-                    "llm_api_key": {
-                        "type": "string",
-                        "description": 'AI服务的API Key（可选，留空则不更新，无密钥时传"EMPTY"）',
-                    },
-                    "llm_model": {
-                        "type": "string",
-                        "description": "AI服务的模型名称（可选，留空则不更新）",
-                    },
-                },
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "设置成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {"type": "string"},
-                        },
-                    }
-                }
-            },
-        }
-    },
-)
-@requires_permission("system:u")
-async def set_ai(request):
-    params = request.json
-    args = ["llm_host", "llm_api_key", "llm_model"]
-
-    for a in args:
-        if params.get(a):
-            await Config.update_or_create(key=a, defaults={"value": params[a]}, module="ai")
-    ai_cfg = {a: params[a] for a in args}
-    await request.app.ctx.cache_client.set("ai_config", ai_cfg, 60 * 60 * 24)
-
-    return response_ok("success")
-
-
 @system_bp.post("/transforms-update")
 @openapi.definition(
     summary="更新transforms模型",

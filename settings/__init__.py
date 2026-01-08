@@ -111,8 +111,16 @@ WEBSOCKET_PING_TIMEOUT = 60
 BASE_LOGGING = {
     "version": 1,
     "loggers": {
-        "": {"level": "INFO", "handlers": ["console", "info_file", "error_file"], "propagate": False},
-        "sanic": {"level": "INFO", "handlers": ["console", "info_file", "error_file"], "propagate": False},
+        "": {
+            "level": "INFO",
+            "handlers": ["console", "info_file", "error_file"],
+            "propagate": False,
+        },
+        "sanic": {
+            "level": "INFO",
+            "handlers": ["console", "info_file", "error_file"],
+            "propagate": False,
+        },
     },
     "formatters": {
         "default": {
@@ -177,7 +185,10 @@ TORTOISE = {
 }
 
 CACHE = {
-    "default": {"cache": "aiocache.SimpleMemoryCache", "serializer": {"class": "aiocache.serializers.PickleSerializer"}},
+    "default": {
+        "cache": "aiocache.SimpleMemoryCache",
+        "serializer": {"class": "aiocache.serializers.PickleSerializer"},
+    },
     "redis_mgmt": {
         "cache": "aiocache.RedisCache",
         "serializer": {"class": "aiocache.serializers.PickleSerializer"},

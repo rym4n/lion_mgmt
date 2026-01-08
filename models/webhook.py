@@ -28,7 +28,14 @@ class PlaybookWebhook(BaseModel):
             "webhook_url": f"/webhook/execute?key={self.webhook_token}",
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
-            "creator": {"username": self.creator.username, "display_name": self.creator.display_name} if self.creator else None,
+            "creator": (
+                {
+                    "username": self.creator.username,
+                    "display_name": self.creator.display_name,
+                }
+                if self.creator
+                else None
+            ),
             "description": self.description,
         }
 

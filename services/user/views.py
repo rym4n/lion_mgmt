@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 import pyotp
+from aiocache import caches
 from argon2.exceptions import VerificationError, InvalidHashError
 from jsonpath import jsonpath
 from sanic import Blueprint, response
@@ -1247,8 +1248,13 @@ async def oauth2_callback(request):
     },
 )
 async def init_scene_list(request):
-    s = await Scene.get_or_none(deleted=False, status=1)
-    return response_ok({"scene": s.name if s else ""})
+    scene_name = await caches.get("redis_chat").get("aioe_current_scene")
+    if not scene_name:
+        s = await Scene.get_or_none(deleted=False, status=1)
+        if s:
+            await caches.get("redis_chat").set("aioe_current_scene", s.name)
+            return response_ok({"scene": s.name})
+    return response_ok({"scene": ""})
 
 
 @user_bp.post("/account-list")

@@ -15,10 +15,26 @@ from tortoise.expressions import Q
 from tortoise.functions import Max
 
 from libs.kafka import aconsume
-from models import Runlog, Approvement, Events, Config, ToolAction, ToolResourcesModel, ToolResources, Playbook, PlaybookVersion
+from models import (
+    Runlog,
+    Approvement,
+    Events,
+    Config,
+    ToolAction,
+    ToolResourcesModel,
+    ToolResources,
+    Playbook,
+    PlaybookVersion,
+)
 from models.user import Account
 from models.warroom import Room, Message, MessageAccount
-from settings import CACHE, RUNLOG_TOPIC, WR_TOPIC, AUTHENTICATION_SESSION_EXPIRATION, TZ
+from settings import (
+    CACHE,
+    RUNLOG_TOPIC,
+    WR_TOPIC,
+    AUTHENTICATION_SESSION_EXPIRATION,
+    TZ,
+)
 
 
 async def fetch_completion(host, api_key, model, messages):
@@ -38,7 +54,12 @@ async def fetch_completion(host, api_key, model, messages):
 
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-    payload = {"model": model, "messages": messages, "max_tokens": 4000, "temperature": 0.75}
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": 4000,
+        "temperature": 0.75,
+    }
 
     try:
         async with httpx.AsyncClient(timeout=600) as client:
@@ -159,7 +180,14 @@ async def creat_message(room_id, log, user, redis):
     content = log.get("run_id") + ":" + log.get("node_id")
     if got_lock:
         # 当前是第一个拿到锁的人，创建记录
-        msg, _ = await Message.update_or_create(type="runlog", sender=sender, room_id=room_id, content=content, receiver=user, defaults={"image_content": ""})
+        msg, _ = await Message.update_or_create(
+            type="runlog",
+            sender=sender,
+            room_id=room_id,
+            content=content,
+            receiver=user,
+            defaults={"image_content": ""},
+        )
     else:
         # 其他执行引擎进入这里：稍等一下，再尝试获取已创建的记录
         for i in range(5):
@@ -350,10 +378,24 @@ class ChatManager:
         if user.id not in self.active_connections.keys():
             self.active_connections[user.id] = {session_id: {"conn": ws, "current_room": None, "run_id": None}}
         else:
-            self.active_connections[user.id][session_id] = {"conn": ws, "current_room": None, "run_id": None}
+            self.active_connections[user.id][session_id] = {
+                "conn": ws,
+                "current_room": None,
+                "run_id": None,
+            }
         logger.info(self.active_connections)
-        status_message = {"type": "user_status", "user_id": user.id, "username": user.username, "online": True, "timestamp": str(datetime.now())}
-        await self.cache_client.set(f"room_online_{user.id}", int(time.time()), AUTHENTICATION_SESSION_EXPIRATION)
+        status_message = {
+            "type": "user_status",
+            "user_id": user.id,
+            "username": user.username,
+            "online": True,
+            "timestamp": str(datetime.now()),
+        }
+        await self.cache_client.set(
+            f"room_online_{user.id}",
+            int(time.time()),
+            AUTHENTICATION_SESSION_EXPIRATION,
+        )
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(status_message).decode())
 
     async def disconnect(self, user_id, session_id):
@@ -394,7 +436,14 @@ class ChatManager:
                     if "log" in msg.keys():
                         if msg["log"].get("type") == "approval-info":
                             continue
-                        message["data"] = orjson.dumps(await creat_message(room_id=msg["room_id"], log=msg["log"], user=msg["updator"], redis=self.redis))
+                        message["data"] = orjson.dumps(
+                            await creat_message(
+                                room_id=msg["room_id"],
+                                log=msg["log"],
+                                user=msg["updator"],
+                                redis=self.redis,
+                            )
+                        )
                     room_id = msg.get("room_id")
                     for key, values in self.active_connections.items():
                         for k, v in values.items():
@@ -488,7 +537,11 @@ class ChatManager:
                         log["event_id"] = event.id
                 to_insert.append(Runlog(**log))
         try:
-            await Runlog.bulk_create(to_insert, update_fields=["status", "end_time", "result", "utime", "id"], on_conflict=["run_id", "node_id", "node_name", "resource_name"])
+            await Runlog.bulk_create(
+                to_insert,
+                update_fields=["status", "end_time", "result", "utime", "id"],
+                on_conflict=["run_id", "node_id", "node_name", "resource_name"],
+            )
         except Exception as e:
             logger.info(f"runlog消息：{to_insert}")
             logger.error(f"{e} | {traceback.format_exc()}")
@@ -512,19 +565,46 @@ class ChatManager:
             elif message_type == "delete_announcement":
                 await self._handle_delete_announcement(user, data)
                 # 通知删除成功
-                await ws.send(orjson.dumps({"type": "delete_announcement_success", "announcement_id": data.get("announcement_id")}).decode())
+                await ws.send(
+                    orjson.dumps(
+                        {
+                            "type": "delete_announcement_success",
+                            "announcement_id": data.get("announcement_id"),
+                        }
+                    ).decode()
+                )
             elif message_type == "request_online_users":
                 online_users = await self._handle_request_online_users(data)
                 if user.id in self.active_connections:
                     self.active_connections[user.id][session_id]["current_room"] = data["room_id"]
                 # 发送在线状态列表
-                await ws.send(orjson.dumps({"type": "online_users_list", "room_id": data.get("room_id"), "users": online_users}).decode())
+                await ws.send(
+                    orjson.dumps(
+                        {
+                            "type": "online_users_list",
+                            "room_id": data.get("room_id"),
+                            "users": online_users,
+                        }
+                    ).decode()
+                )
             elif message_type == "ping":
-                await self.cache_client.set(f"room_online_{user.id}", int(time.time()), AUTHENTICATION_SESSION_EXPIRATION)
+                await self.cache_client.set(
+                    f"room_online_{user.id}",
+                    int(time.time()),
+                    AUTHENTICATION_SESSION_EXPIRATION,
+                )
                 await ws.send(orjson.dumps({"type": "pong"}).decode())
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
-            await ws.send(orjson.dumps({"type": "error", "message": str(e), "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}).decode())
+            await ws.send(
+                orjson.dumps(
+                    {
+                        "type": "error",
+                        "message": str(e),
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                ).decode()
+            )
 
     async def publish_ai_message(self, data: dict):
         """消息处理"""
@@ -550,7 +630,14 @@ class ChatManager:
             raise Exception("消息不能为空")
 
         # 保存消息到数据库
-        message = await Message.create(type="public", sender=user, room=room, content=content, image_content=image_content, receiver=user)  # 群聊消息设为发送者自己作为占位符
+        message = await Message.create(
+            type="public",
+            sender=user,
+            room=room,
+            content=content,
+            image_content=image_content,
+            receiver=user,
+        )  # 群聊消息设为发送者自己作为占位符
 
         if specify_users:
             for specify_user in specify_users:
@@ -663,7 +750,14 @@ class ChatManager:
 
             chat_room = await Room.get_or_none(id=chat_room["room_id"])
 
-            message = await Message.create(type="private", sender=user, receiver=receiver, content=content, image_content=image_content, room=chat_room)
+            message = await Message.create(
+                type="private",
+                sender=user,
+                receiver=receiver,
+                content=content,
+                image_content=image_content,
+                room=chat_room,
+            )
 
             if specify_users:
                 # 指定用户发送消息
@@ -742,7 +836,13 @@ class ChatManager:
         message.is_recalled = True
         await message.save()
 
-        recall_notice = {"type": "recall", "message_id": str(message.id), "sender_id": user.id, "room_id": message.room.id, "timestamp": str(now)}
+        recall_notice = {
+            "type": "recall",
+            "message_id": str(message.id),
+            "sender_id": user.id,
+            "room_id": message.room.id,
+            "timestamp": str(now),
+        }
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(recall_notice).decode())
 
     async def _handle_announcement(self, user: Account, data: dict):
@@ -756,7 +856,15 @@ class ChatManager:
         room = await Room.get_or_none(id=room_id)
         if not room:
             raise Exception("作战室不存在")
-        announcement = await Message.create(type="announcement", sender=user, room=room, content=content, image_content=image_content, is_pinned=True, receiver=user)  # 设公告发送者自己作为占位符
+        announcement = await Message.create(
+            type="announcement",
+            sender=user,
+            room=room,
+            content=content,
+            image_content=image_content,
+            is_pinned=True,
+            receiver=user,
+        )  # 设公告发送者自己作为占位符
 
         # 指定房间广播公告
         # await self._broadcast_to_room(room_id, )

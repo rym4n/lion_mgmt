@@ -1212,10 +1212,7 @@ async def run(request):
                 "type": "object",
                 "required": ["run_id"],
                 "properties": {
-                    "run_id": {
-                        "type": "string",
-                        "description": "请求run接口返回的ID"
-                    },
+                    "run_id": {"type": "string", "description": "请求run接口返回的ID"},
                 },
             }
         }
@@ -1240,7 +1237,8 @@ async def run(request):
                                         [{....}]
                                     ]
                                 ]""",
-                                "description": "返回的runlog3层list含义，最外层对应的执行次数，中间对应的执行的不同节点，最里面对应不同资源的执行结果"},
+                                "description": "返回的runlog3层list含义，最外层对应的执行次数，中间对应的执行的不同节点，最里面对应不同资源的执行结果",
+                            },
                         },
                     }
                 }

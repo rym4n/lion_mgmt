@@ -71,8 +71,14 @@ class PlaybookVersion(BaseModel):
             "status": self.status,
             "flow_json": self.flow_json,
             "version": self.version,
-            "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
-            "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
+            "creator": {
+                "username": self.creator.username,
+                "display_name": self.creator.display_name,
+            },
+            "updator": {
+                "username": self.updator.username,
+                "display_name": self.updator.display_name,
+            },
             "internal": self.playbook.internal,
         }
 
@@ -88,9 +94,24 @@ class PlaybookPermissions(BaseModel):
     剧本权限表
     """
 
-    pb = fields.ForeignKeyField("models.Playbook", unique=True, related_name="playbook_permissions", description="剧本")
-    users = fields.ForeignKeyField("models.Account", null=True, related_name="playbook_permissions_user", description="用户")
-    roles = fields.ForeignKeyField("models.Role", null=True, related_name="playbook_permissions_role", description="角色")
+    pb = fields.ForeignKeyField(
+        "models.Playbook",
+        unique=True,
+        related_name="playbook_permissions",
+        description="剧本",
+    )
+    users = fields.ForeignKeyField(
+        "models.Account",
+        null=True,
+        related_name="playbook_permissions_user",
+        description="用户",
+    )
+    roles = fields.ForeignKeyField(
+        "models.Role",
+        null=True,
+        related_name="playbook_permissions_role",
+        description="角色",
+    )
     permissions = fields.JSONField(null=True)
 
     def validate(self) -> None:
@@ -102,8 +123,16 @@ class PlaybookPermissions(BaseModel):
             "id": self.id,
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
-            "users": {"id": self.users_id, "username": self.users.username, "display_name": self.users.display_name} if self.users else None,
-            "roles": {"id": self.roles_id, "name": self.roles.name} if self.roles else None,
+            "users": (
+                {
+                    "id": self.users_id,
+                    "username": self.users.username,
+                    "display_name": self.users.display_name,
+                }
+                if self.users
+                else None
+            ),
+            "roles": ({"id": self.roles_id, "name": self.roles.name} if self.roles else None),
             "permissions": self.permissions,
         }
 

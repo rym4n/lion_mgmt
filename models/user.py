@@ -16,8 +16,18 @@ class Account(BaseModel):
 
     username: str = fields.CharField(unique=True, null=False, max_length=32)
     display_name: str = fields.CharField(max_length=255, null=True)
-    email: str = fields.CharField(unique=True, max_length=150, null=True, validators=[RegexValidator(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", re.I)])
-    phone: str = fields.CharField(unique=True, max_length=15, null=True, validators=[RegexValidator(r"^1[3-9]\d{9}$", re.I)])  # 中国
+    email: str = fields.CharField(
+        unique=True,
+        max_length=150,
+        null=True,
+        validators=[RegexValidator(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", re.I)],
+    )
+    phone: str = fields.CharField(
+        unique=True,
+        max_length=15,
+        null=True,
+        validators=[RegexValidator(r"^1[3-9]\d{9}$", re.I)],
+    )  # 中国
     password: str = fields.CharField(max_length=255)
     mfa_enable: bool = fields.BooleanField(default=False)
     mfa_key: str = fields.CharField(max_length=50, null=True)
@@ -144,7 +154,12 @@ class Tenant(Model):
     deleted: bool = fields.BooleanField(default=False, description="删除标识")
     name: str = fields.CharField(max_length=255, null=True, unique=True, description="工作空间名称")
     creator = fields.ForeignKeyField("models.Account", null=True, related_name="creator_tenant", description="创建人")
-    member = fields.ManyToManyField(model_name="models.Account", related_name="member", through="tenant_member", description="工作空间成员")
+    member = fields.ManyToManyField(
+        model_name="models.Account",
+        related_name="member",
+        through="tenant_member",
+        description="工作空间成员",
+    )
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -156,11 +171,17 @@ class Tenant(Model):
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
             "name": self.name,
-            "creator": {"username": self.creator.username, "display_name": self.creator.display_name} if self.creator else {},
-            "member": [{"username": user.username, "display_name": user.display_name} for user in self.member] if self.member else [],
+            "creator": (
+                {
+                    "username": self.creator.username,
+                    "display_name": self.creator.display_name,
+                }
+                if self.creator
+                else {}
+            ),
+            "member": ([{"username": user.username, "display_name": user.display_name} for user in self.member] if self.member else []),
         }
 
     class Meta:
         table = "tenant"
         ordering = ["-utime"]
-

@@ -39,7 +39,13 @@ class CacheListener(BaseListener):
             scopes = app.ctx.oauth_cfg.get("scopes")
             base_scopes = scopes.split(",") if scopes else None
 
-            app.ctx.oauth2 = OAuth2(client_id, client_secret, authorize_uri, token_uri, base_scopes=base_scopes)
+            app.ctx.oauth2 = OAuth2(
+                client_id,
+                client_secret,
+                authorize_uri,
+                token_uri,
+                base_scopes=base_scopes,
+            )
 
         app.add_task(chat_manager.msg_listener, name="chat_msg_listener")
         app.add_task(chat_manager.log_listener, name="run_log_listener")

@@ -14,7 +14,6 @@ import zipfile
 import aiofile
 import orjson
 import yaml
-from openai import OpenAI
 from sanic import Blueprint, response
 from sanic.log import logger
 from sanic_ext import openapi
@@ -24,7 +23,6 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs import supervisor
-from libs.chat import get_ai_config
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import run_linux_command, query_vlog
@@ -941,7 +939,11 @@ async def binding_event_ingestion_script(request):
             }
         data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
             "type": "remap",
-            "inputs": ([f"{topic}_transforms"] if conditions else ([f"{topic}_dedupe_transforms"] if request_data.get("fields") and request_data.get("numbers") else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]))),
+            "inputs": (
+                [f"{topic}_transforms"]
+                if conditions
+                else ([f"{topic}_dedupe_transforms"] if request_data.get("fields") and request_data.get("numbers") else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]))
+            ),
             "source": f"""
 .aioe_event_id = uuid_v4()
 .log_data = to_string(encode_json(.log))
@@ -1579,67 +1581,3 @@ async def transforms_list(request):
     transforms = await Config.filter(deleted=False, module="transforms").all()
 
     return response_ok([{"key": transform.key, "type": transform.type} for transform in transforms])
-
-
-@event_ingestion_bp.post("/grok-ai")
-@openapi.definition(
-    summary="使用AI进行日志解析生成grok表达式",
-    description="使用ai进行日志解析生成grok表达式并返回",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "required": ["log"],
-                "properties": {"log": {"type": "string", "description": "日志内容"}},
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "生成成功",
-            "content": {"text/plain": {"schema": {"type": "string"}}},
-        }
-    },
-)
-async def grok_ai(request):
-    log = request.json.get("log")
-    system_prompt = """
-# 角色
-你是一位日志解析专家，擅长使用vecotr工具,能够根据提供的日志样例生成 *单个* Grok 表达式。
-
-# 目标
-只返回最终 Grok 表达式字符串（单行）,不得输出除表达式本身以外的任何内容
-
-# 规则
-1. 基于我提供的日志样例自动识别固定文本、字段边界与字段类型
-2. 优先使用内置模式: USERNAME, USER, EMAILLOCALPART, EMAILADDRESS, INT, BASE10NUM, NUMBER, BASE16NUM, BASE16FLOAT, WORD, NOTSPACE, SPACE, DATA, GREEDYDATA, QUOTEDSTRING, UUID, MAC, IPV6, IPV4, IP, HOSTNAME, IPORHOST, HOSTPORT, YEAR, HOUR, MINUTE, SECOND, TIME, DATE_US, DATE_EU, ISO8601_TIMEZONE, ISO8601_SECOND, TIMESTAMP_ISO8601, DATE, DATESTAMP, TZ, DATESTAMP_RFC822, DATESTAMP_RFC2822, DATESTAMP_OTHER, DATESTAMP_EVENTLOG, SYSLOGTIMESTAMP
-3. 尽量精简,避免过度捕获；不需要刻意区分 DATA/GREEDYDATA
-
-# 输出格式（严格）：
-仅输出 Grok 表达式本身（单行）。不要包裹引号,不要回显“grok”字样,不要多余换行。
-
-# 示例（仅供参考，真实输出时不含此类内容）：
-日志样例：2020-10-02T23:22:12.223222Z info Hello world
-输出结果：%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:level} %{GREEDYDATA:message}
-    """
-
-    ai_cfg = await get_ai_config()
-    host = ai_cfg.get("llm_host")
-    if host is None:
-        return response_ok("当前未配置ai服务模型，请前往系统设置进行配置。")
-
-    api_key = ai_cfg.get("llm_api_key")
-    model = ai_cfg.get("llm_model")
-    if model is None:
-        return response_ok("当前未配置ai服务模型，请前往系统设置进行配置。")
-
-    client = OpenAI(base_url=host, api_key=api_key)
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"提供给你的日志样例是：{log}"},
-    ]
-    resp = client.chat.completions.create(model=model, messages=messages, max_tokens=4000, temperature=0.7)
-
-    full_response = resp.choices[0].message.content if resp.choices else ""
-
-    return full_response

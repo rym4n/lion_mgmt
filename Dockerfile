@@ -8,7 +8,7 @@ RUN apt update -y && apt install -y \
     libaio-dev \
     ccache
 
-RUN pip install uv==0.8.17 nuitka==2.8.3
+RUN pip install uv==0.9.22 nuitka==2.8.9
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \

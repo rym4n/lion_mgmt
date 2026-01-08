@@ -9,7 +9,8 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import (
-    Tenant, Account,
+    Tenant,
+    Account,
 )
 
 tenant_bp = Blueprint("tenant", url_prefix="/tenant")
@@ -26,7 +27,7 @@ _all__ = ["tenant_bp"]
                 "type": "object",
                 "properties": {
                     "page": {"type": "integer", "description": "页码（默认1）"},
-                    "size": {"type": "integer", "description": "每页数量（默认15）"}
+                    "size": {"type": "integer", "description": "每页数量（默认15）"},
                 },
             }
         }
@@ -67,7 +68,11 @@ async def get_tenant(request):
                 "required": ["name"],
                 "properties": {
                     "name": {"type": "string", "description": "工作空间名称"},
-                    "members": {"type": "array", "items": {"type": "string"}, "description": "成员id列表"},
+                    "members": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "成员id列表",
+                    },
                 },
             }
         }
@@ -104,9 +109,7 @@ async def add_tenant(request):
             "schema": {
                 "type": "object",
                 "required": ["name"],
-                "properties": {
-                    "id": {"type": "string", "description": "工作空间id"}
-                },
+                "properties": {"id": {"type": "string", "description": "工作空间id"}},
             }
         }
     },
@@ -140,7 +143,11 @@ async def del_tenant(request):
                 "properties": {
                     "id": {"type": "string", "description": "工作空间id"},
                     "name": {"type": "string", "description": "工作空间名称"},
-                    "members": {"type": "array", "items": {"type": "string"}, "description": "成员id列表,更新为覆盖更新,不传就不更新"}
+                    "members": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "成员id列表,更新为覆盖更新,不传就不更新",
+                    },
                 },
             }
         }
@@ -169,5 +176,3 @@ async def edit_tenant(request):
 
     await tenant.save()
     return response_ok("更新成功")
-
-

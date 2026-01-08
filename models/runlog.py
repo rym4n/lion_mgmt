@@ -12,7 +12,12 @@ class Runlog(BaseModel):
     """
 
     run_id = fields.CharField(max_length=36, description="每次运行的唯一ID")
-    timer = fields.ForeignKeyField("models.Timed", null=True, related_name="timer_runlog", description="关联定时任务")
+    timer = fields.ForeignKeyField(
+        "models.Timed",
+        null=True,
+        related_name="timer_runlog",
+        description="关联定时任务",
+    )
     event_id = fields.CharField(max_length=36, null=True, description="事件id")
 
     node_id = fields.CharField(max_length=36, description="节点ID")
@@ -37,7 +42,13 @@ class Runlog(BaseModel):
     resource_name = fields.CharField(null=True, max_length=36, description="资源名称")
     playbook_name = fields.CharField(null=True, max_length=255, index=True, description="剧本名称")
 
-    playbook_version = fields.ForeignKeyField("models.PlaybookVersion", null=True, related_name="playbook_runlog", description="关联剧本版本", on_delete=fields.SET_NULL)
+    playbook_version = fields.ForeignKeyField(
+        "models.PlaybookVersion",
+        null=True,
+        related_name="playbook_runlog",
+        description="关联剧本版本",
+        on_delete=fields.SET_NULL,
+    )
 
     def validate(self) -> None:
         raise NotImplementedError

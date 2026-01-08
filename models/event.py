@@ -43,9 +43,23 @@ class Events(BaseModel):
             "log_data": self.log_data,
             "event_ingestion_id": self.event_ingestion_id,
             "room": self.room_id,
-            "creator": {"username": self.creator.username, "display_name": self.creator.display_name} if self.creator else None,
-            "updator": {"username": self.updator.username, "display_name": self.updator.display_name} if self.updator else None,
-            "close_time": strip_timezone_to_seconds(self.close_time) if self.close_time else None,
+            "creator": (
+                {
+                    "username": self.creator.username,
+                    "display_name": self.creator.display_name,
+                }
+                if self.creator
+                else None
+            ),
+            "updator": (
+                {
+                    "username": self.updator.username,
+                    "display_name": self.updator.display_name,
+                }
+                if self.updator
+                else None
+            ),
+            "close_time": (strip_timezone_to_seconds(self.close_time) if self.close_time else None),
         }
 
     class Meta:
@@ -92,8 +106,14 @@ class EventsIngestion(BaseModel):
             "event_source_type": self.event_source_type,
             "transforms_type": self.transforms_type,
             "enabled_status": self.enabled_status,
-            "creator": {"username": self.creator.username, "display_name": self.creator.display_name},
-            "updator": {"username": self.updator.username, "display_name": self.updator.display_name},
+            "creator": {
+                "username": self.creator.username,
+                "display_name": self.creator.display_name,
+            },
+            "updator": {
+                "username": self.updator.username,
+                "display_name": self.updator.display_name,
+            },
             "file_path": self.file_path,
             "linked_execution": self.linked_execution,
             "syslog_config": self.syslog_config,

@@ -17,7 +17,16 @@ class SecurityMiddleware(BaseMiddleware):
 
     async def before_request(self, request: Request) -> None:
         # 判断请求URI是否需要身份验证
-        white_urls = ["/user/login", "/health", "/system/oauth/status", "/system/platform", "/system/picture", "/user/oauth/login", "/user/oauth/callback", "/user/local-auth"]
+        white_urls = [
+            "/user/login",
+            "/health",
+            "/system/oauth/status",
+            "/system/platform",
+            "/system/picture",
+            "/user/oauth/login",
+            "/user/oauth/callback",
+            "/user/local-auth",
+        ]
         if request.path not in white_urls:
             await authenticate(request)
 
@@ -31,7 +40,7 @@ class SecurityMiddleware(BaseMiddleware):
             data = {
                 "username": request.ctx.session["name"],
                 "display_name": request.ctx.session["display_name"],
-                "tenant_id": request.ctx.session["tenant_id"] if "tenant_id" in request.ctx.session else 0,
+                "tenant_id": (request.ctx.session["tenant_id"] if "tenant_id" in request.ctx.session else 0),
                 "client_ip": request.ctx.session["ip"],
                 "result": "成功" if response.status == 200 else "失败",
                 "uri": request.path,
