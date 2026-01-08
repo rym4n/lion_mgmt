@@ -1254,7 +1254,7 @@ async def init_scene_list(request):
         if s:
             await caches.get("redis_chat").set("aioe_current_scene", s.name)
             return response_ok({"scene": s.name})
-    return response_ok({"scene": ""})
+    return response_ok({"scene": scene_name})
 
 
 @user_bp.post("/account-list")
