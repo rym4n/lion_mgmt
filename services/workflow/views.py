@@ -40,6 +40,7 @@ from models import (
     Timed,
     PlaybookWebhook,
     Account,
+    Tool,
 )
 from services.tools.views import tool_action_update, tool_action_playbook_delete
 from settings import TASK_TOPIC, TZ
@@ -1967,6 +1968,12 @@ async def import_workflow(request):
                     )
 
             for flow_json in flow_json_list:
+                for node in flow_json.get("nodes", []):
+                    if node.get("type") == "action-node":
+                        app_name = node["properties"].get("app_name")
+                        tool = await Tool.filter(deleted=False, name=app_name, maintain=maintenance_mode).order_by("-utime").first()
+                        node["properties"]["version"] = tool.version if tool else ""
+
                 pv = await PlaybookVersion.create(
                     playbook=playbook,
                     version=gen_run_id(),
