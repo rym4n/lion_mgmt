@@ -1006,9 +1006,8 @@ del(.datetime_str)
                     process_name = hashlib.md5(f"{event.id}_{script_id}".encode()).hexdigest()
                     command = f"python start.py -m auto -f {script_id} -t {topic}"
                     supervisor.add_process(process_name, command, concurrency)
-                    result = supervisor.start_process(process_name)
-                    if result:
-                        event.execution_health_status = "healthy"
+                    supervisor.start_process(process_name)
+
             event_related_script.status = linked_execution
             await event_related_script.save()
 
@@ -1017,7 +1016,7 @@ del(.datetime_str)
         await f.write(yaml_str)
 
     event.vector_config = data
-
+    event.execution_health_status = "healthy"
     await event.save()
 
     return response_ok("绑定成功")
