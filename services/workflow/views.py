@@ -1886,15 +1886,15 @@ async def dashboard_statistics(request):
     summary="导入剧本",
     description="导入剧本",
     body={
-        "application/json": {
+        "multipart/from-data": {
             "schema": {
                 "type": "object",
-                "required": ["flow_list"],
+                "required": ["file"],
                 "properties": {
-                    "flow_list": {
-                        "type": "array",
-                        "items": {"type": "object"},
-                        "description": "剧本列表",
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "剧本导入文件",
                     }
                 },
             }
@@ -1920,11 +1920,11 @@ async def dashboard_statistics(request):
 )
 @requires_permission("workflow:c")
 async def import_workflow(request):
-    data = request.json
-    if not data.get("flow_list"):
+    file_obj = request.files.get("file")
+    if not file_obj:
         raise CustomError(ErrorCode.ParameterError)
 
-    for flow_data in data.get("flow_list"):
+    for flow_data in orjson.loads(file_obj.body.decode("utf-8")):
         # 判断name是否已经存在，如果存在的话要抛出异常
         if await Playbook.filter(name=flow_data.get("name"), deleted=False).exists():
             flow_data["name"] = f"{flow_data.get('name')}_{time.time()}"
@@ -1973,7 +1973,7 @@ async def import_workflow(request):
                         app_name = node["properties"].get("app_name")
                         tool = await Tool.filter(deleted=False, name=app_name, maintain=maintenance_mode).order_by("-utime").first()
                         node["properties"]["version"] = tool.version if tool else ""
-
+                print(flow_json)
                 pv = await PlaybookVersion.create(
                     playbook=playbook,
                     version=gen_run_id(),
