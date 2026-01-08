@@ -143,3 +143,4 @@ class ErrorCode(BaseErrorCode):
     TenantAlreadyExists = ErrorData(4105, "已存在同名工作空间")
     TenantHasMembers = ErrorData(4106, "当前工作空间存在成员，禁止删除")
     TenantNotFound = ErrorData(4107, "当前工作空间不存在")
+    CannotDeleteTenant = ErrorData(4108, "默认工作空间禁止删除")
