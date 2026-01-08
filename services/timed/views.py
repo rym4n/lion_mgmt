@@ -21,7 +21,7 @@ from models import (
     Runlog,
     PlaybookVersion,
     PlaybookPermissions,
-    ActionPermissions,
+    ActionPermissions, Account,
 )
 from services.workflow.views import get_playbook_input
 from settings import TASK_TOPIC, TZ, KAFKA_CONFIG
@@ -1032,10 +1032,14 @@ async def runlog_list(all_logs):
     logs_by_run_id = {}
     for log in all_logs:
         # 处理runlog中的过期的审核节点
+        log_data = log.json
+        creator = await Account.get_or_none(id=log_data["creator"])
+        log_data["creator_username"] = creator.username if creator else None
+        log_data["creator_display_name"] = creator.display_name if creator else None
         if (log.run_id, log.node_id) not in logs_by_run_id.setdefault(log.run_id, {}).keys():
-            logs_by_run_id[log.run_id][(log.run_id, log.node_id)] = [log.json]
+            logs_by_run_id[log.run_id][(log.run_id, log.node_id)] = [log_data]
         else:
-            logs_by_run_id[log.run_id][(log.run_id, log.node_id)].append(log.json)
+            logs_by_run_id[log.run_id][(log.run_id, log.node_id)].append(log_data)
 
     for value in logs_by_run_id.values():
         data = []

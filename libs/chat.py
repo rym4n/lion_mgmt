@@ -196,6 +196,10 @@ async def creat_message(room_id, log, user, redis):
                 break
             await asyncio.sleep(0.01 * (i + 1))  # 指数轮询避免数据库压力过大
 
+    creator = await Account.get_or_none(id=log["creator"])
+    log["creator_username"] = creator.username if creator else None
+    log["creator_display_name"] = creator.display_name if creator else None
+
     message_data = {
         "type": "runlog",
         "message_id": str(msg.id),
