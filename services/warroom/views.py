@@ -128,6 +128,10 @@ async def create_room(request: Request):
     # 作战室名称唯一
     if await Room.filter(name=room_name).exists():
         raise CustomError(ErrorCode.RoomNameExists)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     creator = request.ctx.session["account_info"]
     room = await Room.create(name=room_name, creator=creator)
     await room.users.add(creator)
@@ -150,6 +154,7 @@ async def create_room(request: Request):
         creator=creator,
         updator=creator,
         room=room,
+        tenant_id=tenant_id,
     )
 
     return response_ok({"room_id": str(room.id), "name": room.name})
@@ -1191,13 +1196,15 @@ async def run(request):
     params = request.json.get("playbook_input") or request.json.get("action_input")
     if not params:
         raise CustomError(ErrorCode.ParamValueError)
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
     params["executor"] = user.id
     msg = {"run_type": run_type, "run_id": gen_run_id(), "run_args": params}
     room = await Room.get_or_none(id=room_id)
     room.updator = user
     room.run_id.append(msg["run_id"])
     await room.save()
-    await request.app.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
+    await request.app.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id, "tenant_id": tenant_id}, 3600 * 24 * 7)
     await aproduce(TASK_TOPIC, msg)
 
     return response_ok({"run_id": str(msg["run_id"])})
@@ -1267,7 +1274,11 @@ async def execution(request):
     executorActionAssetIds = request.json.get("executorActionAssetIds")
     executorParams = request.json.get("params")
     user = request.ctx.session["account_info"]
-    event = await Events.get_or_none(id=eventId)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    event = await Events.get_or_none(id=eventId, tenant_id=tenant_id)
     if not event.room:
         room_name = event.event_name + "_" + gen_random_code(6)
         if await Room.filter(name=room_name, deleted=False).exists():

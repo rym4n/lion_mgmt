@@ -529,7 +529,7 @@ class ChatManager:
                     # 消费作战室的执行记录
                     data["log"] = log
                     await self.msg_pub.publish(WR_TOPIC, orjson.dumps(data).decode())
-                    event = await Events.get_or_none(room_id=data["room_id"])
+                    event = await Events.get_or_none(room_id=data["room_id"], tenant_id=data["tenant_id"])
                     if event:
                         if log.get("node_type") == "start-node":
                             event.event_process_status = "处理中"

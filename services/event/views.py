@@ -13,6 +13,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
+from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from libs.utils import gen_random_code, strip_timezone_to_seconds, gen_run_id
 from models import (
@@ -104,7 +105,10 @@ async def get_all_events(request):
     offset = (page - 1) * size
     limit = size
 
-    filters = {}
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    filters = {"tenant_id": tenant_id}
     if request.json.get("event_name"):
         filters["event_name__icontains"] = request.json.get("event_name")
     if request.json.get("event_process_status"):
@@ -183,7 +187,10 @@ async def artificial_create_event(request):
     event_ingestion_id = ""
     log_data = ""
 
-    if await Events.filter(event_name=event_name, deleted=False).exists():
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    if await Events.filter(event_name=event_name, deleted=False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.EventNameExists)
 
     async with in_transaction():
@@ -197,6 +204,7 @@ async def artificial_create_event(request):
             updator=user,
             event_ingestion_id=event_ingestion_id,
             log_data=log_data,
+            tenant_id=tenant_id,
         )
         await event.fetch_related("scene")
         run_log = await Runlog.filter(event_id=event.id, deleted=False).first()
@@ -272,7 +280,10 @@ async def artificial_create_event_wuzhi(request):
     event_ingestion_id = ""
     log_data = ""
 
-    if await Events.filter(event_name=event_name, deleted=False).exists():
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    if await Events.filter(event_name=event_name, deleted=False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.EventNameExists)
 
     async with in_transaction():
@@ -286,6 +297,7 @@ async def artificial_create_event_wuzhi(request):
             updator=user,
             event_ingestion_id=event_ingestion_id,
             log_data=log_data,
+            tenant_id=tenant_id
         )
         await event.fetch_related("scene")
         run_log = await Runlog.filter(event_id=event.id, deleted=False).first()
@@ -358,7 +370,11 @@ async def execution(request):
     executorActionAssetIds = request.json.get("executorActionAssetIds")
     executorParams = request.json.get("params")
     user = request.ctx.session["account_info"]
-    event = await Events.get_or_none(id=eventId)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    event = await Events.get_or_none(id=eventId, tenant_id=tenant_id)
     if not event.room:
         room_name = event.event_name + "_" + gen_random_code(6)
         if await Room.filter(name=room_name, deleted=False).exists():
@@ -579,7 +595,10 @@ async def create_event(request):
     event_ingestion_id = request.json.get("event_ingestion_id") or ""
     log_data = request.json.get("log_data") or ""
 
-    if await Events.filter(event_name=event_name, deleted=False).exists():
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    if await Events.filter(event_name=event_name, deleted=False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.EventNameExists)
 
     async with in_transaction():
@@ -593,6 +612,7 @@ async def create_event(request):
             updator=user,
             event_ingestion_id=event_ingestion_id,
             log_data=log_data,
+            tenant_id=tenant_id,
         )
 
     return response_ok("创建成功")
@@ -609,7 +629,10 @@ async def create_event(request):
 async def get_event_detail(request):
     event_id = request.json.get("id")
 
-    event = await Events.get(id=event_id, deleted=False).prefetch_related("room", "creator", "updator")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    event = await Events.get(id=event_id, deleted=False, tenant_id=tenant_id).prefetch_related("room", "creator", "updator")
     if not event:
         raise CustomError(ErrorCode.NotFound)
     creator = request.ctx.session["account_info"]
@@ -675,7 +698,10 @@ async def update_event(request):
     if not event_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    event = await Events.get(id=event_id, deleted=False).prefetch_related("room", "creator", "updator")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    event = await Events.get(id=event_id, deleted=False, tenant_id=tenant_id).prefetch_related("room", "creator", "updator")
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
@@ -779,6 +805,9 @@ async def get_report(request):
     if not event_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    event = await Events.get(id=event_id)
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    event = await Events.get(id=event_id, tenant_id=tenant_id)
 
     return response_ok(event.download_url if event.download_url else "")

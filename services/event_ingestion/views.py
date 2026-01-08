@@ -24,6 +24,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs import supervisor
 from libs.error_code.exception import CustomError
+from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from libs.utils import run_linux_command, query_vlog
 from models import PlaybookVersion, Playbook, Config
@@ -423,6 +424,9 @@ async def get_all_events_ingestion(request):
 async def delete_event_ingestion(request):
     event_id = request.json.get("id")
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     async with in_transaction():
         event = await EventsIngestion.get(id=event_id)
         if not event:
@@ -440,7 +444,7 @@ async def delete_event_ingestion(request):
                     os.remove(supervisor_path)
             await es.delete()
 
-        await Events.filter(event_ingestion_id=event.id).delete()
+        await Events.filter(event_ingestion_id=event.id, tenant_id=tenant_id).delete()
 
         await event.delete()
 
@@ -893,6 +897,10 @@ async def binding_event_ingestion_script(request):
     event = await EventsIngestion.get(id=event_ingestion_id).prefetch_related("creator")
     if not event:
         raise CustomError(ErrorCode.NotFound)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False).all()
     for event_related_script in event_related_scripts:
         if event_related_script.script_id:
@@ -955,6 +963,7 @@ async def binding_event_ingestion_script(request):
 .event_process_status = "待处理"
 .event_source = "{event.event_ingestion_name}"
 .event_ingestion_id = "{event_ingestion_id}"
+.tenant_id = "{tenant_id}"
 del(.datetime_str)
 """,
         }
