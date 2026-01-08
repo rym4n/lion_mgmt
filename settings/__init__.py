@@ -202,7 +202,7 @@ CACHE = {
     },
     "redis_chat": {
         "cache": "aiocache.RedisCache",
-        "serializer": {"class": "aiocache.serializers.MsgPackSerializer"},
+        "serializer": {"class": "aiocache.serializers.MsgPackSerializer", "encoding": None},
         "timeout": 2,
         "endpoint": os.environ.get("RY_REDIS_HOST"),
         "port": os.environ.get("RY_REDIS_PORT"),
@@ -212,7 +212,7 @@ CACHE = {
     },
     "redis_action": {
         "cache": "aiocache.RedisCache",
-        "serializer": {"class": "aiocache.serializers.MsgPackSerializer"},
+        "serializer": {"class": "aiocache.serializers.MsgPackSerializer", "encoding": None},
         "namespace": "lion_mgmt",
         "timeout": 2,
         "endpoint": os.environ.get("RY_REDIS_HOST"),
