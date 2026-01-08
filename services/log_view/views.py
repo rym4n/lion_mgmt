@@ -27,11 +27,6 @@ _all__ = ["logs_bp"]
                 "properties": {
                     "query": {"type": "string", "description": "LogsQL查询语句"},
                     "project_id": {"type": "integer", "description": "项目ID"},
-                    "limit": {
-                        "type": "integer",
-                        "description": "返回结果数量限制",
-                        "default": 1000,
-                    },
                     "start": {
                         "type": "string",
                         "description": "查询开始时间(RFC3339格式或Unix时间戳)",
@@ -68,15 +63,15 @@ _all__ = ["logs_bp"]
 async def get_logs_by_sql(request):
     param = request.json
     query = param.get("query")
-    if not query:
+    project_id = param.get("project_id")
+
+    if not query or not project_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    limit = param.get("limit", 1000)
-    project_id = param.get("project_id", 1000)
     start = param.get("start")
     end = param.get("end")
 
-    result = await query_vlog(query, project_id, start, end, limit=limit)
+    result = await query_vlog(query, project_id, start, end, limit=1000)
     return response_ok(result) if result is not None else response_fail(ErrorCode.VictoriaLogsError)
 
 
