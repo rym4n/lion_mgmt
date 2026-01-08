@@ -347,11 +347,11 @@ class ChatManager:
 
     async def connect(self, user: Account, ws, session_id):
         """处理用户连接"""
-        logger.info(self.active_connections)
         if user.id not in self.active_connections.keys():
             self.active_connections[user.id] = {session_id: {"conn": ws, "current_room": None, "run_id": None}}
         else:
             self.active_connections[user.id][session_id] = {"conn": ws, "current_room": None, "run_id": None}
+        logger.info(self.active_connections)
         status_message = {"type": "user_status", "user_id": user.id, "username": user.username, "online": True, "timestamp": str(datetime.now())}
         await self.cache_client.set(f"room_online_{user.id}", int(time.time()), AUTHENTICATION_SESSION_EXPIRATION)
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(status_message).decode())
