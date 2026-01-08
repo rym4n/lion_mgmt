@@ -3,6 +3,7 @@
 import functools
 import re
 import time
+import traceback
 
 import jwt
 from sanic import Request
@@ -68,7 +69,7 @@ def requires_authentication(arg=None):
     return decorator(arg) if callable(arg) else decorator
 
 
-def token_encode(account_id, username, display_name, mfa_enable, tenant_id, token_id: str,expiration=AUTHENTICATION_SESSION_EXPIRATION, secret=SECRET, **kwargs) -> str:
+def token_encode(account_id, username, display_name, mfa_enable, tenant_id, token_id: str, expiration=AUTHENTICATION_SESSION_EXPIRATION, secret=SECRET, **kwargs) -> str:
     """
     根据账号信息生成token
     """
@@ -118,7 +119,8 @@ async def token_decode(request: Request) -> dict:
         else:
             payload = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
         return payload
-    except Exception:
+    except Exception as e:
+        logger.warning(f"{token} | {e} | {traceback.format_exc()}")
         raise CustomError(ErrorCode.SessionInvalid)
 
 
