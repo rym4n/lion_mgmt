@@ -123,8 +123,11 @@ async def create_workflow(request):
     if total_up_value != 99999 and total_count >= total_up_value:
         raise CustomError(ErrorCode.PlaybookCreateLimit)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     # 判断name是否已经存在，如果存在的话要抛出异常
-    if await Playbook.filter(name=data.get("name"), deleted=False).exists():
+    if await Playbook.filter(name=data.get("name"), deleted=False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.PlaybookNameExists)
 
     flow_timeout = 300
@@ -144,6 +147,7 @@ async def create_workflow(request):
             remark=data.get("remark", ""),
             creator=creator,
             internal=maintenance_mode if maintenance_mode else False,
+            tenant_id=tenant_id,
         )
         await PlaybookPermissions.create(
             pb=playbook,
@@ -262,7 +266,10 @@ async def list_workflow(request):
     permissions = await PlaybookPermissions.filter(Q(users__id=user_id) | Q(roles__id__in=user_roles), permissions__contains=["r"]).values_list("pb_id", flat=True)
     pb_ids = set(permissions)
 
-    condition = Q(deleted=False, id__in=pb_ids)
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    condition = Q(deleted=False, id__in=pb_ids, tenant_id=tenant_id)
 
     # 分页查询Account，返回总数和数据
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
@@ -616,7 +623,11 @@ async def get_flow_json(request):
 @playbook_permission("u")
 async def edit_workflow(request):
     params = request.json
-    playbook = await Playbook.get(id=params.get("playbook_id")).prefetch_related("scenes", "tags")
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    playbook = await Playbook.get(id=params.get("playbook_id"), tenant_id=tenant_id).prefetch_related("scenes", "tags")
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
@@ -790,7 +801,10 @@ async def publish_workflow(request):
 @requires_permission("workflow:d")
 @playbook_permission("d")
 async def delete_workflow(request):
-    playbook = await Playbook.get(id=request.json.get("playbook_id"))
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    playbook = await Playbook.get(id=request.json.get("playbook_id"), tenant_id=tenant_id)
     if playbook.internal:
         raise CustomError(ErrorCode.InternalDeleteError)
     pvs = await PlaybookVersion.filter(playbook=playbook, deleted=False).all()
@@ -854,8 +868,10 @@ async def delete_workflow_version(request):
     pv = await PlaybookVersion.get(id=request.json.get("flow_id")).prefetch_related("playbook")
     if pv.playbook.internal:
         raise CustomError(ErrorCode.InternalDeleteError)
+
     payload = await token_decode(request)
     tenant_id = payload.get("tenant_id")
+
     if await EventRelatedScript.filter(script_id__contains=[pv.id], deleted=False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.PlaybookUsedByEvent)
     if await Timed.filter(playbook_id=pv.playbook_id, playbook_version=pv.version, deleted=False).exists():
@@ -865,7 +881,7 @@ async def delete_workflow_version(request):
         action_ids = await statistics_data(pv.flow_json)
         await tool_action_playbook_delete({pv.id: action_ids})
     if await PlaybookVersion.filter(playbook_id=pv.playbook_id).count() == 1:
-        await Playbook.filter(id=pv.playbook_id).delete()
+        await Playbook.filter(id=pv.playbook_id, tenant_id=tenant_id).delete()
     else:
         await pv.delete()
     return response_ok("删除成功")
@@ -1371,7 +1387,10 @@ async def add_permission(request):
     if not playbook_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    playbook = await Playbook.get_or_none(id=playbook_id)
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    playbook = await Playbook.get_or_none(id=playbook_id, tenant_id=tenant_id)
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
     if playbook.internal:
@@ -1929,9 +1948,12 @@ async def import_workflow(request):
     if not file_obj:
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     for flow_data in orjson.loads(file_obj.body.decode("utf-8")):
         # 判断name是否已经存在，如果存在的话要抛出异常
-        if await Playbook.filter(name=flow_data.get("name"), deleted=False).exists():
+        if await Playbook.filter(name=flow_data.get("name"), deleted=False, tenant_id=tenant_id).exists():
             flow_data["name"] = f"{flow_data.get('name')}_{time.time()}"
 
         flow_json_list = flow_data.get("data") or []
@@ -1945,6 +1967,7 @@ async def import_workflow(request):
                 remark=flow_data.get("remark", ""),
                 creator=creator,
                 internal=maintenance_mode if maintenance_mode else False,
+                tenant_id=tenant_id,
             )
             await PlaybookPermissions.create(
                 pb=playbook,

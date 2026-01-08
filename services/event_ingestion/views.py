@@ -1592,7 +1592,9 @@ async def event_ingestion_config_list(request):
     },
 )
 async def playbook_list(request):
-    playbooks = await Playbook.filter(deleted=False).all().values_list("id", "name")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    playbooks = await Playbook.filter(deleted=False, tenant_id=tenant_id).all().values_list("id", "name")
 
     return response_ok([{"id": playbook[0], "name": playbook[1]} for playbook in playbooks])
 

@@ -7,6 +7,7 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from models import Scene, Playbook
 
@@ -374,8 +375,11 @@ async def remove_scene(request):
     if scene.status == 1:
         raise CustomError(ErrorCode.SceneDeleteNotAllowed)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     async with in_transaction():
-        playbooks = await Playbook.filter(scenes__id=id).all()
+        playbooks = await Playbook.filter(scenes__id=scene_id, tenant_id=tenant_id).all()
 
         for playbook in playbooks:
             await playbook.scenes.remove(scene)

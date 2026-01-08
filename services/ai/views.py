@@ -7,6 +7,7 @@ from sanic_ext import openapi
 from core.response import response_ok
 from libs.chat import chat_manager, get_prompt_words, get_playbook_prompt_words
 from libs.kafka import aproduce
+from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from libs.utils import gen_run_id
 from models import (
@@ -271,10 +272,13 @@ async def publish_msg(request):
 )
 @requires_permission("warroom:r")
 async def get_prompt_word(request):
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     if request.json.get("ai_type") == "action":
         system_prompt, ai_dict, ai_desc = await get_prompt_words(request.json.get("prompt_word"))
     else:
-        system_prompt, ai_dict, ai_desc = await get_playbook_prompt_words(request.json.get("prompt_word"))
+        system_prompt, ai_dict, ai_desc = await get_playbook_prompt_words(request.json.get("prompt_word"), tenant_id)
 
     return response_ok({"system_prompt": system_prompt, "ai_dict": ai_dict, "ai_desc": ai_desc})
 

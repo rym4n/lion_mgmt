@@ -12,6 +12,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
+from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
 from models import (
@@ -170,13 +171,16 @@ async def add_timed(request):
     if await Timed.filter(name=request.json.get("name"), deleted=False).exists():
         raise CustomError(ErrorCode.TimedNameExists)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     msg = {}
     playbook = None
     action = None
     playbook_version = None
     timer_rule = {}
     if operate_type == 0:
-        playbook = await Playbook.get_or_none(id=playbook_id, deleted=False)
+        playbook = await Playbook.get_or_none(id=playbook_id, deleted=False, tenant_id=tenant_id)
         playbook_version = await PlaybookVersion.get_or_none(id=playbook_input.get("flow_id"))
         if not playbook:
             raise CustomError(ErrorCode.PlaybookNotFound)
@@ -752,6 +756,9 @@ async def update_timed(request):
     if run_type not in [RUN_TYPE_FLOW, RUN_TYPE_ACTION]:
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     enable = data.get("enable", timed.enable)
     status = data.get("status", timed.status)
     tactics = data.get("tactics", timed.tactics)
@@ -770,7 +777,7 @@ async def update_timed(request):
                 playbook_input = timed.playbook_input
                 playbook_id = timed.playbook.id
 
-        timed.playbook = await Playbook.get_or_none(id=playbook_id, deleted=False)
+        timed.playbook = await Playbook.get_or_none(id=playbook_id, deleted=False, tenant_id=tenant_id)
         playbook_version = await PlaybookVersion.get_or_none(id=playbook_input.get("flow_id"))
         timed.playbook_version = playbook_version.version if playbook_version else None
 

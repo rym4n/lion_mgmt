@@ -116,8 +116,8 @@ async def get_prompt_words(prompt_word):
 
 
 # 获取剧本推荐列表
-async def get_playbook_prompt_words(prompt_word):
-    playbooks = await Playbook.filter(deleted=False, internal=False).all()
+async def get_playbook_prompt_words(prompt_word, tenant_id):
+    playbooks = await Playbook.filter(deleted=False, internal=False, tenant_id=tenant_id).all()
 
     a = 0
     playbooks_desc = {}
@@ -196,7 +196,7 @@ async def creat_message(room_id, log, user, redis):
                 break
             await asyncio.sleep(0.01 * (i + 1))  # 指数轮询避免数据库压力过大
 
-    creator = await Account.get_or_none(id=log["creator"])
+    creator = await Account.get_or_none(id=log["executor"])
     log["creator_username"] = creator.username if creator else None
     log["creator_display_name"] = creator.display_name if creator else None
 
