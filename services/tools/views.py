@@ -5,7 +5,6 @@ import hashlib
 import operator
 import os
 import re
-import shutil
 import time
 import zipfile
 from collections import defaultdict
@@ -39,7 +38,7 @@ from models import (
     Runlog,
     Timed,
 )
-from settings import TASK_TOPIC, TZ, TOOLS_DIR
+from settings import TASK_TOPIC, TZ
 
 # 定义 Blueprint
 tools_bp = Blueprint("tools", url_prefix="/tools")
@@ -856,10 +855,6 @@ async def delete_tool(request):
             await ToolResources.filter(tool_name=name, deleted=False).delete()
             await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
 
-        tool_path = os.path.join(TOOLS_DIR, name, version)
-        if os.path.exists(tool_path):
-            shutil.rmtree(tool_path)
-
         await utils.delete_from_s3("system", f"{name}/{version}.zip", "tools")
 
         await ToolAction.filter(tool_name=name, version_number=version, deleted=False).update(deleted=True)
@@ -917,10 +912,6 @@ async def delete_tool_all(request):
         raise CustomError(ErrorCode.ToolHasScriptError)
 
     async with in_transaction():
-        tool_path = os.path.join(TOOLS_DIR, name)
-        if os.path.exists(tool_path):
-            shutil.rmtree(tool_path)
-
         for tool in await Tool.filter(name=name, deleted=False).all():
             await utils.delete_from_s3("system", f"{name}/{tool.version}.zip", "tools")
 

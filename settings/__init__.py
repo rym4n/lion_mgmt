@@ -15,25 +15,13 @@ os.makedirs(LOG_PATH, exist_ok=True)
 VECTOR_CFG = os.path.join(BASE_DIR, "data/ship")
 os.makedirs(VECTOR_CFG, exist_ok=True)
 
-# 文件上传的目录
-UPLOAD_DIR = os.path.join(BASE_DIR, "data/upload")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
 # 子进程配置文件输出目录
 SUPERVISOR_PATH = os.path.join(BASE_DIR, "data/action")
 os.makedirs(SUPERVISOR_PATH, exist_ok=True)
 
-# 存储上传APP包的目录
-TOOLS_DIR = os.path.join(BASE_DIR, "data/tools")
-os.makedirs(TOOLS_DIR, exist_ok=True)
-
 # 存储许可文件的目录
 LICENSE_DIR = os.path.join(BASE_DIR, "data/license")
 os.makedirs(LICENSE_DIR, exist_ok=True)
-
-# 存储通用文件的目录
-COMMON_FILES_DIR = os.path.join(BASE_DIR, "data/common_files")
-os.makedirs(COMMON_FILES_DIR, exist_ok=True)
 
 if os.environ.get("RY_ENV") == "DEV":
     try:
