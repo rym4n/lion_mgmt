@@ -7,6 +7,7 @@ from sanic_ext import openapi
 from core.error_code import ErrorCode
 from core.response import response_ok, response_fail
 from libs.error_code.exception import CustomError
+from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from libs.utils import query_vlog
 from models.event import EventsIngestion
@@ -114,9 +115,11 @@ async def get_logs_by_sql(request):
 )
 @requires_permission("logs:r")
 async def get_index_list(request):
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
     try:
         # 获取所有已配置的项目
-        projects = await EventsIngestion.filter(project_id__isnull=False).values("project_id", "event_ingestion_name")
+        projects = await EventsIngestion.filter(project_id__isnull=False, tenant_id=tenant_id).values("project_id", "event_ingestion_name")
 
         result = [
             {

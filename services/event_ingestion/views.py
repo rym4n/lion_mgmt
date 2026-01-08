@@ -297,6 +297,9 @@ async def event_ingestion(request):
     if vector_config is None:
         raise CustomError(ErrorCode.ConfigFileGenerateError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     events_ingestion = await EventsIngestion.create(
         event_ingestion_name=event_name,
         event_ingestion_describe=event_describe,
@@ -313,6 +316,7 @@ async def event_ingestion(request):
         enabled_health_status="healthy",
         retention_days=retention_days,
         project_id=project_id,
+        tenant_id=tenant_id,
     )
 
     return response_ok(events_ingestion.json)
@@ -371,7 +375,10 @@ async def get_all_events_ingestion(request):
     offset = (page - 1) * size
     limit = size
 
-    filters = {"deleted": False}
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    filters = {"deleted": False, "tenant_id":tenant_id}
     if request.json.get("name"):
         filters["event_ingestion_name__icontains"] = request.json.get("name")
 
@@ -398,7 +405,7 @@ async def get_all_events_ingestion(request):
             "schema": {
                 "type": "object",
                 "required": ["id"],
-                "properties": {"id": {"type": "string", "description": "事件ID"}},
+                "properties": {"id": {"type": "string", "description": "事件接入ID"}},
             }
         }
     },
@@ -428,7 +435,7 @@ async def delete_event_ingestion(request):
     tenant_id = payload.get("tenant_id")
 
     async with in_transaction():
-        event = await EventsIngestion.get(id=event_id)
+        event = await EventsIngestion.get(id=event_id, tenant_id=tenant_id)
         if not event:
             raise CustomError(ErrorCode.NotFound)
         if event.enabled_status == 1:
@@ -461,7 +468,7 @@ async def delete_event_ingestion(request):
                 "type": "object",
                 "required": ["id"],
                 "properties": {
-                    "id": {"type": "string", "description": "事件ID"},
+                    "id": {"type": "string", "description": "事件接入ID"},
                     "event_describe": {
                         "type": "string",
                         "description": "事件描述 非必填",
@@ -573,7 +580,11 @@ async def update_event_ingestion(request):
     key_delimiter_value = data.get("key_delimiter_value")
     key_value_delimiter = data.get("key_value_delimiter")
     kafka_topic = data.get("kafka_topic", [])
-    event = await EventsIngestion.get(id=event_id)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    event = await EventsIngestion.get(id=event_id, tenant_id=tenant_id)
     max_length = int(data.get("max_length", 100))
     event_source_type = data.get("event_source_type")
 
@@ -700,7 +711,7 @@ async def update_event_ingestion(request):
             "schema": {
                 "type": "object",
                 "required": ["id"],
-                "properties": {"id": {"type": "string", "description": "事件ID"}},
+                "properties": {"id": {"type": "string", "description": "事件接入ID"}},
             }
         }
     },
@@ -731,7 +742,11 @@ async def update_event_ingestion(request):
 @requires_permission("ingestion:r")
 async def get_event_ingestion_detail(request):
     event_id = request.json.get("id")
-    event = await EventsIngestion.get(id=event_id).prefetch_related("creator", "updator")
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    event = await EventsIngestion.get(id=event_id, tenant_id=tenant_id).prefetch_related("creator", "updator")
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
     sources = event.vector_config.get("sources", {})
@@ -788,7 +803,10 @@ async def get_event_ingestion_kafka_sample(request):
     except:
         raise CustomError(ErrorCode.ParamError)
 
-    event = await EventsIngestion.get_or_none(id=event_id, deleted=False)
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    event = await EventsIngestion.get_or_none(id=event_id, deleted=False, tenant_id=tenant_id)
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
@@ -894,7 +912,11 @@ async def get_event_ingestion_kafka_sample(request):
 @requires_permission("ingestion:u")
 async def binding_event_ingestion_script(request):
     event_ingestion_id = request.json.get("event_ingestion_id")
-    event = await EventsIngestion.get(id=event_ingestion_id).prefetch_related("creator")
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    event = await EventsIngestion.get(id=event_ingestion_id, tenant_id=tenant_id).prefetch_related("creator")
     if not event:
         raise CustomError(ErrorCode.NotFound)
 
@@ -1079,9 +1101,12 @@ async def unbundled_event_ingestion_script(request):
     event_ingestion_id = request.json.get("event_ingestion_id")
     script_ids = request.json.get("script_ids")
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False).all()
 
-    event = await EventsIngestion.get_or_none(id=event_ingestion_id)
+    event = await EventsIngestion.get_or_none(id=event_ingestion_id, tenant_id=tenant_id)
     if not event:
         raise CustomError(ErrorCode.NoEventAccess)
 
@@ -1164,7 +1189,10 @@ async def export_event_ingestion_script(request):
     if not isinstance(event_ids, list) or not event_ids:
         raise CustomError(ErrorCode.ParameterError)
 
-    events = await EventsIngestion.filter(id__in=event_ids).prefetch_related("creator", "updator")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    events = await EventsIngestion.filter(id__in=event_ids, tenant_id=tenant_id).prefetch_related("creator", "updator")
 
     def sanitize_filename(name):
         return "".join(c if c.isalnum() or c in ("_", "-") else "_" for c in name)
@@ -1235,6 +1263,9 @@ async def import_event_ingestion_script(request):
         raise CustomError(ErrorCode.ParameterError)
     file_results = []
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     for file in files:
         zip_data = io.BytesIO(file.body)
         with zipfile.ZipFile(zip_data, "r") as zf:
@@ -1246,11 +1277,12 @@ async def import_event_ingestion_script(request):
                 if await EventsIngestion.filter(
                     event_ingestion_name=vector_config.get("event_ingestion_name"),
                     deleted=False,
+                    tenant_id=tenant_id,
                 ).exists():
                     file_results.append({f"{vector_config['event_ingestion_name']}": "已存在相同名称的事件接入"})
                     continue
 
-                if await EventsIngestion.filter(syslog_config=vector_config.get("syslog_config"), deleted=False).exists():
+                if await EventsIngestion.filter(syslog_config=vector_config.get("syslog_config"), deleted=False, tenant_id=tenant_id).exists():
                     file_results.append({f"{vector_config['event_ingestion_name']}": "当前已存在端口一致的事件接入了"})
                     continue
 
@@ -1297,6 +1329,7 @@ async def import_event_ingestion_script(request):
                     convert_health_status=vector_config.get("convert_health_status"),
                     enabled_health_status=vector_config.get("enabled_health_status"),
                     execution_health_status=vector_config.get("execution_health_status"),
+                    tenant_id=tenant_id,
                 )
 
                 for ers in vector_config.get("event_related_scripts", []):
@@ -1395,7 +1428,10 @@ async def parse_log(request):
     if not config:
         raise CustomError(ErrorCode.TypeNotSupportedError)
 
-    event = await EventsIngestion.get_or_none(id=params.get("id"), deleted=False)
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    event = await EventsIngestion.get_or_none(id=params.get("id"), deleted=False, tenant_id=tenant_id)
     if not event:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -1452,6 +1488,7 @@ async def parse_log(request):
         await EventsIngestion.update_or_create(
             id=request.json.get("id"),
             deleted=False,
+            tenant_id=tenant_id,
             defaults={"convert_health_status": "healthy"},
         )
         log = orjson.loads(output).get("log")
