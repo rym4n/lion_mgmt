@@ -347,6 +347,7 @@ class ChatManager:
 
     async def connect(self, user: Account, ws, session_id):
         """处理用户连接"""
+        logger.info(self.active_connections)
         if user.id not in self.active_connections.keys():
             self.active_connections[user.id] = {session_id: {"conn": ws, "current_room": None, "run_id": None}}
         else:
