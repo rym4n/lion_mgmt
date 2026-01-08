@@ -1,5 +1,4 @@
 # coding=utf-8
-
 from sanic import Blueprint
 from sanic_ext import openapi
 from tortoise.transactions import in_transaction
@@ -7,11 +6,14 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.security.authentication import refresh_token
 from libs.security.authorization import requires_permission
+from libs.utils import get_expiration_date
 from models import (
     Tenant,
     Account,
 )
+from settings import AUTHENTICATION_SESSION_EXPIRATION, SESSION_SECURE, SESSION_SAMESITE, SESSION_HTTPONLY
 
 tenant_bp = Blueprint("tenant", url_prefix="/tenant")
 _all__ = ["tenant_bp"]
@@ -65,7 +67,7 @@ async def get_tenant(request):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["name"],
+                "required": ["name", "members"],
                 "properties": {
                     "name": {"type": "string", "description": "工作空间名称"},
                     "members": {
@@ -79,7 +81,7 @@ async def get_tenant(request):
     },
     response={"添加成功"},
 )
-@requires_permission("tenant:r")
+@requires_permission("tenant:c")
 async def add_tenant(request):
     name = request.json.get("name")
     if not name:
@@ -108,23 +110,29 @@ async def add_tenant(request):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["name"],
+                "required": ["id"],
                 "properties": {"id": {"type": "string", "description": "工作空间id"}},
             }
         }
     },
     response={"删除成功"},
 )
-@requires_permission("tenant:r")
+@requires_permission("tenant:d")
 async def del_tenant(request):
     id = request.json.get("id")
     if not id:
         raise CustomError(ErrorCode.ParameterError)
 
+    if id == "0":
+        raise CustomError(ErrorCode.CannotDeleteTenant)
+
     tenant = await Tenant.get_or_none(id=id).prefetch_related("member")
 
-    if tenant.member is not None:
-        raise CustomError(ErrorCode.TenantHasMembers)
+    if tenant.member:
+        if len(tenant.member) > 1:
+            raise CustomError(ErrorCode.TenantHasMembers)
+        if str(tenant.member[0].id) != "43782755-6382-4f42-82a2-5e557370d858":
+            raise CustomError(ErrorCode.TenantHasMembers)
 
     await tenant.delete()
 
@@ -139,7 +147,7 @@ async def del_tenant(request):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["name"],
+                "required": ["id", "members"],
                 "properties": {
                     "id": {"type": "string", "description": "工作空间id"},
                     "name": {"type": "string", "description": "工作空间名称"},
@@ -154,7 +162,7 @@ async def del_tenant(request):
     },
     response={"更新成功"},
 )
-@requires_permission("tenant:r")
+@requires_permission("tenant:u")
 async def edit_tenant(request):
     id = request.json.get("id")
     if not id:
@@ -176,3 +184,73 @@ async def edit_tenant(request):
 
     await tenant.save()
     return response_ok("更新成功")
+
+
+@tenant_bp.post("/switch")
+@openapi.definition(
+    summary="切换工作空间",
+    description="切换工作空间",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "工作空间id"}
+                },
+            }
+        }
+    },
+    response={"切换成功"},
+)
+@requires_permission("tenant:r")
+async def switch_tenant(request):
+    id = request.json.get("id")
+    if not id:
+        raise CustomError(ErrorCode.ParameterError)
+
+    tenant = await Tenant.get_or_none(id=id).prefetch_related("member")
+
+    if tenant is None:
+        raise CustomError(ErrorCode.TenantNotFound)
+
+    request.ctx.sessio["tenant_id"] = tenant.id
+    new_token = refresh_token(request.ctx.session)
+
+    resp_ok = response_ok("切换成功")
+    resp_ok.cookies.add_cookie(
+        "aioe-auth",
+        new_token,
+        httponly=SESSION_HTTPONLY,
+        samesite=SESSION_SAMESITE,
+        secure=SESSION_SECURE,
+        expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
+    )
+
+    return resp_ok
+
+
+@tenant_bp.post("/get")
+@openapi.definition(
+    summary="获取当前用户所有的工作空间",
+    description="获取当前用户所有的工作空间",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {},
+            }
+        }
+    },
+    response={"tenants": []},
+)
+@requires_permission("tenant:r")
+async def get_account_tenant(request):
+    account = request.ctx.session["account_info"]
+
+    tenants = await Tenant.filter(member__id=account.id, deleted=False).all()
+
+    if tenants is None:
+        return response_ok({"tenants": []})
+
+    return response_ok({"tenants": [{"id": tenant.id, "name": tenant.name} for tenant in tenants]})
