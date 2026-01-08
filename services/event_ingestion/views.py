@@ -440,7 +440,7 @@ async def delete_event_ingestion(request):
             raise CustomError(ErrorCode.NotFound)
         if event.enabled_status == 1:
             return response_ok("请先禁用事件接入再删除")
-        es = await EventRelatedScript.get_or_none(event_ingestion_id=event_id)
+        es = await EventRelatedScript.get_or_none(event_ingestion_id=event_id, tenant_id=tenant_id)
         if es:
             for script_id in es.script_id:
                 process_name = hashlib.md5(f"{es.event_ingestion_id}_{script_id}".encode()).hexdigest()
@@ -923,7 +923,7 @@ async def binding_event_ingestion_script(request):
     payload = await token_decode(request)
     tenant_id = payload.get("tenant_id")
 
-    event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False).all()
+    event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False, tenant_id=tenant_id).all()
     for event_related_script in event_related_scripts:
         if event_related_script.script_id:
             for script_id in event_related_script.script_id:
@@ -1027,6 +1027,7 @@ del(.datetime_str)
             numbers=request_data.get("numbers"),
             concurrency=concurrency,
             fields=request_data.get("fields"),
+            tenant_id=tenant_id,
         )
 
         if linked_execution in [0, 1]:
@@ -1104,7 +1105,7 @@ async def unbundled_event_ingestion_script(request):
     payload = await token_decode(request)
     tenant_id = payload.get("tenant_id")
 
-    event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False).all()
+    event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False, tenant_id=tenant_id).all()
 
     event = await EventsIngestion.get_or_none(id=event_ingestion_id, tenant_id=tenant_id)
     if not event:
@@ -1200,7 +1201,7 @@ async def export_event_ingestion_script(request):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
         for event in events:
-            event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event.id, deleted=False).all()
+            event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event.id, deleted=False, tenant_id=tenant_id).all()
             event_data = event.json
             event_data["vector_config"] = str(event.vector_config)
             event_data.pop("file_path", None)
@@ -1344,6 +1345,7 @@ async def import_event_ingestion_script(request):
                         numbers=ers["numbers"],
                         concurrency=ers["concurrency"],
                         fields=ers["fields"],
+                        tenant_id=tenant_id,
                     )
 
                     if int(ers["status"]) == 1:
@@ -1535,8 +1537,11 @@ async def event_ingestion_config_list(request):
     if not event_id:
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     config_list = []
-    events = await EventRelatedScript.filter(event_ingestion_id=event_id).all()
+    events = await EventRelatedScript.filter(event_ingestion_id=event_id, tenant_id=tenant_id).all()
     if not events:
         return response_ok("当前未配置接入规则")
 

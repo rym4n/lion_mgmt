@@ -20,6 +20,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
+from libs.security.authentication import token_decode
 from libs.security.authorization import (
     requires_permission,
     load_license,
@@ -795,7 +796,9 @@ async def delete_workflow(request):
     pvs = await PlaybookVersion.filter(playbook=playbook, deleted=False).all()
     pv_ids = [pv.id for pv in pvs]
     pv_versions = [pv.version for pv in pvs]
-    condition = Q()
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    condition = Q(tenant_id=tenant_id)
     if pv_ids:
         for pv_id in pv_ids:
             condition |= Q(script_id__contains=[pv_id])
@@ -851,7 +854,9 @@ async def delete_workflow_version(request):
     pv = await PlaybookVersion.get(id=request.json.get("flow_id")).prefetch_related("playbook")
     if pv.playbook.internal:
         raise CustomError(ErrorCode.InternalDeleteError)
-    if await EventRelatedScript.filter(script_id__contains=[pv.id], deleted=False).exists():
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    if await EventRelatedScript.filter(script_id__contains=[pv.id], deleted=False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.PlaybookUsedByEvent)
     if await Timed.filter(playbook_id=pv.playbook_id, playbook_version=pv.version, deleted=False).exists():
         raise CustomError(ErrorCode.PlaybookUsedByTimer)
