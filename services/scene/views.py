@@ -258,7 +258,7 @@ async def get_all_scene(request):
     key = request.json.get("key") or None
     status = request.json.get("status")
 
-    condition = Q()
+    condition = Q(deleted=False)
 
     if status is not None:
         condition = condition & Q(status__not=status)
@@ -325,7 +325,7 @@ async def set_current_scene(request):
     scene.updator = request.ctx.session["account_info"]
     await scene.save()
 
-    await caches.get("redis_chat").set("aioe_current_scene", scene.id)
+    await caches.get("redis_chat").set("aioe_current_scene", scene.name)
 
     return response_ok("设置成功")
 
