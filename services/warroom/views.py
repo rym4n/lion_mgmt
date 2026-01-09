@@ -567,7 +567,8 @@ async def get_private_room(request: Request):
 @requires_permission("warroom:r")
 async def get_star_rooms(request: Request):
     user = request.ctx.session["account_info"]
-    return response_ok({"star_rooms": [r.json for r in await user.star_rooms.all().prefetch_related("creator", "users")]})
+    tenant_id = request.ctx.session.get("tenant_id")
+    return response_ok({"star_rooms": [r.json for r in await user.star_rooms.filter(tenant_id=tenant_id).all().prefetch_related("creator", "users")]})
 
 
 @warroom_bp.post("/star_room")
