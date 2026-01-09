@@ -545,7 +545,7 @@ async def all_tools(request):
     subquery_results = await subquery.values("name", "max_version")
     if not subquery_results:
         return response_ok({"tools": [], "total": 0, "page": page, "size": size, "total_pages": 0})
-    condition = Q(tenant_id=tenant_id)
+    condition = Q()
     for pair in subquery_results:
         condition |= Q(name=pair["name"], version=pair["max_version"])
 
