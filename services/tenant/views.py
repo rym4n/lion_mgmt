@@ -214,7 +214,7 @@ async def switch_tenant(request):
     if tenant is None:
         raise CustomError(ErrorCode.TenantNotFound)
 
-    request.ctx.sessio["tenant_id"] = tenant.id
+    request.ctx.session["tenant_id"] = tenant.id
     new_token = refresh_token(request.ctx.session)
 
     resp_ok = response_ok("切换成功")
