@@ -74,7 +74,7 @@ async def fetch_completion(host, api_key, model, messages):
 # 获取动作推荐列表
 async def get_prompt_words(prompt_word, tenant_id):
     tool_names = []
-    actions = await ToolResourcesModel.filter(deleted=False, status=0).all().values("tool_name")
+    actions = await ToolResourcesModel.filter(deleted=False, status=0, tenant_id=tenant_id).all().values("tool_name")
     for action in actions:
         if action["tool_name"] not in tool_names:
             tool_names.append(action["tool_name"])

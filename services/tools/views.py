@@ -200,13 +200,14 @@ async def upload_and_extract_zip(request):
                 roles=[],
                 users=[],
             )
-        configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False)
+        configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False, tenant_id=tenant_id)
         if not configuration:
             trm = await ToolResourcesModel.create(
                 tool_name=tool_name,
                 resources=config_data.get("resource") or {},
                 status=(1 if (config_data.get("resource") and any(field.get("required") is True for field in config_data.get("resource").values())) else 0),
                 health_check=health_check,
+                tenant_id=tenant_id
             )
             if health_check == 1:
                 trm.version = version
@@ -382,7 +383,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
             percent = int(data * single_progress) + success_progress
             await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-            configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False).first().values("resources")
+            configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).first().values("resources")
             if configuration and configuration["resources"] != config_data.get("resource", {}):
                 for key in config_data.get("resource", {}).keys():
                     if key not in configuration["resources"].keys() and config_data.get("resource", {})[key].get("required") is True:
@@ -553,7 +554,7 @@ async def all_tools(request):
         if int(req_json.get("logo", 1)) == 1 and tool["logo_path"]:
             tool["logo"] = tool["logo_path"]
         tool.pop("path", None)
-        trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"])
+        trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"], tenant_id=tenant_id)
         if trm:
             tool["required"] = trm.status
             tool["health_check"] = trm.health_check
@@ -873,7 +874,7 @@ async def delete_tool(request):
             raise CustomError(ErrorCode.InternalDeleteError)
 
         if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).count() == 1:
-            await ToolResourcesModel.filter(tool_name=name, deleted=False).update(deleted=True)
+            await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
             await ToolResources.filter(tool_name=name, deleted=False).delete()
             await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
 
@@ -944,7 +945,7 @@ async def delete_tool_all(request):
             await utils.delete_from_s3("system", f"{name}/{tool.version}.zip", "tools")
 
         await ToolAction.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
-        await ToolResourcesModel.filter(tool_name=name, deleted=False).update(deleted=True)
+        await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
         await ToolResources.filter(tool_name=name, deleted=False).delete()
         await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
         await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
@@ -997,7 +998,10 @@ async def tool_resource_model(request):
     if not tool_name:
         raise CustomError(ErrorCode.ParameterError)
 
-    resources = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False).first().values()
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    resources = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).first().values()
     if not resources:
         raise CustomError(ErrorCode.ResourcesModelNotFoundError)
 

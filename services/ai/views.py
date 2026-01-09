@@ -406,7 +406,7 @@ async def get_tool_info(request):
         tenant_id=tenant_id,
     )
 
-    resource = await ToolResourcesModel.get_or_none(tool_name=request.json.get("tool_name"), deleted=False)
+    resource = await ToolResourcesModel.get_or_none(tool_name=request.json.get("tool_name"), deleted=False, tenant_id=tenant_id)
     return response_ok(
         {
             "description": tool.description,
