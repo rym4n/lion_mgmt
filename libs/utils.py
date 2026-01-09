@@ -37,8 +37,11 @@ password_hasher: PasswordHasher = PasswordHasher()
 
 def get_client_ip(request) -> str:
     xri = request.headers.get(REAL_IP_HEADER)
+    xff = request.headers.get("X-Forwarded-For")
     if xri:
         return xri
+    elif xff:
+        return xff.split(",")[0].strip()
     else:
         return request.ip
 
