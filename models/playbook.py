@@ -11,7 +11,7 @@ class Playbook(BaseModel):
     剧本模型
     """
 
-    name = fields.CharField(max_length=255, unique=True, description="剧本名称")
+    name = fields.CharField(max_length=255, description="剧本名称")
     remark = fields.TextField(description="描述")
     tags = fields.ManyToManyField("models.Tag", through="playbook_tag")
     scenes = fields.ManyToManyField("models.Scene", through="playbook_scene")
@@ -38,7 +38,7 @@ class Playbook(BaseModel):
         table = "playbook"
         ordering = ["-utime"]
 
-        unique_together = (("name", "deleted"),)
+        unique_together = (('tenant_id', "name"),)
 
 
 class PlaybookVersion(BaseModel):

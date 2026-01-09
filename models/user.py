@@ -90,7 +90,7 @@ class Role(BaseModel):
     角色权限
     """
 
-    name: str = fields.CharField(unique=True, max_length=255)
+    name: str = fields.CharField(max_length=255)
     description: str = fields.CharField(max_length=255, null=True)
     permissions: list[str] = fields.JSONField(null=True)
 
@@ -111,6 +111,8 @@ class Role(BaseModel):
     class Meta:
         table = "role"
         ordering = ["-utime"]
+
+        unique_together = (('tenant_id', "name"),)
 
 
 class PermissionsMenu(BaseModel):

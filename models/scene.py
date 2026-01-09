@@ -11,7 +11,7 @@ class Scene(BaseModel):
     运行场景模型
     """
 
-    name = fields.CharField(description="场景名称", unique=True, max_length=255)
+    name = fields.CharField(description="场景名称", max_length=255)
     remark = fields.CharField(description="描述", max_length=255)
     status = fields.IntField(max_length=1, description="是否启用，1启用，0禁用")
     creator = fields.ForeignKeyField("models.Account", related_name="created_scenes", description="创建人")
@@ -43,3 +43,5 @@ class Scene(BaseModel):
     class Meta:
         table = "scene"
         ordering = ["-ctime"]
+
+        unique_together = (('tenant_id', "name"),)
