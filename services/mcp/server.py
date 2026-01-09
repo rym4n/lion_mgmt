@@ -1,6 +1,7 @@
 # coding=utf-8
 
 import re
+from functools import partial
 
 from mcp.server import Server
 from mcp.types import Tool, TextContent, ImageContent, EmbeddedResource
@@ -176,7 +177,7 @@ async def get_playbook_input_logic(playbook_version_id):
 
 
 # @mcp_server.call_tool()
-async def handle_call_tool(name: str, arguments: dict | None) -> list[TextContent | ImageContent | EmbeddedResource]:
+async def handle_call_tool(tenant_id, name: str, arguments: dict | None) -> list[TextContent | ImageContent | EmbeddedResource]:
     if name == "execute_script":
         if not arguments:
             raise ValueError("Missing arguments")
@@ -242,7 +243,7 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[TextConten
         offset = (page - 1) * size
         limit = size
 
-        condition = Q(deleted=False)
+        condition = Q(deleted=False, tenant_id=tenant_id)
         if keyword:
             condition = condition & (Q(name__icontains=keyword) | Q(remark__icontains=keyword) | Q(id=keyword))
 
@@ -307,8 +308,8 @@ async def handle_call_tool(name: str, arguments: dict | None) -> list[TextConten
     raise ValueError(f"Unknown tool: {name}")
 
 
-def create_mcp_server():
+def create_mcp_server(tenant_id):
     server = Server("lion-mgmt", version="3.0")
     server.list_tools()(handle_list_tools)
-    server.call_tool()(handle_call_tool)
+    server.call_tool()(partial(handle_call_tool, tenant_id))
     return server

@@ -7,6 +7,7 @@ from mcp.types import JSONRPCMessage
 from sanic import Blueprint, Request, response
 from sanic.log import logger
 
+from libs.security.authentication import token_decode
 from .server import create_mcp_server
 
 mcp_bp = Blueprint("mcp", url_prefix="/mcp")
@@ -48,6 +49,9 @@ async def handle_sse(request: Request):
         },
     )
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     # 1. 在后台启动MCP服务器
     # 需要运行mcp_server.run(...)
     # 它处理协议逻辑。
@@ -55,7 +59,7 @@ async def handle_sse(request: Request):
 
         async def run_server():
             # 为该会话创建一个新的服务器实例以确保隔离
-            server = create_mcp_server()
+            server = create_mcp_server(tenant_id)
             try:
                 # 启用无状态模式以允许在初始化完成前接收请求
                 # 这将修复客户端立即发送请求时的
