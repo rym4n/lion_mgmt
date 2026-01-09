@@ -49,6 +49,7 @@ async def warroom_ws(request: Request, ws: Websocket):
             raise CustomError(ErrorCode.SessionInvalid)
         # 建立连接
         session_id = request.ctx.session.get("id")
+        tenant_id = request.ctx.session.get("tenant_id")
         await chat_manager.connect(account, ws, session_id)
         has_perm = False
         if not has_perm:
@@ -63,7 +64,7 @@ async def warroom_ws(request: Request, ws: Websocket):
                 continue
             try:
                 message = orjson.loads(msg)
-                await chat_manager.handle_message(account, ws, message, session_id)
+                await chat_manager.handle_message(account, ws, message, session_id, tenant_id)
             except Exception as e1:
                 logger.error(f"{e1} | {traceback.format_exc()}")
     except ConnectionClosed as e2:
@@ -124,14 +125,13 @@ async def create_room(request: Request):
     room_name = request.json.get("name")
     members_ids = request.json.get("members", [])
     user_id = []
+    tenant_id = request.ctx.session.get("tenant_id")
     # 作战室名称唯一
-    if await Room.filter(name=room_name).exists():
+    if await Room.filter(name=room_name, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.RoomNameExists)
 
-    tenant_id = request.ctx.session.get("tenant_id")
-
     creator = request.ctx.session["account_info"]
-    room = await Room.create(name=room_name, creator=creator)
+    room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id)
     await room.users.add(creator)
     await creator.star_rooms.add(room)
     user_id.append(creator.id)
@@ -196,7 +196,8 @@ async def create_room(request: Request):
 )
 @requires_permission("warroom:u")
 async def invite_members(request: Request):
-    room = await Room.get_or_none(id=request.json.get("id"))
+    tenant_id = request.ctx.session.get("tenant_id")
+    room = await Room.get_or_none(id=request.json.get("id"), tenant_id=tenant_id)
     accounts = await Account.filter(id__in=request.json.get("members")).all()
     for account in accounts:
         if await room.users.filter(id=account.id).exists():
@@ -238,7 +239,8 @@ async def invite_members(request: Request):
 )
 @requires_permission("warroom:u")
 async def join_room(request: Request):
-    room = await Room.get(id=request.json.get("id"))
+    tenant_id = request.ctx.session.get("tenant_id")
+    room = await Room.get(id=request.json.get("id"), tenant_id=tenant_id)
     user = request.ctx.session["account_info"]
     # 检查当前用户是否已加入该作战室
     is_member = await room.users.filter(id=user.id).exists()
@@ -279,7 +281,8 @@ async def join_room(request: Request):
 )
 @requires_permission("warroom:u")
 async def quit_room(request: Request):
-    room = await Room.get(id=request.json.get("id"))
+    tenant_id = request.ctx.session.get("tenant_id")
+    room = await Room.get(id=request.json.get("id"), tenant_id=tenant_id)
     user = request.ctx.session["account_info"]
     # 检查当前用户是否已加入该作战室
     is_member = await room.users.filter(id=user.id).exists()
@@ -331,7 +334,8 @@ async def quit_room(request: Request):
 )
 @requires_permission("warroom:r")
 async def get_room_list(request: Request):
-    condition = Q(users__id=request.ctx.session["account_info"].id)
+    tenant_id = request.ctx.session.get("tenant_id")
+    condition = Q(users__id=request.ctx.session["account_info"].id, tenant_id=tenant_id)
     keyword = request.json.get("keyword")
     if keyword:
         condition = condition & Q(name__icontains=keyword)
@@ -391,7 +395,8 @@ async def get_all_rooms(request: Request):
     size = req_json.get("size", 10)
     offset = (page - 1) * size
     limit = size
-    condition = Q()
+    tenant_id = request.ctx.session.get("tenant_id")
+    condition = Q(tenant_id=tenant_id)
     keyword = req_json.get("keyword")
     if keyword:
         condition = condition & Q(name__icontains=keyword)
@@ -452,8 +457,8 @@ async def get_all_rooms(request: Request):
 @requires_permission("warroom:r")
 async def acquire_members(request: Request):
     room_id = request.json.get("id")
-
-    room = await Room.get(id=room_id).prefetch_related("creator", "users")
+    tenant_id = request.ctx.session.get("tenant_id")
+    room = await Room.get(id=room_id, tenant_id=tenant_id).prefetch_related("creator", "users")
 
     user_list = []
     for user in room.users:
@@ -511,9 +516,10 @@ async def get_private_room(request: Request):
     partner = await Account.get(id=partner_id)
     if partner is None:
         raise CustomError(ErrorCode.AccountNotFound)
+    tenant_id = request.ctx.session.get("tenant_id")
     # 先获取私聊作战室
-    room_info = await get_or_create_private_chat_room(request.app.ctx.cache_client, user, partner)
-    room = await Room.get_or_none(id=room_info["room_id"])
+    room_info = await get_or_create_private_chat_room(request.app.ctx.cache_client, user, partner, tenant_id)
+    room = await Room.get_or_none(id=room_info["room_id"], tenant_id=tenant_id)
     await user.star_rooms.add(room)
     await partner.star_rooms.add(room)
     return response_ok(room_info)
@@ -596,7 +602,8 @@ async def get_star_rooms(request: Request):
 @requires_permission("warroom:r")
 async def star_room(request: Request):
     room_id = request.json.get("id")
-    room = await Room.get(id=room_id)
+    tenant_id = request.ctx.session.get("tenant_id")
+    room = await Room.get(id=room_id, tenant_id=tenant_id)
     user = request.ctx.session["account_info"]
     # 检查当前用户是否已加入该作战室
     is_member = await room.users.filter(id=user.id).exists()
@@ -638,7 +645,8 @@ async def star_room(request: Request):
 @requires_permission("warroom:u")
 async def unstar_room(request: Request):
     room_id = request.json.get("id")
-    room = await Room.get(id=room_id)
+    tenant_id = request.ctx.session.get("tenant_id")
+    room = await Room.get(id=room_id, tenant_id=tenant_id)
     user = request.ctx.session["account_info"]
     # 检查当前用户是否已加入该作战室
     is_member = await room.users.filter(id=user.id).exists()
@@ -697,7 +705,8 @@ async def unstar_room(request: Request):
 async def get_user_rooms(request: Request):
     user = request.ctx.session["account_info"]
     keyword = request.json.get("keyword", "")
-    query = Room.filter(users__id=user.id)
+    tenant_id = request.ctx.session.get("tenant_id")
+    query = Room.filter(users__id=user.id, tenant_id=tenant_id)
     if keyword:
         query = query.filter(name__contains=keyword)
     user_rooms = await query.order_by("-ctime").prefetch_related("creator")
@@ -787,7 +796,7 @@ async def query_messages(request: Request):
     keyword = request.json.get("keyword", "")
     limit = request.json.get("limit", 20)
     offset = request.json.get("offset", 0)
-
+    tenant_id = request.ctx.session.get("tenant_id")
     # 群聊历史. 先查询后创建消息发送
     if query_type == "public_history" and keyword in ["", None]:
         if not room_id:
@@ -795,11 +804,13 @@ async def query_messages(request: Request):
         total_count = await Message.filter(
             type__in=["public", "ai", "runlog", "execute", "ai-question"],
             room_id=room_id,
+            tenant_id=tenant_id,
         ).count()
         messages = (
             await Message.filter(
                 type__in=["public", "ai", "runlog", "execute", "ai-question"],
                 room_id=room_id,
+                tenant_id=tenant_id,
             )
             .order_by("-ctime")
             .offset(offset)
@@ -849,12 +860,14 @@ async def query_messages(request: Request):
         total_count = await Message.filter(
             type__in=["private", "ai", "runlog", "execute", "ai-question"],
             room_id=room_id,
+            tenant_id=tenant_id,
         ).count()
         # 分页处理
         messages = (
             await Message.filter(
                 type__in=["private", "ai", "runlog", "execute", "ai-question"],
                 room_id=room_id,
+                tenant_id=tenant_id,
             )
             .order_by("-ctime")
             .offset(offset)
@@ -905,6 +918,7 @@ async def query_messages(request: Request):
                 room_id=room_id,
                 content__contains=keyword,
                 is_recalled=False,
+                tenant_id=tenant_id,
             )
         # 传入私聊用户ID, 搜索私聊历史记录
         elif query_type == "private_history":
@@ -913,6 +927,7 @@ async def query_messages(request: Request):
                 room_id=room_id,
                 content__contains=keyword,
                 is_recalled=False,
+                tenant_id=tenant_id,
             )
         else:
             raise CustomError(ErrorCode.ParamValueError)
@@ -951,9 +966,9 @@ async def query_messages(request: Request):
         if not room_id:
             raise CustomError(ErrorCode.ParamValueError)
 
-        total_count = await Message.filter(type="announcement", room_id=room_id).count()
+        total_count = await Message.filter(type="announcement", room_id=room_id, tenant_id=tenant_id).count()
 
-        announcements = await Message.filter(type="announcement", room_id=room_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related("sender")
+        announcements = await Message.filter(type="announcement", room_id=room_id, tenant_id=tenant_id).order_by("-ctime").offset(offset).limit(limit).prefetch_related("sender")
 
         announcement_list = []
         for msg in announcements:
@@ -1032,8 +1047,9 @@ async def get_list(request):
     limit = size
     message_list = []
     account = request.ctx.session["account_info"]
-    count = await MessageAccount.filter(account_id=account.id, status=0).count()
-    messages = await MessageAccount.filter(account_id=account.id, status=0).offset(offset).limit(limit).all().prefetch_related("message__sender")
+    tenant_id = request.ctx.session.get("tenant_id")
+    count = await MessageAccount.filter(account_id=account.id, status=0, tenant_id=tenant_id).count()
+    messages = await MessageAccount.filter(account_id=account.id, status=0, tenant_id=tenant_id).offset(offset).limit(limit).all().prefetch_related("message__sender")
     for message in messages:
         message_list.append(message.json)
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
@@ -1079,11 +1095,12 @@ async def up_status(request):
     ids = request.json.get("ids")
     if not ids:
         raise CustomError(ErrorCode.ParamValueError)
+    tenant_id = request.ctx.session.get("tenant_id")
     if "*" in ids:
         account = request.ctx.session["account_info"]
-        await MessageAccount.filter(account_id=account.id, status=0).update(status=1)
+        await MessageAccount.filter(account_id=account.id, status=0, tenant_id=tenant_id).update(status=1)
         return response_ok(True)
-    await MessageAccount.filter(id__in=ids).update(status=1)
+    await MessageAccount.filter(id__in=ids, tenant_id=tenant_id).update(status=1)
     return response_ok(True)
 
 
@@ -1197,7 +1214,7 @@ async def run(request):
     tenant_id = request.ctx.session.get("tenant_id")
     params["executor"] = user.id
     msg = {"run_type": run_type, "run_id": gen_run_id(), "run_args": params, "tenant_id": tenant_id}
-    room = await Room.get_or_none(id=room_id)
+    room = await Room.get_or_none(id=room_id, tenant_id=tenant_id)
     room.updator = user
     room.run_id.append(msg["run_id"])
     await room.save()
@@ -1277,9 +1294,9 @@ async def execution(request):
     event = await Events.get_or_none(id=eventId, tenant_id=tenant_id)
     if not event.room:
         room_name = event.event_name + "_" + gen_random_code(6)
-        if await Room.filter(name=room_name, deleted=False).exists():
+        if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
             raise CustomError(ErrorCode.RoomNameExists)
-        room = await Room.create(name=room_name, creator=user)
+        room = await Room.create(name=room_name, creator=user, tenant_id=tenant_id)
         event.room = room
     room_id = event.room_id
     run_type = TYPE_DICT.get(executorInstanceType)
@@ -1317,7 +1334,7 @@ async def execution(request):
         params["resource"] = executorActionAssetIds
     run_id = gen_run_id()
     msg = {"run_type": run_type, "run_id": run_id, "run_args": params, "tenant_id": tenant_id}
-    room = await Room.get_or_none(id=room_id)
+    room = await Room.get_or_none(id=room_id, tenant_id=tenant_id)
     room.updator = user
     room.run_id.append(msg["run_id"])
     await room.save()
@@ -1418,9 +1435,9 @@ async def send_message(request):
     sender = await Account.get(username="system", type="api")
     if partner is None:
         raise CustomError(ErrorCode.AccountNotFound)
-
-    room_info = await get_or_create_private_chat_room(request.app.ctx.cache_client, sender, partner)
-    room = await Room.get_or_none(id=room_info["room_id"])
+    tenant_id = request.ctx.session.get("tenant_id")
+    room_info = await get_or_create_private_chat_room(request.app.ctx.cache_client, sender, partner, tenant_id)
+    room = await Room.get_or_none(id=room_info["room_id"], tenant_id=tenant_id)
     await sender.star_rooms.add(room)
     await partner.star_rooms.add(room)
 
@@ -1441,9 +1458,10 @@ async def send_message(request):
         content=content,
         image_content=image_content,
         receiver=partner,
+        tenant_id=tenant_id
     )
 
-    await MessageAccount.create(message=message, account_id=partner.id)
+    await MessageAccount.create(message=message, account_id=partner.id, tenant_id=tenant_id)
 
     message_data = {
         "type": "private",

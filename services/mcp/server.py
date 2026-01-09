@@ -207,7 +207,7 @@ async def handle_call_tool(tenant_id, name: str, arguments: dict | None) -> list
             if not user:
                 user = await Account.first()
 
-        room = await Room.get_or_none(id=room_id)
+        room = await Room.get_or_none(id=room_id, tenant_id=tenant_id)
         if not room:
             return [TextContent(type="text", text=f"Error: Room {room_id} not found.")]
 

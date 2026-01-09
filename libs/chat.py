@@ -137,26 +137,26 @@ async def get_playbook_prompt_words(prompt_word, tenant_id):
 
 
 # 获取或创建私聊作战室
-async def get_or_create_private_chat_room(cache_client, sender: Account, receiver: Account) -> dict:
+async def get_or_create_private_chat_room(cache_client, sender: Account, receiver: Account, tenant_id) -> dict:
     # 保证顺序
     key = f"{sender.id}&{receiver.id}"
     private_room_name = f"{sender.display_name}和{receiver.display_name}的私聊"
     if sender.id > receiver.id:
         key = f"{receiver.id}&{sender.id}"
         private_room_name = f"{receiver.display_name}和{sender.display_name}的私聊"
-    user_private_chat_rooms = await cache_client.get("user_private_chat_rooms") or {}
+    user_private_chat_rooms = await cache_client.get(f"user_private_chat_rooms_{tenant_id}") or {}
     if key not in user_private_chat_rooms:
         # 作战室名字
-        room = await Room.get_or_none(name=private_room_name)
+        room = await Room.get_or_none(name=private_room_name, tenant_id=tenant_id)
         # 先查后创
         if not room:
-            room = await Room.create(name=private_room_name, creator=sender)
+            room = await Room.create(name=private_room_name, creator=sender, tenant_id=tenant_id)
             await room.users.add(sender)
             await room.users.add(receiver)
         data = {"room_id": room.id, "name": room.name}
         user_private_chat_rooms[key] = data
         logger.info(user_private_chat_rooms)
-        await cache_client.set("user_private_chat_rooms", user_private_chat_rooms, 60 * 60 * 24)
+        await cache_client.set(f"user_private_chat_rooms_{tenant_id}", user_private_chat_rooms, 60 * 60 * 24)
         return data
     else:
         return user_private_chat_rooms[key]
@@ -553,24 +553,24 @@ class ChatManager:
             logger.info(f"runlog消息：{to_insert}")
             logger.error(f"{e} | {traceback.format_exc()}")
 
-    async def handle_message(self, user: Account, ws, data: dict, session_id):
+    async def handle_message(self, user: Account, ws, data: dict, session_id, tenant_id):
         """消息处理"""
         try:
             message_type = data.get("type")
             # 按消息类型调用处理方法 (前端发送)
             if message_type in ["public", "runlog"]:
-                await self._handle_public_message(user, data)
+                await self._handle_public_message(user, data, tenant_id)
             elif message_type == "private":
-                await self._handle_private_message(user, data)
+                await self._handle_private_message(user, data, tenant_id)
             elif message_type == "audit":
-                await self._handle_audit_message(user, data)
+                await self._handle_audit_message(user, data, tenant_id)
             elif message_type == "recall":
-                await self._handle_recall_message(user, data)
+                await self._handle_recall_message(user, data, tenant_id)
                 await ws.send(orjson.dumps({"type": "recall_success", "message_id": data.get("message_id")}).decode())
             elif message_type == "announcement":  # 发布公告，公告查询在消息查询API接口里
-                await self._handle_announcement(user, data)
+                await self._handle_announcement(user, data, tenant_id)
             elif message_type == "delete_announcement":
-                await self._handle_delete_announcement(user, data)
+                await self._handle_delete_announcement(user, data, tenant_id)
                 # 通知删除成功
                 await ws.send(
                     orjson.dumps(
@@ -581,7 +581,7 @@ class ChatManager:
                     ).decode()
                 )
             elif message_type == "request_online_users":
-                online_users = await self._handle_request_online_users(data)
+                online_users = await self._handle_request_online_users(data, tenant_id)
                 if user.id in self.active_connections:
                     self.active_connections[user.id][session_id]["current_room"] = data["room_id"]
                 # 发送在线状态列表
@@ -622,10 +622,10 @@ class ChatManager:
             logger.error(f"{e} | {traceback.format_exc()}")
             return {"type": "error", "message": str(e)}
 
-    async def _handle_public_message(self, user: Account, data: dict):
+    async def _handle_public_message(self, user: Account, data: dict, tenant_id):
         """处理发送群聊消息"""
         current_room_id = data.get("room_id")
-        room = await Room.filter(id=current_room_id).get()
+        room = await Room.filter(id=current_room_id, tenant_id=tenant_id).get()
         if not room:
             raise Exception("作战室不存在")
 
@@ -644,13 +644,14 @@ class ChatManager:
             content=content,
             image_content=image_content,
             receiver=user,
+            tenant_id=tenant_id
         )  # 群聊消息设为发送者自己作为占位符
 
         if specify_users:
             for specify_user in specify_users:
                 # 指定用户发送消息
                 sf_user = await Account.filter(id=specify_user).first()
-                ma = await MessageAccount.create(message=message, account_id=specify_user)
+                ma = await MessageAccount.create(message=message, account_id=specify_user, tenant_id=tenant_id)
                 await sf_user.star_rooms.add(room)
                 msg = {
                     "mention": {
@@ -737,7 +738,7 @@ class ChatManager:
     #             receiver=user  # 群聊消息设为发送者自己作为占位符
     #         )
 
-    async def _handle_private_message(self, user: Account, data: dict):
+    async def _handle_private_message(self, user: Account, data: dict, tenant_id):
         """处理发送私聊消息"""
         try:
             receiver_id = data.get("receiver_id")
@@ -753,9 +754,9 @@ class ChatManager:
             specify_users = data.get("specify_user", "")
 
             # 获取或创建私聊房间
-            chat_room = await get_or_create_private_chat_room(self.redis, user, receiver)
+            chat_room = await get_or_create_private_chat_room(self.redis, user, receiver, tenant_id)
 
-            chat_room = await Room.get_or_none(id=chat_room["room_id"])
+            chat_room = await Room.get_or_none(id=chat_room["room_id"], tenant_id=tenant_id)
 
             message = await Message.create(
                 type="private",
@@ -764,12 +765,13 @@ class ChatManager:
                 content=content,
                 image_content=image_content,
                 room=chat_room,
+                tenant_id=tenant_id,
             )
 
             if specify_users:
                 # 指定用户发送消息
                 for specify_user in specify_users:
-                    await MessageAccount.create(message=message, account_id=specify_user)
+                    await MessageAccount.create(message=message, account_id=specify_user, tenant_id=tenant_id)
 
             # 构建消息数据
             message_data = {
@@ -790,7 +792,7 @@ class ChatManager:
             logger.error(f"{e} | {traceback.format_exc()}")
             raise Exception("发送私聊消息失败")
 
-    async def _handle_audit_message(self, user: Account, data: dict):
+    async def _handle_audit_message(self, user: Account, data: dict, tenant_id):
         """处理发送审批消息"""
         try:
             run_node_ids = data.get("run_node_id", {})
@@ -800,7 +802,7 @@ class ChatManager:
             for node_id in run_node_ids.values():
                 node_ids.update(node_id.split(",") if "," in node_id else [node_id])
             node_ids = list(node_ids)
-            run_logs = await Runlog.filter(run_id__in=list(run_node_ids.keys()), node_id__in=node_ids).all()
+            run_logs = await Runlog.filter(run_id__in=list(run_node_ids.keys()), node_id__in=node_ids, tenant_id=tenant_id).all()
 
             for runlog in run_logs:
                 if runlog.status == 3:
@@ -820,13 +822,13 @@ class ChatManager:
             logger.error(f"{e} | {traceback.format_exc()}")
             raise Exception("查询超时审批失败")
 
-    async def _handle_recall_message(self, user: Account, data: dict):
+    async def _handle_recall_message(self, user: Account, data: dict, tenant_id):
         """处理消息撤回"""
         message_id = data.get("message_id")
         if not message_id:
             raise Exception("缺少消息ID")
 
-        message = await Message.filter(id=message_id).first().prefetch_related("room", "sender", "receiver")
+        message = await Message.filter(id=message_id, tenant_id=tenant_id).first().prefetch_related("room", "sender", "receiver")
         if not message:
             raise Exception("消息不存在")
 
@@ -852,7 +854,7 @@ class ChatManager:
         }
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(recall_notice).decode())
 
-    async def _handle_announcement(self, user: Account, data: dict):
+    async def _handle_announcement(self, user: Account, data: dict, tenant_id):
         """处理发布公告请求"""
         content = data.get("content")
         image_content = data.get("image_content", "")
@@ -860,7 +862,7 @@ class ChatManager:
         if not content or not room_id:
             raise Exception("公告内容和作战室ID不能为空")
 
-        room = await Room.get_or_none(id=room_id)
+        room = await Room.get_or_none(id=room_id, tenant_id=tenant_id)
         if not room:
             raise Exception("作战室不存在")
         announcement = await Message.create(
@@ -871,6 +873,7 @@ class ChatManager:
             image_content=image_content,
             is_pinned=True,
             receiver=user,
+            tenant_id=tenant_id
         )  # 设公告发送者自己作为占位符
 
         # 指定房间广播公告
@@ -891,13 +894,13 @@ class ChatManager:
             ).decode(),
         )
 
-    async def _handle_delete_announcement(self, user: Account, data: dict):
+    async def _handle_delete_announcement(self, user: Account, data: dict, tenant_id):
         """处理删除公告请求"""
         announcement_id = data.get("announcement_id")
         if not announcement_id:
             raise Exception("缺少公告ID")
 
-        announcement = await Message.filter(id=announcement_id, type="announcement").first().prefetch_related("sender", "room")
+        announcement = await Message.filter(id=announcement_id, type="announcement", tenant_id=tenant_id).first().prefetch_related("sender", "room")
         if not announcement:
             raise Exception("公告不存在")
 
@@ -919,7 +922,7 @@ class ChatManager:
         }
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(msg).decode())
 
-    async def _handle_request_online_users(self, data: dict):
+    async def _handle_request_online_users(self, data: dict, tenant_id):
         """处理请求在线用户列表"""
         online_status = []
         try:
@@ -928,7 +931,7 @@ class ChatManager:
                 raise Exception("缺少房间ID")
 
             # 获取指定房间的所有用户
-            room = await Room.get(id=room_id).prefetch_related("users")
+            room = await Room.get(id=room_id, tenant_id=tenant_id).prefetch_related("users")
             if not room:
                 raise Exception("找不到作战室")
 

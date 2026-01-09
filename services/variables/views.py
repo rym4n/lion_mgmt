@@ -69,13 +69,16 @@ async def new_variable(request):
     if not name or not value:
         raise CustomError(ErrorCode.ParameterError)
 
+    tenant_id = request.ctx.session.get("tenant_id")
+
     var = await Variables.create(
         name=request.json["name"],
         value=value,
         type="global",
         updator=request.ctx.session["account_info"],
+        tenant_id=tenant_id,
     )
-    await caches.get("redis_chat").set(f"global_{var.name}", value)
+    await caches.get("redis_chat").set(f"global_{var.name}_{tenant_id}", value)
     return response_ok(var.json)
 
 
@@ -142,7 +145,8 @@ async def all_variables(request):
     size = int(req_json.get("size", 15))
     offset = (page - 1) * size
     limit = size
-    condition = Q(type="global")
+    tenant_id = request.ctx.session.get("tenant_id")
+    condition = Q(type="global",tenant_id=tenant_id)
     keyword = req_json.get("keyword")
     if keyword:
         condition = Q(name__icontains=keyword) | Q(value__contains=[keyword])
@@ -185,7 +189,8 @@ async def all_variables(request):
 )
 @requires_permission("var:d")
 async def delelte_variable(request):
-    var = await Variables.get_or_none(name=request.json.get("name"), type="global")
+    tenant_id = request.ctx.session.get("tenant_id")
+    var = await Variables.get_or_none(name=request.json.get("name"), type="global", tenant_id=tenant_id)
     if not var:
         raise CustomError(ErrorCode.NotFound)
     await caches.get("redis_chat").delete(f"global_{var.name}")
@@ -232,8 +237,8 @@ async def update_variable(request):
     value = request.json.get("value")
     if not name or not value:
         raise CustomError(ErrorCode.ParameterError)
-
-    var = await Variables.get(name=name, type="global")
+    tenant_id = request.ctx.session.get("tenant_id")
+    var = await Variables.get(name=name, type="global", tenant_id=tenant_id)
     if not var:
         raise CustomError(ErrorCode.NotFound)
 

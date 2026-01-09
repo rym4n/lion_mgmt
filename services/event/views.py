@@ -373,9 +373,9 @@ async def execution(request):
     event = await Events.get_or_none(id=eventId, tenant_id=tenant_id)
     if not event.room:
         room_name = event.event_name + "_" + gen_random_code(6)
-        if await Room.filter(name=room_name, deleted=False).exists():
+        if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
             raise CustomError(ErrorCode.RoomNameExists)
-        room = await Room.create(name=room_name, creator=user)
+        room = await Room.create(name=room_name, creator=user, tenant_id=tenant_id)
         event.room = room
     room_id = event.room_id
     type = TYPE_DICT.get(executorInstanceType)
@@ -411,7 +411,7 @@ async def execution(request):
         params["resource"] = executorActionAssetIds
     run_id = gen_run_id()
     msg = {"run_type": type, "run_id": run_id, "run_args": params, "tenant_id": tenant_id}
-    room = await Room.get_or_none(id=room_id)
+    room = await Room.get_or_none(id=room_id, tenant_id=tenant_id)
     room.updator = user
     room.run_id.append(msg["run_id"])
     await room.save()
@@ -636,9 +636,9 @@ async def get_event_detail(request):
     first = False
     if not event.room:
         room_name = event.event_name + "_" + gen_random_code(6)
-        if await Room.filter(name=room_name, deleted=False).exists():
+        if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
             raise CustomError(ErrorCode.RoomNameExists)
-        room = await Room.create(name=room_name, creator=creator)
+        room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id)
         event.room = room
         first = True
     if event.event_process_status == "待处理":
