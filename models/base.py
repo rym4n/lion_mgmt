@@ -23,7 +23,7 @@ class BaseModel(Model):
     ctime = fields.DatetimeField(null=False, auto_now_add=True, description="创建时间")
     utime = fields.DatetimeField(null=False, auto_now=True, description="更新时间")
     deleted: bool = fields.BooleanField(default=False, description="删除标识")
-    tenant_id: str = fields.CharField(max_length=255, default="0", null=True, description="租户ID")
+    tenant_id: str = fields.CharField(max_length=255, default="8bce552d-c27c-41d4-8a1b-8c5bf38dfe18", null=True, description="租户ID")
 
     def validate(self) -> None:
         raise NotImplementedError
