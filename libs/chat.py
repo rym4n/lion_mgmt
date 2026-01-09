@@ -178,6 +178,7 @@ async def creat_message(room_id, log, user, redis):
         got_lock = False  # key 已存在，没拿到锁
 
     content = log.get("run_id") + ":" + log.get("node_id")
+    tenant_id = log.get("tenant_id")
     if got_lock:
         # 当前是第一个拿到锁的人，创建记录
         msg, _ = await Message.update_or_create(
@@ -187,11 +188,12 @@ async def creat_message(room_id, log, user, redis):
             content=content,
             receiver=user,
             defaults={"image_content": ""},
+            tenant_id=tenant_id,
         )
     else:
         # 其他执行引擎进入这里：稍等一下，再尝试获取已创建的记录
         for i in range(5):
-            msg = await Message.get_or_none(content=content, room_id=room_id, receiver=user)
+            msg = await Message.get_or_none(content=content, room_id=room_id, receiver=user, tenant_id=tenant_id)
             if msg:
                 break
             await asyncio.sleep(0.01 * (i + 1))  # 指数轮询避免数据库压力过大
@@ -492,6 +494,7 @@ class ChatManager:
                     audit_node=log["audit_app"],
                     approve_type=int(log["approve_type"]),
                     callback_token=log.get("callback_token"),
+                    tenant_id=log["tenant_id"]
                 )
                 if log.get("users"):
                     users = await Account.filter(id__in=log["users"].split(",")).all()

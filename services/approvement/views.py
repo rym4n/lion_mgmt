@@ -13,6 +13,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
+from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from models import Approvement
 from settings import TASK_TOPIC, TZ
@@ -116,7 +117,10 @@ async def all_approvement(request):
     size = int(params.get("size", 15))
     offset = (page - 1) * size
 
-    condition = Q(approvers=request.ctx.session["account_info"].id)
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    condition = Q(approvers=request.ctx.session["account_info"].id, tenant_id=tenant_id)
     keyword = params.get("keyword")
     status = params.get("status")
     ctime = params.get("ctime")
@@ -129,7 +133,7 @@ async def all_approvement(request):
     if ctime and len(ctime) == 2:
         condition = condition & Q(ctime__range=[datetime.strptime(TZ.localize(t), "%Y-%m-%d %H:%M:%S") for t in ctime])
 
-    await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
+    await Approvement.filter(status=0, expire_time__lt=datetime.now(), tenant_id=tenant_id).update(status=3)
     total = await Approvement.filter(condition).count()
     records = []
     if total > 0:
@@ -286,7 +290,10 @@ async def update_approvement(request):
         if p.get("required") is True and not p.get("value"):
             raise CustomError(ErrorCode.ParameterError)
 
-    approve = await Approvement.filter(id=approvement_id).select_for_update().prefetch_related("approvers").first()
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    approve = await Approvement.filter(id=approvement_id, tenant_id=tenant_id).select_for_update().prefetch_related("approvers").first()
     if not approve:
         raise CustomError(ErrorCode.NotFound)
 
@@ -401,13 +408,16 @@ async def update_approvement_callback(request):
     if not token or not isinstance(agree, bool) or not isinstance(remark, str):
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     if flow_input:
         try:
             flow_input = orjson.loads(flow_input)
         except orjson.JSONDecodeError:
             raise CustomError(ErrorCode.ParameterError)
 
-    approve = await Approvement.filter(callback_token=token).select_for_update().prefetch_related("approvers").first()
+    approve = await Approvement.filter(callback_token=token, tenant_id=tenant_id).select_for_update().prefetch_related("approvers").first()
     if not approve:
         raise CustomError(ErrorCode.NotFound)
 
