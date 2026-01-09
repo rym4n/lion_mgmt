@@ -188,7 +188,7 @@ async def count_mttr(request):
         end_time = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
     except ValueError:
         raise CustomError(ErrorCode.ParameterError)
-
+    tenant_id = request.ctx.session.get("tenant_id")
     async with in_transaction() as tconn:
         results = await tconn.execute_query_dict(
             "SELECT DATE(ctime) AS day, "
@@ -197,9 +197,10 @@ async def count_mttr(request):
             "FROM events "
             "WHERE close_time IS NOT NULL "
             "AND ctime >= $1 AND ctime <= $2 "
+            "AND tenant_id = $3"
             "GROUP BY DATE(ctime) "
             "ORDER BY day",
-            (start_time, end_time),
+            (start_time, end_time, tenant_id),
         )
         return response_ok(
             [
@@ -301,6 +302,7 @@ async def count_apps(request):
 )
 @requires_permission("dashboard:r")
 async def playbooks_success_rate(request):
+    tenant_id = request.ctx.session.get("tenant_id")
     sql = """
           SELECT playbook_name,
                  ROUND(SUM(CASE WHEN has_fail = 0 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 2) AS success_rate
@@ -308,13 +310,13 @@ async def playbooks_success_rate(request):
                        playbook_name,
                        MAX(CASE WHEN status != 0 THEN 1 ELSE 0 END) AS has_fail
                 FROM runlog
-                WHERE playbook_name != '执行动作'
+                WHERE playbook_name != '执行动作' AND tenant_id = $1
                 GROUP BY run_id, playbook_name) AS deduplicated
           GROUP BY playbook_name
           ORDER BY success_rate;
           """
     async with in_transaction() as conn:
-        rows = await conn.execute_query_dict(sql)
+        rows = await conn.execute_query_dict(sql,(tenant_id))
         for row in rows:
             row["success_rate"] = float(row["success_rate"])
         return response_ok(rows)
