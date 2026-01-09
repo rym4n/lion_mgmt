@@ -158,7 +158,7 @@ async def create_workflow(request):
         )
         await PlaybookPermissions.create(pb=playbook, users=None, roles=admin, permissions=["r", "u", "d", "e", "p"], tenant_id=tenant_id)
         if data.get("tags"):
-            tags = await Tag.filter(name__in=data.get("tags")).all()
+            tags = await Tag.filter(name__in=data.get("tags"), tenant_id=tenant_id).all()
             await playbook.tags.add(*tags)
         if data.get("scenes"):
             scenes = await Scene.filter(name__in=data.get("scenes"), tenant_id=tenant_id).all()
@@ -286,7 +286,7 @@ async def list_workflow(request):
             condition = condition & Q(scenes__in=scenes)
 
     if json_params.get("tag"):
-        tags = await Tag.filter(name__in=json_params.get("tag")).all()
+        tags = await Tag.filter(name__in=json_params.get("tag"), tenant_id=tenant_id).all()
         if tags:
             condition = condition & Q(tags__in=tags)
 
@@ -648,7 +648,7 @@ async def edit_workflow(request):
         await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
     await playbook.tags.clear()
     if params.get("tags"):
-        tags = await Tag.filter(name__in=params.get("tags"))
+        tags = await Tag.filter(name__in=params.get("tags"), tenant_id=tenant_id)
         await playbook.tags.add(*tags)
     if params.get("flow_timeout"):
         if 300 > int(params.get("flow_timeout")) or int(params.get("flow_timeout")) > 259200:
@@ -1279,10 +1279,13 @@ async def new_tag(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    if await Tag.get_or_none(name=name, type=0):
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    if await Tag.filter(name=name, type=0, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.TagExistError)
 
-    await Tag.create(name=name, type=0)
+    await Tag.create(name=name, type=0, tenant_id=tenant_id)
 
     return response_ok("标签新建成功")
 
@@ -1311,7 +1314,9 @@ async def new_tag(request):
 )
 @requires_permission("workflow:r")
 async def tag_list(request):
-    tags = await Tag.filter(type=0).all()
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    tags = await Tag.filter(type=0, tenant_id=tenant_id).all()
     return response_ok([tag.name for tag in tags])
 
 
@@ -1351,8 +1356,9 @@ async def remove_tag(request):
     name = request.json.get("name")
     if not name:
         raise CustomError(ErrorCode.ParameterError)
-
-    tag = await Tag.get(name=name, type=0)
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    tag = await Tag.get(name=name, type=0, tenant_id=tenant_id)
     await tag.delete()
     return response_ok("标签删除成功")
 
@@ -2019,7 +2025,7 @@ async def import_workflow(request):
             )
 
             if flow_data.get("tags"):
-                tags = await Tag.filter(name__in=flow_data.get("tags")).all()
+                tags = await Tag.filter(name__in=flow_data.get("tags"), tenant_id=tenant_id).all()
                 if tags:
                     await playbook.tags.add(*tags)
             if flow_data.get("scenes"):

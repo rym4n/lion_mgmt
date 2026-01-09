@@ -2063,10 +2063,13 @@ async def new_tag(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    if await Tag.get_or_none(name=name, type=1):
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    if await Tag.filter(name=name, type=1, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.TagExistError)
 
-    await Tag.create(name=name, type=1)
+    await Tag.create(name=name, type=1, tenant_id=tenant_id)
 
     return response_ok("标签新建成功")
 
@@ -2094,7 +2097,10 @@ async def new_tag(request):
 )
 @requires_permission("tool:r")
 async def tag_list(request):
-    tags = await Tag.filter(type=1, deleted=False).all()
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    tags = await Tag.filter(type=1, deleted=False, tenant_id=tenant_id).all()
 
     return response_ok([tag.name for tag in tags])
 
@@ -2135,7 +2141,10 @@ async def remove_tag(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    tag = await Tag.get(name=name, type=1)
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    tag = await Tag.get(name=name, type=1, tenant_id=tenant_id)
     await tag.delete()
 
     return response_ok("标签删除成功")

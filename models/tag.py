@@ -8,7 +8,8 @@ from models.base import BaseModel
 
 class Tag(BaseModel):
     """
-    运行场景模型
+    标签模型
+    0为剧本标签，1为工具标签
     """
 
     name = fields.CharField(description="标签名称", max_length=255)
