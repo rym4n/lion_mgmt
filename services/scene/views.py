@@ -259,7 +259,7 @@ async def get_all_scene(request):
     key = request.json.get("key") or None
     status = request.json.get("status")
 
-    condition = Q(deleted=False)
+    condition = Q()
 
     if status is not None:
         condition = condition & Q(status__not=status)
@@ -384,7 +384,6 @@ async def remove_scene(request):
         for playbook in playbooks:
             await playbook.scenes.remove(scene)
 
-        scene.deleted = True
-        await scene.save()
+        await scene.delete()
 
     return response_ok("删除成功")
