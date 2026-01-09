@@ -182,7 +182,7 @@ async def upload_and_extract_zip(request):
             if "health_check" == action.get("func"):
                 health_check = 1
             await ToolAction.create(tool_name=config_data.get("name"), version_number=version, action=action, tenant_id=tenant_id)
-            actions = await ActionPermissions.filter(tool_name=tool_name, deleted=False).values("action_name")
+            actions = await ActionPermissions.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).values("action_name")
             action_names = {action["action_name"] for action in actions}
 
             if action["func"] not in action_names:
@@ -192,6 +192,7 @@ async def upload_and_extract_zip(request):
                     action_description=action.get("name") or "",
                     roles=[],
                     users=[],
+                    tenant_id=tenant_id,
                 )
             await ActionPermissions.create(
                 tool_name=tool_name,
@@ -199,6 +200,7 @@ async def upload_and_extract_zip(request):
                 action_description="动作全部动作权限",
                 roles=[],
                 users=[],
+                tenant_id=tenant_id,
             )
         configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False, tenant_id=tenant_id)
         if not configuration:
@@ -876,7 +878,7 @@ async def delete_tool(request):
         if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).count() == 1:
             await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
             await ToolResources.filter(tool_name=name, deleted=False, tenant_id=tenant_id).delete()
-            await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
+            await ActionPermissions.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
 
         await utils.delete_from_s3("system", f"{name}/{version}.zip", "tools")
 
@@ -947,7 +949,7 @@ async def delete_tool_all(request):
         await ToolAction.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
         await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
         await ToolResources.filter(tool_name=name, deleted=False, tenant_id=tenant_id).delete()
-        await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
+        await ActionPermissions.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
         await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
 
     return response_ok({"message": "全部工具删除成功"})
@@ -1427,18 +1429,22 @@ async def add_permission(request):
     if not isinstance(users_id, list) or not isinstance(roles_id, list) or not isinstance(actions, list):
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     if "all" in actions:
-        if not await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False).exists():
+        if not await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False, tenant_id=tenant_id).exists():
             await ActionPermissions.create(
                 tool_name=name,
                 action_name="all",
                 action_description="动作全部动作权限",
                 roles=[],
                 users=[],
+                tenant_id=tenant_id,
             )
-        permissions = await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False).all()
+        permissions = await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False, tenant_id=tenant_id).all()
     else:
-        permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False).all()
+        permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False, tenant_id=tenant_id).all()
 
     if not permissions:
         raise CustomError(ErrorCode.ActionNotFoundError)
@@ -1543,18 +1549,22 @@ async def select_permission_all(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     if "all" in actions:
-        if not await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False).exists():
+        if not await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False, tenant_id=tenant_id).exists():
             await ActionPermissions.create(
                 tool_name=name,
                 action_name="all",
                 action_description="动作全部动作权限",
                 roles=[],
                 users=[],
+                tenant_id=tenant_id,
             )
-        permissions = await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False).all()
+        permissions = await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False, tenant_id=tenant_id).all()
     else:
-        permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False).all()
+        permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False, tenant_id=tenant_id).all()
 
     if not permissions:
         raise CustomError(ErrorCode.ActionNotFoundError)
@@ -1672,6 +1682,9 @@ async def judge_permission(request):
     if not action_groups or not isinstance(action_groups, list):
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     user = request.ctx.session.get("account_info")
     if not user:
         raise CustomError(ErrorCode.AccountNotFound)
@@ -1690,7 +1703,7 @@ async def judge_permission(request):
 
         query_conditions.append(Q(tool_name=tool_name, action_name__in=actions))
 
-    permissions = await ActionPermissions.filter(reduce(operator.or_, query_conditions), deleted=False)
+    permissions = await ActionPermissions.filter(reduce(operator.or_, query_conditions), deleted=False, tenant_id=tenant_id)
 
     perm_dict = defaultdict(dict)
     for p in permissions:

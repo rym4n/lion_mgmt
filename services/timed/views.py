@@ -22,7 +22,8 @@ from models import (
     Runlog,
     PlaybookVersion,
     PlaybookPermissions,
-    ActionPermissions, Account,
+    ActionPermissions,
+    Account,
 )
 from services.workflow.views import get_playbook_input
 from settings import TASK_TOPIC, TZ, KAFKA_CONFIG
@@ -307,6 +308,7 @@ async def get_timed_permissions(request, filtered_items):
                 tool_name=item.action_input["app_name"],
                 action_name__in=[item.action_input["action"], "all"],
                 deleted=False,
+                tenant_id=tenant_id,
             )
 
             resource = item.action_input["resource"]
