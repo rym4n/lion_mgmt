@@ -21,6 +21,7 @@ from libs.security.authentication import (
     token_encode,
     refresh_token,
     validate_username,
+    token_decode,
 )
 from libs.security.authorization import requires_permission
 from libs.utils import (
@@ -1248,16 +1249,19 @@ async def oauth2_callback(request):
     },
 )
 async def init_scene_list(request):
-    scene_name = await caches.get("redis_chat").get("aioe_current_scene")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    scene_name = await caches.get("redis_chat").get(f"aioe_current_scene_{tenant_id}")
     if scene_name:
         if isinstance(scene_name, bytes):
             scene_name = scene_name.decode("utf-8")
         return response_ok({"scene": scene_name})
 
     if not scene_name:
-        s = await Scene.get_or_none(deleted=False, status=1)
+        s = await Scene.get_or_none(deleted=False, status=1, tenant_id=tenant_id)
         if s:
-            await caches.get("redis_chat").set("aioe_current_scene", s.name)
+            await caches.get("redis_chat").set(f"aioe_current_scene_{tenant_id}", s.name)
             return response_ok({"scene": s.name})
     return response_ok({"scene": None})
 

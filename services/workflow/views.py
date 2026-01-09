@@ -161,7 +161,7 @@ async def create_workflow(request):
             tags = await Tag.filter(name__in=data.get("tags")).all()
             await playbook.tags.add(*tags)
         if data.get("scenes"):
-            scenes = await Scene.filter(name__in=data.get("scenes")).all()
+            scenes = await Scene.filter(name__in=data.get("scenes"), tenant_id=tenant_id).all()
             await playbook.scenes.add(*scenes)
             await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
 
@@ -281,7 +281,7 @@ async def list_workflow(request):
         keyword = json_params.get("keyword")
         condition = condition & (Q(name__icontains=keyword) | Q(remark__icontains=keyword) | Q(id=keyword))
     if json_params.get("scene"):
-        scenes = await Scene.filter(name__in=json_params.get("scene")).all()
+        scenes = await Scene.filter(name__in=json_params.get("scene"), tenant_id=tenant_id).all()
         if scenes:
             condition = condition & Q(scenes__in=scenes)
 
@@ -643,7 +643,7 @@ async def edit_workflow(request):
     playbook.remark = params.get("remark", "")
     await playbook.scenes.clear()
     if params.get("scenes"):
-        scenes = await Scene.filter(name__in=params.get("scenes"))
+        scenes = await Scene.filter(name__in=params.get("scenes"), tenant_id=tenant_id)
         await playbook.scenes.add(*scenes)
         await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
     await playbook.tags.clear()
@@ -1996,7 +1996,7 @@ async def import_workflow(request):
         maintenance_mode = flow_data.get("maintenance_mode") if flow_data.get("maintenance_mode") else await request.app.ctx.cache_client.get(request.ctx.session["id"])
         async with in_transaction():
             playbook = await Playbook.create(
-                id=(str(flow_data.get("flow_id")) if flow_data.get("flow_id") else str(uuid.uuid4())),
+                id=str(uuid.uuid4()),
                 name=flow_data.get("name"),
                 remark=flow_data.get("remark", ""),
                 creator=creator,
@@ -2023,7 +2023,7 @@ async def import_workflow(request):
                 if tags:
                     await playbook.tags.add(*tags)
             if flow_data.get("scenes"):
-                scenes = await Scene.filter(name__in=flow_data.get("scenes")).all()
+                scenes = await Scene.filter(name__in=flow_data.get("scenes"), tenant_id=tenant_id).all()
                 if scenes:
                     await playbook.scenes.add(*scenes)
                     await caches.get("redis_chat").set(
@@ -2037,7 +2037,7 @@ async def import_workflow(request):
                         app_name = node["properties"].get("app_name")
                         tool = await Tool.filter(deleted=False, name=app_name, maintain=maintenance_mode).order_by("-utime").first()
                         node["properties"]["version"] = tool.version if tool else ""
-                print(flow_json)
+
                 pv = await PlaybookVersion.create(
                     playbook=playbook,
                     version=gen_run_id(),

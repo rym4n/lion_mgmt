@@ -87,16 +87,20 @@ async def add_scene(request):
     if status is None and status not in [0, 1]:
         raise CustomError(ErrorCode.ParameterError)
 
-    if await Scene.filter(name=request.json.get("name")).exists():
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    if await Scene.filter(name=request.json.get("name"), tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.SceneExistsError)
     if status == 1:
-        await Scene.filter(status=1).update(status=0)
+        await Scene.filter(status=1, tenant_id=tenant_id).update(status=0)
     scene = await Scene.create(
         name=name,
         remark=remark,
         status=status,
         creator=request.ctx.session["account_info"],
         updator=request.ctx.session["account_info"],
+        tenant_id=tenant_id,
     )
 
     return response_ok(scene.json)
@@ -166,7 +170,10 @@ async def update_scene(request):
     if not scene_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    scene = await Scene.get_or_none(id=scene_id).prefetch_related("creator")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    scene = await Scene.get_or_none(id=scene_id, tenant_id=tenant_id).prefetch_related("creator")
     if not scene:
         raise CustomError(ErrorCode.NotFound)
 
@@ -259,7 +266,10 @@ async def get_all_scene(request):
     key = request.json.get("key") or None
     status = request.json.get("status")
 
-    condition = Q()
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    condition = Q(tenant_id=tenant_id)
 
     if status is not None:
         condition = condition & Q(status__not=status)
@@ -317,8 +327,12 @@ async def set_current_scene(request):
     scene_id = request.json.get("id")
     if not scene_id:
         raise CustomError(ErrorCode.ParameterError)
-    await Scene.filter(status=1).update(status=0)
-    scene = await Scene.get_or_none(id=scene_id)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    await Scene.filter(status=1, tenant_id=tenant_id).update(status=0)
+    scene = await Scene.get_or_none(id=scene_id, tenant_id=tenant_id)
     if not scene:
         raise CustomError(ErrorCode.NotFound)
 
@@ -326,7 +340,7 @@ async def set_current_scene(request):
     scene.updator = request.ctx.session["account_info"]
     await scene.save()
 
-    await caches.get("redis_chat").set("aioe_current_scene", scene.name)
+    await caches.get("redis_chat").set(f"aioe_current_scene_{tenant_id}", scene.name)
 
     return response_ok("设置成功")
 
@@ -367,7 +381,10 @@ async def remove_scene(request):
     if not scene_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    scene = await Scene.get_or_none(id=scene_id)
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    scene = await Scene.get_or_none(id=scene_id, tenant_id=tenant_id)
 
     if not scene:
         raise CustomError(ErrorCode.NotFound)
