@@ -265,7 +265,9 @@ async def count_playbooks(request):
 )
 @requires_permission("dashboard:r")
 async def count_apps(request):
-    result = await ToolResources.annotate(counts=Count("tool_name", distinct=True)).values("counts")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    result = await ToolResources.filter(tenant_id=tenant_id).annotate(counts=Count("tool_name", distinct=True)).values("counts")
     return response_ok(result[0].get("counts"))
 
 

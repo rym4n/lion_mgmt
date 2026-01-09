@@ -78,7 +78,7 @@ async def get_prompt_words(prompt_word, tenant_id):
     for action in actions:
         if action["tool_name"] not in tool_names:
             tool_names.append(action["tool_name"])
-    tools = await ToolResources.filter(deleted=False).all().values("tool_name")
+    tools = await ToolResources.filter(deleted=False, tenant_id=tenant_id).all().values("tool_name")
     for tool in tools:
         if tool["tool_name"] not in tool_names:
             tool_names.append(tool["tool_name"])

@@ -137,7 +137,7 @@ async def all_apps(request):
     for tool in tools:
         actions = await ToolAction.filter(tool_name=tool.name, version_number=tool.version, deleted=False, tenant_id=tenant_id).all()
         resource_model = await ToolResourcesModel.get(tool_name=tool.name, deleted=False, tenant_id=tenant_id)
-        resources = await ToolResources.filter(tool_name=tool.name, deleted=False).all()
+        resources = await ToolResources.filter(tool_name=tool.name, deleted=False, tenant_id=tenant_id).all()
         data = {
             "id": tool.id,
             "name": tool.name,

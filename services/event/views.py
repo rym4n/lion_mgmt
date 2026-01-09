@@ -528,7 +528,7 @@ async def get_activity_result(request, activityId):
         )
         if log.resource_name:
             for node in nodes:
-                resources = await ToolResources.get_or_none(tool_name=node.tool_name, name=node.resource_name, deleted=False)
+                resources = await ToolResources.get_or_none(tool_name=node.tool_name, name=node.resource_name, deleted=False, tenant_id=tenant_id)
                 nodeResults[-1]["assetResultModels"].append(
                     {
                         "nodeResultId": node.id,

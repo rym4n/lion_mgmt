@@ -875,7 +875,7 @@ async def delete_tool(request):
 
         if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).count() == 1:
             await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
-            await ToolResources.filter(tool_name=name, deleted=False).delete()
+            await ToolResources.filter(tool_name=name, deleted=False, tenant_id=tenant_id).delete()
             await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
 
         await utils.delete_from_s3("system", f"{name}/{version}.zip", "tools")
@@ -946,7 +946,7 @@ async def delete_tool_all(request):
 
         await ToolAction.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
         await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
-        await ToolResources.filter(tool_name=name, deleted=False).delete()
+        await ToolResources.filter(tool_name=name, deleted=False, tenant_id=tenant_id).delete()
         await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
         await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
 
@@ -1058,12 +1058,16 @@ async def add_tool_resource(request):
     if not tool_name or resources is None or not name:
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     existing_resource = await ToolResources.get_or_none(
         name=name,
         deleted=False,
         tool_name=tool_name,
         internal=maintenance_mode if maintenance_mode else False,
+        tenant_id=tenant_id,
     )
     if existing_resource:
         raise CustomError(ErrorCode.ResourcesNameExistsError)
@@ -1076,6 +1080,7 @@ async def add_tool_resource(request):
         internal=maintenance_mode if maintenance_mode else False,
         creator=request.ctx.session["account_info"].username,
         updater=request.ctx.session["account_info"].username,
+        tenant_id=tenant_id,
     )
 
     r = {k: resources[k].get("value") or resources[k].get("default_value", "") for k in resources}
@@ -1137,11 +1142,15 @@ async def tool_resources_detailed(request):
     if not tool_name:
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     resources = await ToolResources.filter(
         tool_name=tool_name,
         deleted=False,
         internal=maintenance_mode if maintenance_mode else False,
+        tenant_id=tenant_id,
     ).all()
     return response_ok([r.json for r in resources])
 
@@ -1193,12 +1202,16 @@ async def update_tool_resource(request):
     if not tool_name or not name:
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     tool_resource = await ToolResources.get_or_none(
         tool_name=tool_name,
         name=name,
         deleted=False,
         internal=maintenance_mode if maintenance_mode else False,
+        tenant_id=tenant_id,
     )
 
     if not tool_resource:
@@ -1274,6 +1287,7 @@ async def delete_tool_resource(request):
         name=name,
         deleted=False,
         internal=maintenance_mode if maintenance_mode else False,
+        tenant_id=tenant_id,
     )
 
     if not tool_resource:
@@ -2347,7 +2361,7 @@ async def tool_debug(request):
     if not tool:
         return response_ok("工具开发运行APP缺失，请联系管理员处理")
 
-    resource = await ToolResources.filter(tool_name="lion_mgmt", deleted=False).order_by("-ctime").first()
+    resource = await ToolResources.filter(tool_name="lion_mgmt", deleted=False, tenant_id=tenant_id).order_by("-ctime").first()
     if not resource:
         raise response_ok("工具开发运行资源不存在，请联系管理员处理")
 
