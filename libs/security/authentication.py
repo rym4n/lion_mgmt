@@ -12,7 +12,7 @@ from sanic.log import logger
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.utils import get_client_ip, ip_in_list
-from models import Account
+from models import Account, Tenant
 from settings import (
     SECRET,
     SESSION_ENCODING_ALGORITHM,
@@ -139,6 +139,10 @@ async def token_decode(request: Request) -> dict:
                 account = await Account.get(id=user_id, deleted=False).prefetch_related("roles")
                 await request.app.ctx.cache_client.set(f"account_{account.id}", account, 7 * 24 * 3600)
             payload = jwt.decode(token, account.password, SESSION_ENCODING_ALGORITHM)
+            if request.headers.get("tenant_name"):
+                tenant = await Tenant.get_or_none(name=request.headers.get("tenant_name"))
+                if tenant:
+                    payload["tenant_id"] = tenant.id
         else:
             payload = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
         return payload

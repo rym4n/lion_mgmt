@@ -105,8 +105,7 @@ async def get_all_events(request):
     offset = (page - 1) * size
     limit = size
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     filters = {"tenant_id": tenant_id}
     if request.json.get("event_name"):
@@ -187,8 +186,7 @@ async def artificial_create_event(request):
     event_ingestion_id = ""
     log_data = ""
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     if await Events.filter(event_name=event_name, deleted=False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.EventNameExists)
@@ -280,8 +278,7 @@ async def artificial_create_event_wuzhi(request):
     event_ingestion_id = ""
     log_data = ""
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     if await Events.filter(event_name=event_name, deleted=False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.EventNameExists)
@@ -371,8 +368,7 @@ async def execution(request):
     executorParams = request.json.get("params")
     user = request.ctx.session["account_info"]
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     event = await Events.get_or_none(id=eventId, tenant_id=tenant_id)
     if not event.room:
@@ -414,7 +410,7 @@ async def execution(request):
     if executorActionAssetIds and type == "action":
         params["resource"] = executorActionAssetIds
     run_id = gen_run_id()
-    msg = {"run_type": type, "run_id": run_id, "run_args": params}
+    msg = {"run_type": type, "run_id": run_id, "run_args": params, "tenant_id": tenant_id}
     room = await Room.get_or_none(id=room_id)
     room.updator = user
     room.run_id.append(msg["run_id"])
@@ -432,8 +428,7 @@ async def get_activity_result(request, activityId):
     if not activityId:
         raise CustomError(ErrorCode.ParamValueError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     logs = await Runlog.filter(run_id=activityId, deleted=False).all()
     activity = {}
@@ -599,8 +594,7 @@ async def create_event(request):
     event_ingestion_id = request.json.get("event_ingestion_id") or ""
     log_data = request.json.get("log_data") or ""
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     if await Events.filter(event_name=event_name, deleted=False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.EventNameExists)
@@ -633,8 +627,7 @@ async def create_event(request):
 async def get_event_detail(request):
     event_id = request.json.get("id")
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     event = await Events.get(id=event_id, deleted=False, tenant_id=tenant_id).prefetch_related("room", "creator", "updator")
     if not event:
@@ -702,8 +695,7 @@ async def update_event(request):
     if not event_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     event = await Events.get(id=event_id, deleted=False, tenant_id=tenant_id).prefetch_related("room", "creator", "updator")
     if not event:
@@ -764,7 +756,7 @@ async def create_ai_report(event_id, tenant_id):
         "flow_input": {"event_id": event_id, "ai_type": "event"},
     }
     run_id = gen_run_id()
-    msg = {"run_type": "flow", "run_id": run_id, "run_args": params}
+    msg = {"run_type": "flow", "run_id": run_id, "run_args": params, "tenant_id": tenant_id}
     await aproduce(TASK_TOPIC, msg)
     while True:
         runlog = await Runlog.filter(run_id=run_id, deleted=False).order_by("-ctime").all()
@@ -809,8 +801,7 @@ async def get_report(request):
     if not event_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     event = await Events.get(id=event_id, tenant_id=tenant_id)
 

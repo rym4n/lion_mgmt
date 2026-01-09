@@ -86,8 +86,7 @@ async def get_license(request: Request):
     if not lic:
         return response_ok([p["url"] for p in permissions if p["model"] == "lic"])
 
-    payload = await token_decode(request)
-    user = await Account.get(id=payload["sub"]).prefetch_related("roles")
+    user = await Account.get(id=request.ctx.session["sub"]).prefetch_related("roles")
     if not user:
         raise CustomError(ErrorCode.AccountNotFound)
 

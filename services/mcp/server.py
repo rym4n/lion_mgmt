@@ -218,7 +218,7 @@ async def handle_call_tool(tenant_id, name: str, arguments: dict | None) -> list
         params["executor"] = user.id
 
         run_id = gen_run_id()
-        msg = {"run_type": run_type, "run_id": run_id, "run_args": params}
+        msg = {"run_type": run_type, "run_id": run_id, "run_args": params, "tenant_id": tenant_id}
 
         room.updator = user
         room.run_id.append(run_id)

@@ -31,7 +31,7 @@ from libs.utils import (
     validate_ips,
     get_expiration_date,
 )
-from models import Account, Role, Scene
+from models import Account, Role, Scene, Tenant
 from settings import (
     AUTHENTICATION_SESSION_EXPIRATION,
     MAX_CHALLENGE_ATTEMPTS,
@@ -71,6 +71,11 @@ _all__ = ["user_bp"]
                         "type": "string",
                         "description": "允许访问的IP列表，逗号分隔 192.168.1.1,192.168.1.2 如果为空则为全部ip",
                     },
+                    "tenant_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "工作空间列表",
+                    }
                 },
             }
         }
@@ -125,8 +130,9 @@ async def new_user(request):
         if validate_ips(request.json["permit_ip"]) is not True:
             raise CustomError(ErrorCode.InvalidIP)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    t_ids = request.json.get("tenant_ids", [])
 
     try:
         mfa_enable = bool(request.json.get("mfa_enable", False)) or False
@@ -140,6 +146,7 @@ async def new_user(request):
             mfa_enable=mfa_enable,
             mfa_key=pyotp.random_base32(32) if mfa_enable else None,
             permit_ip=request.json.get("permit_ip"),
+            tenant_id=t_ids[0],
         )
         # 添加角色
         if request.json.get("role_names"):
@@ -147,6 +154,11 @@ async def new_user(request):
             await account.roles.add(*roles)
         else:
             await account.fetch_related("roles")
+
+        if t_ids:
+            tenants = await Tenant.filter(id__in=t_ids).all()
+            await account.member.add(*tenants)
+
         await account.fetch_related("roles")
         res = account.json
         if mfa_enable:
@@ -276,6 +288,11 @@ async def all_users(request):
                         "type": "string",
                         "description": "允许访问的IP列表，逗号分隔 192.168.1.1,192.168.1.2 如果为空则为全部ip",
                     },
+                    "tenant_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "工作空间列表",
+                    }
                 },
             }
         }
@@ -327,8 +344,9 @@ async def create_api_user(request):
         if validate_ips(request.json["permit_ip"]) is not True:
             raise CustomError(ErrorCode.InvalidIP)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    t_ids = request.json.get("tenant_ids", [])
 
     account = await Account.create(
         username=validate_username(request.json.get("name", "")),
@@ -338,11 +356,17 @@ async def create_api_user(request):
         expiration=datetime.fromtimestamp(int(time.time()) + request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION)),
         creator=request.ctx.session["account_info"].username,
         permit_ip=request.json.get("permit_ip"),
+        tenant_id=t_ids[0]
     )
     # 添加角色
     if request.json.get("role_names"):
         roles = await Role.filter(name__in=request.json.get("role_names"), tenant_id=tenant_id).all()
         await account.roles.add(*roles)
+
+    # 添加工作空间
+    if t_ids:
+        tenants = await Tenant.filter(id__in=t_ids).all()
+        await account.member.add(*tenants)
 
     token = token_encode(
         account.id,
@@ -1102,8 +1126,7 @@ async def assign_role_to_user(request):
     if not account:
         raise CustomError(ErrorCode.AccountNotFound)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     role_names = request.json.get("role_names", "").split(",")
     if role_names in [[""], None]:
@@ -1260,8 +1283,7 @@ async def oauth2_callback(request):
     },
 )
 async def init_scene_list(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     scene_name = await caches.get("redis_chat").get(f"aioe_current_scene_{tenant_id}")
     if scene_name:
@@ -1354,8 +1376,7 @@ async def init_account_list(request):
     },
 )
 async def init_role_list(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     roles = await Role.filter(deleted=False, tenant_id=tenant_id).all().values_list("id", "name")
     return response_ok({"roles": [{"id": role[0], "name": role[1]} for role in roles]})

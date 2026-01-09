@@ -69,8 +69,7 @@ async def ai_question(request):
     ai_type = request.json.get("ai_type")
     user = request.ctx.session["account_info"]
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     room = await Room.get(id=room_id, deleted=False)
     message = await Message.create(
@@ -107,7 +106,7 @@ async def ai_question(request):
         "executor": user.id,
     }
     run_id = gen_run_id()
-    msg = {"run_type": "flow", "run_id": run_id, "run_args": params}
+    msg = {"run_type": "flow", "run_id": run_id, "run_args": params, "tenant_id": tenant_id}
     await aproduce(TASK_TOPIC, msg)
 
     return response_ok("运行成功")
@@ -275,8 +274,7 @@ async def publish_msg(request):
 )
 @requires_permission("warroom:r")
 async def get_prompt_word(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     if request.json.get("ai_type") == "action":
         system_prompt, ai_dict, ai_desc = await get_prompt_words(request.json.get("prompt_word"), tenant_id)
@@ -339,8 +337,7 @@ async def get_prompt_word(request):
 )
 @requires_permission("warroom:r")
 async def get_tool_action(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
     tool_actions = await ToolAction.filter(id__in=request.json.get("data"), deleted=False, tenant_id=tenant_id).all()
     data = []
     for tool_action in tool_actions:
@@ -396,8 +393,7 @@ async def get_tool_action(request):
 )
 @requires_permission("warroom:r")
 async def get_tool_info(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     tool = await Tool.get_or_none(
         name=request.json.get("tool_name"),

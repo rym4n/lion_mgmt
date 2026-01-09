@@ -120,8 +120,7 @@ async def upload_and_extract_zip(request):
         },
     )
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     creator = request.ctx.session["account_info"].username
     if "file" not in request.files:
@@ -521,8 +520,7 @@ async def all_tools(request):
     if size > 50:
         raise CustomError(ErrorCode.RequestTooManyError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     subquery = Tool.filter(deleted=False, tenant_id=tenant_id).annotate(max_version=Max("version")).group_by("name")
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
@@ -627,8 +625,7 @@ async def all_versions(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     tools = (
         await Tool.filter(
@@ -727,8 +724,7 @@ async def tool_actions(request):
     if not name or not version:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     tool = await Tool.get_or_none(name=name, version=version, deleted=False, tenant_id=tenant_id)
     if not tool:
@@ -805,8 +801,7 @@ async def update_tool_status(request):
     if not name or not version or status not in [0, 1]:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     tool = await Tool.get_or_none(name=name, version=version, deleted=False, tenant_id=tenant_id)
     if not tool:
@@ -861,8 +856,7 @@ async def delete_tool(request):
     if not name or not version:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     async with in_transaction():
         tool = await Tool.get(name=name, version=version, deleted=False, tenant_id=tenant_id)
@@ -930,17 +924,13 @@ async def delete_tool_all(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     if await Tool.filter(name=name, deleted=False, maintain=True, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.InternalDeleteError)
 
     if await Tool.filter(name=name, deleted=False, status=1, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.ToolHasScriptError)
-
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
 
     async with in_transaction():
         for tool in await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all():
@@ -1000,8 +990,7 @@ async def tool_resource_model(request):
     if not tool_name:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     resources = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).first().values()
     if not resources:
@@ -1060,8 +1049,7 @@ async def add_tool_resource(request):
     if not tool_name or resources is None or not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     existing_resource = await ToolResources.get_or_none(
@@ -1144,8 +1132,7 @@ async def tool_resources_detailed(request):
     if not tool_name:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     resources = await ToolResources.filter(
@@ -1204,8 +1191,7 @@ async def update_tool_resource(request):
     if not tool_name or not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     tool_resource = await ToolResources.get_or_none(
@@ -1280,8 +1266,7 @@ async def delete_tool_resource(request):
     if not tool_name or not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     tool_resource = await ToolResources.get_or_none(
@@ -1346,8 +1331,7 @@ async def download_zip(request):
     if not tool_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     tool = await Tool.get_or_none(id=tool_id, deleted=False, tenant_id=tenant_id)
     if not tool:
@@ -1429,8 +1413,7 @@ async def add_permission(request):
     if not isinstance(users_id, list) or not isinstance(roles_id, list) or not isinstance(actions, list):
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     if "all" in actions:
         if not await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False, tenant_id=tenant_id).exists():
@@ -1549,8 +1532,7 @@ async def select_permission_all(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     if "all" in actions:
         if not await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False, tenant_id=tenant_id).exists():
@@ -1682,8 +1664,7 @@ async def judge_permission(request):
     if not action_groups or not isinstance(action_groups, list):
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     user = request.ctx.session.get("account_info")
     if not user:
@@ -1798,8 +1779,7 @@ async def add_tag(request):
     if not name or not tags:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     tools = await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all()
 
@@ -1861,8 +1841,7 @@ async def delete_tag(request):
     if not name or not tags:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     tools = await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all()
 
@@ -2018,8 +1997,7 @@ async def tool_action_input(request):
     if not action_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
     if not action:
@@ -2132,8 +2110,7 @@ async def new_tag(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     if await Tag.filter(name=name, type=1, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.TagExistError)
@@ -2166,8 +2143,7 @@ async def new_tag(request):
 )
 @requires_permission("tool:r")
 async def tag_list(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     tags = await Tag.filter(type=1, deleted=False, tenant_id=tenant_id).all()
 
@@ -2210,8 +2186,7 @@ async def remove_tag(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     tag = await Tag.get(name=name, type=1, tenant_id=tenant_id)
     await tag.delete()
@@ -2320,7 +2295,7 @@ async def health_check(request):
     if message.get("type") in ("flow", "action"):
         run_id = gen_run_id()
         message["executor"] = request.ctx.session["account_info"].id
-        msg = {"run_type": message["type"], "run_id": run_id, "run_args": message}
+        msg = {"run_type": message["type"], "run_id": run_id, "run_args": message, "tenant_id": request.ctx.session.get("tenant_id")}
         await aproduce(TASK_TOPIC, msg)
         sent_id = []
         for i in range(60):
@@ -2367,8 +2342,7 @@ async def tool_debug(request):
     if not data:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     tool = await Tool.filter(name="lion_mgmt", deleted=False, tenant_id=tenant_id).order_by("-ctime").first()
     if not tool:
@@ -2394,7 +2368,7 @@ async def tool_debug(request):
         "executor": user.id,
     }
     run_id = gen_run_id()
-    msg = {"run_type": "action", "run_id": run_id, "run_args": params}
+    msg = {"run_type": "action", "run_id": run_id, "run_args": params, "tenant_id": tenant_id}
     await aproduce(TASK_TOPIC, msg)
     sent_id = []
     for i in range(60):

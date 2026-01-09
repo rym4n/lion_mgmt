@@ -73,8 +73,7 @@ async def add_role(request):
     description = request.json.get("description", "")
     permissions = request.json.get("permissions", [])
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     async with in_transaction():
         role = await Role.create(name=name, description=description, permissions=permissions, tenant_id=tenant_id)
@@ -145,8 +144,7 @@ async def find_all(request):
     offset = (page - 1) * size
     limit = size
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     roles = await Role.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(limit).values()
     total = await Role.filter(deleted=False, tenant_id=tenant_id).count()
@@ -221,8 +219,7 @@ async def find_all(request):
 async def find_role(request):
     role_id = request.json.get("role_id")
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
     if not role:
@@ -303,8 +300,7 @@ async def delete_role(request):
     if exists:
         raise CustomError(ErrorCode.RoleAlreadyUsed)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
     if not role:
@@ -373,8 +369,7 @@ async def update_role(request):
     description = request.json.get("description", "")
     permissions = request.json.get("permissions", [])
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
     if not role:

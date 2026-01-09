@@ -123,8 +123,7 @@ async def create_workflow(request):
     if total_up_value != 99999 and total_count >= total_up_value:
         raise CustomError(ErrorCode.PlaybookCreateLimit)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     # 判断name是否已经存在，如果存在的话要抛出异常
     if await Playbook.filter(name=data.get("name"), deleted=False, tenant_id=tenant_id).exists():
@@ -262,8 +261,7 @@ async def list_workflow(request):
     offset = (page - 1) * size
     limit = size
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     user = request.ctx.session.get("account_info")
     user_id = str(user.id)
@@ -402,8 +400,7 @@ async def list_workflow(request):
 @requires_permission("workflow:r")
 @playbook_permission("r")
 async def list_workflow_versions(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
     pv = (
         await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False, tenant_id=tenant_id)
         .only(
@@ -498,8 +495,7 @@ async def list_workflow_versions(request):
 @requires_permission("workflow:r")
 @playbook_permission("r")
 async def export_workflow(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
     pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False, tenant_id=tenant_id).all().prefetch_related("playbook")
     result = [
         {
@@ -556,8 +552,7 @@ async def export_workflow(request):
 @playbook_permission("r")
 async def get_flow_json(request):
     data = None
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
     pv = await PlaybookVersion.get_or_none(id=request.json.get("flow_id"), tenant_id=tenant_id).prefetch_related("playbook", "creator", "updator")
     if pv:
         data = pv.json
@@ -632,8 +627,7 @@ async def get_flow_json(request):
 async def edit_workflow(request):
     params = request.json
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     playbook = await Playbook.get(id=params.get("playbook_id"), tenant_id=tenant_id).prefetch_related("scenes", "tags")
     if not playbook:
@@ -698,9 +692,8 @@ async def edit_workflow(request):
 async def edit_workflow_flow(request):
     if not request.json.get("flow_id") or not request.json.get("flow_json"):
         raise CustomError(ErrorCode.ParameterError)
-    
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+
+    tenant_id = request.ctx.session.get("tenant_id")
     
     pv = await PlaybookVersion.get(id=request.json.get("flow_id"), tenant_id=tenant_id).prefetch_related("playbook", "creator", "updator")
     old_data = pv.flow_json
@@ -770,9 +763,8 @@ async def edit_workflow_flow(request):
 async def publish_workflow(request):
     if not request.json.get("flow_id") or not request.json.get("change_desc"):
         raise CustomError(ErrorCode.ParameterError)
-    
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+
+    tenant_id = request.ctx.session.get("tenant_id")
     
     await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0, tenant_id=tenant_id).update(
         status=1,
@@ -817,8 +809,7 @@ async def publish_workflow(request):
 @requires_permission("workflow:d")
 @playbook_permission("d")
 async def delete_workflow(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     playbook = await Playbook.get(id=request.json.get("playbook_id"), tenant_id=tenant_id)
     if playbook.internal:
@@ -826,8 +817,6 @@ async def delete_workflow(request):
     pvs = await PlaybookVersion.filter(playbook=playbook, deleted=False, tenant_id=tenant_id).all()
     pv_ids = [pv.id for pv in pvs]
     pv_versions = [pv.version for pv in pvs]
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
     condition = Q(tenant_id=tenant_id)
     if pv_ids:
         for pv_id in pv_ids:
@@ -881,8 +870,7 @@ async def delete_workflow(request):
 @requires_permission("workflow:d")
 @playbook_permission("d")
 async def delete_workflow_version(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
     pv = await PlaybookVersion.get(id=request.json.get("flow_id"), tenant_id=tenant_id).prefetch_related("playbook")
     if pv.playbook.internal:
         raise CustomError(ErrorCode.InternalDeleteError)
@@ -940,6 +928,7 @@ async def stop_workflow(request):
         "run_type": "kill",
         "run_id": run_id,
         "run_args": {"executor": request.ctx.session["account_info"].id},
+        "tenant_id": request.ctx.session.get("tenant_id")
     }
     await aproduce(TASK_TOPIC, msg)
     return response_ok("success")
@@ -994,8 +983,7 @@ async def execute_action(request):
     utime = datetime.now(TZ)
     message = request.json
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     if message.get("type") in ("flow", "action", "code"):
         if message.get("type") == "flow":
@@ -1013,7 +1001,7 @@ async def execute_action(request):
                 return resp
         run_id = gen_run_id()
         message["executor"] = request.ctx.session["account_info"].id
-        msg = {"run_type": message["type"], "run_id": run_id, "run_args": message}
+        msg = {"run_type": message["type"], "run_id": run_id, "run_args": message, "tenant_id": tenant_id}
         await aproduce(TASK_TOPIC, msg)
         sent_id = []
         for _ in range(60):
@@ -1192,8 +1180,7 @@ async def run_history(request):
 @requires_permission("workflow:r")
 @playbook_permission("r")
 async def input_data(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
     input_list = await get_playbook_input(request.json.get("flow_id"), tenant_id)
 
     return response_ok(input_list)
@@ -1279,8 +1266,7 @@ async def new_tag(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     if await Tag.filter(name=name, type=0, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.TagExistError)
@@ -1314,8 +1300,7 @@ async def new_tag(request):
 )
 @requires_permission("workflow:r")
 async def tag_list(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
     tags = await Tag.filter(type=0, tenant_id=tenant_id).all()
     return response_ok([tag.name for tag in tags])
 
@@ -1356,8 +1341,7 @@ async def remove_tag(request):
     name = request.json.get("name")
     if not name:
         raise CustomError(ErrorCode.ParameterError)
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
     tag = await Tag.get(name=name, type=0, tenant_id=tenant_id)
     await tag.delete()
     return response_ok("标签删除成功")
@@ -1414,8 +1398,7 @@ async def add_permission(request):
     if not playbook_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     playbook = await Playbook.get_or_none(id=playbook_id, tenant_id=tenant_id)
     if not playbook:
@@ -1483,8 +1466,7 @@ async def add_permission(request):
 )
 @requires_permission("workflow:r")
 async def select_my_permission(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
     pps = await PlaybookPermissions.filter(users__id=request.ctx.session["sub"], tenant_id=tenant_id).all()
     account = await Account.get(id=request.ctx.session["sub"], deleted=False).prefetch_related("roles")
     account_roles = [role.id for role in account.roles]
@@ -1538,8 +1520,7 @@ async def select_permission_all(request):
     if not playbook_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     pps = await PlaybookPermissions.filter(pb_id=playbook_id, tenant_id=tenant_id).all().prefetch_related("users", "roles")
 
@@ -1598,14 +1579,13 @@ async def create_webhook(request):
     if not flow_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     pv = await PlaybookVersion.get_or_none(id=flow_id, tenant_id=tenant_id).prefetch_related("playbook")
     if not pv:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
-    if await PlaybookWebhook.filter(playbook_version=pv, deleted=False).exists():
+    if await PlaybookWebhook.filter(playbook_version=pv, deleted=False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.WebhookExists)
 
     # 生成唯一的webhook token
@@ -1617,6 +1597,7 @@ async def create_webhook(request):
         enabled=True,
         creator=request.ctx.session["account_info"],
         description=description,
+        tenant_id=tenant_id
     )
 
     return response_ok(webhook.json)
@@ -1670,14 +1651,13 @@ async def list_webhook(request):
     if not flow_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     pv = await PlaybookVersion.get_or_none(id=flow_id, tenant_id=tenant_id)
     if not pv:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
-    webhook = await PlaybookWebhook.get_or_none(playbook_version_id=flow_id, deleted=False).prefetch_related("creator")
+    webhook = await PlaybookWebhook.get_or_none(playbook_version_id=flow_id, deleted=False, tenant_id=tenant_id).prefetch_related("creator")
 
     return response_ok(webhook.json if webhook else {})
 
@@ -1724,7 +1704,9 @@ async def delete_webhook(request):
     if not webhook_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    webhook = await PlaybookWebhook.get_or_none(id=webhook_id, playbook_version_id=flow_id, deleted=False)
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    webhook = await PlaybookWebhook.get_or_none(id=webhook_id, playbook_version_id=flow_id, deleted=False, tenant_id=tenant_id)
     if not webhook:
         raise CustomError(ErrorCode.ParameterError)
 
@@ -1770,7 +1752,9 @@ async def execute_webhook(request):
     if not webhook_token:
         raise CustomError(ErrorCode.ParameterError)
 
-    webhook = await PlaybookWebhook.filter(webhook_token=webhook_token, deleted=False).prefetch_related("playbook_version", "playbook_version__playbook", "creator").first()
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    webhook = await PlaybookWebhook.filter(webhook_token=webhook_token, deleted=False, tenant_id=tenant_id).prefetch_related("playbook_version", "playbook_version__playbook", "creator").first()
 
     if not webhook:
         raise CustomError(ErrorCode.ParameterError)
@@ -1807,12 +1791,13 @@ async def execute_webhook(request):
             "flow_input": flow_input,
             "executor": webhook.creator_id,
         },
+        "tenant_id": tenant_id,
     }
     await aproduce(TASK_TOPIC, msg)
 
     sent_id = []
     for _ in range(60):
-        logs = await Runlog.filter(run_id=run_id, utime__gte=utime).all()
+        logs = await Runlog.filter(run_id=run_id, utime__gte=utime, tenant_id=tenant_id).all()
         if logs:
             utime = logs[0].utime
             for log in logs:
@@ -1988,8 +1973,7 @@ async def import_workflow(request):
     if not file_obj:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     for flow_data in orjson.loads(file_obj.body.decode("utf-8")):
         # 判断name是否已经存在，如果存在的话要抛出异常

@@ -48,8 +48,7 @@ async def warroom_ws(request: Request, ws: Websocket):
             logger.warning("redis里已经没有account信息了")
             raise CustomError(ErrorCode.SessionInvalid)
         # 建立连接
-        payload = await token_decode(request)
-        session_id = payload.get("id")
+        session_id = request.ctx.session.get("id")
         await chat_manager.connect(account, ws, session_id)
         has_perm = False
         if not has_perm:
@@ -129,8 +128,7 @@ async def create_room(request: Request):
     if await Room.filter(name=room_name).exists():
         raise CustomError(ErrorCode.RoomNameExists)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     creator = request.ctx.session["account_info"]
     room = await Room.create(name=room_name, creator=creator)
@@ -1196,10 +1194,9 @@ async def run(request):
     params = request.json.get("playbook_input") or request.json.get("action_input")
     if not params:
         raise CustomError(ErrorCode.ParamValueError)
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
     params["executor"] = user.id
-    msg = {"run_type": run_type, "run_id": gen_run_id(), "run_args": params}
+    msg = {"run_type": run_type, "run_id": gen_run_id(), "run_args": params, "tenant_id": tenant_id}
     room = await Room.get_or_none(id=room_id)
     room.updator = user
     room.run_id.append(msg["run_id"])
@@ -1275,8 +1272,7 @@ async def execution(request):
     executorParams = request.json.get("params")
     user = request.ctx.session["account_info"]
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     event = await Events.get_or_none(id=eventId, tenant_id=tenant_id)
     if not event.room:
@@ -1320,7 +1316,7 @@ async def execution(request):
     if executorActionAssetIds and run_type == "action":
         params["resource"] = executorActionAssetIds
     run_id = gen_run_id()
-    msg = {"run_type": run_type, "run_id": run_id, "run_args": params}
+    msg = {"run_type": run_type, "run_id": run_id, "run_args": params, "tenant_id": tenant_id}
     room = await Room.get_or_none(id=room_id)
     room.updator = user
     room.run_id.append(msg["run_id"])
@@ -1338,8 +1334,7 @@ async def activity(request, activityId):
     if not activityId:
         raise CustomError(ErrorCode.ParamValueError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     logs = await Runlog.filter(run_id=activityId, deleted=False).all()
     result = {}

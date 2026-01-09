@@ -87,8 +87,7 @@ async def add_scene(request):
     if status is None and status not in [0, 1]:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     if await Scene.filter(name=request.json.get("name"), tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.SceneExistsError)
@@ -170,8 +169,7 @@ async def update_scene(request):
     if not scene_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     scene = await Scene.get_or_none(id=scene_id, tenant_id=tenant_id).prefetch_related("creator")
     if not scene:
@@ -266,8 +264,7 @@ async def get_all_scene(request):
     key = request.json.get("key") or None
     status = request.json.get("status")
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     condition = Q(tenant_id=tenant_id)
 
@@ -328,8 +325,7 @@ async def set_current_scene(request):
     if not scene_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     await Scene.filter(status=1, tenant_id=tenant_id).update(status=0)
     scene = await Scene.get_or_none(id=scene_id, tenant_id=tenant_id)
@@ -381,8 +377,7 @@ async def remove_scene(request):
     if not scene_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     scene = await Scene.get_or_none(id=scene_id, tenant_id=tenant_id)
 
@@ -392,8 +387,7 @@ async def remove_scene(request):
     if scene.status == 1:
         raise CustomError(ErrorCode.SceneDeleteNotAllowed)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     async with in_transaction():
         playbooks = await Playbook.filter(scenes__id=scene_id, tenant_id=tenant_id).all()

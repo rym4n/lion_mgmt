@@ -24,8 +24,7 @@ async def activity(request, activityId):
     if not activityId:
         raise CustomError(ErrorCode.ParamValueError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     logs = await Runlog.filter(run_id=activityId, deleted=False).all()
     result = {}
@@ -74,8 +73,7 @@ async def playbook_list(request):
     offset = (page - 1) * size
     limit = size
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     pvs = await PlaybookVersion.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(limit).prefetch_related("playbook", "creator", "updator", "playbook__scenes", "playbook__tags")
 
@@ -129,8 +127,7 @@ async def all_apps(request):
     offset = (page - 1) * size
     limit = size
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     tools = await Tool.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(limit)
     content = []

@@ -49,8 +49,7 @@ async def handle_sse(request: Request):
         },
     )
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     # 1. 在后台启动MCP服务器
     # 需要运行mcp_server.run(...)

@@ -297,8 +297,7 @@ async def event_ingestion(request):
     if vector_config is None:
         raise CustomError(ErrorCode.ConfigFileGenerateError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     events_ingestion = await EventsIngestion.create(
         event_ingestion_name=event_name,
@@ -375,8 +374,7 @@ async def get_all_events_ingestion(request):
     offset = (page - 1) * size
     limit = size
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     filters = {"deleted": False, "tenant_id":tenant_id}
     if request.json.get("name"):
@@ -431,8 +429,7 @@ async def get_all_events_ingestion(request):
 async def delete_event_ingestion(request):
     event_id = request.json.get("id")
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     async with in_transaction():
         event = await EventsIngestion.get(id=event_id, tenant_id=tenant_id)
@@ -581,8 +578,7 @@ async def update_event_ingestion(request):
     key_value_delimiter = data.get("key_value_delimiter")
     kafka_topic = data.get("kafka_topic", [])
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     event = await EventsIngestion.get(id=event_id, tenant_id=tenant_id)
     max_length = int(data.get("max_length", 100))
@@ -743,8 +739,7 @@ async def update_event_ingestion(request):
 async def get_event_ingestion_detail(request):
     event_id = request.json.get("id")
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     event = await EventsIngestion.get(id=event_id, tenant_id=tenant_id).prefetch_related("creator", "updator")
     if not event:
@@ -803,8 +798,7 @@ async def get_event_ingestion_kafka_sample(request):
     except:
         raise CustomError(ErrorCode.ParamError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     event = await EventsIngestion.get_or_none(id=event_id, deleted=False, tenant_id=tenant_id)
     if not event:
@@ -913,15 +907,11 @@ async def get_event_ingestion_kafka_sample(request):
 async def binding_event_ingestion_script(request):
     event_ingestion_id = request.json.get("event_ingestion_id")
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     event = await EventsIngestion.get(id=event_ingestion_id, tenant_id=tenant_id).prefetch_related("creator")
     if not event:
         raise CustomError(ErrorCode.NotFound)
-
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
 
     event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False, tenant_id=tenant_id).all()
     for event_related_script in event_related_scripts:
@@ -1102,8 +1092,7 @@ async def unbundled_event_ingestion_script(request):
     event_ingestion_id = request.json.get("event_ingestion_id")
     script_ids = request.json.get("script_ids")
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False, tenant_id=tenant_id).all()
 
@@ -1190,8 +1179,7 @@ async def export_event_ingestion_script(request):
     if not isinstance(event_ids, list) or not event_ids:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     events = await EventsIngestion.filter(id__in=event_ids, tenant_id=tenant_id).prefetch_related("creator", "updator")
 
@@ -1264,8 +1252,7 @@ async def import_event_ingestion_script(request):
         raise CustomError(ErrorCode.ParameterError)
     file_results = []
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     for file in files:
         zip_data = io.BytesIO(file.body)
@@ -1430,8 +1417,7 @@ async def parse_log(request):
     if not config:
         raise CustomError(ErrorCode.TypeNotSupportedError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     event = await EventsIngestion.get_or_none(id=params.get("id"), deleted=False, tenant_id=tenant_id)
     if not event:
@@ -1537,8 +1523,7 @@ async def event_ingestion_config_list(request):
     if not event_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     config_list = []
     events = await EventRelatedScript.filter(event_ingestion_id=event_id, tenant_id=tenant_id).all()
@@ -1592,8 +1577,7 @@ async def event_ingestion_config_list(request):
     },
 )
 async def playbook_list(request):
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
     playbooks = await Playbook.filter(deleted=False, tenant_id=tenant_id).all().values_list("id", "name")
 
     return response_ok([{"id": playbook[0], "name": playbook[1]} for playbook in playbooks])

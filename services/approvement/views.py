@@ -117,8 +117,7 @@ async def all_approvement(request):
     size = int(params.get("size", 15))
     offset = (page - 1) * size
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     condition = Q(approvers=request.ctx.session["account_info"].id, tenant_id=tenant_id)
     keyword = params.get("keyword")
@@ -290,8 +289,7 @@ async def update_approvement(request):
         if p.get("required") is True and not p.get("value"):
             raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     approve = await Approvement.filter(id=approvement_id, tenant_id=tenant_id).select_for_update().prefetch_related("approvers").first()
     if not approve:
@@ -339,6 +337,7 @@ async def update_approvement(request):
             "approval_status": approve.status,
             "executor": (",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session["account_info"].id),
         },
+        "tenant_id": tenant_id,
     }
     await aproduce(TASK_TOPIC, msg)
 
@@ -408,8 +407,7 @@ async def update_approvement_callback(request):
     if not token or not isinstance(agree, bool) or not isinstance(remark, str):
         raise CustomError(ErrorCode.ParameterError)
 
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
+    tenant_id = request.ctx.session.get("tenant_id")
 
     if flow_input:
         try:
@@ -457,6 +455,7 @@ async def update_approvement_callback(request):
             "approval_status": approve.status,
             "executor": ",".join([p.id for p in approve.approvers]),
         },
+        "tenant_id": tenant_id,
     }
     await aproduce(TASK_TOPIC, msg)
 
