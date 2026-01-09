@@ -279,7 +279,7 @@ async def get_prompt_word(request):
     tenant_id = payload.get("tenant_id")
 
     if request.json.get("ai_type") == "action":
-        system_prompt, ai_dict, ai_desc = await get_prompt_words(request.json.get("prompt_word"))
+        system_prompt, ai_dict, ai_desc = await get_prompt_words(request.json.get("prompt_word"), tenant_id)
     else:
         system_prompt, ai_dict, ai_desc = await get_playbook_prompt_words(request.json.get("prompt_word"), tenant_id)
 
@@ -339,7 +339,9 @@ async def get_prompt_word(request):
 )
 @requires_permission("warroom:r")
 async def get_tool_action(request):
-    tool_actions = await ToolAction.filter(id__in=request.json.get("data"), deleted=False).all()
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    tool_actions = await ToolAction.filter(id__in=request.json.get("data"), deleted=False, tenant_id=tenant_id).all()
     data = []
     for tool_action in tool_actions:
         data.append(

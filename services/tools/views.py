@@ -148,6 +148,9 @@ async def upload_and_extract_zip(request):
         if total_up_value != 99999 and total_count >= total_up_value:
             return response_ok({"error": "应用数量已达到上限"})
 
+        payload = await token_decode(request)
+        tenant_id = payload.get("tenant_id")
+
         config_data, version, tool_name, msg = await unzip(
             zip_file.body,
             creator,
@@ -177,7 +180,7 @@ async def upload_and_extract_zip(request):
         for action in config_data.get(action_key):
             if "health_check" == action.get("func"):
                 health_check = 1
-            await ToolAction.create(tool_name=config_data.get("name"), version_number=version, action=action)
+            await ToolAction.create(tool_name=config_data.get("name"), version_number=version, action=action, tenant_id=tenant_id)
             actions = await ActionPermissions.filter(tool_name=tool_name, deleted=False).values("action_name")
             action_names = {action["action_name"] for action in actions}
 
@@ -513,11 +516,14 @@ async def all_tools(request):
     if size > 50:
         raise CustomError(ErrorCode.RequestTooManyError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     subquery = Tool.filter(deleted=False).annotate(max_version=Max("version")).group_by("name")
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     subquery = subquery.filter(maintain=maintenance_mode if maintenance_mode else False)
     if key:
-        tool_actions = await ToolAction.filter(deleted=False).values("tool_name", "version_number", "action")
+        tool_actions = await ToolAction.filter(deleted=False, tenant_id=tenant_id).values("tool_name", "version_number", "action")
         tool_name_version_set = set()
 
         for act in tool_actions:
@@ -719,7 +725,7 @@ async def tool_actions(request):
     if not tool:
         raise CustomError(ErrorCode.ToolNotFoundError)
 
-    actions = await ToolAction.filter(tool_name=name, version_number=version).values("action", "id", "playbook")
+    actions = await ToolAction.filter(tool_name=name, version_number=version, tenant_id=tenant_id).values("action", "id", "playbook")
     action_list = []
     for action in actions:
         action.get("action")["id"] = action.get("id")
@@ -843,6 +849,9 @@ async def delete_tool(request):
     if not name or not version:
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     async with in_transaction():
         tool = await Tool.get(name=name, version=version, deleted=False)
         if not tool:
@@ -861,10 +870,10 @@ async def delete_tool(request):
 
         await utils.delete_from_s3("system", f"{name}/{version}.zip", "tools")
 
-        await ToolAction.filter(tool_name=name, version_number=version, deleted=False).update(deleted=True)
+        await ToolAction.filter(tool_name=name, version_number=version, deleted=False, tenant_id=tenant_id).update(deleted=True)
         tool.deleted = True
         tool.updater = request.ctx.session["account_info"].username
-        await ToolAction.filter(tool_name=name, version_number=version, deleted=False).update(deleted=True)
+        await ToolAction.filter(tool_name=name, version_number=version, deleted=False, tenant_id=tenant_id).update(deleted=True)
         await tool.save()
 
     return response_ok({"message": "工具删除成功"})
@@ -915,11 +924,14 @@ async def delete_tool_all(request):
     if await Tool.filter(name=name, deleted=False, status=1).exists():
         raise CustomError(ErrorCode.ToolHasScriptError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     async with in_transaction():
         for tool in await Tool.filter(name=name, deleted=False).all():
             await utils.delete_from_s3("system", f"{name}/{tool.version}.zip", "tools")
 
-        await ToolAction.filter(tool_name=name, deleted=False).update(deleted=True)
+        await ToolAction.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
         await ToolResourcesModel.filter(tool_name=name, deleted=False).update(deleted=True)
         await ToolResources.filter(tool_name=name, deleted=False).delete()
         await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
@@ -1251,7 +1263,7 @@ async def delete_tool_resource(request):
     if not tool_resource:
         raise CustomError(ErrorCode.ResourcesNotFoundError)
 
-    playbooks = await ToolAction.filter(tool_name=tool_name, deleted=False).all().values("playbook")
+    playbooks = await ToolAction.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).all().values("playbook")
 
     playbook_ids = []
     for playbook in playbooks:
@@ -1952,7 +1964,11 @@ async def tool_action_input(request):
     action_id = request.json.get("id")
     if not action_id:
         raise CustomError(ErrorCode.ParameterError)
-    action = await ToolAction.get_or_none(id=action_id, deleted=False)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
     if not action:
         raise CustomError(ErrorCode.ActionNotFoundError)
 
@@ -1961,7 +1977,7 @@ async def tool_action_input(request):
     return response_ok(input_data)
 
 
-async def tool_action_update(data):
+async def tool_action_update(data, tenant_id):
     if not isinstance(data, dict):
         raise CustomError(ErrorCode.ParameterError)
 
@@ -1969,7 +1985,7 @@ async def tool_action_update(data):
 
     for playbook_version_id, action_ids in data.items():
         for action_id in action_ids:
-            action = await ToolAction.get_or_none(id=action_id, deleted=False)
+            action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
             if not action:
                 continue
 
@@ -1989,7 +2005,7 @@ async def tool_action_update(data):
             await tool.save()
 
 
-async def tool_action_playbook_delete(data):
+async def tool_action_playbook_delete(data, tenant_id):
     """
     删除动作绑定的剧本
         - data   动作数据    dict
@@ -2007,7 +2023,7 @@ async def tool_action_playbook_delete(data):
 
     for playbook_id, action_ids in data.items():
         for action_id in action_ids:
-            action = await ToolAction.get_or_none(id=action_id, deleted=False)
+            action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
             if not action:
                 continue
             if not isinstance(action.playbook, list):
@@ -2019,7 +2035,7 @@ async def tool_action_playbook_delete(data):
             affected_tools.add((action.tool_name, action.version_number))
 
     for tool_name, version in affected_tools:
-        actions = await ToolAction.filter(tool_name=tool_name, version_number=version, deleted=False).all()
+        actions = await ToolAction.filter(tool_name=tool_name, version_number=version, deleted=False, tenant_id=tenant_id).all()
         has_playbook = any(action.playbook for action in actions)
         tool = await Tool.get_or_none(name=tool_name, version=version, deleted=False)
         if tool:

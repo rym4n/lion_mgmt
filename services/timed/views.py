@@ -200,7 +200,7 @@ async def add_timed(request):
                 raise CustomError(ErrorCode.CronExpressionError)
             timer_rule["crontab"] = tactics
     elif operate_type == 1:
-        action = await ToolAction.get_or_none(id=action_id, deleted=False)
+        action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
         if not action:
             raise CustomError(ErrorCode.ActionNotFoundError)
         action_input["executor"] = request.ctx.session.get("account_info").id
@@ -640,6 +640,7 @@ async def get_timed_detail(request):
             tool_name=timed.action_input.get("app_name"),
             deleted=False,
             version_number=timed.action_input.get("app_ver"),
+            tenant_id=tenant_id,
         ).all()
         for action in actions:
             if action.action["func"] == timed.action_input["action"]:
@@ -813,7 +814,7 @@ async def update_timed(request):
         action_id = data.get("action_id", timed.action.id if timed.action else None)
         action_input = data.get("action_input", timed.action_input)
 
-        timed.action = await ToolAction.get_or_none(id=action_id, deleted=False)
+        timed.action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
 
         action_input["executor"] = request.ctx.session.get("account_info").id
         if any(

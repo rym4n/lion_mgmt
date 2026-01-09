@@ -181,7 +181,7 @@ async def create_workflow(request):
             )
 
             action_ids = await statistics_data(flow_json)
-            await tool_action_update({pv.id: action_ids})
+            await tool_action_update({pv.id: action_ids}, tenant_id)
 
     return response_ok("success")
 
@@ -723,10 +723,10 @@ async def edit_workflow_flow(request):
 
     if old_data:
         action_ids = await statistics_data(old_data)
-        await tool_action_playbook_delete({pv.id: action_ids})
+        await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
 
     action_ids = await statistics_data(pv.flow_json)
-    await tool_action_update({pv.id: action_ids})
+    await tool_action_update({pv.id: action_ids}, tenant_id)
 
     return response_ok(pv.json)
 
@@ -840,7 +840,7 @@ async def delete_workflow(request):
     for pv in pvs:
         if pv.flow_json:
             action_ids = await statistics_data(pv.flow_json)
-            await tool_action_playbook_delete({pv.id: action_ids})
+            await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
 
     await playbook.delete()
 
@@ -894,7 +894,7 @@ async def delete_workflow_version(request):
 
     if pv.flow_json:
         action_ids = await statistics_data(pv.flow_json)
-        await tool_action_playbook_delete({pv.id: action_ids})
+        await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
     if await PlaybookVersion.filter(playbook_id=pv.playbook_id, tenant_id=tenant_id).count() == 1:
         await Playbook.filter(id=pv.playbook_id, tenant_id=tenant_id).delete()
     else:
@@ -1227,14 +1227,14 @@ async def get_playbook_input(playbook_id, tenant_id):
     return input_list
 
 
-async def statistics_data(flow_json):
+async def statistics_data(flow_json, tenant_id):
     actions_list = []
     for node in flow_json["nodes"]:
         if "app_name" in node["properties"] and "action" in node["properties"] and "version" in node["properties"]:
             tool_name = node["properties"]["app_name"]
             version_number = node["properties"]["version"]
             action_name = node["properties"]["action"]
-            actions = await ToolAction.filter(tool_name=tool_name, version_number=version_number).all()
+            actions = await ToolAction.filter(tool_name=tool_name, version_number=version_number, tenant_id=tenant_id).all()
             for action in actions:
                 if action_name == action.action["func"]:
                     actions_list.append(action.id)
@@ -2057,6 +2057,6 @@ async def import_workflow(request):
                 )
 
                 action_ids = await statistics_data(flow_json)
-                await tool_action_update({pv.id: action_ids})
+                await tool_action_update({pv.id: action_ids}, tenant_id)
 
     return response_ok("success")

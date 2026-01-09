@@ -72,7 +72,7 @@ async def fetch_completion(host, api_key, model, messages):
 
 
 # 获取动作推荐列表
-async def get_prompt_words(prompt_word):
+async def get_prompt_words(prompt_word, tenant_id):
     tool_names = []
     actions = await ToolResourcesModel.filter(deleted=False, status=0).all().values("tool_name")
     for action in actions:
@@ -86,7 +86,7 @@ async def get_prompt_words(prompt_word):
         tool_names.remove("lion_mgmt")
         tool_names.remove("lion_ai")
 
-    latest_versions = await ToolAction.filter(deleted=False, tool_name__in=tool_names).annotate(latest_version=Max("version_number")).group_by("tool_name").values("tool_name", "latest_version")
+    latest_versions = await ToolAction.filter(deleted=False, tool_name__in=tool_names, tenant_id=tenant_id).annotate(latest_version=Max("version_number")).group_by("tool_name").values("tool_name", "latest_version")
 
     pairs = [(row["tool_name"], row["latest_version"]) for row in latest_versions]
 
@@ -94,7 +94,7 @@ async def get_prompt_words(prompt_word):
     for name, ver in pairs:
         cond |= Q(tool_name=name, version_number=ver)
 
-    actions = await ToolAction.filter(deleted=False).filter(cond).order_by("-ctime").all()
+    actions = await ToolAction.filter(deleted=False, tenant_id=tenant_id).filter(cond).order_by("-ctime").all()
 
     actions_desc = {}
     actions_dict = {}

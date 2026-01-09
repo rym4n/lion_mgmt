@@ -23,6 +23,10 @@ from models import (
 async def activity(request, activityId):
     if not activityId:
         raise CustomError(ErrorCode.ParamValueError)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     logs = await Runlog.filter(run_id=activityId, deleted=False).all()
     result = {}
     if logs[0].playbook_name != "执行动作":
@@ -30,7 +34,7 @@ async def activity(request, activityId):
         executorInstanceName = logs[0].playbook_name
         executorInstanceType = "PLAYBOOK"
     else:
-        actions = await ToolAction.filter(tool_name=logs[0].tool_name, version_number=logs[0].tool_version).all()
+        actions = await ToolAction.filter(tool_name=logs[0].tool_name, version_number=logs[0].tool_version, tenant_id=tenant_id).all()
         for action in actions:
             if action.action["func"] == logs[0].action_name and action.action["name"] == logs[0].action_display_name:
                 executorInstanceId = action.id
@@ -125,10 +129,13 @@ async def all_apps(request):
     offset = (page - 1) * size
     limit = size
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     tools = await Tool.filter(deleted=False).offset(offset).limit(limit)
     content = []
     for tool in tools:
-        actions = await ToolAction.filter(tool_name=tool.name, version_number=tool.version, deleted=False).all()
+        actions = await ToolAction.filter(tool_name=tool.name, version_number=tool.version, deleted=False, tenant_id=tenant_id).all()
         resource_model = await ToolResourcesModel.get(tool_name=tool.name, deleted=False)
         resources = await ToolResources.filter(tool_name=tool.name, deleted=False).all()
         data = {

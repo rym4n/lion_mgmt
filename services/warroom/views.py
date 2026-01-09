@@ -1298,7 +1298,7 @@ async def execution(request):
         params["flow_id"] = executorInstanceId
         params["flow_input"] = input_data
     elif run_type == "action":
-        action = await ToolAction.get_or_none(id=executorInstanceId, deleted=False)
+        action = await ToolAction.get_or_none(id=executorInstanceId, deleted=False, tenant_id=tenant_id)
         if not action:
             raise CustomError(ErrorCode.ActionNotFoundError)
         tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False)
@@ -1337,6 +1337,10 @@ async def execution(request):
 async def activity(request, activityId):
     if not activityId:
         raise CustomError(ErrorCode.ParamValueError)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     logs = await Runlog.filter(run_id=activityId, deleted=False).all()
     result = {}
     if logs[0].playbook_name != "执行动作":
@@ -1344,7 +1348,7 @@ async def activity(request, activityId):
         executorInstanceName = logs[0].playbook_name
         executorInstanceType = "PLAYBOOK"
     else:
-        actions = await ToolAction.filter(tool_name=logs[0].tool_name, version_number=logs[0].tool_version).all()
+        actions = await ToolAction.filter(tool_name=logs[0].tool_name, version_number=logs[0].tool_version, tenant_id=tenant_id).all()
         for action in actions:
             if action.action["func"] == logs[0].action_name and action.action["name"] == logs[0].action_display_name:
                 executorInstanceId = action.id

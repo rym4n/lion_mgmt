@@ -394,7 +394,7 @@ async def execution(request):
         params["flow_id"] = executorInstanceId
         params["flow_input"] = input_data
     elif type == "action":
-        action = await ToolAction.get_or_none(id=executorInstanceId, deleted=False)
+        action = await ToolAction.get_or_none(id=executorInstanceId, deleted=False, tenant_id=tenant_id)
         tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False)
         if executorParams:
             for param in executorParams:
@@ -431,13 +431,17 @@ async def execution(request):
 async def get_activity_result(request, activityId):
     if not activityId:
         raise CustomError(ErrorCode.ParamValueError)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     logs = await Runlog.filter(run_id=activityId, deleted=False).all()
     activity = {}
     if logs[0].playbook_name != "执行动作":
         executorInstanceId = logs[0].playbook_version_id
         executorInstanceName = logs[0].playbook_name
     else:
-        actions = await ToolAction.filter(tool_name=logs[0].tool_name, version_number=logs[0].tool_version).all()
+        actions = await ToolAction.filter(tool_name=logs[0].tool_name, version_number=logs[0].tool_version, tenant_id=tenant_id).all()
         for action in actions:
             if action.action["func"] == logs[0].action_name and action.action["name"] == logs[0].action_display_name:
                 executorInstanceId = action.id
@@ -479,7 +483,7 @@ async def get_activity_result(request, activityId):
         if log.node_id in node_ids:
             break
         node_ids.append(log.node_id)
-        tool_action = await ToolAction.filter(tool_name=log.tool_name, version_number=log.tool_version, deleted=False).first()
+        tool_action = await ToolAction.filter(tool_name=log.tool_name, version_number=log.tool_version, deleted=False, tenant_id=tenant_id).first()
         action_id = tool_action.id if tool_action and tool_action.action.get("func") == log.action_name else None
 
         nodes = await Runlog.filter(run_id=log.run_id, node_id=log.node_id, deleted=False).all()
