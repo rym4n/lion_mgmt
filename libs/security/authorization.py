@@ -141,13 +141,13 @@ async def check_playbook_permission(request, user, playbook_id, required_permiss
     tenant_id = payload.get("tenant_id")
 
     if not data:
-        pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id, users_id=user_id)
+        pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id, users_id=user_id, tenant_id=tenant_id)
         if pp:
             data = pp.permissions
         else:
             pv = await PlaybookVersion.get_or_none(id=playbook_id, tenant_id=tenant_id)
             if pv:
-                pp = await PlaybookPermissions.get_or_none(pb_id=pv.playbook_id, users_id=user_id)
+                pp = await PlaybookPermissions.get_or_none(pb_id=pv.playbook_id, users_id=user_id, tenant_id=tenant_id)
                 if pp:
                     data = pp.permissions
     if data and all(perm in data for perm in required_permissions):
@@ -156,13 +156,13 @@ async def check_playbook_permission(request, user, playbook_id, required_permiss
         for role in user_roles:
             data = await request.app.ctx.cache_client.get((playbook_id, role))
             if not data:
-                pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id, roles_id=role)
+                pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id, roles_id=role, tenant_id=tenant_id)
                 if pp:
                     data = pp.permissions
                 else:
                     pv = await PlaybookVersion.get_or_none(id=playbook_id, tenant_id=tenant_id)
                     if pv:
-                        pp = await PlaybookPermissions.get_or_none(pb_id=pv.playbook_id, roles_id=role)
+                        pp = await PlaybookPermissions.get_or_none(pb_id=pv.playbook_id, roles_id=role, tenant_id=tenant_id)
                         if pp:
                             data = pp.permissions
             if data and all(perm in data for perm in required_permissions):

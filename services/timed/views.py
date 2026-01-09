@@ -257,11 +257,12 @@ async def add_timed(request):
     return response_ok(timed.json)
 
 
-async def get_playbook_permissions(pb_id, subject, cache_client, is_user: bool = True):
+async def get_playbook_permissions(pb_id, subject, cache_client, tenant_id, is_user: bool = True):
     cache_key = (pb_id, subject)
     data = await cache_client.get(cache_key)
+    filter_kwargs = {"tenant_id": tenant_id}
     if not data:
-        filter_kwargs = {"pb_id": pb_id}
+        filter_kwargs["pb_id"] = pb_id
         if is_user:
             filter_kwargs["users_id"] = subject
         else:
@@ -279,10 +280,14 @@ async def get_timed_permissions(request, filtered_items):
     user_id = user.id
     user_roles = set(str(role.id) for role in user.roles)
     cache_client = request.app.ctx.cache_client
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     for item in filtered_items:
         if item.playbook_id:
             # 先查用户权限
-            data = await get_playbook_permissions(item.playbook_id, user_id, cache_client, is_user=True)
+            data = await get_playbook_permissions(item.playbook_id, user_id, cache_client, tenant_id, is_user=True)
             if data and any(perm in data for perm in ("r", "e")):
                 result.append(item)
                 timed_permissions[item.id] = data
@@ -290,7 +295,7 @@ async def get_timed_permissions(request, filtered_items):
 
             # 再查角色权限
             for role_id in user_roles:
-                data = await get_playbook_permissions(item.playbook_id, role_id, cache_client, is_user=False)
+                data = await get_playbook_permissions(item.playbook_id, role_id, cache_client, tenant_id, is_user=False)
                 if data and any(perm in data for perm in ("r", "e")):
                     result.append(item)
                     timed_permissions[item.id] = data

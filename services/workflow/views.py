@@ -154,8 +154,9 @@ async def create_workflow(request):
             users=creator,
             roles=None,
             permissions=["r", "u", "d", "e", "p"],
+            tenant_id=tenant_id,
         )
-        await PlaybookPermissions.create(pb=playbook, users=None, roles=admin, permissions=["r", "u", "d", "e", "p"])
+        await PlaybookPermissions.create(pb=playbook, users=None, roles=admin, permissions=["r", "u", "d", "e", "p"], tenant_id=tenant_id)
         if data.get("tags"):
             tags = await Tag.filter(name__in=data.get("tags")).all()
             await playbook.tags.add(*tags)
@@ -261,14 +262,14 @@ async def list_workflow(request):
     offset = (page - 1) * size
     limit = size
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     user = request.ctx.session.get("account_info")
     user_id = str(user.id)
     user_roles = set(str(role.id) for role in user.roles)
-    permissions = await PlaybookPermissions.filter(Q(users__id=user_id) | Q(roles__id__in=user_roles), permissions__contains=["r"]).values_list("pb_id", flat=True)
+    permissions = await PlaybookPermissions.filter(Q(users__id=user_id) | Q(roles__id__in=user_roles), permissions__contains=["r"], tenant_id=tenant_id).values_list("pb_id", flat=True)
     pb_ids = set(permissions)
-
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
 
     condition = Q(deleted=False, id__in=pb_ids, tenant_id=tenant_id)
 
@@ -1421,6 +1422,7 @@ async def add_permission(request):
         await PlaybookPermissions.update_or_create(
             pb_id=playbook_id,
             users_id=uid,
+            tenant_id=tenant_id,
             defaults={"permissions": perms, "roles_id": None},
         )
         await request.app.ctx.cache_client.set((playbook_id, uid), perms, ttl=2592000)
@@ -1431,6 +1433,7 @@ async def add_permission(request):
             await PlaybookPermissions.update_or_create(
                 pb_id=playbook_id,
                 roles_id=rid,
+                tenant_id=tenant_id,
                 defaults={"permissions": perms, "users_id": None},
             )
         await request.app.ctx.cache_client.set((playbook_id, rid), perms, ttl=2592000)
@@ -1474,10 +1477,12 @@ async def add_permission(request):
 )
 @requires_permission("workflow:r")
 async def select_my_permission(request):
-    pps = await PlaybookPermissions.filter(users__id=request.ctx.session["sub"]).all()
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    pps = await PlaybookPermissions.filter(users__id=request.ctx.session["sub"], tenant_id=tenant_id).all()
     account = await Account.get(id=request.ctx.session["sub"], deleted=False).prefetch_related("roles")
     account_roles = [role.id for role in account.roles]
-    account_pps = await PlaybookPermissions.filter(roles__id__in=account_roles).all()
+    account_pps = await PlaybookPermissions.filter(roles__id__in=account_roles, tenant_id=tenant_id).all()
     data = [{"id": pp.pb_id, "permissions": pp.permissions} for pp in account_pps] + [{"id": pp.pb_id, "permissions": pp.permissions} for pp in pps]
     seen = set()
     result = []
@@ -1527,7 +1532,10 @@ async def select_permission_all(request):
     if not playbook_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    pps = await PlaybookPermissions.filter(pb_id=playbook_id).all().prefetch_related("users", "roles")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    pps = await PlaybookPermissions.filter(pb_id=playbook_id, tenant_id=tenant_id).all().prefetch_related("users", "roles")
 
     return response_ok([pp.json for pp in pps])
 
@@ -2000,12 +2008,14 @@ async def import_workflow(request):
                 users=creator,
                 roles=None,
                 permissions=["r", "u", "d", "e", "p"],
+                tenant_id=tenant_id,
             )
             await PlaybookPermissions.create(
                 pb=playbook,
                 users=None,
                 roles=admin,
                 permissions=["r", "u", "d", "e", "p"],
+                tenant_id=tenant_id,
             )
 
             if flow_data.get("tags"):
