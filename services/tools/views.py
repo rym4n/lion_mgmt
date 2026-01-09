@@ -1264,7 +1264,7 @@ async def delete_tool_resource(request):
             if tool_resource.id in str(playbook.flow_json):
                 return response_ok({"message": f"当前资源已被剧本{playbook.playbook.name}使用，请仔细检查后再删除！"})
 
-    timeds = await Timed.filter(deleted=False).all()
+    timeds = await Timed.filter(deleted=False, tenant_id=tenant_id).all()
 
     for timed in timeds:
         if timed.type == 0:

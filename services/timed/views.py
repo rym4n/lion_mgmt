@@ -168,11 +168,11 @@ async def add_timed(request):
     if operate_type == 1 and not action_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    if await Timed.filter(name=request.json.get("name"), deleted=False).exists():
-        raise CustomError(ErrorCode.TimedNameExists)
-
     payload = await token_decode(request)
     tenant_id = payload.get("tenant_id")
+
+    if await Timed.filter(name=request.json.get("name"), deleted=False, tenant_id=tenant_id).exists():
+        raise CustomError(ErrorCode.TimedNameExists)
 
     msg = {}
     playbook = None
@@ -250,6 +250,7 @@ async def add_timed(request):
         internal=maintenance_mode if maintenance_mode else False,
         creator=request.ctx.session["account_info"],
         updator=request.ctx.session["account_info"],
+        tenant_id=tenant_id
     )
     msg["timer_id"] = timed.id
     msg["timer_rule"] = timer_rule
@@ -422,8 +423,12 @@ async def get_all(request):
     size = int(req_json.get("size") or 15)
     keyword = req_json.get("keyword", "").strip()
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     # 获取全部（后续在 Python 层过滤）
-    all_items = await Timed.filter(deleted=False, internal=maintenance_mode if maintenance_mode else False).prefetch_related("action", "playbook", "creator", "updator")
+    all_items = await Timed.filter(deleted=False, internal=maintenance_mode if maintenance_mode else False, tenant_id=tenant_id).prefetch_related("action", "playbook", "creator", "updator")
 
     if keyword:
         keyword = keyword.lower()
@@ -530,7 +535,9 @@ async def get_all(request):
 )
 @requires_permission("timed:r")
 async def get_success_rate(request):
-    items = await Timed.filter(id__in=request.json.get("ids"), deleted=False).all()
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    items = await Timed.filter(id__in=request.json.get("ids"), deleted=False, tenant_id=tenant_id).all()
     return response_ok([await timer_success_rate(item) for item in items])
 
 
@@ -619,7 +626,7 @@ async def get_timed_detail(request):
     payload = await token_decode(request)
     tenant_id = payload.get("tenant_id")
 
-    timed = await Timed.get_or_none(id=timed_id, deleted=False).prefetch_related("action", "playbook", "creator", "updator")
+    timed = await Timed.get_or_none(id=timed_id, deleted=False, tenant_id=tenant_id).prefetch_related("action", "playbook", "creator", "updator")
 
     if not timed:
         raise CustomError(ErrorCode.ParameterError)
@@ -754,7 +761,10 @@ async def update_timed(request):
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    timed = await Timed.get(id=timed_id, deleted=False).prefetch_related("action", "playbook", "creator", "updator")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    timed = await Timed.get(id=timed_id, deleted=False, tenant_id=tenant_id).prefetch_related("action", "playbook", "creator", "updator")
     result, permissions = await get_timed_permissions(request, [timed])
 
     if not result:
@@ -763,9 +773,6 @@ async def update_timed(request):
     run_type = int(data.get("type", timed.type))
     if run_type not in [RUN_TYPE_FLOW, RUN_TYPE_ACTION]:
         raise CustomError(ErrorCode.ParameterError)
-
-    payload = await token_decode(request)
-    tenant_id = payload.get("tenant_id")
 
     enable = data.get("enable", timed.enable)
     status = data.get("status", timed.status)
@@ -894,7 +901,10 @@ async def delete_timed(request):
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    timed = await Timed.get_or_none(id=timed_id, deleted=False)
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    timed = await Timed.get_or_none(id=timed_id, deleted=False, tenant_id=tenant_id)
     if not timed:
         raise CustomError(ErrorCode.TimedNotFound)
     if timed.internal:
