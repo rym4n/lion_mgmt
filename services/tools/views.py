@@ -120,6 +120,9 @@ async def upload_and_extract_zip(request):
         },
     )
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     creator = request.ctx.session["account_info"].username
     if "file" not in request.files:
         return response_ok({"error": "No file provided"})
@@ -148,9 +151,6 @@ async def upload_and_extract_zip(request):
         if total_up_value != 99999 and total_count >= total_up_value:
             return response_ok({"error": "应用数量已达到上限"})
 
-        payload = await token_decode(request)
-        tenant_id = payload.get("tenant_id")
-
         config_data, version, tool_name, msg = await unzip(
             zip_file.body,
             creator,
@@ -159,6 +159,7 @@ async def upload_and_extract_zip(request):
             success_progress,
             request.app.ctx.cache_client,
             request.ctx.session["id"],
+            tenant_id
         )
         if msg != "success":
             results.append({"tool": zip_filename, "msg": msg})
@@ -229,7 +230,7 @@ async def upload_and_extract_zip(request):
         await resp.eof()
 
 
-async def unzip(zip_data, creator, single_progress, resp, success_progress, redis_client, token_id):
+async def unzip(zip_data, creator, single_progress, resp, success_progress, redis_client, token_id, tenant_id):
     try:
         data = 0
         zip_buffer = BytesIO(zip_data)
@@ -402,7 +403,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
             percent = int(data * single_progress) + success_progress
             await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-            hash_values = await Tool.filter(name=name, deleted=False).all().values("hash_value")
+            hash_values = await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all().values("hash_value")
             hash_set = {entry["hash_value"] for entry in hash_values}
             if hash_values and hasher.hexdigest() in hash_set:
                 return config_data, version, tool_name, "工具已存在"
@@ -428,6 +429,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
                 internal=config_data.get("internal", False),
                 main=py_file_name,
                 maintain=maintenance_mode if maintenance_mode else False,
+                tenant_id=tenant_id,
             )
 
             # 将config数据存入redis
@@ -519,7 +521,7 @@ async def all_tools(request):
     payload = await token_decode(request)
     tenant_id = payload.get("tenant_id")
 
-    subquery = Tool.filter(deleted=False).annotate(max_version=Max("version")).group_by("name")
+    subquery = Tool.filter(deleted=False, tenant_id=tenant_id).annotate(max_version=Max("version")).group_by("name")
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     subquery = subquery.filter(maintain=maintenance_mode if maintenance_mode else False)
     if key:
@@ -542,7 +544,7 @@ async def all_tools(request):
     subquery_results = await subquery.values("name", "max_version")
     if not subquery_results:
         return response_ok({"tools": [], "total": 0, "page": page, "size": size, "total_pages": 0})
-    condition = Q()
+    condition = Q(tenant_id=tenant_id)
     for pair in subquery_results:
         condition |= Q(name=pair["name"], version=pair["max_version"])
 
@@ -622,11 +624,15 @@ async def all_versions(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     tools = (
         await Tool.filter(
             name=name,
             deleted=False,
             maintain=maintenance_mode if maintenance_mode else False,
+            tenant_id=tenant_id,
         )
         .order_by("-ctime")
         .values()
@@ -721,7 +727,7 @@ async def tool_actions(request):
     payload = await token_decode(request)
     tenant_id = payload.get("tenant_id")
 
-    tool = await Tool.get_or_none(name=name, version=version, deleted=False)
+    tool = await Tool.get_or_none(name=name, version=version, deleted=False, tenant_id=tenant_id)
     if not tool:
         raise CustomError(ErrorCode.ToolNotFoundError)
 
@@ -796,7 +802,10 @@ async def update_tool_status(request):
     if not name or not version or status not in [0, 1]:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool = await Tool.get_or_none(name=name, version=version, deleted=False)
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    tool = await Tool.get_or_none(name=name, version=version, deleted=False, tenant_id=tenant_id)
     if not tool:
         raise CustomError(ErrorCode.ToolNotFoundError)
 
@@ -853,7 +862,7 @@ async def delete_tool(request):
     tenant_id = payload.get("tenant_id")
 
     async with in_transaction():
-        tool = await Tool.get(name=name, version=version, deleted=False)
+        tool = await Tool.get(name=name, version=version, deleted=False, tenant_id=tenant_id)
         if not tool:
             return response_ok({"message": "工具删除成功"})
 
@@ -863,7 +872,7 @@ async def delete_tool(request):
         if tool.maintain:
             raise CustomError(ErrorCode.InternalDeleteError)
 
-        if await Tool.filter(name=name, deleted=False).count() == 1:
+        if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).count() == 1:
             await ToolResourcesModel.filter(tool_name=name, deleted=False).update(deleted=True)
             await ToolResources.filter(tool_name=name, deleted=False).delete()
             await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
@@ -918,24 +927,27 @@ async def delete_tool_all(request):
     if not name:
         raise CustomError(ErrorCode.ParameterError)
 
-    if await Tool.filter(name=name, deleted=False, maintain=True).exists():
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    if await Tool.filter(name=name, deleted=False, maintain=True, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.InternalDeleteError)
 
-    if await Tool.filter(name=name, deleted=False, status=1).exists():
+    if await Tool.filter(name=name, deleted=False, status=1, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.ToolHasScriptError)
 
     payload = await token_decode(request)
     tenant_id = payload.get("tenant_id")
 
     async with in_transaction():
-        for tool in await Tool.filter(name=name, deleted=False).all():
+        for tool in await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all():
             await utils.delete_from_s3("system", f"{name}/{tool.version}.zip", "tools")
 
         await ToolAction.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
         await ToolResourcesModel.filter(tool_name=name, deleted=False).update(deleted=True)
         await ToolResources.filter(tool_name=name, deleted=False).delete()
         await ActionPermissions.filter(tool_name=name, deleted=False).update(deleted=True)
-        await Tool.filter(name=name, deleted=False).update(deleted=True)
+        await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
 
     return response_ok({"message": "全部工具删除成功"})
 
@@ -1313,7 +1325,11 @@ async def download_zip(request):
     tool_id = request.json.get("tool_id")
     if not tool_id:
         raise CustomError(ErrorCode.ParameterError)
-    tool = await Tool.get_or_none(id=tool_id, deleted=False)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    tool = await Tool.get_or_none(id=tool_id, deleted=False, tenant_id=tenant_id)
     if not tool:
         raise CustomError(ErrorCode.ToolNotFoundError)
 
@@ -1751,7 +1767,10 @@ async def add_tag(request):
     if not name or not tags:
         raise CustomError(ErrorCode.ParameterError)
 
-    tools = await Tool.filter(name=name, deleted=False).all()
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    tools = await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all()
 
     if not tools:
         raise CustomError(ErrorCode.ToolNotFoundError)
@@ -1811,7 +1830,10 @@ async def delete_tag(request):
     if not name or not tags:
         raise CustomError(ErrorCode.ParameterError)
 
-    tools = await Tool.filter(name=name, deleted=False).all()
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    tools = await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all()
 
     if not tools:
         raise CustomError(ErrorCode.ToolNotFoundError)
@@ -1999,7 +2021,7 @@ async def tool_action_update(data, tenant_id):
                 affected_tools.add((action.tool_name, action.version_number))
 
     for tool_name, version in affected_tools:
-        tool = await Tool.get_or_none(name=tool_name, version=version, deleted=False)
+        tool = await Tool.get_or_none(name=tool_name, version=version, deleted=False, tenant_id=tenant_id)
         if tool and tool.status != 1:
             tool.status = 1
             await tool.save()
@@ -2037,7 +2059,7 @@ async def tool_action_playbook_delete(data, tenant_id):
     for tool_name, version in affected_tools:
         actions = await ToolAction.filter(tool_name=tool_name, version_number=version, deleted=False, tenant_id=tenant_id).all()
         has_playbook = any(action.playbook for action in actions)
-        tool = await Tool.get_or_none(name=tool_name, version=version, deleted=False)
+        tool = await Tool.get_or_none(name=tool_name, version=version, deleted=False, tenant_id=tenant_id)
         if tool:
             tool.status = 1 if has_playbook else 0
             await tool.save()
@@ -2314,7 +2336,10 @@ async def tool_debug(request):
     if not data:
         raise CustomError(ErrorCode.ParameterError)
 
-    tool = await Tool.filter(name="lion_mgmt", deleted=False).order_by("-ctime").first()
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    tool = await Tool.filter(name="lion_mgmt", deleted=False, tenant_id=tenant_id).order_by("-ctime").first()
     if not tool:
         return response_ok("工具开发运行APP缺失，请联系管理员处理")
 

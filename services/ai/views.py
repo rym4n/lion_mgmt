@@ -396,10 +396,14 @@ async def get_tool_action(request):
 )
 @requires_permission("warroom:r")
 async def get_tool_info(request):
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     tool = await Tool.get_or_none(
         name=request.json.get("tool_name"),
         version=request.json.get("version_number"),
         deleted=False,
+        tenant_id=tenant_id,
     )
 
     resource = await ToolResourcesModel.get_or_none(tool_name=request.json.get("tool_name"), deleted=False)

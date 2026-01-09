@@ -132,7 +132,7 @@ async def all_apps(request):
     payload = await token_decode(request)
     tenant_id = payload.get("tenant_id")
 
-    tools = await Tool.filter(deleted=False).offset(offset).limit(limit)
+    tools = await Tool.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(limit)
     content = []
     for tool in tools:
         actions = await ToolAction.filter(tool_name=tool.name, version_number=tool.version, deleted=False, tenant_id=tenant_id).all()
@@ -240,7 +240,7 @@ async def all_apps(request):
             "actionEngineType": None,
         }
         content.append(data)
-    total = await Tool.filter(deleted=False).count()
+    total = await Tool.filter(deleted=False, tenant_id=tenant_id).count()
     return response.json(
         {
             "code": 0,

@@ -1301,7 +1301,7 @@ async def execution(request):
         action = await ToolAction.get_or_none(id=executorInstanceId, deleted=False, tenant_id=tenant_id)
         if not action:
             raise CustomError(ErrorCode.ActionNotFoundError)
-        tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False)
+        tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False, tenant_id=tenant_id)
         if executorParams:
             for param in executorParams:
                 input_data[param["key"]] = param["value"]

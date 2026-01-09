@@ -2041,7 +2041,7 @@ async def import_workflow(request):
                 for node in flow_json.get("nodes", []):
                     if node.get("type") == "action-node":
                         app_name = node["properties"].get("app_name")
-                        tool = await Tool.filter(deleted=False, name=app_name, maintain=maintenance_mode).order_by("-utime").first()
+                        tool = await Tool.filter(deleted=False, name=app_name, maintain=maintenance_mode, tenant_id=tenant_id).order_by("-utime").first()
                         node["properties"]["version"] = tool.version if tool else ""
 
                 pv = await PlaybookVersion.create(
