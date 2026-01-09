@@ -124,6 +124,10 @@ async def new_user(request):
     if request.json.get("permit_ip"):
         if validate_ips(request.json["permit_ip"]) is not True:
             raise CustomError(ErrorCode.InvalidIP)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     try:
         mfa_enable = bool(request.json.get("mfa_enable", False)) or False
         account = await Account.create(
@@ -139,7 +143,7 @@ async def new_user(request):
         )
         # 添加角色
         if request.json.get("role_names"):
-            roles = await Role.filter(name__in=request.json.get("role_names")).all()
+            roles = await Role.filter(name__in=request.json.get("role_names"), tenant_id=tenant_id).all()
             await account.roles.add(*roles)
         else:
             await account.fetch_related("roles")
@@ -322,6 +326,10 @@ async def create_api_user(request):
     if request.json.get("permit_ip"):
         if validate_ips(request.json["permit_ip"]) is not True:
             raise CustomError(ErrorCode.InvalidIP)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     account = await Account.create(
         username=validate_username(request.json.get("name", "")),
         password=password_hasher.hash(str(uuid.uuid4())),
@@ -333,7 +341,7 @@ async def create_api_user(request):
     )
     # 添加角色
     if request.json.get("role_names"):
-        roles = await Role.filter(name__in=request.json.get("role_names")).all()
+        roles = await Role.filter(name__in=request.json.get("role_names"), tenant_id=tenant_id).all()
         await account.roles.add(*roles)
 
     token = token_encode(
@@ -1094,11 +1102,14 @@ async def assign_role_to_user(request):
     if not account:
         raise CustomError(ErrorCode.AccountNotFound)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     role_names = request.json.get("role_names", "").split(",")
     if role_names in [[""], None]:
         await account.roles.clear()
         return response_ok("success")
-    roles = await Role.filter(name__in=role_names, deleted=False).all()
+    roles = await Role.filter(name__in=role_names, deleted=False, tenant_id=tenant_id).all()
     if len(roles) != len(role_names):
         raise CustomError(ErrorCode.RoleNotFound)
 
@@ -1343,5 +1354,8 @@ async def init_account_list(request):
     },
 )
 async def init_role_list(request):
-    roles = await Role.filter(deleted=False).all().values_list("id", "name")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    roles = await Role.filter(deleted=False, tenant_id=tenant_id).all().values_list("id", "name")
     return response_ok({"roles": [{"id": role[0], "name": role[1]} for role in roles]})

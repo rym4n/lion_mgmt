@@ -8,6 +8,7 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission, load_license
 from models import Role, Account, PermissionsMenu
 
@@ -71,8 +72,12 @@ async def add_role(request):
     name = request.json.get("name")
     description = request.json.get("description", "")
     permissions = request.json.get("permissions", [])
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     async with in_transaction():
-        role = await Role.create(name=name, description=description, permissions=permissions)
+        role = await Role.create(name=name, description=description, permissions=permissions, tenant_id=tenant_id)
     return response_ok(role.json)
 
 
@@ -139,8 +144,12 @@ async def find_all(request):
     size = int(request.json.get("size", 15))
     offset = (page - 1) * size
     limit = size
-    roles = await Role.filter(deleted=False).offset(offset).limit(limit).values()
-    total = await Role.filter(deleted=False).count()
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    roles = await Role.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(limit).values()
+    total = await Role.filter(deleted=False, tenant_id=tenant_id).count()
     return response_ok(
         {
             "roles": roles,
@@ -211,7 +220,11 @@ async def find_all(request):
 @requires_permission("role:r")
 async def find_role(request):
     role_id = request.json.get("role_id")
-    role = await Role.get_or_none(id=role_id, deleted=False)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
     if not role:
         raise CustomError(ErrorCode.RoleNotFound)
 
@@ -289,7 +302,11 @@ async def delete_role(request):
     exists = await Account.filter(roles__id=role_id).exists()
     if exists:
         raise CustomError(ErrorCode.RoleAlreadyUsed)
-    role = await Role.get_or_none(id=role_id, deleted=False)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
     if not role:
         raise CustomError(ErrorCode.RoleNotFound)
     role.deleted = True
@@ -355,7 +372,11 @@ async def update_role(request):
     name = request.json.get("name")
     description = request.json.get("description", "")
     permissions = request.json.get("permissions", [])
-    role = await Role.get_or_none(id=role_id, deleted=False)
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
     if not role:
         raise CustomError(ErrorCode.RoleNotFound)
     if name:

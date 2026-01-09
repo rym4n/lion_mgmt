@@ -132,7 +132,7 @@ async def get_all_events(request):
             role_ids = event.owner["role"]
             user_ids = event.owner["user"]
 
-            role_objs = await Role.filter(id__in=role_ids)
+            role_objs = await Role.filter(id__in=role_ids, tenant_id=tenant_id)
             user_objs = await Account.filter(id__in=user_ids)
 
             role_list = [{r.id: r.name} for r in role_objs]
@@ -667,7 +667,7 @@ async def get_event_detail(request):
         role_ids = event.owner["role"]
         user_ids = event.owner["user"]
 
-        role_objs = await Role.filter(id__in=role_ids)
+        role_objs = await Role.filter(id__in=role_ids, tenant_id=tenant_id)
         user_objs = await Account.filter(id__in=user_ids)
 
         role_list = [{r.id: r.name} for r in role_objs]
