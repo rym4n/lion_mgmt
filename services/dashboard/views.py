@@ -197,7 +197,7 @@ async def count_mttr(request):
             "FROM events "
             "WHERE close_time IS NOT NULL "
             "AND ctime >= $1 AND ctime <= $2 "
-            "AND tenant_id = $3"
+            "AND tenant_id = $3 "
             "GROUP BY DATE(ctime) "
             "ORDER BY day",
             (start_time, end_time, tenant_id),
