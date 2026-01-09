@@ -316,7 +316,7 @@ async def playbooks_success_rate(request):
           ORDER BY success_rate;
           """
     async with in_transaction() as conn:
-        rows = await conn.execute_query_dict(sql,(tenant_id))
+        rows = await conn.execute_query_dict(sql, (tenant_id,))
         for row in rows:
             row["success_rate"] = float(row["success_rate"])
         return response_ok(rows)
