@@ -6,6 +6,7 @@ from sanic_ext import openapi
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
+from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from models import (
     Runlog,
@@ -69,7 +70,10 @@ async def playbook_list(request):
     offset = (page - 1) * size
     limit = size
 
-    pvs = await PlaybookVersion.filter(deleted=False).offset(offset).limit(limit).prefetch_related("playbook", "creator", "updator", "playbook__scenes", "playbook__tags")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    pvs = await PlaybookVersion.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(limit).prefetch_related("playbook", "creator", "updator", "playbook__scenes", "playbook__tags")
 
     content = []
     for pv in pvs:
@@ -95,7 +99,7 @@ async def playbook_list(request):
             "labelList": [{"id": tag.id, "name": tag.name} for tag in pv.playbook.tags],
         }
         content.append(data)
-    total = await PlaybookVersion.filter(deleted=False).count()
+    total = await PlaybookVersion.filter(deleted=False, tenant_id=tenant_id).count()
 
     return response.json(
         {

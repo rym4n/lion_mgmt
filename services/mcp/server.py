@@ -148,8 +148,8 @@ async def handle_list_tools() -> list[Tool]:
     ]
 
 
-async def get_playbook_input_logic(playbook_version_id):
-    playbook = await PlaybookVersion.get_or_none(id=playbook_version_id)
+async def get_playbook_input_logic(playbook_version_id, tenant_id):
+    playbook = await PlaybookVersion.get_or_none(id=playbook_version_id, tenant_id=tenant_id)
     if not playbook:
         raise ValueError(f"Playbook version {playbook_version_id} not found")
 
@@ -297,12 +297,12 @@ async def handle_call_tool(tenant_id, name: str, arguments: dict | None) -> list
 
         if not flow_id:
             # Find latest version for playbook_id
-            pv = await PlaybookVersion.filter(playbook__id=playbook_id, deleted=False).order_by("-version").first()
+            pv = await PlaybookVersion.filter(playbook__id=playbook_id, deleted=False, tenant_id=tenant_id).order_by("-version").first()
             if not pv:
                 raise ValueError(f"No versions found for playbook {playbook_id}")
             flow_id = pv.id
 
-        inputs = await get_playbook_input_logic(flow_id)
+        inputs = await get_playbook_input_logic(flow_id, tenant_id)
         return [TextContent(type="text", text=str(inputs))]
 
     raise ValueError(f"Unknown tool: {name}")

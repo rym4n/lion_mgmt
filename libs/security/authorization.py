@@ -136,12 +136,16 @@ async def check_playbook_permission(request, user, playbook_id, required_permiss
     user_id = str(user.id)
     user_roles = set(str(role.id) for role in user.roles)
     data = await request.app.ctx.cache_client.get((playbook_id, user_id))
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     if not data:
         pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id, users_id=user_id)
         if pp:
             data = pp.permissions
         else:
-            pv = await PlaybookVersion.get_or_none(id=playbook_id)
+            pv = await PlaybookVersion.get_or_none(id=playbook_id, tenant_id=tenant_id)
             if pv:
                 pp = await PlaybookPermissions.get_or_none(pb_id=pv.playbook_id, users_id=user_id)
                 if pp:
@@ -156,7 +160,7 @@ async def check_playbook_permission(request, user, playbook_id, required_permiss
                 if pp:
                     data = pp.permissions
                 else:
-                    pv = await PlaybookVersion.get_or_none(id=playbook_id)
+                    pv = await PlaybookVersion.get_or_none(id=playbook_id, tenant_id=tenant_id)
                     if pv:
                         pp = await PlaybookPermissions.get_or_none(pb_id=pv.playbook_id, roles_id=role)
                         if pp:

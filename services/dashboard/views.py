@@ -10,6 +10,7 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from models import PlaybookVersion, ToolResources
 
@@ -235,7 +236,9 @@ async def count_mttr(request):
 )
 @requires_permission("dashboard:r")
 async def count_playbooks(request):
-    result = await PlaybookVersion.filter(status=1).annotate(counts=Count("playbook_id", distinct=True)).values("counts")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    result = await PlaybookVersion.filter(status=1, tenant_id=tenant_id).annotate(counts=Count("playbook_id", distinct=True)).values("counts")
     return response_ok(result[0].get("counts"))
 
 

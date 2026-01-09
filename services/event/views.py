@@ -718,7 +718,7 @@ async def update_event(request):
     if status := params.get("event_process_status"):
         event.event_process_status = status
         if status == "已处理":
-            event.download_url = await create_ai_report(event.id)
+            event.download_url = await create_ai_report(event.id, tenant_id)
             event.close_time = TZ.localize(datetime.now())
             update_fields.append("close_time")
             update_fields.append("download_url")
@@ -750,8 +750,8 @@ async def update_event(request):
     return response_ok("更新成功")
 
 
-async def create_ai_report(event_id):
-    pv = await PlaybookVersion.filter(playbook__name="AI", deleted=False, status=1).order_by("-ctime").first()
+async def create_ai_report(event_id, tenant_id):
+    pv = await PlaybookVersion.filter(playbook__name="AI", deleted=False, status=1, tenant_id=tenant_id).order_by("-ctime").first()
     if not pv:
         return ""
     download_link = ""

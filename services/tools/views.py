@@ -24,6 +24,7 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
+from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission, load_license
 from libs.utils import gen_run_id
 from models import (
@@ -711,6 +712,9 @@ async def tool_actions(request):
     if not name or not version:
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     tool = await Tool.get_or_none(name=name, version=version, deleted=False)
     if not tool:
         raise CustomError(ErrorCode.ToolNotFoundError)
@@ -722,7 +726,7 @@ async def tool_actions(request):
         pv_list = []
         if action.get("playbook"):
             for pv_id in action.get("playbook"):
-                pv = await PlaybookVersion.get_or_none(id=pv_id, deleted=False).prefetch_related("playbook")
+                pv = await PlaybookVersion.get_or_none(id=pv_id, deleted=False, tenant_id=tenant_id).prefetch_related("playbook")
                 pv_list.append(
                     {
                         "id": pv.playbook.id,
@@ -1233,6 +1237,9 @@ async def delete_tool_resource(request):
     if not tool_name or not name:
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     tool_resource = await ToolResources.get_or_none(
         tool_name=tool_name,
@@ -1250,7 +1257,7 @@ async def delete_tool_resource(request):
     for playbook in playbooks:
         playbook_ids += playbook.get("playbook") if playbook.get("playbook") else []
 
-    playbooks = await PlaybookVersion.filter(id__in=playbook_ids, deleted=False).all().prefetch_related("playbook")
+    playbooks = await PlaybookVersion.filter(id__in=playbook_ids, deleted=False, tenant_id=tenant_id).all().prefetch_related("playbook")
 
     for playbook in playbooks:
         if playbook.flow_json:

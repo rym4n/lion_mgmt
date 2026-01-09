@@ -181,7 +181,7 @@ async def add_timed(request):
     timer_rule = {}
     if operate_type == 0:
         playbook = await Playbook.get_or_none(id=playbook_id, deleted=False, tenant_id=tenant_id)
-        playbook_version = await PlaybookVersion.get_or_none(id=playbook_input.get("flow_id"))
+        playbook_version = await PlaybookVersion.get_or_none(id=playbook_input.get("flow_id"), tenant_id=tenant_id)
         if not playbook:
             raise CustomError(ErrorCode.PlaybookNotFound)
         msg["run_type"] = "flow"
@@ -611,6 +611,9 @@ async def get_timed_detail(request):
     if not timed_id:
         raise CustomError(ErrorCode.ParameterError)
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     timed = await Timed.get_or_none(id=timed_id, deleted=False).prefetch_related("action", "playbook", "creator", "updator")
 
     if not timed:
@@ -618,7 +621,7 @@ async def get_timed_detail(request):
 
     data = timed.json
     if timed.playbook_input:
-        input_args = await get_playbook_input(timed.playbook_input["flow_id"])
+        input_args = await get_playbook_input(timed.playbook_input["flow_id"], tenant_id=tenant_id)
         data["input_args"] = input_args
     if timed.action_input:
         actions = await ToolAction.filter(
@@ -778,7 +781,7 @@ async def update_timed(request):
                 playbook_id = timed.playbook.id
 
         timed.playbook = await Playbook.get_or_none(id=playbook_id, deleted=False, tenant_id=tenant_id)
-        playbook_version = await PlaybookVersion.get_or_none(id=playbook_input.get("flow_id"))
+        playbook_version = await PlaybookVersion.get_or_none(id=playbook_input.get("flow_id"), tenant_id=tenant_id)
         timed.playbook_version = playbook_version.version if playbook_version else None
 
         playbook_input["executor"] = request.ctx.session.get("account_info").id

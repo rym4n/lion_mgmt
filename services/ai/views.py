@@ -69,6 +69,9 @@ async def ai_question(request):
     ai_type = request.json.get("ai_type")
     user = request.ctx.session["account_info"]
 
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     room = await Room.get(id=room_id, deleted=False)
     message = await Message.create(
         type="ai-question",
@@ -94,7 +97,7 @@ async def ai_question(request):
     await chat_manager.publish_ai_message(message_data)
 
     # 剧本实现
-    pv = await PlaybookVersion.filter(playbook__name="AI", deleted=False, status=1).order_by("-ctime").first()
+    pv = await PlaybookVersion.filter(playbook__name="AI", deleted=False, status=1, tenant_id=tenant_id).order_by("-ctime").first()
     if not pv:
         return response_ok("ai功能剧本缺失或未发布，请联系管理员处理")
 

@@ -123,10 +123,10 @@ async def get_playbook_prompt_words(prompt_word, tenant_id):
     playbooks_desc = {}
     playbooks_dict = {}
     for playbook in playbooks:
-        if await PlaybookVersion.filter(status=1, playbook_id=playbook.id).exists():
+        if await PlaybookVersion.filter(status=1, playbook_id=playbook.id, tenant_id=tenant_id).exists():
             playbooks_desc[str(a)] = {"名称": playbook.name, "描述": playbook.remark}
             a += 1
-            pv = await PlaybookVersion.filter(status=1, playbook_id=playbook.id).order_by("-ctime").first()
+            pv = await PlaybookVersion.filter(status=1, playbook_id=playbook.id, tenant_id=tenant_id).order_by("-ctime").first()
             playbooks_dict[playbook.name] = pv.id
 
     logger.info(playbooks_dict)

@@ -176,6 +176,7 @@ async def create_workflow(request):
                 creator=request.ctx.session["account_info"],
                 updator=request.ctx.session["account_info"],
                 flow_timeout=flow_timeout,
+                tenant_id=tenant_id,
             )
 
             action_ids = await statistics_data(flow_json)
@@ -400,8 +401,10 @@ async def list_workflow(request):
 @requires_permission("workflow:r")
 @playbook_permission("r")
 async def list_workflow_versions(request):
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
     pv = (
-        await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False)
+        await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False, tenant_id=tenant_id)
         .only(
             "id",
             "ctime",
@@ -494,7 +497,9 @@ async def list_workflow_versions(request):
 @requires_permission("workflow:r")
 @playbook_permission("r")
 async def export_workflow(request):
-    pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False).all().prefetch_related("playbook")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False, tenant_id=tenant_id).all().prefetch_related("playbook")
     result = [
         {
             "playbook_id": p.playbook_id,
@@ -550,11 +555,13 @@ async def export_workflow(request):
 @playbook_permission("r")
 async def get_flow_json(request):
     data = None
-    pv = await PlaybookVersion.get_or_none(id=request.json.get("flow_id")).prefetch_related("playbook", "creator", "updator")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    pv = await PlaybookVersion.get_or_none(id=request.json.get("flow_id"), tenant_id=tenant_id).prefetch_related("playbook", "creator", "updator")
     if pv:
         data = pv.json
     else:
-        pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False).order_by("-version").first().prefetch_related("playbook", "creator", "updator")
+        pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False, tenant_id=tenant_id).order_by("-version").first().prefetch_related("playbook", "creator", "updator")
         if pv:
             data = pv.json
     return response_ok(data)
@@ -645,7 +652,7 @@ async def edit_workflow(request):
     if params.get("flow_timeout"):
         if 300 > int(params.get("flow_timeout")) or int(params.get("flow_timeout")) > 259200:
             raise CustomError(ErrorCode.FlowTimeOutError)
-        await PlaybookVersion.filter(playbook_id=playbook.id).update(flow_timeout=int(params.get("flow_timeout", 300)))
+        await PlaybookVersion.filter(playbook_id=playbook.id, tenant_id=tenant_id).update(flow_timeout=int(params.get("flow_timeout", 300)))
     playbook.updator = request.ctx.session["account_info"]
     await playbook.save()
     return response_ok(playbook.json)
@@ -690,8 +697,11 @@ async def edit_workflow(request):
 async def edit_workflow_flow(request):
     if not request.json.get("flow_id") or not request.json.get("flow_json"):
         raise CustomError(ErrorCode.ParameterError)
-
-    pv = await PlaybookVersion.get(id=request.json.get("flow_id")).prefetch_related("playbook", "creator", "updator")
+    
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    
+    pv = await PlaybookVersion.get(id=request.json.get("flow_id"), tenant_id=tenant_id).prefetch_related("playbook", "creator", "updator")
     old_data = pv.flow_json
     pv.flow_json = request.json.get("flow_json")
     pv.updator = request.ctx.session["account_info"]
@@ -705,6 +715,7 @@ async def edit_workflow_flow(request):
             status=0,
             creator=request.ctx.session["account_info"],
             updator=request.ctx.session["account_info"],
+            tenant_id=tenant_id,
         )
     else:
         await pv.save()
@@ -758,7 +769,11 @@ async def edit_workflow_flow(request):
 async def publish_workflow(request):
     if not request.json.get("flow_id") or not request.json.get("change_desc"):
         raise CustomError(ErrorCode.ParameterError)
-    await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0).update(
+    
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    
+    await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0, tenant_id=tenant_id).update(
         status=1,
         updator=request.ctx.session["account_info"],
         version=gen_run_id(),
@@ -807,7 +822,7 @@ async def delete_workflow(request):
     playbook = await Playbook.get(id=request.json.get("playbook_id"), tenant_id=tenant_id)
     if playbook.internal:
         raise CustomError(ErrorCode.InternalDeleteError)
-    pvs = await PlaybookVersion.filter(playbook=playbook, deleted=False).all()
+    pvs = await PlaybookVersion.filter(playbook=playbook, deleted=False, tenant_id=tenant_id).all()
     pv_ids = [pv.id for pv in pvs]
     pv_versions = [pv.version for pv in pvs]
     payload = await token_decode(request)
@@ -865,12 +880,11 @@ async def delete_workflow(request):
 @requires_permission("workflow:d")
 @playbook_permission("d")
 async def delete_workflow_version(request):
-    pv = await PlaybookVersion.get(id=request.json.get("flow_id")).prefetch_related("playbook")
-    if pv.playbook.internal:
-        raise CustomError(ErrorCode.InternalDeleteError)
-
     payload = await token_decode(request)
     tenant_id = payload.get("tenant_id")
+    pv = await PlaybookVersion.get(id=request.json.get("flow_id"), tenant_id=tenant_id).prefetch_related("playbook")
+    if pv.playbook.internal:
+        raise CustomError(ErrorCode.InternalDeleteError)
 
     if await EventRelatedScript.filter(script_id__contains=[pv.id], deleted=False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.PlaybookUsedByEvent)
@@ -880,7 +894,7 @@ async def delete_workflow_version(request):
     if pv.flow_json:
         action_ids = await statistics_data(pv.flow_json)
         await tool_action_playbook_delete({pv.id: action_ids})
-    if await PlaybookVersion.filter(playbook_id=pv.playbook_id).count() == 1:
+    if await PlaybookVersion.filter(playbook_id=pv.playbook_id, tenant_id=tenant_id).count() == 1:
         await Playbook.filter(id=pv.playbook_id, tenant_id=tenant_id).delete()
     else:
         await pv.delete()
@@ -978,9 +992,13 @@ async def execute_action(request):
     )
     utime = datetime.now(TZ)
     message = request.json
+
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
     if message.get("type") in ("flow", "action", "code"):
         if message.get("type") == "flow":
-            pv = await PlaybookVersion.get_or_none(id=message.get("flow_id"))
+            pv = await PlaybookVersion.get_or_none(id=message.get("flow_id"), tenant_id=tenant_id)
             playbook_id = pv.playbook_id
             has_access = await check_playbook_permission(
                 request=request,
@@ -1173,13 +1191,15 @@ async def run_history(request):
 @requires_permission("workflow:r")
 @playbook_permission("r")
 async def input_data(request):
-    input_list = await get_playbook_input(request.json.get("flow_id"))
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+    input_list = await get_playbook_input(request.json.get("flow_id"), tenant_id)
 
     return response_ok(input_list)
 
 
-async def get_playbook_input(playbook_id):
-    playbook = await PlaybookVersion.get_or_none(id=playbook_id)
+async def get_playbook_input(playbook_id, tenant_id):
+    playbook = await PlaybookVersion.get_or_none(id=playbook_id, tenant_id=tenant_id)
     if not playbook:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
@@ -1564,7 +1584,10 @@ async def create_webhook(request):
     if not flow_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    pv = await PlaybookVersion.get_or_none(id=flow_id).prefetch_related("playbook")
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    pv = await PlaybookVersion.get_or_none(id=flow_id, tenant_id=tenant_id).prefetch_related("playbook")
     if not pv:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
@@ -1633,7 +1656,10 @@ async def list_webhook(request):
     if not flow_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    pv = await PlaybookVersion.get_or_none(id=flow_id)
+    payload = await token_decode(request)
+    tenant_id = payload.get("tenant_id")
+
+    pv = await PlaybookVersion.get_or_none(id=flow_id, tenant_id=tenant_id)
     if not pv:
         raise CustomError(ErrorCode.PlaybookNotFound)
 
@@ -2011,6 +2037,7 @@ async def import_workflow(request):
                     creator=creator,
                     updator=creator,
                     flow_timeout=flow_data.get("flow_timeout", 300),
+                    tenant_id=tenant_id,
                 )
 
                 action_ids = await statistics_data(flow_json)
