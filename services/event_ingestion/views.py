@@ -24,12 +24,11 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs import supervisor
 from libs.error_code.exception import CustomError
-from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
-from libs.utils import run_linux_command, query_vlog
-from models import PlaybookVersion, Playbook, Config
-from models.event import EventsIngestion, EventRelatedScript, Events
-from settings import VECTOR_CFG, KAFKA_SERVERS, SUPERVISOR_PATH, VL_HOST
+from libs.utils import query_vlog, run_linux_command
+from models import Config, Playbook, PlaybookVersion
+from models.event import EventRelatedScript, Events, EventsIngestion
+from settings import KAFKA_SERVERS, SUPERVISOR_PATH, VECTOR_CFG, VL_HOST
 
 event_ingestion_bp = Blueprint("event_ingestion", url_prefix="/event-ingestion")
 _all__ = ["event_ingestion_bp"]
@@ -376,7 +375,7 @@ async def get_all_events_ingestion(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    filters = {"deleted": False, "tenant_id":tenant_id}
+    filters = {"deleted": False, "tenant_id": tenant_id}
     if request.json.get("name"):
         filters["event_ingestion_name__icontains"] = request.json.get("name")
 
@@ -954,7 +953,11 @@ async def binding_event_ingestion_script(request):
             data.setdefault("transforms", {})[f"{topic}_transforms"] = {
                 "type": "filter",
                 # 如果之前配置了去重则用去重后的配置，否则用原始配置
-                "inputs": ([f"{topic}_dedupe_transforms"] if request_data.get("fields") and request_data.get("numbers") else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])),
+                "inputs": (
+                    [f"{topic}_dedupe_transforms"]
+                    if request_data.get("fields") and request_data.get("numbers")
+                    else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])
+                ),
                 "condition": f"{conditional_statements}",
             }
         data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
@@ -962,7 +965,11 @@ async def binding_event_ingestion_script(request):
             "inputs": (
                 [f"{topic}_transforms"]
                 if conditions
-                else ([f"{topic}_dedupe_transforms"] if request_data.get("fields") and request_data.get("numbers") else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]))
+                else (
+                    [f"{topic}_dedupe_transforms"]
+                    if request_data.get("fields") and request_data.get("numbers")
+                    else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])
+                )
             ),
             "source": f"""
 .aioe_event_id = uuid_v4()

@@ -3,12 +3,13 @@ import uuid
 from datetime import datetime
 
 import orjson
-from sanic import Request, HTTPResponse
+from sanic import HTTPResponse, Request
 
 from libs.kafka import aproduce
 from libs.security.authentication import authenticate
 from libs.utils import get_client_ip
-from settings import AUDIT_TOPIC, TZ, KAFKA_CONFIG
+from settings import AUDIT_TOPIC, TZ
+
 from .base import BaseMiddleware
 
 
@@ -75,4 +76,5 @@ class SecurityMiddleware(BaseMiddleware):
         if data is not None:
             data["ctime"] = datetime.now(TZ).strftime("%Y-%m-%dT%H:%M:%S%z")
             data["id"] = str(uuid.uuid4())
+            data["log_type"] = "aioe_audit"
             await aproduce(AUDIT_TOPIC, data)

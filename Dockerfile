@@ -43,7 +43,6 @@ FROM python:3.11-slim AS runtime
 ENV VIRTUAL_ENV=/app/.venv \
     RY_ENV=PROD \
     PYTHONDONTWRITEBYTECODE=1 \
-    TZ="Asia/Shanghai" \
     PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app

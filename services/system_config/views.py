@@ -24,14 +24,7 @@ from libs.security.authorization import requires_permission
 from libs.utils import get_from_s3, query_vlog, strip_timezone_to_seconds, upload_to_s3
 from models import Config
 from services.event_ingestion.views import check_vector_config
-from settings import (
-    AUTHENTICATION_SESSION_EXPIRATION,
-    BASE_DIR,
-    SECRET,
-    SESSION_ENCODING_ALGORITHM,
-    VECTOR_CFG,
-    TZ,
-)
+from settings import AUTHENTICATION_SESSION_EXPIRATION, SECRET, SESSION_ENCODING_ALGORITHM, TZ, VECTOR_CFG
 
 system_bp = Blueprint("system", url_prefix="/system")
 _all__ = ["system_bp"]
@@ -311,25 +304,216 @@ async def get_system_status(request):
         "lion-vl": "日志存储服务",
         "lion-es": "日志存储服务",
     }
-    # 遍历目录获取 status_ 开头的json文件
-    data_dir = os.path.join(BASE_DIR, "data")
-    status_files = [f for f in os.listdir(data_dir) if f.startswith("status_") and f.endswith(".json")]
-    if not status_files:
+    # 从VictoriaLog查询最新的健康检查数据
+    query = 'log_type:"health_check" | sort(_time desc)'
+    data_res = await query_vlog(query, project_id=0, limit=1000)
+
+    if not data_res:
         raise CustomError(ErrorCode.CheckStatusNotFound)
+
+    # 按主机分组，获取每个主机的最新一条记录
+    host_latest = {}
+    for item in data_res:
+        log_ip = item.get("log_ip")
+        if not log_ip:
+            continue
+        if log_ip not in host_latest:
+            host_latest[log_ip] = item
+
     result = []
-    for file in status_files:
-        ip = file.split("_")[1].strip(".json")
-        file_path = os.path.join(data_dir, file)
-        modify_time = datetime.strftime(datetime.fromtimestamp(os.path.getmtime(file_path)), "%Y-%m-%d %H:%M:%S")
-        async with aiofile.AIOFile(file_path, "r", encoding="utf-8") as f:
-            content = await f.read()
-            data = orjson.loads(content)
-            for item in data:
-                item["host"] = ip
-                item["name"] = name_map.get(item["name"], item["name"])
-                item["start_time"] = strip_timezone_to_seconds(item["start_time"])
-                item["check_time"] = modify_time
-                result.append(item)
+    for log_ip, log_data in host_latest.items():
+        data = log_data.get("data", {})
+        ctime = log_data.get("ctime", "")
+
+        # 处理时间格式
+        check_time = ""
+        if ctime:
+            try:
+                # 解析时间字符串（格式：2026-01-11T00:24:01+0800）
+                if "+" in ctime or ctime.endswith("Z"):
+                    dt = datetime.fromisoformat(ctime.replace("Z", "+00:00"))
+                    dt_local = dt.astimezone(TZ)
+                    check_time = dt_local.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    check_time = ctime
+            except Exception:
+                check_time = ctime
+
+        # 将data中的每个服务展开为一条记录
+        for service_name, service_info in data.items():
+            if not isinstance(service_info, dict):
+                continue
+
+            status = service_info.get("run_status", "")
+            start_time_str = service_info.get("start_time", "")
+
+            start_time = ""
+            if start_time_str:
+                start_time = strip_timezone_to_seconds(start_time_str)
+
+            result.append(
+                {
+                    "host": log_ip,
+                    "name": name_map.get(service_name, service_name),
+                    "status": status,
+                    "start_time": start_time,
+                    "check_time": check_time,
+                }
+            )
+
+    if not result:
+        raise CustomError(ErrorCode.CheckStatusNotFound)
+
+    return response_ok(result)
+
+
+@system_bp.post("/status/history")
+@openapi.definition(
+    summary="查询健康检查历史数据",
+    description="查询指定主机和服务的健康检查历史数据，需要系统配置查看权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["host", "start_time", "end_time"],
+                "properties": {
+                    "host": {"type": "string", "description": "主机IP地址"},
+                    "service_name": {"type": "string", "description": "服务名称（可选），如lion-mgmt、lion-web等"},
+                    "start_time": {
+                        "type": "string",
+                        "description": "开始时间，格式为2025-01-01 00:00:00",
+                    },
+                    "end_time": {
+                        "type": "string",
+                        "description": "结束时间，格式为2025-01-01 00:00:00",
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "查询成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "host": {"type": "string"},
+                                        "name": {"type": "string"},
+                                        "status": {"type": "string"},
+                                        "start_time": {"type": "string"},
+                                        "check_time": {"type": "string"},
+                                        "health": {"type": "string"},
+                                        "cpu_percent": {"type": "string"},
+                                        "mem_usage": {"type": "string"},
+                                        "mem_percent": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("status:r")
+async def get_system_status_history(request):
+    params = request.json
+    host = params.get("host")
+    service_name = params.get("service_name")
+    start_time = params.get("start_time")
+    end_time = params.get("end_time")
+
+    if not host or not start_time or not end_time:
+        raise CustomError(ErrorCode.ParameterError)
+
+    name_map = {
+        "lion-mgmt": "控制台服务",
+        "lion-web": "Web服务器",
+        "lion-db": "数据库服务",
+        "lion-kb": "数据库服务",
+        "lion-redis": "缓存服务",
+        "lion-ship": "ETL服务",
+        "lion-job": "任务调度服务",
+        "lion-worker": "执行引擎",
+        "lion-mq": "消息队列",
+        "lion-ai": "AI服务",
+        "lion-fs": "文件存储服务",
+        "lion-vl": "日志存储服务",
+        "lion-es": "日志存储服务",
+    }
+
+    # 构建查询条件
+    query = f'log_type:"health_check" AND log_ip:"{host}"'
+    data_query = f"{query} | sort(_time desc)"
+
+    # 从VictoriaLog查询指定时间范围的健康检查数据
+    data_res = await query_vlog(data_query, project_id=0, start=start_time, end=end_time, limit=1000)
+
+    if not data_res:
+        return response_ok([])
+
+    result = []
+    for log_data in data_res:
+        log_ip = log_data.get("log_ip", host)
+        data = log_data.get("data", {})
+        ctime = log_data.get("ctime", "")
+
+        # 处理时间格式
+        check_time = ""
+        if ctime:
+            try:
+                # 解析时间字符串（格式：2026-01-11T00:24:01+0800）
+                if "+" in ctime or ctime.endswith("Z"):
+                    dt = datetime.fromisoformat(ctime.replace("Z", "+00:00"))
+                    dt_local = dt.astimezone(TZ)
+                    check_time = dt_local.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    check_time = ctime
+            except Exception:
+                check_time = ctime
+
+        # 将data中的每个服务展开为一条记录
+        for svc_name, service_info in data.items():
+            if not isinstance(service_info, dict):
+                continue
+
+            # 如果指定了service_name，只处理匹配的服务
+            if service_name and svc_name != service_name:
+                continue
+
+            status = service_info.get("run_status", "")
+            start_time_str = service_info.get("start_time", "")
+            health = service_info.get("health", "")
+            cpu_percent = service_info.get("cpu_percent", "")
+            mem_usage = service_info.get("mem_usage", "")
+            mem_percent = service_info.get("mem_percent", "")
+
+            start_time_formatted = ""
+            if start_time_str:
+                start_time_formatted = strip_timezone_to_seconds(start_time_str)
+
+            result.append(
+                {
+                    "host": log_ip,
+                    "name": name_map.get(svc_name, svc_name),
+                    "status": status,
+                    "start_time": start_time_formatted,
+                    "check_time": check_time,
+                    "health": health,
+                    "cpu_percent": cpu_percent,
+                    "mem_usage": mem_usage,
+                    "mem_percent": mem_percent,
+                }
+            )
 
     return response_ok(result)
 
