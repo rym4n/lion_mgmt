@@ -123,7 +123,7 @@ async def ai_question(request):
                 "type": "object",
                 "properties": {
                     "content": {"type": "string", "description": "消息内容"},
-                    "room_id": {"type": "string", "description": "作战室ID"},
+                    "room_name": {"type": "string", "description": "作战室名称"},
                     "user_id": {"type": "string", "description": "用户ID"},
                     "type": {"type": "string", "description": "消息类型"},
                     "create": {"type": "boolean", "description": "是否创建历史消息"},

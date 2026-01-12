@@ -876,12 +876,17 @@ async def query_messages(request: Request):
             .prefetch_related("sender", "receiver")
         )
         message_list = []
+        run_id_list = []
         for msg in reversed(messages):
             if msg.type == "runlog":
                 run_id = msg.content.split(":")[0]
-                node_id = msg.content.split(":")[1]
-                runlogs = await Runlog.filter(run_id=run_id, node_id=node_id).all()
-                content = "[已撤回]" if msg.is_recalled else [runlog.json for runlog in runlogs]
+                if run_id not in run_id_list:
+                    run_id_list.append(run_id)
+                    runlogs = await Runlog.filter(run_id=run_id, deleted=False).order_by("ctime").all()
+                    run_logs = await runlog_list(runlogs)
+                    content = "[已撤回]" if msg.is_recalled else run_logs
+                else:
+                    continue
             elif msg.type == "execute":
                 content = "[已撤回]" if msg.is_recalled else ast.literal_eval(msg.content)
             else:
