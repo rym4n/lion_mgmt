@@ -109,19 +109,19 @@ async def create_workflow(request):
     if not data.get("name") or not data.get("flow_json_list"):
         raise CustomError(ErrorCode.ParameterError)
 
-    total_up_value = 0
-    # 判断剧本数量是否达到了创建上限
-    total_count = await Playbook.filter(deleted=False, internal=False).count()
-    lic = load_license()
-    if not lic:
-        raise CustomError(ErrorCode.InvalidLicenseError)
-    for key, item in lic["grouplist"].items():
-        if key == "剧本编排":
-            if int(item["expireTime"]) > int(time.time() * 1000):
-                total_up_value = int(item["value"])
-
-    if total_up_value != 99999 and total_count >= total_up_value:
-        raise CustomError(ErrorCode.PlaybookCreateLimit)
+    # total_up_value = 0
+    # # 判断剧本数量是否达到了创建上限
+    # total_count = await Playbook.filter(deleted=False, internal=False).count()
+    # lic = load_license()
+    # if not lic:
+    #     raise CustomError(ErrorCode.InvalidLicenseError)
+    # for key, item in lic["grouplist"].items():
+    #     if key == "剧本编排":
+    #         if int(item["expireTime"]) > int(time.time() * 1000):
+    #             total_up_value = int(item["value"])
+    #
+    # if total_up_value != 99999 and total_count >= total_up_value:
+    #     raise CustomError(ErrorCode.PlaybookCreateLimit)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -165,7 +165,7 @@ async def create_workflow(request):
             await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
 
         await playbook.fetch_related("tags", "scenes")
-
+        print(tenant_id)
         for flow_json in flow_json_list:
             pv = await PlaybookVersion.create(
                 playbook=playbook,
@@ -179,7 +179,7 @@ async def create_workflow(request):
                 tenant_id=tenant_id,
             )
 
-            action_ids = await statistics_data(flow_json)
+            action_ids = await statistics_data(flow_json, tenant_id)
             await tool_action_update({pv.id: action_ids}, tenant_id)
 
     return response_ok("success")
@@ -715,10 +715,10 @@ async def edit_workflow_flow(request):
         await pv.save()
 
     if old_data:
-        action_ids = await statistics_data(old_data)
+        action_ids = await statistics_data(old_data, tenant_id)
         await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
 
-    action_ids = await statistics_data(pv.flow_json)
+    action_ids = await statistics_data(pv.flow_json, tenant_id)
     await tool_action_update({pv.id: action_ids}, tenant_id)
 
     return response_ok(pv.json)
@@ -828,7 +828,7 @@ async def delete_workflow(request):
 
     for pv in pvs:
         if pv.flow_json:
-            action_ids = await statistics_data(pv.flow_json)
+            action_ids = await statistics_data(pv.flow_json, tenant_id)
             await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
 
     await playbook.delete()
@@ -881,7 +881,7 @@ async def delete_workflow_version(request):
         raise CustomError(ErrorCode.PlaybookUsedByTimer)
 
     if pv.flow_json:
-        action_ids = await statistics_data(pv.flow_json)
+        action_ids = await statistics_data(pv.flow_json, tenant_id)
         await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
     if await PlaybookVersion.filter(playbook_id=pv.playbook_id, tenant_id=tenant_id).count() == 1:
         await Playbook.filter(id=pv.playbook_id, tenant_id=tenant_id).delete()
@@ -2040,7 +2040,7 @@ async def import_workflow(request):
                     tenant_id=tenant_id,
                 )
 
-                action_ids = await statistics_data(flow_json)
+                action_ids = await statistics_data(flow_json, tenant_id)
                 await tool_action_update({pv.id: action_ids}, tenant_id)
 
     return response_ok("success")

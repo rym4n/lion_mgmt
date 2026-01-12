@@ -1336,8 +1336,12 @@ async def init_scene_list(request):
     },
 )
 async def init_account_list(request):
-    users = await Account.filter(deleted=False, type="user").all().values_list("id", "username", "display_name")
-    return response_ok({"users": [{"id": user[0], "username": user[1], "display_name": user[2]} for user in users]})
+    tenant = await Tenant.get_or_none(deleted=False, id=request.ctx.session["tenant_id"]).prefetch_related("member")
+    data = []
+    for user in tenant.member:
+        if user.deleted is False and user.type == "user":
+            data.append({"id": user.id, "username": user.username, "display_name": user.display_name})
+    return response_ok({"users": data})
 
 
 @user_bp.post("/role-list")
