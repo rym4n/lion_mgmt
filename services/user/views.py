@@ -12,6 +12,7 @@ from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.exceptions import IntegrityError, DoesNotExist
 from tortoise.expressions import Q
+from tortoise.functions import Count
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -244,13 +245,18 @@ async def all_users(request):
     page = int(req_json.get("page", 1))
     size = int(req_json.get("size", 15))
     offset = (page - 1) * size
-    limit = size
-    # 分页查询Account，返回总数和数据
-    condition = {"deleted": False, "type": "user"}
+
+    current_user: Account = request.ctx.session.get("account_info")
+    tenant_ids = await current_user.member.all().values_list("id", flat=True)
+
+    qs = Account.filter(deleted=False, type="user", member__id__in=tenant_ids).distinct()
+
     if req_json.get("username"):
-        condition["username"] = req_json.get("username")
-    total = await Account.filter(**condition).count()
-    users = await Account.filter(**condition).offset(offset).limit(limit).all().prefetch_related("roles")
+        qs = qs.filter(username__icontains=req_json["username"])
+
+    total = await Account.filter(deleted=False, type="user", member__id__in=tenant_ids).count()
+
+    users = await qs.offset(offset).limit(size).prefetch_related("roles")
 
     return response_ok(
         {
