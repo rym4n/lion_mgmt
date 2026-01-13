@@ -128,6 +128,7 @@ async def ai_question(request):
                     "type": {"type": "string", "description": "消息类型"},
                     "create": {"type": "boolean", "description": "是否创建历史消息"},
                     "eof": {"type": "boolean", "description": "是否为结尾消息"},
+                    "ai_msg_id": {"type": "string", "description": "AI类型的消息id"}
                 },
             }
         }
@@ -200,6 +201,9 @@ async def create_msg(request):
         message_data["eof"] = True
     else:
         message_data["eof"] = False
+
+    if request.json.get("ai_msg_id"):
+        message_data["ai_msg_id"] = request.json.get("ai_msg_id")
 
     return response_ok(message_data)
 
