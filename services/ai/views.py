@@ -127,6 +127,7 @@ async def ai_question(request):
                     "user_id": {"type": "string", "description": "用户ID"},
                     "type": {"type": "string", "description": "消息类型"},
                     "create": {"type": "boolean", "description": "是否创建历史消息"},
+                    "eof": {"type": "boolean", "description": "是否为结尾消息"},
                 },
             }
         }
@@ -194,6 +195,11 @@ async def create_msg(request):
         "timestamp": (str(message.ctime) if message else datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")),
         "room_id": room.id,
     }
+
+    if request.json.get("eof"):
+        message_data["eof"] = True
+    else:
+        message_data["eof"] = False
 
     return response_ok(message_data)
 

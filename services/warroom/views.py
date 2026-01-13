@@ -830,8 +830,6 @@ async def query_messages(request: Request):
                     content = "[已撤回]" if msg.is_recalled else run_logs
                 else:
                     continue
-            elif msg.type == "execute":
-                content = "[已撤回]" if msg.is_recalled else ast.literal_eval(msg.content)
             else:
                 content = "[已撤回]" if msg.is_recalled else msg.content
             message_list.append(
@@ -887,8 +885,6 @@ async def query_messages(request: Request):
                     content = "[已撤回]" if msg.is_recalled else run_logs
                 else:
                     continue
-            elif msg.type == "execute":
-                content = "[已撤回]" if msg.is_recalled else ast.literal_eval(msg.content)
             else:
                 content = "[已撤回]" if msg.is_recalled else msg.content
             message_list.append(
