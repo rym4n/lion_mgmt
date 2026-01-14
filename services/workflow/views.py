@@ -20,30 +20,10 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authentication import token_decode
-from libs.security.authorization import (
-    requires_permission,
-    load_license,
-    playbook_permission,
-    check_playbook_permission,
-)
+from libs.security.authorization import check_playbook_permission, playbook_permission, requires_permission
 from libs.utils import gen_run_id, strip_timezone_to_seconds
-from models import (
-    Playbook,
-    Scene,
-    ToolAction,
-    Runlog,
-    Tag,
-    PlaybookVersion,
-    Role,
-    PlaybookPermissions,
-    EventRelatedScript,
-    Timed,
-    PlaybookWebhook,
-    Account,
-    Tool,
-)
-from services.tools.views import tool_action_update, tool_action_playbook_delete
+from models import Account, EventRelatedScript, Playbook, PlaybookPermissions, PlaybookVersion, PlaybookWebhook, Role, Runlog, Scene, Tag, Timed, Tool, ToolAction
+from services.tools.views import tool_action_playbook_delete, tool_action_update
 from settings import TASK_TOPIC, TZ
 
 workflow_bp = Blueprint("workflow", url_prefix="/playbook")

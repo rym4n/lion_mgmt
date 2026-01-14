@@ -5,39 +5,22 @@ from datetime import datetime
 
 import pyotp
 from aiocache import caches
-from argon2.exceptions import VerificationError, InvalidHashError
+from argon2.exceptions import InvalidHashError, VerificationError
 from jsonpath import jsonpath
 from sanic import Blueprint, response
 from sanic.log import logger
 from sanic_ext import openapi
-from tortoise.exceptions import IntegrityError, DoesNotExist
+from tortoise.exceptions import DoesNotExist, IntegrityError
 from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authentication import (
-    validate_password,
-    token_encode,
-    refresh_token,
-    validate_username,
-)
+from libs.security.authentication import refresh_token, token_encode, validate_password, validate_username
 from libs.security.authorization import requires_permission
-from libs.utils import (
-    password_hasher,
-    ip_in_list,
-    get_client_ip,
-    validate_ips,
-    get_expiration_date,
-)
+from libs.utils import get_client_ip, get_expiration_date, ip_in_list, password_hasher, validate_ips
 from models import Account, Role, Scene, Tenant
-from settings import (
-    AUTHENTICATION_SESSION_EXPIRATION,
-    MAX_CHALLENGE_ATTEMPTS,
-    SESSION_HTTPONLY,
-    SESSION_SAMESITE,
-    SESSION_SECURE,
-)
+from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE
 
 user_bp = Blueprint("user", url_prefix="/user")
 _all__ = ["user_bp"]
@@ -74,7 +57,7 @@ _all__ = ["user_bp"]
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "工作空间列表",
-                    }
+                    },
                 },
             }
         }
@@ -296,7 +279,7 @@ async def all_users(request):
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "工作空间列表",
-                    }
+                    },
                 },
             }
         }
