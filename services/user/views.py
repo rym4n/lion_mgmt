@@ -145,7 +145,7 @@ async def new_user(request):
             mfa_enable=mfa_enable,
             mfa_key=pyotp.random_base32(32) if mfa_enable else None,
             permit_ip=request.json.get("permit_ip"),
-            tenant_id=t_ids[0],
+            tenant_id=t_ids[0] if t_ids else request.ctx.session["tenant_id"],
         )
         # 添加角色
         if request.json.get("role_names"):
