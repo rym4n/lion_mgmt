@@ -290,7 +290,6 @@ async def get_platform_config(request):
     },
 )
 @requires_permission("status:r")
-@cached(timeout=120)
 async def get_system_status(request):
     name_map = {
         "lion-mgmt": "控制台服务",
@@ -308,13 +307,14 @@ async def get_system_status(request):
         "lion-es": "日志存储服务",
     }
     # 从VictoriaLog查询最新的健康检查数据
+    # 查询最近5分钟的数据，确保能覆盖所有主机
     query = 'log_type:"health_check" | sort(_time desc)'
     data_res = await query_vlog(query, project_id=0, limit=1)
 
     if not data_res:
-        raise CustomError(ErrorCode.CheckStatusNotFound)
+        return response_ok([])
 
-    logger.info(data_res)
+    logger.info(f"health check data count: {len(data_res)}")
     # 按主机分组，获取每个主机的最新一条记录
     host_latest = {}
     for item in data_res:
@@ -358,7 +358,6 @@ async def get_system_status(request):
 
         # 将data中的每个服务展开为一条记录
         for service_name, service_info in data.items():
-            logger.info(f"service_name: {service_name}, service_info: {service_info}")
             if not isinstance(service_info, dict):
                 continue
 
@@ -366,6 +365,7 @@ async def get_system_status(request):
             cpu_percent = service_info.get("cpu_percent", "")
             mem_percent = service_info.get("mem_percent", "")
             start_time_str = service_info.get("start_time", "")
+            health = service_info.get("health", "")
 
             start_time = ""
             if start_time_str:
@@ -375,7 +375,8 @@ async def get_system_status(request):
                 {
                     "host": log_ip,
                     "name": name_map.get(service_name, service_name),
-                    "status": status,
+                    "run_status": status,
+                    "health": health,
                     "cpu_percent": cpu_percent,
                     "mem_percent": mem_percent,
                     "start_time": start_time,
@@ -426,10 +427,10 @@ async def get_system_status(request):
                                     "properties": {
                                         "host": {"type": "string"},
                                         "name": {"type": "string"},
-                                        "status": {"type": "string"},
+                                        "run_status": {"type": "string"},
+                                        "health_status": {"type": "string"},
                                         "start_time": {"type": "string"},
                                         "check_time": {"type": "string"},
-                                        "health": {"type": "string"},
                                         "cpu_percent": {"type": "string"},
                                         "mem_usage": {"type": "string"},
                                         "mem_percent": {"type": "string"},
@@ -537,10 +538,10 @@ async def get_system_status_history(request):
                 {
                     "host": log_ip,
                     "name": name_map.get(svc_name, svc_name),
-                    "status": status,
+                    "run_status": status,
+                    "health": health,
                     "start_time": start_time_formatted,
                     "check_time": check_time,
-                    "health": health,
                     "cpu_percent": cpu_percent,
                     "mem_usage": mem_usage,
                     "mem_percent": mem_percent,
