@@ -12,7 +12,6 @@ from sanic.request import Request
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authentication import token_decode
 from libs.security.authorization import (
     requires_permission,
     load_license,
@@ -21,6 +20,7 @@ from libs.security.authorization import (
 from libs.utils import verify_license
 from models import Tool, Playbook, Account, PermissionsMenu, Config
 from settings import LICENSE_DIR
+from sanic.log import logger
 
 license_bp = Blueprint("license", url_prefix="/license")
 _all__ = ["license_bp"]
@@ -96,27 +96,28 @@ async def get_license(request: Request):
     for role in user.roles:
         perm_models = set()
         if role.permissions:
+            valid_modules = set()
+            for item in lic["moduleList"]:
+                module = item["module"]
+                if module == "ai_bp":
+                    if item["auth"] and int(lic["grouplist"][item["group"]]["expireTime"]) > int(time.time() * 1000):
+                        if item["name"] == "AI智能问答":
+                            ai_type += 1
+                        else:
+                            ai_type += 2
+                    continue
+                group = item["group"]
+                if int(lic["grouplist"][group]["expireTime"]) > int(time.time() * 1000):
+                    valid_modules.add(module)
+            valid_modules.update(["license_bp"])
+            logger.info(f"valid_modules: {valid_modules}")
             # 超级权限处理
             if "*:*" in role.permissions:
                 # 基于 license 构造权限列表
-                valid_modules = set()
-                for item in lic["moduleList"]:
-                    module = item["module"]
-                    if module == "ai_bp":
-                        if item["auth"] and int(lic["grouplist"][item["group"]]["expireTime"]) > int(time.time() * 1000):
-                            if item["name"] == "AI智能问答":
-                                ai_type += 1
-                            else:
-                                ai_type += 2
-                        continue
-                    group = item["group"]
-                    if int(lic["grouplist"][group]["expireTime"]) > int(time.time() * 1000):
-                        valid_modules.add(module)
-                valid_modules.update(["license_bp"])
                 perm_models.update([p["model"] for p in permissions if p["bp"] in valid_modules and p["model"] != "dashboard"])
             else:
-                perm_models.update([p.split(":")[0] for p in role.permissions if p.split(":")[0] != "dashboard"])
-
+                perm_models.update([p.split(":")[0] for p in role.permissions if p.split(":")[0] in valid_modules and p.split(":")[0] != "dashboard"])
+        logger.info(f"perm_models: {perm_models}")
         for model in perm_models:
             permission_data = next((p for p in permissions if p["model"] == model), None)
             if not permission_data or not permission_data["url"]:
