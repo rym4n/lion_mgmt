@@ -60,9 +60,6 @@ def register_blueprints(app: Sanic) -> None:
     app.blueprint(approve_bp)
     app.blueprint(mcp_bp)
 
-    # 测试工作空间使用，未用产品许可控制
-    app.blueprint(tenant_bp)
-
     try:
         bp_dict = {
             "event_bp": event_bp,
