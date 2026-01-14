@@ -119,7 +119,7 @@ async def get_license(request: Request):
 
         for model in perm_models:
             permission_data = next((p for p in permissions if p["model"] == model), None)
-            if not permission_data:
+            if not permission_data or not permission_data["url"]:
                 continue
 
             key = permission_data["url"][language]["path"]
