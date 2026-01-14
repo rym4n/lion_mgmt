@@ -24,21 +24,9 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authentication import token_decode
-from libs.security.authorization import requires_permission, load_license
+from libs.security.authorization import load_license, requires_permission
 from libs.utils import gen_run_id
-from models import (
-    Tool,
-    ToolAction,
-    ToolResources,
-    ToolResourcesModel,
-    ActionPermissions,
-    Config,
-    Tag,
-    PlaybookVersion,
-    Runlog,
-    Timed,
-)
+from models import ActionPermissions, Config, PlaybookVersion, Runlog, Tag, Timed, Tool, ToolAction, ToolResources, ToolResourcesModel
 from settings import TASK_TOPIC, TZ
 
 # 定义 Blueprint
@@ -236,6 +224,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
     try:
         data = 0
         zip_buffer = BytesIO(zip_data)
+        logo_data = None
 
         with zipfile.ZipFile(zip_buffer, "r", metadata_encoding="utf-8") as zip_ref:
             version = None
@@ -526,10 +515,10 @@ async def all_tools(request):
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     subquery = subquery.filter(maintain=maintenance_mode if maintenance_mode else False)
     if key:
-        tool_actions = await ToolAction.filter(deleted=False, tenant_id=tenant_id).values("tool_name", "version_number", "action")
+        actions = await ToolAction.filter(deleted=False, tenant_id=tenant_id).values("tool_name", "version_number", "action")
         tool_name_version_set = set()
 
-        for act in tool_actions:
+        for act in actions:
             act_data = act["action"]
             if isinstance(act_data, dict) and (key.lower() in act_data.get("func", "").lower() or key.lower() in act_data.get("name", "").lower()):
                 tool_name_version_set.add((act["tool_name"], act["version_number"]))
@@ -2298,7 +2287,7 @@ async def health_check(request):
         msg = {"run_type": message["type"], "run_id": run_id, "run_args": message, "tenant_id": request.ctx.session.get("tenant_id")}
         await aproduce(TASK_TOPIC, msg)
         sent_id = []
-        for i in range(60):
+        for _ in range(60):
             log = await Runlog.get_or_none(run_id=run_id, utime__gte=utime)
             if log:
                 if log.id not in sent_id:
@@ -2350,7 +2339,7 @@ async def tool_debug(request):
 
     resource = await ToolResources.filter(tool_name="lion_mgmt", deleted=False, tenant_id=tenant_id).order_by("-ctime").first()
     if not resource:
-        raise response_ok("工具开发运行资源不存在，请联系管理员处理")
+        return response_ok("工具开发运行资源不存在，请联系管理员处理")
 
     user = request.ctx.session["account_info"]
     params = {

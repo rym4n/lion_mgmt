@@ -5,20 +5,11 @@ from sanic import Blueprint
 from sanic_ext import openapi
 
 from core.response import response_ok
-from libs.chat import chat_manager, get_prompt_words, get_playbook_prompt_words
+from libs.chat import chat_manager, get_playbook_prompt_words, get_prompt_words
 from libs.kafka import aproduce
-from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from libs.utils import gen_run_id
-from models import (
-    Tool,
-    Account,
-    Message,
-    Room,
-    ToolAction,
-    ToolResourcesModel,
-    PlaybookVersion,
-)
+from models import Account, Message, PlaybookVersion, Room, Tool, ToolAction, ToolResourcesModel
 from settings import TASK_TOPIC
 
 ai_bp = Blueprint("ai", url_prefix="/ai")

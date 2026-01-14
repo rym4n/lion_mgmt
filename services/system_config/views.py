@@ -12,7 +12,6 @@ import jwt
 import orjson
 import pytz
 import yaml
-from aiocache import cached
 from sanic import Blueprint, json, response
 from sanic.log import logger
 from sanic_ext import openapi
