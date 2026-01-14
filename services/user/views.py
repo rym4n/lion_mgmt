@@ -21,7 +21,6 @@ from libs.security.authentication import (
     token_encode,
     refresh_token,
     validate_username,
-    token_decode,
 )
 from libs.security.authorization import requires_permission
 from libs.utils import (
@@ -146,7 +145,7 @@ async def new_user(request):
             mfa_enable=mfa_enable,
             mfa_key=pyotp.random_base32(32) if mfa_enable else None,
             permit_ip=request.json.get("permit_ip"),
-            tenant_id=t_ids[0],
+            tenant_id=t_ids[0] if t_ids else request.ctx.session["tenant_id"],
         )
         # 添加角色
         if request.json.get("role_names"):
@@ -244,13 +243,18 @@ async def all_users(request):
     page = int(req_json.get("page", 1))
     size = int(req_json.get("size", 15))
     offset = (page - 1) * size
-    limit = size
-    # 分页查询Account，返回总数和数据
-    condition = {"deleted": False, "type": "user"}
+
+    current_user: Account = request.ctx.session.get("account_info")
+    tenant_ids = await current_user.member.all().values_list("id", flat=True)
+
+    qs = Account.filter(deleted=False, type="user", member__id__in=tenant_ids).distinct()
+
     if req_json.get("username"):
-        condition["username"] = req_json.get("username")
-    total = await Account.filter(**condition).count()
-    users = await Account.filter(**condition).offset(offset).limit(limit).all().prefetch_related("roles")
+        qs = qs.filter(username__icontains=req_json["username"])
+
+    total = await Account.filter(deleted=False, type="user", member__id__in=tenant_ids).count()
+
+    users = await qs.offset(offset).limit(size).prefetch_related("roles")
 
     return response_ok(
         {
@@ -356,7 +360,7 @@ async def create_api_user(request):
         expiration=datetime.fromtimestamp(int(time.time()) + request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION)),
         creator=request.ctx.session["account_info"].username,
         permit_ip=request.json.get("permit_ip"),
-        tenant_id=t_ids[0]
+        tenant_id=t_ids[0] if t_ids else request.ctx.session["tenant_id"],
     )
     # 添加角色
     if request.json.get("role_names"):
@@ -1336,8 +1340,12 @@ async def init_scene_list(request):
     },
 )
 async def init_account_list(request):
-    users = await Account.filter(deleted=False, type="user").all().values_list("id", "username", "display_name")
-    return response_ok({"users": [{"id": user[0], "username": user[1], "display_name": user[2]} for user in users]})
+    tenant = await Tenant.get_or_none(deleted=False, id=request.ctx.session["tenant_id"]).prefetch_related("member")
+    data = []
+    for user in tenant.member:
+        if user.deleted is False and user.type == "user":
+            data.append({"id": user.id, "username": user.username, "display_name": user.display_name})
+    return response_ok({"users": data})
 
 
 @user_bp.post("/role-list")

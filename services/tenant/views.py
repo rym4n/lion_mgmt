@@ -1,6 +1,7 @@
 # coding=utf-8
 from sanic import Blueprint
 from sanic_ext import openapi
+from tortoise.functions import Count
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
@@ -164,25 +165,65 @@ async def del_tenant(request):
 )
 @requires_permission("tenant:u")
 async def edit_tenant(request):
-    id = request.json.get("id")
-    if not id:
+    tenant_id = request.json.get("id")
+    if not tenant_id:
         raise CustomError(ErrorCode.ParameterError)
 
-    tenant = await Tenant.get_or_none(id=id).prefetch_related("member")
+    async with in_transaction():
+        tenant = await Tenant.get_or_none(id=tenant_id).prefetch_related("member")
+        if tenant is None:
+            raise CustomError(ErrorCode.TenantNotFound)
 
-    if tenant is None:
-        raise CustomError(ErrorCode.TenantNotFound)
+        name = request.json.get("name")
+        if name:
+            tenant.name = name
+            await tenant.save(update_fields=["name"])
 
-    if request.json.get("name"):
-        tenant.name = request.json.get("name")
+        unsafe_usernames = []
 
-    if request.json.get("members"):
-        members = request.json.get("members")
-        users = await Account.filter(id__in=members).all()
-        await tenant.member.clear()
-        await tenant.member.add(*users)
+        if "members" in request.json:
+            target_member_ids = set(request.json.get("members") or [])
 
-    await tenant.save()
+            current_members = await tenant.member.all()
+            current_member_ids = {u.id for u in current_members}
+
+            ids_to_add = target_member_ids - current_member_ids
+            ids_to_remove = current_member_ids - target_member_ids
+
+            if ids_to_remove:
+                unsafe_users = await Account.filter(
+                    id__in=ids_to_remove
+                ).annotate(
+                    tenant_count=Count("member")
+                ).filter(
+                    tenant_count__lte=1
+                )
+
+                unsafe_ids = {u.id for u in unsafe_users}
+                unsafe_usernames = [u.display_name for u in unsafe_users]
+
+                ids_to_remove -= unsafe_ids
+
+            if ids_to_remove:
+                remove_users = await Account.filter(id__in=ids_to_remove)
+                await tenant.member.remove(*remove_users)
+                for user in remove_users:
+                    if user.tenant_id == tenant.id:
+                        remaining_tenants = await user.member.all()
+                        if remaining_tenants:
+                            tenant_new_id = remaining_tenants[0].id
+                            user.tenant_id = tenant_new_id
+                        else:
+                            user.tenant_id = None
+                        await user.save(update_fields=["tenant_id"])
+
+            if ids_to_add:
+                add_users = await Account.filter(id__in=ids_to_add)
+                await tenant.member.add(*add_users)
+
+    if unsafe_usernames:
+        return response_ok(f"更新成功，但以下用户未被移除（仅属于一个工作空间）: {', '.join(unsafe_usernames)}")
+
     return response_ok("更新成功")
 
 

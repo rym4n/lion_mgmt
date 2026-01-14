@@ -300,6 +300,9 @@ async def delete_role(request):
     if exists:
         raise CustomError(ErrorCode.RoleAlreadyUsed)
 
+    if role_id == "111111":
+        raise CustomError(ErrorCode.RoleCannotDelete)
+
     tenant_id = request.ctx.session.get("tenant_id")
 
     role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
