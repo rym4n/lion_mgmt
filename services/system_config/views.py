@@ -290,21 +290,6 @@ async def get_platform_config(request):
 )
 @requires_permission("status:r")
 async def get_system_status(request):
-    name_map = {
-        "lion-mgmt": "控制台服务",
-        "lion-web": "Web服务器",
-        "lion-db": "数据库服务",
-        "lion-kb": "数据库服务",
-        "lion-redis": "缓存服务",
-        "lion-ship": "ETL服务",
-        "lion-job": "任务调度服务",
-        "lion-worker": "执行引擎",
-        "lion-mq": "消息队列",
-        "lion-ai": "AI服务",
-        "lion-fs": "文件存储服务",
-        "lion-vl": "日志存储服务",
-        "lion-es": "日志存储服务",
-    }
     # 从VictoriaLog查询最新的健康检查数据
     # 查询最近5分钟的数据，确保能覆盖所有主机
     query = 'log_type:"health_check" | sort(_time desc)'
@@ -373,7 +358,7 @@ async def get_system_status(request):
             result.append(
                 {
                     "host": log_ip,
-                    "name": name_map.get(service_name, service_name),
+                    "name": service_name,
                     "run_status": status,
                     "health": health,
                     "cpu_percent": cpu_percent,
@@ -454,22 +439,6 @@ async def get_system_status_history(request):
     if not host or not service_name or not start_time or not end_time:
         raise CustomError(ErrorCode.ParameterError)
 
-    name_map = {
-        "lion-mgmt": "控制台服务",
-        "lion-web": "Web服务器",
-        "lion-db": "数据库服务",
-        "lion-kb": "数据库服务",
-        "lion-redis": "缓存服务",
-        "lion-ship": "ETL服务",
-        "lion-job": "任务调度服务",
-        "lion-worker": "执行引擎",
-        "lion-mq": "消息队列",
-        "lion-ai": "AI服务",
-        "lion-fs": "文件存储服务",
-        "lion-vl": "日志存储服务",
-        "lion-es": "日志存储服务",
-    }
-
     # 构建查询条件
     query = f'log_type:"health_check" AND log_ip:"{host}"'
     data_query = f"{query} | sort(_time desc)"
@@ -536,7 +505,7 @@ async def get_system_status_history(request):
             result.append(
                 {
                     "host": log_ip,
-                    "name": name_map.get(svc_name, svc_name),
+                    "name": svc_name,
                     "run_status": status,
                     "health": health,
                     "start_time": start_time_formatted,
