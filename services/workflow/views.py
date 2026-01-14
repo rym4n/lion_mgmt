@@ -162,7 +162,7 @@ async def create_workflow(request):
         if data.get("scenes"):
             scenes = await Scene.filter(name__in=data.get("scenes"), tenant_id=tenant_id).all()
             await playbook.scenes.add(*scenes)
-            await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
+            await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.name for s in scenes]))
 
         await playbook.fetch_related("tags", "scenes")
         print(tenant_id)
@@ -639,7 +639,7 @@ async def edit_workflow(request):
     if params.get("scenes"):
         scenes = await Scene.filter(name__in=params.get("scenes"), tenant_id=tenant_id)
         await playbook.scenes.add(*scenes)
-        await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
+        await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.name for s in scenes]))
     await playbook.tags.clear()
     if params.get("tags"):
         tags = await Tag.filter(name__in=params.get("tags"), tenant_id=tenant_id)
@@ -2018,7 +2018,7 @@ async def import_workflow(request):
                     await playbook.scenes.add(*scenes)
                     await caches.get("redis_chat").set(
                         f"workflow_scene_{playbook.id}",
-                        ",".join([s.id for s in scenes]),
+                        ",".join([s.name for s in scenes]),
                     )
 
             for flow_json in flow_json_list:
