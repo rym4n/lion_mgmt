@@ -452,6 +452,7 @@ async def all_permission(request):
             menu_dict[module] = True
     menu_dict["license_bp"] = True
     menu_dict["user_bp"] = True
+    menu_dict["tenant_bp"] = True
 
     permission_list = []
     permissions = await PermissionsMenu.all().values()
