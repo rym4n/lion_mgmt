@@ -12,7 +12,6 @@ from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.exceptions import IntegrityError, DoesNotExist
 from tortoise.expressions import Q
-from tortoise.functions import Count
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -22,7 +21,6 @@ from libs.security.authentication import (
     token_encode,
     refresh_token,
     validate_username,
-    token_decode,
 )
 from libs.security.authorization import requires_permission
 from libs.utils import (
@@ -362,7 +360,7 @@ async def create_api_user(request):
         expiration=datetime.fromtimestamp(int(time.time()) + request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION)),
         creator=request.ctx.session["account_info"].username,
         permit_ip=request.json.get("permit_ip"),
-        tenant_id=t_ids[0]
+        tenant_id=t_ids[0] if t_ids else request.ctx.session["tenant_id"],
     )
     # 添加角色
     if request.json.get("role_names"):
