@@ -101,6 +101,8 @@ async def get_license(request: Request):
                 name = item["name"]
                 group = item["group"]
                 if int(lic["grouplist"][group]["expireTime"]) > int(time.time() * 1000):
+                    if item["model"] == "ai_bp":
+                        ai_type += 1
                     valid_modules.add(name)
             valid_modules.update(["许可管理"])
             logger.info(f"valid_modules: {valid_modules}")
