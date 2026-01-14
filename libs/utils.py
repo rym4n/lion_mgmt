@@ -23,14 +23,14 @@ from botocore.config import Config
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from settings import RY_RES_KEY, REAL_IP_HEADER, FS_AK, S3_HOST, FS_SK, VL_HOST
+from settings import FS_AK, FS_SK, REAL_IP_HEADER, RY_RES_KEY, S3_HOST, VL_HOST
 
 password_hasher: PasswordHasher = PasswordHasher()
 

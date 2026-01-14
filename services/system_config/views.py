@@ -14,6 +14,7 @@ import pytz
 import yaml
 from aiocache import cached
 from sanic import Blueprint, json, response
+from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.transactions import in_transaction
 
@@ -276,6 +277,8 @@ async def get_platform_config(request):
                                         "status": {"type": "string"},
                                         "start_time": {"type": "string"},
                                         "check_time": {"type": "string"},
+                                        "cpu_percent": {"type": "string"},
+                                        "mem_percent": {"type": "string"},
                                     },
                                 },
                             },
@@ -306,11 +309,12 @@ async def get_system_status(request):
     }
     # 从VictoriaLog查询最新的健康检查数据
     query = 'log_type:"health_check" | sort(_time desc)'
-    data_res = await query_vlog(query, project_id=0, limit=1000)
+    data_res = await query_vlog(query, project_id=0, limit=1)
 
     if not data_res:
         raise CustomError(ErrorCode.CheckStatusNotFound)
 
+    logger.info(data_res)
     # 按主机分组，获取每个主机的最新一条记录
     host_latest = {}
     for item in data_res:
@@ -322,8 +326,21 @@ async def get_system_status(request):
 
     result = []
     for log_ip, log_data in host_latest.items():
-        data = log_data.get("data", {})
+        data = log_data.get("data")
         ctime = log_data.get("ctime", "")
+
+        # 尝试从 _msg 中解析，因为 VictoriaLogs 可能不会自动展开 JSON 对象
+        if not data and "_msg" in log_data:
+            try:
+                msg_data = orjson.loads(log_data["_msg"])
+                if isinstance(msg_data, dict):
+                    data = msg_data.get("data", {})
+                    ctime = msg_data.get("ctime", ctime)
+            except Exception:
+                pass
+
+        if not data:
+            data = {}
 
         # 处理时间格式
         check_time = ""
@@ -341,10 +358,13 @@ async def get_system_status(request):
 
         # 将data中的每个服务展开为一条记录
         for service_name, service_info in data.items():
+            logger.info(f"service_name: {service_name}, service_info: {service_info}")
             if not isinstance(service_info, dict):
                 continue
 
             status = service_info.get("run_status", "")
+            cpu_percent = service_info.get("cpu_percent", "")
+            mem_percent = service_info.get("mem_percent", "")
             start_time_str = service_info.get("start_time", "")
 
             start_time = ""
@@ -356,13 +376,12 @@ async def get_system_status(request):
                     "host": log_ip,
                     "name": name_map.get(service_name, service_name),
                     "status": status,
+                    "cpu_percent": cpu_percent,
+                    "mem_percent": mem_percent,
                     "start_time": start_time,
                     "check_time": check_time,
                 }
             )
-
-    if not result:
-        raise CustomError(ErrorCode.CheckStatusNotFound)
 
     return response_ok(result)
 
@@ -375,7 +394,7 @@ async def get_system_status(request):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["host", "start_time", "end_time"],
+                "required": ["host", "service_name", "start_time", "end_time"],
                 "properties": {
                     "host": {"type": "string", "description": "主机IP地址"},
                     "service_name": {"type": "string", "description": "服务名称（可选），如lion-mgmt、lion-web等"},
@@ -432,7 +451,7 @@ async def get_system_status_history(request):
     start_time = params.get("start_time")
     end_time = params.get("end_time")
 
-    if not host or not start_time or not end_time:
+    if not host or not service_name or not start_time or not end_time:
         raise CustomError(ErrorCode.ParameterError)
 
     name_map = {
@@ -464,8 +483,21 @@ async def get_system_status_history(request):
     result = []
     for log_data in data_res:
         log_ip = log_data.get("log_ip", host)
-        data = log_data.get("data", {})
+        data = log_data.get("data")
         ctime = log_data.get("ctime", "")
+
+        # 尝试从 _msg 中解析，因为 VictoriaLogs 可能不会自动展开 JSON 对象
+        if not data and "_msg" in log_data:
+            try:
+                msg_data = orjson.loads(log_data["_msg"])
+                if isinstance(msg_data, dict):
+                    data = msg_data.get("data", {})
+                    ctime = msg_data.get("ctime", ctime)
+            except Exception:
+                pass
+
+        if not data:
+            data = {}
 
         # 处理时间格式
         check_time = ""

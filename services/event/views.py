@@ -4,8 +4,7 @@ from datetime import datetime
 
 import orjson
 import pytz
-from sanic import Blueprint
-from sanic import response
+from sanic import Blueprint, response
 from sanic_ext import openapi
 from tortoise.transactions import in_transaction
 
@@ -13,23 +12,11 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
-from libs.utils import gen_random_code, strip_timezone_to_seconds, gen_run_id
-from models import (
-    Events,
-    Runlog,
-    Room,
-    Account,
-    Role,
-    EventsIngestion,
-    ToolAction,
-    ToolResources,
-    Tool,
-    PlaybookVersion,
-)
+from libs.utils import gen_random_code, gen_run_id, strip_timezone_to_seconds
+from models import Account, Events, EventsIngestion, PlaybookVersion, Role, Room, Runlog, Tool, ToolAction, ToolResources
 from services.timed.views import runlog_list
-from settings import TASK_TOPIC, TZ, KAFKA_CONFIG
+from settings import TASK_TOPIC, TZ
 
 TYPE_DICT = {"PLAYBOOK": "flow", "ACTION": "action"}
 

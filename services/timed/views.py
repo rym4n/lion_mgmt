@@ -12,21 +12,11 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
-from models import (
-    Timed,
-    Playbook,
-    ToolAction,
-    Runlog,
-    PlaybookVersion,
-    PlaybookPermissions,
-    ActionPermissions,
-    Account,
-)
+from models import Account, ActionPermissions, Playbook, PlaybookPermissions, PlaybookVersion, Runlog, Timed, ToolAction
 from services.workflow.views import get_playbook_input
-from settings import TASK_TOPIC, TZ, KAFKA_CONFIG
+from settings import TASK_TOPIC, TZ
 
 timed_bp = Blueprint("timed", url_prefix="/timed")
 _all__ = ["timed_bp"]
