@@ -400,11 +400,11 @@ async def get_system_status(request):
                     "service_name": {"type": "string", "description": "服务名称（可选），如lion-mgmt、lion-web等"},
                     "start_time": {
                         "type": "string",
-                        "description": "开始时间，格式为2025-01-01 00:00:00",
+                        "description": "开始时间，格式为2025-01-01T00:00:00.000Z",
                     },
                     "end_time": {
                         "type": "string",
-                        "description": "结束时间，格式为2025-01-01 00:00:00",
+                        "description": "结束时间，格式为2025-01-02T00:00:00.000Z",
                     },
                 },
             }

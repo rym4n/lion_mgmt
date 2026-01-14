@@ -288,20 +288,42 @@ def decrypt_aes256_gcm(encrypted_data: str) -> str:
         raise ValueError("解密失败: 密码错误或数据损坏") from e
 
 
-def time_conversion(original_time):
-    dt = datetime.datetime.strptime(original_time, "%Y-%m-%d %H:%M:%S")
-    dt_utc = dt.replace(tzinfo=datetime.timezone.utc)
-    rfc3339 = dt_utc.isoformat().replace("+00:00", "Z")
-    return rfc3339
+def local_time_to_utc(time_str):
+    """将本地时间转换为UTC时间"""
+    if not time_str:
+        return ""
+    try:
+        time_str = time_str.strip()
+        try:
+            dt = datetime.datetime.fromisoformat(time_str)
+        except ValueError:
+            # 尝试处理一些常见的非标准格式，比如空格分隔
+            if ' ' in time_str and 'T' not in time_str:
+                dt = datetime.datetime.fromisoformat(time_str.replace(' ', 'T'))
+            else:
+                dt = datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S.%fZ")
+        # 转换为 UTC
+        if dt.tzinfo is None:
+            # 如果是 naive 时间，认为是本地时间
+            dt = dt.astimezone().astimezone(datetime.timezone.utc)
+        else:
+            dt = dt.astimezone(datetime.timezone.utc)
+        # 格式化
+        return dt.isoformat().replace("+00:00", "Z")
+    except Exception:
+        # 如果解析失败，为了兼容性抛出 ValueError 或者让调用者处理
+        # 这里为了保持行为一致性（原函数也是报错），我们抛出异常
+        raise ValueError(f"Invalid time format: {time_str}")
+
 
 
 async def query_vlog(query, project_id, start=None, end=None, account_id=0, limit=None):
     # 构建VictoriaLogs查询参数
     params = {"query": query}
     if start:
-        params["start"] = time_conversion(start)
+        params["start"] = local_time_to_utc(start)
     if end:
-        params["end"] = time_conversion(end)
+        params["end"] = local_time_to_utc(end)
     if limit:
         params["limit"] = limit
 
