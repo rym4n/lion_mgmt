@@ -191,13 +191,7 @@ async def edit_tenant(request):
             ids_to_remove = current_member_ids - target_member_ids
 
             if ids_to_remove:
-                unsafe_users = await Account.filter(
-                    id__in=ids_to_remove
-                ).annotate(
-                    tenant_count=Count("member")
-                ).filter(
-                    tenant_count__lte=1
-                )
+                unsafe_users = await Account.filter(id__in=ids_to_remove).annotate(tenant_count=Count("member")).filter(tenant_count__lte=1)
 
                 unsafe_ids = {u.id for u in unsafe_users}
                 unsafe_usernames = [u.display_name for u in unsafe_users]
@@ -236,9 +230,7 @@ async def edit_tenant(request):
             "schema": {
                 "type": "object",
                 "required": ["id"],
-                "properties": {
-                    "id": {"type": "string", "description": "工作空间id"}
-                },
+                "properties": {"id": {"type": "string", "description": "工作空间id"}},
             }
         }
     },

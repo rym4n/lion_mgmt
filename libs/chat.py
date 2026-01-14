@@ -86,7 +86,9 @@ async def get_prompt_words(prompt_word, tenant_id):
         tool_names.remove("lion_mgmt")
         tool_names.remove("lion_ai")
 
-    latest_versions = await ToolAction.filter(deleted=False, tool_name__in=tool_names, tenant_id=tenant_id).annotate(latest_version=Max("version_number")).group_by("tool_name").values("tool_name", "latest_version")
+    latest_versions = (
+        await ToolAction.filter(deleted=False, tool_name__in=tool_names, tenant_id=tenant_id).annotate(latest_version=Max("version_number")).group_by("tool_name").values("tool_name", "latest_version")
+    )
 
     pairs = [(row["tool_name"], row["latest_version"]) for row in latest_versions]
 
@@ -494,7 +496,7 @@ class ChatManager:
                     audit_node=log["audit_app"],
                     approve_type=int(log["approve_type"]),
                     callback_token=log.get("callback_token"),
-                    tenant_id=log["tenant_id"]
+                    tenant_id=log["tenant_id"],
                 )
                 if log.get("users"):
                     users = await Account.filter(id__in=log["users"].split(",")).all()
@@ -637,15 +639,7 @@ class ChatManager:
             raise Exception("消息不能为空")
 
         # 保存消息到数据库
-        message = await Message.create(
-            type="public",
-            sender=user,
-            room=room,
-            content=content,
-            image_content=image_content,
-            receiver=user,
-            tenant_id=tenant_id
-        )  # 群聊消息设为发送者自己作为占位符
+        message = await Message.create(type="public", sender=user, room=room, content=content, image_content=image_content, receiver=user, tenant_id=tenant_id)  # 群聊消息设为发送者自己作为占位符
 
         if specify_users:
             for specify_user in specify_users:
@@ -866,14 +860,7 @@ class ChatManager:
         if not room:
             raise Exception("作战室不存在")
         announcement = await Message.create(
-            type="announcement",
-            sender=user,
-            room=room,
-            content=content,
-            image_content=image_content,
-            is_pinned=True,
-            receiver=user,
-            tenant_id=tenant_id
+            type="announcement", sender=user, room=room, content=content, image_content=image_content, is_pinned=True, receiver=user, tenant_id=tenant_id
         )  # 设公告发送者自己作为占位符
 
         # 指定房间广播公告

@@ -146,7 +146,7 @@ async def all_variables(request):
     offset = (page - 1) * size
     limit = size
     tenant_id = request.ctx.session.get("tenant_id")
-    condition = Q(type="global",tenant_id=tenant_id)
+    condition = Q(type="global", tenant_id=tenant_id)
     keyword = req_json.get("keyword")
     if keyword:
         condition = Q(name__icontains=keyword) | Q(value__contains=[keyword])

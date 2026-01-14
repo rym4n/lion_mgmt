@@ -1,18 +1,14 @@
 # coding=utf-8
 from asyncpg.exceptions import UniqueViolationError
-from sanic import HTTPResponse, exceptions, MethodNotAllowed
+from sanic import HTTPResponse, MethodNotAllowed, exceptions
 from sanic.log import logger
 from sanic.request import Request
-from tortoise.exceptions import (
-    ValidationError,
-    IntegrityError,
-    FieldError,
-    DoesNotExist,
-)
+from tortoise.exceptions import DoesNotExist, FieldError, IntegrityError, ValidationError
 
 from core.response import response_fail
-from .base import BaseExcHandler
+
 from ..error_code import ErrorCode
+from .base import BaseExcHandler
 
 
 class UnknownExcHandler(BaseExcHandler):
