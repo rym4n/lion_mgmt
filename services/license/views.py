@@ -98,25 +98,18 @@ async def get_license(request: Request):
         if role.permissions:
             valid_modules = set()
             for item in lic["moduleList"]:
-                module = item["module"]
-                if module == "ai_bp":
-                    if item["auth"] and int(lic["grouplist"][item["group"]]["expireTime"]) > int(time.time() * 1000):
-                        if item["name"] == "AI智能问答":
-                            ai_type += 1
-                        else:
-                            ai_type += 2
-                    continue
+                name = item["name"]
                 group = item["group"]
                 if int(lic["grouplist"][group]["expireTime"]) > int(time.time() * 1000):
-                    valid_modules.add(module)
-            valid_modules.update(["license_bp"])
+                    valid_modules.add(name)
+            valid_modules.update(["许可管理"])
             logger.info(f"valid_modules: {valid_modules}")
             # 超级权限处理
-            if "*:*" in role.permissions:
-                # 基于 license 构造权限列表
-                perm_models.update([p["model"] for p in permissions if p["bp"] in valid_modules and p["model"] != "dashboard"])
-            else:
-                perm_models.update([p.split(":")[0] for p in role.permissions if p.split(":")[0] in valid_modules and p.split(":")[0] != "dashboard"])
+            if "*:*" not in role.permissions:
+                relo_permissions_model = [p.split(":")[0] for p in role.permissions]
+                await PermissionsMenu.filter(model__in=relo_permissions_model).all().values()
+            perm_models.update([p["model"] for p in permissions if p["description"] in valid_modules and p["description"] != "仪表盘"])
+
         logger.info(f"perm_models: {perm_models}")
         for model in perm_models:
             permission_data = next((p for p in permissions if p["model"] == model), None)
@@ -176,13 +169,6 @@ async def get_license(request: Request):
             menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
         elif menu["meta"]["title"] in ["事件管理", "Event Management"]:
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
-    if ai_type in [1, 2, 3]:
-        await Config.update_or_create(
-            key="PROMPT_WORD",
-            defaults={"value": Prompt_Word_Dict.get(ai_type)},
-            module="ai",
-        )
-        await Config.update_or_create(key="AI", defaults={"value": str(ai_type)}, module="ai")
 
     return response_ok(menus)
 
