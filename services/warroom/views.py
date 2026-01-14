@@ -1453,15 +1453,7 @@ async def send_message(request):
     content = data.get("content", "")
     image_content = data.get("image_content", "")
 
-    message = await Message.create(
-        type="private",
-        sender=sender,
-        room=room,
-        content=content,
-        image_content=image_content,
-        receiver=partner,
-        tenant_id=tenant_id
-    )
+    message = await Message.create(type="private", sender=sender, room=room, content=content, image_content=image_content, receiver=partner, tenant_id=tenant_id)
 
     await MessageAccount.create(message=message, account_id=partner.id, tenant_id=tenant_id)
 

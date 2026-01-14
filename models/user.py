@@ -112,7 +112,7 @@ class Role(BaseModel):
         table = "role"
         ordering = ["-utime"]
 
-        unique_together = (('tenant_id', "name"),)
+        unique_together = (("tenant_id", "name"),)
 
 
 class PermissionsMenu(BaseModel):

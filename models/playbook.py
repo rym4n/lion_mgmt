@@ -38,7 +38,7 @@ class Playbook(BaseModel):
         table = "playbook"
         ordering = ["-utime"]
 
-        unique_together = (('tenant_id', "name"),)
+        unique_together = (("tenant_id", "name"),)
 
 
 class PlaybookVersion(BaseModel):

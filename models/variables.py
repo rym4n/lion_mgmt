@@ -37,4 +37,4 @@ class Variables(BaseModel):
         table = "variables"
         ordering = ["-utime"]
 
-        unique_together = (('tenant_id', "name"),)
+        unique_together = (("tenant_id", "name"),)

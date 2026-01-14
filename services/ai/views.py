@@ -63,15 +63,7 @@ async def ai_question(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     room = await Room.get(id=room_id, deleted=False, tenant_id=tenant_id)
-    message = await Message.create(
-        type="ai-question",
-        sender=user,
-        room=room,
-        content=content,
-        image_content="",
-        receiver=user,
-        tenant_id=tenant_id
-    )  # 群聊消息设为发送者自己作为占位符
+    message = await Message.create(type="ai-question", sender=user, room=room, content=content, image_content="", receiver=user, tenant_id=tenant_id)  # 群聊消息设为发送者自己作为占位符
 
     message_data = {
         "type": "ai-question",
@@ -119,7 +111,7 @@ async def ai_question(request):
                     "type": {"type": "string", "description": "消息类型"},
                     "create": {"type": "boolean", "description": "是否创建历史消息"},
                     "eof": {"type": "boolean", "description": "是否为结尾消息"},
-                    "ai_msg_id": {"type": "string", "description": "AI类型的消息id"}
+                    "ai_msg_id": {"type": "string", "description": "AI类型的消息id"},
                 },
             }
         }
@@ -166,15 +158,7 @@ async def create_msg(request):
     room = await Room.get(name=room_name, deleted=False, tenant_id=tenant_id)
     message = None
     if request.json.get("create"):
-        message = await Message.create(
-            type=msg_type,
-            sender=user,
-            room=room,
-            content=content,
-            image_content="",
-            receiver=user,
-            tenant_id=tenant_id
-        )  # 群聊消息设为发送者自己作为占位符
+        message = await Message.create(type=msg_type, sender=user, room=room, content=content, image_content="", receiver=user, tenant_id=tenant_id)  # 群聊消息设为发送者自己作为占位符
 
     message_data = {
         "type": msg_type,

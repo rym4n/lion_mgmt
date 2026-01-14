@@ -537,7 +537,12 @@ async def get_flow_json(request):
     if pv:
         data = pv.json
     else:
-        pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False, tenant_id=tenant_id).order_by("-version").first().prefetch_related("playbook", "creator", "updator")
+        pv = (
+            await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False, tenant_id=tenant_id)
+            .order_by("-version")
+            .first()
+            .prefetch_related("playbook", "creator", "updator")
+        )
         if pv:
             data = pv.json
     return response_ok(data)
@@ -674,7 +679,7 @@ async def edit_workflow_flow(request):
         raise CustomError(ErrorCode.ParameterError)
 
     tenant_id = request.ctx.session.get("tenant_id")
-    
+
     pv = await PlaybookVersion.get(id=request.json.get("flow_id"), tenant_id=tenant_id).prefetch_related("playbook", "creator", "updator")
     old_data = pv.flow_json
     pv.flow_json = request.json.get("flow_json")
@@ -745,7 +750,7 @@ async def publish_workflow(request):
         raise CustomError(ErrorCode.ParameterError)
 
     tenant_id = request.ctx.session.get("tenant_id")
-    
+
     await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0, tenant_id=tenant_id).update(
         status=1,
         updator=request.ctx.session["account_info"],
@@ -904,12 +909,7 @@ async def delete_workflow_version(request):
 @requires_permission("workflow:u")
 async def stop_workflow(request):
     run_id = request.json.get("run_id")
-    msg = {
-        "run_type": "kill",
-        "run_id": run_id,
-        "run_args": {"executor": request.ctx.session["account_info"].id},
-        "tenant_id": request.ctx.session.get("tenant_id")
-    }
+    msg = {"run_type": "kill", "run_id": run_id, "run_args": {"executor": request.ctx.session["account_info"].id}, "tenant_id": request.ctx.session.get("tenant_id")}
     await aproduce(TASK_TOPIC, msg)
     return response_ok("success")
 
@@ -1571,14 +1571,7 @@ async def create_webhook(request):
     # 生成唯一的webhook token
     webhook_token = secrets.token_urlsafe(10)
 
-    webhook = await PlaybookWebhook.create(
-        playbook_version=pv,
-        webhook_token=webhook_token,
-        enabled=True,
-        creator=request.ctx.session["account_info"],
-        description=description,
-        tenant_id=tenant_id
-    )
+    webhook = await PlaybookWebhook.create(playbook_version=pv, webhook_token=webhook_token, enabled=True, creator=request.ctx.session["account_info"], description=description, tenant_id=tenant_id)
 
     return response_ok(webhook.json)
 

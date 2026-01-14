@@ -240,7 +240,7 @@ async def add_timed(request):
         internal=maintenance_mode if maintenance_mode else False,
         creator=request.ctx.session["account_info"],
         updator=request.ctx.session["account_info"],
-        tenant_id=tenant_id
+        tenant_id=tenant_id,
     )
     msg["timer_id"] = timed.id
     msg["timer_rule"] = timer_rule

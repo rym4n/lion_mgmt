@@ -44,4 +44,4 @@ class Scene(BaseModel):
         table = "scene"
         ordering = ["-ctime"]
 
-        unique_together = (('tenant_id', "name"),)
+        unique_together = (("tenant_id", "name"),)

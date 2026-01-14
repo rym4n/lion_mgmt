@@ -281,7 +281,7 @@ async def artificial_create_event_wuzhi(request):
             updator=user,
             event_ingestion_id=event_ingestion_id,
             log_data=log_data,
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
         )
         await event.fetch_related("scene")
         run_log = await Runlog.filter(event_id=event.id, deleted=False).first()
