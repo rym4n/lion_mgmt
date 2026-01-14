@@ -112,7 +112,7 @@ async def get_license(request: Request):
                     group = item["group"]
                     if int(lic["grouplist"][group]["expireTime"]) > int(time.time() * 1000):
                         valid_modules.add(module)
-                valid_modules.update(["license_bp", "user_bp"])
+                valid_modules.update(["license_bp"])
                 perm_models.update([p["model"] for p in permissions if p["bp"] in valid_modules and p["model"] != "dashboard"])
             else:
                 perm_models.update([p.split(":")[0] for p in role.permissions if p.split(":")[0] != "dashboard"])
