@@ -2363,7 +2363,7 @@ async def tool_debug(request):
     for _ in range(30):
         await asyncio.sleep(1)
         log = await Runlog.get_or_none(run_id=run_id)
-        if log:
+        if log and log.result:
             result = orjson.loads(log.result)
             data = result.get("data")
             return response_ok(data)
