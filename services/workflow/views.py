@@ -805,7 +805,7 @@ async def delete_workflow(request):
     condition = Q(tenant_id=tenant_id)
     if pv_ids:
         for pv_id in pv_ids:
-            condition |= Q(script_id__contains=[pv_id])
+            condition &= Q(script_id__contains=[pv_id])
         if await EventRelatedScript.filter(condition).exists():
             raise CustomError(ErrorCode.PlaybookUsedByEvent)
         if await Timed.filter(playbook=playbook, playbook_version__in=pv_versions, deleted=False, tenant_id=tenant_id).exists():

@@ -904,8 +904,9 @@ async def delete_tool_all(request):
         raise CustomError(ErrorCode.ParameterError)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
 
-    if await Tool.filter(name=name, deleted=False, maintain=True, tenant_id=tenant_id).exists():
+    if await Tool.filter(name=name, deleted=False, maintain=maintenance_mode if maintenance_mode else False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.InternalDeleteError)
 
     if await Tool.filter(name=name, deleted=False, status=1, tenant_id=tenant_id).exists():
