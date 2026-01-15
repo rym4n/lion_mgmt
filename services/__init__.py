@@ -24,6 +24,7 @@ from services.mcp.views import mcp_bp
 from services.others.views import activity, playbook_list, all_apps
 from services.role.views import role_bp
 from services.scene.views import scene_bp
+from services.secure.views import secure_bp
 from services.system_config.views import system_bp
 from services.tenant.views import tenant_bp
 from services.timed.views import timed_bp
@@ -56,6 +57,7 @@ def register_blueprints(app: Sanic) -> None:
     app.blueprint(scene_bp)
     app.blueprint(dashboard_bp)
     app.blueprint(system_bp)
+    app.blueprint(secure_bp)
     app.blueprint(warroom_bp)
     app.blueprint(approve_bp)
     app.blueprint(mcp_bp)

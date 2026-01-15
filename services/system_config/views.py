@@ -99,7 +99,7 @@ async def upload_image(request):
         default = {
             "Version": system_version or "3.0.0",
             "Title": system_name or "AIOE智能运营与自动化系统",
-            "Content": copyright_text or "Copyright © 2025 虹云数据",
+            "Content": copyright_text or " © 2026",
             "FixedHeader": True,
             "HiddenSideBar": False,
             "MultiTagsCache": False,
@@ -222,7 +222,7 @@ async def get_platform_config(request):
     default = {
         "Version": "V3.0",
         "Title": "AIOE智能运营与自动化系统",
-        "Content": "Copyright © 2025 虹云数据",
+        "Content": " © 2026",
         "FixedHeader": True,
         "HiddenSideBar": False,
         "MultiTagsCache": False,
@@ -374,7 +374,7 @@ async def get_system_status(request):
 @system_bp.post("/status/history")
 @openapi.definition(
     summary="查询健康检查历史数据",
-    description="查询指定主机和服务的健康检查历史数据，需要系统配置查看权限",
+    description="查询指定主机和服务的健康检查历史数据，需要系统状态查看权限",
     body={
         "application/json": {
             "schema": {
@@ -444,7 +444,7 @@ async def get_system_status_history(request):
     data_query = f"{query} | sort(_time desc)"
 
     # 从VictoriaLog查询指定时间范围的健康检查数据
-    data_res = await query_vlog(data_query, project_id=0, start=start_time, end=end_time, limit=1000)
+    data_res = await query_vlog(data_query, project_id=0, start=start_time, end=end_time, limit=1500)
 
     if not data_res:
         return response_ok([])

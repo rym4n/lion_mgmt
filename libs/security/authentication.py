@@ -12,12 +12,8 @@ from sanic.log import logger
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.utils import get_client_ip, ip_in_list
-from models import Account, Tenant
-from settings import (
-    SECRET,
-    SESSION_ENCODING_ALGORITHM,
-    AUTHENTICATION_SESSION_EXPIRATION,
-)
+from models import Account, Config, Tenant
+from settings import AUTHENTICATION_SESSION_EXPIRATION, SECRET, SECURE_CONFIG_DEFAULT, SESSION_ENCODING_ALGORITHM
 
 
 async def authenticate(request: Request):
@@ -160,10 +156,117 @@ def validate_username(username: str) -> str:
     return username
 
 
-def validate_password(password: str) -> str:
+async def get_secure_config_dict() -> dict:
     """
-    密码强度校验，必须包含大小写字母、数字、特殊字符、长度不小于8
+    获取安全配置，与数据库合并
     """
-    if not re.search(r"^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[@#$%^&+=!]).{8,}$", password):
-        raise CustomError(ErrorCode.WeakPassword)
+    configs = await Config.filter(module="secure").all()
+    config_dict = {c.key: c.value for c in configs}
+
+    result = {}
+    for key, default_value in SECURE_CONFIG_DEFAULT.items():
+        value = config_dict.get(key)
+        if value is None:
+            result[key] = default_value
+        else:
+            if isinstance(default_value, bool):
+                result[key] = value.lower() == "true"
+            elif isinstance(default_value, int):
+                try:
+                    result[key] = int(value)
+                except ValueError:
+                    result[key] = default_value
+            else:
+                result[key] = value
+    return result
+
+
+def has_consecutive_both(s: str, n: int = 5) -> bool:
+    if n <= 1:
+        return True
+    inc = dec = 1
+    for i in range(1, len(s)):
+        d = ord(s[i]) - ord(s[i - 1])
+        if d == 1:
+            inc += 1
+            dec = 1
+        elif d == -1:
+            dec += 1
+            inc = 1
+        else:
+            inc = dec = 1
+        if inc >= n or dec >= n:
+            return True
+    return False
+
+
+def has_keyboard_sequence_plus(s: str, min_len: int = 4, include_reverse: bool = True):
+    seqs = [
+        "1234567890",
+        "qwertyuiop",
+        "asdfghjkl",
+        "zxcvbnm",
+        "1qaz",
+        "2wsx",
+        "3edc",
+        "4rfv",
+        "5tgb",
+        "6yhn",
+        "7ujm",
+        "qaz",
+        "wsx",
+        "edc",
+        "rfv",
+        "tgb",
+        "yhn",
+        "ujm",
+    ]
+    if include_reverse:
+        seqs = seqs + [x[::-1] for x in seqs]
+    s = s.casefold()
+    for i in range(0, len(s) - min_len + 1):
+        chunk = s[i : i + min_len]
+        for seq in seqs:
+            if chunk in seq:
+                return True
+    return False
+
+
+async def validate_password(password: str) -> str:
+    """
+    密码强度校验，基于安全配置
+    """
+    config = await get_secure_config_dict()
+
+    # 1. 长度校验
+    if len(password) < config["password_length_min"] or len(password) > config["password_length_max"]:
+        raise CustomError(ErrorCode.PasswordLengthError)
+
+    # 2. 包含字符类型校验
+    if config["password_include_lowercase"] and not re.search(r"[a-z]", password):
+        raise CustomError(ErrorCode.PasswordMissingLowercase)
+    if config["password_include_uppercase"] and not re.search(r"[A-Z]", password):
+        raise CustomError(ErrorCode.PasswordMissingUppercase)
+    if config["password_include_digit"] and not re.search(r"\d", password):
+        raise CustomError(ErrorCode.PasswordMissingDigit)
+    if config["password_include_special"] and not re.search(r"[@#$%^&+=!]", password):
+        raise CustomError(ErrorCode.PasswordMissingSpecial)
+
+    # 3. 连续字符长度校验
+    if config["password_exclude_continuous_length"] > 0:
+        if has_consecutive_both(password, config["password_exclude_continuous_length"]):
+            raise CustomError(ErrorCode.PasswordContinuousChar)
+
+    # 4. 键盘序校验
+    if config["password_exclude_keyboard_order"]:
+        has_seq = has_keyboard_sequence_plus(password)
+        if has_seq:
+            raise CustomError(ErrorCode.PasswordKeyboardOrder)
+
+    # 5. 字符重复校验
+    if config["password_exclude_repeat"]:
+        # 检查是否有连续重复字符，例如 aaa
+        if re.search(r"(.)\1\1", password):
+            raise CustomError(ErrorCode.PasswordRepeatedChar)
+
     return password

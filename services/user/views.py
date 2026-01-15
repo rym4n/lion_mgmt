@@ -16,14 +16,14 @@ from tortoise.expressions import Q
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authentication import refresh_token, token_encode, validate_password, validate_username
+from libs.security.authentication import get_secure_config_dict, refresh_token, token_encode, validate_password, validate_username
 from libs.security.authorization import requires_permission
 from libs.utils import get_client_ip, get_expiration_date, ip_in_list, password_hasher, validate_ips
 from models import Account, Role, Scene, Tenant
 from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE
 
 user_bp = Blueprint("user", url_prefix="/user")
-_all__ = ["user_bp"]
+__all__ = ["user_bp"]
 
 
 @user_bp.post("/new")
@@ -117,10 +117,14 @@ async def new_user(request):
     t_ids = request.json.get("tenant_ids", [])
 
     try:
+        # 密码强度校验
+        password = request.json.get("password") or ""
+        await validate_password(password)
+
         mfa_enable = bool(request.json.get("mfa_enable", False)) or False
         account = await Account.create(
             username=validate_username(request.json.get("username", "")),
-            password=password_hasher.hash(validate_password(request.json.get("password") or "")),
+            password=password_hasher.hash(password),
             display_name=request.json.get("display_name"),
             email=request.json.get("email"),
             phone=request.json.get("phone"),
@@ -531,6 +535,7 @@ async def update_api_user(request):
                 "properties": {
                     "username": {"type": "string", "description": "用户名"},
                     "password": {"type": "string", "description": "密码"},
+                    "captcha_code": {"type": "string", "description": "验证码"},
                 },
             }
         }
@@ -581,15 +586,32 @@ async def update_api_user(request):
 async def login(request):
     username = request.json.get("username")
     password = request.json.get("password")
+    captcha_code = request.json.get("captcha_code")
+
     if not username or not password:
         raise CustomError(ErrorCode.CredentialsError)
+
+    secure_config = await get_secure_config_dict()
+
+    # 1. 验证码校验
+    if secure_config["captcha_enabled"]:
+        # TODO: 这里需要结合实际的验证码生成和缓存逻辑
+        # 目前假设前端传来的 captcha_code 必须存在
+        if not captcha_code:
+            # 暂时用 CredentialsError，或者新增一个验证码错误的 ErrorCode
+            raise CustomError(ErrorCode.ParameterError)
 
     # 防止暴力破解
     user_attempts = await request.app.ctx.cache_client.get(f"{username}_login_attempts")
     if user_attempts is None:
         user_attempts = 0
-    if user_attempts > MAX_CHALLENGE_ATTEMPTS:
-        raise CustomError(ErrorCode.MaxChallenge)
+
+    # 使用配置中的最大重试次数
+    max_retries = secure_config["password_max_retries"]
+    lock_duration = secure_config["account_lock_duration"]
+
+    if user_attempts > max_retries:
+        raise CustomError(ErrorCode.AccountLocked)
 
     client_ip = get_client_ip(request)
 
@@ -597,29 +619,51 @@ async def login(request):
     ip_attempts = await request.app.ctx.cache_client.get(f"{client_ip}_login_attempts")
     if ip_attempts is None:
         ip_attempts = 0
-    if ip_attempts > MAX_CHALLENGE_ATTEMPTS:
-        raise CustomError(ErrorCode.MaxChallenge)
+    if ip_attempts > max_retries:
+        raise CustomError(ErrorCode.AccountLocked)
 
     try:
         account = await Account.get(username=username, deleted=False).prefetch_related("roles")
         if account.permit_ip and ip_in_list(client_ip, account.permit_ip.split(",")) is False:
             raise CustomError(ErrorCode.IpForbidden)
+
+        # 2. 账号自动冻结检查
+        if secure_config["account_auto_freeze_enabled"]:
+            # 使用 utime 作为最后活动时间，如果距离现在超过 N 天，则冻结
+            # 注意：这里需要确保 utime 是带时区的或者统一的
+            last_active = account.utime.timestamp()  # float seconds
+            now = time.time()
+            if (now - last_active) > (secure_config["account_auto_freeze_days"] * 86400):
+                account.disabled = True
+                await account.save(update_fields=["disabled"])
+                raise CustomError(ErrorCode.AccountDisabled)
+
+        if account.deleted:
+            raise CustomError(ErrorCode.AccountNotFound)
+        elif account.disabled:
+            raise CustomError(ErrorCode.AccountDisabled)
+
         # 验证密码
         password_hasher.verify(account.password, password)
         if password_hasher.check_needs_rehash(account.password):
             account.password = password_hasher.hash(password)
             await account.save(update_fields=["password"])
-        if account.deleted:
-            raise CustomError(ErrorCode.AccountNotFound)
-        elif account.disabled:
-            raise CustomError(ErrorCode.AccountDisabled)
+
+        # 登录成功，清除错误次数
+        await request.app.ctx.cache_client.delete(f"{username}_login_attempts")
+
         resp = account.json
         token_id = str(uuid.uuid4())
+
+        # 3. MFA 强制开启检查
+        # 如果全局开启了 MFA，或者用户自己开启了 MFA
+        mfa_enabled = secure_config["mfa_enabled"] or account.mfa_enable
+
         token = token_encode(
             account.id,
             account.username,
             account.display_name,
-            account.mfa_enable,
+            mfa_enabled,  # 使用计算后的 mfa 状态
             account.tenant_id,
             token_id,
             ip=client_ip,
@@ -627,7 +671,13 @@ async def login(request):
         await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
         # resp['aioe-auth'] = token
         # 如果开启了MFA，缓存记录MFA密钥，便于mfa认证
-        if account.mfa_enable and account.mfa_key:
+        if mfa_enabled:
+            # 如果全局开启，但用户没有 key，生成一个
+            if not account.mfa_key:
+                account.mfa_key = pyotp.random_base32(32)
+                account.mfa_enable = True
+                await account.save(update_fields=["mfa_key", "mfa_enable"])
+
             await request.app.ctx.cache_client.set(
                 f"mfa_key_{token_id}",
                 account.mfa_key,
@@ -636,6 +686,12 @@ async def login(request):
             # 如果是开启mfa之后的第一次登录，在mfa还没绑定的情况下，返回mfa_uri，供前端渲染二维码
             if not account.mfa_bind:
                 resp["mfa_uri"] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name="AIOE")
+
+        # todo: 4. 首次登录强制修改密码
+        # if secure_config["force_change_password_first_login"]:
+        #     if abs(account.ctime.timestamp() - account.utime.timestamp()) < 10:
+        #         resp["force_change_password"] = True
+
         tmp_resp = response_ok(resp)
         tmp_resp.cookies.add_cookie(
             "aioe-auth",
@@ -649,10 +705,8 @@ async def login(request):
     except DoesNotExist:
         raise CustomError(ErrorCode.CredentialsError)
     except (VerificationError, InvalidHashError):
-        await request.app.ctx.cache_client.set(f"{username}_login_attempts", user_attempts + 1, 60 * 5)
-        await request.app.ctx.cache_client.set(f"{client_ip}_login_attempts", ip_attempts + 1, 60 * 5)
-        # await request.app.ctx.cache_client.expire(f"{username}_login_attempts", 60 * 5)
-        # await request.app.ctx.cache_client.expire(f"{client_ip}_login_attempts", 60 * 5)
+        await request.app.ctx.cache_client.set(f"{username}_login_attempts", user_attempts + 1, lock_duration)
+        await request.app.ctx.cache_client.set(f"{client_ip}_login_attempts", ip_attempts + 1, lock_duration)
         raise CustomError(ErrorCode.CredentialsError)
 
 
@@ -867,7 +921,10 @@ async def update_user(request):
     for field in ["email", "phone", "password", "permit_ip"]:
         if field in request.json:
             if field == "password":
-                data["password"] = password_hasher.hash(validate_password(request.json.get("password") or ""))
+                # 密码强度校验
+                password = request.json.get("password") or ""
+                await validate_password(password)
+                data["password"] = password_hasher.hash(password)
             else:
                 data[field] = request.json[field]
 
@@ -965,7 +1022,10 @@ async def edit_user(request):
             raise CustomError(ErrorCode.CannotDisableSelf)
         need_update = True
         if p == "password":
-            user.password = password_hasher.hash(validate_password(request.json.get("password") or ""))
+            # 密码强度校验
+            password = request.json.get("password") or ""
+            await validate_password(password)
+            user.password = password_hasher.hash(password)
         elif p == "mfa_enable":
             if user.mfa_enable == params[p]:
                 continue

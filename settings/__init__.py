@@ -89,6 +89,29 @@ MAX_CHALLENGE_ATTEMPTS = 5
 AUTHENTICATION_SESSION_EXPIRATION = 60 * 5
 AUTHENTICATION_REFRESH_EXPIRATION = 60 * 60 * 8
 
+SECURE_CONFIG_DEFAULT = {
+    "password_length_min": 8,
+    "password_length_max": 32,
+    "password_include_lowercase": True,
+    "password_include_uppercase": False,
+    "password_include_digit": True,
+    "password_include_special": False,
+    "password_exclude_continuous_length": 0,
+    "password_exclude_keyboard_order": False,
+    "password_exclude_letter_order": False,
+    "password_exclude_digit_order": False,
+    "password_exclude_special_order": False,
+    "password_exclude_repeat": False,
+    "password_validity_period": "forever",
+    "password_max_retries": 5,
+    "account_lock_duration": 600,
+    "account_auto_freeze_days": 180,
+    "account_auto_freeze_enabled": False,
+    "force_change_password_first_login": True,
+    "captcha_enabled": False,
+    "mfa_enabled": False,
+}
+
 # 健康检查相关
 HEALTH = True
 HEALTH_ENDPOINT = True
