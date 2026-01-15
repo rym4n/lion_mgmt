@@ -81,10 +81,11 @@ async def get_license(request: Request):
 
     请求参数
     """
+    language = request.json.get("language", "CN")
     permissions = await PermissionsMenu.all().values()
     lic = load_license()
     if not lic:
-        return response_ok([p["url"] for p in permissions if p["model"] == "lic"])
+        return response_ok([p["url"][language] for p in permissions if p["model"] == "lic"])
 
     user = await Account.get(id=request.ctx.session["sub"]).prefetch_related("roles")
     if not user:
@@ -92,7 +93,6 @@ async def get_license(request: Request):
 
     menu_dict = {}
     ai_type = 0
-    language = request.json.get("language", "CN")
     for role in user.roles:
         perm_models = set()
         if role.permissions:
@@ -109,7 +109,7 @@ async def get_license(request: Request):
             # 超级权限处理
             if "*:*" not in role.permissions:
                 relo_permissions_model = [p.split(":")[0] for p in role.permissions]
-                await PermissionsMenu.filter(model__in=relo_permissions_model).all().values()
+                permissions = await PermissionsMenu.filter(model__in=relo_permissions_model).all().values()
             perm_models.update([p["model"] for p in permissions if p["description"] in valid_modules and p["description"] != "仪表盘"])
 
         logger.info(f"perm_models: {perm_models}")

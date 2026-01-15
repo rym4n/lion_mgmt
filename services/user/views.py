@@ -141,9 +141,9 @@ async def new_user(request):
         else:
             await account.fetch_related("roles")
 
-        if t_ids:
-            tenants = await Tenant.filter(id__in=t_ids).all()
-            await account.member.add(*tenants)
+        ids = t_ids if t_ids else [request.ctx.session["tenant_id"]]
+        tenants = await Tenant.filter(id__in=ids).all()
+        await account.member.add(*tenants)
 
         await account.fetch_related("roles")
         res = account.json
@@ -355,9 +355,9 @@ async def create_api_user(request):
         await account.roles.add(*roles)
 
     # 添加工作空间
-    if t_ids:
-        tenants = await Tenant.filter(id__in=t_ids).all()
-        await account.member.add(*tenants)
+    ids = t_ids if t_ids else [request.ctx.session["tenant_id"]]
+    tenants = await Tenant.filter(id__in=ids).all()
+    await account.member.add(*tenants)
 
     token = token_encode(
         account.id,
