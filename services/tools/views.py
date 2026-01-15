@@ -171,14 +171,14 @@ async def upload_and_extract_zip(request):
                     users=[],
                     tenant_id=tenant_id,
                 )
-            await ActionPermissions.create(
-                tool_name=tool_name,
-                action_name="all",
-                action_description="动作全部动作权限",
-                roles=[],
-                users=[],
-                tenant_id=tenant_id,
-            )
+        await ActionPermissions.create(
+            tool_name=tool_name,
+            action_name="all",
+            action_description="动作全部动作权限",
+            roles=[],
+            users=[],
+            tenant_id=tenant_id,
+        )
         configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False, tenant_id=tenant_id)
         if not configuration:
             trm = await ToolResourcesModel.create(
