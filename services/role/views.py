@@ -443,20 +443,19 @@ async def all_permission(request):
     if not lic:
         raise CustomError(ErrorCode.InvalidLicenseError)
     for item in lic["moduleList"]:
-        module = item["module"]
+        name = item["name"]
         auth = item["auth"]
 
-        if module not in menu_dict:
-            menu_dict[module] = False
+        if name not in menu_dict:
+            menu_dict[name] = False
         if auth and int(lic["grouplist"][item["group"]]["expireTime"]) > int(time.time() * 1000):
-            menu_dict[module] = True
-    menu_dict["license_bp"] = True
-    menu_dict["user_bp"] = True
+            menu_dict[name] = True
+    menu_dict["许可管理"] = True
 
     permission_list = []
     permissions = await PermissionsMenu.all().values()
     for permission in permissions:
-        if permission["bp"] in menu_dict:
+        if permission["description"] in menu_dict:
             permission_list.append(permission)
     return response_ok(
         {
