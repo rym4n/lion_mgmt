@@ -9,8 +9,8 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
-from libs.security.authorization import requires_permission, load_license
-from models import Role, Account, PermissionsMenu
+from libs.security.authorization import load_license, requires_permission
+from models import Account, PermissionsMenu, Role
 
 role_bp = Blueprint("role", url_prefix="/role")
 _all__ = ["role_bp"]
@@ -456,7 +456,7 @@ async def all_permission(request):
     permission_list = []
     permissions = await PermissionsMenu.all().values()
     for permission in permissions:
-        if menu_dict[permission["bp"]]:
+        if permission["bp"] in menu_dict:
             permission_list.append(permission)
     return response_ok(
         {
