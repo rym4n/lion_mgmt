@@ -21,7 +21,7 @@ from services.event_ingestion.views import event_ingestion_bp
 from services.license.views import license_bp
 from services.log_view.views import logs_bp
 from services.mcp.views import mcp_bp
-from services.others.views import activity, playbook_list, all_apps
+from services.others.views import activity, all_apps, playbook_list
 from services.role.views import role_bp
 from services.scene.views import scene_bp
 from services.secure.views import secure_bp
@@ -60,7 +60,7 @@ def register_blueprints(app: Sanic) -> None:
     app.blueprint(secure_bp)
     app.blueprint(warroom_bp)
     app.blueprint(approve_bp)
-    app.blueprint(mcp_bp)
+    app.blueprint(tenant_bp)
 
     try:
         bp_dict = {
@@ -73,7 +73,7 @@ def register_blueprints(app: Sanic) -> None:
             "workflow_bp": workflow_bp,
             "logs_bp": logs_bp,
             "ai_bp": ai_bp,
-            "tenant_bp": tenant_bp,
+            "mcp_bp": mcp_bp,
         }
         license_data = load_license()
         if license_data and "moduleList" in license_data:
