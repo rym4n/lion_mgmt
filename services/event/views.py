@@ -176,7 +176,7 @@ async def artificial_create_event(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     if await Events.filter(event_name=event_name, deleted=False, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.EventNameExists)
+        raise CustomError(ErrorCode.EVENT_NAME_EXISTS)
 
     async with in_transaction():
         event = await Events.create(
@@ -268,7 +268,7 @@ async def artificial_create_event_wuzhi(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     if await Events.filter(event_name=event_name, deleted=False, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.EventNameExists)
+        raise CustomError(ErrorCode.EVENT_NAME_EXISTS)
 
     async with in_transaction():
         event = await Events.create(
@@ -361,13 +361,13 @@ async def execution(request):
     if not event.room:
         room_name = event.event_name + "_" + gen_random_code(6)
         if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
-            raise CustomError(ErrorCode.RoomNameExists)
+            raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
         room = await Room.create(name=room_name, creator=user, tenant_id=tenant_id)
         event.room = room
     room_id = event.room_id
     type = TYPE_DICT.get(executorInstanceType)
     if not room_id or not type:
-        raise CustomError(ErrorCode.ParamValueError)
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     params = {}
     input_data = {}
     if type == "flow":
@@ -413,7 +413,7 @@ async def execution(request):
 @requires_permission("event:r")
 async def get_activity_result(request, activityId):
     if not activityId:
-        raise CustomError(ErrorCode.ParamValueError)
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -584,7 +584,7 @@ async def create_event(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     if await Events.filter(event_name=event_name, deleted=False, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.EventNameExists)
+        raise CustomError(ErrorCode.EVENT_NAME_EXISTS)
 
     async with in_transaction():
         await Events.create(
@@ -624,7 +624,7 @@ async def get_event_detail(request):
     if not event.room:
         room_name = event.event_name + "_" + gen_random_code(6)
         if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
-            raise CustomError(ErrorCode.RoomNameExists)
+            raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
         room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id)
         event.room = room
         first = True

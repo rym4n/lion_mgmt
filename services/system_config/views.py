@@ -932,7 +932,7 @@ async def search_audit(request):
     offset = (page - 1) * size
 
     if offset >= 1000:
-        return response_fail(ErrorCode.OutOfPage)
+        return response_fail(ErrorCode.OUT_OF_PAGE)
 
     username = request.json.get("username")
     start_time = request.json.get("start_time")
@@ -1076,18 +1076,18 @@ async def outgoing(request):
 
         addresses = raw_address.split(",")
         if len(addresses) > 1 and sink_type == "syslog":
-            raise CustomError(ErrorCode.MultipleSyslogAddressNotSupported)
+            raise CustomError(ErrorCode.MULTIPLE_SYSLOG_ADDRESS_NOT_SUPPORTED)
 
         for addr in addresses:
             try:
                 port = int(addr.split(":")[-1])
                 if not (1 <= port <= 65535):
-                    raise CustomError(ErrorCode.InvalidPortError)
+                    raise CustomError(ErrorCode.INVALID_PORT_ERROR)
             except (ValueError, IndexError):
-                raise CustomError(ErrorCode.InvalidPortError)
+                raise CustomError(ErrorCode.INVALID_PORT_ERROR)
 
             if addr in seen_addresses:
-                raise CustomError(ErrorCode.OutboundAddressCanNotBeRepeated)
+                raise CustomError(ErrorCode.OUTBOUND_ADDRESS_CAN_NOT_BE_REPEATED)
             seen_addresses.add(addr)
 
         sink_key_suffix = str(i)
@@ -1129,7 +1129,7 @@ async def outgoing(request):
     yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
     if not check_vector_config(data, vector_config_yaml=yaml_str):
-        raise CustomError(ErrorCode.OutboundFileConfigurationFailed)
+        raise CustomError(ErrorCode.OUTBOUND_FILE_CONFIGURATION_FAILED)
 
     async with aiofile.AIOFile(yaml_file, mode="w", encoding="utf-8") as file:
         await file.write(yaml_str)
@@ -1231,7 +1231,7 @@ async def update_maintenance_mode_status(request):
         else:
             await request.app.ctx.cache_client.set(request.ctx.session["id"], False, AUTHENTICATION_SESSION_EXPIRATION)
     else:
-        raise CustomError(ErrorCode.MaintenanceModeError)
+        raise CustomError(ErrorCode.MAINTENANCE_MODE_ERROR)
     return response_ok("更新成功")
 
 

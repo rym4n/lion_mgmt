@@ -22,7 +22,7 @@ from models import (
 @requires_permission("warroom:r")
 async def activity(request, activityId):
     if not activityId:
-        raise CustomError(ErrorCode.ParamValueError)
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 

@@ -25,30 +25,30 @@ async def authenticate(request: Request):
     account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
     if not account:
         logger.warning("redis里已经没有account信息了")
-        raise CustomError(ErrorCode.SessionInvalid)
+        raise CustomError(ErrorCode.SESSION_INVALID)
     request.ctx.session["account_info"] = account
 
 
 def validate_token(payload, request):
     if payload.get("exp", 0) < int(time.time()):
-        raise CustomError(ErrorCode.SessionExpired)
+        raise CustomError(ErrorCode.SESSION_EXPIRED)
 
     if not request.path.endswith("/user/mfa-auth") and payload.get("mfa_enable") is True and payload.get("mfa_auth") is not True:
-        raise CustomError(ErrorCode.SecondFactorRequired)
+        raise CustomError(ErrorCode.SECOND_FACTOR_REQUIRED)
 
     client_ip = get_client_ip(request)
 
     if payload.get("ip"):
         if payload.get("ip") != client_ip:
             # 防止会话劫持
-            raise CustomError(ErrorCode.SessionInvalid)
+            raise CustomError(ErrorCode.SESSION_INVALID)
     else:
         payload["ip"] = client_ip
 
     # API访问时验证是否满足IP白名单
     if payload.get("permit_ip"):
         if ip_in_list(client_ip, payload["permit_ip"].split(",")) is False:
-            raise CustomError(ErrorCode.IpForbidden)
+            raise CustomError(ErrorCode.IP_FORBIDDEN)
 
     request.ctx.session = payload
 
@@ -124,7 +124,7 @@ async def token_decode(request: Request) -> dict:
     elif request.headers.get("aioe-auth") and ":" in request.headers.get("aioe-auth"):
         token = request.headers.get("aioe-auth")
     else:
-        raise CustomError(ErrorCode.SessionInvalid)
+        raise CustomError(ErrorCode.SESSION_INVALID)
 
     try:
         if ":" in token:
@@ -144,7 +144,7 @@ async def token_decode(request: Request) -> dict:
         return payload
     except Exception as e:
         logger.warning(f"{token} | {e} | {traceback.format_exc()}")
-        raise CustomError(ErrorCode.SessionInvalid)
+        raise CustomError(ErrorCode.SESSION_INVALID)
 
 
 def validate_username(username: str) -> str:
@@ -152,7 +152,7 @@ def validate_username(username: str) -> str:
     用户名校验，只允许英文字母、数字和中文字符、长度不小于2
     """
     if not re.search(r"^[a-zA-Z0-9\u4e00-\u9fa5\.·]{2,}$", username):
-        raise CustomError(ErrorCode.InvalidUsername)
+        raise CustomError(ErrorCode.INVALID_USERNAME)
     return username
 
 
@@ -240,33 +240,33 @@ async def validate_password(password: str) -> str:
 
     # 1. 长度校验
     if len(password) < config["password_length_min"] or len(password) > config["password_length_max"]:
-        raise CustomError(ErrorCode.PasswordLengthError)
+        raise CustomError(ErrorCode.PASSWORD_LENGTH_ERROR)
 
     # 2. 包含字符类型校验
     if config["password_include_lowercase"] and not re.search(r"[a-z]", password):
-        raise CustomError(ErrorCode.PasswordMissingLowercase)
+        raise CustomError(ErrorCode.PASSWORD_MISSING_LOWERCASE)
     if config["password_include_uppercase"] and not re.search(r"[A-Z]", password):
-        raise CustomError(ErrorCode.PasswordMissingUppercase)
+        raise CustomError(ErrorCode.PASSWORD_MISSING_UPPERCASE)
     if config["password_include_digit"] and not re.search(r"\d", password):
-        raise CustomError(ErrorCode.PasswordMissingDigit)
+        raise CustomError(ErrorCode.PASSWORD_MISSING_DIGIT)
     if config["password_include_special"] and not re.search(r"[@#$%^&+=!]", password):
-        raise CustomError(ErrorCode.PasswordMissingSpecial)
+        raise CustomError(ErrorCode.PASSWORD_MISSING_SPECIAL)
 
     # 3. 连续字符长度校验
     if config["password_exclude_continuous_length"] > 0:
         if has_consecutive_both(password, config["password_exclude_continuous_length"]):
-            raise CustomError(ErrorCode.PasswordContinuousChar)
+            raise CustomError(ErrorCode.PASSWORD_CONTINUOUS_CHAR)
 
     # 4. 键盘序校验
     if config["password_exclude_keyboard_order"]:
         has_seq = has_keyboard_sequence_plus(password)
         if has_seq:
-            raise CustomError(ErrorCode.PasswordKeyboardOrder)
+            raise CustomError(ErrorCode.PASSWORD_KEYBOARD_ORDER)
 
     # 5. 字符重复校验
     if config["password_exclude_repeat"]:
         # 检查是否有连续重复字符，例如 aaa
         if re.search(r"(.)\1\1", password):
-            raise CustomError(ErrorCode.PasswordRepeatedChar)
+            raise CustomError(ErrorCode.PASSWORD_REPEATED_CHAR)
 
     return password

@@ -89,7 +89,7 @@ async def get_license(request: Request):
 
     user = await Account.get(id=request.ctx.session["sub"]).prefetch_related("roles")
     if not user:
-        raise CustomError(ErrorCode.AccountNotFound)
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
 
     menu_dict = {}
     ai_type = 0
@@ -193,7 +193,7 @@ async def get_all_license(request: Request):
     lic = load_license()
 
     if not lic:
-        raise CustomError(ErrorCode.InvalidLicenseError)
+        raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
 
     # 基础字段赋值
     menu_dict["name"] = lic["company"]

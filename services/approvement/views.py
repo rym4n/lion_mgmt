@@ -296,7 +296,7 @@ async def update_approvement(request):
         raise CustomError(ErrorCode.NOT_FOUND)
 
     if approve.status != 0:
-        raise CustomError(ErrorCode.ApprovementStatusError)
+        raise CustomError(ErrorCode.APPROVEMENT_STATUS_ERROR)
 
     if args:
         approve.params = args
@@ -420,7 +420,7 @@ async def update_approvement_callback(request):
         raise CustomError(ErrorCode.NOT_FOUND)
 
     if approve.status != 0:
-        raise CustomError(ErrorCode.ApprovementStatusError)
+        raise CustomError(ErrorCode.APPROVEMENT_STATUS_ERROR)
 
     if flow_input:
         approve.params = flow_input

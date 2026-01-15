@@ -157,9 +157,9 @@ def verify_license(data: bytes):
                 m["expireTime"] = lic["grouplist"][m["group"]]["expireTime"]
             return lic
         else:
-            raise CustomError(ErrorCode.LicenseExpired)
+            raise CustomError(ErrorCode.LICENSE_EXPIRED)
     except Exception:
-        raise CustomError(ErrorCode.InvalidLicenseError)
+        raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
 
 
 def generate_mac_uuid():

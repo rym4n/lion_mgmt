@@ -111,7 +111,7 @@ __all__ = ["user_bp"]
 async def new_user(request):
     if request.json.get("permit_ip"):
         if validate_ips(request.json["permit_ip"]) is not True:
-            raise CustomError(ErrorCode.InvalidIP)
+            raise CustomError(ErrorCode.INVALID_IP)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -152,7 +152,7 @@ async def new_user(request):
             res["mfa_uri"] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name="AIOE")
         return response_ok(res)
     except IntegrityError:
-        raise CustomError(ErrorCode.AccountExists)
+        raise CustomError(ErrorCode.ACCOUNT_EXISTS)
 
 
 @user_bp.post("/list")
@@ -334,7 +334,7 @@ async def all_users(request):
 async def create_api_user(request):
     if request.json.get("permit_ip"):
         if validate_ips(request.json["permit_ip"]) is not True:
-            raise CustomError(ErrorCode.InvalidIP)
+            raise CustomError(ErrorCode.INVALID_IP)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -511,10 +511,10 @@ async def list_api_users(request):
 async def update_api_user(request):
     api_user = await Account.get(id=request.json.get("id"), deleted=False)
     if not api_user:
-        raise CustomError(ErrorCode.ApiUserNotFound)
+        raise CustomError(ErrorCode.API_USER_NOT_FOUND)
 
     if api_user.username == "system":
-        raise CustomError(ErrorCode.SystemUserCannotBeDeleted)
+        raise CustomError(ErrorCode.SYSTEM_USER_CANNOT_BE_DELETED)
 
     await request.app.ctx.cache_client.delete(f"account_{api_user.id}")
 
@@ -586,7 +586,7 @@ async def login(request):
     password = request.json.get("password")
 
     if not username or not password:
-        raise CustomError(ErrorCode.CredentialsError)
+        raise CustomError(ErrorCode.CREDENTIALS_ERROR)
 
     secure_config = await get_secure_config_dict()
 
@@ -600,7 +600,7 @@ async def login(request):
     lock_duration = secure_config["account_lock_duration"]
 
     if user_attempts > max_retries:
-        raise CustomError(ErrorCode.AccountLocked)
+        raise CustomError(ErrorCode.ACCOUNT_LOCKED)
 
     client_ip = get_client_ip(request)
 
@@ -609,24 +609,24 @@ async def login(request):
     if ip_attempts is None:
         ip_attempts = 0
     if ip_attempts > max_retries:
-        raise CustomError(ErrorCode.AccountLocked)
+        raise CustomError(ErrorCode.ACCOUNT_LOCKED)
 
     try:
         account = await Account.get(username=username, deleted=False).prefetch_related("roles")
         if account.permit_ip and ip_in_list(client_ip, account.permit_ip.split(",")) is False:
-            raise CustomError(ErrorCode.IpForbidden)
+            raise CustomError(ErrorCode.IP_FORBIDDEN)
 
         # 2. 账号自动冻结检查
         if secure_config["account_auto_freeze_enabled"]:
             if (time.time() - account.last_login_time.timestamp()) > (secure_config["account_auto_freeze_days"] * 86400):
                 account.disabled = True
                 await account.save(update_fields=["disabled"])
-                raise CustomError(ErrorCode.AccountDisabled)
+                raise CustomError(ErrorCode.ACCOUNT_DISABLED)
 
         if account.deleted:
-            raise CustomError(ErrorCode.AccountNotFound)
+            raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
         elif account.disabled:
-            raise CustomError(ErrorCode.AccountDisabled)
+            raise CustomError(ErrorCode.ACCOUNT_DISABLED)
 
         # 验证密码
         password_hasher.verify(account.password, password)
@@ -694,18 +694,18 @@ async def login(request):
         )
         return tmp_resp
     except DoesNotExist:
-        raise CustomError(ErrorCode.CredentialsError)
+        raise CustomError(ErrorCode.CREDENTIALS_ERROR)
     except (VerificationError, InvalidHashError):
         await request.app.ctx.cache_client.set(f"{username}_login_attempts", user_attempts + 1, lock_duration)
         await request.app.ctx.cache_client.set(f"{client_ip}_login_attempts", ip_attempts + 1, lock_duration)
-        raise CustomError(ErrorCode.CredentialsError)
+        raise CustomError(ErrorCode.CREDENTIALS_ERROR)
 
 
 @user_bp.post("/local-auth")
 @openapi.exclude()
 async def local_auth(request):
     if request.ip != "127.0.0.1":
-        raise CustomError(ErrorCode.IpForbidden)
+        raise CustomError(ErrorCode.IP_FORBIDDEN)
 
     account = await Account.get(username=request.json.get("username", ""))
     token = token_encode(
@@ -846,13 +846,13 @@ async def logout(request):
 )
 async def mfa_auth(request):
     if request.ctx.session.get("mfa_enable") is not True:
-        raise CustomError(ErrorCode.NONEEDMFA)
+        raise CustomError(ErrorCode.NO_NEED_MFA)
     old_token_id = request.ctx.session.get("id", "")
     mfa_key = await request.app.ctx.cache_client.get(f"mfa_key_{old_token_id}")
     totp = pyotp.TOTP(mfa_key)
     code = request.json.get("code")
     if not code or not mfa_key or not totp.verify(code):
-        raise CustomError(ErrorCode.MFAError)
+        raise CustomError(ErrorCode.MFA_ERROR)
 
     await Account.filter(id=request.ctx.session.get("sub")).update(mfa_bind=True)
     # 彻底刷新token，用新的token id
@@ -999,7 +999,7 @@ async def update_user(request):
 async def edit_user(request):
     user = await Account.get(username=request.json.get("username"), deleted=False).prefetch_related("roles")
     if not user:
-        raise CustomError(ErrorCode.AccountNotFound)
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
 
     params = request.json
     need_update = False
@@ -1007,10 +1007,10 @@ async def edit_user(request):
     for p in params:
         # 敏感属性不允许修改
         if p in ["id", "ctime", "utime", "deleted", "name", "mfa_key", "roles"]:
-            raise CustomError(ErrorCode.CannotEditSensitiveAttribute)
+            raise CustomError(ErrorCode.CANNOT_EDIT_SENSITIVE_ATTRIBUTE)
         # 不能禁用自己
         if p == "disabled" and request.ctx.session["sub"] == user.id:
-            raise CustomError(ErrorCode.CannotDisableSelf)
+            raise CustomError(ErrorCode.CANNOT_DISABLE_SELF)
         need_update = True
         if p == "password":
             # 密码强度校验
@@ -1021,7 +1021,7 @@ async def edit_user(request):
             if user.mfa_enable == params[p]:
                 continue
             if user.oauth_id and params[p]:
-                raise CustomError(ErrorCode.OauthUserCannotUseMfa)
+                raise CustomError(ErrorCode.OAUTH_USER_CANNOT_USE_MFA)
             user.mfa_enable = params[p]
             user.mfa_key = pyotp.random_base32(32) if user.mfa_enable else None
             user.mfa_bind = False
@@ -1072,9 +1072,9 @@ async def edit_user(request):
 @requires_permission("user:d")
 async def delelte_user(request):
     if request.json.get("username") == request.ctx.session["account_info"].username:
-        raise CustomError(ErrorCode.CannotDeleteSelf)
+        raise CustomError(ErrorCode.CANNOT_DELETE_SELF)
     if request.json.get("username") == "admin":
-        raise CustomError(ErrorCode.CannotDeleteAdmin)
+        raise CustomError(ErrorCode.CANNOT_DELETE_ADMIN)
     await Account.filter(username=request.json.get("username")).update(deleted=True)
     return response_ok("用户删除成功")
 
@@ -1113,7 +1113,7 @@ async def delelte_user(request):
 async def refresh_mfa_key(request):
     account = await Account.get(username=request.json.get("username"), deleted=False)
     if not account:
-        raise CustomError(ErrorCode.AccountNotFound)
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
     account.mfa_key = pyotp.random_base32(32)
     account.mfa_enable = True
     await account.save()
@@ -1162,7 +1162,7 @@ async def assign_role_to_user(request):
     username = request.json.get("username")
     account = await Account.get_or_none(username=username, deleted=False)
     if not account:
-        raise CustomError(ErrorCode.AccountNotFound)
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1172,7 +1172,7 @@ async def assign_role_to_user(request):
         return response_ok("success")
     roles = await Role.filter(name__in=role_names, deleted=False, tenant_id=tenant_id).all()
     if len(roles) != len(role_names):
-        raise CustomError(ErrorCode.RoleNotFound)
+        raise CustomError(ErrorCode.ROLE_NOT_FOUND)
 
     await account.roles.clear()
     await account.roles.add(*roles)
@@ -1240,7 +1240,7 @@ async def oauth2_callback(request):
     logger.info(f"token_info: {token_info}")
     access_token = jsonpath(token_info, request.app.ctx.oauth_cfg["token_path"])
     if not access_token:
-        raise CustomError(ErrorCode.GetAccessTokenError)
+        raise CustomError(ErrorCode.GET_ACCESS_TOKEN_ERROR)
 
     async with request.app.ctx.oauth2.get_httpx_client() as c:
         resp = await c.get(
@@ -1252,12 +1252,12 @@ async def oauth2_callback(request):
 
     username = jsonpath(user_info, request.app.ctx.oauth_cfg["user_id_path"])
     if not username:
-        raise CustomError(ErrorCode.GetUserInfoError)
+        raise CustomError(ErrorCode.GET_USER_INFO_ERROR)
     try:
         account = await Account.get(username=username[0]).prefetch_related("roles")
     except DoesNotExist:
         if request.app.ctx.oauth_cfg["auto_create"] != "true":
-            raise CustomError(ErrorCode.AccountNotFound)
+            raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
         # 不存在自动新建
         account = await Account.create(
             username=username[0],
@@ -1282,13 +1282,13 @@ async def oauth2_callback(request):
                 for t in tenants_by_id:
                     t.member.add(account)
             else:
-                raise CustomError(ErrorCode.DefaultTenantNotFound)
+                raise CustomError(ErrorCode.DEFAULT_TENANT_NOT_FOUND)
         else:
             tenant = await Tenant.get(id=account.tenant_id)
             if tenant:
                 tenant.member.add(account)
             else:
-                raise CustomError(ErrorCode.DefaultTenantNotFound)
+                raise CustomError(ErrorCode.DEFAULT_TENANT_NOT_FOUND)
 
         default_roles = request.app.ctx.oauth_cfg.get("default_roles", "").split(",")
         if default_roles:
@@ -1296,7 +1296,7 @@ async def oauth2_callback(request):
             if roles:
                 await account.roles.add(*roles)
             else:
-                raise CustomError(ErrorCode.DefaultRoleNotFound)
+                raise CustomError(ErrorCode.DEFAULT_ROLE_NOT_FOUND)
         else:
             await account.fetch_related("roles")
 

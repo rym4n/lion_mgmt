@@ -162,7 +162,7 @@ async def add_timed(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     if await Timed.filter(name=request.json.get("name"), deleted=False, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.TimedNameExists)
+        raise CustomError(ErrorCode.TIMED_NAME_EXISTS)
 
     msg = {}
     playbook = None
@@ -173,11 +173,11 @@ async def add_timed(request):
         playbook = await Playbook.get_or_none(id=playbook_id, deleted=False, tenant_id=tenant_id)
         playbook_version = await PlaybookVersion.get_or_none(id=playbook_input.get("flow_id"), tenant_id=tenant_id)
         if not playbook:
-            raise CustomError(ErrorCode.PlaybookNotFound)
+            raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
         msg["run_type"] = "flow"
         playbook_input["executor"] = request.ctx.session.get("account_info").id
         if any(key not in playbook_input.keys() for key in ["flow_id", "flow_input", "executor"]):
-            raise CustomError(ErrorCode.PlaybookInputError)
+            raise CustomError(ErrorCode.PLAYBOOK_INPUT_ERROR)
         msg["run_args"] = playbook_input
         if status == 0:
             msg["timer"] = "once"
@@ -187,12 +187,12 @@ async def add_timed(request):
             timer_rule["end_date"] = end_time
             if not croniter.is_valid(tactics):
                 logger.info(f"定时任务{name}的执行策略{tactics}不符合crontab格式，创建失败")
-                raise CustomError(ErrorCode.CronExpressionError)
+                raise CustomError(ErrorCode.CRON_EXPRESSION_ERROR)
             timer_rule["crontab"] = tactics
     elif operate_type == 1:
         action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
         if not action:
-            raise CustomError(ErrorCode.ActionNotFoundError)
+            raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
         action_input["executor"] = request.ctx.session.get("account_info").id
         if any(
             key not in action_input
@@ -211,7 +211,7 @@ async def add_timed(request):
                 "timeout",
             ]
         ):
-            raise CustomError(ErrorCode.ActionInputError)
+            raise CustomError(ErrorCode.ACTION_INPUT_ERROR)
         msg["run_type"] = "action"
         msg["run_args"] = action_input
         if status == 0:
@@ -222,7 +222,7 @@ async def add_timed(request):
             timer_rule["end_date"] = end_time
             if not croniter.is_valid(tactics):
                 logger.info(f"定时任务{name}的执行策略{tactics}不符合crontab格式，创建失败")
-                raise CustomError(ErrorCode.CronExpressionError)
+                raise CustomError(ErrorCode.CRON_EXPRESSION_ERROR)
             timer_rule["crontab"] = tactics
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     timed = await Timed.create(
@@ -787,7 +787,7 @@ async def update_timed(request):
         playbook_input["executor"] = request.ctx.session.get("account_info").id
 
         if any(key not in playbook_input.keys() for key in ["flow_id", "flow_input", "executor"]):
-            raise CustomError(ErrorCode.PlaybookInputError)
+            raise CustomError(ErrorCode.PLAYBOOK_INPUT_ERROR)
 
         timed.playbook_input = playbook_input
         timed.action = None
@@ -821,7 +821,7 @@ async def update_timed(request):
                 "timeout",
             ]
         ):
-            raise CustomError(ErrorCode.ActionInputError)
+            raise CustomError(ErrorCode.ACTION_INPUT_ERROR)
 
         timed.action_input = action_input
         timed.playbook = None
@@ -836,7 +836,7 @@ async def update_timed(request):
         if status == EXEC_TYPE_CRON:
             if not croniter.is_valid(tactics):
                 logger.info(f"定时任务{timed.name}的执行策略{tactics}不符合crontab格式，更新失败")
-                raise CustomError(ErrorCode.CronExpressionError)
+                raise CustomError(ErrorCode.CRON_EXPRESSION_ERROR)
         timer_info = build_timer_rule(status, tactics, end_time)
         msg.update(timer_info)
     msg["timer_id"] = timed.id
@@ -894,9 +894,9 @@ async def delete_timed(request):
 
     timed = await Timed.get_or_none(id=timed_id, deleted=False, tenant_id=tenant_id)
     if not timed:
-        raise CustomError(ErrorCode.TimedNotFound)
+        raise CustomError(ErrorCode.TIMED_NOT_FOUND)
     if timed.internal:
-        raise CustomError(ErrorCode.InternalDeleteError)
+        raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
     msg = {}
     if timed.type == RUN_TYPE_FLOW:
         msg["run_type"] = "flow"

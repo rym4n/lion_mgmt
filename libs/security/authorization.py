@@ -21,7 +21,7 @@ async def check_permissions(request: Request, *required_permissions: str) -> boo
     # account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
     # if not account:
     #     logger.warning("redis里已经没有account信息了")
-    #     raise CustomError(ErrorCode.SessionInvalid)
+    #     raise CustomError(ErrorCode.SESSION_INVALID)
     # request.ctx.session['account_info'] = account
     # roles = await account.roles.filter(deleted=False).all()
     for role in request.ctx.session["account_info"].roles:
@@ -63,7 +63,7 @@ async def check_roles(request: Request, *required_roles: str) -> bool:
     account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
     if not account:
         logger.warning("redis里已经没有account信息了")
-        raise CustomError(ErrorCode.SessionInvalid)
+        raise CustomError(ErrorCode.SESSION_INVALID)
     request.ctx.session["account_info"] = account
     if set(required_roles) & {role.name for role in account.roles}:
         return True
@@ -108,11 +108,11 @@ def playbook_permission(*required_permissions: str):
             if not playbook_id:
                 playbook_id = request.json.get("flow_id")  # 获取剧本版本id
                 if not playbook_id:
-                    raise CustomError(ErrorCode.PlaybookUnauthorized)
+                    raise CustomError(ErrorCode.PLAYBOOK_UNAUTHORIZED)
 
             user = request.ctx.session.get("account_info")
             if not user:
-                raise CustomError(ErrorCode.AccountNotFound)
+                raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
 
             has_access = await check_playbook_permission(request, user, playbook_id, required_permissions)
 

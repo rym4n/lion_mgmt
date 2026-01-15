@@ -123,7 +123,7 @@ async def upload_and_extract_zip(request):
 
     lic = load_license()
     if not lic:
-        raise CustomError(ErrorCode.InvalidLicenseError)
+        raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
 
     for zip_file in zip_files:
         total_count = await Tool.filter(deleted=False, maintain=False).count()
@@ -497,7 +497,7 @@ async def all_tools(request):
     key = req_json.get("key", "").strip()
 
     if size > 50:
-        raise CustomError(ErrorCode.RequestTooManyError)
+        raise CustomError(ErrorCode.REQUEST_TOO_MANY_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -707,7 +707,7 @@ async def tool_actions(request):
 
     tool = await Tool.get_or_none(name=name, version=version, deleted=False, tenant_id=tenant_id)
     if not tool:
-        raise CustomError(ErrorCode.ToolNotFoundError)
+        raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
 
     actions = await ToolAction.filter(tool_name=name, version_number=version, tenant_id=tenant_id).values("action", "id", "playbook")
     action_list = []
@@ -784,7 +784,7 @@ async def update_tool_status(request):
 
     tool = await Tool.get_or_none(name=name, version=version, deleted=False, tenant_id=tenant_id)
     if not tool:
-        raise CustomError(ErrorCode.ToolNotFoundError)
+        raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
 
     tool.status = status
     await tool.save()
@@ -843,10 +843,10 @@ async def delete_tool(request):
             return response_ok({"message": "工具删除成功"})
 
         if tool.status == 1:
-            raise CustomError(ErrorCode.ToolHasScriptError)
+            raise CustomError(ErrorCode.TOOL_HAS_SCRIPT_ERROR)
 
         if tool.maintain:
-            raise CustomError(ErrorCode.InternalDeleteError)
+            raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
 
         if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).count() == 1:
             await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
@@ -907,10 +907,10 @@ async def delete_tool_all(request):
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
 
     if await Tool.filter(name=name, deleted=False, maintain=maintenance_mode if maintenance_mode else False, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.InternalDeleteError)
+        raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
 
     if await Tool.filter(name=name, deleted=False, status=1, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.ToolHasScriptError)
+        raise CustomError(ErrorCode.TOOL_HAS_SCRIPT_ERROR)
 
     async with in_transaction():
         for tool in await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all():
@@ -974,7 +974,7 @@ async def tool_resource_model(request):
 
     resources = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).first().values()
     if not resources:
-        raise CustomError(ErrorCode.ResourcesModelNotFoundError)
+        raise CustomError(ErrorCode.RESOURCES_MODEL_NOT_FOUND_ERROR)
 
     return response_ok(resources)
 
@@ -1040,7 +1040,7 @@ async def add_tool_resource(request):
         tenant_id=tenant_id,
     )
     if existing_resource:
-        raise CustomError(ErrorCode.ResourcesNameExistsError)
+        raise CustomError(ErrorCode.RESOURCES_NAME_EXISTS_ERROR)
 
     tr = await ToolResources.create(
         tool_name=tool_name,
@@ -1183,7 +1183,7 @@ async def update_tool_resource(request):
     )
 
     if not tool_resource:
-        raise CustomError(ErrorCode.ResourcesNotFoundError)
+        raise CustomError(ErrorCode.RESOURCES_NOT_FOUND_ERROR)
 
     if engine:
         tool_resource.engine = engine
@@ -1258,7 +1258,7 @@ async def delete_tool_resource(request):
     )
 
     if not tool_resource:
-        raise CustomError(ErrorCode.ResourcesNotFoundError)
+        raise CustomError(ErrorCode.RESOURCES_NOT_FOUND_ERROR)
 
     playbooks = await ToolAction.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).all().values("playbook")
 
@@ -1315,13 +1315,13 @@ async def download_zip(request):
 
     tool = await Tool.get_or_none(id=tool_id, deleted=False, tenant_id=tenant_id)
     if not tool:
-        raise CustomError(ErrorCode.ToolNotFoundError)
+        raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
 
     if tool.maintain:
-        raise CustomError(ErrorCode.InternalToolError)
+        raise CustomError(ErrorCode.INTERNAL_TOOL_ERROR)
 
     if tool.internal:
-        raise CustomError(ErrorCode.NotDownloadError)
+        raise CustomError(ErrorCode.NOT_DOWNLOAD_ERROR)
 
     file_url = await utils.get_url_from_s3("system", f"{tool.name}/{tool.version}.zip", request.host, "tools")
 
@@ -1410,7 +1410,7 @@ async def add_permission(request):
         permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False, tenant_id=tenant_id).all()
 
     if not permissions:
-        raise CustomError(ErrorCode.ActionNotFoundError)
+        raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
     for permission in permissions:
         user_dict_list = []
@@ -1529,7 +1529,7 @@ async def select_permission_all(request):
         permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False, tenant_id=tenant_id).all()
 
     if not permissions:
-        raise CustomError(ErrorCode.ActionNotFoundError)
+        raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
     permission_list = []
     for permission in permissions:
@@ -1648,7 +1648,7 @@ async def judge_permission(request):
 
     user = request.ctx.session.get("account_info")
     if not user:
-        raise CustomError(ErrorCode.AccountNotFound)
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
 
     user_id = str(user.id)
     role_ids = {str(role.id) for role in user.roles}
@@ -1764,7 +1764,7 @@ async def add_tag(request):
     tools = await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all()
 
     if not tools:
-        raise CustomError(ErrorCode.ToolNotFoundError)
+        raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
 
     for tool in tools:
         tool.tag = list(set(tool.tag or []) | set(tags))
@@ -1826,7 +1826,7 @@ async def delete_tag(request):
     tools = await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all()
 
     if not tools:
-        raise CustomError(ErrorCode.ToolNotFoundError)
+        raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
 
     for tool in tools:
         tool.tag = list(set(tool.tag or []) - set(tags))
@@ -1981,7 +1981,7 @@ async def tool_action_input(request):
 
     action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
     if not action:
-        raise CustomError(ErrorCode.ActionNotFoundError)
+        raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
     input_data = action.action["input"]
 
@@ -2093,7 +2093,7 @@ async def new_tag(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     if await Tag.filter(name=name, type=1, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.TagExistError)
+        raise CustomError(ErrorCode.TAG_EXIST_ERROR)
 
     await Tag.create(name=name, type=1, tenant_id=tenant_id)
 
@@ -2308,7 +2308,7 @@ async def health_check(request):
             if data:
                 return response_ok(data)
 
-    raise CustomError(ErrorCode.ActionTimeout)
+    raise CustomError(ErrorCode.ACTION_TIMEOUT)
 
 
 @tools_bp.post("/debug")
@@ -2369,7 +2369,7 @@ async def tool_debug(request):
             data = result.get("data")
             return response_ok(data)
 
-    raise CustomError(ErrorCode.ActionTimeout)
+    raise CustomError(ErrorCode.ACTION_TIMEOUT)
 
 
 @tools_bp.post("/add-config")

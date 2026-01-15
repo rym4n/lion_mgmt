@@ -94,27 +94,27 @@ async def create_workflow(request):
     # total_count = await Playbook.filter(deleted=False, internal=False).count()
     # lic = load_license()
     # if not lic:
-    #     raise CustomError(ErrorCode.InvalidLicenseError)
+    #     raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
     # for key, item in lic["grouplist"].items():
     #     if key == "剧本编排":
     #         if int(item["expireTime"]) > int(time.time() * 1000):
     #             total_up_value = int(item["value"])
     #
     # if total_up_value != 99999 and total_count >= total_up_value:
-    #     raise CustomError(ErrorCode.PlaybookCreateLimit)
+    #     raise CustomError(ErrorCode.PLAYBOOK_CREATE_LIMIT)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     # 判断name是否已经存在，如果存在的话要抛出异常
     if await Playbook.filter(name=data.get("name"), deleted=False, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.PlaybookNameExists)
+        raise CustomError(ErrorCode.PLAYBOOK_NAME_EXISTS)
 
     flow_timeout = 300
     if data.get("flow_timeout"):
         if 300 <= int(data.get("flow_timeout")) <= 259200:
             flow_timeout = int(data.get("flow_timeout"))
         else:
-            raise CustomError(ErrorCode.FlowTimeOutError)
+            raise CustomError(ErrorCode.FLOW_TIME_OUT_ERROR)
 
     flow_json_list = data.get("flow_json_list") or []
     creator = request.ctx.session["account_info"]
@@ -554,7 +554,7 @@ async def get_flow_json(request):
 #
 #     playbook = await PlaybookVersion.get(id=request.json.get("id")).prefetch_related("creator", "updator", "playbook")
 #     if not playbook:
-#         raise CustomError(ErrorCode.PlaybookNotFound)
+#         raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
 #     return response_ok(playbook.json)
 
 
@@ -616,7 +616,7 @@ async def edit_workflow(request):
 
     playbook = await Playbook.get(id=params.get("playbook_id"), tenant_id=tenant_id).prefetch_related("scenes", "tags")
     if not playbook:
-        raise CustomError(ErrorCode.PlaybookNotFound)
+        raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
 
     playbook.name = params.get("name")
     playbook.remark = params.get("remark", "")
@@ -631,7 +631,7 @@ async def edit_workflow(request):
         await playbook.tags.add(*tags)
     if params.get("flow_timeout"):
         if 300 > int(params.get("flow_timeout")) or int(params.get("flow_timeout")) > 259200:
-            raise CustomError(ErrorCode.FlowTimeOutError)
+            raise CustomError(ErrorCode.FLOW_TIME_OUT_ERROR)
         await PlaybookVersion.filter(playbook_id=playbook.id, tenant_id=tenant_id).update(flow_timeout=int(params.get("flow_timeout", 300)))
     playbook.updator = request.ctx.session["account_info"]
     await playbook.save()
@@ -798,7 +798,7 @@ async def delete_workflow(request):
 
     playbook = await Playbook.get(id=request.json.get("playbook_id"), tenant_id=tenant_id)
     if playbook.internal:
-        raise CustomError(ErrorCode.InternalDeleteError)
+        raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
     pvs = await PlaybookVersion.filter(playbook=playbook, deleted=False, tenant_id=tenant_id).all()
     pv_ids = [pv.id for pv in pvs]
     pv_versions = [pv.version for pv in pvs]
@@ -807,9 +807,9 @@ async def delete_workflow(request):
         for pv_id in pv_ids:
             condition &= Q(script_id__contains=[pv_id])
         if await EventRelatedScript.filter(condition).exists():
-            raise CustomError(ErrorCode.PlaybookUsedByEvent)
+            raise CustomError(ErrorCode.PLAYBOOK_USED_BY_EVENT)
         if await Timed.filter(playbook=playbook, playbook_version__in=pv_versions, deleted=False, tenant_id=tenant_id).exists():
-            raise CustomError(ErrorCode.PlaybookUsedByTimer)
+            raise CustomError(ErrorCode.PLAYBOOK_USED_BY_TIMER)
 
     for pv in pvs:
         if pv.flow_json:
@@ -858,12 +858,12 @@ async def delete_workflow_version(request):
     tenant_id = request.ctx.session.get("tenant_id")
     pv = await PlaybookVersion.get(id=request.json.get("flow_id"), tenant_id=tenant_id).prefetch_related("playbook")
     if pv.playbook.internal:
-        raise CustomError(ErrorCode.InternalDeleteError)
+        raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
 
     if await EventRelatedScript.filter(script_id__contains=[pv.id], deleted=False, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.PlaybookUsedByEvent)
+        raise CustomError(ErrorCode.PLAYBOOK_USED_BY_EVENT)
     if await Timed.filter(playbook_id=pv.playbook_id, playbook_version=pv.version, deleted=False, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.PlaybookUsedByTimer)
+        raise CustomError(ErrorCode.PLAYBOOK_USED_BY_TIMER)
 
     if pv.flow_json:
         action_ids = await statistics_data(pv.flow_json, tenant_id)
@@ -1169,7 +1169,7 @@ async def input_data(request):
 async def get_playbook_input(playbook_id, tenant_id):
     playbook = await PlaybookVersion.get_or_none(id=playbook_id, tenant_id=tenant_id)
     if not playbook:
-        raise CustomError(ErrorCode.PlaybookNotFound)
+        raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
 
     input_list = []
 
@@ -1249,7 +1249,7 @@ async def new_tag(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     if await Tag.filter(name=name, type=0, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.TagExistError)
+        raise CustomError(ErrorCode.TAG_EXIST_ERROR)
 
     await Tag.create(name=name, type=0, tenant_id=tenant_id)
 
@@ -1382,9 +1382,9 @@ async def add_permission(request):
 
     playbook = await Playbook.get_or_none(id=playbook_id, tenant_id=tenant_id)
     if not playbook:
-        raise CustomError(ErrorCode.PlaybookNotFound)
+        raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
     if playbook.internal:
-        raise CustomError(ErrorCode.InternalDeleteError)
+        raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
 
     # 处理用户权限
     for uid, perms in users.items():
@@ -1563,10 +1563,10 @@ async def create_webhook(request):
 
     pv = await PlaybookVersion.get_or_none(id=flow_id, tenant_id=tenant_id).prefetch_related("playbook")
     if not pv:
-        raise CustomError(ErrorCode.PlaybookNotFound)
+        raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
 
     if await PlaybookWebhook.filter(playbook_version=pv, deleted=False, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.WebhookExists)
+        raise CustomError(ErrorCode.WEBHOOK_EXISTS)
 
     # 生成唯一的webhook token
     webhook_token = secrets.token_urlsafe(10)
@@ -1628,7 +1628,7 @@ async def list_webhook(request):
 
     pv = await PlaybookVersion.get_or_none(id=flow_id, tenant_id=tenant_id)
     if not pv:
-        raise CustomError(ErrorCode.PlaybookNotFound)
+        raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
 
     webhook = await PlaybookWebhook.get_or_none(playbook_version_id=flow_id, deleted=False, tenant_id=tenant_id).prefetch_related("creator")
 

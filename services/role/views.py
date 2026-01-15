@@ -222,7 +222,7 @@ async def find_role(request):
 
     role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
     if not role:
-        raise CustomError(ErrorCode.RoleNotFound)
+        raise CustomError(ErrorCode.ROLE_NOT_FOUND)
 
     permissions_data = await PermissionsMenu.all().values()
 
@@ -297,16 +297,16 @@ async def delete_role(request):
     role_id = request.json.get("role_id")
     exists = await Account.filter(roles__id=role_id).exists()
     if exists:
-        raise CustomError(ErrorCode.RoleAlreadyUsed)
+        raise CustomError(ErrorCode.ROLE_ALREADY_USED)
 
     if role_id == "111111":
-        raise CustomError(ErrorCode.RoleCannotDelete)
+        raise CustomError(ErrorCode.ROLE_CANNOT_DELETE)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
     if not role:
-        raise CustomError(ErrorCode.RoleNotFound)
+        raise CustomError(ErrorCode.ROLE_NOT_FOUND)
     role.deleted = True
     await role.save()
     return response_ok("角色删除成功")
@@ -375,7 +375,7 @@ async def update_role(request):
 
     role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
     if not role:
-        raise CustomError(ErrorCode.RoleNotFound)
+        raise CustomError(ErrorCode.ROLE_NOT_FOUND)
     if name:
         role.name = name
     if description:
@@ -440,7 +440,7 @@ async def all_permission(request):
     menu_dict = {}
     lic = load_license()
     if not lic:
-        raise CustomError(ErrorCode.InvalidLicenseError)
+        raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
     for item in lic["moduleList"]:
         name = item["name"]
         auth = item["auth"]

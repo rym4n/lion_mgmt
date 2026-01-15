@@ -89,7 +89,7 @@ async def add_tenant(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     if await Tenant.filter(name=name).exists():
-        raise CustomError(ErrorCode.TenantAlreadyExists)
+        raise CustomError(ErrorCode.TENANT_ALREADY_EXISTS)
 
     members = request.json.get("members")
 
@@ -126,15 +126,15 @@ async def del_tenant(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     if id == "0":
-        raise CustomError(ErrorCode.CannotDeleteTenant)
+        raise CustomError(ErrorCode.CANNOT_DELETE_TENANT)
 
     tenant = await Tenant.get_or_none(id=id).prefetch_related("member")
 
     if tenant.member:
         if len(tenant.member) > 1:
-            raise CustomError(ErrorCode.TenantHasMembers)
+            raise CustomError(ErrorCode.TENANT_HAS_MEMBERS)
         if str(tenant.member[0].id) != "43782755-6382-4f42-82a2-5e557370d858":
-            raise CustomError(ErrorCode.TenantHasMembers)
+            raise CustomError(ErrorCode.TENANT_HAS_MEMBERS)
 
     await tenant.delete()
 
@@ -173,7 +173,7 @@ async def edit_tenant(request):
     async with in_transaction():
         tenant = await Tenant.get_or_none(id=tenant_id).prefetch_related("member")
         if tenant is None:
-            raise CustomError(ErrorCode.TenantNotFound)
+            raise CustomError(ErrorCode.TENANT_NOT_FOUND)
 
         name = request.json.get("name")
         if name:
@@ -246,7 +246,7 @@ async def switch_tenant(request):
     tenant = await Tenant.get_or_none(id=id).prefetch_related("member")
 
     if tenant is None:
-        raise CustomError(ErrorCode.TenantNotFound)
+        raise CustomError(ErrorCode.TENANT_NOT_FOUND)
 
     request.ctx.session["tenant_id"] = tenant.id
     new_token = refresh_token(request.ctx.session)

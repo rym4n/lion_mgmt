@@ -89,7 +89,7 @@ async def add_scene(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     if await Scene.filter(name=request.json.get("name"), tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.SceneExistsError)
+        raise CustomError(ErrorCode.SCENE_EXISTS_ERROR)
     if status == 1:
         await Scene.filter(status=1, tenant_id=tenant_id).update(status=0)
     scene = await Scene.create(
@@ -384,7 +384,7 @@ async def remove_scene(request):
         raise CustomError(ErrorCode.NOT_FOUND)
 
     if scene.status == 1:
-        raise CustomError(ErrorCode.SceneDeleteNotAllowed)
+        raise CustomError(ErrorCode.SCENE_DELETE_NOT_ALLOWED)
 
     tenant_id = request.ctx.session.get("tenant_id")
 

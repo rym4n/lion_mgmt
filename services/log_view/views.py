@@ -73,7 +73,7 @@ async def get_logs_by_sql(request):
     end = param.get("end")
 
     result = await query_vlog(query, project_id, start, end, limit=1000)
-    return response_ok(result) if result is not None else response_fail(ErrorCode.VictoriaLogsError)
+    return response_ok(result) if result is not None else response_fail(ErrorCode.VICTORIA_LOGS_ERROR)
 
 
 @logs_bp.route("/indexes", methods=["POST"])

@@ -294,7 +294,7 @@ async def event_ingestion(request):
         vector_config = await gen_vector_config(output_path, sources, vector_name, project_id)
 
     if vector_config is None:
-        raise CustomError(ErrorCode.ConfigFileGenerateError)
+        raise CustomError(ErrorCode.CONFIG_FILE_GENERATE_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -622,7 +622,7 @@ async def update_event_ingestion(request):
 
         config = await Config.get_or_none(key=transforms_type, module="transforms")
         if not config:
-            raise CustomError(ErrorCode.TypeNotSupportedError)
+            raise CustomError(ErrorCode.TYPE_NOT_SUPPORTED_ERROR)
         args = {
             "transformsconfig": transformsconfig,
             "key_value_delimiter": key_value_delimiter,
@@ -670,7 +670,7 @@ async def update_event_ingestion(request):
 
     result = check_vector_config(data)
     if not result:
-        raise CustomError(ErrorCode.ConfigFileGenerateError)
+        raise CustomError(ErrorCode.CONFIG_FILE_GENERATE_ERROR)
 
     async with aiofile.AIOFile(event.file_path, "w", encoding="utf-8") as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
@@ -742,7 +742,7 @@ async def get_event_ingestion_detail(request):
 
     event = await EventsIngestion.get(id=event_id, tenant_id=tenant_id).prefetch_related("creator", "updator")
     if not event:
-        raise CustomError(ErrorCode.NoEventAccess)
+        raise CustomError(ErrorCode.NO_EVENT_ACCESS)
     sources = event.vector_config.get("sources", {})
     max_length = sources.get(event.vector_name, {}).get("max_length")
     if max_length:
@@ -795,13 +795,13 @@ async def get_event_ingestion_kafka_sample(request):
     try:
         size = int(size)
     except:
-        raise CustomError(ErrorCode.ParamError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     event = await EventsIngestion.get_or_none(id=event_id, deleted=False, tenant_id=tenant_id)
     if not event:
-        raise CustomError(ErrorCode.NoEventAccess)
+        raise CustomError(ErrorCode.NO_EVENT_ACCESS)
 
     messages = await query_vlog(f"* | first {size} by (_time desc)", event.project_id)
 
@@ -933,7 +933,7 @@ async def binding_event_ingestion_script(request):
         linked_execution = request_data.get("linked_execution")
 
         if linked_execution == 1 and not script_ids:
-            raise CustomError(ErrorCode.NotScriptError)
+            raise CustomError(ErrorCode.NOT_SCRIPT_ERROR)
 
         timestamp_int = str(int(time.time() * 1000))
         topic = f"{event.vector_name}_{timestamp_int}"
@@ -1009,7 +1009,7 @@ del(.datetime_str)
         # }
         result = check_vector_config(data)
         if not result:
-            raise CustomError(ErrorCode.ConfigFileGenerateError)
+            raise CustomError(ErrorCode.CONFIG_FILE_GENERATE_ERROR)
 
         concurrency = int(request_data.get("concurrency", 1))
         if concurrency > 4:
@@ -1105,7 +1105,7 @@ async def unbundled_event_ingestion_script(request):
 
     event = await EventsIngestion.get_or_none(id=event_ingestion_id, tenant_id=tenant_id)
     if not event:
-        raise CustomError(ErrorCode.NoEventAccess)
+        raise CustomError(ErrorCode.NO_EVENT_ACCESS)
 
     data = event.vector_config
 
@@ -1141,7 +1141,7 @@ async def unbundled_event_ingestion_script(request):
 
     result = check_vector_config(data)
     if not result:
-        raise CustomError(ErrorCode.ConfigFileGenerateError)
+        raise CustomError(ErrorCode.CONFIG_FILE_GENERATE_ERROR)
 
     async with aiofile.AIOFile(event.file_path, "w", encoding="utf-8") as f:
         yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
@@ -1422,7 +1422,7 @@ async def parse_log(request):
 
     config = await Config.get_or_none(key=transforms_type, module="transforms")
     if not config:
-        raise CustomError(ErrorCode.TypeNotSupportedError)
+        raise CustomError(ErrorCode.TYPE_NOT_SUPPORTED_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1450,7 +1450,7 @@ async def parse_log(request):
 
     result = check_vector_config(tmp_data)
     if not result:
-        raise CustomError(ErrorCode.LogParseError)
+        raise CustomError(ErrorCode.LOG_PARSE_ERROR)
 
     messages = await query_vlog("* | first 1 by (_time desc)", event.project_id)
 

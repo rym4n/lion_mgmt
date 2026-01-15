@@ -31,7 +31,7 @@ class UnknownExcHandler(BaseExcHandler):
             logger.exception(exception)
             return response_fail(ErrorCode.PARAM_ERROR)
         elif isinstance(exception, IntegrityError) or isinstance(exception, UniqueViolationError):
-            return response_fail(ErrorCode.DataAlreadyExists)
+            return response_fail(ErrorCode.DATA_ALREADY_EXISTS)
         elif isinstance(exception, MethodNotAllowed):
             return response_fail(ErrorCode.METHOD_NOT_ALLOWED)
         else:

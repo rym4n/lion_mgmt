@@ -46,7 +46,7 @@ async def warroom_ws(request: Request, ws: Websocket):
         account = await request.ctx.session.get("account_info")
         if not account:
             logger.warning("redis里已经没有account信息了")
-            raise CustomError(ErrorCode.SessionInvalid)
+            raise CustomError(ErrorCode.SESSION_INVALID)
         # 建立连接
         session_id = request.ctx.session.get("id")
         tenant_id = request.ctx.session.get("tenant_id")
@@ -128,7 +128,7 @@ async def create_room(request: Request):
     tenant_id = request.ctx.session.get("tenant_id")
     # 作战室名称唯一
     if await Room.filter(name=room_name, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.RoomNameExists)
+        raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
 
     creator = request.ctx.session["account_info"]
     room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id)
@@ -515,7 +515,7 @@ async def get_private_room(request: Request):
     partner_id = request.json.get("partner_id")
     partner = await Account.get(id=partner_id)
     if partner is None:
-        raise CustomError(ErrorCode.AccountNotFound)
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
     tenant_id = request.ctx.session.get("tenant_id")
     # 先获取私聊作战室
     room_info = await get_or_create_private_chat_room(request.app.ctx.cache_client, user, partner, tenant_id)
@@ -801,7 +801,7 @@ async def query_messages(request: Request):
     # 群聊历史. 先查询后创建消息发送
     if query_type == "public_history" and keyword in ["", None]:
         if not room_id:
-            raise CustomError(ErrorCode.ParamValueError)
+            raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
         total_count = await Message.filter(
             type__in=["public", "ai", "runlog", "execute", "ai-question"],
             room_id=room_id,
@@ -932,7 +932,7 @@ async def query_messages(request: Request):
                 tenant_id=tenant_id,
             )
         else:
-            raise CustomError(ErrorCode.ParamValueError)
+            raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
 
         total_count = await query.count()
         messages = await query.order_by("-ctime").offset(offset).limit(limit).prefetch_related("sender", "receiver")
@@ -966,7 +966,7 @@ async def query_messages(request: Request):
     # 获取公告列表
     elif query_type == "announcements":
         if not room_id:
-            raise CustomError(ErrorCode.ParamValueError)
+            raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
 
         total_count = await Message.filter(type="announcement", room_id=room_id, tenant_id=tenant_id).count()
 
@@ -994,7 +994,7 @@ async def query_messages(request: Request):
             }
         )
     else:
-        raise CustomError(ErrorCode.ParamValueError)
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
 
 
 @warroom_bp.post("/get/list")
@@ -1096,7 +1096,7 @@ async def get_list(request):
 async def up_status(request):
     ids = request.json.get("ids")
     if not ids:
-        raise CustomError(ErrorCode.ParamValueError)
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
     if "*" in ids:
         account = request.ctx.session["account_info"]
@@ -1209,10 +1209,10 @@ async def run(request):
     run_type = request.json.get("type")
     user = request.ctx.session["account_info"]
     if not room_id or not run_type:
-        raise CustomError(ErrorCode.ParamValueError)
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     params = request.json.get("playbook_input") or request.json.get("action_input")
     if not params:
-        raise CustomError(ErrorCode.ParamValueError)
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
     params["executor"] = user.id
     msg = {"run_type": run_type, "run_id": gen_run_id(), "run_args": params, "tenant_id": tenant_id}
@@ -1272,7 +1272,7 @@ async def run(request):
 @requires_permission("warroom:r")
 async def get_runlog(request):
     if not request.json.get("run_id"):
-        raise CustomError(ErrorCode.ParamValueError)
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     logs = await Runlog.filter(run_id=request.json.get("run_id"), deleted=False).all()
 
     run_logs = await runlog_list(logs)
@@ -1297,13 +1297,13 @@ async def execution(request):
     if not event.room:
         room_name = event.event_name + "_" + gen_random_code(6)
         if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
-            raise CustomError(ErrorCode.RoomNameExists)
+            raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
         room = await Room.create(name=room_name, creator=user, tenant_id=tenant_id)
         event.room = room
     room_id = event.room_id
     run_type = TYPE_DICT.get(executorInstanceType)
     if not room_id or not run_type:
-        raise CustomError(ErrorCode.ParamValueError)
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     params = {}
     input_data = {}
     if run_type == "flow":
@@ -1315,7 +1315,7 @@ async def execution(request):
     elif run_type == "action":
         action = await ToolAction.get_or_none(id=executorInstanceId, deleted=False, tenant_id=tenant_id)
         if not action:
-            raise CustomError(ErrorCode.ActionNotFoundError)
+            raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
         tool = await Tool.get_or_none(name=action.tool_name, version=action.version_number, deleted=False, tenant_id=tenant_id)
         if executorParams:
             for param in executorParams:
@@ -1351,7 +1351,7 @@ async def execution(request):
 @requires_permission("warroom:r")
 async def activity(request, activityId):
     if not activityId:
-        raise CustomError(ErrorCode.ParamValueError)
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1436,7 +1436,7 @@ async def send_message(request):
     partner = await Account.get(username=username)
     sender = await Account.get(username="system", type="api")
     if partner is None:
-        raise CustomError(ErrorCode.AccountNotFound)
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
     tenant_id = request.ctx.session.get("tenant_id")
     room_info = await get_or_create_private_chat_room(request.app.ctx.cache_client, sender, partner, tenant_id)
     room = await Room.get_or_none(id=room_info["room_id"], tenant_id=tenant_id)
