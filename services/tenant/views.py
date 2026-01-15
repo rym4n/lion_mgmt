@@ -195,7 +195,7 @@ async def edit_tenant(request):
                 unsafe_users = await Account.filter(id__in=ids_to_remove).annotate(tenant_count=Count("member")).filter(tenant_count__lte=1)
 
                 unsafe_ids = {u.id for u in unsafe_users}
-                unsafe_usernames = [u.display_name for u in unsafe_users]
+                unsafe_usernames = [{"display_name": u.display_name, "username": u.username} for u in unsafe_users]
 
                 ids_to_remove -= unsafe_ids
 
