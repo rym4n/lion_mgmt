@@ -99,6 +99,7 @@ async def add_tenant(request):
         if members:
             users = await Account.filter(id__in=members).all()
             await tenant.member.add(*users)
+        await tenant.member.add(request.ctx.session["account_info"])
 
     return response_ok("添加成功")
 
