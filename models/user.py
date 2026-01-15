@@ -2,7 +2,7 @@
 import re
 import uuid
 
-from tortoise import fields, Model
+from tortoise import Model, fields
 from tortoise.validators import RegexValidator
 
 from libs.utils import strip_timezone_to_seconds
@@ -39,6 +39,7 @@ class Account(BaseModel):
     type: str = fields.CharField(max_length=255, default="user")
     creator = fields.CharField(max_length=32, null=True, description="创建人")
     expiration = fields.DatetimeField(null=True, description="Token过期时间")
+    last_login_time = fields.DatetimeField(null=True, description="最后登录时间")
     star_rooms = fields.ManyToManyField("models.Room", through="account_star_room")
 
     @property
@@ -54,6 +55,7 @@ class Account(BaseModel):
             "phone": self.phone,
             "disabled": self.disabled,
             "oauth_id": self.oauth_id,
+            "last_login_time": strip_timezone_to_seconds(self.last_login_time),
             "mfa_enable": self.mfa_enable,
             "mfa_bind": self.mfa_bind,
             "permit_ip": self.permit_ip,

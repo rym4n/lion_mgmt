@@ -86,6 +86,7 @@ __all__ = ["user_bp"]
                                     "mfa_key": {"type": "string"},
                                     "mfa_uri": {"type": "string"},
                                     "permit_ip": {"type": "string"},
+                                    "force_change_password": {"type": "boolean"},
                                     "roles": {
                                         "type": "array",
                                         "items": {
@@ -532,11 +533,7 @@ async def update_api_user(request):
             "schema": {
                 "type": "object",
                 "required": ["username", "password"],
-                "properties": {
-                    "username": {"type": "string", "description": "用户名"},
-                    "password": {"type": "string", "description": "密码"},
-                    "captcha_code": {"type": "string", "description": "验证码"},
-                },
+                "properties": {"username": {"type": "string", "description": "用户名"}, "password": {"type": "string", "description": "密码"}},
             }
         }
     },
@@ -563,6 +560,7 @@ async def update_api_user(request):
                                     "mfa_enable": {"type": "boolean"},
                                     "mfa_uri": {"type": "string"},
                                     "permit_ip": {"type": "string"},
+                                    "force_change_password": {"type": "boolean"},
                                     "roles": {
                                         "type": "array",
                                         "items": {
@@ -586,20 +584,11 @@ async def update_api_user(request):
 async def login(request):
     username = request.json.get("username")
     password = request.json.get("password")
-    captcha_code = request.json.get("captcha_code")
 
     if not username or not password:
         raise CustomError(ErrorCode.CredentialsError)
 
     secure_config = await get_secure_config_dict()
-
-    # 1. 验证码校验
-    if secure_config["captcha_enabled"]:
-        # TODO: 这里需要结合实际的验证码生成和缓存逻辑
-        # 目前假设前端传来的 captcha_code 必须存在
-        if not captcha_code:
-            # 暂时用 CredentialsError，或者新增一个验证码错误的 ErrorCode
-            raise CustomError(ErrorCode.ParameterError)
 
     # 防止暴力破解
     user_attempts = await request.app.ctx.cache_client.get(f"{username}_login_attempts")
@@ -629,11 +618,7 @@ async def login(request):
 
         # 2. 账号自动冻结检查
         if secure_config["account_auto_freeze_enabled"]:
-            # 使用 utime 作为最后活动时间，如果距离现在超过 N 天，则冻结
-            # 注意：这里需要确保 utime 是带时区的或者统一的
-            last_active = account.utime.timestamp()  # float seconds
-            now = time.time()
-            if (now - last_active) > (secure_config["account_auto_freeze_days"] * 86400):
+            if (time.time() - account.last_login_time.timestamp()) > (secure_config["account_auto_freeze_days"] * 86400):
                 account.disabled = True
                 await account.save(update_fields=["disabled"])
                 raise CustomError(ErrorCode.AccountDisabled)
@@ -645,9 +630,15 @@ async def login(request):
 
         # 验证密码
         password_hasher.verify(account.password, password)
+
+        update_fields = ["last_login_time"]
+        account.last_login_time = datetime.now()
+
         if password_hasher.check_needs_rehash(account.password):
             account.password = password_hasher.hash(password)
-            await account.save(update_fields=["password"])
+            update_fields.append("password")
+
+        await account.save(update_fields=update_fields)
 
         # 登录成功，清除错误次数
         await request.app.ctx.cache_client.delete(f"{username}_login_attempts")
@@ -687,10 +678,10 @@ async def login(request):
             if not account.mfa_bind:
                 resp["mfa_uri"] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name="AIOE")
 
-        # todo: 4. 首次登录强制修改密码
-        # if secure_config["force_change_password_first_login"]:
-        #     if abs(account.ctime.timestamp() - account.utime.timestamp()) < 10:
-        #         resp["force_change_password"] = True
+        # 4. 首次登录强制修改密码
+        if secure_config["force_change_password_first_login"]:
+            if abs(account.ctime.timestamp() - account.utime.timestamp()) < 10:
+                resp["force_change_password"] = True
 
         tmp_resp = response_ok(resp)
         tmp_resp.cookies.add_cookie(

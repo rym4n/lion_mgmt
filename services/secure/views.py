@@ -48,7 +48,6 @@ secure_bp = Blueprint("secure", url_prefix="/secure")
                                     "account_auto_freeze_days": {"type": "integer"},
                                     "account_auto_freeze_enabled": {"type": "boolean"},
                                     "force_change_password_first_login": {"type": "boolean"},
-                                    "captcha_enabled": {"type": "boolean"},
                                     "mfa_enabled": {"type": "boolean"},
                                 },
                             },
@@ -112,6 +111,7 @@ async def get_secure_config(request):
                     "account_auto_freeze_days": {"type": "integer"},
                     "account_auto_freeze_enabled": {"type": "boolean"},
                     "force_change_password_first_login": {"type": "boolean"},
+                    "mfa_enabled": {"type": "boolean"},
                 },
             }
         }
@@ -159,6 +159,7 @@ async def update_secure_config(request):
         "account_auto_freeze_days",
         "account_auto_freeze_enabled",
         "force_change_password_first_login",
+        "mfa_enabled",
     }
 
     async with in_transaction():

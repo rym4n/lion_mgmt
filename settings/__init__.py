@@ -93,9 +93,9 @@ SECURE_CONFIG_DEFAULT = {
     "password_length_min": 8,
     "password_length_max": 32,
     "password_include_lowercase": True,
-    "password_include_uppercase": False,
+    "password_include_uppercase": True,
     "password_include_digit": True,
-    "password_include_special": False,
+    "password_include_special": True,
     "password_exclude_continuous_length": 0,
     "password_exclude_keyboard_order": False,
     "password_exclude_letter_order": False,
@@ -107,8 +107,7 @@ SECURE_CONFIG_DEFAULT = {
     "account_lock_duration": 600,
     "account_auto_freeze_days": 180,
     "account_auto_freeze_enabled": False,
-    "force_change_password_first_login": True,
-    "captcha_enabled": False,
+    "force_change_password_first_login": False,
     "mfa_enabled": False,
 }
 

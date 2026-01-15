@@ -7,9 +7,8 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
-from models import Scene, Playbook
+from models import Playbook, Scene
 
 scene_bp = Blueprint("scene", url_prefix="/scene")
 _all__ = ["scene_bp"]
