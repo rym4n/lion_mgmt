@@ -67,7 +67,7 @@ async def get_logs_by_sql(request):
     project_id = param.get("project_id")
 
     if not query or not project_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     start = param.get("start")
     end = param.get("end")
@@ -170,7 +170,7 @@ async def get_index_list(request):
 async def get_field_list(request):
     project_id = request.json.get("project_id")
     if not project_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     try:
         # 由于VictoriaLogs可能没有直接获取字段列表的接口，这里通过查询最近的日志来推断字段

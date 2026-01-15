@@ -19,7 +19,7 @@ class UnknownExcHandler(BaseExcHandler):
 
     def handle(self, request: Request, exception: Exception) -> HTTPResponse:
         if isinstance(exception, exceptions.NotFound) or isinstance(exception, DoesNotExist):
-            return response_fail(ErrorCode.NotFound)
+            return response_fail(ErrorCode.NOT_FOUND)
         elif (
             isinstance(exception, exceptions.BadRequest)
             or isinstance(exception, ValidationError)
@@ -29,11 +29,11 @@ class UnknownExcHandler(BaseExcHandler):
             or isinstance(exception, FieldError)
         ):
             logger.exception(exception)
-            return response_fail(ErrorCode.ParameterError)
+            return response_fail(ErrorCode.PARAM_ERROR)
         elif isinstance(exception, IntegrityError) or isinstance(exception, UniqueViolationError):
             return response_fail(ErrorCode.DataAlreadyExists)
         elif isinstance(exception, MethodNotAllowed):
-            return response_fail(ErrorCode.MethodNotAllowed)
+            return response_fail(ErrorCode.METHOD_NOT_ALLOWED)
         else:
             logger.exception(exception)
-            return response_fail(ErrorCode.ServerError, 500)
+            return response_fail(ErrorCode.SERVER_ERROR, 500)

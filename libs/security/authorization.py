@@ -67,7 +67,7 @@ async def check_roles(request: Request, *required_roles: str) -> bool:
     request.ctx.session["account_info"] = account
     if set(required_roles) & {role.name for role in account.roles}:
         return True
-    raise CustomError(ErrorCode.Unauthorized)
+    raise CustomError(ErrorCode.UNAUTH)
 
 
 def requires_permission(*required_permissions: str):
@@ -117,7 +117,7 @@ def playbook_permission(*required_permissions: str):
             has_access = await check_playbook_permission(request, user, playbook_id, required_permissions)
 
             if not has_access:
-                raise CustomError(ErrorCode.Unauthorized)
+                raise CustomError(ErrorCode.UNAUTH)
 
             return await func(request, *args, **kwargs)
 

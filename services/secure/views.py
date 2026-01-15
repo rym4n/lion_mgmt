@@ -137,7 +137,7 @@ async def get_secure_config(request):
 async def update_secure_config(request):
     params = request.json
     if not params:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     # 允许的配置项
     allowed_keys = {

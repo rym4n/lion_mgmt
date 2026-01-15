@@ -85,7 +85,7 @@ async def upload_image(request):
     system_version = request.form.get("system_version")
 
     if not system_version:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     cfg = await Config.get_or_none(key="platform_config", module="system")
     if cfg:
@@ -166,7 +166,7 @@ async def upload_image(request):
 async def get_bgpic(request):
     pic_type = request.args.get("type")
     if pic_type not in ("background", "webico", "logo"):
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
     cfg = await Config.get_or_none(key=pic_type, module="system")
     if cfg:
         return response_ok({"url": cfg.value})
@@ -437,7 +437,7 @@ async def get_system_status_history(request):
     end_time = params.get("end_time")
 
     if not host or not service_name or not start_time or not end_time:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     # 构建查询条件
     query = f'log_type:"health_check" AND log_ip:"{host}"'
@@ -589,6 +589,8 @@ async def get_oauth_status(request):
                                     "display_name_path": {"type": "string"},
                                     "email_path": {"type": "string"},
                                     "phone_path": {"type": "string"},
+                                    "default_roles": {"type": "string"},
+                                    "default_tenants": {"type": "string"},
                                     "scopes": {"type": "string"},
                                 },
                             },
@@ -620,6 +622,8 @@ async def get_oauth_config(request):
             "display_name_path": oauth_config.get("display_name_path", ""),
             "email_path": oauth_config.get("email_path", ""),
             "phone_path": oauth_config.get("phone_path", ""),
+            "default_roles": oauth_config.get("default_roles", ""),
+            "default_tenants": oauth_config.get("default_tenants", ""),
             "scopes": oauth_config.get("scopes", ""),
         }
     )
@@ -643,6 +647,7 @@ async def get_oauth_config(request):
                     "user_info_uri",
                     "user_id_path",
                     "token_path",
+                    "default_roles",
                 ],
                 "properties": {
                     "use_oauth2": {
@@ -689,6 +694,14 @@ async def get_oauth_config(request):
                         "type": "string",
                         "description": "用户手机号的取值路径",
                     },
+                    "default_roles": {
+                        "type": "string",
+                        "description": "新用户默认角色ID，多个用英文逗号分隔",
+                    },
+                    "default_tenants": {
+                        "type": "string",
+                        "description": "新用户默认工作空间ID，多个用英文逗号分隔",
+                    },
                     "scopes_alias": {
                         "type": "string",
                         "description": "请求资源范围的名称",
@@ -720,7 +733,7 @@ async def update_oauth_config(request):
     params = request.json
     use_oauth2 = params.get("use_oauth2")
     if use_oauth2 not in ("true", "false"):
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     if use_oauth2 == "false":
         old = await Config.get_or_none(key="use_oauth2")
@@ -744,6 +757,8 @@ async def update_oauth_config(request):
             "display_name_path",
             "email_path",
             "phone_path",
+            "default_tenants",
+            "default_roles",
             "scopes",
             "client_id_alias",
             "client_secret_alias",
@@ -752,7 +767,7 @@ async def update_oauth_config(request):
         # 校验必填字段是否为空或不存在
         for field in required_fields:
             if not params.get(field):
-                raise CustomError(ErrorCode.ParameterError)
+                raise CustomError(ErrorCode.PARAM_ERROR)
 
         # 收集所有要更新的键值对
         all_keys = required_fields + optional_fields
@@ -1057,7 +1072,7 @@ async def outgoing(request):
         raw_address = item.get("sink_address")
 
         if not raw_address and not sink_type:
-            raise CustomError(ErrorCode.ParameterError)
+            raise CustomError(ErrorCode.PARAM_ERROR)
 
         addresses = raw_address.split(",")
         if len(addresses) > 1 and sink_type == "syslog":
@@ -1081,7 +1096,7 @@ async def outgoing(request):
         if sink_type == "kafka":
             topic = item.get("kafka_topic")
             if not topic:
-                raise CustomError(ErrorCode.ParameterError)
+                raise CustomError(ErrorCode.PARAM_ERROR)
 
             sink_config = {
                 "type": "kafka",
@@ -1102,7 +1117,7 @@ async def outgoing(request):
         elif sink_type == "syslog":
             mode = item.get("sink_protocol")
             if not mode:
-                raise CustomError(ErrorCode.ParameterError)
+                raise CustomError(ErrorCode.PARAM_ERROR)
 
             data["sinks"][f"syslog_sinks_{sink_key_suffix}"] = {
                 "type": "socket",
@@ -1207,7 +1222,7 @@ async def get_outgoing_config(request):
 @requires_permission("audit:r")
 async def update_maintenance_mode_status(request):
     if request.json.get("mt_status") is None:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     mt_status = int(request.json.get("mt_status"))
     if request.ctx.session["account_info"].username == "admin":
@@ -1274,7 +1289,7 @@ async def update_maintenance_mode_status(request):
 @requires_permission("audit:r")
 async def update_file(request):
     if not request.files or "file" not in request.files:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     files = request.files.getlist("file")
     saved_files = []
@@ -1328,7 +1343,7 @@ async def update_file(request):
 )
 async def download_file(request, file_id):
     if not file_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
     safe_name = os.path.basename(file_id)
 
     content = await get_from_s3("user", file_id, "common_files")

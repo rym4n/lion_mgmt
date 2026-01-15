@@ -76,7 +76,7 @@ async def view_dashboard(request):
     static_type = params.get("static_type")
 
     if not start_time or not end_time or not static_type:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     result = None
     start_time = datetime.strptime(start_time, "%Y-%m-%d")
@@ -187,7 +187,7 @@ async def count_mttr(request):
         start_time = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
         end_time = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
     except ValueError:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
     async with in_transaction() as tconn:
         results = await tconn.execute_query_dict(

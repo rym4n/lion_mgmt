@@ -6,13 +6,13 @@ from libs.error_code.enum import BaseErrorCode, ErrorData
 class ErrorCode(BaseErrorCode):
     """错误码枚举类"""
 
-    ServerError = ErrorData(5000, "服务异常，请稍后重试")
-    ParameterError = ErrorData(4000, "参数错误")
-    InvalidJsonError = ErrorData(4001, "请求体是无效的json格式")
-    NotFound = ErrorData(4002, "请求资源不存在")
-    MethodNotAllowed = ErrorData(4003, "请求方法不允许")
-    Unauthorized = ErrorData(4004, "权限不足")
-    Forbidden = ErrorData(4005, "禁止访问")
+    SERVER_ERROR = ErrorData(5000, "服务异常，请稍后重试")
+    PARAM_ERROR = ErrorData(4000, "参数错误")
+    INVALID_JSON = ErrorData(4001, "请求体是无效的json格式")
+    NOT_FOUND = ErrorData(4002, "请求资源不存在")
+    METHOD_NOT_ALLOWED = ErrorData(4003, "请求方法不允许")
+    UNAUTH = ErrorData(4004, "权限不足")
+    FORBIDDEN = ErrorData(4005, "禁止访问")
 
     WeakPassword = ErrorData(4006, "密码强度过低,必须包含大小写字母、数字、特殊字符、长度不小于8")
     PasswordLengthError = ErrorData(40061, "密码长度不符合要求")
@@ -155,5 +155,8 @@ class ErrorCode(BaseErrorCode):
     TenantNotFound = ErrorData(4107, "当前工作空间不存在")
     CannotDeleteTenant = ErrorData(4108, "默认工作空间禁止删除")
     RoleCannotDelete = ErrorData(4109, "超管角色禁止删除")
+
+    DefaultTenantNotFound = ErrorData(4111, "默认工作空间未配置")
+    DefaultRoleNotFound = ErrorData(4112, "默认角色未配置")
 
     ActionTimeout = ErrorData(4110, "执行超时")

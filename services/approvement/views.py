@@ -280,20 +280,20 @@ async def update_approvement(request):
     remark = param.get("remark", "")
     args = param.get("params") or []
     if not approvement_id or not isinstance(agree, bool) or not isinstance(remark, str) or not isinstance(args, list):
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     for p in args:
         if not p.get("name") or not p.get("value"):
-            raise CustomError(ErrorCode.ParameterError)
+            raise CustomError(ErrorCode.PARAM_ERROR)
 
         if p.get("required") is True and not p.get("value"):
-            raise CustomError(ErrorCode.ParameterError)
+            raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     approve = await Approvement.filter(id=approvement_id, tenant_id=tenant_id).select_for_update().prefetch_related("approvers").first()
     if not approve:
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NOT_FOUND)
 
     if approve.status != 0:
         raise CustomError(ErrorCode.ApprovementStatusError)
@@ -405,7 +405,7 @@ async def update_approvement_callback(request):
     flow_input = param.get("params")
 
     if not token or not isinstance(agree, bool) or not isinstance(remark, str):
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -413,11 +413,11 @@ async def update_approvement_callback(request):
         try:
             flow_input = orjson.loads(flow_input)
         except orjson.JSONDecodeError:
-            raise CustomError(ErrorCode.ParameterError)
+            raise CustomError(ErrorCode.PARAM_ERROR)
 
     approve = await Approvement.filter(callback_token=token, tenant_id=tenant_id).select_for_update().prefetch_related("approvers").first()
     if not approve:
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NOT_FOUND)
 
     if approve.status != 0:
         raise CustomError(ErrorCode.ApprovementStatusError)

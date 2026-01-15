@@ -1272,7 +1272,33 @@ async def oauth2_callback(request):
             creator="auto",
             permit_ip=None,
         )
-        await account.fetch_related("roles")
+
+        default_tenants = request.app.ctx.oauth_cfg.get("default_tenants", "").split(",")
+        if default_tenants:
+            tenants_by_id = await Tenant.filter(id__in=default_tenants).all()
+            if tenants_by_id:
+                account.tenant_id = tenants_by_id[0].id
+                await account.save(update_fields=["tenant_id"])
+                for t in tenants_by_id:
+                    t.member.add(account)
+            else:
+                raise CustomError(ErrorCode.DefaultTenantNotFound)
+        else:
+            tenant = await Tenant.get(id=account.tenant_id)
+            if tenant:
+                tenant.member.add(account)
+            else:
+                raise CustomError(ErrorCode.DefaultTenantNotFound)
+
+        default_roles = request.app.ctx.oauth_cfg.get("default_roles", "").split(",")
+        if default_roles:
+            roles = await Role.filter(id__in=default_roles, tenant_id=account.tenant_id).all()
+            if roles:
+                await account.roles.add(*roles)
+            else:
+                raise CustomError(ErrorCode.DefaultRoleNotFound)
+        else:
+            await account.fetch_related("roles")
 
     aioe_token = token_encode(
         account.id,

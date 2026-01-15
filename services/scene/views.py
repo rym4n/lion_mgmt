@@ -81,10 +81,10 @@ async def add_scene(request):
     remark = request.json.get("remark")
     status = int(request.json.get("status"))
     if not all([name, remark]):
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     if status is None and status not in [0, 1]:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -166,13 +166,13 @@ async def update_scene(request):
     scene_id = request.json.get("id")
     remark = request.json.get("remark") or None
     if not scene_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     scene = await Scene.get_or_none(id=scene_id, tenant_id=tenant_id).prefetch_related("creator")
     if not scene:
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NOT_FOUND)
 
     if remark:
         scene.remark = remark
@@ -322,14 +322,14 @@ async def get_all_scene(request):
 async def set_current_scene(request):
     scene_id = request.json.get("id")
     if not scene_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     await Scene.filter(status=1, tenant_id=tenant_id).update(status=0)
     scene = await Scene.get_or_none(id=scene_id, tenant_id=tenant_id)
     if not scene:
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NOT_FOUND)
 
     scene.status = 1
     scene.updator = request.ctx.session["account_info"]
@@ -374,14 +374,14 @@ async def set_current_scene(request):
 async def remove_scene(request):
     scene_id = request.json.get("id")
     if not scene_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     scene = await Scene.get_or_none(id=scene_id, tenant_id=tenant_id)
 
     if not scene:
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NOT_FOUND)
 
     if scene.status == 1:
         raise CustomError(ErrorCode.SceneDeleteNotAllowed)

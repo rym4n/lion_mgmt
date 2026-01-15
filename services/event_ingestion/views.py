@@ -52,7 +52,7 @@ def get_conditional_statements(conditions):
         elif condition["type"] == "match":
             conditional_statements += f"""match(string!(.log."{condition['name']}"), r'{condition['value']}')"""
         else:
-            raise CustomError(ErrorCode.ParameterError)
+            raise CustomError(ErrorCode.PARAM_ERROR)
         connect_type = condition["connect_type"] if condition.get("connect_type") in ["&&", "||"] else None
         if connect_type:
             conditional_statements += f" {connect_type} "
@@ -238,7 +238,7 @@ async def event_ingestion(request):
     max_length = int(data.get("max_length", 100))
 
     if event_source_type not in ["syslog", "kafka"]:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     syslog_config = None
     if syslog_port and communication_type:
@@ -433,7 +433,7 @@ async def delete_event_ingestion(request):
     async with in_transaction():
         event = await EventsIngestion.get(id=event_id, tenant_id=tenant_id)
         if not event:
-            raise CustomError(ErrorCode.NotFound)
+            raise CustomError(ErrorCode.NOT_FOUND)
         if event.enabled_status == 1:
             return response_ok("请先禁用事件接入再删除")
         es = await EventRelatedScript.get_or_none(event_ingestion_id=event_id, tenant_id=tenant_id)
@@ -910,7 +910,7 @@ async def binding_event_ingestion_script(request):
 
     event = await EventsIngestion.get(id=event_ingestion_id, tenant_id=tenant_id).prefetch_related("creator")
     if not event:
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NOT_FOUND)
 
     event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False, tenant_id=tenant_id).all()
     for event_related_script in event_related_scripts:
@@ -1184,7 +1184,7 @@ async def unbundled_event_ingestion_script(request):
 async def export_event_ingestion_script(request):
     event_ids = request.json.get("ids", [])
     if not isinstance(event_ids, list) or not event_ids:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1256,7 +1256,7 @@ async def export_event_ingestion_script(request):
 async def import_event_ingestion_script(request):
     files = request.files["files"]
     if not files:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
     file_results = []
 
     tenant_id = request.ctx.session.get("tenant_id")
@@ -1428,7 +1428,7 @@ async def parse_log(request):
 
     event = await EventsIngestion.get_or_none(id=params.get("id"), deleted=False, tenant_id=tenant_id)
     if not event:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     args = {
         "transformsconfig": transformsconfig,
@@ -1528,7 +1528,7 @@ async def parse_log(request):
 async def event_ingestion_config_list(request):
     event_id = request.json.get("id")
     if not event_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 

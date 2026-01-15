@@ -17,7 +17,7 @@ class ErrorData(NamedTuple):
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, ErrorData):
-            raise NotImplemented
+            raise NotImplementedError
         return self.code == other.code
 
 

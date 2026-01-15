@@ -151,13 +151,13 @@ async def add_timed(request):
     tactics = data.get("tactics")
     end_time = data.get("end_time") or ""
     if any(x is None for x in [name, operate_type, status, tactics]):
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
     if status not in [0, 1] or operate_type not in [0, 1]:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
     if operate_type == 0 and not playbook_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
     if operate_type == 1 and not action_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -610,14 +610,14 @@ async def get_success_rate(request):
 async def get_timed_detail(request):
     timed_id = request.json.get("id")
     if not timed_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     timed = await Timed.get_or_none(id=timed_id, deleted=False, tenant_id=tenant_id).prefetch_related("action", "playbook", "creator", "updator")
 
     if not timed:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     data = timed.json
     if timed.playbook_input:
@@ -748,7 +748,7 @@ async def update_timed(request):
     data = request.json
     timed_id = data.get("id")
     if not timed_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -756,11 +756,11 @@ async def update_timed(request):
     result, permissions = await get_timed_permissions(request, [timed])
 
     if not result:
-        raise CustomError(ErrorCode.Unauthorized)
+        raise CustomError(ErrorCode.UNAUTH)
 
     run_type = int(data.get("type", timed.type))
     if run_type not in [RUN_TYPE_FLOW, RUN_TYPE_ACTION]:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     enable = data.get("enable", timed.enable)
     status = data.get("status", timed.status)
@@ -775,7 +775,7 @@ async def update_timed(request):
 
         if not playbook_id or not playbook_input:
             if not timed.playbook_input:
-                raise CustomError(ErrorCode.ParameterError)
+                raise CustomError(ErrorCode.PARAM_ERROR)
             else:
                 playbook_input = timed.playbook_input
                 playbook_id = timed.playbook.id
@@ -796,7 +796,7 @@ async def update_timed(request):
 
     else:
         if not timed.action and not data.get("action_id"):
-            raise CustomError(ErrorCode.ParameterError)
+            raise CustomError(ErrorCode.PARAM_ERROR)
 
         action_id = data.get("action_id", timed.action.id if timed.action else None)
         action_input = data.get("action_input", timed.action_input)
@@ -888,7 +888,7 @@ async def update_timed(request):
 async def delete_timed(request):
     timed_id = request.json.get("id")
     if not timed_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1014,7 +1014,7 @@ async def get_run_log(request):
     status = req_json.get("status")
 
     if not timed_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     condition = Q(timer_id=timed_id, deleted=False)
 

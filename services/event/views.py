@@ -618,7 +618,7 @@ async def get_event_detail(request):
 
     event = await Events.get(id=event_id, deleted=False, tenant_id=tenant_id).prefetch_related("room", "creator", "updator")
     if not event:
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NOT_FOUND)
     creator = request.ctx.session["account_info"]
     first = False
     if not event.room:
@@ -680,13 +680,13 @@ async def update_event(request):
     params = request.json
     event_id = params.get("id")
     if not event_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     event = await Events.get(id=event_id, deleted=False, tenant_id=tenant_id).prefetch_related("room", "creator", "updator")
     if not event:
-        raise CustomError(ErrorCode.NotFound)
+        raise CustomError(ErrorCode.NOT_FOUND)
 
     update_fields = []
 
@@ -786,7 +786,7 @@ async def get_report(request):
     event_id = request.json.get("event_id")
 
     if not event_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 

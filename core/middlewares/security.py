@@ -7,6 +7,7 @@ from sanic import HTTPResponse, Request
 
 from libs.kafka import aproduce
 from libs.security.authentication import authenticate
+from libs.security.authorization import check_permissions
 from libs.utils import get_client_ip
 from settings import AUDIT_TOPIC, TZ
 
@@ -30,6 +31,8 @@ class SecurityMiddleware(BaseMiddleware):
         ]
         if request.path not in white_urls:
             await authenticate(request)
+            if request.path == "/docs" or request.path.startswith("/docs/"):
+                await check_permissions(request, "apidoc:r")
 
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
         """统一记录操作日志"""

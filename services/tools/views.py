@@ -602,7 +602,7 @@ async def all_versions(request):
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     name = request.json.get("name")
     if not name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -701,7 +701,7 @@ async def tool_actions(request):
     name = request.json.get("name")
     version = request.json.get("version")
     if not name or not version:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -778,7 +778,7 @@ async def update_tool_status(request):
     version = request.json.get("version")
     status = int(request.json.get("status"))
     if not name or not version or status not in [0, 1]:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -833,7 +833,7 @@ async def delete_tool(request):
     name = request.json.get("name")
     version = request.json.get("version")
     if not name or not version:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -901,7 +901,7 @@ async def delete_tool(request):
 async def delete_tool_all(request):
     name = request.json.get("name")
     if not name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
@@ -968,7 +968,7 @@ async def delete_tool_all(request):
 async def tool_resource_model(request):
     tool_name = request.json.get("name")
     if not tool_name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1027,7 +1027,7 @@ async def add_tool_resource(request):
     engine = request.json.get("engine")
     resources = request.json.get("resources")
     if not tool_name or resources is None or not name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1110,7 +1110,7 @@ async def add_tool_resource(request):
 async def tool_resources_detailed(request):
     tool_name = request.json.get("name")
     if not tool_name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1169,7 +1169,7 @@ async def update_tool_resource(request):
     engine = request.json.get("engine")
     resources = request.json.get("resources") or {}
     if not tool_name or not name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1244,7 +1244,7 @@ async def delete_tool_resource(request):
     tool_name = request.json.get("tool_name")
     name = request.json.get("name")
     if not tool_name or not name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1309,7 +1309,7 @@ async def delete_tool_resource(request):
 async def download_zip(request):
     tool_id = request.json.get("tool_id")
     if not tool_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1389,9 +1389,9 @@ async def add_permission(request):
     users_id = list(set(request.json.get("users_id", [])))
     roles_id = list(set(request.json.get("roles_id", [])))
     if not name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
     if not isinstance(users_id, list) or not isinstance(roles_id, list) or not isinstance(actions, list):
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1510,7 +1510,7 @@ async def select_permission_all(request):
     resource_id = request.json.get("resource_id")
     actions = request.json.get("actions", ["all"])
     if not name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1642,7 +1642,7 @@ async def select_permission_all(request):
 async def judge_permission(request):
     action_groups = request.json.get("actions", [])
     if not action_groups or not isinstance(action_groups, list):
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1757,7 +1757,7 @@ async def add_tag(request):
     name = request.json.get("name")
     tags = request.json.get("tags", [])
     if not name or not tags:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1819,7 +1819,7 @@ async def delete_tag(request):
     name = request.json.get("name")
     tags = request.json.get("tags", [])
     if not name or not tags:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1883,7 +1883,7 @@ async def health_check_config(request):
     # 参数验证
     if switch == "on":
         if not cron:
-            raise CustomError(ErrorCode.ParameterError)
+            raise CustomError(ErrorCode.PARAM_ERROR)
         await Config.update_or_create(key="health_check_cron", defaults={"value": cron}, module="tool")
 
     await Config.update_or_create(key="health_check_switch", defaults={"value": switch}, module="tool")
@@ -1975,7 +1975,7 @@ async def health_check_get(request):
 async def tool_action_input(request):
     action_id = request.json.get("id")
     if not action_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1990,7 +1990,7 @@ async def tool_action_input(request):
 
 async def tool_action_update(data, tenant_id):
     if not isinstance(data, dict):
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     affected_tools = set()
 
@@ -2028,7 +2028,7 @@ async def tool_action_playbook_delete(data, tenant_id):
             }
     """
     if not isinstance(data, dict):
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     affected_tools = set()
 
@@ -2088,7 +2088,7 @@ async def tool_action_playbook_delete(data, tenant_id):
 async def new_tag(request):
     name = request.json.get("name", "").strip()
     if not name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -2164,7 +2164,7 @@ async def tag_list(request):
 async def remove_tag(request):
     name = request.json.get("name")
     if not name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -2261,17 +2261,17 @@ async def engine_list(request):
 async def health_check(request):
     data = request.json.get("data")
     if not data:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     tool_name = request.json.get("tool_name")
     if not tool_name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     resource_id = data.get("resource_id")
     if not resource_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tool = await Tool.filter(name=tool_name, deleted=False, tenant_id=tenant_id).order_by("-ctime").first()
     if not tool:
@@ -2330,7 +2330,7 @@ async def health_check(request):
 async def tool_debug(request):
     data = request.json.get("data")
     if not data:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 

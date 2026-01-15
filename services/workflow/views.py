@@ -87,7 +87,7 @@ _all__ = ["workflow_bp"]
 async def create_workflow(request):
     data = request.json
     if not data.get("name") or not data.get("flow_json_list"):
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     # total_up_value = 0
     # # 判断剧本数量是否达到了创建上限
@@ -676,7 +676,7 @@ async def edit_workflow(request):
 @playbook_permission("u")
 async def edit_workflow_flow(request):
     if not request.json.get("flow_id") or not request.json.get("flow_json"):
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -747,7 +747,7 @@ async def edit_workflow_flow(request):
 @playbook_permission("u")
 async def publish_workflow(request):
     if not request.json.get("flow_id") or not request.json.get("change_desc"):
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1075,7 +1075,7 @@ async def run_history(request):
     size = int(body.get("size", 15))
 
     if not playbook_id or page < 1 or size < 1:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     offset = (page - 1) * size
     limit = size
@@ -1244,7 +1244,7 @@ async def statistics_data(flow_json, tenant_id):
 async def new_tag(request):
     name = request.json.get("name", "").strip()
     if not name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1320,7 +1320,7 @@ async def tag_list(request):
 async def remove_tag(request):
     name = request.json.get("name")
     if not name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
     tag = await Tag.get(name=name, type=0, tenant_id=tenant_id)
     await tag.delete()
@@ -1376,7 +1376,7 @@ async def add_permission(request):
     roles = request.json.get("roles", [])
 
     if not playbook_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1498,7 +1498,7 @@ async def select_my_permission(request):
 async def select_permission_all(request):
     playbook_id = request.json.get("playbook_id")
     if not playbook_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1557,7 +1557,7 @@ async def create_webhook(request):
     description = request.json.get("description", "")
 
     if not flow_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1622,7 +1622,7 @@ async def list_webhook(request):
     flow_id = request.json.get("flow_id")
 
     if not flow_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -1675,13 +1675,13 @@ async def delete_webhook(request):
     webhook_id = request.json.get("webhook_id")
     flow_id = request.json.get("flow_id")
     if not webhook_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     webhook = await PlaybookWebhook.get_or_none(id=webhook_id, playbook_version_id=flow_id, deleted=False, tenant_id=tenant_id)
     if not webhook:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     await webhook.delete()
 
@@ -1723,14 +1723,14 @@ async def execute_webhook(request):
     # 查找webhook
     webhook_token = request.args.get("token")
     if not webhook_token:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     webhook = await PlaybookWebhook.filter(webhook_token=webhook_token, deleted=False, tenant_id=tenant_id).prefetch_related("playbook_version", "playbook_version__playbook", "creator").first()
 
     if not webhook:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     pv = webhook.playbook_version
 
@@ -1740,7 +1740,7 @@ async def execute_webhook(request):
         try:
             flow_input = orjson.loads(flow_input)
         except orjson.JSONDecodeError:
-            raise CustomError(ErrorCode.ParameterError)
+            raise CustomError(ErrorCode.PARAM_ERROR)
 
     resp = await request.respond(
         content_type="text/event-stream",
@@ -1854,7 +1854,7 @@ async def dashboard_statistics(request):
     end_dt = datetime.strptime(end, "%Y-%m-%d %H:%M:%S")
 
     if not flow_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     sql = """
         SELECT
@@ -1944,7 +1944,7 @@ async def dashboard_statistics(request):
 async def import_workflow(request):
     file_obj = request.files.get("file")
     if not file_obj:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 

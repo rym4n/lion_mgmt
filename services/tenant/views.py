@@ -86,7 +86,7 @@ async def get_tenant(request):
 async def add_tenant(request):
     name = request.json.get("name")
     if not name:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     if await Tenant.filter(name=name).exists():
         raise CustomError(ErrorCode.TenantAlreadyExists)
@@ -123,7 +123,7 @@ async def add_tenant(request):
 async def del_tenant(request):
     id = request.json.get("id")
     if not id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     if id == "0":
         raise CustomError(ErrorCode.CannotDeleteTenant)
@@ -168,7 +168,7 @@ async def del_tenant(request):
 async def edit_tenant(request):
     tenant_id = request.json.get("id")
     if not tenant_id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     async with in_transaction():
         tenant = await Tenant.get_or_none(id=tenant_id).prefetch_related("member")
@@ -241,7 +241,7 @@ async def edit_tenant(request):
 async def switch_tenant(request):
     id = request.json.get("id")
     if not id:
-        raise CustomError(ErrorCode.ParameterError)
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant = await Tenant.get_or_none(id=id).prefetch_related("member")
 

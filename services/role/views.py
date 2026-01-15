@@ -8,7 +8,6 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authentication import token_decode
 from libs.security.authorization import load_license, requires_permission
 from models import Account, PermissionsMenu, Role
 

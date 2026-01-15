@@ -35,7 +35,7 @@ def response_fail(enum: Optional[ErrorCode] = None, status: int = 400):
     :return:
     """
     if enum is None:
-        enum = ErrorCode.NotFound
+        enum = ErrorCode.NOT_FOUND
     # 错误码
     code: int = enum.code
     # 错误信息
