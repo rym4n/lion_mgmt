@@ -81,10 +81,11 @@ async def get_license(request: Request):
 
     请求参数
     """
+    language = request.json.get("language", "CN")
     permissions = await PermissionsMenu.all().values()
     lic = load_license()
     if not lic:
-        return response_ok([p["url"] for p in permissions if p["model"] == "lic"])
+        return response_ok([p["url"][language] for p in permissions if p["model"] == "lic"])
 
     user = await Account.get(id=request.ctx.session["sub"]).prefetch_related("roles")
     if not user:
@@ -92,7 +93,6 @@ async def get_license(request: Request):
 
     menu_dict = {}
     ai_type = 0
-    language = request.json.get("language", "CN")
     for role in user.roles:
         perm_models = set()
         if role.permissions:
