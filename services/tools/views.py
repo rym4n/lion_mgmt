@@ -171,14 +171,14 @@ async def upload_and_extract_zip(request):
                     users=[],
                     tenant_id=tenant_id,
                 )
-            await ActionPermissions.create(
-                tool_name=tool_name,
-                action_name="all",
-                action_description="动作全部动作权限",
-                roles=[],
-                users=[],
-                tenant_id=tenant_id,
-            )
+        await ActionPermissions.create(
+            tool_name=tool_name,
+            action_name="all",
+            action_description="动作全部动作权限",
+            roles=[],
+            users=[],
+            tenant_id=tenant_id,
+        )
         configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False, tenant_id=tenant_id)
         if not configuration:
             trm = await ToolResourcesModel.create(
@@ -904,8 +904,9 @@ async def delete_tool_all(request):
         raise CustomError(ErrorCode.ParameterError)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
 
-    if await Tool.filter(name=name, deleted=False, maintain=True, tenant_id=tenant_id).exists():
+    if await Tool.filter(name=name, deleted=False, maintain=maintenance_mode if maintenance_mode else False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.InternalDeleteError)
 
     if await Tool.filter(name=name, deleted=False, status=1, tenant_id=tenant_id).exists():
@@ -1523,7 +1524,7 @@ async def select_permission_all(request):
                 users=[],
                 tenant_id=tenant_id,
             )
-        permissions = await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False, tenant_id=tenant_id).all()
+        permissions = await ActionPermissions.filter(tool_name=name, deleted=False, tenant_id=tenant_id).all()
     else:
         permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False, tenant_id=tenant_id).all()
 
