@@ -1524,7 +1524,7 @@ async def select_permission_all(request):
                 users=[],
                 tenant_id=tenant_id,
             )
-        permissions = await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False, tenant_id=tenant_id).all()
+        permissions = await ActionPermissions.filter(tool_name=name, deleted=False, tenant_id=tenant_id).all()
     else:
         permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False, tenant_id=tenant_id).all()
 
