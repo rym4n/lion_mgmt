@@ -93,6 +93,7 @@ async def get_license(request: Request):
 
     menu_dict = {}
     ai_type = 0
+    tenant_type = False
     for role in user.roles:
         perm_models = set()
         if role.permissions:
@@ -103,6 +104,8 @@ async def get_license(request: Request):
                 if int(lic["grouplist"][group]["expireTime"]) > int(time.time() * 1000):
                     if item["module"] == "ai_bp":
                         ai_type += 1
+                    if item["module"] == "tenant_bp":
+                        tenant_type = True
                     valid_modules.add(name)
             valid_modules.update(["许可管理"])
             logger.info(f"valid_modules: {valid_modules}")
@@ -133,6 +136,11 @@ async def get_license(request: Request):
                     menu_dict[key]["ai"] = False
                 else:
                     menu_dict[key]["ai"] = True
+            if model == "tenant":
+                if tenant_type:
+                    menu_dict[key]["tenant"] = True
+                else:
+                    menu_dict[key]["tenant"] = False
 
     # 菜单处理排序逻辑
     system_dict = {

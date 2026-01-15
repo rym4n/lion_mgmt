@@ -125,7 +125,7 @@ async def del_tenant(request):
     if not id:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    if id == "0":
+    if id == "8bce552d-c27c-41d4-8a1b-8c5bf38dfe18":
         raise CustomError(ErrorCode.CANNOT_DELETE_TENANT)
 
     tenant = await Tenant.get_or_none(id=id).prefetch_related("member")
@@ -153,10 +153,15 @@ async def del_tenant(request):
                 "properties": {
                     "id": {"type": "string", "description": "工作空间id"},
                     "name": {"type": "string", "description": "工作空间名称"},
-                    "members": {
+                    "add_members": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "成员id列表,更新为覆盖更新,不传就不更新",
+                        "description": "新增成员id列表",
+                    },
+                    "del_members": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "删除成员id列表",
                     },
                 },
             }
@@ -166,60 +171,61 @@ async def del_tenant(request):
 )
 @requires_permission("tenant:u")
 async def edit_tenant(request):
-    tenant_id = request.json.get("id")
+    req = request.json or {}
+    tenant_id = req.get("id")
     if not tenant_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
+    name = (req.get("name") or "").strip()
+    add_member_ids = set(req.get("add_members") or [])
+    del_member_ids = set(req.get("del_members") or [])
+
+    add_member_ids -= del_member_ids
+    unsafe_usernames = []
+
     async with in_transaction():
-        tenant = await Tenant.get_or_none(id=tenant_id).prefetch_related("member")
+        tenant = await Tenant.get_or_none(id=tenant_id)
         if tenant is None:
             raise CustomError(ErrorCode.TENANT_NOT_FOUND)
 
-        name = request.json.get("name")
         if name:
+            if await Tenant.filter(name=name).exists():
+                raise CustomError(ErrorCode.TENANT_ALREADY_EXISTS)
             tenant.name = name
             await tenant.save(update_fields=["name"])
 
-        unsafe_usernames = []
+        if add_member_ids:
+            existing_ids = set(
+                await tenant.member.filter(id__in=add_member_ids).values_list("id", flat=True)
+            )
+            ids_to_add = add_member_ids - existing_ids
+            if ids_to_add:
+                add_users = await Account.filter(id__in=ids_to_add)
+                await tenant.member.add(*add_users)
 
-        if "members" in request.json:
-            target_member_ids = set(request.json.get("members") or [])
-
-            current_members = await tenant.member.all()
-            current_member_ids = {u.id for u in current_members}
-
-            ids_to_add = target_member_ids - current_member_ids
-            ids_to_remove = current_member_ids - target_member_ids
-
+        if del_member_ids:
+            current_ids = set(await tenant.member.filter(id__in=del_member_ids).values_list("id", flat=True))
+            # 筛选存在这个工作空间下的用户id
+            ids_to_remove = current_ids
             if ids_to_remove:
                 unsafe_users = await Account.filter(id__in=ids_to_remove).annotate(tenant_count=Count("member")).filter(tenant_count__lte=1)
-
                 unsafe_ids = {u.id for u in unsafe_users}
                 unsafe_usernames = [{"display_name": u.display_name, "username": u.username} for u in unsafe_users]
-
+                # 剔除只有一个工作空间的用户
                 ids_to_remove -= unsafe_ids
-
             if ids_to_remove:
                 remove_users = await Account.filter(id__in=ids_to_remove)
                 await tenant.member.remove(*remove_users)
                 for user in remove_users:
                     if user.tenant_id == tenant.id:
-                        remaining_tenants = await user.member.all()
-                        if remaining_tenants:
-                            tenant_new_id = remaining_tenants[0].id
-                            user.tenant_id = tenant_new_id
-                        else:
-                            user.tenant_id = None
+                        new_tenant_id = await Tenant.filter(member=user).exclude(id=tenant.id).values_list("id", flat=True)
+                        user.tenant_id = new_tenant_id[0] if new_tenant_id else None
                         await user.save(update_fields=["tenant_id"])
 
-            if ids_to_add:
-                add_users = await Account.filter(id__in=ids_to_add)
-                await tenant.member.add(*add_users)
-
     if unsafe_usernames:
-        return response_ok(f"更新成功，但以下用户未被移除（仅属于一个工作空间）: {', '.join(unsafe_usernames)}")
+        raise CustomError(ErrorCode.DELETE_SONG_USERS_FAILED)
 
-    return response_ok("更新成功")
+    return response_ok({"message": "更新成功"})
 
 
 @tenant_bp.post("/switch")
@@ -288,3 +294,106 @@ async def get_account_tenant(request):
         return response_ok({"tenants": []})
 
     return response_ok({"tenants": [{"id": tenant.id, "name": tenant.name} for tenant in tenants]})
+
+
+@tenant_bp.post("/user-list")
+@openapi.definition(
+    summary="获取全部用户信息",
+    description="获取全部用户信息",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "integer", "description": "分页的页码，默认1"},
+                    "size": {"type": "integer", "description": "分页的大小，默认10"},
+                    "username": {"type": "string", "description": "用户名，搜索时使用"},
+                },
+            }
+        }
+    },
+    response={"tenants": []},
+)
+@requires_permission("tenant:c, u")
+async def get_all_user_info(request):
+    req_json = request.json or {}
+    page = int(req_json.get("page", 1))
+    size = int(req_json.get("size", 15))
+    offset = (page - 1) * size
+    limit = size
+
+    condition = {"deleted": False, "type": "user"}
+    if req_json.get("username"):
+        condition["username"] = req_json.get("username")
+    total = await Account.filter(**condition).count()
+    users = await Account.filter(**condition).offset(offset).limit(limit).all().prefetch_related("roles", "member")
+    data = []
+    for u in users:
+        tenants = await u.member.all()
+        tenant_ids = [t.id for t in tenants]
+        data.append({"username": u.username, "display_name": u.display_name, "tenant_ids": tenant_ids})
+
+    return response_ok(
+        {
+            "total": total,
+            "page": page,
+            "size": size,
+            "total_pages": (total + size - 1) // size,
+            "data": data,
+        }
+    )
+
+
+@tenant_bp.post("/get-tenant-user")
+@openapi.definition(
+    summary="获取空间所有用户",
+    description="获取空间所有用户",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "integer", "description": "分页的页码，默认1"},
+                    "size": {"type": "integer", "description": "分页的大小，默认10"},
+                    "tenant_id": {"type": "string", "description": "工作空间id"},
+                    "username": {"type": "string", "description": "用户名，搜索时使用"},
+                },
+            }
+        }
+    },
+    response={"tenants": []},
+)
+@requires_permission("tenant:r")
+async def get_tenant_user(request):
+    req_json = request.json or {}
+    page = int(req_json.get("page", 1))
+    size = int(req_json.get("size", 10))
+    tenant_id = req_json.get("tenant_id")
+    username = (req_json.get("username") or "").strip()
+    if not tenant_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if page < 1:
+        page = 1
+    if size < 1:
+        size = 10
+    offset = (page - 1) * size
+
+    qs = Account.filter(
+        deleted=False,
+        type="user",
+        member__id=tenant_id,
+    )
+    if username:
+        qs = qs.filter(username__contains=username, display_name=username)
+    total = await qs.count()
+    rows = await qs.offset(offset).limit(size).values("username", "display_name")
+
+    return response_ok(
+        {
+            "total": total,
+            "page": page,
+            "size": size,
+            "total_pages": (total + size - 1) // size,
+            "data": rows,
+        }
+    )

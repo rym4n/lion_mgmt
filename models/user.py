@@ -182,8 +182,7 @@ class Tenant(Model):
                 }
                 if self.creator
                 else {}
-            ),
-            "member": ([{"username": user.username, "display_name": user.display_name} for user in self.member] if self.member else []),
+            )
         }
 
     class Meta:

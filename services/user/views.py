@@ -53,11 +53,6 @@ __all__ = ["user_bp"]
                         "type": "string",
                         "description": "允许访问的IP列表，逗号分隔 192.168.1.1,192.168.1.2 如果为空则为全部ip",
                     },
-                    "tenant_ids": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "工作空间列表",
-                    },
                 },
             }
         }
@@ -115,8 +110,6 @@ async def new_user(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    t_ids = request.json.get("tenant_ids", [])
-
     try:
         # 密码强度校验
         password = request.json.get("password") or ""
@@ -133,7 +126,7 @@ async def new_user(request):
             mfa_enable=mfa_enable,
             mfa_key=pyotp.random_base32(32) if mfa_enable else None,
             permit_ip=request.json.get("permit_ip"),
-            tenant_id=t_ids[0] if t_ids else request.ctx.session["tenant_id"],
+            tenant_id=request.ctx.session["tenant_id"],
         )
         # 添加角色
         if request.json.get("role_names"):
@@ -142,7 +135,7 @@ async def new_user(request):
         else:
             await account.fetch_related("roles")
 
-        ids = t_ids if t_ids else [request.ctx.session["tenant_id"]]
+        ids = [request.ctx.session["tenant_id"]]
         tenants = await Tenant.filter(id__in=ids).all()
         await account.member.add(*tenants)
 
@@ -232,8 +225,7 @@ async def all_users(request):
     size = int(req_json.get("size", 15))
     offset = (page - 1) * size
 
-    current_user: Account = request.ctx.session.get("account_info")
-    tenant_ids = await current_user.member.all().values_list("id", flat=True)
+    tenant_ids = [request.ctx.session.get("tenant_id")]
 
     qs = Account.filter(deleted=False, type="user", member__id__in=tenant_ids).distinct()
 
@@ -243,6 +235,7 @@ async def all_users(request):
     total = await Account.filter(deleted=False, type="user", member__id__in=tenant_ids).count()
 
     users = await qs.offset(offset).limit(size).prefetch_related("roles")
+
 
     return response_ok(
         {
@@ -455,7 +448,7 @@ async def list_api_users(request):
     offset = (page - 1) * size
     limit = size
     # 分页查询ApiUserToken，返回总数和数据
-    condition = Q(type="api") & Q(deleted=False)
+    condition = Q(type="api") & Q(deleted=False) & Q(member__id__in=[request.ctx.session.get("tenant_id")])
     keyword = req_json.get("keyword")
     if keyword:
         condition = condition & Q(username__icontains=keyword) | Q(display_name=keyword)
@@ -1448,3 +1441,58 @@ async def init_role_list(request):
 
     roles = await Role.filter(deleted=False, tenant_id=tenant_id).all().values_list("id", "name")
     return response_ok({"roles": [{"id": role[0], "name": role[1]} for role in roles]})
+
+
+@user_bp.post("/default-tenant")
+@openapi.definition(
+    summary="设置用户默认tenant_id",
+    description="设置用户默认tenant_id",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "tenant_id": {"type": "string", "description": "工作空间id"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "设置成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+async def set_default_tenant(request):
+    req = request.json or {}
+    tenant_id = (req.get("tenant_id") or "").strip()
+    if not tenant_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    account = request.ctx.session.get("account_info")
+    if not account.id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    tenant_exists = await Tenant.filter(id=tenant_id, deleted=False).exists()
+    if not tenant_exists:
+        raise CustomError(ErrorCode.TENANT_NOT_FOUND)
+
+    in_tenant = await Account.filter(
+        id=account.id,
+        deleted=False,
+        type="user",
+        member__id=tenant_id,
+    ).exists()
+    if not in_tenant:
+        raise CustomError(ErrorCode.NOT_EXIST_IN_TENANT)
+    await Account.filter(id=account.id).update(tenant_id=tenant_id)
+    return response_ok("设置成功")

@@ -156,7 +156,9 @@ class ErrorCode(BaseErrorCode):
     CANNOT_DELETE_TENANT = ErrorData(4108, "默认工作空间禁止删除")
     ROLE_CANNOT_DELETE = ErrorData(4109, "超管角色禁止删除")
 
-    DEFAULT_TENANT_NOT_FOUND = ErrorData(4111, "默认工作空间未配置")
-    DEFAULT_ROLE_NOT_FOUND = ErrorData(4112, "默认角色未配置")
-
     ACTION_TIMEOUT = ErrorData(4110, "执行超时")
+    DELETE_SONG_USERS_FAILED = ErrorData(4111, "部分用户由于只存在一个工作空间删除失败")
+    NOT_EXIST_IN_TENANT = ErrorData(4112, "当前用户不存在工作空间下")
+    DEFAULT_TENANT_NOT_FOUND = ErrorData(4113, "默认工作空间未配置")
+    DEFAULT_ROLE_NOT_FOUND = ErrorData(4114, "默认角色未配置")
+
