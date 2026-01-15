@@ -102,6 +102,8 @@ def gen_run_id(length=4):
 
 
 def strip_timezone_to_seconds(dt_str):
+    if not dt_str:
+        return None
     dt = datetime.datetime.fromisoformat(str(dt_str))
     dt_local = dt.astimezone()
     return dt_local.strftime("%Y-%m-%d %H:%M:%S")
@@ -298,8 +300,8 @@ def local_time_to_utc(time_str):
             dt = datetime.datetime.fromisoformat(time_str)
         except ValueError:
             # 尝试处理一些常见的非标准格式，比如空格分隔
-            if ' ' in time_str and 'T' not in time_str:
-                dt = datetime.datetime.fromisoformat(time_str.replace(' ', 'T'))
+            if " " in time_str and "T" not in time_str:
+                dt = datetime.datetime.fromisoformat(time_str.replace(" ", "T"))
             else:
                 dt = datetime.datetime.strptime(time_str, "%Y-%m-%dT%H:%M:%S.%fZ")
         # 转换为 UTC
@@ -314,7 +316,6 @@ def local_time_to_utc(time_str):
         # 如果解析失败，为了兼容性抛出 ValueError 或者让调用者处理
         # 这里为了保持行为一致性（原函数也是报错），我们抛出异常
         raise ValueError(f"Invalid time format: {time_str}")
-
 
 
 async def query_vlog(query, project_id, start=None, end=None, account_id=0, limit=None):
