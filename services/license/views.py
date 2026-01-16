@@ -179,9 +179,9 @@ async def get_license(request: Request):
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
 
     if tenant_type:
-        menus["tenant"] = True
+        menus.append({"tenant": True})
     else:
-        menus["tenant"] = False
+        menus.append({"tenant": False})
 
     return response_ok(menus)
 
