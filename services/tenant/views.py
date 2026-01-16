@@ -385,7 +385,7 @@ async def get_tenant_user(request):
     if username:
         qs = qs.filter(username__contains=username, display_name=username)
     total = await qs.count()
-    rows = await qs.offset(offset).limit(size).values("username", "display_name")
+    rows = await qs.offset(offset).limit(size).values("id", "username", "display_name")
 
     return response_ok(
         {
