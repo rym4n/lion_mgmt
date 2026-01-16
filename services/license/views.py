@@ -137,11 +137,6 @@ async def get_license(request: Request):
                 else:
                     menu_dict[key]["ai"] = True
 
-        if tenant_type:
-            menu_dict["tenant"] = True
-        else:
-            menu_dict["tenant"] = False
-
     # 菜单处理排序逻辑
     system_dict = {
         "产品许可": 0,
@@ -182,6 +177,11 @@ async def get_license(request: Request):
             menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
         elif menu["meta"]["title"] in ["事件管理", "Event Management"]:
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
+
+    if tenant_type:
+        menus["tenant"] = True
+    else:
+        menus["tenant"] = False
 
     return response_ok(menus)
 
