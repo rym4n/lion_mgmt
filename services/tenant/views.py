@@ -3,6 +3,7 @@ from sanic import Blueprint
 from sanic_ext import openapi
 from tortoise.functions import Count
 from tortoise.transactions import in_transaction
+from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -323,7 +324,7 @@ async def get_all_user_info(request):
 
     condition = {"deleted": False, "type": "user"}
     if req_json.get("username"):
-        condition["username"] = req_json.get("username")
+        condition["username__contains"] = req_json.get("username")
     total = await Account.filter(**condition).count()
     users = await Account.filter(**condition).offset(offset).limit(limit).all().prefetch_related("roles", "member")
     data = []
@@ -383,7 +384,7 @@ async def get_tenant_user(request):
         member__id=tenant_id,
     )
     if username:
-        qs = qs.filter(username__contains=username, display_name=username)
+        qs = qs.filter(Q(username__contains=username) | Q(display_name__contains=username))
     total = await qs.count()
     rows = await qs.offset(offset).limit(size).values("id", "username", "display_name")
 
