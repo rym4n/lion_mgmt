@@ -284,7 +284,6 @@ async def switch_tenant(request):
     },
     response={"tenants": []},
 )
-@requires_permission("tenant:r")
 async def get_account_tenant(request):
     account = request.ctx.session["account_info"]
 
