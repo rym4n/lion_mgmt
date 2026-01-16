@@ -330,7 +330,7 @@ async def get_all_user_info(request):
     for u in users:
         tenants = await u.member.all()
         tenant_ids = [t.id for t in tenants]
-        data.append({"username": u.username, "display_name": u.display_name, "tenant_ids": tenant_ids})
+        data.append({"id": u.id, "username": u.username, "display_name": u.display_name, "tenant_ids": tenant_ids})
 
     return response_ok(
         {
