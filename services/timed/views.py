@@ -341,6 +341,15 @@ async def get_timed_permissions(request, filtered_items):
                         "type": "string",
                         "description": "搜索关键字，目前支持任务名称，动作名称，剧本名称搜索",
                     },
+                    "playbook_name": {"type": "string", "description": "剧本名称（模糊匹配）"},
+                    "enable": {"type": "integer", "description": "是否启用：0禁用，1启用"},
+                    "updator": {"type": "string", "description": "更新人（用户名/显示名 模糊匹配）"},
+                    "utime": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "更新时间范围，格式：['2026-01-05 00:00:00','2026-01-16 00:00:00']",
+                    },
+                    "scope": {"type": "integer", "description": "范围：0非内置，1内置，2全部；不传则按维护模式"},
                 },
             }
         }
@@ -412,13 +421,63 @@ async def get_all(request):
     req_json = request.json or {}
     page = int(req_json.get("page") or 1)
     size = int(req_json.get("size") or 15)
-    keyword = req_json.get("keyword", "").strip()
+    keyword = (req_json.get("keyword") or "").strip()
+    playbook_name = (req_json.get("playbook_name") or "").strip()
+    enable = req_json.get("enable")
+    updator = (req_json.get("updator") or "").strip()
+    utime = req_json.get("utime")
+    scope = req_json.get("scope")
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    # 获取全部（后续在 Python 层过滤）
-    all_items = await Timed.filter(deleted=False, internal=maintenance_mode if maintenance_mode else False, tenant_id=tenant_id).prefetch_related("action", "playbook", "creator", "updator")
+    condition = Q(deleted=False, tenant_id=tenant_id)
+
+    internal = None
+    if scope in [0, "0"]:
+        internal = False
+    elif scope in [1, "1"]:
+        internal = True
+    elif scope in [2, "2"]:
+        internal = None
+    else:
+        internal = maintenance_mode if maintenance_mode else False
+
+    if internal is not None:
+        condition &= Q(internal=internal)
+
+    if enable not in [None, ""]:
+        try:
+            enable_int = int(enable)
+        except (TypeError, ValueError):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        if enable_int in [DISABLED, ENABLED]:
+            condition &= Q(enable=enable_int)
+
+    if playbook_name:
+        condition &= Q(playbook__name=playbook_name)
+
+    if updator:
+        condition &= Q(updator__username=updator) | Q(updator__display_name=updator)
+
+    if utime:
+        if not isinstance(utime, (list, tuple)) or len(utime) != 2:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        start_str, end_str = utime
+        if start_str:
+            try:
+                start_time = datetime.datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
+            except (TypeError, ValueError):
+                raise CustomError(ErrorCode.PARAM_ERROR)
+            condition &= Q(utime__gte=TZ.localize(start_time))
+        if end_str:
+            try:
+                end_time = datetime.datetime.strptime(end_str, "%Y-%m-%d %H:%M:%S")
+            except (TypeError, ValueError):
+                raise CustomError(ErrorCode.PARAM_ERROR)
+            condition &= Q(utime__lte=TZ.localize(end_time))
+
+    all_items = await Timed.filter(condition).prefetch_related("action", "playbook", "creator", "updator")
 
     if keyword:
         keyword = keyword.lower()
@@ -431,8 +490,8 @@ async def get_all(request):
                 action_desc = item.action.action.get("name", "")
             action_match = keyword in action_desc.lower()
 
-            playbook_name = item.playbook.name if item.playbook else ""
-            playbook_match = keyword in playbook_name.lower()
+            pb_name = item.playbook.name if item.playbook else ""
+            playbook_match = keyword in pb_name.lower()
 
             return name_match or action_match or playbook_match
 

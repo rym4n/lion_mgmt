@@ -20,7 +20,7 @@ from libs.security.authentication import get_secure_config_dict, refresh_token, 
 from libs.security.authorization import requires_permission
 from libs.utils import get_client_ip, get_expiration_date, ip_in_list, password_hasher, validate_ips
 from models import Account, Role, Scene, Tenant
-from settings import AUTHENTICATION_SESSION_EXPIRATION, MAX_CHALLENGE_ATTEMPTS, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE
+from settings import AUTHENTICATION_SESSION_EXPIRATION, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE
 
 user_bp = Blueprint("user", url_prefix="/user")
 __all__ = ["user_bp"]
@@ -160,6 +160,13 @@ async def new_user(request):
                     "page": {"type": "integer", "description": "分页的页码，默认1"},
                     "size": {"type": "integer", "description": "分页的大小，默认10"},
                     "username": {"type": "string", "description": "用户名，搜索时使用"},
+                    "display_name": {"type": "string", "description": "姓名/展示名，搜索时使用"},
+                    "roles": {
+                        "description": "角色名称（支持字符串或数组；字符串可用逗号分隔多个）",
+                        "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                    },
+                    "phone": {"type": "string", "description": "手机号，搜索时使用"},
+                    "email": {"type": "string", "description": "邮箱，搜索时使用"},
                 },
             }
         }
@@ -221,21 +228,52 @@ async def new_user(request):
 @requires_permission("user:r")
 async def all_users(request):
     req_json = request.json or {}
-    page = int(req_json.get("page", 1))
-    size = int(req_json.get("size", 15))
+    page = int(req_json.get("page", 1) or 1)
+    size = int(req_json.get("size", 15) or 15)
+    if page < 1:
+        page = 1
+    if size < 1:
+        size = 15
     offset = (page - 1) * size
 
     tenant_ids = [request.ctx.session.get("tenant_id")]
 
     qs = Account.filter(deleted=False, type="user", member__id__in=tenant_ids).distinct()
 
-    if req_json.get("username"):
-        qs = qs.filter(username__icontains=req_json["username"])
+    username = (req_json.get("username") or "").strip()
+    if username:
+        qs = qs.filter(username=username)
 
-    total = await Account.filter(deleted=False, type="user", member__id__in=tenant_ids).count()
+    display_name = (req_json.get("display_name") or "").strip()
+    if display_name:
+        qs = qs.filter(display_name=display_name)
+
+    phone = (req_json.get("phone") or "").strip()
+    if phone:
+        qs = qs.filter(phone=phone)
+
+    email = (req_json.get("email") or "").strip()
+    if email:
+        qs = qs.filter(email=email)
+
+    raw_roles = req_json.get("roles")
+    role_terms: list[str] = []
+    if isinstance(raw_roles, list):
+        role_terms = [str(x).strip() for x in raw_roles if str(x).strip()]
+    elif isinstance(raw_roles, str):
+        role_terms = [x.strip() for x in raw_roles.split(",") if x.strip()]
+    elif raw_roles is not None:
+        role_terms = [str(raw_roles).strip()] if str(raw_roles).strip() else []
+
+    if role_terms:
+        if len(role_terms) == 1:
+            qs = qs.filter(roles__name__icontains=role_terms[0])
+        else:
+            qs = qs.filter(roles__name__in=role_terms)
+
+    total = await qs.count()
 
     users = await qs.offset(offset).limit(size).prefetch_related("roles")
-
 
     return response_ok(
         {
@@ -383,7 +421,12 @@ async def create_api_user(request):
                 "properties": {
                     "page": {"type": "integer", "description": "分页的页码，默认1"},
                     "size": {"type": "integer", "description": "分页的大小，默认10"},
-                    "keyword": {"type": "string", "description": "搜索时使用"},
+                    "username": {"type": "string", "description": "用户名，搜索时使用"},
+                    "creator": {"type": "string", "description": "创建人，搜索时使用"},
+                    "roles": {
+                        "description": "角色名称（支持字符串或数组；字符串可用逗号分隔多个）",
+                        "oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                    },
                 },
             }
         }
@@ -443,18 +486,43 @@ async def create_api_user(request):
 @requires_permission("user:r")
 async def list_api_users(request):
     req_json = request.json or {}
-    page = int(req_json.get("page", 1))
-    size = int(req_json.get("size", 15))
+    page = int(req_json.get("page", 1) or 1)
+    size = int(req_json.get("size", 15) or 15)
+    if page < 1:
+        page = 1
+    if size < 1:
+        size = 15
     offset = (page - 1) * size
     limit = size
     # 分页查询ApiUserToken，返回总数和数据
-    condition = Q(type="api") & Q(deleted=False) & Q(member__id__in=[request.ctx.session.get("tenant_id")])
-    keyword = req_json.get("keyword")
-    if keyword:
-        condition = condition & Q(username__icontains=keyword) | Q(display_name=keyword)
+    tenant_id = request.ctx.session.get("tenant_id")
+    qs = Account.filter(Q(type="api") & Q(deleted=False) & Q(member__id__in=[tenant_id])).distinct()
 
-    total = await Account.filter(condition).count()
-    api_users = await Account.filter(condition).offset(offset).limit(limit).all().prefetch_related("roles")
+    username = (req_json.get("username") or "").strip()
+    if username:
+        qs = qs.filter(username=username)
+
+    creator = (req_json.get("creator") or "").strip()
+    if creator:
+        qs = qs.filter(creator=creator)
+
+    raw_roles = req_json.get("roles")
+    role_terms: list[str] = []
+    if isinstance(raw_roles, list):
+        role_terms = [str(x).strip() for x in raw_roles if str(x).strip()]
+    elif isinstance(raw_roles, str):
+        role_terms = [x.strip() for x in raw_roles.split(",") if x.strip()]
+    elif raw_roles is not None:
+        role_terms = [str(raw_roles).strip()] if str(raw_roles).strip() else []
+
+    if role_terms:
+        if len(role_terms) == 1:
+            qs = qs.filter(roles__name=role_terms[0])
+        else:
+            qs = qs.filter(roles__name__in=role_terms)
+
+    total = await qs.count()
+    api_users = await qs.offset(offset).limit(limit).all().prefetch_related("roles")
     data = []
     for u in api_users:
         data.append(u.api_json)
