@@ -136,11 +136,11 @@ async def get_license(request: Request):
                     menu_dict[key]["ai"] = False
                 else:
                     menu_dict[key]["ai"] = True
-            if model == "tenant":
-                if tenant_type:
-                    menu_dict[key]["tenant"] = True
-                else:
-                    menu_dict[key]["tenant"] = False
+
+        if tenant_type:
+            menu_dict["tenant"] = True
+        else:
+            menu_dict["tenant"] = False
 
     # 菜单处理排序逻辑
     system_dict = {
