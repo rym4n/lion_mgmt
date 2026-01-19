@@ -1251,14 +1251,6 @@ async def import_event_ingestion_script(request):
                     continue
                 vector_config = orjson.loads(zf.read(name))
 
-                if await EventsIngestion.filter(
-                    event_ingestion_name=vector_config.get("event_ingestion_name"),
-                    deleted=False,
-                    tenant_id=tenant_id,
-                ).exists():
-                    file_results.append(False)
-                    continue
-
                 if await EventsIngestion.filter(syslog_config=vector_config.get("syslog_config"), deleted=False, tenant_id=tenant_id, enabled_status=1).exists():
                     file_results.append(True)
                     continue
