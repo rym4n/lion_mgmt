@@ -3,7 +3,6 @@
 from aiocache import caches
 from sanic import Blueprint
 from sanic_ext import openapi
-from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -93,9 +92,13 @@ async def new_variable(request):
                 "properties": {
                     "page": {"type": "integer", "description": "页码"},
                     "size": {"type": "integer", "description": "每页数量"},
-                    "keyword": {
+                    "name": {
                         "type": "string",
-                        "description": "可选参数，变量名 或 变量值（元素要完全匹配）",
+                        "description": "可选参数，变量名（精准匹配）",
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "可选参数，变量值（对JSONField内的元素进行精准匹配）",
                     },
                 },
             }
@@ -141,19 +144,29 @@ async def new_variable(request):
 @requires_permission("var:r")
 async def all_variables(request):
     req_json = request.json or {}
-    page = int(req_json.get("page", 1))
-    size = int(req_json.get("size", 15))
+    page = int(req_json.get("page", 1) or 1)
+    size = int(req_json.get("size", 15) or 15)
+    if page < 1:
+        page = 1
+    if size < 1:
+        size = 15
     offset = (page - 1) * size
     limit = size
     tenant_id = request.ctx.session.get("tenant_id")
-    condition = Q(type="global", tenant_id=tenant_id)
-    keyword = req_json.get("keyword")
-    if keyword:
-        condition = Q(name__icontains=keyword) | Q(value__contains=[keyword])
-    total = await Variables.filter(condition).count()
+    qs = Variables.filter(type="global", tenant_id=tenant_id)
+
+    name = (req_json.get("name") or "").strip()
+    if name:
+        qs = qs.filter(name=name)
+
+    value = req_json.get("value")
+    if value is not None and value != "":
+        qs = qs.filter(value__contains=[value])
+
+    total = await qs.count()
     records = []
     if total > 0:
-        records = await Variables.filter(condition).offset(offset).limit(limit).all().prefetch_related("updator")
+        records = await qs.offset(offset).limit(limit).all().prefetch_related("updator")
     return response_ok({"total": total, "data": [v.json for v in records]})
 
 

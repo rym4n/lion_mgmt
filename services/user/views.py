@@ -167,6 +167,8 @@ async def new_user(request):
                     },
                     "phone": {"type": "string", "description": "手机号，搜索时使用"},
                     "email": {"type": "string", "description": "邮箱，搜索时使用"},
+                    "disabled": {"type": "boolean", "description": "是否禁用"},
+                    "mfa_enable": {"type": "boolean", "description": "是否开启MFA"},
                 },
             }
         }
@@ -255,6 +257,14 @@ async def all_users(request):
     email = (req_json.get("email") or "").strip()
     if email:
         qs = qs.filter(email=email)
+
+    disabled = req_json.get("disabled")
+    if isinstance(disabled, bool):
+        qs = qs.filter(disabled=disabled)
+
+    mfa_enable = req_json.get("mfa_enable")
+    if isinstance(mfa_enable, bool):
+        qs = qs.filter(mfa_enable=mfa_enable)
 
     raw_roles = req_json.get("roles")
     role_terms: list[str] = []
