@@ -1564,3 +1564,38 @@ async def set_default_tenant(request):
         raise CustomError(ErrorCode.NOT_EXIST_IN_TENANT)
     await Account.filter(id=account.id).update(tenant_id=tenant_id)
     return response_ok("设置成功")
+
+
+@user_bp.post("/details")
+@openapi.definition(
+    summary="获取用户详情",
+    description="获取用户详情",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+async def get_user_details(request):
+    account = request.ctx.session["account_info"]
+    return response_ok(account.json)
+
