@@ -4,6 +4,7 @@ from datetime import datetime
 
 import orjson
 from sanic import HTTPResponse, Request
+from sanic_ext.extensions.openapi.builders import OperationStore
 
 from libs.kafka import aproduce
 from libs.security.authentication import authenticate
@@ -12,6 +13,24 @@ from libs.utils import get_client_ip
 from settings import AUDIT_TOPIC, TZ
 
 from .base import BaseMiddleware
+
+
+def _get_openapi_summary(request: Request) -> str:
+    route = getattr(request, "route", None)
+    handler = getattr(route, "handler", None)
+    if handler is None:
+        return ""
+
+    try:
+        op_builder = OperationStore().get(handler)
+    except Exception:
+        return ""
+
+    if not op_builder:
+        return ""
+
+    summary = getattr(op_builder, "summary", None)
+    return summary or "访问"
 
 
 class SecurityMiddleware(BaseMiddleware):
@@ -37,6 +56,7 @@ class SecurityMiddleware(BaseMiddleware):
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
         """统一记录操作日志"""
         data = None
+
         if hasattr(request.ctx, "session"):
             param = None
             if "multipart" not in request.content_type:
@@ -50,6 +70,7 @@ class SecurityMiddleware(BaseMiddleware):
                 "uri": request.path,
                 "client_ua": request.headers.get("User-Agent", ""),
                 "request_data": param,
+                "action": _get_openapi_summary(request),
             }
         elif request.path == "/user/login" and request.method == "POST":
             params = request.json
@@ -64,6 +85,7 @@ class SecurityMiddleware(BaseMiddleware):
                 "uri": request.path,
                 "client_ua": request.headers.get("User-Agent", ""),
                 "request_data": orjson.dumps(params).decode(),
+                "action": "登录",
             }
         elif request.path == "/user/oauth/callback":
             data = {
@@ -75,6 +97,7 @@ class SecurityMiddleware(BaseMiddleware):
                 "uri": request.path,
                 "client_ua": request.headers.get("User-Agent", ""),
                 "request_data": "",
+                "action": "OAuth回调",
             }
         if data is not None:
             data["ctime"] = datetime.now(TZ).strftime("%Y-%m-%dT%H:%M:%S%z")
