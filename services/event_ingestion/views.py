@@ -1274,11 +1274,11 @@ async def import_event_ingestion_script(request):
                     deleted=False,
                     tenant_id=tenant_id,
                 ).exists():
-                    file_results.append({f"{vector_config['event_ingestion_name']}": "已存在相同名称的事件接入"})
+                    file_results.append(False)
                     continue
 
-                if await EventsIngestion.filter(syslog_config=vector_config.get("syslog_config"), deleted=False, tenant_id=tenant_id).exists():
-                    file_results.append({f"{vector_config['event_ingestion_name']}": "当前已存在端口一致的事件接入了"})
+                if await EventsIngestion.filter(syslog_config=vector_config.get("syslog_config"), deleted=False, tenant_id=tenant_id, enabled_status=1).exists():
+                    file_results.append(True)
                     continue
 
                 letters = string.ascii_letters  # 包含 a-zA-Z
@@ -1294,9 +1294,10 @@ async def import_event_ingestion_script(request):
                 data = orjson.loads(json_str)
 
                 path = f"{VECTOR_CFG}/{vector_name}.yaml"
-                async with aiofile.AIOFile(path, "w", encoding="utf-8") as f:
-                    yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
-                    await f.write(yaml_str)
+
+                # async with aiofile.AIOFile(path, "w", encoding="utf-8") as f:
+                #     yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+                #     await f.write(yaml_str)
 
                 raw_config = vector_config["vector_config_raw"]
                 if isinstance(raw_config, str):
@@ -1312,7 +1313,7 @@ async def import_event_ingestion_script(request):
                     event_ingestion_describe=vector_config.get("event_ingestion_describe"),
                     event_source_type=vector_config.get("event_source_type"),
                     transforms_type=vector_config.get("transforms_type"),
-                    enabled_status=vector_config.get("enabled_status"),
+                    enabled_status=0,
                     creator=request.ctx.session["account_info"],
                     updator=request.ctx.session["account_info"],
                     file_path=path,
@@ -1350,8 +1351,10 @@ async def import_event_ingestion_script(request):
                             supervisor.start_process(process_name)
 
                 file_results.append({f"{vector_config['event_ingestion_name']}": "上传成功"})
-
-    return response_ok(file_results)
+    if bool(file_results) and all(file_results):
+        return response_ok(file_results)
+    else:
+        raise CustomError(ErrorCode.IMPORT_PART_EVENT_INGESTION_FAIL)
 
 
 @event_ingestion_bp.post("/parse")
