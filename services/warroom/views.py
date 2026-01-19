@@ -403,7 +403,8 @@ async def get_all_rooms(request: Request):
 
     # 前端是先获取再查询, 没有使用到这里的查询参数
     rooms = await Room.filter(condition).offset(offset).limit(limit).order_by("-ctime").prefetch_related("creator", "users")
-    return response_ok({"rooms": [r.json for r in rooms]})
+    total = await Room.filter(condition).count()
+    return response_ok({"total": total, "rooms": [r.json for r in rooms]})
 
 
 @warroom_bp.post("/members")
