@@ -86,7 +86,7 @@ _all__ = ["workflow_bp"]
 @requires_permission("workflow:c")
 async def create_workflow(request):
     data = request.json
-    if not data.get("name") or not data.get("flow_json_list"):
+    if not data.get("name") or not data.get("flow_json_list") or not data.get("scenes"):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     # total_up_value = 0
