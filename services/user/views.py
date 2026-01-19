@@ -1420,18 +1420,8 @@ async def oauth2_callback(request):
 async def init_scene_list(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
-    scene_name = await caches.get("redis_chat").get(f"aioe_current_scene_{tenant_id}")
-    if scene_name:
-        if isinstance(scene_name, bytes):
-            scene_name = scene_name.decode("utf-8")
-        return response_ok({"scene": scene_name})
-
-    if not scene_name:
-        s = await Scene.get_or_none(deleted=False, status=1, tenant_id=tenant_id)
-        if s:
-            await caches.get("redis_chat").set(f"aioe_current_scene_{tenant_id}", s.name)
-            return response_ok({"scene": s.name})
-    return response_ok({"scene": None})
+    s = await Scene.get_or_none(deleted=False, status=1, tenant_id=tenant_id)
+    return response_ok({"scene": s.name if s else ""})
 
 
 @user_bp.post("/account-list")

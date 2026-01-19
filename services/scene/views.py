@@ -335,7 +335,7 @@ async def set_current_scene(request):
     scene.updator = request.ctx.session["account_info"]
     await scene.save()
 
-    await caches.get("redis_chat").set(f"aioe_current_scene_{tenant_id}", scene.name)
+    await caches.get("redis_chat").set(f"aioe_current_scene_{tenant_id}", scene.id)
 
     return response_ok("设置成功")
 

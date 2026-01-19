@@ -85,7 +85,7 @@ def check_vector_config(vector_config, vector_config_yaml=None):
 
 # 生成配置文件
 # noinspection PyTypeChecker
-async def gen_vector_config(output_path, sources, topic, project_id):
+async def gen_vector_config(sources, topic, project_id):
     config = {
         "sources": sources,
         "sinks": {
@@ -118,15 +118,6 @@ async def gen_vector_config(output_path, sources, topic, project_id):
             }
         },
     }
-    yaml_str = yaml.dump(config, default_flow_style=False, allow_unicode=True)
-
-    result = check_vector_config(config)
-
-    if not result:
-        return None
-
-    async with aiofile.AIOFile(output_path, mode="w", encoding="utf-8") as file:
-        await file.write(yaml_str)
 
     return config
 
@@ -232,7 +223,7 @@ async def event_ingestion(request):
     sasl_mechanism = data.get("sasl_mechanism")
     sasl_username = data.get("sasl_username")
     sasl_password = data.get("sasl_password")
-    enabled_status = int(data.get("enabled_status", 1))
+    enabled_status = 0
     linked_execution = int(data.get("linked_execution", 0))
     retention_days = int(data.get("retention_days", 7))
     max_length = int(data.get("max_length", 100))
@@ -265,7 +256,7 @@ async def event_ingestion(request):
                 "mode": communication_type,
             }
         }
-        vector_config = await gen_vector_config(output_path, sources, vector_name, project_id)
+        vector_config = await gen_vector_config(sources, vector_name, project_id)
     elif event_source_type == "kafka":
         if sasl_mechanism:
             sources = {
@@ -291,10 +282,7 @@ async def event_ingestion(request):
                     "topics": kafka_topic,
                 }
             }
-        vector_config = await gen_vector_config(output_path, sources, vector_name, project_id)
-
-    if vector_config is None:
-        raise CustomError(ErrorCode.CONFIG_FILE_GENERATE_ERROR)
+        vector_config = await gen_vector_config(sources, vector_name, project_id)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -311,7 +299,6 @@ async def event_ingestion(request):
         vector_name=vector_name,
         vector_config=vector_config,
         vector_config_raw=vector_config,
-        enabled_health_status="healthy",
         retention_days=retention_days,
         project_id=project_id,
         tenant_id=tenant_id,
@@ -682,6 +669,7 @@ async def update_event_ingestion(request):
         event.transforms_type = transforms_type
     if enabled_status == 1:
         event.enabled_status = enabled_status
+        event.enabled_health_status = "healthy"
 
     if retention_days:
         event.retention_days = retention_days
@@ -807,12 +795,6 @@ async def get_event_ingestion_kafka_sample(request):
 
     if not messages:
         return response_ok("当前不存在日志")
-
-    data = messages[0]
-    if "_msg" in data.keys():
-        event.enabled_health_status = "healthy"
-    else:
-        event.enabled_health_status = "unhealthy"
 
     await event.save()
 
@@ -1322,9 +1304,6 @@ async def import_event_ingestion_script(request):
                     vector_name=vector_name,
                     vector_config_raw=data_raw,
                     vector_config=data,
-                    convert_health_status=vector_config.get("convert_health_status"),
-                    enabled_health_status=vector_config.get("enabled_health_status"),
-                    execution_health_status=vector_config.get("execution_health_status"),
                     tenant_id=tenant_id,
                 )
 
