@@ -129,7 +129,7 @@ async def get_all_events(request):
         event_dict["owner"] = {"role": role_list, "user": user_list}
         event_dict["scene"] = event.scene.name if event.scene else ""
 
-        event_ingestion = await EventsIngestion.get_or_none(event_ingestion_name=event.event_source, deleted=False, tenant_id=tenant_id).prefetch_related("creator")
+        event_ingestion = await EventsIngestion.get_or_none(id=event.event_ingestion_id, deleted=False, tenant_id=tenant_id).prefetch_related("creator")
         if event_ingestion:
             event_dict["event_source"] = {
                 "name": event_ingestion.event_ingestion_name,
