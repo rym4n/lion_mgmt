@@ -295,9 +295,6 @@ def local_time_to_utc(time_str):
     if not time_str:
         return ""
     try:
-        if isinstance(time_str, (int, float)):
-            dt = datetime.datetime.fromtimestamp(int(time_str), tz=datetime.timezone.utc)
-            return dt.isoformat().replace("+00:00", "Z")
         time_str = time_str.strip()
         try:
             dt = datetime.datetime.fromisoformat(time_str)

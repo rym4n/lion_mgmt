@@ -4,7 +4,7 @@ import ast
 import asyncio
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 import aiofile
@@ -384,12 +384,12 @@ async def get_system_status(request):
                     "host": {"type": "string", "description": "主机IP地址"},
                     "service_name": {"type": "string", "description": "服务名称（可选），如lion-mgmt、lion-web等"},
                     "start_time": {
-                        "type": "integer",
-                        "description": "开始时间（秒级时间戳）",
+                        "type": "string",
+                        "description": "开始时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                     "end_time": {
-                        "type": "integer",
-                        "description": "结束时间（秒级时间戳）",
+                        "type": "string",
+                        "description": "结束时间（UTC格式：2025-01-01T00:00:00Z）",
                     }
                 },
             }
@@ -435,18 +435,21 @@ async def get_system_status_history(request):
     service_name = params.get("service_name")
     start_time = params.get("start_time")
     end_time = params.get("end_time")
-    start_epoch = int(start_time) if isinstance(start_time, str) and start_time.isdigit() else start_time
-    end_epoch = int(end_time) if isinstance(end_time, str) and end_time.isdigit() else end_time
 
     if not host or not service_name or not start_time or not end_time:
         raise CustomError(ErrorCode.PARAM_ERROR)
+
+    start_time_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+    end_time_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+    start_time_iso = start_time_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_time_iso = end_time_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # 构建查询条件
     query = f'log_type:"health_check" AND log_ip:"{host}"'
     data_query = f"{query} | sort(_time desc)"
 
     # 从VictoriaLog查询指定时间范围的健康检查数据
-    data_res = await query_vlog(data_query, project_id=0, start=start_epoch, end=end_epoch, limit=1500)
+    data_res = await query_vlog(data_query, project_id=0, start=start_time_iso, end=end_time_iso, limit=1500)
 
     if not data_res:
         return response_ok([])
@@ -871,12 +874,12 @@ async def transforms_update(request):
                 "properties": {
                     "username": {"type": "string", "description": "用户名"},
                     "start_time": {
-                        "type": "integer",
-                        "description": "开始时间（秒级时间戳）",
+                        "type": "string",
+                        "description": "开始时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                     "end_time": {
-                        "type": "integer",
-                        "description": "结束时间（秒级时间戳）",
+                        "type": "string",
+                        "description": "结束时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                     "ip": {"type": "string", "description": "ip"},
                     "action": {"type": "string", "description": "操作"},
@@ -941,8 +944,18 @@ async def search_audit(request):
     username = request.json.get("username")
     start_time = request.json.get("start_time")
     end_time = request.json.get("end_time")
-    start_epoch = int(start_time) if isinstance(start_time, str) and start_time.isdigit() else start_time
-    end_epoch = int(end_time) if isinstance(end_time, str) and end_time.isdigit() else end_time
+
+    start_iso = None
+    end_iso = None
+
+    if start_time:
+        start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+        start_iso = start_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if end_time:
+        end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+        end_iso = end_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     ip = request.json.get("ip")
 
     query = 'topic:"lion_audit"'
@@ -953,12 +966,12 @@ async def search_audit(request):
 
     # 获取总数
     count_query = f"{query} | stats count()"
-    count_task = query_vlog(count_query, project_id=0, start=start_epoch, end=end_epoch)
+    count_task = query_vlog(count_query, project_id=0, start=start_iso, end=end_iso)
 
     # 获取数据
     data_query = f"{query} | sort(_time desc)"
     # 由于VictoriaLogs不支持offset，最多查询1000条数据
-    data_task = query_vlog(data_query, project_id=0, start=start_epoch, end=end_epoch, limit=1000)
+    data_task = query_vlog(data_query, project_id=0, start=start_iso, end=end_iso, limit=1000)
 
     count_res, data_res = await asyncio.gather(count_task, data_task)
 

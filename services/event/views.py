@@ -75,9 +75,9 @@ NODE_TYPE = {
                     },
                     "ctime": {
                         "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "起止时间范围（秒级时间戳）",
-                        "example": [1760812800, 1761686400],
+                        "items": {"type": "string"},
+                        "description": "起止时间范围（UTC格式：2025-01-01T00:00:00Z）",
+                        "example": ["2025-01-01T00:00:00Z", "2025-02-01T00:00:00Z"],
                     },
                 },
             }
@@ -102,7 +102,7 @@ async def get_all_events(request):
     if request.json.get("event_source"):
         filters["event_source"] = request.json.get("event_source")
     if len(request.json.get("ctime") or []) == 2:
-        ctime = [datetime.fromtimestamp(int(t), TZ) for t in request.json.get("ctime")]
+        ctime = [datetime.strptime(t, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC) for t in request.json.get("ctime")]
         filters["ctime__range"] = ctime
 
     events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room", "creator", "updator", "scene")

@@ -9,6 +9,7 @@ from collections import defaultdict
 from datetime import datetime
 
 import orjson
+import pytz
 from aiocache import caches
 from sanic import Blueprint
 from sanic_ext import openapi
@@ -195,9 +196,9 @@ async def create_workflow(request):
                     },
                     "ctime": {
                         "type": "array",
-                        "items": {"type": "integer"},
-                        "description": "搜索时使用，支持搜索创建时间（秒级时间戳）",
-                        "example": [1760832000, 1761696000],
+                        "items": {"type": "string"},
+                        "description": "搜索时使用，支持搜索创建时间（UTC格式：2025-01-01T00:00:00Z）",
+                        "example": ["2025-01-01T00:00:00Z", "2025-02-01T00:00:00Z"],
                     },
                 },
             }
@@ -269,8 +270,8 @@ async def list_workflow(request):
             condition = condition & Q(tags__in=tags)
 
     if len(json_params.get("ctime") or []) == 2:
-        start_time = datetime.fromtimestamp(int(json_params["ctime"][0]), TZ)
-        end_time = datetime.fromtimestamp(int(json_params["ctime"][1]), TZ)
+        start_time = datetime.strptime(json_params["ctime"][0], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+        end_time = datetime.strptime(json_params["ctime"][1], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
         condition = condition & Q(ctime__range=(start_time, end_time))
 
     pv_condition = Q(playbook_versions__deleted=False)
@@ -1798,12 +1799,12 @@ async def execute_webhook(request):
                 "properties": {
                     "flow_id": {"type": "string", "description": "剧本版本ID"},
                     "start": {
-                        "type": "integer",
-                        "description": "查询开始时间（秒级时间戳）",
+                        "type": "string",
+                        "description": "查询开始时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                     "end": {
-                        "type": "integer",
-                        "description": "查询结束时间（秒级时间戳）",
+                        "type": "string",
+                        "description": "查询结束时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                 },
             }
@@ -1848,8 +1849,8 @@ async def dashboard_statistics(request):
     start = data.get("start")
     end = data.get("end")
 
-    start_dt = datetime.fromtimestamp(int(start), TZ)
-    end_dt = datetime.fromtimestamp(int(end), TZ)
+    start_dt = datetime.strptime(start, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+    end_dt = datetime.strptime(end, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
 
     if not flow_id:
         raise CustomError(ErrorCode.PARAM_ERROR)

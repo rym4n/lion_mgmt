@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+import pytz
 from sanic import Blueprint
 from sanic_ext import openapi
 from tortoise.functions import Count
@@ -10,7 +11,6 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from models import PlaybookVersion, ToolResources
 
@@ -33,12 +33,12 @@ _all__ = ["dashboard_bp"]
                         "description": "统计类型，可选值：events_day，events_status，runlog_playbook，runlog_action",
                     },
                     "start_time": {
-                        "type": "integer",
-                        "description": "统计的起始时间（秒级时间戳）",
+                        "type": "string",
+                        "description": "统计的起始时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                     "end_time": {
-                        "type": "integer",
-                        "description": "统计的结束时间（秒级时间戳）",
+                        "type": "string",
+                        "description": "统计的结束时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                 },
             }
@@ -79,8 +79,8 @@ async def view_dashboard(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     result = None
-    start_time = datetime.fromtimestamp(int(start_time))
-    end_time = datetime.fromtimestamp(int(end_time))
+    start_time = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+    end_time = datetime.strptime(end_time, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
 
     async with in_transaction() as tconn:
         if static_type == "events_day":
@@ -138,12 +138,12 @@ async def view_dashboard(request):
                 "required": ["start_time", "end_time"],
                 "properties": {
                     "start_time": {
-                        "type": "integer",
-                        "description": "统计的起始时间（秒级时间戳）",
+                        "type": "string",
+                        "description": "统计的起始时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                     "end_time": {
-                        "type": "integer",
-                        "description": "统计的结束时间（秒级时间戳）",
+                        "type": "string",
+                        "description": "统计的结束时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                 },
             }
@@ -184,8 +184,8 @@ async def count_mttr(request):
 
     # 判断时间参数是否合法的时间格式
     try:
-        start_time = datetime.fromtimestamp(int(start_time))
-        end_time = datetime.fromtimestamp(int(end_time))
+        start_time = datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+        end_time = datetime.strptime(end_time, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
     except ValueError:
         raise CustomError(ErrorCode.PARAM_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")

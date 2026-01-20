@@ -1,6 +1,7 @@
 # coding=utf-8
 from datetime import datetime, timezone
 
+import pytz
 from sanic import Blueprint
 from sanic.log import logger
 from sanic_ext import openapi
@@ -29,12 +30,12 @@ _all__ = ["logs_bp"]
                     "query": {"type": "string", "description": "LogsQL查询语句"},
                     "project_id": {"type": "integer", "description": "项目ID"},
                     "start": {
-                        "type": "integer",
-                        "description": "查询开始时间（秒级时间戳）",
+                        "type": "string",
+                        "description": "查询开始时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                     "end": {
-                        "type": "integer",
-                        "description": "查询结束时间（秒级时间戳）",
+                        "type": "string",
+                        "description": "查询结束时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                 },
             }
@@ -75,15 +76,11 @@ async def get_logs_by_sql(request):
     start_iso = None
     end_iso = None
     if start is not None:
-        try:
-            start_iso = datetime.fromtimestamp(int(start), tz=timezone.utc).isoformat().replace("+00:00", "Z")
-        except Exception:
-            raise CustomError(ErrorCode.PARAM_ERROR)
+        start_dt = datetime.strptime(start, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+        start_iso = start_dt.isoformat().replace("+00:00", "Z")
     if end is not None:
-        try:
-            end_iso = datetime.fromtimestamp(int(end), tz=timezone.utc).isoformat().replace("+00:00", "Z")
-        except Exception:
-            raise CustomError(ErrorCode.PARAM_ERROR)
+        end_dt = datetime.strptime(end, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+        end_iso = end_dt.isoformat().replace("+00:00", "Z")
 
     result = await query_vlog(query, project_id, start_iso, end_iso, limit=1000)
     return response_ok(result) if result is not None else response_fail(ErrorCode.VICTORIA_LOGS_ERROR)
