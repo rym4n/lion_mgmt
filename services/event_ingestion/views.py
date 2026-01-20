@@ -576,6 +576,11 @@ async def update_event_ingestion(request):
         event.enabled_status = 0
         await event.save()
         return response_ok("禁用成功")
+    elif enabled_status == 1:
+        if await EventsIngestion.filter(syslog_config=event.syslog_config, enabled_status=1).exists():
+            raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
+        event.enabled_status = enabled_status
+        event.enabled_health_status = "healthy"
 
     data = event.vector_config_raw
 
@@ -667,9 +672,6 @@ async def update_event_ingestion(request):
         event.event_ingestion_describe = event_describe
     if transforms_type:
         event.transforms_type = transforms_type
-    if enabled_status == 1:
-        event.enabled_status = enabled_status
-        event.enabled_health_status = "healthy"
 
     if retention_days:
         event.retention_days = retention_days

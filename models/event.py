@@ -80,7 +80,7 @@ class EventsIngestion(BaseModel):
     linked_execution: int = fields.IntField(max_length=50, null=True, description="是否开启联动执行")
     creator = fields.ForeignKeyField("models.Account", related_name="created_events_ingestion", description="创建人")
     updator = fields.ForeignKeyField("models.Account", related_name="updated_events_ingestion", description="更新人")
-    syslog_config: str = fields.CharField(max_length=255, null=True, unique=True, description="syslog端口")
+    syslog_config: str = fields.CharField(max_length=255, null=True, description="syslog端口")
     file_path: str = fields.CharField(max_length=255, null=True, description="配置文件路径")
     vector_name: str = fields.CharField(max_length=255, null=True, unique=True, description="vector名称")
     config_info = fields.JSONField(default={}, null=True, description="转换配置信息")
