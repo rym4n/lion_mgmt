@@ -384,13 +384,13 @@ async def get_system_status(request):
                     "host": {"type": "string", "description": "主机IP地址"},
                     "service_name": {"type": "string", "description": "服务名称（可选），如lion-mgmt、lion-web等"},
                     "start_time": {
-                        "type": "string",
-                        "description": "开始时间，格式为2025-01-01T00:00:00.000Z",
+                        "type": "integer",
+                        "description": "开始时间（秒级时间戳）",
                     },
                     "end_time": {
-                        "type": "string",
-                        "description": "结束时间，格式为2025-01-02T00:00:00.000Z",
-                    },
+                        "type": "integer",
+                        "description": "结束时间（秒级时间戳）",
+                    }
                 },
             }
         }
@@ -435,6 +435,8 @@ async def get_system_status_history(request):
     service_name = params.get("service_name")
     start_time = params.get("start_time")
     end_time = params.get("end_time")
+    start_epoch = int(start_time) if isinstance(start_time, str) and start_time.isdigit() else start_time
+    end_epoch = int(end_time) if isinstance(end_time, str) and end_time.isdigit() else end_time
 
     if not host or not service_name or not start_time or not end_time:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -444,7 +446,7 @@ async def get_system_status_history(request):
     data_query = f"{query} | sort(_time desc)"
 
     # 从VictoriaLog查询指定时间范围的健康检查数据
-    data_res = await query_vlog(data_query, project_id=0, start=start_time, end=end_time, limit=1500)
+    data_res = await query_vlog(data_query, project_id=0, start=start_epoch, end=end_epoch, limit=1500)
 
     if not data_res:
         return response_ok([])
@@ -869,12 +871,12 @@ async def transforms_update(request):
                 "properties": {
                     "username": {"type": "string", "description": "用户名"},
                     "start_time": {
-                        "type": "string",
-                        "description": "开始时间, 格式为2025-01-01 00:00:00",
+                        "type": "integer",
+                        "description": "开始时间（秒级时间戳）",
                     },
                     "end_time": {
-                        "type": "string",
-                        "description": "结束时间, 格式为2025-01-01 00:00:00",
+                        "type": "integer",
+                        "description": "结束时间（秒级时间戳）",
                     },
                     "ip": {"type": "string", "description": "ip"},
                     "action": {"type": "string", "description": "操作"},
@@ -939,6 +941,8 @@ async def search_audit(request):
     username = request.json.get("username")
     start_time = request.json.get("start_time")
     end_time = request.json.get("end_time")
+    start_epoch = int(start_time) if isinstance(start_time, str) and start_time.isdigit() else start_time
+    end_epoch = int(end_time) if isinstance(end_time, str) and end_time.isdigit() else end_time
     ip = request.json.get("ip")
 
     query = 'topic:"lion_audit"'
@@ -949,12 +953,12 @@ async def search_audit(request):
 
     # 获取总数
     count_query = f"{query} | stats count()"
-    count_task = query_vlog(count_query, project_id=0, start=start_time, end=end_time)
+    count_task = query_vlog(count_query, project_id=0, start=start_epoch, end=end_epoch)
 
     # 获取数据
     data_query = f"{query} | sort(_time desc)"
     # 由于VictoriaLogs不支持offset，最多查询1000条数据
-    data_task = query_vlog(data_query, project_id=0, start=start_time, end=end_time, limit=1000)
+    data_task = query_vlog(data_query, project_id=0, start=start_epoch, end=end_epoch, limit=1000)
 
     count_res, data_res = await asyncio.gather(count_task, data_task)
 

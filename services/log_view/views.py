@@ -1,4 +1,5 @@
 # coding=utf-8
+from datetime import datetime, timezone
 
 from sanic import Blueprint
 from sanic.log import logger
@@ -7,7 +8,6 @@ from sanic_ext import openapi
 from core.error_code import ErrorCode
 from core.response import response_ok, response_fail
 from libs.error_code.exception import CustomError
-from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from libs.utils import query_vlog
 from models.event import EventsIngestion
@@ -29,12 +29,12 @@ _all__ = ["logs_bp"]
                     "query": {"type": "string", "description": "LogsQL查询语句"},
                     "project_id": {"type": "integer", "description": "项目ID"},
                     "start": {
-                        "type": "string",
-                        "description": "查询开始时间(RFC3339格式或Unix时间戳)",
+                        "type": "integer",
+                        "description": "查询开始时间（秒级时间戳）",
                     },
                     "end": {
-                        "type": "string",
-                        "description": "查询结束时间(RFC3339格式或Unix时间戳)",
+                        "type": "integer",
+                        "description": "查询结束时间（秒级时间戳）",
                     },
                 },
             }
@@ -72,7 +72,20 @@ async def get_logs_by_sql(request):
     start = param.get("start")
     end = param.get("end")
 
-    result = await query_vlog(query, project_id, start, end, limit=1000)
+    start_iso = None
+    end_iso = None
+    if start is not None:
+        try:
+            start_iso = datetime.fromtimestamp(int(start), tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        except Exception:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+    if end is not None:
+        try:
+            end_iso = datetime.fromtimestamp(int(end), tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        except Exception:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+    result = await query_vlog(query, project_id, start_iso, end_iso, limit=1000)
     return response_ok(result) if result is not None else response_fail(ErrorCode.VICTORIA_LOGS_ERROR)
 
 

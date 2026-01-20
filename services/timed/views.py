@@ -346,8 +346,8 @@ async def get_timed_permissions(request, filtered_items):
                     "updator": {"type": "string", "description": "更新人（用户名/显示名 模糊匹配）"},
                     "utime": {
                         "type": "array",
-                        "items": {"type": "string"},
-                        "description": "更新时间范围，格式：['2026-01-05 00:00:00','2026-01-16 00:00:00']",
+                        "items": {"type": "integer"},
+                        "description": "更新时间范围，格式：[1767571200, 1768521600]",
                     },
                     "scope": {"type": "integer", "description": "范围：0非内置，1内置，2全部；不传则按维护模式"},
                 },
@@ -463,19 +463,19 @@ async def get_all(request):
     if utime:
         if not isinstance(utime, (list, tuple)) or len(utime) != 2:
             raise CustomError(ErrorCode.PARAM_ERROR)
-        start_str, end_str = utime
-        if start_str:
+        start_ts, end_ts = utime
+        if start_ts:
             try:
-                start_time = datetime.datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
+                start_time = datetime.datetime.fromtimestamp(int(start_ts), TZ)
             except (TypeError, ValueError):
                 raise CustomError(ErrorCode.PARAM_ERROR)
-            condition &= Q(utime__gte=TZ.localize(start_time))
-        if end_str:
+            condition &= Q(utime__gte=start_time)
+        if end_ts:
             try:
-                end_time = datetime.datetime.strptime(end_str, "%Y-%m-%d %H:%M:%S")
+                end_time = datetime.datetime.fromtimestamp(int(end_ts), TZ)
             except (TypeError, ValueError):
                 raise CustomError(ErrorCode.PARAM_ERROR)
-            condition &= Q(utime__lte=TZ.localize(end_time))
+            condition &= Q(utime__lte=end_time)
 
     all_items = await Timed.filter(condition).prefetch_related("action", "playbook", "creator", "updator")
 
@@ -989,12 +989,12 @@ async def delete_timed(request):
                     "page": {"type": "integer", "description": "页码，默认1"},
                     "size": {"type": "integer", "description": "页大小，默认10"},
                     "start_time": {
-                        "type": "string",
-                        "description": "开始时间，格式为2025-12-12 00:00:00",
+                        "type": "integer",
+                        "description": "开始时间（秒级时间戳）",
                     },
                     "end_time": {
-                        "type": "string",
-                        "description": "结束时间，格式为2025-12-12 00:00:00",
+                        "type": "integer",
+                        "description": "结束时间（秒级时间戳）",
                     },
                     "status": {
                         "type": "integer",
@@ -1078,12 +1078,10 @@ async def get_run_log(request):
     condition = Q(timer_id=timed_id, deleted=False)
 
     if start_time:
-        start_time = datetime.datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
-        start_time = TZ.localize(start_time)
+        start_time = datetime.datetime.fromtimestamp(int(start_time), TZ)
         condition &= Q(start_time__gte=start_time)
     if end_time:
-        end_time = datetime.datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
-        end_time = TZ.localize(end_time)
+        end_time = datetime.datetime.fromtimestamp(int(end_time), TZ)
         condition &= Q(start_time__lte=end_time)
     if status in [0, 1]:
         condition &= Q(status=int(status))

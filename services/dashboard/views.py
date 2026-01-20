@@ -33,12 +33,12 @@ _all__ = ["dashboard_bp"]
                         "description": "统计类型，可选值：events_day，events_status，runlog_playbook，runlog_action",
                     },
                     "start_time": {
-                        "type": "string",
-                        "description": "统计的起始时间，格式：YYYY-MM-DD HH:MM:SS",
+                        "type": "integer",
+                        "description": "统计的起始时间（秒级时间戳）",
                     },
                     "end_time": {
-                        "type": "string",
-                        "description": "统计的结束时间，格式：YYYY-MM-DD HH:MM:SS",
+                        "type": "integer",
+                        "description": "统计的结束时间（秒级时间戳）",
                     },
                 },
             }
@@ -79,8 +79,8 @@ async def view_dashboard(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     result = None
-    start_time = datetime.strptime(start_time, "%Y-%m-%d")
-    end_time = datetime.strptime(end_time, "%Y-%m-%d")
+    start_time = datetime.fromtimestamp(int(start_time))
+    end_time = datetime.fromtimestamp(int(end_time))
 
     async with in_transaction() as tconn:
         if static_type == "events_day":
@@ -138,12 +138,12 @@ async def view_dashboard(request):
                 "required": ["start_time", "end_time"],
                 "properties": {
                     "start_time": {
-                        "type": "string",
-                        "description": "统计的起始时间，格式：YYYY-MM-DD HH:MM:SS",
+                        "type": "integer",
+                        "description": "统计的起始时间（秒级时间戳）",
                     },
                     "end_time": {
-                        "type": "string",
-                        "description": "统计的结束时间，格式：YYYY-MM-DD HH:MM:SS",
+                        "type": "integer",
+                        "description": "统计的结束时间（秒级时间戳）",
                     },
                 },
             }
@@ -184,8 +184,8 @@ async def count_mttr(request):
 
     # 判断时间参数是否合法的时间格式
     try:
-        start_time = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
-        end_time = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
+        start_time = datetime.fromtimestamp(int(start_time))
+        end_time = datetime.fromtimestamp(int(end_time))
     except ValueError:
         raise CustomError(ErrorCode.PARAM_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")

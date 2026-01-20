@@ -44,9 +44,9 @@ _all__ = ["approve_bp"]
                     },
                     "ctime": {
                         "type": "array",
-                        "items": {"type": "string"},
-                        "description": "搜索时使用，支持搜索创建时间",
-                        "example": ["2021-01-01T00:00:00Z", "2021-01-31T23:59:59Z"],
+                        "items": {"type": "integer"},
+                        "description": "搜索时使用，支持创建时间范围（秒级时间戳）",
+                        "example": [1609459200, 1612137599],
                     },
                 },
             }
@@ -130,7 +130,7 @@ async def all_approvement(request):
         condition = condition & Q(status__in=status)
 
     if ctime and len(ctime) == 2:
-        condition = condition & Q(ctime__range=[datetime.strptime(TZ.localize(t), "%Y-%m-%d %H:%M:%S") for t in ctime])
+        condition = condition & Q(ctime__range=[datetime.fromtimestamp(int(t), TZ) for t in ctime])
 
     await Approvement.filter(status=0, expire_time__lt=datetime.now(), tenant_id=tenant_id).update(status=3)
     total = await Approvement.filter(condition).count()
