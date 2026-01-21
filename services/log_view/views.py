@@ -1,5 +1,7 @@
 # coding=utf-8
+from datetime import datetime, timezone
 
+import pytz
 from sanic import Blueprint
 from sanic.log import logger
 from sanic_ext import openapi
@@ -7,7 +9,6 @@ from sanic_ext import openapi
 from core.error_code import ErrorCode
 from core.response import response_ok, response_fail
 from libs.error_code.exception import CustomError
-from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from libs.utils import query_vlog
 from models.event import EventsIngestion
@@ -30,11 +31,11 @@ _all__ = ["logs_bp"]
                     "project_id": {"type": "integer", "description": "项目ID"},
                     "start": {
                         "type": "string",
-                        "description": "查询开始时间(RFC3339格式或Unix时间戳)",
+                        "description": "查询开始时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                     "end": {
                         "type": "string",
-                        "description": "查询结束时间(RFC3339格式或Unix时间戳)",
+                        "description": "查询结束时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                 },
             }
@@ -72,7 +73,16 @@ async def get_logs_by_sql(request):
     start = param.get("start")
     end = param.get("end")
 
-    result = await query_vlog(query, project_id, start, end, limit=1000)
+    start_iso = None
+    end_iso = None
+    if start is not None:
+        start_dt = datetime.strptime(start, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+        start_iso = start_dt.isoformat().replace("+00:00", "Z")
+    if end is not None:
+        end_dt = datetime.strptime(end, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+        end_iso = end_dt.isoformat().replace("+00:00", "Z")
+
+    result = await query_vlog(query, project_id, start_iso, end_iso, limit=1000)
     return response_ok(result) if result is not None else response_fail(ErrorCode.VICTORIA_LOGS_ERROR)
 
 

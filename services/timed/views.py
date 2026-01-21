@@ -2,6 +2,7 @@
 
 import datetime
 
+import pytz
 from croniter import croniter
 from sanic import Blueprint
 from sanic.log import logger
@@ -347,7 +348,7 @@ async def get_timed_permissions(request, filtered_items):
                     "utime": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "更新时间范围，格式：['2026-01-05 00:00:00','2026-01-16 00:00:00']",
+                        "description": "更新时间范围（UTC格式：2025-01-01T00:00:00Z）",
                     },
                     "scope": {"type": "integer", "description": "范围：0非内置，1内置，2全部；不传则按维护模式"},
                 },
@@ -465,17 +466,11 @@ async def get_all(request):
             raise CustomError(ErrorCode.PARAM_ERROR)
         start_str, end_str = utime
         if start_str:
-            try:
-                start_time = datetime.datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
-            except (TypeError, ValueError):
-                raise CustomError(ErrorCode.PARAM_ERROR)
-            condition &= Q(utime__gte=TZ.localize(start_time))
+            start_time = datetime.datetime.strptime(start_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+            condition &= Q(utime__gte=start_time)
         if end_str:
-            try:
-                end_time = datetime.datetime.strptime(end_str, "%Y-%m-%d %H:%M:%S")
-            except (TypeError, ValueError):
-                raise CustomError(ErrorCode.PARAM_ERROR)
-            condition &= Q(utime__lte=TZ.localize(end_time))
+            end_time = datetime.datetime.strptime(end_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+            condition &= Q(utime__lte=end_time)
 
     all_items = await Timed.filter(condition).prefetch_related("action", "playbook", "creator", "updator")
 
@@ -990,11 +985,11 @@ async def delete_timed(request):
                     "size": {"type": "integer", "description": "页大小，默认10"},
                     "start_time": {
                         "type": "string",
-                        "description": "开始时间，格式为2025-12-12 00:00:00",
+                        "description": "开始时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                     "end_time": {
                         "type": "string",
-                        "description": "结束时间，格式为2025-12-12 00:00:00",
+                        "description": "结束时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                     "status": {
                         "type": "integer",
@@ -1078,13 +1073,11 @@ async def get_run_log(request):
     condition = Q(timer_id=timed_id, deleted=False)
 
     if start_time:
-        start_time = datetime.datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
-        start_time = TZ.localize(start_time)
-        condition &= Q(start_time__gte=start_time)
+        start_dt = datetime.datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+        condition &= Q(start_time__gte=start_dt)
     if end_time:
-        end_time = datetime.datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
-        end_time = TZ.localize(end_time)
-        condition &= Q(start_time__lte=end_time)
+        end_dt = datetime.datetime.strptime(end_time, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+        condition &= Q(start_time__lte=end_dt)
     if status in [0, 1]:
         condition &= Q(status=int(status))
 

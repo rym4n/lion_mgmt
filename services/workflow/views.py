@@ -9,6 +9,7 @@ from collections import defaultdict
 from datetime import datetime
 
 import orjson
+import pytz
 from aiocache import caches
 from sanic import Blueprint
 from sanic_ext import openapi
@@ -196,8 +197,8 @@ async def create_workflow(request):
                     "ctime": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "搜索时使用，支持搜索创建时间",
-                        "example": ["2025-10-19 00:00:00", "2025-10-29 00:00:00"],
+                        "description": "搜索时使用，支持搜索创建时间（UTC格式：2025-01-01T00:00:00Z）",
+                        "example": ["2025-01-01T00:00:00Z", "2025-02-01T00:00:00Z"],
                     },
                 },
             }
@@ -269,10 +270,8 @@ async def list_workflow(request):
             condition = condition & Q(tags__in=tags)
 
     if len(json_params.get("ctime") or []) == 2:
-        start_time = datetime.strptime(json_params["ctime"][0], "%Y-%m-%d %H:%M:%S")
-        start_time = TZ.localize(start_time)
-        end_time = datetime.strptime(json_params["ctime"][1], "%Y-%m-%d %H:%M:%S")
-        end_time = TZ.localize(end_time)
+        start_time = datetime.strptime(json_params["ctime"][0], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+        end_time = datetime.strptime(json_params["ctime"][1], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
         condition = condition & Q(ctime__range=(start_time, end_time))
 
     pv_condition = Q(playbook_versions__deleted=False)
@@ -1801,11 +1800,11 @@ async def execute_webhook(request):
                     "flow_id": {"type": "string", "description": "剧本版本ID"},
                     "start": {
                         "type": "string",
-                        "description": "查询开始时间,格式为2025-12-12 00:00:00",
+                        "description": "查询开始时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                     "end": {
                         "type": "string",
-                        "description": "查询结束时间,格式为2025-12-12 00:00:00",
+                        "description": "查询结束时间（UTC格式：2025-01-01T00:00:00Z）",
                     },
                 },
             }
@@ -1850,8 +1849,8 @@ async def dashboard_statistics(request):
     start = data.get("start")
     end = data.get("end")
 
-    start_dt = datetime.strptime(start, "%Y-%m-%d %H:%M:%S")
-    end_dt = datetime.strptime(end, "%Y-%m-%d %H:%M:%S")
+    start_dt = datetime.strptime(start, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+    end_dt = datetime.strptime(end, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
 
     if not flow_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -1992,6 +1991,16 @@ async def import_workflow(request):
                     await caches.get("redis_chat").set(
                         f"workflow_scene_{playbook.id}",
                         ",".join([s.id for s in scenes]),
+                    )
+
+            existing_scenes = await playbook.scenes.all()
+            if not existing_scenes:
+                default_scene = await Scene.filter(status=1, tenant_id=tenant_id).order_by("-ctime").first()
+                if default_scene:
+                    await playbook.scenes.add(default_scene)
+                    await caches.get("redis_chat").set(
+                        f"workflow_scene_{playbook.id}",
+                        ",".join([default_scene.id]),
                     )
 
             for flow_json in flow_json_list:

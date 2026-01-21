@@ -13,7 +13,6 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from models import Approvement
 from settings import TASK_TOPIC, TZ
@@ -45,8 +44,8 @@ _all__ = ["approve_bp"]
                     "ctime": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "搜索时使用，支持搜索创建时间",
-                        "example": ["2021-01-01T00:00:00Z", "2021-01-31T23:59:59Z"],
+                        "description": "搜索时使用，支持创建时间范围（UTC格式：2025-01-01T00:00:00Z）",
+                        "example": ["2025-01-01T00:00:00Z", "2025-02-01T00:00:00Z"],
                     },
                 },
             }
@@ -130,7 +129,7 @@ async def all_approvement(request):
         condition = condition & Q(status__in=status)
 
     if ctime and len(ctime) == 2:
-        condition = condition & Q(ctime__range=[datetime.strptime(TZ.localize(t), "%Y-%m-%d %H:%M:%S") for t in ctime])
+        condition = condition & Q(ctime__range=[datetime.strptime(t, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC) for t in ctime])
 
     await Approvement.filter(status=0, expire_time__lt=datetime.now(), tenant_id=tenant_id).update(status=3)
     total = await Approvement.filter(condition).count()
