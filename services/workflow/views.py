@@ -1255,6 +1255,66 @@ async def new_tag(request):
     return response_ok("标签新建成功")
 
 
+@workflow_bp.post("/tag/edit")
+@openapi.definition(
+    summary="编辑标签",
+    description="编辑标签（需要剧本更新权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["old_name", "new_name"],
+                "properties": {
+                    "old_name": {"type": "string", "description": "原标签名称"},
+                    "new_name": {"type": "string", "description": "新标签名称"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "编辑成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("workflow:u")
+async def edit_tag(request):
+    old_name = request.json.get("old_name", "").strip()
+    new_name = request.json.get("new_name", "").strip()
+
+    if not old_name or not new_name:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    tag = await Tag.get_or_none(name=old_name, type=0, tenant_id=tenant_id)
+    if not tag:
+        raise CustomError(ErrorCode.TAG_NOT_FOUND_ERROR)
+
+    if old_name == new_name:
+        return response_ok("标签编辑成功")
+
+    if await Tag.filter(name=new_name, type=0, tenant_id=tenant_id).exists():
+        raise CustomError(ErrorCode.TAG_EXIST_ERROR)
+
+    tag.name = new_name
+    await tag.save()
+
+    return response_ok("标签编辑成功")
+
+
 @workflow_bp.post("/tag/list")
 @openapi.definition(
     summary="获取标签列表",
