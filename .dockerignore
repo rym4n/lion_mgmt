@@ -5,7 +5,7 @@
 # 排除 Dockerfile 和其他敏感文件
 Dockerfile*
 .dockerignore
-README.md
+*.md
 
 # 排除 Node.js 或其他语言的依赖缓存
 node_modules/
