@@ -1339,7 +1339,7 @@ async def execution(request):
     room.updator = user
     room.run_id.append(msg["run_id"])
     await room.save()
-    await request.app.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id}, 3600 * 24 * 7)
+    await request.app.ctx.cache_client.set(str(msg["run_id"]), {"room_id": str(room_id), "updator": user.id, "tenant_id": tenant_id}, 3600 * 24 * 7)
     await aproduce(TASK_TOPIC, msg)
 
     return response.json({"code": 0, "data": {"activityId": str(run_id)}, "result": str(run_id)})
