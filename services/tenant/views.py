@@ -122,14 +122,14 @@ async def add_tenant(request):
 )
 @requires_permission("tenant:d")
 async def del_tenant(request):
-    id = request.json.get("id")
-    if not id:
+    tenant_id = request.json.get("id")
+    if not tenant_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    if id == "8bce552d-c27c-41d4-8a1b-8c5bf38dfe18":
+    if tenant_id == "8bce552d-c27c-41d4-8a1b-8c5bf38dfe18":
         raise CustomError(ErrorCode.CANNOT_DELETE_TENANT)
 
-    tenant = await Tenant.get_or_none(id=id).prefetch_related("member")
+    tenant = await Tenant.get_or_none(id=tenant_id).prefetch_related("member")
 
     if tenant.member:
         if len(tenant.member) > 1:
@@ -196,9 +196,7 @@ async def edit_tenant(request):
             await tenant.save(update_fields=["name"])
 
         if add_member_ids:
-            existing_ids = set(
-                await tenant.member.filter(id__in=add_member_ids).values_list("id", flat=True)
-            )
+            existing_ids = set(await tenant.member.filter(id__in=add_member_ids).values_list("id", flat=True))
             ids_to_add = add_member_ids - existing_ids
             if ids_to_add:
                 add_users = await Account.filter(id__in=ids_to_add)
@@ -246,11 +244,11 @@ async def edit_tenant(request):
 )
 @requires_permission("tenant:r")
 async def switch_tenant(request):
-    id = request.json.get("id")
-    if not id:
+    tenant_id = request.json.get("id")
+    if not tenant_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    tenant = await Tenant.get_or_none(id=id).prefetch_related("member")
+    tenant = await Tenant.get_or_none(id=tenant_id).prefetch_related("member")
 
     if tenant is None:
         raise CustomError(ErrorCode.TENANT_NOT_FOUND)

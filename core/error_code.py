@@ -162,4 +162,3 @@ class ErrorCode(BaseErrorCode):
     DEFAULT_TENANT_NOT_FOUND = ErrorData(4113, "默认工作空间未配置")
     DEFAULT_ROLE_NOT_FOUND = ErrorData(4114, "默认角色未配置")
     IMPORT_PART_EVENT_INGESTION_FAIL = ErrorData(4115, "部分事件接入导入失败，请检查名称或端口是否重复")
-

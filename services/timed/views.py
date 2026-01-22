@@ -17,7 +17,7 @@ from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
 from models import Account, ActionPermissions, Playbook, PlaybookPermissions, PlaybookVersion, Runlog, Timed, ToolAction
 from services.workflow.views import get_playbook_input
-from settings import TASK_TOPIC, TZ
+from settings import TASK_TOPIC
 
 timed_bp = Blueprint("timed", url_prefix="/timed")
 _all__ = ["timed_bp"]
@@ -807,7 +807,7 @@ async def update_timed(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     timed = await Timed.get(id=timed_id, deleted=False, tenant_id=tenant_id).prefetch_related("action", "playbook", "creator", "updator")
-    result, permissions = await get_timed_permissions(request, [timed])
+    result, _ = await get_timed_permissions(request, [timed])
 
     if not result:
         raise CustomError(ErrorCode.UNAUTH)

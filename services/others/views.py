@@ -6,7 +6,6 @@ from sanic_ext import openapi
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from libs.security.authentication import token_decode
 from libs.security.authorization import requires_permission
 from models import (
     Runlog,

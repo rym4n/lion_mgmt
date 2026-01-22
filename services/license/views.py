@@ -5,22 +5,17 @@ import hashlib
 import os
 import time
 
-from sanic import Blueprint
-from sanic import response
+from sanic import Blueprint, response
+from sanic.log import logger
 from sanic.request import Request
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import (
-    requires_permission,
-    load_license,
-    get_license_sha256,
-)
+from libs.security.authorization import get_license_sha256, load_license, requires_permission
 from libs.utils import verify_license
-from models import Tool, Playbook, Account, PermissionsMenu, Config
+from models import Account, PermissionsMenu, Playbook, Tool
 from settings import LICENSE_DIR
-from sanic.log import logger
 
 license_bp = Blueprint("license", url_prefix="/license")
 _all__ = ["license_bp"]

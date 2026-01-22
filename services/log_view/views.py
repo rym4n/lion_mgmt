@@ -1,5 +1,5 @@
 # coding=utf-8
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pytz
 from sanic import Blueprint
@@ -7,7 +7,7 @@ from sanic.log import logger
 from sanic_ext import openapi
 
 from core.error_code import ErrorCode
-from core.response import response_ok, response_fail
+from core.response import response_fail, response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import query_vlog

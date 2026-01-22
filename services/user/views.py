@@ -1,10 +1,10 @@
 # coding=utf-8
+
 import time
 import uuid
 from datetime import datetime
 
 import pyotp
-from aiocache import caches
 from argon2.exceptions import InvalidHashError, VerificationError
 from jsonpath import jsonpath
 from sanic import Blueprint, response
@@ -1598,4 +1598,3 @@ async def set_default_tenant(request):
 async def get_user_details(request):
     account = request.ctx.session["account_info"]
     return response_ok(account.json)
-

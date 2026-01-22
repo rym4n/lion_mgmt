@@ -15,7 +15,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from models import Approvement
-from settings import TASK_TOPIC, TZ
+from settings import TASK_TOPIC
 
 approve_bp = Blueprint("approve", url_prefix="/approve")
 _all__ = ["approve_bp"]
@@ -193,7 +193,7 @@ async def todo_approvement(request):
           WHERE a.status = 0 AND NOT a.results ? '{request.ctx.session["sub"]}'
         """
 
-    runlog_sql = f"""
+    runlog_sql = """
         UPDATE runlog r
         SET status = 3,
             result = '审核已超时'

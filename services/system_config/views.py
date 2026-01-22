@@ -390,7 +390,7 @@ async def get_system_status(request):
                     "end_time": {
                         "type": "string",
                         "description": "结束时间（UTC格式：2025-01-01T00:00:00Z）",
-                    }
+                    },
                 },
             }
         }
@@ -1101,7 +1101,7 @@ async def outgoing(request):
         for addr in addresses:
             try:
                 port = int(addr.split(":")[-1])
-                if not (1 <= port <= 65535):
+                if port > 65535 or port < 1:
                     raise CustomError(ErrorCode.INVALID_PORT_ERROR)
             except (ValueError, IndexError):
                 raise CustomError(ErrorCode.INVALID_PORT_ERROR)

@@ -365,12 +365,12 @@ async def execution(request):
         room = await Room.create(name=room_name, creator=user, tenant_id=tenant_id)
         event.room = room
     room_id = event.room_id
-    type = TYPE_DICT.get(executorInstanceType)
-    if not room_id or not type:
+    instance_type = TYPE_DICT.get(executorInstanceType)
+    if not room_id or not instance_type:
         raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     params = {}
     input_data = {}
-    if type == "flow":
+    if instance_type == "flow":
         if executorParams:
             for param in executorParams:
                 input_data[param["key"]] = param["value"]

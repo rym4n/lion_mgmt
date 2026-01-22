@@ -7,8 +7,7 @@ from mcp.types import JSONRPCMessage
 from sanic import Blueprint, Request, response
 from sanic.log import logger
 
-from libs.security.authentication import token_decode
-from .server import create_mcp_server
+from services.mcp.server import create_mcp_server
 
 mcp_bp = Blueprint("mcp", url_prefix="/mcp")
 
