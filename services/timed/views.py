@@ -2,8 +2,8 @@
 
 import datetime
 
-import pytz
 from croniter import croniter
+import pytz
 from sanic import Blueprint
 from sanic.log import logger
 from sanic_ext import openapi
@@ -15,7 +15,16 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import strip_timezone_to_seconds
-from models import Account, ActionPermissions, Playbook, PlaybookPermissions, PlaybookVersion, Runlog, Timed, ToolAction
+from models import (
+    Account,
+    ActionPermissions,
+    Playbook,
+    PlaybookPermissions,
+    PlaybookVersion,
+    Runlog,
+    Timed,
+    ToolAction,
+)
 from services.workflow.views import get_playbook_input
 from settings import TASK_TOPIC
 
@@ -420,8 +429,8 @@ async def get_timed_permissions(request, filtered_items):
 @requires_permission("timed:r")
 async def get_all(request):
     req_json = request.json or {}
-    page = int(req_json.get("page") or 1)
-    size = int(req_json.get("size") or 15)
+    page = max(1, int(req_json.get("page") or 1))
+    size = max(1, min(int(req_json.get("size") or 15), 100))
     keyword = (req_json.get("keyword") or "").strip()
     playbook_name = (req_json.get("playbook_name") or "").strip()
     enable = req_json.get("enable")
@@ -1061,8 +1070,8 @@ async def delete_timed(request):
 async def get_run_log(request):
     req_json = request.json or {}
     timed_id = req_json.get("id")
-    page = int(req_json.get("page") or 1)
-    size = int(req_json.get("size") or 15)
+    page = max(1, int(req_json.get("page") or 1))
+    size = max(1, min(int(req_json.get("size") or 15), 100))
     start_time = req_json.get("start_time")
     end_time = req_json.get("end_time")
     status = req_json.get("status")

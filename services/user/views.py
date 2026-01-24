@@ -1,12 +1,12 @@
 # coding=utf-8
 
+from datetime import datetime
 import time
 import uuid
-from datetime import datetime
 
-import pyotp
 from argon2.exceptions import InvalidHashError, VerificationError
 from jsonpath import jsonpath
+import pyotp
 from sanic import Blueprint, response
 from sanic.log import logger
 from sanic_ext import openapi
@@ -16,11 +16,28 @@ from tortoise.expressions import Q
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authentication import get_secure_config_dict, refresh_token, token_encode, validate_password, validate_username
+from libs.security.authentication import (
+    get_secure_config_dict,
+    refresh_token,
+    token_encode,
+    validate_password,
+    validate_username,
+)
 from libs.security.authorization import requires_permission
-from libs.utils import get_client_ip, get_expiration_date, ip_in_list, password_hasher, validate_ips
+from libs.utils import (
+    get_client_ip,
+    get_expiration_date,
+    ip_in_list,
+    password_hasher,
+    validate_ips,
+)
 from models import Account, Role, Scene, Tenant
-from settings import AUTHENTICATION_SESSION_EXPIRATION, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE
+from settings import (
+    AUTHENTICATION_SESSION_EXPIRATION,
+    SESSION_HTTPONLY,
+    SESSION_SAMESITE,
+    SESSION_SECURE,
+)
 
 user_bp = Blueprint("user", url_prefix="/user")
 __all__ = ["user_bp"]
@@ -230,12 +247,8 @@ async def new_user(request):
 @requires_permission("user:r")
 async def all_users(request):
     req_json = request.json or {}
-    page = int(req_json.get("page", 1) or 1)
-    size = int(req_json.get("size", 15) or 15)
-    if page < 1:
-        page = 1
-    if size < 1:
-        size = 15
+    page = max(1, int(req_json.get("page", 1) or 1))
+    size = max(1, min(int(req_json.get("size", 15) or 15), 100))
     offset = (page - 1) * size
 
     tenant_ids = [request.ctx.session.get("tenant_id")]
@@ -496,14 +509,9 @@ async def create_api_user(request):
 @requires_permission("user:r")
 async def list_api_users(request):
     req_json = request.json or {}
-    page = int(req_json.get("page", 1) or 1)
-    size = int(req_json.get("size", 15) or 15)
-    if page < 1:
-        page = 1
-    if size < 1:
-        size = 15
+    page = max(1, int(req_json.get("page", 1) or 1))
+    size = max(1, min(int(req_json.get("size", 15) or 15), 100))
     offset = (page - 1) * size
-    limit = size
     # 分页查询ApiUserToken，返回总数和数据
     tenant_id = request.ctx.session.get("tenant_id")
     qs = Account.filter(Q(type="api") & Q(deleted=False) & Q(member__id__in=[tenant_id])).distinct()
@@ -532,7 +540,7 @@ async def list_api_users(request):
             qs = qs.filter(roles__name__in=role_terms)
 
     total = await qs.count()
-    api_users = await qs.offset(offset).limit(limit).all().prefetch_related("roles")
+    api_users = await qs.offset(offset).limit(size).all().prefetch_related("roles")
     data = []
     for u in api_users:
         data.append(u.api_json)

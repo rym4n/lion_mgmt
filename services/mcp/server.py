@@ -1,16 +1,16 @@
 # coding=utf-8
 
-import re
 from functools import partial
+import re
 
 from mcp.server import Server
-from mcp.types import Tool, TextContent, ImageContent, EmbeddedResource
+from mcp.types import EmbeddedResource, ImageContent, TextContent, Tool
 from tortoise.expressions import Q
 from tortoise.functions import Count, Max
 
 from libs.kafka import aproduce
 from libs.utils import gen_run_id
-from models import Room, Playbook, PlaybookVersion
+from models import Playbook, PlaybookVersion, Room
 from models.user import Account
 from settings import TASK_TOPIC
 
@@ -241,7 +241,6 @@ async def handle_call_tool(tenant_id, name: str, arguments: dict | None) -> list
         keyword = args.get("keyword")
 
         offset = (page - 1) * size
-        limit = size
 
         condition = Q(deleted=False, tenant_id=tenant_id)
         if keyword:
@@ -256,7 +255,7 @@ async def handle_call_tool(tenant_id, name: str, arguments: dict | None) -> list
             )
             .order_by("-utime")
             .offset(offset)
-            .limit(limit)
+            .limit(size)
             .prefetch_related("scenes", "tags")
         )
 

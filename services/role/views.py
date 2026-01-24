@@ -138,14 +138,14 @@ async def add_role(request):
 )
 @requires_permission("role:r")
 async def find_all(request):
-    page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 15))
+    page = max(1, int(request.json.get("page", 1)))
+    size = max(1, min(int(request.json.get("size", 15)), 100))
     offset = (page - 1) * size
-    limit = size
+
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    roles = await Role.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(limit).values()
+    roles = await Role.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(size).values()
     total = await Role.filter(deleted=False, tenant_id=tenant_id).count()
     return response_ok(
         {

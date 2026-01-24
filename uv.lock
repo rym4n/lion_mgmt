@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11, <4"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -683,6 +683,15 @@ wheels = [
 ]
 
 [[package]]
+name = "distro"
+version = "1.9.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/fc/f8/98eea607f65de6527f8a2e8885fc8015d3e6f5775df186e443e0964a11c3/distro-1.9.0.tar.gz", hash = "sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/12/b3/231ffd4ab1fc9d679809f356cebee130ac7daa00d6d6f3206dd4fd137e9e/distro-1.9.0-py3-none-any.whl", hash = "sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2" },
+]
+
+[[package]]
 name = "dotenv"
 version = "0.9.9"
 source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
@@ -1013,6 +1022,23 @@ wheels = [
 ]
 
 [[package]]
+name = "letta-client"
+version = "1.7.6"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/5b/27/31353df7bf55285f9829030d59d126a796d49003f0f41b49cbd2685855ec/letta_client-1.7.6.tar.gz", hash = "sha256:b5b34fa8e4295f3892cfbd05aaf490e30557a2c97a7b04f1fdb0a7754fb30421" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/74/29/2826c93163ef3d0cb6870aca15e1f8b3da5214c0f180d1f9e46b71df7869/letta_client-1.7.6-py3-none-any.whl", hash = "sha256:e92a681459576561297709db9716798bb04b8972035ef055e4224e70b7bb9a31" },
+]
+
+[[package]]
 name = "lion-mgmt"
 version = "3.0.0"
 source = { virtual = "." }
@@ -1032,6 +1058,7 @@ dependencies = [
     { name = "httpx-oauth" },
     { name = "jsonpath" },
     { name = "jsonrpcserver" },
+    { name = "letta-client" },
     { name = "mcp" },
     { name = "msgpack" },
     { name = "orjson" },
@@ -1070,6 +1097,7 @@ requires-dist = [
     { name = "httpx-oauth", specifier = ">=0.16.1" },
     { name = "jsonpath", specifier = ">=0.82.2" },
     { name = "jsonrpcserver", specifier = ">=5.0.9" },
+    { name = "letta-client", specifier = ">=1.7.6" },
     { name = "mcp", specifier = ">=1.25.0" },
     { name = "msgpack", specifier = ">=1.1.0" },
     { name = "orjson", specifier = ">=3.10.16" },
@@ -2093,6 +2121,15 @@ source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81" }
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274" },
+]
+
+[[package]]
+name = "sniffio"
+version = "1.3.1"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2" },
 ]
 
 [[package]]

@@ -883,6 +883,8 @@ async def transforms_update(request):
                     },
                     "ip": {"type": "string", "description": "ip"},
                     "action": {"type": "string", "description": "操作"},
+                    "uri": {"type": "string", "description": "请求URI"},
+                    "client_ua": {"type": "string", "description": "客户端User-Agent"},
                     "page": {"type": "integer", "description": "页码"},
                     "size": {"type": "integer", "description": "每页条数"},
                 },
@@ -934,8 +936,8 @@ async def transforms_update(request):
 )
 @requires_permission("audit:r")
 async def search_audit(request):
-    page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 15))
+    page = max(1, int(request.json.get("page", 1)))
+    size = max(1, min(int(request.json.get("size", 15)), 100))
     offset = (page - 1) * size
 
     if offset >= 1000:
@@ -957,12 +959,21 @@ async def search_audit(request):
         end_iso = end_dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     ip = request.json.get("ip")
+    action = request.json.get("action")
+    uri = request.json.get("uri")
+    client_ua = request.json.get("client_ua")
 
     query = 'topic:"lion_audit"'
     if username:
         query += f' AND username:"{username}"'
     if ip:
         query += f' AND client_ip:"{ip}"'
+    if action:
+        query += f' AND action:"{action}"'
+    if uri:
+        query += f' AND uri:"{uri}"'
+    if client_ua:
+        query += f' AND client_ua:"{client_ua}"'
 
     # 获取总数
     count_query = f"{query} | stats count()"

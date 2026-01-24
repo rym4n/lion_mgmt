@@ -258,8 +258,8 @@ async def update_scene(request):
     },
 )
 async def get_all_scene(request):
-    page = int(request.json.get("page") or 1)
-    page_size = int(request.json.get("page_size") or 10)
+    page = max(1, int(request.json.get("page") or 1))
+    page_size = max(1, min(int(request.json.get("page_size") or 10), 100))
     key = request.json.get("key") or None
     status = request.json.get("status")
 

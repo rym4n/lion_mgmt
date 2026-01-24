@@ -112,8 +112,8 @@ _all__ = ["approve_bp"]
 @requires_permission("approve:r")
 async def all_approvement(request):
     params = request.json
-    page = int(params.get("page", 1))
-    size = int(params.get("size", 15))
+    page = max(1, int(params.get("page", 1)))
+    size = max(1, min(int(params.get("size", 15)), 100))
     offset = (page - 1) * size
 
     tenant_id = request.ctx.session.get("tenant_id")

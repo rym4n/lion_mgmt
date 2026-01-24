@@ -13,12 +13,12 @@ import zipfile
 
 import aiofile
 import orjson
-import yaml
 from sanic import Blueprint, response
 from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.functions import Max
 from tortoise.transactions import in_transaction
+import yaml
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -358,7 +358,7 @@ async def get_all_events_ingestion(request):
     page = request.json.get("page", 1)
     size = request.json.get("size", 15)
     offset = (page - 1) * size
-    limit = size
+
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -366,7 +366,7 @@ async def get_all_events_ingestion(request):
     if request.json.get("name"):
         filters["event_ingestion_name__icontains"] = request.json.get("name")
 
-    events = await EventsIngestion.filter(**filters).order_by("-ctime").offset(offset).select_related("creator", "updator").limit(limit).all()
+    events = await EventsIngestion.filter(**filters).order_by("-ctime").offset(offset).select_related("creator", "updator").limit(size).all()
     total = await EventsIngestion.filter(**filters).count()
 
     return response_ok(
@@ -781,11 +781,7 @@ async def get_event_ingestion_detail(request):
 async def get_event_ingestion_kafka_sample(request):
     data = request.json
     event_id = data.get("id")
-    size = data.get("size", 10)
-    try:
-        size = int(size)
-    except:
-        raise CustomError(ErrorCode.PARAM_ERROR)
+    size = max(1, min(int(data.get("size", 10)), 100))
 
     tenant_id = request.ctx.session.get("tenant_id")
 

@@ -87,10 +87,10 @@ NODE_TYPE = {
 )
 @requires_permission("event:r")
 async def get_all_events(request):
-    page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 15))
+    page = max(1, int(request.json.get("page", 1)))
+    size = max(1, min(int(request.json.get("size", 15)), 100))
     offset = (page - 1) * size
-    limit = size
+
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -105,7 +105,7 @@ async def get_all_events(request):
         ctime = [datetime.strptime(t, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC) for t in request.json.get("ctime")]
         filters["ctime__range"] = ctime
 
-    events = await Events.filter(**filters).offset(offset).limit(limit).all().prefetch_related("room", "creator", "updator", "scene")
+    events = await Events.filter(**filters).offset(offset).limit(size).all().prefetch_related("room", "creator", "updator", "scene")
     total = await Events.filter(**filters).count()
 
     data = []

@@ -1,8 +1,8 @@
 # coding=utf-8
 import traceback
 
-import orjson
 from aiocache import caches
+import orjson
 from sanic import Blueprint, Request, Websocket
 from sanic import response
 from sanic.log import logger
@@ -12,16 +12,16 @@ from websockets import ConnectionClosed
 
 from core.error_code import ErrorCode
 from core.response import response_ok
-from libs.chat import get_or_create_private_chat_room, chat_manager
+from libs.chat import chat_manager, get_or_create_private_chat_room
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import requires_permission, check_wildcard
-from libs.utils import gen_run_id, gen_random_code
-from models import Events, ToolAction, Tool, Runlog
+from libs.security.authorization import check_wildcard, requires_permission
+from libs.utils import gen_random_code, gen_run_id
+from models import Events, Runlog, Tool, ToolAction
 from models.user import Account
-from models.warroom import Room, Message, MessageAccount
+from models.warroom import Message, MessageAccount, Room
 from services.timed.views import runlog_list
-from settings import TASK_TOPIC, WR_TOPIC, CACHE
+from settings import CACHE, TASK_TOPIC, WR_TOPIC
 
 warroom_bp = Blueprint("warroom", url_prefix="/warroom")
 __all__ = ["warroom_bp"]
@@ -392,7 +392,6 @@ async def get_all_rooms(request: Request):
     page = req_json.get("page", 1)
     size = req_json.get("size", 10)
     offset = (page - 1) * size
-    limit = size
     tenant_id = request.ctx.session.get("tenant_id")
     condition = Q(tenant_id=tenant_id)
     keyword = req_json.get("keyword")
@@ -400,7 +399,7 @@ async def get_all_rooms(request: Request):
         condition = condition & Q(name__icontains=keyword)
 
     # 前端是先获取再查询, 没有使用到这里的查询参数
-    rooms = await Room.filter(condition).offset(offset).limit(limit).order_by("-ctime").prefetch_related("creator", "users")
+    rooms = await Room.filter(condition).offset(offset).limit(size).order_by("-ctime").prefetch_related("creator", "users")
     total = await Room.filter(condition).count()
     return response_ok({"total": total, "rooms": [r.json for r in rooms]})
 
@@ -1045,12 +1044,11 @@ async def get_list(request):
     page = req_json.get("page", 1)
     size = req_json.get("size", 20)
     offset = (page - 1) * size
-    limit = size
     message_list = []
     account = request.ctx.session["account_info"]
     tenant_id = request.ctx.session.get("tenant_id")
     count = await MessageAccount.filter(account_id=account.id, status=0, tenant_id=tenant_id).count()
-    messages = await MessageAccount.filter(account_id=account.id, status=0, tenant_id=tenant_id).offset(offset).limit(limit).all().prefetch_related("message__sender")
+    messages = await MessageAccount.filter(account_id=account.id, status=0, tenant_id=tenant_id).offset(offset).limit(size).all().prefetch_related("message__sender")
     for message in messages:
         message_list.append(message.json)
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])

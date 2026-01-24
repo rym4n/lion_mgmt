@@ -40,12 +40,12 @@ _all__ = ["tenant_bp"]
 )
 @requires_permission("tenant:r")
 async def get_tenant(request):
-    page = int(request.json.get("page", 1))
-    size = int(request.json.get("size", 15))
+    page = max(1, int(request.json.get("page", 1)))
+    size = max(1, min(int(request.json.get("size", 15)), 100))
     offset = (page - 1) * size
-    limit = size
 
-    tenants = await Tenant.filter().offset(offset).limit(limit).all().prefetch_related("creator", "member")
+
+    tenants = await Tenant.filter().offset(offset).limit(size).all().prefetch_related("creator", "member")
     total = await Tenant.filter().count()
 
     data = [tenant.json for tenant in tenants]
@@ -315,16 +315,16 @@ async def get_account_tenant(request):
 @requires_permission("tenant:c, u")
 async def get_all_user_info(request):
     req_json = request.json or {}
-    page = int(req_json.get("page", 1))
-    size = int(req_json.get("size", 15))
+    page = max(1, int(req_json.get("page", 1)))
+    size = max(1, min(int(req_json.get("size", 15)), 100))
     offset = (page - 1) * size
-    limit = size
+
 
     condition = {"deleted": False, "type": "user"}
     if req_json.get("username"):
         condition["username__contains"] = req_json.get("username")
     total = await Account.filter(**condition).count()
-    users = await Account.filter(**condition).offset(offset).limit(limit).all().prefetch_related("roles", "member")
+    users = await Account.filter(**condition).offset(offset).limit(size).all().prefetch_related("roles", "member")
     data = []
     for u in users:
         tenants = await u.member.all()
@@ -364,8 +364,8 @@ async def get_all_user_info(request):
 @requires_permission("tenant:r")
 async def get_tenant_user(request):
     req_json = request.json or {}
-    page = int(req_json.get("page", 1))
-    size = int(req_json.get("size", 10))
+    page = max(1, int(req_json.get("page", 1)))
+    size = max(1, min(int(req_json.get("size", 10)), 100))
     tenant_id = req_json.get("tenant_id")
     username = (req_json.get("username") or "").strip()
     if not tenant_id:

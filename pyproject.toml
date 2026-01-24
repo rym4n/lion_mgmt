@@ -33,6 +33,7 @@ dependencies = [
     "jsonrpcserver>=5.0.9",
     "aioboto3>=15.4.0",
     "mcp>=1.25.0",
+    "letta-client>=1.7.6",
 ]
 
 [build-system]

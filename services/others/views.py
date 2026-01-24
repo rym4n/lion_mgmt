@@ -8,12 +8,12 @@ from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models import (
-    Runlog,
-    ToolAction,
     PlaybookVersion,
+    Runlog,
     Tool,
-    ToolResourcesModel,
+    ToolAction,
     ToolResources,
+    ToolResourcesModel,
 )
 
 
@@ -67,14 +67,14 @@ async def activity(request, activityId):
 @openapi.exclude()
 @requires_permission("workflow:r")
 async def playbook_list(request):
-    page = int(request.args.get("page", 1))
-    size = int(request.args.get("size", 10))
+    page = max(1, int(request.args.get("page", 1)))
+    size = max(1, min(int(request.args.get("size", 10)), 100))
     offset = (page - 1) * size
-    limit = size
+
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    pvs = await PlaybookVersion.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(limit).prefetch_related("playbook", "creator", "updator", "playbook__scenes", "playbook__tags")
+    pvs = await PlaybookVersion.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(size).prefetch_related("playbook", "creator", "updator", "playbook__scenes", "playbook__tags")
 
     content = []
     for pv in pvs:
@@ -121,14 +121,13 @@ async def playbook_list(request):
 @openapi.exclude()
 @requires_permission("tool:r")
 async def all_apps(request):
-    page = int(request.args.get("page", 1))
-    size = int(request.args.get("size", 10))
+    page = max(1, int(request.args.get("page", 1)))
+    size = max(1, min(int(request.args.get("size", 10)), 100))
     offset = (page - 1) * size
-    limit = size
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    tools = await Tool.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(limit)
+    tools = await Tool.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(size)
     content = []
     for tool in tools:
         actions = await ToolAction.filter(tool_name=tool.name, version_number=tool.version, deleted=False, tenant_id=tenant_id).all()
