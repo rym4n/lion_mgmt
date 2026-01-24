@@ -710,15 +710,6 @@ async def login(request):
         # 验证密码
         password_hasher.verify(account.password, password)
 
-        update_fields = ["last_login_time"]
-        account.last_login_time = datetime.now()
-
-        if password_hasher.check_needs_rehash(account.password):
-            account.password = password_hasher.hash(password)
-            update_fields.append("password")
-
-        await account.save(update_fields=update_fields)
-
         # 登录成功，清除错误次数
         await request.app.ctx.cache_client.delete(f"{username}_login_attempts")
 
@@ -759,8 +750,12 @@ async def login(request):
 
         # 4. 首次登录强制修改密码
         if secure_config["force_change_password_first_login"]:
-            if abs(account.ctime.timestamp() - account.utime.timestamp()) < 10:
+            if not account.last_login_time:
                 resp["force_change_password"] = True
+
+        if not resp.get("force_change_password"):
+            account.last_login_time = datetime.now()
+            await account.save(update_fields=["last_login_time"])
 
         tmp_resp = response_ok(resp)
         tmp_resp.cookies.add_cookie(
