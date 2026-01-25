@@ -129,7 +129,7 @@ async def new_user(request):
 
     try:
         # 密码强度校验
-        password = request.json.get("password") or ""
+        password = request.json.get("password").strip() or ""
         await validate_password(password)
 
         mfa_enable = bool(request.json.get("mfa_enable", False)) or False
@@ -147,7 +147,7 @@ async def new_user(request):
         )
         # 添加角色
         if request.json.get("role_names"):
-            roles = await Role.filter(name__in=request.json.get("role_names"), tenant_id=tenant_id).all()
+            roles = await Role.filter(name__in=request.json.get("role_names"), tenant_id=tenant_id, deleted=False).all()
             await account.roles.add(*roles)
         else:
             await account.fetch_related("roles")
@@ -290,9 +290,9 @@ async def all_users(request):
 
     if role_terms:
         if len(role_terms) == 1:
-            qs = qs.filter(roles__name__icontains=role_terms[0])
+            qs = qs.filter(roles__name__icontains=role_terms[0], deleted=False)
         else:
-            qs = qs.filter(roles__name__in=role_terms)
+            qs = qs.filter(roles__name__in=role_terms, deleted=False)
 
     total = await qs.count()
 
@@ -406,12 +406,12 @@ async def create_api_user(request):
     )
     # 添加角色
     if request.json.get("role_names"):
-        roles = await Role.filter(name__in=request.json.get("role_names"), tenant_id=tenant_id).all()
+        roles = await Role.filter(name__in=request.json.get("role_names"), tenant_id=tenant_id, deleted=False).all()
         await account.roles.add(*roles)
 
     # 添加工作空间
     ids = t_ids if t_ids else [request.ctx.session["tenant_id"]]
-    tenants = await Tenant.filter(id__in=ids).all()
+    tenants = await Tenant.filter(id__in=ids, deleted=False).all()
     await account.member.add(*tenants)
 
     token = token_encode(
@@ -535,9 +535,9 @@ async def list_api_users(request):
 
     if role_terms:
         if len(role_terms) == 1:
-            qs = qs.filter(roles__name=role_terms[0])
+            qs = qs.filter(roles__name__icontains=role_terms[0], deleted=False)
         else:
-            qs = qs.filter(roles__name__in=role_terms)
+            qs = qs.filter(roles__name__in=role_terms, deleted=False)
 
     total = await qs.count()
     api_users = await qs.offset(offset).limit(size).all().prefetch_related("roles")
@@ -661,8 +661,8 @@ async def update_api_user(request):
     },
 )
 async def login(request):
-    username = request.json.get("username")
-    password = request.json.get("password")
+    username = request.json.get("username", '').strip()
+    password = request.json.get("password", '').strip()
 
     if not username or not password:
         raise CustomError(ErrorCode.CREDENTIALS_ERROR)
@@ -781,7 +781,7 @@ async def local_auth(request):
     if request.ip != "127.0.0.1":
         raise CustomError(ErrorCode.IP_FORBIDDEN)
 
-    account = await Account.get(username=request.json.get("username", ""))
+    account = await Account.get(username=request.json.get("username", ""), deleted=False)
     token = token_encode(
         account.id,
         account.username,
@@ -987,7 +987,7 @@ async def update_user(request):
         if field in request.json:
             if field == "password":
                 # 密码强度校验
-                password = request.json.get("password") or ""
+                password = request.json.get("password").strip() or ""
                 await validate_password(password)
                 data["password"] = password_hasher.hash(password)
             else:
@@ -1088,7 +1088,7 @@ async def edit_user(request):
         need_update = True
         if p == "password":
             # 密码强度校验
-            password = request.json.get("password") or ""
+            password = request.json.get("password").strip() or ""
             await validate_password(password)
             user.password = password_hasher.hash(password)
         elif p == "mfa_enable":
@@ -1233,7 +1233,7 @@ async def refresh_mfa_key(request):
 )
 @requires_permission("user:u")
 async def assign_role_to_user(request):
-    username = request.json.get("username")
+    username = request.json.get("username", '').strip()
     account = await Account.get_or_none(username=username, deleted=False)
     if not account:
         raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
@@ -1241,7 +1241,7 @@ async def assign_role_to_user(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     role_names = request.json.get("role_names", "").split(",")
-    if role_names in [[""], None]:
+    if not role_names:
         await account.roles.clear()
         return response_ok("success")
     roles = await Role.filter(name__in=role_names, deleted=False, tenant_id=tenant_id).all()
