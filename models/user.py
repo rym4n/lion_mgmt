@@ -14,16 +14,14 @@ class Account(BaseModel):
     账号模型，包含以下属性：用户名、姓名、邮箱、手机号、密码、OAuth ID、是否禁用、角色
     """
 
-    username: str = fields.CharField(unique=True, null=False, max_length=32)
+    username: str = fields.CharField(null=False, max_length=255)
     display_name: str = fields.CharField(max_length=255, null=True)
     email: str = fields.CharField(
-        unique=True,
         max_length=150,
         null=True,
         validators=[RegexValidator(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", re.I)],
     )
     phone: str = fields.CharField(
-        unique=True,
         max_length=15,
         null=True,
         validators=[RegexValidator(r"^1[3-9]\d{9}$", re.I)],
@@ -32,7 +30,7 @@ class Account(BaseModel):
     mfa_enable: bool = fields.BooleanField(default=False)
     mfa_key: str = fields.CharField(max_length=50, null=True)
     mfa_bind: bool = fields.BooleanField(default=False)
-    oauth_id: str = fields.CharField(unique=True, null=True, max_length=255)
+    oauth_id: str = fields.CharField(null=True, max_length=255)
     disabled: bool = fields.BooleanField(default=False)
     roles = fields.ManyToManyField("models.Role", through="account_role")
     permit_ip: str = fields.CharField(null=True, max_length=255)
@@ -114,7 +112,6 @@ class Role(BaseModel):
         table = "role"
         ordering = ["-utime"]
 
-        unique_together = (("tenant_id", "name"),)
 
 
 class PermissionsMenu(BaseModel):
@@ -156,7 +153,7 @@ class Tenant(Model):
     ctime = fields.DatetimeField(null=False, auto_now_add=True, description="创建时间")
     utime = fields.DatetimeField(null=False, auto_now=True, description="更新时间")
     deleted: bool = fields.BooleanField(default=False, description="删除标识")
-    name: str = fields.CharField(max_length=255, null=True, unique=True, description="工作空间名称")
+    name: str = fields.CharField(max_length=255, null=True, description="工作空间名称")
     creator = fields.ForeignKeyField("models.Account", null=True, related_name="creator_tenant", description="创建人")
     member = fields.ManyToManyField(
         model_name="models.Account",

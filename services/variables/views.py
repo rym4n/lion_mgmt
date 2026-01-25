@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # coding=utf-8
+import time
+
 from aiocache import caches
 from sanic import Blueprint
 from sanic_ext import openapi
@@ -202,7 +204,7 @@ async def delelte_variable(request):
     if not var:
         raise CustomError(ErrorCode.NOT_FOUND)
     await caches.get("redis_chat").delete(f"global_{var.name}")
-    await var.delete()
+    await var.update_from_dict({"deleted": True})
     return response_ok("success")
 
 

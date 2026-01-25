@@ -38,8 +38,6 @@ class Playbook(BaseModel):
         table = "playbook"
         ordering = ["-utime"]
 
-        unique_together = (("tenant_id", "name"),)
-
 
 class PlaybookVersion(BaseModel):
     """
@@ -48,7 +46,7 @@ class PlaybookVersion(BaseModel):
 
     playbook = fields.ForeignKeyField("models.Playbook", related_name="playbook_versions")
     change_desc = fields.TextField(null=True, description="变更说明")
-    version = fields.CharField(max_length=30, description="版本号，每次publish都会生成新纪录，用于版本回溯")
+    version = fields.CharField(max_length=50, description="版本号，每次publish都会生成新纪录，用于版本回溯")
     status = fields.IntField(max_length=1, default=0, description="剧本状态,0草稿,1已发布")
     flow_timeout = fields.IntField(max_length=6, default=300, description="剧本运行超时时间，单位秒")
     flow_json = fields.JSONField(default={}, description="流程图flow数据，包含edges和nodes")
@@ -86,7 +84,6 @@ class PlaybookVersion(BaseModel):
         table = "playbook_version"
         ordering = ["-utime"]
 
-        unique_together = (("playbook", "version"),)
 
 
 class PlaybookPermissions(BaseModel):

@@ -434,11 +434,10 @@ async def delete_event_ingestion(request):
                     os.remove(supervisor_path)
             await es.delete()
 
-        await Events.filter(event_ingestion_id=event.id, tenant_id=tenant_id).delete()
+        # await Events.filter(event_ingestion_id=event.id, tenant_id=tenant_id).delete()
+        await event.update_from_dict({"deleted": True})
 
-        await event.delete()
-
-    return response_ok("事件删除成功")
+    return response_ok("success")
 
 
 @event_ingestion_bp.post("/update")

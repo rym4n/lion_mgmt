@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 # coding=utf-8
 import asyncio
+from collections import defaultdict
+from datetime import datetime
 import re
 import secrets
 import time
 import uuid
-from collections import defaultdict
-from datetime import datetime
 
+from aiocache import caches
 import orjson
 import pytz
-from aiocache import caches
 from sanic import Blueprint
 from sanic_ext import openapi
 from tortoise.expressions import Q
@@ -21,9 +21,27 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import check_playbook_permission, playbook_permission, requires_permission
+from libs.security.authorization import (
+    check_playbook_permission,
+    playbook_permission,
+    requires_permission,
+)
 from libs.utils import gen_run_id, strip_timezone_to_seconds
-from models import Account, EventRelatedScript, Playbook, PlaybookPermissions, PlaybookVersion, PlaybookWebhook, Role, Runlog, Scene, Tag, Timed, Tool, ToolAction
+from models import (
+    Account,
+    EventRelatedScript,
+    Playbook,
+    PlaybookPermissions,
+    PlaybookVersion,
+    PlaybookWebhook,
+    Role,
+    Runlog,
+    Scene,
+    Tag,
+    Timed,
+    Tool,
+    ToolAction,
+)
 from services.tools.views import tool_action_playbook_delete, tool_action_update
 from settings import TASK_TOPIC, TZ
 
@@ -795,7 +813,9 @@ async def publish_workflow(request):
 async def delete_workflow(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
-    playbook = await Playbook.get(id=request.json.get("playbook_id"), tenant_id=tenant_id)
+    playbook = await Playbook.get_or_none(id=request.json.get("playbook_id"), deleted=False, tenant_id=tenant_id)
+    if not playbook:
+        raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
     if playbook.internal:
         raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
     pvs = await PlaybookVersion.filter(playbook=playbook, deleted=False, tenant_id=tenant_id).all()
@@ -815,9 +835,9 @@ async def delete_workflow(request):
             action_ids = await statistics_data(pv.flow_json, tenant_id)
             await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
 
-    await playbook.delete()
+    await playbook.update_from_dict({"deleted": True})
 
-    return response_ok("剧本删除成功")
+    return response_ok("success")
 
 
 @workflow_bp.post("/del-version")
@@ -855,7 +875,9 @@ async def delete_workflow(request):
 @playbook_permission("d")
 async def delete_workflow_version(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    pv = await PlaybookVersion.get(id=request.json.get("flow_id"), tenant_id=tenant_id).prefetch_related("playbook")
+    pv = await PlaybookVersion.filter(id=request.json.get("flow_id"), deleted=False, tenant_id=tenant_id).prefetch_related("playbook").first()
+    if not pv:
+        raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
     if pv.playbook.internal:
         raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
 
@@ -867,11 +889,11 @@ async def delete_workflow_version(request):
     if pv.flow_json:
         action_ids = await statistics_data(pv.flow_json, tenant_id)
         await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
-    if await PlaybookVersion.filter(playbook_id=pv.playbook_id, tenant_id=tenant_id).count() == 1:
-        await Playbook.filter(id=pv.playbook_id, tenant_id=tenant_id).delete()
-    else:
-        await pv.delete()
-    return response_ok("删除成功")
+    if await PlaybookVersion.filter(playbook_id=pv.playbook_id, deleted=False, tenant_id=tenant_id).count() == 1:
+        await pv.playbook.update_from_dict({"deleted": True})
+
+    await pv.update_from_dict({"deleted": True})
+    return response_ok("success")
 
 
 @workflow_bp.post("/stop")
@@ -1742,9 +1764,9 @@ async def delete_webhook(request):
     if not webhook:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    await webhook.delete()
+    await webhook.update_from_dict({"deleted": True})
 
-    return response_ok("Webhook已删除")
+    return response_ok("success")
 
 
 # 无需权限验证的webhook执行接口，通过webhook_token验证

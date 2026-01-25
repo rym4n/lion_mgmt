@@ -1,17 +1,17 @@
 # coding=utf-8
 import asyncio
+from collections import defaultdict
+from functools import reduce
 import hashlib
+from io import BytesIO
 import operator
 import os
 import re
 import time
 import zipfile
-from collections import defaultdict
-from functools import reduce
-from io import BytesIO
 
-import orjson
 from aiocache import caches
+import orjson
 from sanic import Blueprint
 from sanic_ext import openapi
 from tortoise.expressions import Q
@@ -25,7 +25,18 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import load_license, requires_permission
 from libs.utils import gen_run_id
-from models import ActionPermissions, Config, PlaybookVersion, Runlog, Tag, Timed, Tool, ToolAction, ToolResources, ToolResourcesModel
+from models import (
+    ActionPermissions,
+    Config,
+    PlaybookVersion,
+    Runlog,
+    Tag,
+    Timed,
+    Tool,
+    ToolAction,
+    ToolResources,
+    ToolResourcesModel,
+)
 from settings import TASK_TOPIC
 
 # 定义 Blueprint
@@ -850,7 +861,7 @@ async def delete_tool(request):
 
         if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).count() == 1:
             await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
-            await ToolResources.filter(tool_name=name, deleted=False, tenant_id=tenant_id).delete()
+            await ToolResources.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
             await ActionPermissions.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
 
         await utils.delete_from_s3("system", f"{name}/{version}.zip", "tools")
@@ -918,7 +929,7 @@ async def delete_tool_all(request):
 
         await ToolAction.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
         await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
-        await ToolResources.filter(tool_name=name, deleted=False, tenant_id=tenant_id).delete()
+        await ToolResources.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
         await ActionPermissions.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
         await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
 
@@ -1283,7 +1294,7 @@ async def delete_tool_resource(request):
             if timed.action_input and timed.action_input["resource"] == tool_resource.id:
                 return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
 
-    await tool_resource.delete()
+    await tool_resource.update_from_dict(deleted=True)
 
     await caches.get("redis_chat").delete("resource_" + tool_resource.id)
 

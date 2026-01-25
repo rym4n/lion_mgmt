@@ -25,7 +25,7 @@ class Runlog(BaseModel):
     node_type = fields.CharField(max_length=36, description="节点类型")
 
     tool_name = fields.CharField(null=True, max_length=255, description="工具标识")
-    tool_version = fields.CharField(null=True, max_length=255, description="工具版本")
+    tool_version = fields.CharField(null=True, max_length=50, description="工具版本")
     tool_display_name = fields.CharField(null=True, max_length=255, description="工具中文名称")
 
     action_name = fields.CharField(null=True, max_length=255, description="动作标识")

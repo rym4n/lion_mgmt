@@ -43,5 +43,3 @@ class Scene(BaseModel):
     class Meta:
         table = "scene"
         ordering = ["-ctime"]
-
-        unique_together = (("tenant_id", "name"),)

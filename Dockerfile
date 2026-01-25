@@ -56,6 +56,7 @@ RUN apt update -y \
 COPY --from=vector /usr/bin/vector /usr/bin/vector
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
+COPY migrations ./migrations
 COPY pyproject.toml ./
 COPY settings ./settings
 COPY server.py ./

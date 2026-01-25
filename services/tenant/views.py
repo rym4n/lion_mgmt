@@ -1,9 +1,11 @@
 # coding=utf-8
+import time
+
 from sanic import Blueprint
 from sanic_ext import openapi
+from tortoise.expressions import Q
 from tortoise.functions import Count
 from tortoise.transactions import in_transaction
-from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -11,11 +13,13 @@ from libs.error_code.exception import CustomError
 from libs.security.authentication import refresh_token
 from libs.security.authorization import requires_permission
 from libs.utils import get_expiration_date
-from models import (
-    Tenant,
-    Account,
+from models import Account, Tenant
+from settings import (
+    AUTHENTICATION_SESSION_EXPIRATION,
+    SESSION_HTTPONLY,
+    SESSION_SAMESITE,
+    SESSION_SECURE,
 )
-from settings import AUTHENTICATION_SESSION_EXPIRATION, SESSION_SECURE, SESSION_SAMESITE, SESSION_HTTPONLY
 
 tenant_bp = Blueprint("tenant", url_prefix="/tenant")
 _all__ = ["tenant_bp"]
@@ -130,6 +134,8 @@ async def del_tenant(request):
         raise CustomError(ErrorCode.CANNOT_DELETE_TENANT)
 
     tenant = await Tenant.get_or_none(id=tenant_id).prefetch_related("member")
+    if tenant is None:
+        raise CustomError(ErrorCode.TENANT_NOT_FOUND)
 
     if tenant.member:
         if len(tenant.member) > 1:
@@ -137,9 +143,9 @@ async def del_tenant(request):
         if str(tenant.member[0].id) != "43782755-6382-4f42-82a2-5e557370d858":
             raise CustomError(ErrorCode.TENANT_HAS_MEMBERS)
 
-    await tenant.delete()
+    await tenant.update_from_dict({"deleted": True})
 
-    return response_ok("删除成功")
+    return response_ok("success")
 
 
 @tenant_bp.post("/edit")

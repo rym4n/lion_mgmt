@@ -36,5 +36,3 @@ class Variables(BaseModel):
     class Meta:
         table = "variables"
         ordering = ["-utime"]
-
-        unique_together = (("tenant_id", "name"),)

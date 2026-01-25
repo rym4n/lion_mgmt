@@ -151,8 +151,8 @@ class ErrorCode(BaseErrorCode):
     MCP_RATE_LIMIT_EXCEEDED = ErrorData(4104, "Rate limit exceeded")
 
     TENANT_ALREADY_EXISTS = ErrorData(4105, "已存在同名工作空间")
-    TENANT_HAS_MEMBERS = ErrorData(4106, "当前工作空间存在成员，禁止删除")
-    TENANT_NOT_FOUND = ErrorData(4107, "当前工作空间不存在")
+    TENANT_HAS_MEMBERS = ErrorData(4106, "工作空间存在成员，禁止删除")
+    TENANT_NOT_FOUND = ErrorData(4107, "工作空间不存在")
     CANNOT_DELETE_TENANT = ErrorData(4108, "默认工作空间禁止删除")
     ROLE_CANNOT_DELETE = ErrorData(4109, "超管角色禁止删除")
 

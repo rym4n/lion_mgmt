@@ -12,6 +12,7 @@ from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.exceptions import DoesNotExist, IntegrityError
 from tortoise.expressions import Q
+from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -134,15 +135,15 @@ async def new_user(request):
 
         mfa_enable = bool(request.json.get("mfa_enable", False)) or False
         account = await Account.create(
-            username=validate_username(request.json.get("username", "")),
+            username=validate_username(request.json.get("username", "").strip()),
             password=password_hasher.hash(password),
             display_name=request.json.get("display_name"),
-            email=request.json.get("email"),
-            phone=request.json.get("phone"),
-            disabled=request.json.get("disabled") or False,
+            email=request.json.get("email", "").strip(),
+            phone=request.json.get("phone", "").strip(),
+            disabled=bool(request.json.get("disabled", False)) or False,
             mfa_enable=mfa_enable,
             mfa_key=pyotp.random_base32(32) if mfa_enable else None,
-            permit_ip=request.json.get("permit_ip"),
+            permit_ip=request.json.get("permit_ip", "").strip(),
             tenant_id=request.ctx.session["tenant_id"],
         )
         # 添加角色
@@ -727,7 +728,7 @@ async def login(request):
             mfa_enabled,  # 使用计算后的 mfa 状态
             account.tenant_id,
             token_id,
-            ip=client_ip,
+            ip=client_ip
         )
         await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
         # resp['aioe-auth'] = token
@@ -993,6 +994,9 @@ async def update_user(request):
             else:
                 data[field] = request.json[field]
 
+    # 如果是首次登录强制改密的话，需要刷新认证时间
+    if request.ctx.session["account_info"].last_login_time is None:
+        data["last_login_time"] = datetime.now()
     await Account.filter(id=request.ctx.session.get("sub")).update(**data)
 
     return response_ok("success")
@@ -1145,12 +1149,14 @@ async def edit_user(request):
 )
 @requires_permission("user:d")
 async def delelte_user(request):
-    if request.json.get("username") == request.ctx.session["account_info"].username:
+    username = request.json.get("username", '').strip()
+    if username == request.ctx.session["account_info"].username:
         raise CustomError(ErrorCode.CANNOT_DELETE_SELF)
-    if request.json.get("username") == "admin":
+    if username == "admin":
         raise CustomError(ErrorCode.CANNOT_DELETE_ADMIN)
-    await Account.filter(username=request.json.get("username")).update(deleted=True)
-    return response_ok("用户删除成功")
+
+    await Account.filter(username=username, deleted=False,tenant_id= request.ctx.session["account_info"].tenant_id).update(deleted=True)
+    return response_ok("success")
 
 
 @user_bp.post("/reset-mfa-key")
@@ -1185,7 +1191,8 @@ async def delelte_user(request):
 )
 @requires_permission("user:u")
 async def refresh_mfa_key(request):
-    account = await Account.get(username=request.json.get("username"), deleted=False)
+    username = request.json.get("username", '').strip()
+    account = await Account.get_or_none(username=username, deleted=False)
     if not account:
         raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
     account.mfa_key = pyotp.random_base32(32)

@@ -1,3 +1,7 @@
+# coding=utf-8
+
+import time
+
 from aiocache import caches
 from sanic import Blueprint
 from sanic_ext import openapi
@@ -371,7 +375,7 @@ async def set_current_scene(request):
     },
 )
 @requires_permission("scene:d")
-async def remove_scene(request):
+async def delete_scene(request):
     scene_id = request.json.get("id")
     if not scene_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -394,6 +398,6 @@ async def remove_scene(request):
         for playbook in playbooks:
             await playbook.scenes.remove(scene)
 
-        await scene.delete()
+        await scene.update_from_dict({"deleted": True})
 
-    return response_ok("删除成功")
+    return response_ok("success")
