@@ -5,7 +5,7 @@ RUN_IN_TRANSACTION = True
 
 async def upgrade(db: BaseDBAsyncClient) -> str:
     return """
-        ALTER TABLE "account" ADD "last_login_time" TIMESTAMPTZ;
+        ALTER TABLE "account" ADD IF NOT EXISTS "last_login_time" TIMESTAMPTZ;
         COMMENT ON COLUMN "account"."last_login_time" IS '最后登录时间';"""
 
 
