@@ -9,6 +9,7 @@ import orjson
 import pytz
 import io
 import zipfile
+import hashlib
 
 from aiocache import caches
 from collections import defaultdict
@@ -172,7 +173,7 @@ async def create_workflow(request):
         for flow_json in flow_json_list:
             pv = await PlaybookVersion.create(
                 playbook=playbook,
-                version=gen_run_id(),
+                version="",
                 status=0,
                 change_desc=data.get("change_desc", ""),
                 flow_json=flow_json,
@@ -299,6 +300,7 @@ async def list_workflow(request):
     pv_condition = Q(playbook_versions__deleted=False)
     if json_params.get("publish") in (0, 1):
         pv_condition = pv_condition & Q(playbook_versions__status=json_params.get("publish"))
+        condition = condition & pv_condition
 
     playbooks = (
         await Playbook.filter(condition)
@@ -306,13 +308,14 @@ async def list_workflow(request):
             versions=Count("playbook_versions", _filter=pv_condition),
             max_flow_timeout=Max("playbook_versions__flow_timeout"),
         )
+        .distinct()
         .order_by("-utime")
         .offset(offset)
         .limit(limit)
         .prefetch_related("scenes", "tags")
     )
 
-    total = await Playbook.filter(condition).count()
+    total = await Playbook.filter(condition).distinct().count()
 
     # 组装数据
     data = []
@@ -724,7 +727,7 @@ async def edit_workflow_flow(request):
     if pv.status == 1:
         pv = await PlaybookVersion.create(
             playbook=pv.playbook,
-            version=gen_run_id(),
+            version="",
             flow_json=pv.flow_json,
             change_desc=None,
             status=0,
@@ -787,12 +790,20 @@ async def publish_workflow(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0, tenant_id=tenant_id).update(
-        status=1,
-        updator=request.ctx.session["account_info"],
-        version=gen_run_id(),
-        change_desc=request.json.get("change_desc"),
+    pv = await PlaybookVersion.get_or_none(
+        id=request.json.get("flow_id"), status=0, tenant_id=tenant_id
     )
+    if not pv:
+        raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
+
+    flow_json_str = orjson.dumps(pv.flow_json)
+    sha1_val = hashlib.sha1(flow_json_str).hexdigest()
+
+    pv.status = 1
+    pv.updator = request.ctx.session["account_info"]
+    pv.version = sha1_val
+    pv.change_desc = request.json.get("change_desc")
+    await pv.save()
     return response_ok("剧本发布成功")
 
 
