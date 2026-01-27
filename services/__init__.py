@@ -62,7 +62,6 @@ def register_blueprints(app: Sanic) -> None:
     app.blueprint(warroom_bp)
     app.blueprint(approve_bp)
     app.blueprint(tenant_bp)
-    app.blueprint(agent_bp)
 
     try:
         bp_dict = {
@@ -75,6 +74,7 @@ def register_blueprints(app: Sanic) -> None:
             "workflow_bp": workflow_bp,
             "logs_bp": logs_bp,
             "ai_bp": ai_bp,
+            "agent_bp": agent_bp,
             "mcp_bp": mcp_bp,
         }
         license_data = load_license()

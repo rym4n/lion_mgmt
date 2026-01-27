@@ -2033,7 +2033,7 @@ async def dashboard_statistics(request):
     summary="导入剧本",
     description="导入剧本",
     body={
-        "multipart/from-data": {
+        "multipart/form-data": {
             "schema": {
                 "type": "object",
                 "required": ["file"],

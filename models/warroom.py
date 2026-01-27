@@ -21,6 +21,7 @@ class Room(BaseModel):
         description="房间内进行调试的用户",
     )
     run_id = fields.JSONField(default=[], null=True, description="run_id列表")
+    room_type = fields.CharField(null=False, default="public", max_length=20, description="房间类型，public群聊private私聊")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -32,6 +33,7 @@ class Room(BaseModel):
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
             "name": self.name,
+            "room_type": self.room_type,
             "creator": {
                 "username": self.creator.username,
                 "display_name": self.creator.display_name,
