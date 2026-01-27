@@ -161,7 +161,7 @@ async def upload_tool(zip_file, lic, creator, single_progress, resp, success_pro
         data += 1
         percent = int((data * single_progress))
         success_progress = percent
-        await resp.send(f"data: 解压进度：{percent}%\n\n")
+        await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
         return results, success_progress, data
 
     if "actions" in config_data.keys():
@@ -221,7 +221,7 @@ async def upload_tool(zip_file, lic, creator, single_progress, resp, success_pro
     data += 1
     percent = int((data * single_progress))
     success_progress = percent
-    await resp.send(f"data: 解压进度：{percent}%\n\n")
+    await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
     return results, success_progress, data
 
 
