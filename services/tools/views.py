@@ -277,7 +277,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
                 )
             data += 1
             percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n")
+            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             hasher = hash_func()
             zip_buffer.seek(0)  # 确保从头开始读取数据
@@ -288,14 +288,14 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
                 return config_data, version, tool_name, "缺失config文件"
             data += 1
             percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n")
+            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             missing_files = set(EXPECTED_STRUCTURE["required_files"]) - actual_files
             if missing_files:
                 return config_data, version, tool_name, "缺失config文件"
             data += 1
             percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n")
+            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             name = config_data.get("name")
             py_file_name = config_data.get("main")
@@ -333,13 +333,13 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
                 return config_data, version, tool_name, "config文件内容错误"
             data += 1
             percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n")
+            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             if py_file_name not in py_files_dict:
                 return config_data, version, tool_name, "缺失py文件"
             data += 1
             percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n")
+            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             if logo_name not in actual_files:
                 return config_data, version, tool_name, "缺少logo文件"
@@ -362,7 +362,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
                 return config_data, version, tool_name, "缺少logo文件"
             data += 1
             percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n")
+            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             with zip_ref.open(py_files_dict[py_file_name]) as py_file:
                 py_data = py_file.read().decode()
@@ -371,7 +371,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
                 return config_data, version, tool_name, "Python文件内容错误"
             data += 1
             percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n")
+            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).first().values("resources")
             if configuration and configuration["resources"] != config_data.get("resource", {}):
@@ -392,13 +392,13 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
                         )
             data += 1
             percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n")
+            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id, version=hasher.hexdigest()).exists():
                 return config_data, version, tool_name, "工具已存在"
             data += 1
             percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n")
+            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             version = hasher.hexdigest()
             suffix = logo_name.split(".")[-1]
@@ -912,9 +912,8 @@ async def delete_tool_all(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
 
-    if await Tool.filter(name=name, deleted=False, maintain=maintenance_mode if maintenance_mode else False, tenant_id=tenant_id).exists():
+    if await Tool.filter(name=name, deleted=False, maintain=True, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
 
     if await Tool.filter(name=name, deleted=False, status=1, tenant_id=tenant_id).exists():
