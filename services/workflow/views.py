@@ -7,13 +7,13 @@ import hashlib
 import io
 import re
 import secrets
-import time
 import uuid
 import zipfile
-
-from aiocache import caches
 import orjson
 import pytz
+
+from services.tools.views import unzip
+from aiocache import caches
 from sanic import Blueprint
 from sanic.response import raw
 from sanic_ext import openapi
@@ -474,7 +474,7 @@ async def list_workflow_versions(request):
         }
     },
 )
-@requires_permission("workflow:r")
+@requires_permission("workflow:r,tool:r")
 @playbook_permission("r")
 async def export_workflow(request):
     tenant_id = request.ctx.session.get("tenant_id")
@@ -2041,7 +2041,7 @@ async def dashboard_statistics(request):
                     "file": {
                         "type": "string",
                         "format": "binary",
-                        "description": "剧本导入文件",
+                        "description": "导入ZIP包",
                     }
                 },
             }
@@ -2049,14 +2049,14 @@ async def dashboard_statistics(request):
     },
     response={
         "200": {
-            "description": "创建成功",
+            "description": "导入成功",
             "content": {
                 "application/json": {
                     "schema": {
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer"},
-                            "data": {"type": "string"},
+                            "data": {"type": "object"},
                             "message": {"type": "string"},
                         },
                     }
@@ -2065,90 +2065,127 @@ async def dashboard_statistics(request):
         }
     },
 )
-@requires_permission("workflow:c")
+@requires_permission("workflow:c, tool:c")
 async def import_workflow(request):
     file_obj = request.files.get("file")
     if not file_obj:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    creator = request.ctx.session["account_info"]
+    admin = await Role.get(id="111111")
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
 
-    for flow_data in orjson.loads(file_obj.body.decode("utf-8")):
-        # 判断name是否已经存在，如果存在的话要抛出异常
-        if await Playbook.filter(name=flow_data.get("name"), deleted=False, tenant_id=tenant_id).exists():
-            flow_data["name"] = f"{flow_data.get('name')}_{time.time()}"
+    imported = {"playbooks": 0, "tools": 0, "resources": 0, "skipped_versions": 0, "skipped_resources": 0}
 
-        flow_json_list = flow_data.get("data") or []
-        creator = request.ctx.session["account_info"]
-        admin = await Role.get(id="111111")
-        maintenance_mode = flow_data.get("maintenance_mode") if flow_data.get("maintenance_mode") else await request.app.ctx.cache_client.get(request.ctx.session["id"])
-        async with in_transaction():
-            playbook = await Playbook.create(
-                id=str(uuid.uuid4()),
-                name=flow_data.get("name"),
-                remark=flow_data.get("remark", ""),
-                creator=creator,
-                internal=maintenance_mode if maintenance_mode else False,
-                tenant_id=tenant_id,
-            )
-            await PlaybookPermissions.create(
-                pb=playbook,
-                users=creator,
-                roles=None,
-                permissions=["r", "u", "d", "e", "p"],
-                tenant_id=tenant_id,
-            )
-            await PlaybookPermissions.create(
-                pb=playbook,
-                users=None,
-                roles=admin,
-                permissions=["r", "u", "d", "e", "p"],
-                tenant_id=tenant_id,
-            )
+    buf = io.BytesIO(file_obj.body)
+    with zipfile.ZipFile(buf, "r", metadata_encoding="utf-8") as zf:
+        names = zf.namelist()
 
-            if flow_data.get("tags"):
-                tags = await Tag.filter(name__in=flow_data.get("tags"), tenant_id=tenant_id).all()
-                if tags:
-                    await playbook.tags.add(*tags)
-            if flow_data.get("scenes"):
-                scenes = await Scene.filter(name__in=flow_data.get("scenes"), tenant_id=tenant_id).all()
-                if scenes:
-                    await playbook.scenes.add(*scenes)
-                    await caches.get("redis_chat").set(
-                        f"workflow_scene_{playbook.id}",
-                        ",".join([s.id for s in scenes]),
-                    )
-
-            existing_scenes = await playbook.scenes.all()
-            if not existing_scenes:
-                default_scene = await Scene.filter(status=1, tenant_id=tenant_id).order_by("-ctime").first()
-                if default_scene:
-                    await playbook.scenes.add(default_scene)
-                    await caches.get("redis_chat").set(
-                        f"workflow_scene_{playbook.id}",
-                        ",".join([default_scene.id]),
-                    )
-
-            for flow_json in flow_json_list:
-                for node in flow_json.get("nodes", []):
-                    if node.get("type") == "action-node":
-                        app_name = node["properties"].get("app_name")
-                        tool = await Tool.filter(deleted=False, name=app_name, maintain=maintenance_mode, tenant_id=tenant_id).order_by("-utime").first()
-                        node["properties"]["version"] = tool.version if tool else ""
-
-                pv = await PlaybookVersion.create(
-                    playbook=playbook,
-                    version=gen_run_id(),
-                    status=0,
-                    change_desc="",
-                    flow_json=flow_json,
-                    creator=creator,
-                    updator=creator,
-                    flow_timeout=flow_data.get("flow_timeout", 300),
+        if "resources.json" in names:
+            data = orjson.loads(zf.read("resources.json"))
+            for res in data:
+                name = res.get("name")
+                tool_name = res.get("tool_name")
+                engine = res.get("engine")
+                resources = res.get("resources") or {}
+                exist = await ToolResources.get_or_none(
+                    name=name,
+                    deleted=False,
+                    tool_name=tool_name,
+                    internal=maintenance_mode if maintenance_mode else False,
                     tenant_id=tenant_id,
                 )
+                if exist:
+                    imported["skipped_resources"] += 1
+                    continue
+                await ToolResources.create(
+                    tool_name=tool_name,
+                    name=name,
+                    engine=engine,
+                    resources=orjson.dumps(resources).decode(),
+                    internal=maintenance_mode if maintenance_mode else False,
+                    creator=creator.username,
+                    updater=creator.username,
+                    tenant_id=tenant_id,
+                )
+                imported["resources"] += 1
 
-                action_ids = await statistics_data(flow_json, tenant_id)
-                await tool_action_update({pv.id: action_ids}, tenant_id)
+        for fn in names:
+            if not fn.endswith(".zip"):
+                continue
+            base = fn[:-4]
+            idx = base.rfind("_")
+            if idx <= 0:
+                continue
+            t_name = base[:idx]
+            t_ver = base[idx + 1 :]
+            if await Tool.filter(name=t_name, deleted=False, tenant_id=tenant_id, version=t_ver).exists():
+                imported["skipped_versions"] += 1
+                continue
+            content = zf.read(fn)
+            await unzip(
+                content,
+                creator,
+                100,
+                None,
+                0,
+                request.app.ctx.cache_client,
+                request.ctx.session["id"],
+                tenant_id,
+            )
+            imported["tools"] += 1
 
-    return response_ok("success")
+        if "workflow.json" in names:
+            flows = orjson.loads(zf.read("workflow.json"))
+            for item in flows:
+                ver = item.get("version")
+                if await PlaybookVersion.filter(version=ver, deleted=False, tenant_id=tenant_id).exists():
+                    imported["skipped_versions"] += 1
+                    continue
+                name = item.get("name")
+                remark = item.get("remark", "")
+                status = item.get("status", 1)
+                change_desc = item.get("change_desc", "")
+                flow_json = item.get("flow_json") or {}
+                async with in_transaction():
+                    pb = await Playbook.get_or_none(name=name, deleted=False, tenant_id=tenant_id)
+                    if not pb:
+                        pb = await Playbook.create(
+                            id=str(uuid.uuid4()),
+                            name=name,
+                            remark=remark,
+                            creator=creator,
+                            internal=maintenance_mode if maintenance_mode else False,
+                            tenant_id=tenant_id,
+                        )
+                        await PlaybookPermissions.create(
+                            pb=pb,
+                            users=creator,
+                            roles=None,
+                            permissions=["r", "u", "d", "e", "p"],
+                            tenant_id=tenant_id,
+                        )
+                        await PlaybookPermissions.create(
+                            pb=pb,
+                            users=None,
+                            roles=admin,
+                            permissions=["r", "u", "d", "e", "p"],
+                            tenant_id=tenant_id,
+                        )
+                    pv = await PlaybookVersion.create(
+                        playbook=pb,
+                        version=ver,
+                        status=status,
+                        change_desc=change_desc,
+                        flow_json=flow_json,
+                        creator=creator,
+                        updator=creator,
+                        flow_timeout=300,
+                        tenant_id=tenant_id,
+                    )
+                    action_ids = await statistics_data(flow_json, tenant_id)
+                    await tool_action_update({pv.id: action_ids}, tenant_id)
+                    imported["playbooks"] += 1
+
+    return response_ok(imported)
