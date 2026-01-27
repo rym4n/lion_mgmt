@@ -16,8 +16,8 @@ from models.agent import ArchivalKnowledge, UserPreference
 from services.agent.gateway import AgentGateway
 from settings import TZ
 
-secops_bp = Blueprint("secops_expert", url_prefix="/secops-expert")
-__all__ = ["secops_bp"]
+agent_bp = Blueprint("agent", url_prefix="/agent")
+__all__ = ["agent_bp"]
 
 
 async def _build_user_info(user: Account, tenant_id: str) -> dict:
@@ -61,10 +61,10 @@ async def _generate_embedding(text: str) -> list[float]:
 # ============ 对话接口 ============
 
 
-@secops_bp.post("/chat")
+@agent_bp.post("/chat")
 @openapi.definition(
-    summary="与 SecOpsExpert 对话",
-    description="在作战室中与 SecOpsExpert 智能体对话",
+    summary="与 Agent 对话",
+    description="在作战室中与 Agent 智能体对话",
     body={
         "application/json": {
             "schema": {
@@ -112,8 +112,8 @@ async def chat(request):
     return response_ok(result)
 
 
-@secops_bp.post("/chat/stream")
-@openapi.definition(summary="与 SecOpsExpert 对话 (流式)", description="流式返回 Agent 回复，适合长回复场景")
+@agent_bp.post("/chat/stream")
+@openapi.definition(summary="与 Agent 对话 (流式)", description="流式返回 Agent 回复，适合长回复场景")
 @requires_permission("warroom:r")
 async def chat_stream(request):
     """
@@ -163,7 +163,7 @@ async def chat_stream(request):
     return response
 
 
-@secops_bp.post("/state")
+@agent_bp.post("/state")
 @openapi.definition(summary="获取 Agent L1 状态", description="获取当前 Agent 的 Core Memory 状态 (用于前端渲染)")
 @requires_permission("warroom:r")
 async def get_state(request):
@@ -188,8 +188,8 @@ async def get_state(request):
 # ============ 生命周期接口 ============
 
 
-@secops_bp.post("/init")
-@openapi.definition(summary="初始化作战室 Agent", description="手动初始化作战室的 SecOpsExpert Agent (通常自动触发)")
+@agent_bp.post("/init")
+@openapi.definition(summary="初始化作战室 Agent", description="手动初始化作战室的 Agent (通常自动触发)")
 @requires_permission("warroom:c")
 async def init_agent(request):
     """
@@ -210,7 +210,7 @@ async def init_agent(request):
     return response_ok({"agent_id": agent_id, "status": "initialized"})
 
 
-@secops_bp.post("/archive")
+@agent_bp.post("/archive")
 @openapi.definition(summary="归档作战室 Agent", description="触发 Agent 反思并归档 (通常由作战室归档时自动触发)")
 @requires_permission("warroom:u")
 async def archive_agent(request):
@@ -230,9 +230,9 @@ async def archive_agent(request):
 # ============ 知识库管理接口 ============
 
 
-@secops_bp.post("/knowledge/list")
+@agent_bp.post("/knowledge/list")
 @openapi.definition(summary="查询 L5 知识库", description="分页查询租户的知识库内容")
-@requires_permission("secops:r")
+@requires_permission("agent:r")
 async def list_knowledge(request):
     """查询知识库 (管理用途)"""
     tenant_id = request.ctx.session.get("tenant_id")
@@ -269,9 +269,9 @@ async def list_knowledge(request):
     return response_ok({"data": data, "total": total, "page": page, "size": size})
 
 
-@secops_bp.post("/knowledge/review")
+@agent_bp.post("/knowledge/review")
 @openapi.definition(summary="审核知识条目", description="审核 Agent 提交的案例学习")
-@requires_permission("secops:u")
+@requires_permission("agent:u")
 async def review_knowledge(request):
     """审核知识条目"""
     knowledge_id = request.json.get("id")
@@ -295,9 +295,9 @@ async def review_knowledge(request):
     return response_ok({"status": knowledge.review_status})
 
 
-@secops_bp.post("/knowledge/upload")
+@agent_bp.post("/knowledge/upload")
 @openapi.definition(summary="上传 SOP 文档", description="管理员上传 SOP/知识文档到 L5")
-@requires_permission("secops:c")
+@requires_permission("agent:c")
 async def upload_knowledge(request):
     """上传 SOP 文档"""
     content = request.json.get("content")
@@ -323,10 +323,10 @@ async def upload_knowledge(request):
 # ============ 用户偏好接口 ============
 
 
-@secops_bp.post("/preference/get")
+@agent_bp.post("/preference/get")
 @requires_permission("user:r")
 async def get_preference(request):
-    """获取当前用户的 SecOps 偏好"""
+    """获取当前用户的 Agent 偏好"""
     user = request.ctx.session["account_info"]
 
     pref = await UserPreference.get_or_none(account_id=user.id)
@@ -345,9 +345,9 @@ async def get_preference(request):
     )
 
 
-@secops_bp.post("/preference/update")
-@requires_permission("user:u")
-async def update_preference(request):
+@agent_bp.post("/preference/update")
+@requires_permission("agent:u")
+async def agent_update_preference(request):
     """更新用户偏好"""
     user = request.ctx.session["account_info"]
     tenant_id = request.ctx.session.get("tenant_id")

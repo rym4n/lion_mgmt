@@ -1,8 +1,8 @@
 # coding=utf-8
 
 
+from .agent import AgentListener
 from .base import BaseListener
 from .cache import CacheListener
-from .secops import SecOpsListener
 
-LISTENER_TUPLE: tuple[type[BaseListener], ...] = (CacheListener, SecOpsListener)
+LISTENER_TUPLE: tuple[type[BaseListener], ...] = (CacheListener, AgentListener)
