@@ -540,7 +540,7 @@ async def all_tools(request):
     for pair in subquery_results:
         condition |= Q(name=pair["name"], version=pair["max_version"])
 
-    latest_tools = await Tool.filter(condition).offset((page - 1) * size).limit(size).values()
+    latest_tools = await Tool.filter(condition, deleted=False, tenant_id=tenant_id).offset((page - 1) * size).limit(size).values()
     for tool in latest_tools:
         if int(req_json.get("logo", 1)) == 1 and tool["logo_path"]:
             tool["logo"] = tool["logo_path"]
@@ -551,7 +551,7 @@ async def all_tools(request):
             tool["health_check"] = trm.health_check
             tool["health_check_version"] = trm.version
 
-    total_count = await Tool.filter(condition).count()
+    total_count = await Tool.filter(condition, deleted=False, tenant_id=tenant_id).count()
 
     return response_ok(
         {
