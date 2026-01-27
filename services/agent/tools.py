@@ -200,8 +200,9 @@ async def register_tools_to_agent_server(client, tenant_id: str):
         {
             "name": "call_playbook",
             "description": "Execute a playbook (automation script) to perform security operations.",
-            "source_type": "json",
-            "json_schema": {
+            "source_type": "python",
+            "source_code": 'def call_playbook(playbook_name: str, params: dict, warroom_id: str = None, executor_id: str = None):\n    """Execute a playbook (automation script) to perform security operations."""\n    return "run_id"',
+            "args_json_schema": {
                 "type": "object",
                 "properties": {
                     "playbook_name": {"type": "string", "description": "Name of the playbook to execute"},
@@ -215,14 +216,16 @@ async def register_tools_to_agent_server(client, tenant_id: str):
         {
             "name": "list_available_playbooks",
             "description": "List available playbooks filtered by category.",
-            "source_type": "json",
-            "json_schema": {"type": "object", "properties": {"category": {"type": "string", "description": "Playbook category"}}},
+            "source_type": "python",
+            "source_code": 'def list_available_playbooks(category: str = None):\n    """List available playbooks filtered by category."""\n    return []',
+            "args_json_schema": {"type": "object", "properties": {"category": {"type": "string", "description": "Playbook category"}}},
         },
         {
             "name": "submit_case_learning",
             "description": "Submit case learning to knowledge base.",
-            "source_type": "json",
-            "json_schema": {
+            "source_type": "python",
+            "source_code": 'def submit_case_learning(summary: str, attack_type: str, key_indicators: list, lessons_learned: str, false_positive: bool = False):\n    """Submit case learning to knowledge base."""\n    return "success"',
+            "args_json_schema": {
                 "type": "object",
                 "properties": {
                     "summary": {"type": "string"},
@@ -238,7 +241,13 @@ async def register_tools_to_agent_server(client, tenant_id: str):
 
     for tool in tools:
         try:
-            payload = {"name": tool["name"], "description": tool["description"], "source_type": "json", "json_schema": tool["json_schema"]}
+            payload = {
+                "name": tool["name"],
+                "description": tool["description"],
+                "source_type": tool["source_type"],
+                "source_code": tool["source_code"],
+                "args_json_schema": tool["args_json_schema"],
+            }
 
             response = await client.post("/v1/tools/", json=payload)
             if response.status_code == 409:  # Already exists
