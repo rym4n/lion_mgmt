@@ -361,7 +361,7 @@ async def execution(request):
         room_name = event.event_name + "_" + gen_random_code(6)
         if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
             raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
-        room = await Room.create(name=room_name, creator=user, tenant_id=tenant_id)
+        room = await Room.create(name=room_name, creator=user, tenant_id=tenant_id, room_type="public")
         event.room = room
     room_id = event.room_id
     instance_type = TYPE_DICT.get(executorInstanceType)
@@ -624,7 +624,7 @@ async def get_event_detail(request):
         room_name = event.event_name + "_" + gen_random_code(6)
         if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
             raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
-        room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id)
+        room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id, room_type="public")
         event.room = room
         first = True
     if event.event_process_status == "待处理":
