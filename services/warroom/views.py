@@ -83,7 +83,7 @@ async def warroom_ws(request: Request, ws: Websocket):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["name"],
+                "required": ["name","room_type"],
                 "properties": {
                     "name": {"type": "string", "description": "作战室名称"},
                     "members": {
@@ -91,6 +91,7 @@ async def warroom_ws(request: Request, ws: Websocket):
                         "items": {"type": "string"},
                         "description": "邀请其他用户ID列表",
                     },
+                    "room_type": {"type": "string", "description": "作战室类型：public、private"},
                 },
             }
         }
@@ -121,6 +122,7 @@ async def warroom_ws(request: Request, ws: Websocket):
 @requires_permission("warroom:c")
 async def create_room(request: Request):
     room_name = request.json.get("name")
+    room_type = request.json.get("room_type")
     members_ids = request.json.get("members", [])
     user_id = []
     tenant_id = request.ctx.session.get("tenant_id")
@@ -128,8 +130,14 @@ async def create_room(request: Request):
     if await Room.filter(name=room_name, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
 
+    if not room_type:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if room_type == "private" and len(members_ids) > 1:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
     creator = request.ctx.session["account_info"]
-    room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id)
+    room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id, room_type=room_type)
     await room.users.add(creator)
     await creator.star_rooms.add(room)
     user_id.append(creator.id)
@@ -235,6 +243,8 @@ async def create_room(request: Request):
 async def invite_members(request: Request):
     tenant_id = request.ctx.session.get("tenant_id")
     room = await Room.get_or_none(id=request.json.get("id"), tenant_id=tenant_id)
+    if room.room_type == "private":
+        raise CustomError(ErrorCode.INVITE_USER_ERROR)
     accounts = await Account.filter(id__in=request.json.get("members")).all()
     for account in accounts:
         if await room.users.filter(id=account.id).exists():
@@ -325,6 +335,8 @@ async def quit_room(request: Request):
     is_member = await room.users.filter(id=user.id).exists()
     if not is_member:
         return response_ok("用户并不在该作战室，无需退出")
+    if room.room_type == "private":
+        raise CustomError(ErrorCode.EXIT_ROOM_ERROR)
     await room.users.remove(user)
     await user.star_rooms.remove(room)
     return response_ok("成功退出作战室")
@@ -763,11 +775,8 @@ async def get_user_rooms(request: Request):
                 "properties": {
                     "query_type": {
                         "type": "string",
-                        "description": "查询类型: public_history, private_history, search_messages, announcements",
+                        "description": "announcements",
                         "enum": [
-                            "public_history",
-                            "private_history",
-                            "search_messages",
                             "announcements",
                         ],
                     },
@@ -824,172 +833,11 @@ async def query_messages(request: Request):
     offset = request.json.get("offset", 0)
     tenant_id = request.ctx.session.get("tenant_id")
     # 群聊历史. 先查询后创建消息发送
-    if query_type == "public_history" and keyword in ["", None]:
-        if not room_id:
-            raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
-        total_count = await Message.filter(
-            type__in=["public", "ai", "runlog", "execute", "ai-question"],
-            room_id=room_id,
-            tenant_id=tenant_id,
-        ).count()
-        messages = (
-            await Message.filter(
-                type__in=["public", "ai", "runlog", "execute", "ai-question"],
-                room_id=room_id,
-                tenant_id=tenant_id,
-            )
-            .order_by("-ctime")
-            .offset(offset)
-            .limit(limit)
-            .prefetch_related("sender")
-        )
-        message_list = []
-        run_id_list = []
-        for msg in reversed(messages):
-            if msg.type == "runlog":
-                run_id = msg.content.split(":")[0]
-                if run_id not in run_id_list:
-                    run_id_list.append(run_id)
-                    runlogs = await Runlog.filter(run_id=run_id, deleted=False).order_by("ctime").all()
-                    run_logs = await runlog_list(runlogs)
-                    content = "[已撤回]" if msg.is_recalled else run_logs
-                else:
-                    continue
-            else:
-                content = "[已撤回]" if msg.is_recalled else msg.content
-            message_list.append(
-                {
-                    "type": msg.type,
-                    "message_id": str(msg.id),
-                    "sender_id": str(msg.sender.id),
-                    "sender_name": msg.sender.username,
-                    "sender_display_name": msg.sender.display_name,
-                    "content": content,
-                    "image_content": msg.image_content,
-                    "timestamp": str(msg.ctime),
-                    "room_id": room_id,
-                    "is_recalled": msg.is_recalled,
-                }
-            )
-        return response_ok(
-            {
-                "messages": message_list,
-                "pagination": {"total": total_count, "offset": offset, "limit": limit},
-            }
-        )
+    if not room_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
 
-    # 私聊历史
-    elif query_type == "private_history" and keyword in ["", None]:
-        # 消息计数
-        total_count = await Message.filter(
-            type__in=["private", "ai", "runlog", "execute", "ai-question"],
-            room_id=room_id,
-            tenant_id=tenant_id,
-        ).count()
-        # 分页处理
-        messages = (
-            await Message.filter(
-                type__in=["private", "ai", "runlog", "execute", "ai-question"],
-                room_id=room_id,
-                tenant_id=tenant_id,
-            )
-            .order_by("-ctime")
-            .offset(offset)
-            .limit(limit)
-            .prefetch_related("sender", "receiver")
-        )
-        message_list = []
-        run_id_list = []
-        for msg in reversed(messages):
-            if msg.type == "runlog":
-                run_id = msg.content.split(":")[0]
-                if run_id not in run_id_list:
-                    run_id_list.append(run_id)
-                    runlogs = await Runlog.filter(run_id=run_id, deleted=False).order_by("ctime").all()
-                    run_logs = await runlog_list(runlogs)
-                    content = "[已撤回]" if msg.is_recalled else run_logs
-                else:
-                    continue
-            else:
-                content = "[已撤回]" if msg.is_recalled else msg.content
-            message_list.append(
-                {
-                    "type": msg.type,
-                    "message_id": msg.id,
-                    "sender_id": msg.sender.id,
-                    "sender_name": msg.sender.username,
-                    "sender_display_name": msg.sender.display_name,
-                    "receiver_id": msg.receiver.id,
-                    "receiver_name": msg.receiver.username,
-                    "receiver_display_name": msg.receiver.display_name,
-                    "content": content,
-                    "image_content": msg.image_content,
-                    "timestamp": str(msg.ctime),
-                    "is_recalled": msg.is_recalled,
-                    "room_id": room_id,
-                }
-            )
-
-        return response_ok(
-            {
-                "messages": message_list,
-                "pagination": {"total": total_count, "offset": offset, "limit": limit},
-            }
-        )
-
-    # 搜索消息
-    elif keyword:
-        if query_type == "public_history":
-            query = Message.filter(
-                type="public",
-                room_id=room_id,
-                content__contains=keyword,
-                is_recalled=False,
-                tenant_id=tenant_id,
-            )
-        # 传入私聊用户ID, 搜索私聊历史记录
-        elif query_type == "private_history":
-            query = Message.filter(
-                type="private",
-                room_id=room_id,
-                content__contains=keyword,
-                is_recalled=False,
-                tenant_id=tenant_id,
-            )
-        else:
-            raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
-
-        total_count = await query.count()
-        messages = await query.order_by("-ctime").offset(offset).limit(limit).prefetch_related("sender", "receiver")
-        message_list = []
-        for msg in messages:
-            message_list.append(
-                {
-                    "message_id": str(msg.id),
-                    "type": msg.type,
-                    "content": "[已撤回]" if msg.is_recalled else msg.content,
-                    "image_content": msg.image_content,
-                    "timestamp": str(msg.ctime),
-                    "sender_id": msg.sender.id,
-                    "sender_name": msg.sender.username,
-                    "sender_display_name": msg.sender.display_name,
-                    "receiver_id": msg.receiver.id,
-                    "receiver_name": msg.receiver.username,
-                    "receiver_display_name": msg.receiver.display_name,
-                    "is_recalled": msg.is_recalled,
-                    "room_id": msg.room_id,
-                }
-            )
-
-        return response_ok(
-            {
-                "messages": message_list,
-                "pagination": {"total": total_count, "offset": offset, "limit": limit},
-            }
-        )
-
-    # 获取公告列表
-    elif query_type == "announcements":
+        # 获取公告列表
+    if query_type == "announcements":
         if not room_id:
             raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
 
@@ -1018,9 +866,52 @@ async def query_messages(request: Request):
                 "pagination": {"total": total_count, "offset": offset, "limit": limit},
             }
         )
-    else:
-        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    condition = Q(room_id=room_id, tenant_id=tenant_id)
+    if keyword:
+        condition &= Q(content__contains=keyword)
 
+    total_count = await Message.filter(condition).count()
+    messages = (
+        await Message.filter(condition)
+        .order_by("-ctime")
+        .offset(offset)
+        .limit(limit)
+        .prefetch_related("sender")
+    )
+    message_list = []
+    run_id_list = []
+    for msg in reversed(messages):
+        if msg.type == "runlog":
+            run_id = msg.content.split(":")[0]
+            if run_id not in run_id_list:
+                run_id_list.append(run_id)
+                runlogs = await Runlog.filter(run_id=run_id, deleted=False).order_by("ctime").all()
+                run_logs = await runlog_list(runlogs)
+                content = "[已撤回]" if msg.is_recalled else run_logs
+            else:
+                continue
+        else:
+            content = "[已撤回]" if msg.is_recalled else msg.content
+        message_list.append(
+            {
+                "type": msg.type,
+                "message_id": str(msg.id),
+                "sender_id": str(msg.sender.id),
+                "sender_name": msg.sender.username,
+                "sender_display_name": msg.sender.display_name,
+                "content": content,
+                "image_content": msg.image_content,
+                "timestamp": str(msg.ctime),
+                "room_id": room_id,
+                "is_recalled": msg.is_recalled,
+            }
+        )
+    return response_ok(
+        {
+            "messages": message_list,
+            "pagination": {"total": total_count, "offset": offset, "limit": limit},
+        }
+    )
 
 @warroom_bp.post("/get/list")
 @openapi.definition(
@@ -1322,7 +1213,7 @@ async def execution(request):
         room_name = event.event_name + "_" + gen_random_code(6)
         if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
             raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
-        room = await Room.create(name=room_name, creator=user, tenant_id=tenant_id)
+        room = await Room.create(name=room_name, creator=user, tenant_id=tenant_id, room_type="public")
         event.room = room
     room_id = event.room_id
     run_type = TYPE_DICT.get(executorInstanceType)

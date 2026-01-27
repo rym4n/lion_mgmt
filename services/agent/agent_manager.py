@@ -88,7 +88,7 @@ class AgentLifecycleManager:
         if not creator:
             creator = await Account.first()
 
-        room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id)
+        room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id, room_type="public")
 
         # Update event with room
         if event_data.get("id"):

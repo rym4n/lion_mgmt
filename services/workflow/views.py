@@ -12,7 +12,7 @@ import zipfile
 import orjson
 import pytz
 
-from services.tools.views import unzip
+from services.tools.views import upload_tool
 from aiocache import caches
 from sanic import Blueprint
 from sanic.response import raw
@@ -30,6 +30,7 @@ from libs.security.authorization import (
     check_playbook_permission,
     playbook_permission,
     requires_permission,
+    load_license,
 )
 from libs.utils import gen_run_id, strip_timezone_to_seconds
 from models import (
@@ -880,6 +881,8 @@ async def delete_workflow(request):
         if pv.flow_json:
             action_ids = await statistics_data(pv.flow_json, tenant_id)
             await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
+        pv.deleted = True
+        await pv.save()
 
     playbook.deleted = True
     await playbook.save()
@@ -2093,6 +2096,7 @@ async def import_workflow(request):
             data = orjson.loads(zf.read("resources.json"))
             for res in data:
                 name = res.get("name")
+                id = res.get("id")
                 tool_name = res.get("tool_name")
                 engine = res.get("engine")
                 resources = res.get("resources") or {}
@@ -2107,6 +2111,7 @@ async def import_workflow(request):
                     imported["skipped_resources"] += 1
                     continue
                 await ToolResources.create(
+                    id=id,
                     tool_name=tool_name,
                     name=name,
                     engine=engine,
@@ -2117,6 +2122,16 @@ async def import_workflow(request):
                     tenant_id=tenant_id,
                 )
                 imported["resources"] += 1
+
+        lic = load_license()
+        if not lic:
+            raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
+
+        # 模拟文件对象类，用于适配 upload_tool 接口
+        class MockFile:
+            def __init__(self, name, body):
+                self.name = name
+                self.body = body
 
         for fn in names:
             if not fn.endswith(".zip"):
@@ -2131,17 +2146,25 @@ async def import_workflow(request):
                 imported["skipped_versions"] += 1
                 continue
             content = zf.read(fn)
-            await unzip(
-                content,
-                creator,
+            
+            # 构造 MockFile 对象
+            mock_file = MockFile(name=fn, body=content)
+            
+            results, _, _ = await upload_tool(
+                mock_file,
+                lic,
+                creator.username,
                 100,
                 None,
                 0,
-                request.app.ctx.cache_client,
-                request.ctx.session["id"],
                 tenant_id,
+                request,
+                0,
+                []
             )
-            imported["tools"] += 1
+            
+            if results and results[-1].get("msg") == "success":
+                imported["tools"] += 1
 
         if "workflow.json" in names:
             flows = orjson.loads(zf.read("workflow.json"))
@@ -2152,7 +2175,6 @@ async def import_workflow(request):
                     continue
                 name = item.get("name")
                 remark = item.get("remark", "")
-                status = item.get("status", 1)
                 change_desc = item.get("change_desc", "")
                 flow_json = item.get("flow_json") or {}
                 async with in_transaction():
@@ -2183,7 +2205,7 @@ async def import_workflow(request):
                     pv = await PlaybookVersion.create(
                         playbook=pb,
                         version=ver,
-                        status=status,
+                        status=0,
                         change_desc=change_desc,
                         flow_json=flow_json,
                         creator=creator,
@@ -2196,4 +2218,4 @@ async def import_workflow(request):
                     imported["playbooks"] += 1
     if imported["skipped_resources"] > 0 or imported["skipped_versions"] > 0:
         raise CustomError(ErrorCode.IMPORT_FLOW_ERROR)
-    return response_ok(imported)
+    return response_ok("导入成功")

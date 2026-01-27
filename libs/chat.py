@@ -149,7 +149,7 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
         room = await Room.get_or_none(name=private_room_name, tenant_id=tenant_id)
         # 先查后创
         if not room:
-            room = await Room.create(name=private_room_name, creator=sender, tenant_id=tenant_id)
+            room = await Room.create(name=private_room_name, creator=sender, tenant_id=tenant_id, room_type="private")
             await room.users.add(sender)
             await room.users.add(receiver)
         data = {"room_id": room.id, "name": room.name}

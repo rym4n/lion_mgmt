@@ -163,3 +163,5 @@ class ErrorCode(BaseErrorCode):
     DEFAULT_ROLE_NOT_FOUND = ErrorData(4128, "默认角色未配置")
     IMPORT_PART_EVENT_INGESTION_FAIL = ErrorData(4129, "部分事件接入导入失败，请检查名称或端口是否重复")
     IMPORT_FLOW_ERROR = ErrorData(4130, "部分剧本导入失败，请检查是否存在相同剧本")
+    INVITE_USER_ERROR = ErrorData(4131, "私聊作战室禁止邀请用户")
+    EXIT_ROOM_ERROR = ErrorData(4132, "禁止退出私聊作战室")
