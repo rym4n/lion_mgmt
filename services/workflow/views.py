@@ -12,7 +12,7 @@ import zipfile
 import orjson
 import pytz
 
-from services.tools.views import unzip
+from services.tools.views import upload_tool
 from aiocache import caches
 from sanic import Blueprint
 from sanic.response import raw
@@ -30,6 +30,7 @@ from libs.security.authorization import (
     check_playbook_permission,
     playbook_permission,
     requires_permission,
+    load_license,
 )
 from libs.utils import gen_run_id, strip_timezone_to_seconds
 from models import (
@@ -2118,6 +2119,16 @@ async def import_workflow(request):
                 )
                 imported["resources"] += 1
 
+        lic = load_license()
+        if not lic:
+            raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
+
+        # 模拟文件对象类，用于适配 upload_tool 接口
+        class MockFile:
+            def __init__(self, name, body):
+                self.name = name
+                self.body = body
+
         for fn in names:
             if not fn.endswith(".zip"):
                 continue
@@ -2131,17 +2142,25 @@ async def import_workflow(request):
                 imported["skipped_versions"] += 1
                 continue
             content = zf.read(fn)
-            await unzip(
-                content,
-                creator,
+            
+            # 构造 MockFile 对象
+            mock_file = MockFile(name=fn, body=content)
+            
+            results, _, _ = await upload_tool(
+                mock_file,
+                lic,
+                creator.username,
                 100,
                 None,
                 0,
-                request.app.ctx.cache_client,
-                request.ctx.session["id"],
                 tenant_id,
+                request,
+                0,
+                []
             )
-            imported["tools"] += 1
+            
+            if results and results[-1].get("msg") == "success":
+                imported["tools"] += 1
 
         if "workflow.json" in names:
             flows = orjson.loads(zf.read("workflow.json"))

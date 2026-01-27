@@ -130,95 +130,99 @@ async def upload_and_extract_zip(request):
     single_progress = 100 / len(zip_files)
     success_progress = 0
     data = 0
-    total_up_value = 0
 
     lic = load_license()
     if not lic:
         raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
 
     for zip_file in zip_files:
-        total_count = await Tool.filter(deleted=False, maintain=False).count()
-        zip_filename = zip_file.name
-
-        for key, item in lic["grouplist"].items():
-            if key == "应用集成":
-                if int(item["expireTime"]) > int(time.time() * 1000):
-                    total_up_value = int(item["value"])
-
-        if total_up_value != 99999 and total_count >= total_up_value:
-            return response_ok({"error": "应用数量已达到上限"})
-
-        config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, resp, success_progress, request.app.ctx.cache_client, request.ctx.session["id"], tenant_id)
-        if msg != "success":
-            results.append({"tool": zip_filename, "msg": msg})
-            data += 1
-            percent = int((data * single_progress))
-            success_progress = percent
-            await resp.send(f"data: 解压进度：{percent}%\n\n")
-            continue
-
-        if "actions" in config_data.keys():
-            action_key = "actions"
-        else:
-            results.append({"tool": zip_filename, "msg": "config文件内容错误，缺失actions字段"})
-            data += 1
-            percent = int((data * single_progress))
-            success_progress = percent
-            continue
-        health_check = 0
-        for action in config_data.get(action_key):
-            if "health_check" == action.get("func"):
-                health_check = 1
-            await ToolAction.create(tool_name=config_data.get("name"), version_number=version, action=action, tenant_id=tenant_id)
-            actions = await ActionPermissions.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).values("action_name")
-            action_names = {action["action_name"] for action in actions}
-
-            if action["func"] not in action_names:
-                await ActionPermissions.create(
-                    tool_name=tool_name,
-                    action_name=action["func"],
-                    action_description=action.get("name") or "",
-                    roles=[],
-                    users=[],
-                    tenant_id=tenant_id,
-                )
-        await ActionPermissions.create(
-            tool_name=tool_name,
-            action_name="all",
-            action_description="动作全部动作权限",
-            roles=[],
-            users=[],
-            tenant_id=tenant_id,
-        )
-        configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False, tenant_id=tenant_id)
-        if not configuration:
-            trm = await ToolResourcesModel.create(
-                tool_name=tool_name,
-                resources=config_data.get("resource") or {},
-                status=(1 if (config_data.get("resource") and any(field.get("required") is True for field in config_data.get("resource").values())) else 0),
-                health_check=health_check,
-                tenant_id=tenant_id,
-            )
-            if health_check == 1:
-                trm.version = version
-                await trm.save()
-        else:
-            if configuration.health_check != 1 and health_check == 1:
-                configuration.health_check = health_check
-                configuration.version = version
-            configuration.resources = config_data.get("resource")
-            await configuration.save()
-
-        results.append({"tool": zip_filename, "msg": msg})
-
-        data += 1
-        percent = int((data * single_progress))
-        success_progress = percent
-        await resp.send(f"data: 解压进度：{percent}%\n\n")
+        results, success_progress, data = await upload_tool(zip_file, lic, creator, single_progress, resp, success_progress, tenant_id, request, data, results)
 
     if resp:
         await resp.send(f"data: {results}\n\n")
         await resp.eof()
+
+
+async def upload_tool(zip_file, lic, creator, single_progress, resp, success_progress, tenant_id, request, data, results):
+    total_count = await Tool.filter(deleted=False, maintain=False).count()
+    zip_filename = zip_file.name
+
+    for key, item in lic["grouplist"].items():
+        if key == "应用集成":
+            if int(item["expireTime"]) > int(time.time() * 1000):
+                total_up_value = int(item["value"])
+
+    if total_up_value != 99999 and total_count >= total_up_value:
+        return response_ok({"error": "应用数量已达到上限"})
+
+    config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, resp, success_progress, request.app.ctx.cache_client, request.ctx.session["id"], tenant_id)
+    if msg != "success":
+        results.append({"tool": zip_filename, "msg": msg})
+        data += 1
+        percent = int((data * single_progress))
+        success_progress = percent
+        await resp.send(f"data: 解压进度：{percent}%\n\n")
+        return results, success_progress, data
+
+    if "actions" in config_data.keys():
+        action_key = "actions"
+    else:
+        results.append({"tool": zip_filename, "msg": "config文件内容错误，缺失actions字段"})
+        data += 1
+        percent = int((data * single_progress))
+        success_progress = percent
+        return results, success_progress, data
+    health_check = 0
+    for action in config_data.get(action_key):
+        if "health_check" == action.get("func"):
+            health_check = 1
+        await ToolAction.create(tool_name=config_data.get("name"), version_number=version, action=action, tenant_id=tenant_id)
+        actions = await ActionPermissions.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).values("action_name")
+        action_names = {action["action_name"] for action in actions}
+
+        if action["func"] not in action_names:
+            await ActionPermissions.create(
+                tool_name=tool_name,
+                action_name=action["func"],
+                action_description=action.get("name") or "",
+                roles=[],
+                users=[],
+                tenant_id=tenant_id,
+            )
+    await ActionPermissions.create(
+        tool_name=tool_name,
+        action_name="all",
+        action_description="动作全部动作权限",
+        roles=[],
+        users=[],
+        tenant_id=tenant_id,
+    )
+    configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False, tenant_id=tenant_id)
+    if not configuration:
+        trm = await ToolResourcesModel.create(
+            tool_name=tool_name,
+            resources=config_data.get("resource") or {},
+            status=(1 if (config_data.get("resource") and any(field.get("required") is True for field in config_data.get("resource").values())) else 0),
+            health_check=health_check,
+            tenant_id=tenant_id,
+        )
+        if health_check == 1:
+            trm.version = version
+            await trm.save()
+    else:
+        if configuration.health_check != 1 and health_check == 1:
+            configuration.health_check = health_check
+            configuration.version = version
+        configuration.resources = config_data.get("resource")
+        await configuration.save()
+
+    results.append({"tool": zip_filename, "msg": msg})
+
+    data += 1
+    percent = int((data * single_progress))
+    success_progress = percent
+    await resp.send(f"data: 解压进度：{percent}%\n\n")
+    return results, success_progress, data
 
 
 async def unzip(zip_data, creator, single_progress, resp, success_progress, redis_client, token_id, tenant_id):
