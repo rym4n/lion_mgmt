@@ -1,21 +1,20 @@
 #!/usr/bin/env python
 # coding=utf-8
 import asyncio
+from collections import defaultdict
+from datetime import datetime
+import hashlib
+import io
 import re
 import secrets
 import time
 import uuid
-import orjson
-import pytz
-import io
 import zipfile
-import hashlib
 
 from aiocache import caches
-from collections import defaultdict
-from datetime import datetime
+import orjson
+import pytz
 from sanic import Blueprint
-from libs import utils
 from sanic.response import raw
 from sanic_ext import openapi
 from tortoise.expressions import Q
@@ -24,6 +23,7 @@ from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
+from libs import utils
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import (
@@ -480,13 +480,7 @@ async def export_workflow(request):
     tenant_id = request.ctx.session.get("tenant_id")
     playbook_ids = request.json.get("playbook_ids", [])
 
-    pv = (
-        await PlaybookVersion.filter(
-            playbook__id__in=playbook_ids, deleted=False, tenant_id=tenant_id
-        )
-        .all()
-        .prefetch_related("playbook")
-    )
+    pv = await PlaybookVersion.filter(playbook__id__in=playbook_ids, deleted=False, tenant_id=tenant_id).all().prefetch_related("playbook")
 
     tool_keys = set()
     resource_ids = set()
@@ -526,9 +520,7 @@ async def export_workflow(request):
         zf.writestr("workflow.json", orjson.dumps(result))
 
         if resource_ids:
-            resources_objs = (
-                await ToolResources.filter(id__in=list(resource_ids), deleted=False).all()
-            )
+            resources_objs = await ToolResources.filter(id__in=list(resource_ids), deleted=False).all()
             resources_list = []
             for res in resources_objs:
                 resources_data = orjson.loads(res.resources) if res.resources else {}
@@ -605,12 +597,7 @@ async def get_flow_json(request):
     if pv:
         data = pv.json
     else:
-        pv = (
-            await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False, tenant_id=tenant_id)
-            .order_by("-version")
-            .first()
-            .prefetch_related("playbook", "creator", "updator")
-        )
+        pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False, tenant_id=tenant_id).order_by("-version").first().prefetch_related("playbook", "creator", "updator")
         if pv:
             data = pv.json
     return response_ok(data)
@@ -819,9 +806,7 @@ async def publish_workflow(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    pv = await PlaybookVersion.get_or_none(
-        id=request.json.get("flow_id"), status=0, tenant_id=tenant_id
-    )
+    pv = await PlaybookVersion.get_or_none(id=request.json.get("flow_id"), status=0, tenant_id=tenant_id)
     if not pv:
         raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
 

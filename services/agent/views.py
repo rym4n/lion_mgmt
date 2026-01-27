@@ -77,6 +77,35 @@ async def _generate_embedding(text: str) -> list[float]:
             }
         }
     },
+    response=[
+        {
+            "status": 200,
+            "description": "成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "default": 0},
+                            "msg": {"type": "string", "default": "success"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "response": {"type": "string", "description": "Agent回复内容"},
+                                    "l1_state": {"type": "object", "description": "L1记忆状态"},
+                                    "tool_calls": {
+                                        "type": "array",
+                                        "items": {"type": "object"},
+                                        "description": "工具调用列表",
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    ],
 )
 @requires_permission("warroom:r")
 async def chat(request):
@@ -113,7 +142,36 @@ async def chat(request):
 
 
 @agent_bp.post("/chat/stream")
-@openapi.definition(summary="与 Agent 对话 (流式)", description="流式返回 Agent 回复，适合长回复场景")
+@openapi.definition(
+    summary="与 Agent 对话 (流式)",
+    description="流式返回 Agent 回复，适合长回复场景",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "warroom_id": {"type": "string", "description": "作战室 ID"},
+                    "content": {"type": "string", "description": "消息内容"},
+                },
+                "required": ["warroom_id", "content"],
+            }
+        }
+    },
+    response=[
+        {
+            "status": 200,
+            "description": "SSE 流式响应",
+            "content": {
+                "text/event-stream": {
+                    "schema": {
+                        "type": "string",
+                        "description": "Event Stream: event: message/tool_call/l1_update/done",
+                    }
+                }
+            },
+        }
+    ],
+)
 @requires_permission("warroom:r")
 async def chat_stream(request):
     """
@@ -164,7 +222,45 @@ async def chat_stream(request):
 
 
 @agent_bp.post("/state")
-@openapi.definition(summary="获取 Agent L1 状态", description="获取当前 Agent 的 Core Memory 状态 (用于前端渲染)")
+@openapi.definition(
+    summary="获取 Agent L1 状态",
+    description="获取当前 Agent 的 Core Memory 状态 (用于前端渲染)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "warroom_id": {"type": "string", "description": "作战室 ID"},
+                },
+                "required": ["warroom_id"],
+            }
+        }
+    },
+    response=[
+        {
+            "status": 200,
+            "description": "成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "default": 0},
+                            "msg": {"type": "string", "default": "success"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "status": {"type": "string", "description": "active|no_agent"},
+                                    "l1_state": {"type": "object", "description": "L1记忆状态"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    ],
+)
 @requires_permission("warroom:r")
 async def get_state(request):
     """
@@ -185,11 +281,46 @@ async def get_state(request):
     return response_ok({"status": "active", "l1_state": l1_state})
 
 
-# ============ 生命周期接口 ============
-
-
 @agent_bp.post("/init")
-@openapi.definition(summary="初始化作战室 Agent", description="手动初始化作战室的 Agent (通常自动触发)")
+@openapi.definition(
+    summary="初始化作战室 Agent",
+    description="手动初始化作战室的 Agent (通常自动触发)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "warroom_id": {"type": "string", "description": "作战室 ID"},
+                },
+                "required": ["warroom_id"],
+            }
+        }
+    },
+    response=[
+        {
+            "status": 200,
+            "description": "成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "default": 0},
+                            "msg": {"type": "string", "default": "success"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "agent_id": {"type": "string"},
+                                    "status": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    ],
+)
 @requires_permission("warroom:c")
 async def init_agent(request):
     """
@@ -211,7 +342,46 @@ async def init_agent(request):
 
 
 @agent_bp.post("/archive")
-@openapi.definition(summary="归档作战室 Agent", description="触发 Agent 反思并归档 (通常由作战室归档时自动触发)")
+@openapi.definition(
+    summary="归档作战室 Agent",
+    description="触发 Agent 反思并归档 (通常由作战室归档时自动触发)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "warroom_id": {"type": "string", "description": "作战室 ID"},
+                    "skip_reflection": {"type": "boolean", "description": "跳过反思", "default": False},
+                },
+                "required": ["warroom_id"],
+            }
+        }
+    },
+    response=[
+        {
+            "status": 200,
+            "description": "成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "default": 0},
+                            "msg": {"type": "string", "default": "success"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "status": {"type": "string"},
+                                    "reflection": {"type": "object"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    ],
+)
 @requires_permission("warroom:u")
 async def archive_agent(request):
     """
@@ -227,11 +397,64 @@ async def archive_agent(request):
     return response_ok(result)
 
 
-# ============ 知识库管理接口 ============
-
-
 @agent_bp.post("/knowledge/list")
-@openapi.definition(summary="查询 L5 知识库", description="分页查询租户的知识库内容")
+@openapi.definition(
+    summary="查询 L5 知识库",
+    description="分页查询租户的知识库内容",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "integer", "description": "页码", "default": 1},
+                    "size": {"type": "integer", "description": "每页数量", "default": 20},
+                    "knowledge_type": {"type": "string", "description": "知识类型"},
+                    "review_status": {"type": "string", "description": "审核状态"},
+                },
+            }
+        }
+    },
+    response=[
+        {
+            "status": 200,
+            "description": "成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "default": 0},
+                            "msg": {"type": "string", "default": "success"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "data": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "content": {"type": "string"},
+                                                "knowledge_type": {"type": "string"},
+                                                "attack_type": {"type": "string"},
+                                                "tags": {"type": "array", "items": {"type": "string"}},
+                                                "review_status": {"type": "string"},
+                                                "ctime": {"type": "string"},
+                                            },
+                                        },
+                                    },
+                                    "total": {"type": "integer"},
+                                    "page": {"type": "integer"},
+                                    "size": {"type": "integer"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    ],
+)
 @requires_permission("agent:r")
 async def list_knowledge(request):
     """查询知识库 (管理用途)"""
@@ -270,7 +493,45 @@ async def list_knowledge(request):
 
 
 @agent_bp.post("/knowledge/review")
-@openapi.definition(summary="审核知识条目", description="审核 Agent 提交的案例学习")
+@openapi.definition(
+    summary="审核知识条目",
+    description="审核 Agent 提交的案例学习",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "知识ID"},
+                    "action": {"type": "string", "description": "approve | reject"},
+                },
+                "required": ["id", "action"],
+            }
+        }
+    },
+    response=[
+        {
+            "status": 200,
+            "description": "成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "default": 0},
+                            "msg": {"type": "string", "default": "success"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "status": {"type": "string", "description": "approved|rejected"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    ],
+)
 @requires_permission("agent:u")
 async def review_knowledge(request):
     """审核知识条目"""
@@ -296,7 +557,46 @@ async def review_knowledge(request):
 
 
 @agent_bp.post("/knowledge/upload")
-@openapi.definition(summary="上传 SOP 文档", description="管理员上传 SOP/知识文档到 L5")
+@openapi.definition(
+    summary="上传 SOP 文档",
+    description="管理员上传 SOP/知识文档到 L5",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "文档内容"},
+                    "knowledge_type": {"type": "string", "description": "类型", "default": "sop"},
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["content"],
+            }
+        }
+    },
+    response=[
+        {
+            "status": 200,
+            "description": "成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "default": 0},
+                            "msg": {"type": "string", "default": "success"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    ],
+)
 @requires_permission("agent:c")
 async def upload_knowledge(request):
     """上传 SOP 文档"""
@@ -313,9 +613,7 @@ async def upload_knowledge(request):
     # 生成 Embedding
     embedding = await _generate_embedding(content)
 
-    knowledge = await ArchivalKnowledge.create(
-        tenant_id=tenant_id, content=content, embedding=embedding, knowledge_type=knowledge_type, tags=tags, submitted_by=user.id, review_status="approved"  # 管理员上传直接通过
-    )
+    knowledge = await ArchivalKnowledge.create(tenant_id=tenant_id, content=content, embedding=embedding, knowledge_type=knowledge_type, tags=tags, submitted_by=user.id, review_status="approved")  # 管理员上传直接通过
 
     return response_ok({"id": knowledge.id})
 
@@ -324,7 +622,38 @@ async def upload_knowledge(request):
 
 
 @agent_bp.post("/preference/get")
-@requires_permission("user:r")
+@openapi.definition(
+    summary="获取当前用户的 Agent 偏好",
+    description="获取当前用户的 Agent 偏好设置",
+    response=[
+        {
+            "status": 200,
+            "description": "成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "default": 0},
+                            "msg": {"type": "string", "default": "success"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "notify_channel": {"type": "string"},
+                                    "notify_config": {"type": "object"},
+                                    "report_language": {"type": "string"},
+                                    "response_verbosity": {"type": "string"},
+                                    "skill_tags": {"type": "array", "items": {"type": "string"}},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    ],
+)
+@requires_permission("agent:r")
 async def get_preference(request):
     """获取当前用户的 Agent 偏好"""
     user = request.ctx.session["account_info"]
@@ -346,6 +675,55 @@ async def get_preference(request):
 
 
 @agent_bp.post("/preference/update")
+@openapi.definition(
+    summary="更新用户偏好",
+    description="更新当前用户的 Agent 偏好设置",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "notify_channel": {"type": "string", "description": "通知渠道"},
+                    "notify_config": {"type": "object", "description": "通知配置"},
+                    "report_language": {"type": "string", "description": "报告语言"},
+                    "response_verbosity": {"type": "string", "description": "回复详细程度"},
+                    "skill_tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "技能标签",
+                    },
+                },
+            }
+        }
+    },
+    response=[
+        {
+            "status": 200,
+            "description": "成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "default": 0},
+                            "msg": {"type": "string", "default": "success"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "notify_channel": {"type": "string"},
+                                    "notify_config": {"type": "object"},
+                                    "report_language": {"type": "string"},
+                                    "response_verbosity": {"type": "string"},
+                                    "skill_tags": {"type": "array", "items": {"type": "string"}},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    ],
+)
 @requires_permission("agent:u")
 async def agent_update_preference(request):
     """更新用户偏好"""

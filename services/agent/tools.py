@@ -240,7 +240,7 @@ async def register_tools_to_agent_server(client, tenant_id: str):
         try:
             payload = {"name": tool["name"], "description": tool["description"], "source_type": "json", "json_schema": tool["json_schema"]}
 
-            response = await client.post("/v1/tools", json=payload)
+            response = await client.post("/v1/tools/", json=payload)
             if response.status_code == 409:  # Already exists
                 continue
             response.raise_for_status()

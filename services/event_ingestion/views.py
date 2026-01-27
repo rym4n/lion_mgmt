@@ -931,24 +931,12 @@ async def binding_event_ingestion_script(request):
             data.setdefault("transforms", {})[f"{topic}_transforms"] = {
                 "type": "filter",
                 # 如果之前配置了去重则用去重后的配置，否则用原始配置
-                "inputs": (
-                    [f"{topic}_dedupe_transforms"]
-                    if request_data.get("fields") and request_data.get("numbers")
-                    else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])
-                ),
+                "inputs": ([f"{topic}_dedupe_transforms"] if request_data.get("fields") and request_data.get("numbers") else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])),
                 "condition": f"{conditional_statements}",
             }
         data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
             "type": "remap",
-            "inputs": (
-                [f"{topic}_transforms"]
-                if conditions
-                else (
-                    [f"{topic}_dedupe_transforms"]
-                    if request_data.get("fields") and request_data.get("numbers")
-                    else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])
-                )
-            ),
+            "inputs": ([f"{topic}_transforms"] if conditions else ([f"{topic}_dedupe_transforms"] if request_data.get("fields") and request_data.get("numbers") else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]))),
             "source": f"""
 .aioe_event_id = uuid_v4()
 .log_data = to_string(encode_json(.log))

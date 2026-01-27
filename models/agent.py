@@ -6,14 +6,14 @@ from models.base import BaseModel
 
 class AgentMapping(BaseModel):
     """
-    Agent 映射表 - Warroom 与 Letta Agent 的关联
+    Agent 映射表 - Warroom 与 Agent 的关联
     """
     warroom = fields.OneToOneField(
         "models.Room",
-        related_name="secops_agent",
+        related_name="agent",
         description="关联作战室"
     )
-    agent_id = fields.CharField(max_length=64, description="Letta Agent ID")
+    agent_id = fields.CharField(max_length=64, description="Agent ID")
     status = fields.CharField(
         max_length=20,
         default="active",
@@ -22,7 +22,7 @@ class AgentMapping(BaseModel):
     archived_at = fields.DatetimeField(null=True)
 
     class Meta:
-        table = "secops_agent_mapping"
+        table = "agent_mapping"
 
 
 class ArchivalKnowledge(BaseModel):
@@ -66,7 +66,7 @@ class UserPreference(BaseModel):
     """
     account = fields.OneToOneField(
         "models.Account",
-        related_name="secops_preference"
+        related_name="agent_preference"
     )
 
     notify_channel = fields.CharField(
@@ -89,4 +89,4 @@ class UserPreference(BaseModel):
     )
 
     class Meta:
-        table = "secops_user_preference"
+        table = "agent_user_preference"
