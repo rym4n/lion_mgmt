@@ -881,6 +881,8 @@ async def delete_workflow(request):
         if pv.flow_json:
             action_ids = await statistics_data(pv.flow_json, tenant_id)
             await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
+        pv.deleted = True
+        await pv.save()
 
     playbook.deleted = True
     await playbook.save()
@@ -2171,7 +2173,6 @@ async def import_workflow(request):
                     continue
                 name = item.get("name")
                 remark = item.get("remark", "")
-                status = item.get("status", 1)
                 change_desc = item.get("change_desc", "")
                 flow_json = item.get("flow_json") or {}
                 async with in_transaction():
@@ -2202,7 +2203,7 @@ async def import_workflow(request):
                     pv = await PlaybookVersion.create(
                         playbook=pb,
                         version=ver,
-                        status=status,
+                        status=0,
                         change_desc=change_desc,
                         flow_json=flow_json,
                         creator=creator,
@@ -2215,4 +2216,4 @@ async def import_workflow(request):
                     imported["playbooks"] += 1
     if imported["skipped_resources"] > 0 or imported["skipped_versions"] > 0:
         raise CustomError(ErrorCode.IMPORT_FLOW_ERROR)
-    return response_ok(imported)
+    return response_ok("导入成功")
