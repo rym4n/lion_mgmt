@@ -316,7 +316,8 @@ async def list_workflow(request):
         .prefetch_related("scenes", "tags")
     )
 
-    total = await Playbook.filter(condition).distinct().count()
+    ids = await Playbook.filter(condition).values_list("id", flat=True)
+    total = len(set(ids))
 
     # 组装数据
     data = []
