@@ -880,7 +880,8 @@ async def delete_workflow(request):
             action_ids = await statistics_data(pv.flow_json, tenant_id)
             await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
 
-    await playbook.update_from_dict({"deleted": True})
+    playbook.deleted = True
+    await playbook.save()
 
     return response_ok("success")
 
@@ -935,9 +936,11 @@ async def delete_workflow_version(request):
         action_ids = await statistics_data(pv.flow_json, tenant_id)
         await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
     if await PlaybookVersion.filter(playbook_id=pv.playbook_id, deleted=False, tenant_id=tenant_id).count() == 1:
-        await pv.playbook.update_from_dict({"deleted": True})
+        pv.playbook.deleted = True
+        await pv.playbook.save()
 
-    await pv.update_from_dict({"deleted": True})
+    pv.deleted = True
+    await pv.save()
     return response_ok("success")
 
 
@@ -1809,7 +1812,8 @@ async def delete_webhook(request):
     if not webhook:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    await webhook.update_from_dict({"deleted": True})
+    webhook.deleted = True
+    await webhook.save()
 
     return response_ok("success")
 

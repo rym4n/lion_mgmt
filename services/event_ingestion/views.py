@@ -434,7 +434,8 @@ async def delete_event_ingestion(request):
             await es.delete()
 
         # await Events.filter(event_ingestion_id=event.id, tenant_id=tenant_id).delete()
-        await event.update_from_dict({"deleted": True})
+        event.deleted = True
+        await event.save()
 
     return response_ok("success")
 
