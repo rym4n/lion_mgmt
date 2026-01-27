@@ -251,7 +251,12 @@ class AgentGateway:
         payload = {
             "name": f"secops_{warroom_id[:8]}",
             "system": system_prompt,
-            "memory_blocks": [{"label": "human", "value": human_text}, {"label": "persona", "value": persona_text}],
+            "memory": {
+                "blocks": [
+                    {"label": "human", "value": human_text},
+                    {"label": "persona", "value": persona_text},
+                ]
+            },
             "tools": tool_names,
         }
 
