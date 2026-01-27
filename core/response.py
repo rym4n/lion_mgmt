@@ -9,6 +9,7 @@ from typing import Any, Optional
 import orjson
 from sanic import HTTPResponse
 from sanic import json
+from sanic.log import logger
 
 from .error_code import ErrorCode
 
@@ -19,10 +20,12 @@ def response_ok(data: Any = None) -> HTTPResponse:
     :param data: 数据
     :return:
     """
-    # 错误码
-    code: int = 0
     # 内容
-    content: dict[str, Any] = {"code": code, "data": data}
+    content: dict[str, Any] = {"code": 0, "data": data}
+    try:
+        orjson.dumps(content)
+    except Exception as e:
+        logger.error(f"response_ok dumps error: {e} | content: {content}")
     return json(content, dumps=orjson.dumps)
 
 

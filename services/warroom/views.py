@@ -747,7 +747,7 @@ async def get_user_rooms(request: Request):
     query = Room.filter(users__id=user.id, tenant_id=tenant_id)
     if keyword:
         query = query.filter(name__contains=keyword)
-    user_rooms = await query.order_by("-ctime").prefetch_related("creator")
+    user_rooms = await query.order_by("-ctime").prefetch_related("creator", "users")
 
     return response_ok({"rooms": [room.json for room in user_rooms]})
 
