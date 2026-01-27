@@ -86,9 +86,7 @@ async def get_prompt_words(prompt_word, tenant_id):
         tool_names.remove("lion_mgmt")
         tool_names.remove("lion_ai")
 
-    latest_versions = (
-        await ToolAction.filter(deleted=False, tool_name__in=tool_names, tenant_id=tenant_id).annotate(latest_version=Max("version_number")).group_by("tool_name").values("tool_name", "latest_version")
-    )
+    latest_versions = await ToolAction.filter(deleted=False, tool_name__in=tool_names, tenant_id=tenant_id).annotate(latest_version=Max("version_number")).group_by("tool_name").values("tool_name", "latest_version")
 
     pairs = [(row["tool_name"], row["latest_version"]) for row in latest_versions]
 
@@ -230,7 +228,6 @@ class ChatManager:
         self.cache_client = caches.get("redis_chat")
         self.msg_pub = self.cache_client.client
         self.active_connections: dict[str, dict] = {}
-
 
     async def connect(self, user: Account, ws, session_id):
         """处理用户连接"""
@@ -710,9 +707,7 @@ class ChatManager:
         room = await Room.get_or_none(id=room_id, tenant_id=tenant_id)
         if not room:
             raise Exception("作战室不存在")
-        announcement = await Message.create(
-            type="announcement", sender=user, room=room, content=content, image_content=image_content, is_pinned=True, receiver=user, tenant_id=tenant_id
-        )  # 设公告发送者自己作为占位符
+        announcement = await Message.create(type="announcement", sender=user, room=room, content=content, image_content=image_content, is_pinned=True, receiver=user, tenant_id=tenant_id)  # 设公告发送者自己作为占位符
 
         # 指定房间广播公告
         # await self._broadcast_to_room(room_id, )

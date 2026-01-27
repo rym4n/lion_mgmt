@@ -36,11 +36,7 @@ def write_process_config(process_name, command, concurrency):
     """写入 supervisor 配置文件"""
     config_path = os.path.join(SUPERVISOR_PATH, "{}.conf".format(process_name))
     with open(config_path, "w", encoding="utf-8") as f:
-        f.write(
-            """[program:{}]\ncommand={}\nnumprocs={}\nprocess_name=%(program_name)s_%(process_num)02d\nautostart=true\nautorestart=true\nredirect_stderr=true\nstdout_logfile=/dev/null\n""".format(
-                process_name, command, concurrency
-            )
-        )
+        f.write("""[program:{}]\ncommand={}\nnumprocs={}\nprocess_name=%(program_name)s_%(process_num)02d\nautostart=true\nautorestart=true\nredirect_stderr=true\nstdout_logfile=/dev/null\n""".format(process_name, command, concurrency))
     logging.info("写入配置文件: {}".format(config_path))
 
 
@@ -69,21 +65,21 @@ def start_process(process_name):
             return False
         for p in all_processes:
             process_info = server.supervisor.getProcessInfo(p)
-            logging.info("process_info：", process_info)
+            logging.info(f"进程 {p} 状态: {process_info['statename']}")
             if process_info["statename"] == "STARTING":
-                logging.info("进程 {} 正在启动中".format(p))
+                logging.info(f"进程 {p} 正在启动中")
                 time.sleep(0.5)
                 process_info = server.supervisor.getProcessInfo(p)
                 if process_info["statename"] != "RUNNING":
                     server.supervisor.startProcess(p)
-                    logging.info("进程 {} 启动成功".format(p))
+                    logging.info(f"进程 {p} 启动成功")
                 else:
-                    logging.info("进程 {} 已经在运行中".format(p))
+                    logging.info(f"进程 {p} 已经在运行中")
             elif process_info["statename"] == "RUNNING":
-                logging.info("进程 {} 已经在运行中".format(p))
+                logging.info(f"进程 {p} 已经在运行中")
             else:
                 server.supervisor.startProcess(p)
-                logging.info("进程 {} 启动成功".format(p))
+                logging.info(f"进程 {p} 启动成功")
         return True
     except Fault as e:
         if "BAD_NAME" in e.faultString or "UNKNOWN" in e.faultString:

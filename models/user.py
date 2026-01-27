@@ -113,7 +113,6 @@ class Role(BaseModel):
         ordering = ["-utime"]
 
 
-
 class PermissionsMenu(BaseModel):
     """
     权限菜单
@@ -179,7 +178,7 @@ class Tenant(Model):
                 }
                 if self.creator
                 else {}
-            )
+            ),
         }
 
     class Meta:

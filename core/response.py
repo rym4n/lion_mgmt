@@ -22,7 +22,7 @@ def response_ok(data: Any = None) -> HTTPResponse:
     # 错误码
     code: int = 0
     # 内容
-    content: dict[str, Any] = dict(code=code, data=data)
+    content: dict[str, Any] = {"code": code, "data": data}
     return json(content, dumps=orjson.dumps)
 
 
@@ -41,5 +41,5 @@ def response_fail(enum: Optional[ErrorCode] = None, status: int = 400):
     # 错误信息
     message: str = enum.message
     # 内容
-    content: dict[int, Any] = dict(code=code, message=message)
+    content: dict[str, Any] = {"code": code, "message": message}
     return json(content, status=status, dumps=orjson.dumps)
