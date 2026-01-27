@@ -474,7 +474,8 @@ async def list_workflow_versions(request):
         }
     },
 )
-@requires_permission("workflow:r,tool:r")
+@requires_permission("workflow:r")
+@requires_permission("tool:r")
 @playbook_permission("r")
 async def export_workflow(request):
     tenant_id = request.ctx.session.get("tenant_id")
@@ -2033,7 +2034,7 @@ async def dashboard_statistics(request):
     summary="导入剧本",
     description="导入剧本",
     body={
-        "multipart/from-data": {
+        "multipart/form-data": {
             "schema": {
                 "type": "object",
                 "required": ["file"],
@@ -2065,7 +2066,8 @@ async def dashboard_statistics(request):
         }
     },
 )
-@requires_permission("workflow:c, tool:c")
+@requires_permission("workflow:c")
+@requires_permission("tool:c")
 async def import_workflow(request):
     file_obj = request.files.get("file")
     if not file_obj:
