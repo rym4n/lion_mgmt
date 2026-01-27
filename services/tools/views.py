@@ -1289,7 +1289,7 @@ async def delete_tool_resource(request):
         else:
             if timed.action_input and timed.action_input["resource"] == tool_resource.id:
                 return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
-    
+
     tool_resource.deleted = True
     await tool_resource.save()
 
