@@ -46,6 +46,7 @@ from models import (
     Timed,
     Tool,
     ToolAction,
+    ToolResources,
 )
 from services.tools.views import tool_action_playbook_delete, tool_action_update
 from settings import TASK_TOPIC, TZ
@@ -488,6 +489,7 @@ async def export_workflow(request):
     )
 
     tool_keys = set()
+    resource_ids = set()
     result = []
 
     for p in pv:
@@ -499,6 +501,10 @@ async def export_workflow(request):
                     version = props.get("version")
                     if name and version:
                         tool_keys.add((name, version))
+
+                    resources = props.get("resources", [])
+                    if resources:
+                        resource_ids.update(resources)
 
         result.append(
             {
@@ -518,6 +524,29 @@ async def export_workflow(request):
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("workflow.json", orjson.dumps(result))
+
+        if resource_ids:
+            resources_objs = (
+                await ToolResources.filter(id__in=list(resource_ids), deleted=False).all()
+            )
+            resources_list = []
+            for res in resources_objs:
+                resources_data = orjson.loads(res.resources) if res.resources else {}
+                for value in resources_data.values():
+                    if value.get("data_type") == "password":
+                        value["value"] = "******"
+
+                res_dict = {
+                    "id": res.id,
+                    "ctime": strip_timezone_to_seconds(res.ctime),
+                    "utime": strip_timezone_to_seconds(res.utime),
+                    "tool_name": res.tool_name,
+                    "name": res.name,
+                    "resources": resources_data,
+                    "engine": res.engine,
+                }
+                resources_list.append(res_dict)
+            zf.writestr("resources.json", orjson.dumps(resources_list))
 
         for tool_key in tool_keys:
             name, version = tool_key
