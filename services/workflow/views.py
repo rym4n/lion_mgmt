@@ -2189,5 +2189,6 @@ async def import_workflow(request):
                     action_ids = await statistics_data(flow_json, tenant_id)
                     await tool_action_update({pv.id: action_ids}, tenant_id)
                     imported["playbooks"] += 1
-
+    if imported["skipped_resources"] > 0 or imported["skipped_versions"] > 0:
+        raise CustomError(ErrorCode.IMPORT_FLOW_ERROR)
     return response_ok(imported)
