@@ -85,7 +85,6 @@ class PlaybookVersion(BaseModel):
         ordering = ["-utime"]
 
 
-
 class PlaybookPermissions(BaseModel):
     """
     剧本权限表

@@ -50,9 +50,7 @@ async def _get_local_embedding(text: str) -> list[float]:
     url = f"{RY_EMBEDDING_API_BASE}/embeddings"
 
     async with httpx.AsyncClient() as client:
-        response = await client.post(
-            url, json={"input": text, "model": RY_EMBEDDING_MODEL, "encoding_format": "float"}, timeout=30.0
-        )
+        response = await client.post(url, json={"input": text, "model": RY_EMBEDDING_MODEL, "encoding_format": "float"}, timeout=30.0)
         response.raise_for_status()
         data = response.json()
         return data["data"][0]["embedding"]

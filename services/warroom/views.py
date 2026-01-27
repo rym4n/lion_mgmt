@@ -749,19 +749,7 @@ async def get_user_rooms(request: Request):
         query = query.filter(name__contains=keyword)
     user_rooms = await query.order_by("-ctime").prefetch_related("creator")
 
-    room_list = []
-    for room in user_rooms:
-        room_list.append(
-            {
-                "id": str(room.id),
-                "name": room.name,
-                "creator_id": room.creator.id,
-                "creator_name": room.creator.display_name,
-                "ctime": str(room.ctime),
-            }
-        )
-
-    return response_ok({"rooms": room_list})
+    return response_ok({"rooms": [room.json for room in user_rooms]})
 
 
 @warroom_bp.post("/query_messages")
