@@ -2096,6 +2096,7 @@ async def import_workflow(request):
             data = orjson.loads(zf.read("resources.json"))
             for res in data:
                 name = res.get("name")
+                id = res.get("id")
                 tool_name = res.get("tool_name")
                 engine = res.get("engine")
                 resources = res.get("resources") or {}
@@ -2110,6 +2111,7 @@ async def import_workflow(request):
                     imported["skipped_resources"] += 1
                     continue
                 await ToolResources.create(
+                    id=id,
                     tool_name=tool_name,
                     name=name,
                     engine=engine,
