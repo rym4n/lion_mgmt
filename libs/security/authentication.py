@@ -22,6 +22,11 @@ async def authenticate(request: Request):
     """
     payload = await token_decode(request)
     validate_token(payload, request)
+
+    if not hasattr(request.app.ctx, "cache_client"):
+        logger.error("Cache client not initialized on app.ctx")
+        raise CustomError(ErrorCode.SERVER_ERROR)
+
     account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
     if not account:
         logger.warning("redis里已经没有account信息了")

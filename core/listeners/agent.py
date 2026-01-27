@@ -21,6 +21,10 @@ class AgentListener(BaseListener):
                 logger.warning("Redis client not found, Agent Gateway initialization skipped.")
                 return
 
+            # 获取底层的 redis-py client
+            if hasattr(redis_client, "client"):
+                redis_client = redis_client.client
+
             gateway = AgentGateway(agent_server_url=RY_AGENT_SERVER, redis_client=redis_client)
 
             # 初始化 Lua 脚本
