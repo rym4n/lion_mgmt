@@ -1,17 +1,22 @@
 #!/usr/bin/env python
 # coding=utf-8
 import asyncio
-from collections import defaultdict
-from datetime import datetime
 import re
 import secrets
 import time
 import uuid
-
-from aiocache import caches
 import orjson
 import pytz
+import io
+import zipfile
+import hashlib
+
+from aiocache import caches
+from collections import defaultdict
+from datetime import datetime
 from sanic import Blueprint
+from libs import utils
+from sanic.response import raw
 from sanic_ext import openapi
 from tortoise.expressions import Q
 from tortoise.functions import Count, Max
@@ -168,7 +173,7 @@ async def create_workflow(request):
         for flow_json in flow_json_list:
             pv = await PlaybookVersion.create(
                 playbook=playbook,
-                version=gen_run_id(),
+                version="",
                 status=0,
                 change_desc=data.get("change_desc", ""),
                 flow_json=flow_json,
@@ -295,6 +300,7 @@ async def list_workflow(request):
     pv_condition = Q(playbook_versions__deleted=False)
     if json_params.get("publish") in (0, 1):
         pv_condition = pv_condition & Q(playbook_versions__status=json_params.get("publish"))
+        condition = condition & pv_condition
 
     playbooks = (
         await Playbook.filter(condition)
@@ -302,13 +308,14 @@ async def list_workflow(request):
             versions=Count("playbook_versions", _filter=pv_condition),
             max_flow_timeout=Max("playbook_versions__flow_timeout"),
         )
+        .distinct()
         .order_by("-utime")
         .offset(offset)
         .limit(limit)
         .prefetch_related("scenes", "tags")
     )
 
-    total = await Playbook.filter(condition).count()
+    total = await Playbook.filter(condition).distinct().count()
 
     # 组装数据
     data = []
@@ -443,49 +450,26 @@ async def list_workflow_versions(request):
 @workflow_bp.post("/export")
 @openapi.definition(
     summary="导出剧本版本",
-    description="导出剧本版本",
+    description="导出剧本版本及工具包（ZIP格式）",
     body={
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["playbook_id"],
-                "properties": {"playbook_id": {"type": "string", "description": "剧本id"}},
+                "required": ["playbook_ids"],
+                "properties": {
+                    "playbook_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "剧本id列表",
+                    }
+                },
             }
         }
     },
     response={
         "200": {
             "description": "获取成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "playbook_id": {"type": "string"},
-                                        "flow_id": {"type": "string"},
-                                        "ctime": {"type": "string"},
-                                        "utime": {"type": "string"},
-                                        "name": {"type": "string"},
-                                        "remark": {"type": "string"},
-                                        "change_desc": {"type": "string"},
-                                        "status": {"type": "integer"},
-                                        "version": {"type": "string"},
-                                        "flow_json": {"type": "object"},
-                                        "internal": {"type": "boolean"},
-                                    },
-                                },
-                            },
-                            "message": {"type": "string"},
-                        },
-                    }
-                }
-            },
+            "content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}},
         }
     },
 )
@@ -493,23 +477,61 @@ async def list_workflow_versions(request):
 @playbook_permission("r")
 async def export_workflow(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False, tenant_id=tenant_id).all().prefetch_related("playbook")
-    result = [
-        {
-            "playbook_id": p.playbook_id,
-            "flow_id": p.id,
-            "ctime": strip_timezone_to_seconds(p.ctime),
-            "utime": strip_timezone_to_seconds(p.utime),
-            "name": p.playbook.name,
-            "remark": p.playbook.remark,
-            "change_desc": p.change_desc,
-            "status": p.status,
-            "version": p.version,
-            "flow_json": p.flow_json,
-        }
-        for p in pv
-    ]
-    return response_ok(result)
+    playbook_ids = request.json.get("playbook_ids", [])
+
+    pv = (
+        await PlaybookVersion.filter(
+            playbook__id__in=playbook_ids, deleted=False, tenant_id=tenant_id
+        )
+        .all()
+        .prefetch_related("playbook")
+    )
+
+    tool_keys = set()
+    result = []
+
+    for p in pv:
+        if p.flow_json and "nodes" in p.flow_json:
+            for node in p.flow_json["nodes"]:
+                if node.get("type") == "action-node":
+                    props = node.get("properties", {})
+                    name = props.get("app_name")
+                    version = props.get("version")
+                    if name and version:
+                        tool_keys.add((name, version))
+
+        result.append(
+            {
+                "playbook_id": p.playbook_id,
+                "flow_id": p.id,
+                "ctime": strip_timezone_to_seconds(p.ctime),
+                "utime": strip_timezone_to_seconds(p.utime),
+                "name": p.playbook.name,
+                "remark": p.playbook.remark,
+                "change_desc": p.change_desc,
+                "status": p.status,
+                "version": p.version,
+                "flow_json": p.flow_json,
+            }
+        )
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("workflow.json", orjson.dumps(result))
+
+        for tool_key in tool_keys:
+            name, version = tool_key
+            content = await utils.get_from_s3("system", f"{name}/{version}.zip", "tools")
+            if content:
+                filename = f"{name}_{version}.zip"
+                zf.writestr(filename, content)
+
+    zip_buffer.seek(0)
+    return raw(
+        zip_buffer.read(),
+        content_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="workflow_export.zip"'},
+    )
 
 
 @workflow_bp.post("/flow-json")
@@ -705,7 +727,7 @@ async def edit_workflow_flow(request):
     if pv.status == 1:
         pv = await PlaybookVersion.create(
             playbook=pv.playbook,
-            version=gen_run_id(),
+            version="",
             flow_json=pv.flow_json,
             change_desc=None,
             status=0,
@@ -768,12 +790,20 @@ async def publish_workflow(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    await PlaybookVersion.filter(id=request.json.get("flow_id"), status=0, tenant_id=tenant_id).update(
-        status=1,
-        updator=request.ctx.session["account_info"],
-        version=gen_run_id(),
-        change_desc=request.json.get("change_desc"),
+    pv = await PlaybookVersion.get_or_none(
+        id=request.json.get("flow_id"), status=0, tenant_id=tenant_id
     )
+    if not pv:
+        raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
+
+    flow_json_str = orjson.dumps(pv.flow_json)
+    sha1_val = hashlib.sha1(flow_json_str).hexdigest()
+
+    pv.status = 1
+    pv.updator = request.ctx.session["account_info"]
+    pv.version = sha1_val
+    pv.change_desc = request.json.get("change_desc")
+    await pv.save()
     return response_ok("剧本发布成功")
 
 

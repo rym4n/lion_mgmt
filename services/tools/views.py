@@ -267,7 +267,7 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
                     "config文件内容错误，缺失description字段",
                 )
 
-            hash_func = getattr(hashlib, "md5", None)
+            hash_func = getattr(hashlib, "sha1", None)
             if hash_func is None:
                 return (
                     config_data,
@@ -360,7 +360,6 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 
             if not logo_found:
                 return config_data, version, tool_name, "缺少logo文件"
-
             data += 1
             percent = int(data * single_progress) + success_progress
             await resp.send(f"data: 解压进度：{percent}%\n\n")
@@ -395,15 +394,13 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
             percent = int(data * single_progress) + success_progress
             await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-            hash_values = await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all().values("hash_value")
-            hash_set = {entry["hash_value"] for entry in hash_values}
-            if hash_values and hasher.hexdigest() in hash_set:
+            if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id, version=hasher.hexdigest()).exists():
                 return config_data, version, tool_name, "工具已存在"
             data += 1
             percent = int(data * single_progress) + success_progress
             await resp.send(f"data: 解压进度：{percent}%\n\n")
 
-            version = "v" + str(int(time.time() * 1000))
+            version = hasher.hexdigest()
             suffix = logo_name.split(".")[-1]
             save_path = await utils.upload_to_s3(zip_data, "system", f"{tool_name}/{version}.zip", "tools")
             logo_path = await utils.upload_to_s3(logo_data, "user", f"{tool_name}.{suffix}", "tools")

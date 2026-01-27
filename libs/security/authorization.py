@@ -104,20 +104,24 @@ def playbook_permission(*required_permissions: str):
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(request, *args, **kwargs):
-            playbook_id = request.json.get("playbook_id")  # 获取剧本id
-            if not playbook_id:
-                playbook_id = request.json.get("flow_id")  # 获取剧本版本id
+            playbook_ids = request.json.get("playbook_ids")
+            if not playbook_ids:
+                playbook_id = request.json.get("playbook_id")  # 获取剧本id
                 if not playbook_id:
-                    raise CustomError(ErrorCode.PLAYBOOK_UNAUTHORIZED)
+                    playbook_id = request.json.get("flow_id")  # 获取剧本版本id
+                    if not playbook_id:
+                        raise CustomError(ErrorCode.PLAYBOOK_UNAUTHORIZED)
+                playbook_ids = [playbook_id]
 
-            user = request.ctx.session.get("account_info")
-            if not user:
-                raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+            for playbook_id in playbook_ids:
+                user = request.ctx.session.get("account_info")
+                if not user:
+                    raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
 
-            has_access = await check_playbook_permission(request, user, playbook_id, required_permissions)
+                has_access = await check_playbook_permission(request, user, playbook_id, required_permissions)
 
-            if not has_access:
-                raise CustomError(ErrorCode.UNAUTH)
+                if not has_access:
+                    raise CustomError(ErrorCode.UNAUTH)
 
             return await func(request, *args, **kwargs)
 
