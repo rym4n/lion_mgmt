@@ -142,7 +142,6 @@ async def find_all(request):
     size = max(1, min(int(request.json.get("size", 15)), 100))
     offset = (page - 1) * size
 
-
     tenant_id = request.ctx.session.get("tenant_id")
 
     roles = await Role.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(size).values()

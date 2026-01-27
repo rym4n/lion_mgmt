@@ -91,7 +91,6 @@ async def get_all_events(request):
     size = max(1, min(int(request.json.get("size", 15)), 100))
     offset = (page - 1) * size
 
-
     tenant_id = request.ctx.session.get("tenant_id")
 
     filters = {"tenant_id": tenant_id}

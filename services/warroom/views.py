@@ -153,6 +153,45 @@ async def create_room(request: Request):
         tenant_id=tenant_id,
     )
 
+    # Hook SecOps Expert (Initialize Agent)
+    if hasattr(request.app.ctx, "agent_lifecycle"):
+
+        async def init_agent_task():
+            try:
+                # Build members list
+                # Creator
+                roles = await creator.roles.filter(tenant_id=tenant_id).all()
+                perms = []
+                for r in roles:
+                    if r.permissions:
+                        perms.extend(r.permissions)
+
+                members = [{"id": creator.id, "display_name": creator.display_name, "role": roles[0].name if roles else "User", "permissions": perms}]
+
+                # Invited members
+                if members_ids and isinstance(members_ids, list):
+                    for member_id in members_ids:
+                        m = await Account.get_or_none(id=member_id)
+                        if m:
+                            m_roles = await m.roles.filter(tenant_id=tenant_id).all()
+                            m_perms = []
+                            for r in m_roles:
+                                if r.permissions:
+                                    m_perms.extend(r.permissions)
+                            members.append({"id": m.id, "display_name": m.display_name, "role": m_roles[0].name if m_roles else "User", "permissions": m_perms})
+
+                await request.app.ctx.agent_lifecycle.on_warroom_created(
+                    warroom_id=str(room.id),
+                    tenant_id=tenant_id,
+                    event={"event_name": room_name, "event_source": "人工", "event_summary": "人工创建作战室"},
+                    creator={"id": creator.id, "display_name": creator.display_name},
+                    initial_members=members,
+                )
+            except Exception as e:
+                logger.error(f"Failed to init SecOps agent: {e} | {traceback.format_exc()}")
+
+        request.app.add_task(init_agent_task())
+
     return response_ok({"room_id": str(room.id), "name": room.name})
 
 

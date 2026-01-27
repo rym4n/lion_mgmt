@@ -244,3 +244,16 @@ CACHE = {
         "pool_max_size": 2,
     },
 }
+
+# Agent Server 配置
+RY_AGENT_SERVER = os.environ.get("RY_AGENT_SERVER", "http://192.168.12.254:8283")
+
+# Embedding 服务配置
+RY_EMBEDDING_PROVIDER = os.environ.get("RY_EMBEDDING_PROVIDER", "openai")  # openai | local
+RY_EMBEDDING_MODEL = os.environ.get("RY_EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-4B")
+RY_EMBEDDING_API_KEY = os.environ.get("RY_EMBEDDING_API_KEY", "")
+RY_EMBEDDING_API_BASE = os.environ.get("RY_EMBEDDING_API_BASE", "https://api-inference.modelscope.cn/v1")
+
+# Agent 默认配置
+RY_AGENT_DEFAULT_LLM = os.environ.get("RY_AGENT_MODEL", "gpt-4o")
+RY_AGENT_CONTEXT_WINDOW = int(os.environ.get("RY_AGENT_CONTEXT_WINDOW", "8000"))

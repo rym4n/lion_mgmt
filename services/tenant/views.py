@@ -48,7 +48,6 @@ async def get_tenant(request):
     size = max(1, min(int(request.json.get("size", 15)), 100))
     offset = (page - 1) * size
 
-
     tenants = await Tenant.filter().offset(offset).limit(size).all().prefetch_related("creator", "member")
     total = await Tenant.filter().count()
 
@@ -324,7 +323,6 @@ async def get_all_user_info(request):
     page = max(1, int(req_json.get("page", 1)))
     size = max(1, min(int(req_json.get("size", 15)), 100))
     offset = (page - 1) * size
-
 
     condition = {"deleted": False, "type": "user"}
     if req_json.get("username"):

@@ -71,7 +71,6 @@ async def playbook_list(request):
     size = max(1, min(int(request.args.get("size", 10)), 100))
     offset = (page - 1) * size
 
-
     tenant_id = request.ctx.session.get("tenant_id")
 
     pvs = await PlaybookVersion.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(size).prefetch_related("playbook", "creator", "updator", "playbook__scenes", "playbook__tags")

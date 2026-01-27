@@ -3,5 +3,6 @@
 
 from .base import BaseListener
 from .cache import CacheListener
+from .secops import SecOpsListener
 
-LISTENER_TUPLE: tuple[type[BaseListener], ...] = (CacheListener,)
+LISTENER_TUPLE: tuple[type[BaseListener], ...] = (CacheListener, SecOpsListener)

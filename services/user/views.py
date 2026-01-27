@@ -662,8 +662,8 @@ async def update_api_user(request):
     },
 )
 async def login(request):
-    username = request.json.get("username", '').strip()
-    password = request.json.get("password", '').strip()
+    username = request.json.get("username", "").strip()
+    password = request.json.get("password", "").strip()
 
     if not username or not password:
         raise CustomError(ErrorCode.CREDENTIALS_ERROR)
@@ -721,15 +721,7 @@ async def login(request):
         # 如果全局开启了 MFA，或者用户自己开启了 MFA
         mfa_enabled = secure_config["mfa_enabled"] or account.mfa_enable
 
-        token = token_encode(
-            account.id,
-            account.username,
-            account.display_name,
-            mfa_enabled,  # 使用计算后的 mfa 状态
-            account.tenant_id,
-            token_id,
-            ip=client_ip
-        )
+        token = token_encode(account.id, account.username, account.display_name, mfa_enabled, account.tenant_id, token_id, ip=client_ip)  # 使用计算后的 mfa 状态
         await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
         # resp['aioe-auth'] = token
         # 如果开启了MFA，缓存记录MFA密钥，便于mfa认证
@@ -1149,13 +1141,13 @@ async def edit_user(request):
 )
 @requires_permission("user:d")
 async def delelte_user(request):
-    username = request.json.get("username", '').strip()
+    username = request.json.get("username", "").strip()
     if username == request.ctx.session["account_info"].username:
         raise CustomError(ErrorCode.CANNOT_DELETE_SELF)
     if username == "admin":
         raise CustomError(ErrorCode.CANNOT_DELETE_ADMIN)
 
-    await Account.filter(username=username, deleted=False,tenant_id= request.ctx.session["account_info"].tenant_id).update(deleted=True)
+    await Account.filter(username=username, deleted=False, tenant_id=request.ctx.session["account_info"].tenant_id).update(deleted=True)
     return response_ok("success")
 
 
@@ -1191,7 +1183,7 @@ async def delelte_user(request):
 )
 @requires_permission("user:u")
 async def refresh_mfa_key(request):
-    username = request.json.get("username", '').strip()
+    username = request.json.get("username", "").strip()
     account = await Account.get_or_none(username=username, deleted=False)
     if not account:
         raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
@@ -1240,7 +1232,7 @@ async def refresh_mfa_key(request):
 )
 @requires_permission("user:u")
 async def assign_role_to_user(request):
-    username = request.json.get("username", '').strip()
+    username = request.json.get("username", "").strip()
     account = await Account.get_or_none(username=username, deleted=False)
     if not account:
         raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)

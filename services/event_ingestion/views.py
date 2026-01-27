@@ -359,7 +359,6 @@ async def get_all_events_ingestion(request):
     size = request.json.get("size", 15)
     offset = (page - 1) * size
 
-
     tenant_id = request.ctx.session.get("tenant_id")
 
     filters = {"deleted": False, "tenant_id": tenant_id}

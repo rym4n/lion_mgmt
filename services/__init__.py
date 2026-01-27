@@ -24,6 +24,7 @@ from services.mcp.views import mcp_bp
 from services.others.views import activity, all_apps, playbook_list
 from services.role.views import role_bp
 from services.scene.views import scene_bp
+from services.agent import secops_bp
 from services.secure.views import secure_bp
 from services.system_config.views import system_bp
 from services.tenant.views import tenant_bp
@@ -61,6 +62,7 @@ def register_blueprints(app: Sanic) -> None:
     app.blueprint(warroom_bp)
     app.blueprint(approve_bp)
     app.blueprint(tenant_bp)
+    app.blueprint(secops_bp)
 
     try:
         bp_dict = {

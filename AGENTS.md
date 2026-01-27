@@ -246,6 +246,19 @@ return response_ok({
 })
 ```
 
+## SecOpsExpert Agent
+
+Integrated intelligent agent for security operations.
+
+**Features:**
+- 5-layer memory architecture (L1-L5) using Letta
+- Autonomous playbook execution
+- Warroom integration (auto-trigger, chat)
+- Knowledge base with vector search (pgvector)
+
+**Configuration:**
+See `settings/__init__.py` for Letta and Embedding config.
+
 ## Key Patterns
 
 1. **Soft Delete**: Use `deleted=False` filter, never hard delete
