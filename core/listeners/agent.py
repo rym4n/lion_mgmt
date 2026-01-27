@@ -21,10 +21,7 @@ class AgentListener(BaseListener):
                 logger.warning("Redis client not found, Agent Gateway initialization skipped.")
                 return
 
-            gateway = AgentGateway(
-                agent_server_url=RY_AGENT_SERVER,
-                redis_client=redis_client
-            )
+            gateway = AgentGateway(agent_server_url=RY_AGENT_SERVER, redis_client=redis_client)
 
             # 初始化 Lua 脚本
             await gateway._init_scripts()

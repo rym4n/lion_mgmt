@@ -2,9 +2,9 @@
 import logging
 import os
 import time
-from xmlrpc.client import Fault, ServerProxy  # Python 3
+from xmlrpc.client import Fault, ServerProxy
 
-from settings import SUPERVISOR_PATH, RY_JOB_SERVER
+from settings import RY_JOB_SERVER, SUPERVISOR_PATH
 
 
 def _get_all_processes(server, process_name):
@@ -34,10 +34,10 @@ def _get_all_processes(server, process_name):
 
 def write_process_config(process_name, command, concurrency):
     """写入 supervisor 配置文件"""
-    config_path = os.path.join(SUPERVISOR_PATH, "{}.conf".format(process_name))
+    config_path = os.path.join(SUPERVISOR_PATH, f"{process_name}.conf")
     with open(config_path, "w", encoding="utf-8") as f:
-        f.write("""[program:{}]\ncommand={}\nnumprocs={}\nprocess_name=%(program_name)s_%(process_num)02d\nautostart=true\nautorestart=true\nredirect_stderr=true\nstdout_logfile=/dev/null\n""".format(process_name, command, concurrency))
-    logging.info("写入配置文件: {}".format(config_path))
+        f.write(f"""[program:{process_name}]\ncommand={command}\nnumprocs={concurrency}\nprocess_name=%(program_name)s_%(process_num)02d\nautostart=true\nautorestart=true\nredirect_stderr=true\nstdout_logfile=/dev/null\n""")
+    logging.info(f"写入配置文件: {config_path}")
 
 
 def add_process(process_name, command, concurrency):
@@ -47,12 +47,12 @@ def add_process(process_name, command, concurrency):
         server = ServerProxy(RY_JOB_SERVER)
         server.supervisor.reloadConfig()
         server.supervisor.addProcessGroup(process_name)
-        logging.info("进程 {} 添加成功".format(process_name))
+        logging.info(f"进程 {process_name} 添加成功")
     except Fault as e:
         if "ALREADY_ADDED" in e.faultString:
-            logging.info("进程 {} 已存在".format(process_name))
+            logging.info(f"进程 {process_name} 已存在")
         else:
-            logging.info("添加进程时发生错误: {}".format(e.faultString))
+            logging.info(f"添加进程时发生错误: {e.faultString}")
 
 
 def start_process(process_name):
@@ -61,7 +61,7 @@ def start_process(process_name):
         server = ServerProxy(RY_JOB_SERVER)
         all_processes = _get_all_processes(server, process_name)
         if not all_processes:
-            logging.info("进程 {} 不存在，无法启动".format(process_name))
+            logging.info(f"进程 {process_name} 不存在，无法启动")
             return False
         for p in all_processes:
             process_info = server.supervisor.getProcessInfo(p)
@@ -83,12 +83,12 @@ def start_process(process_name):
         return True
     except Fault as e:
         if "BAD_NAME" in e.faultString or "UNKNOWN" in e.faultString:
-            logging.info("进程 {} 不存在，无法启动".format(process_name))
+            logging.info(f"进程 {process_name} 不存在，无法启动")
             return False
         elif "ALREADY_STARTED" in e.faultString:
             return True
         else:
-            logging.info("启动进程时发生错误: {}".format(e.faultString))
+            logging.info(f"启动进程时发生错误: {e.faultString}")
             return False
 
 
@@ -98,16 +98,16 @@ def stop_process(process_name):
         server = ServerProxy(RY_JOB_SERVER)
         all_processes = _get_all_processes(server, process_name)
         if not all_processes:
-            logging.info("进程 {} 不存在，无法启动".format(process_name))
+            logging.info(f"进程 {process_name} 不存在，无法停止")
             return False
         for p in all_processes:
             server.supervisor.stopProcess(p)
-            logging.info("进程 {} 已停止".format(p))
+            logging.info(f"进程 {p} 已停止")
     except Fault as e:
         if "NOT_RUNNING" in e.faultString:
-            logging.info("进程 {} 当前未运行".format(process_name))
+            logging.info(f"进程 {process_name} 当前未运行")
         else:
-            logging.info("停止进程时发生错误: {}".format(e.faultString))
+            logging.info(f"停止进程时发生错误: {e.faultString}")
 
 
 def remove_process(process_name):
@@ -115,12 +115,12 @@ def remove_process(process_name):
     try:
         server = ServerProxy(RY_JOB_SERVER)
         server.supervisor.removeProcessGroup(process_name)
-        logging.info("进程 {} 已删除".format(process_name))
+        logging.info(f"进程 {process_name} 已删除")
     except Fault as e:
         if "BAD_NAME" in e.faultString:
-            logging.info("进程 {} 不存在，无法删除".format(process_name))
+            logging.info(f"进程 {process_name} 不存在，无法删除")
         else:
-            logging.info("删除进程时发生错误: {}".format(e.faultString))
+            logging.info(f"删除进程时发生错误: {e.faultString}")
 
 
 def process_status(process_name):
@@ -134,7 +134,7 @@ def process_status(process_name):
             return "unhealthy"
     except Fault as e:
         if "BAD_NAME" in e.faultString:
-            logging.info("进程 {} 不存在".format(process_name))
+            logging.info(f"进程 {process_name} 不存在")
         else:
-            logging.info("获取进程状态时发生错误: {}".format(e.faultString))
+            logging.info(f"获取进程状态时发生错误: {e.faultString}")
         return "unknown"

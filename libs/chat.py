@@ -1,14 +1,14 @@
 # coding=utf-8
 import asyncio
+from datetime import datetime
 import hashlib
 import time
 import traceback
-from datetime import datetime
 
+from aiocache import caches
 import httpx
 import orjson
 import pytz
-from aiocache import caches
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
 from tortoise.expressions import Q
@@ -16,24 +16,23 @@ from tortoise.functions import Max
 
 from libs.kafka import aconsume
 from models import (
-    Runlog,
     Approvement,
     Events,
-    Config,
-    ToolAction,
-    ToolResourcesModel,
-    ToolResources,
     Playbook,
     PlaybookVersion,
+    Runlog,
+    ToolAction,
+    ToolResources,
+    ToolResourcesModel,
 )
 from models.user import Account
-from models.warroom import Room, Message, MessageAccount
+from models.warroom import Message, MessageAccount, Room
 from settings import (
+    AUTHENTICATION_SESSION_EXPIRATION,
     CACHE,
     RUNLOG_TOPIC,
-    WR_TOPIC,
-    AUTHENTICATION_SESSION_EXPIRATION,
     TZ,
+    WR_TOPIC,
 )
 
 
@@ -231,7 +230,7 @@ class ChatManager:
 
     async def connect(self, user: Account, ws, session_id):
         """处理用户连接"""
-        if user.id not in self.active_connections.keys():
+        if user.id not in self.active_connections:
             self.active_connections[user.id] = {session_id: {"conn": ws, "current_room": None, "run_id": None}}
         else:
             self.active_connections[user.id][session_id] = {
