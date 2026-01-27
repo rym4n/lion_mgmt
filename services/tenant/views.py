@@ -142,7 +142,8 @@ async def del_tenant(request):
         if str(tenant.member[0].id) != "43782755-6382-4f42-82a2-5e557370d858":
             raise CustomError(ErrorCode.TENANT_HAS_MEMBERS)
 
-    await tenant.update_from_dict({"deleted": True})
+    tenant.deleted = True
+    await tenant.save()
 
     return response_ok("success")
 

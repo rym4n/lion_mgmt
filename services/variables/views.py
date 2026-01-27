@@ -203,8 +203,9 @@ async def delelte_variable(request):
     var = await Variables.get_or_none(name=request.json.get("name"), type="global", tenant_id=tenant_id)
     if not var:
         raise CustomError(ErrorCode.NOT_FOUND)
-    await caches.get("redis_chat").delete(f"global_{var.name}")
-    await var.update_from_dict({"deleted": True})
+    await caches.get("redis_chat").delete(f"global_{var.name}")    
+    var.deleted = True
+    await var.save()
     return response_ok("success")
 
 

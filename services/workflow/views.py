@@ -316,7 +316,8 @@ async def list_workflow(request):
         .prefetch_related("scenes", "tags")
     )
 
-    total = await Playbook.filter(condition).distinct().count()
+    ids = await Playbook.filter(condition).values_list("id", flat=True)
+    total = len(set(ids))
 
     # 组装数据
     data = []
@@ -880,7 +881,8 @@ async def delete_workflow(request):
             action_ids = await statistics_data(pv.flow_json, tenant_id)
             await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
 
-    await playbook.update_from_dict({"deleted": True})
+    playbook.deleted = True
+    await playbook.save()
 
     return response_ok("success")
 
@@ -935,9 +937,11 @@ async def delete_workflow_version(request):
         action_ids = await statistics_data(pv.flow_json, tenant_id)
         await tool_action_playbook_delete({pv.id: action_ids}, tenant_id)
     if await PlaybookVersion.filter(playbook_id=pv.playbook_id, deleted=False, tenant_id=tenant_id).count() == 1:
-        await pv.playbook.update_from_dict({"deleted": True})
+        pv.playbook.deleted = True
+        await pv.playbook.save()
 
-    await pv.update_from_dict({"deleted": True})
+    pv.deleted = True
+    await pv.save()
     return response_ok("success")
 
 
@@ -1809,7 +1813,8 @@ async def delete_webhook(request):
     if not webhook:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    await webhook.update_from_dict({"deleted": True})
+    webhook.deleted = True
+    await webhook.save()
 
     return response_ok("success")
 
@@ -2189,5 +2194,6 @@ async def import_workflow(request):
                     action_ids = await statistics_data(flow_json, tenant_id)
                     await tool_action_update({pv.id: action_ids}, tenant_id)
                     imported["playbooks"] += 1
-
+    if imported["skipped_resources"] > 0 or imported["skipped_versions"] > 0:
+        raise CustomError(ErrorCode.IMPORT_FLOW_ERROR)
     return response_ok(imported)
