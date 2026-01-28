@@ -1183,7 +1183,7 @@ async def run_history(request):
             status = "fail"
         data.append({"run_id": run_id, "status": status, "logs": grouped_data.get(run_id, [])})
 
-    data = data[offset : offset + limit]
+    data = data[offset: offset + limit]
     if not data:
         return response_ok({"total": total, "page": page, "size": size, "data": []})
 
@@ -2018,17 +2018,17 @@ async def dashboard_statistics(request):
 
     for row in results:
         total = row["total_runs"]
-        succ = int(row["success_count"])
+        success_count = int(row["success_count"])
         fail = int(row["fail_count"])
         day = row["date"]
 
-        rate_val = round(succ / total, 2) if total else 0
+        rate_val = round(success_count / total, 2) if total else 0
         success_rate = str(rate_val * 100) + "%"
 
         day_result = {
             "date": day,
             "total_runs": total,
-            "success_count": succ,
+            "success_count": success_count,
             "fail_count": fail,
             "success_rate": success_rate,
         }
@@ -2096,7 +2096,7 @@ async def import_workflow(request):
             data = orjson.loads(zf.read("resources.json"))
             for res in data:
                 name = res.get("name")
-                id = res.get("id")
+                id_ = res.get("id")
                 tool_name = res.get("tool_name")
                 engine = res.get("engine")
                 resources = res.get("resources") or {}
@@ -2111,7 +2111,7 @@ async def import_workflow(request):
                     imported["skipped_resources"] += 1
                     continue
                 await ToolResources.create(
-                    id=id,
+                    id=id_,
                     tool_name=tool_name,
                     name=name,
                     engine=engine,
@@ -2141,7 +2141,7 @@ async def import_workflow(request):
             if idx <= 0:
                 continue
             t_name = base[:idx]
-            t_ver = base[idx + 1 :]
+            t_ver = base[idx + 1:]
             if await Tool.filter(name=t_name, deleted=False, tenant_id=tenant_id, version=t_ver).exists():
                 imported["skipped_versions"] += 1
                 continue
@@ -2150,9 +2150,9 @@ async def import_workflow(request):
             # 构造 MockFile 对象
             mock_file = MockFile(name=fn, body=content)
 
-            results, _, _ = await upload_tool(mock_file, lic, creator.username, 100, None, 0, tenant_id, request, 0, [])
+            result = await upload_tool(mock_file, lic, creator.username, tenant_id, request)
 
-            if results and results[-1].get("msg") == "success":
+            if result and result.get("msg") == "success":
                 imported["tools"] += 1
 
         if "workflow.json" in names:

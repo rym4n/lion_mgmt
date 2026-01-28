@@ -837,7 +837,7 @@ async def update_oauth_config(request):
     },
     response={
         "200": {
-            "description": "更新成功",
+            "description": "添加成功",
             "content": {
                 "application/json": {
                     "schema": {
@@ -856,7 +856,7 @@ async def transforms_update(request):
     for item in request.json.get("data"):
         await Config.update_or_create(
             key=item.get("key"),
-            defaults={"value": item.get("value"), "type": item.get("type")},
+            defaults={"value": item.get("value"), "type": item.get("type"), "default": True},
             module="transforms",
         )
 
@@ -993,7 +993,7 @@ async def search_audit(request):
     data = []
     if data_res:
         # 内存分页
-        page_data = data_res[offset : offset + size]
+        page_data = data_res[offset: offset + size]
         for item in page_data:
             # 格式化时间，VictoriaLogs返回的_time通常是RFC3339格式，这里需要处理
             utc_str = item.get("_time")

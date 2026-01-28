@@ -37,12 +37,8 @@ from services.workflow.views import workflow_bp
 from settings import BASE_LOGGING, TORTOISE
 
 
-def safe_dumps(obj, **kwargs):
-    return orjson.dumps(obj, option=orjson.OPT_NON_STR_KEYS)
-
-
 def create_app() -> Sanic:
-    app: Sanic = Sanic(__name__, dumps=safe_dumps, loads=orjson.loads, log_config=BASE_LOGGING)
+    app: Sanic = Sanic(__name__, dumps=orjson.dumps, loads=orjson.loads, log_config=BASE_LOGGING)
     app.config.update_config("settings/__init__.py")
     register_listener(app)
     register_tortoise(app, config=TORTOISE, generate_schemas=False)
@@ -81,6 +77,7 @@ def register_blueprints(app: Sanic) -> None:
             "agent_bp": agent_bp,
             "mcp_bp": mcp_bp,
         }
+
         license_data = load_license()
         if license_data and "moduleList" in license_data:
             for item in license_data["moduleList"]:

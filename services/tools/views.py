@@ -122,56 +122,53 @@ async def upload_and_extract_zip(request):
 
     creator = request.ctx.session["account_info"].username
     if "file" not in request.files:
-        return response_ok({"error": "No file provided"})
+        await resp.send("data: No file provided\n\n")
+        await resp.eof()
+        return
 
     results = []
     # 获取 ZIP 文件
-    zip_files = request.files["file"]
-    single_progress = 100 / len(zip_files)
-    success_progress = 0
-    data = 0
+    zip_files = request.files.getlist("file")
+    total_files = len(zip_files)
 
     lic = load_license()
     if not lic:
         raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
 
-    for zip_file in zip_files:
-        results, success_progress, data = await upload_tool(zip_file, lic, creator, single_progress, resp, success_progress, tenant_id, request, data, results)
+    for index, zip_file in enumerate(zip_files):
+        result = await upload_tool(zip_file, lic, creator, tenant_id, request)
+        results.append(result)
+
+        progress = int(((index + 1) / total_files) * 100)
+        await resp.send(f"data: 解压进度：{progress}%\n\n")
 
     if resp:
         await resp.send(f"data: {results}\n\n")
         await resp.eof()
 
 
-async def upload_tool(zip_file, lic, creator, single_progress, resp, success_progress, tenant_id, request, data, results):
+async def upload_tool(zip_file, lic, creator, tenant_id, request):
     total_count = await Tool.filter(deleted=False, maintain=False).count()
     zip_filename = zip_file.name
 
-    for key, item in lic["grouplist"].items():
-        if key == "应用集成":
-            if int(item["expireTime"]) > int(time.time() * 1000):
+    total_up_value = 99999
+    for item in lic["moduleList"]:
+        if item["module"] == "tool_management_bp":
+            if int(lic["grouplist"][item.get("group")]["expireTime"]) > int(time.time() * 1000):
                 total_up_value = int(item["value"])
 
     if total_up_value != 99999 and total_count >= total_up_value:
-        return response_ok({"error": "应用数量已达到上限"})
+        return {"tool": zip_filename, "msg": "应用数量已达到上限"}
 
-    config_data, version, tool_name, msg = await unzip(zip_file.body, creator, single_progress, resp, success_progress, request.app.ctx.cache_client, request.ctx.session["id"], tenant_id)
+    config_data, version, tool_name, msg = await unzip(zip_file.body, creator, request.app.ctx.cache_client, request.ctx.session["id"], tenant_id)
     if msg != "success":
-        results.append({"tool": zip_filename, "msg": msg})
-        data += 1
-        percent = int((data * single_progress))
-        success_progress = percent
-        await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
-        return results, success_progress, data
+        return {"tool": zip_filename, "msg": msg}
 
     if "actions" in config_data.keys():
         action_key = "actions"
     else:
-        results.append({"tool": zip_filename, "msg": "config文件内容错误，缺失actions字段"})
-        data += 1
-        percent = int((data * single_progress))
-        success_progress = percent
-        return results, success_progress, data
+        return {"tool": zip_filename, "msg": "config文件内容错误，缺失actions字段"}
+
     health_check = 0
     for action in config_data.get(action_key):
         if "health_check" == action.get("func"):
@@ -216,18 +213,11 @@ async def upload_tool(zip_file, lic, creator, single_progress, resp, success_pro
         configuration.resources = config_data.get("resource")
         await configuration.save()
 
-    results.append({"tool": zip_filename, "msg": msg})
-
-    data += 1
-    percent = int((data * single_progress))
-    success_progress = percent
-    await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
-    return results, success_progress, data
+    return {"tool": zip_filename, "msg": msg}
 
 
-async def unzip(zip_data, creator, single_progress, resp, success_progress, redis_client, token_id, tenant_id):
+async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
     try:
-        data = 0
         zip_buffer = BytesIO(zip_data)
         logo_data = None
 
@@ -248,8 +238,6 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 
             if config_path.filename.replace("\\", "/") != "config.json":
                 return None, None, None, "config文件需要在最外层目录下"
-
-            single_progress = single_progress / 10
 
             with zip_ref.open(config_path) as config_file:
                 config_data = orjson.loads(config_file.read().decode())
@@ -279,9 +267,6 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
                     tool_name,
                     "Unsupported hash type. Use 'md5', 'sha1', 'sha256', or 'sha512'.",
                 )
-            data += 1
-            percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             hasher = hash_func()
             zip_buffer.seek(0)  # 确保从头开始读取数据
@@ -290,16 +275,10 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 
             if not config_path:
                 return config_data, version, tool_name, "缺失config文件"
-            data += 1
-            percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             missing_files = set(EXPECTED_STRUCTURE["required_files"]) - actual_files
             if missing_files:
                 return config_data, version, tool_name, "缺失config文件"
-            data += 1
-            percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             name = config_data.get("name")
             py_file_name = config_data.get("main")
@@ -335,15 +314,9 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 
             if not py_file_name:
                 return config_data, version, tool_name, "config文件内容错误"
-            data += 1
-            percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             if py_file_name not in py_files_dict:
                 return config_data, version, tool_name, "缺失py文件"
-            data += 1
-            percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             if logo_name not in actual_files:
                 return config_data, version, tool_name, "缺少logo文件"
@@ -364,18 +337,12 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
 
             if not logo_found:
                 return config_data, version, tool_name, "缺少logo文件"
-            data += 1
-            percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             with zip_ref.open(py_files_dict[py_file_name]) as py_file:
                 py_data = py_file.read().decode()
 
             if any(f"def {class_name}(" not in py_data for class_name in class_name_list):
                 return config_data, version, tool_name, "Python文件内容错误"
-            data += 1
-            percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).first().values("resources")
             if configuration and configuration["resources"] != config_data.get("resource", {}):
@@ -394,15 +361,9 @@ async def unzip(zip_data, creator, single_progress, resp, success_progress, redi
                             tool_name,
                             "工具资源不一致，请新建工具或删除原工具后再次上传",
                         )
-            data += 1
-            percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id, version=hasher.hexdigest()).exists():
                 return config_data, version, tool_name, "工具已存在"
-            data += 1
-            percent = int(data * single_progress) + success_progress
-            await resp.send(f"data: 解压进度：{percent}%\n\n") if resp else None
 
             version = hasher.hexdigest()
             suffix = logo_name.split(".")[-1]
