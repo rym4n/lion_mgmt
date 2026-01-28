@@ -251,9 +251,7 @@ class AgentGateway:
 
         payload = {
             "name": f"secops_{warroom_id[:8]}",
-            "compaction_settings": {
-                "model": RY_AGENT_DEFAULT_LLM
-            },
+            "compaction_settings": {"model": RY_AGENT_DEFAULT_LLM},
             "system": system_prompt,
             "memory_blocks": [
                 {"label": "human", "value": human_text},
