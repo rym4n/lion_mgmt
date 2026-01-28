@@ -413,6 +413,8 @@ class ChatManager:
                 await self._handle_private_message(user, data, tenant_id)
             elif message_type == "audit":
                 await self._handle_audit_message(user, data, tenant_id)
+            elif message_type == "file":
+                await self._handle_file_message(user, data, tenant_id)
             elif message_type == "recall":
                 await self._handle_recall_message(user, data, tenant_id)
                 await ws.send(orjson.dumps({"type": "recall_success", "message_id": data.get("message_id")}).decode())
@@ -662,6 +664,37 @@ class ChatManager:
         except Exception as e:
             logger.error(f"{e} | {traceback.format_exc()}")
             raise Exception("查询超时审批失败")
+
+    async def _handle_file_message(self, user: Account, data: dict, tenant_id):
+        """处理发送文件消息"""
+        current_room_id = data.get("room_id")
+        room = await Room.filter(id=current_room_id, tenant_id=tenant_id).get()
+        if not room:
+            raise Exception("作战室不存在")
+
+        content = data.get("content", "")
+        image_content = data.get("image_content", "")
+
+        if not content and not image_content:
+            raise Exception("消息不能为空")
+
+        # 保存消息到数据库
+        message = await Message.create(type="file", sender=user, room=room, content=content, image_content=image_content, receiver=user, tenant_id=tenant_id)  # 群聊消息设为发送者自己作为占位符
+
+        # 广播
+        message_data = {
+            "type": "file",
+            "message_id": str(message.id),
+            "sender_id": user.id,
+            "sender_name": user.username,
+            "sender_display_name": user.display_name,
+            "content": content,
+            "image_content": image_content,
+            "timestamp": str(message.ctime),
+            "room_id": current_room_id,
+        }
+
+        await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
     async def _handle_recall_message(self, user: Account, data: dict, tenant_id):
         """处理消息撤回"""

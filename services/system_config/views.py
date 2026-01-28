@@ -1269,7 +1269,7 @@ async def update_maintenance_mode_status(request):
 @system_bp.post("/up-file")
 @openapi.definition(
     summary="上传文件",
-    description="上传文件，需要audit:r权限",
+    description="上传文件",
     body={
         "multipart/form-data": {
             "schema": {
@@ -1317,7 +1317,6 @@ async def update_maintenance_mode_status(request):
         }
     },
 )
-@requires_permission("audit:r")
 async def update_file(request):
     if not request.files or "file" not in request.files:
         raise CustomError(ErrorCode.PARAM_ERROR)
