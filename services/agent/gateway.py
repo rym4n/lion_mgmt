@@ -254,7 +254,6 @@ class AgentGateway:
             "model": RY_AGENT_DEFAULT_LLM,
             "model_settings": {"max_output_tokens": 8000, "parallel_tool_calls": True, "provider_type": "openai", "reasoning": {"reasoning_effort": "medium"}, "response_format": {"type": "text"}, "strict": True, "temperature": 0.1},
             "system": system_prompt,
-            "embedding": RY_EMBEDDING_MODEL,
             "memory_blocks": [
                 {"label": "human", "value": human_text},
                 {"label": "persona", "value": persona_text},

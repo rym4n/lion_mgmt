@@ -255,5 +255,5 @@ RY_EMBEDDING_API_KEY = os.environ.get("RY_EMBEDDING_API_KEY", "")
 RY_EMBEDDING_API_BASE = os.environ.get("RY_EMBEDDING_API_BASE", "https://api-inference.modelscope.cn/v1")
 
 # Agent 默认配置
-RY_AGENT_DEFAULT_LLM = os.environ.get("RY_AGENT_MODEL", "gpt-4o")
+RY_AGENT_DEFAULT_LLM = os.environ.get("RY_AGENT_MODEL", "openai-proxy/gpt-4o")
 RY_AGENT_CONTEXT_WINDOW = int(os.environ.get("RY_AGENT_CONTEXT_WINDOW", "8000"))
