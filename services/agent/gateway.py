@@ -9,6 +9,7 @@ import orjson
 from sanic.log import logger
 
 from models.agent import AgentMapping
+from settings import RY_AGENT_DEFAULT_LLM
 
 from .prompts import INITIAL_PERSONA_BLOCK, build_members_roster, build_system_prompt
 from .tools import register_tools_to_agent_server
@@ -250,13 +251,14 @@ class AgentGateway:
 
         payload = {
             "name": f"secops_{warroom_id[:8]}",
-            "system": system_prompt,
-            "memory": {
-                "blocks": [
-                    {"label": "human", "value": human_text},
-                    {"label": "persona", "value": persona_text},
-                ]
+            "compaction_settings": {
+                "model": RY_AGENT_DEFAULT_LLM
             },
+            "system": system_prompt,
+            "memory_blocks": [
+                {"label": "human", "value": human_text},
+                {"label": "persona", "value": persona_text},
+            ],
             "tools": tool_names,
         }
 
