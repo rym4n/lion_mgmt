@@ -474,7 +474,7 @@ async def all_tools(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    subquery = Tool.filter(deleted=False, tenant_id=tenant_id).annotate(max_version=Max("version")).group_by("name")
+    subquery = Tool.filter(deleted=False, tenant_id=tenant_id).annotate(latest_ctime=Max("ctime")).group_by("name")
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     subquery = subquery.filter(maintain=maintenance_mode if maintenance_mode else False)
     if key:
@@ -494,12 +494,12 @@ async def all_tools(request):
         subquery = subquery.filter(cond)
     if req_json.get("tag"):
         subquery = subquery.filter(tag__contains=[req_json.get("tag")])
-    subquery_results = await subquery.values("name", "max_version")
+    subquery_results = await subquery.values("name", "latest_ctime")
     if not subquery_results:
         return response_ok({"tools": [], "total": 0, "page": page, "size": size, "total_pages": 0})
     condition = Q()
     for pair in subquery_results:
-        condition |= Q(name=pair["name"], version=pair["max_version"])
+        condition |= Q(name=pair["name"], ctime=pair["latest_ctime"])
 
     latest_tools = await Tool.filter(condition, deleted=False, tenant_id=tenant_id).offset((page - 1) * size).limit(size).values()
     for tool in latest_tools:
