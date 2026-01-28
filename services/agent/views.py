@@ -77,9 +77,8 @@ async def _generate_embedding(text: str) -> list[float]:
             }
         }
     },
-    response=[
-        {
-            "status": 200,
+    response={
+        "200": {
             "description": "成功",
             "content": {
                 "application/json": {
@@ -105,7 +104,7 @@ async def _generate_embedding(text: str) -> list[float]:
                 }
             },
         }
-    ],
+    },
 )
 @requires_permission("warroom:r")
 async def chat(request):
@@ -157,9 +156,8 @@ async def chat(request):
             }
         }
     },
-    response=[
-        {
-            "status": 200,
+    response={
+        "200": {
             "description": "SSE 流式响应",
             "content": {
                 "text/event-stream": {
@@ -170,7 +168,7 @@ async def chat(request):
                 }
             },
         }
-    ],
+    },
 )
 @requires_permission("warroom:r")
 async def chat_stream(request):
@@ -236,9 +234,8 @@ async def chat_stream(request):
             }
         }
     },
-    response=[
-        {
-            "status": 200,
+    response={
+        "200": {
             "description": "成功",
             "content": {
                 "application/json": {
@@ -259,7 +256,7 @@ async def chat_stream(request):
                 }
             },
         }
-    ],
+    },
 )
 @requires_permission("warroom:r")
 async def get_state(request):
@@ -296,9 +293,8 @@ async def get_state(request):
             }
         }
     },
-    response=[
-        {
-            "status": 200,
+    response={
+        "200": {
             "description": "成功",
             "content": {
                 "application/json": {
@@ -319,7 +315,7 @@ async def get_state(request):
                 }
             },
         }
-    ],
+    },
 )
 @requires_permission("warroom:c")
 async def init_agent(request):
@@ -357,9 +353,8 @@ async def init_agent(request):
             }
         }
     },
-    response=[
-        {
-            "status": 200,
+    response={
+        "200": {
             "description": "成功",
             "content": {
                 "application/json": {
@@ -380,7 +375,7 @@ async def init_agent(request):
                 }
             },
         }
-    ],
+    },
 )
 @requires_permission("warroom:u")
 async def archive_agent(request):
@@ -414,9 +409,8 @@ async def archive_agent(request):
             }
         }
     },
-    response=[
-        {
-            "status": 200,
+    response={
+        "200": {
             "description": "成功",
             "content": {
                 "application/json": {
@@ -453,7 +447,7 @@ async def archive_agent(request):
                 }
             },
         }
-    ],
+    },
 )
 @requires_permission("agent:r")
 async def list_knowledge(request):
@@ -508,9 +502,8 @@ async def list_knowledge(request):
             }
         }
     },
-    response=[
-        {
-            "status": 200,
+    response={
+        "200": {
             "description": "成功",
             "content": {
                 "application/json": {
@@ -530,7 +523,7 @@ async def list_knowledge(request):
                 }
             },
         }
-    ],
+    },
 )
 @requires_permission("agent:u")
 async def review_knowledge(request):
@@ -573,9 +566,8 @@ async def review_knowledge(request):
             }
         }
     },
-    response=[
-        {
-            "status": 200,
+    response={
+        "200": {
             "description": "成功",
             "content": {
                 "application/json": {
@@ -595,7 +587,7 @@ async def review_knowledge(request):
                 }
             },
         }
-    ],
+    },
 )
 @requires_permission("agent:c")
 async def upload_knowledge(request):
@@ -625,9 +617,8 @@ async def upload_knowledge(request):
 @openapi.definition(
     summary="获取当前用户的 Agent 偏好",
     description="获取当前用户的 Agent 偏好设置",
-    response=[
-        {
-            "status": 200,
+    response={
+        "200": {
             "description": "成功",
             "content": {
                 "application/json": {
@@ -651,7 +642,7 @@ async def upload_knowledge(request):
                 }
             },
         }
-    ],
+    },
 )
 @requires_permission("agent:r")
 async def get_preference(request):
@@ -696,9 +687,8 @@ async def get_preference(request):
             }
         }
     },
-    response=[
-        {
-            "status": 200,
+    response={
+        "200": {
             "description": "成功",
             "content": {
                 "application/json": {
@@ -722,7 +712,7 @@ async def get_preference(request):
                 }
             },
         }
-    ],
+    },
 )
 @requires_permission("agent:u")
 async def agent_update_preference(request):
