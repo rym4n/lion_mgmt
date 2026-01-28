@@ -15,6 +15,7 @@ class Config(BaseModel):
     value = EncryptedCharField(max_length=4000, null=False, description="配置值")
     type: str = fields.CharField(max_length=255, null=True, description="配置状态")
     module: str = fields.CharField(max_length=255, description="所属模块")
+    default: bool = fields.BooleanField(default=True, description="默认标识")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -29,6 +30,7 @@ class Config(BaseModel):
             "value": self.value,
             "type": self.type,
             "module": self.module,
+            "default": self.default,
         }
 
     class Meta:
