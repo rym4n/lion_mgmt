@@ -143,10 +143,18 @@ class AgentGateway:
 
         async with self.client.stream("POST", f"{self.base_url}/v1/agents/{agent_id}/messages", json={"messages": [{"role": "user", "content": formatted_msg}], "streaming": True}) as response:
             async for line in response.aiter_lines():
-                if not line.startswith("data: "):
+                if not line or not line.strip():
                     continue
 
-                data_str = line[6:]  # Strip "data: "
+                # 处理 SSE 格式: 支持 "data: {...}" 和直接 JSON
+                if line.startswith("data: "):
+                    data_str = line[6:]  # Strip "data: "
+                elif line.startswith("{"):
+                    data_str = line
+                else:
+                    logger.debug(f"SSE skip non-data line: {line[:50]}")
+                    continue
+
                 if data_str == "[DONE]":
                     break
 
@@ -161,8 +169,11 @@ class AgentGateway:
                     elif msg_type == "tool_call_message":
                         tool_call = chunk.get("tool_call", {})
                         yield {"type": "tool_call", "data": {"name": tool_call.get("name"), "arguments": tool_call.get("arguments")}}
-                except orjson.JSONDecodeError:
-                    continue
+                    elif msg_type:
+                        # 记录未知类型便于调试
+                        logger.warning(f"SSE unknown message_type: {msg_type}, chunk: {data_str[:200]}")
+                except orjson.JSONDecodeError as e:
+                    logger.warning(f"SSE JSON parse error: {e}, line: {line[:200]}")
 
         # 对话结束，获取最新 L1
         agent_state = await self._get_agent_state(agent_id)
