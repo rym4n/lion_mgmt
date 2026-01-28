@@ -9,11 +9,10 @@ import re
 import secrets
 import uuid
 import zipfile
+
+from aiocache import caches
 import orjson
 import pytz
-
-from services.tools.views import upload_tool
-from aiocache import caches
 from sanic import Blueprint
 from sanic.response import raw
 from sanic_ext import openapi
@@ -28,9 +27,9 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import (
     check_playbook_permission,
+    load_license,
     playbook_permission,
     requires_permission,
-    load_license,
 )
 from libs.utils import gen_run_id, strip_timezone_to_seconds
 from models import (
@@ -49,6 +48,7 @@ from models import (
     ToolAction,
     ToolResources,
 )
+from services.tools.views import upload_tool
 from services.tools.views import tool_action_playbook_delete, tool_action_update
 from settings import TASK_TOPIC, TZ
 
