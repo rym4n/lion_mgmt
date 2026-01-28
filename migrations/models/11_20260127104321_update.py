@@ -13,7 +13,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
 async def downgrade(db: BaseDBAsyncClient) -> str:
     return """
         ALTER TABLE "agent_mapping" RENAME TO "secops_agent_mapping";
-        COMMENT ON COLUMN "agent_mapping"."agent_id" IS 'Letta Agent ID';
+        COMMENT ON COLUMN "agent_mapping"."agent_id" IS 'Agent ID';
         ALTER TABLE "agent_user_preference" RENAME TO "secops_user_preference";"""
 
 

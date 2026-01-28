@@ -163,7 +163,7 @@ async def action_handler(request):
     # Validate input
     if not data.get("required_field"):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    
+
     # Business logic
     result = await Model.create(**data)
     return response_ok(result.json)
@@ -179,7 +179,7 @@ from tortoise import fields
 
 class MyModel(BaseModel):
     name: str = fields.CharField(max_length=255)
-    
+
     @property
     def json(self) -> dict:
         return {
@@ -187,7 +187,7 @@ class MyModel(BaseModel):
             "ctime": strip_timezone_to_seconds(self.ctime),
             "name": self.name,
         }
-    
+
     class Meta:
         table = "my_model"
         ordering = ["-utime"]
@@ -215,7 +215,7 @@ async with in_transaction():
 
 # Permission decorator pattern
 @requires_permission("user:r")  # Read permission
-@requires_permission("user:c")  # Create permission  
+@requires_permission("user:c")  # Create permission
 @requires_permission("user:u")  # Update permission
 @requires_permission("user:d")  # Delete permission
 
@@ -251,13 +251,13 @@ return response_ok({
 Integrated intelligent agent for security operations.
 
 **Features:**
-- 5-layer memory architecture (L1-L5) using Letta
+- 5-layer memory architecture (L1-L5) using Agent
 - Autonomous playbook execution
 - Warroom integration (auto-trigger, chat)
 - Knowledge base with vector search (pgvector)
 
 **Configuration:**
-See `settings/__init__.py` for Letta and Embedding config.
+See `settings/__init__.py` for Agent and Embedding config.
 
 ## Key Patterns
 
