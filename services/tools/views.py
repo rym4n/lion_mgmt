@@ -155,7 +155,7 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
     for item in lic["moduleList"]:
         if item["module"] == "tool_management_bp":
             if int(lic["grouplist"][item.get("group")]["expireTime"]) > int(time.time() * 1000):
-                total_up_value = int(item["value"])
+                total_up_value = int(lic["grouplist"][item.get("group")]["value"])
 
     if total_up_value != 99999 and total_count >= total_up_value:
         return {"tool": zip_filename, "msg": "应用数量已达到上限"}
