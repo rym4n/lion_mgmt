@@ -993,7 +993,7 @@ async def search_audit(request):
     data = []
     if data_res:
         # 内存分页
-        page_data = data_res[offset: offset + size]
+        page_data = data_res[offset : offset + size]
         for item in page_data:
             # 格式化时间，VictoriaLogs返回的_time通常是RFC3339格式，这里需要处理
             utc_str = item.get("_time")

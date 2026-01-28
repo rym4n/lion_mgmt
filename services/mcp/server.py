@@ -14,7 +14,6 @@ from models import Playbook, PlaybookVersion, Room
 from models.user import Account
 from settings import TASK_TOPIC
 
-
 # Initialize MCP Server
 # mcp_server = Server("lion-mgmt")
 

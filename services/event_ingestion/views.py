@@ -1781,17 +1781,17 @@ async def transforms_del(request):
 async def transforms_export(request):
     ids = request.json.get("ids")
     tenant_id = request.ctx.session.get("tenant_id")
-    
+
     query = Q(deleted=False, module="transforms") & (Q(tenant_id=tenant_id) | Q(default=True))
     if ids:
         query &= Q(id__in=ids)
-    
+
     transforms = await Config.filter(query).all()
-    
+
     data = [transform.json for transform in transforms]
-    
+
     file_content = orjson.dumps(data, option=orjson.OPT_INDENT_2)
-    
+
     return response.raw(
         file_content,
         headers={
@@ -1841,28 +1841,28 @@ async def transforms_import(request):
     files = request.files.get("files")
     if not files:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    
+
     if not isinstance(files, list):
         files = [files]
-    
+
     tenant_id = request.ctx.session.get("tenant_id")
-    
+
     for file in files:
         try:
             content = file.body
             configs = orjson.loads(content)
             if not isinstance(configs, list):
                 configs = [configs]
-            
+
             for config_data in configs:
                 key = config_data.get("key")
                 value = config_data.get("value")
                 type_ = config_data.get("type")
                 default = config_data.get("default", False)
-                
+
                 if not key or not value:
                     continue
-                
+
                 existing = await Config.get_or_none(key=key, module="transforms", tenant_id=tenant_id)
                 if existing:
                     existing.value = value
@@ -1872,16 +1872,9 @@ async def transforms_import(request):
                     existing.deleted = False
                     await existing.save()
                 else:
-                    await Config.create(
-                        key=key,
-                        value=value,
-                        type=type_,
-                        module="transforms",
-                        default=default,
-                        tenant_id=tenant_id
-                    )
+                    await Config.create(key=key, value=value, type=type_, module="transforms", default=default, tenant_id=tenant_id)
         except Exception as e:
             logger.error(f"Import transforms failed: {e}")
             raise CustomError(ErrorCode.PARAM_ERROR)
-            
+
     return response_ok("success")
