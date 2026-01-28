@@ -242,7 +242,6 @@ async def register_tools_to_agent_server(client, tenant_id: str):
     for tool in tools:
         try:
             payload = {
-                "name": tool["name"],
                 "description": tool["description"],
                 "source_type": tool["source_type"],
                 "source_code": tool["source_code"],
@@ -252,7 +251,8 @@ async def register_tools_to_agent_server(client, tenant_id: str):
             response = await client.post("/v1/tools/", json=payload)
             if response.status_code == 409:  # Already exists
                 continue
-            response.raise_for_status()
+            if response.status_code != 200:
+                logger.error(f"Tool registration failed: {response.text}")
 
         except Exception as e:
             logger.warning(f"Tool {tool['name']} registration warning: {e}")

@@ -83,7 +83,7 @@ async def warroom_ws(request: Request, ws: Websocket):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["name","room_type"],
+                "required": ["name", "room_type"],
                 "properties": {
                     "name": {"type": "string", "description": "作战室名称"},
                     "members": {
@@ -871,13 +871,7 @@ async def query_messages(request: Request):
         condition &= Q(content__contains=keyword)
 
     total_count = await Message.filter(condition).count()
-    messages = (
-        await Message.filter(condition)
-        .order_by("-ctime")
-        .offset(offset)
-        .limit(limit)
-        .prefetch_related("sender")
-    )
+    messages = await Message.filter(condition).order_by("-ctime").offset(offset).limit(limit).prefetch_related("sender")
     message_list = []
     run_id_list = []
     for msg in reversed(messages):
@@ -912,6 +906,7 @@ async def query_messages(request: Request):
             "pagination": {"total": total_count, "offset": offset, "limit": limit},
         }
     )
+
 
 @warroom_bp.post("/get/list")
 @openapi.definition(

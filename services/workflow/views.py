@@ -2146,23 +2146,12 @@ async def import_workflow(request):
                 imported["skipped_versions"] += 1
                 continue
             content = zf.read(fn)
-            
+
             # 构造 MockFile 对象
             mock_file = MockFile(name=fn, body=content)
-            
-            results, _, _ = await upload_tool(
-                mock_file,
-                lic,
-                creator.username,
-                100,
-                None,
-                0,
-                tenant_id,
-                request,
-                0,
-                []
-            )
-            
+
+            results, _, _ = await upload_tool(mock_file, lic, creator.username, 100, None, 0, tenant_id, request, 0, [])
+
             if results and results[-1].get("msg") == "success":
                 imported["tools"] += 1
 

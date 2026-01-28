@@ -1,11 +1,11 @@
 # coding=utf-8
 import asyncio
 from contextlib import asynccontextmanager
-import json
 import time
 from typing import Any, AsyncIterator, Optional
 
 import httpx
+import orjson
 from sanic.log import logger
 
 from models.agent import AgentMapping
@@ -152,14 +152,14 @@ class AgentGateway:
                     break
 
                 try:
-                    chunk = json.loads(data_str)
+                    chunk = orjson.loads(data_str)
 
                     if chunk.get("message_type") == "assistant_message":
                         yield {"type": "message", "data": {"text": chunk.get("content", "")}}
                     elif chunk.get("message_type") == "function_call":
                         # Simplistic handling
                         yield {"type": "tool_call", "data": {"name": chunk.get("function_call", {}).get("name"), "arguments": chunk.get("function_call", {}).get("arguments")}}
-                except json.JSONDecodeError:
+                except orjson.JSONDecodeError:
                     continue
 
         # 对话结束，获取最新 L1
@@ -243,8 +243,8 @@ class AgentGateway:
 
         await register_tools_to_agent_server(self.client, tenant_id)
 
-        human_text = json.dumps(human_block, ensure_ascii=False, indent=2)
-        persona_text = json.dumps(INITIAL_PERSONA_BLOCK, ensure_ascii=False, indent=2)
+        human_text = orjson.dumps(human_block, ensure_ascii=False, indent=2).decode()
+        persona_text = orjson.dumps(INITIAL_PERSONA_BLOCK, ensure_ascii=False, indent=2).decode()
 
         tool_names = ["call_playbook", "list_available_playbooks", "submit_case_learning"]
 
@@ -261,6 +261,8 @@ class AgentGateway:
         }
 
         response = await self.client.post("/v1/agents/", json=payload)
+        if response.is_error:
+            logger.error(f"Agent creation failed: {response.text}")
         response.raise_for_status()
         agent_data = response.json()
         agent_id = agent_data["id"]
@@ -293,11 +295,11 @@ class AgentGateway:
             for block in blocks:
                 if block.get("label") == "persona":
                     persona_text = block.get("value", "")
-                    return json.loads(persona_text)
+                    return orjson.loads(persona_text)
 
             # Or legacy structure?
             if "persona" in memory_obj:
-                return json.loads(memory_obj["persona"])
+                return orjson.loads(memory_obj["persona"])
 
             return {}
         except Exception:
