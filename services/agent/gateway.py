@@ -243,8 +243,8 @@ class AgentGateway:
 
         await register_tools_to_agent_server(self.client, tenant_id)
 
-        human_text = orjson.dumps(human_block, ensure_ascii=False, indent=2).decode()
-        persona_text = orjson.dumps(INITIAL_PERSONA_BLOCK, ensure_ascii=False, indent=2).decode()
+        human_text = orjson.dumps(human_block).decode()
+        persona_text = orjson.dumps(INITIAL_PERSONA_BLOCK).decode()
 
         tool_names = ["call_playbook", "list_available_playbooks", "submit_case_learning"]
 
