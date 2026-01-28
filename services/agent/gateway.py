@@ -121,8 +121,7 @@ class AgentGateway:
 
         formatted_msg = f"[User: {user['display_name']} ({user['role']})] {content}"
 
-        # 调用 Agent Server API: POST /v1/agents/{agent_id}/messages
-        response = await self.client.post(f"{self.base_url}/v1/agents/{agent_id}/messages", json={"messages": [{"role": "user", "content": formatted_msg}]})
+        response = await self.client.post(f"{self.base_url}/v1/agents/{agent_id}/messages", json={"messages": [{"role": "user", "content": formatted_msg}], "streaming": False})
         response.raise_for_status()
         resp_data = response.json()
 
@@ -142,8 +141,7 @@ class AgentGateway:
 
         formatted_msg = f"[User: {user['display_name']} ({user['role']})] {content}"
 
-        # Agent Server Streaming API: POST /v1/agents/{agent_id}/messages/stream
-        async with self.client.stream("POST", f"{self.base_url}/v1/agents/{agent_id}/messages/stream", json={"messages": [{"role": "user", "content": formatted_msg}]}) as response:
+        async with self.client.stream("POST", f"{self.base_url}/v1/agents/{agent_id}/messages", json={"messages": [{"role": "user", "content": formatted_msg}], "streaming": True}) as response:
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -154,12 +152,15 @@ class AgentGateway:
 
                 try:
                     chunk = orjson.loads(data_str)
+                    msg_type = chunk.get("message_type")
 
-                    if chunk.get("message_type") == "assistant_message":
+                    if msg_type == "assistant_message":
                         yield {"type": "message", "data": {"text": chunk.get("content", "")}}
-                    elif chunk.get("message_type") == "function_call":
-                        # Simplistic handling
-                        yield {"type": "tool_call", "data": {"name": chunk.get("function_call", {}).get("name"), "arguments": chunk.get("function_call", {}).get("arguments")}}
+                    elif msg_type == "reasoning_message":
+                        yield {"type": "reasoning", "data": {"text": chunk.get("reasoning", "")}}
+                    elif msg_type == "tool_call_message":
+                        tool_call = chunk.get("tool_call", {})
+                        yield {"type": "tool_call", "data": {"name": tool_call.get("name"), "arguments": tool_call.get("arguments")}}
                 except orjson.JSONDecodeError:
                     continue
 

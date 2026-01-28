@@ -197,7 +197,13 @@ async def chat_stream(request):
     await gateway.get_or_create_agent(warroom_id, tenant_id, members)
 
     # 创建 SSE 响应
-    response = await request.respond(content_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})  # 禁用 Nginx 缓冲
+    response = await request.respond(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
     try:
         # 流式发送消息
