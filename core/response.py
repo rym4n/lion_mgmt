@@ -10,7 +10,6 @@ from typing import Any, Optional
 import orjson
 from sanic import HTTPResponse
 from sanic import json
-from sanic.log import logger
 
 from .error_code import ErrorCode
 

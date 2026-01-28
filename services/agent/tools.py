@@ -7,7 +7,7 @@ from sanic.log import logger
 from libs.kafka import aproduce
 from libs.utils import gen_run_id
 from models import PlaybookVersion, Room
-from settings import TASK_TOPIC
+from settings import TASK_TOPIC, RY_AGENT_SERVER
 
 
 async def call_playbook(playbook_name: str, params: Dict[str, Any], warroom_id: Optional[str] = None, executor_id: Optional[str] = None, tenant_id: Optional[str] = None) -> str:
@@ -248,7 +248,7 @@ async def register_tools_to_agent_server(client, tenant_id: str):
                 "args_json_schema": tool["args_json_schema"],
             }
 
-            response = await client.post("/v1/tools/", json=payload)
+            response = await client.post(f"{RY_AGENT_SERVER}/v1/tools/", json=payload)
             if response.status_code == 409:  # Already exists
                 continue
             if response.status_code != 200:

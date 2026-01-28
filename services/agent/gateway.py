@@ -9,7 +9,7 @@ import orjson
 from sanic.log import logger
 
 from models.agent import AgentMapping
-from settings import RY_AGENT_DEFAULT_LLM, RY_EMBEDDING_MODEL
+from settings import RY_AGENT_DEFAULT_LLM
 
 from .prompts import INITIAL_PERSONA_BLOCK, build_members_roster, build_system_prompt
 from .tools import register_tools_to_agent_server
@@ -122,7 +122,7 @@ class AgentGateway:
         formatted_msg = f"[User: {user['display_name']} ({user['role']})] {content}"
 
         # 调用 Agent Server API: POST /v1/agents/{agent_id}/messages
-        response = await self.client.post(f"/v1/agents/{agent_id}/messages", json={"messages": [{"role": "user", "content": formatted_msg}]})
+        response = await self.client.post(f"{self.base_url}/v1/agents/{agent_id}/messages", json={"messages": [{"role": "user", "content": formatted_msg}]})
         response.raise_for_status()
         resp_data = response.json()
 
@@ -143,7 +143,7 @@ class AgentGateway:
         formatted_msg = f"[User: {user['display_name']} ({user['role']})] {content}"
 
         # Agent Server Streaming API: POST /v1/agents/{agent_id}/messages/stream
-        async with self.client.stream("POST", f"/v1/agents/{agent_id}/messages/stream", json={"messages": [{"role": "user", "content": formatted_msg}]}) as response:
+        async with self.client.stream("POST", f"{self.base_url}/v1/agents/{agent_id}/messages/stream", json={"messages": [{"role": "user", "content": formatted_msg}]}) as response:
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -183,7 +183,7 @@ class AgentGateway:
 
         # 删除 Agent: DELETE /v1/agents/{agent_id}
         try:
-            await self.client.delete(f"/v1/agents/{agent_id}")
+            await self.client.delete(f"{self.base_url}/v1/agents/{agent_id}")
         except Exception as e:
             logger.warning(f"Failed to delete agent {agent_id}: {e}")
 
@@ -201,7 +201,7 @@ class AgentGateway:
     # --- Internal Helpers ---
 
     async def _get_agent_state(self, agent_id: str) -> dict:
-        response = await self.client.get(f"/v1/agents/{agent_id}")
+        response = await self.client.get(f"{self.base_url}/v1/agents/{agent_id}")
         response.raise_for_status()
         return response.json()
 
@@ -261,7 +261,7 @@ class AgentGateway:
             "tools": tool_names,
         }
 
-        response = await self.client.post("/v1/agents/", json=payload)
+        response = await self.client.post(f"{self.base_url}/v1/agents/", json=payload)
         if response.is_error:
             logger.error(f"Agent creation failed: {response.text}")
         response.raise_for_status()
@@ -282,7 +282,7 @@ class AgentGateway:
         4. 经验教训
         5. 是否为误报
         """
-        response = await self.client.post(f"/v1/agents/{agent_id}/messages", json={"messages": [{"role": "user", "content": reflection_prompt}]})
+        response = await self.client.post(f"{self.base_url}/v1/agents/{agent_id}/messages", json={"messages": [{"role": "user", "content": reflection_prompt}]})
         resp_data = response.json()
         return self._extract_tool_calls(resp_data)
 
