@@ -83,7 +83,22 @@ NODE_TYPE = {
             }
         }
     },
-    response={"events": [], "total": 0, "page": 1, "size": 15, "total_pages": 0},
+    response={
+        "200": {
+            "description": "Success",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "events": [],
+                        "total": 0,
+                        "page": 1,
+                        "size": 15,
+                        "total_pages": 0,
+                    }
+                }
+            },
+        }
+    },
 )
 @requires_permission("event:r")
 async def get_all_events(request):
@@ -567,7 +582,12 @@ async def get_activity_result(request, activityId):
         "event_ingestion_id": "事件接入id",
         "log_data": "日志数据",
     },
-    response={"code": 0, "data": "创建成功", "message": "创建成功"},
+    response={
+        "200": {
+            "description": "创建成功",
+            "content": {"application/json": {"example": {"code": 0, "data": "创建成功", "message": "创建成功"}}},
+        }
+    },
 )
 @requires_permission("event:c")
 async def create_event(request):
@@ -607,7 +627,12 @@ async def create_event(request):
     summary="获取事件详情",
     description="获取事件详情（需要事件查询权限）",
     body={"id": "事件id"},
-    response={"code": 0, "data": {}, "message": "成功"},
+    response={
+        "200": {
+            "description": "Success",
+            "content": {"application/json": {"example": {"code": 0, "data": {}, "message": "成功"}}},
+        }
+    },
 )
 @requires_permission("event:r")
 async def get_event_detail(request):
@@ -672,7 +697,12 @@ async def get_event_detail(request):
         "event_process_status": "事件处理状态",
         "room_user_id": "作战室新增用户id",
     },
-    response={"code": 0, "data": "更新成功", "message": "更新成功"},
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {"application/json": {"example": {"code": 0, "data": "更新成功", "message": "更新成功"}}},
+        }
+    },
 )
 @requires_permission("event:u")
 async def update_event(request):
@@ -765,19 +795,28 @@ async def create_ai_report(event_id, tenant_id):
     description="获取报告下载链接",
     body={"event_id": "事件id"},
     response={
-        "code": 0,
-        "data": {
-            "status": "success",
-            "result": {
-                "code": 0,
-                "msg": "",
-                "data": {
-                    "download_link": "https://192.168.12.254/api/system/down-file/9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx",
-                    "file_id": "9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx",
-                },
+        "200": {
+            "description": "生成成功",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 0,
+                        "data": {
+                            "status": "success",
+                            "result": {
+                                "code": 0,
+                                "msg": "",
+                                "data": {
+                                    "download_link": "https://192.168.12.254/api/system/down-file/9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx",
+                                    "file_id": "9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx",
+                                },
+                            },
+                        },
+                        "message": "生成成功",
+                    }
+                }
             },
-        },
-        "message": "生成成功",
+        }
     },
 )
 @requires_permission("event:c")

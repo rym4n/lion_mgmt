@@ -40,7 +40,12 @@ _all__ = ["tenant_bp"]
             }
         }
     },
-    response={"tenants": [], "total": 0, "page": 1, "size": 15, "total_pages": 0},
+    response={
+        "200": {
+            "description": "Success",
+            "content": {"application/json": {"example": {"tenants": [], "total": 0, "page": 1, "size": 15, "total_pages": 0}}},
+        }
+    },
 )
 @requires_permission("tenant:r")
 async def get_tenant(request):
@@ -84,7 +89,7 @@ async def get_tenant(request):
             }
         }
     },
-    response={"添加成功"},
+    response={"200": {"description": "添加成功"}},
 )
 @requires_permission("tenant:c")
 async def add_tenant(request):
@@ -121,7 +126,7 @@ async def add_tenant(request):
             }
         }
     },
-    response={"删除成功"},
+    response={"200": {"description": "删除成功"}},
 )
 @requires_permission("tenant:d")
 async def del_tenant(request):
@@ -174,7 +179,7 @@ async def del_tenant(request):
             }
         }
     },
-    response={"更新成功"},
+    response={"200": {"description": "更新成功"}},
 )
 @requires_permission("tenant:u")
 async def edit_tenant(request):
@@ -246,7 +251,7 @@ async def edit_tenant(request):
             }
         }
     },
-    response={"切换成功"},
+    response={"200": {"description": "切换成功"}},
 )
 @requires_permission("tenant:r")
 async def switch_tenant(request):
@@ -287,7 +292,12 @@ async def switch_tenant(request):
             }
         }
     },
-    response={"tenants": []},
+    response={
+        "200": {
+            "description": "Success",
+            "content": {"application/json": {"example": {"tenants": []}}},
+        }
+    },
 )
 async def get_account_tenant(request):
     account = request.ctx.session["account_info"]
@@ -316,7 +326,12 @@ async def get_account_tenant(request):
             }
         }
     },
-    response={"tenants": []},
+    response={
+        "200": {
+            "description": "Success",
+            "content": {"application/json": {"example": {"tenants": []}}},
+        }
+    },
 )
 @requires_permission("tenant:c, u")
 async def get_all_user_info(request):
@@ -364,7 +379,12 @@ async def get_all_user_info(request):
             }
         }
     },
-    response={"tenants": []},
+    response={
+        "200": {
+            "description": "Success",
+            "content": {"application/json": {"example": {"tenants": []}}},
+        }
+    },
 )
 @requires_permission("tenant:r")
 async def get_tenant_user(request):

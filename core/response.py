@@ -23,10 +23,6 @@ def response_ok(data: Any = None) -> HTTPResponse:
     """
     # 内容
     content: dict[str, Any] = {"code": 0, "data": data}
-    try:
-        orjson.dumps(content)
-    except Exception as e:
-        logger.error(f"response_ok dumps error: {e} | content: {content}")
     return json(content, dumps=orjson.dumps)
 
 
