@@ -9,7 +9,7 @@ import orjson
 from sanic.log import logger
 
 from models.agent import AgentMapping
-from settings import RY_AGENT_DEFAULT_LLM
+from settings import RY_AGENT_DEFAULT_LLM, RY_EMBEDDING_MODEL
 
 from .prompts import INITIAL_PERSONA_BLOCK, build_members_roster, build_system_prompt
 from .tools import register_tools_to_agent_server
@@ -251,8 +251,10 @@ class AgentGateway:
 
         payload = {
             "name": f"secops_{warroom_id[:8]}",
-            "compaction_settings": {"model": RY_AGENT_DEFAULT_LLM},
+            "model": RY_AGENT_DEFAULT_LLM,
+            "model_settings": {"max_output_tokens": 8000, "parallel_tool_calls": True, "provider_type": "openai", "reasoning": {"reasoning_effort": "medium"}, "response_format": {"type": "text"}, "strict": True, "temperature": 0.1},
             "system": system_prompt,
+            "embedding": RY_EMBEDDING_MODEL,
             "memory_blocks": [
                 {"label": "human", "value": human_text},
                 {"label": "persona", "value": persona_text},
