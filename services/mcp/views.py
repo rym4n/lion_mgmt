@@ -1,9 +1,9 @@
-from uuid import uuid4, UUID
+from uuid import UUID, uuid4
 
 import anyio
-import orjson
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
+import orjson
 from sanic import Blueprint, Request, response
 from sanic.log import logger
 
@@ -103,8 +103,7 @@ async def handle_sse(request: Request):
                 del _write_stream_writers[session_id]
             # 取消服务器任务？tg将等待/取消
             tg.cancel_scope.cancel()
-
-    return resp
+            await resp.eof()
 
 
 @mcp_bp.post("/messages")

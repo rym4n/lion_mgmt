@@ -217,12 +217,11 @@ async def chat_stream(request):
 
         # 发送结束事件
         await response.send("event: done\ndata: {}\n\n")
-
     except Exception as e:
         logger.error(f"Stream error: {e}")
         await response.send(f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n")
-
-    return response
+    finally:
+        await response.eof()
 
 
 @agent_bp.post("/state")
