@@ -12,7 +12,6 @@ from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.exceptions import DoesNotExist, IntegrityError
 from tortoise.expressions import Q
-from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -861,8 +860,6 @@ async def logout(request):
     await request.app.ctx.cache_client.delete(f"account_{request.ctx.session['sub']}")
 
     if request.app.ctx.oauth_cfg.get("use_oauth2") == "true":
-        # todo: 联动oauth2登出
-        # request.app.ctx.oauth2.revoke_token(request.ctx.session.get('token'))
         resp = response.redirect(f"https://{request.host}/api/user/oauth/login?redirect=https://{request.host}/%23%2Fwelcome")
     else:
         resp = response_ok("登出成功")
@@ -1304,13 +1301,10 @@ async def oauth2_callback(request):
     state = request.args.get("state")
     logger.info(f"oauth2 callback: code={code}, state={state}")
     logger.info(f"oauth2 config: {request.app.ctx.oauth_cfg}")
-    redirect_url = await request.app.ctx.cache_client.get(state)
-    if not redirect_url:
-        redirect_url = "https://" + request.host + "#/welcome"
-    logger.info(f"oauth2 redirect_url: {redirect_url}")
-
-    token_info = await request.app.ctx.oauth2.get_access_token(code, "https://" + request.host + "/api/user/oauth/callback")
-    logger.info(f"token_info: {token_info}")
+    cb_url = "https://" + request.host + "/api/user/oauth/callback"
+    logger.info(f"get_access_token: code={code}, redirect_uri={cb_url}")
+    token_info = await request.app.ctx.oauth2.get_access_token(code, cb_url)
+    logger.info(f"user token: {token_info}")
     access_token = jsonpath(token_info, request.app.ctx.oauth_cfg["token_path"])
     if not access_token:
         raise CustomError(ErrorCode.GET_ACCESS_TOKEN_ERROR)
@@ -1383,6 +1377,10 @@ async def oauth2_callback(request):
     )
     await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
 
+    redirect_url = await request.app.ctx.cache_client.get(state)
+    if not redirect_url:
+        redirect_url = "https://" + request.host + "#/welcome"
+    logger.info(f"用户最终访问地址: {redirect_url}")
     resp = response.redirect(redirect_url)
     resp.cookies.add_cookie(
         "aioe-auth",

@@ -1,6 +1,6 @@
 # coding=utf-8
-import traceback
 from asyncio.base_events import BaseEventLoop
+import traceback
 
 from aiocache import caches
 from httpx_oauth.oauth2 import OAuth2
@@ -10,6 +10,7 @@ from sanic.log import logger
 from libs.chat import chat_manager
 from models import Config
 from settings import CACHE
+
 from .base import BaseListener
 
 
