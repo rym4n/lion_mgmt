@@ -165,3 +165,4 @@ class ErrorCode(BaseErrorCode):
     IMPORT_FLOW_ERROR = ErrorData(4130, "部分剧本导入失败，请检查是否存在相同剧本")
     INVITE_USER_ERROR = ErrorData(4131, "私聊作战室禁止邀请用户")
     EXIT_ROOM_ERROR = ErrorData(4132, "禁止退出私聊作战室")
+    CANNOT_DELETE_DEFAULT_CONFIG = ErrorData(4133, "默认配置禁止删除")

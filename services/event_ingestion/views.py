@@ -16,6 +16,7 @@ import orjson
 from sanic import Blueprint, response
 from sanic.log import logger
 from sanic_ext import openapi
+from tortoise.expressions import Q
 from tortoise.functions import Max
 from tortoise.transactions import in_transaction
 import yaml
@@ -27,7 +28,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.utils import query_vlog, run_linux_command
 from models import Config, Playbook, PlaybookVersion
-from models.event import EventRelatedScript, Events, EventsIngestion
+from models.event import EventRelatedScript, EventsIngestion
 from settings import KAFKA_SERVERS, SUPERVISOR_PATH, VECTOR_CFG, VL_HOST
 
 event_ingestion_bp = Blueprint("event_ingestion", url_prefix="/event-ingestion")
@@ -611,7 +612,7 @@ async def update_event_ingestion(request):
         data["transforms"][first_transform]["inputs"] = [f"{event.vector_name}_date_transforms"]
         data["transforms"][first_transform]["drop_on_error"] = False
 
-        config = await Config.get_or_none(key=transforms_type, module="transforms")
+        config = await Config.get_or_none(Q(key=transforms_type, module="transforms") & (Q(tenant_id=tenant_id) | Q(default=True)))
         if not config:
             raise CustomError(ErrorCode.TYPE_NOT_SUPPORTED_ERROR)
         args = {
@@ -1363,7 +1364,7 @@ async def parse_log(request):
     transformsconfig = params.get("transforms_config")
     key_value_delimiter = params.get("key_value_delimiter")
     key_delimiter_value = params.get("key_delimiter_value")
-
+    tenant_id = request.ctx.session.get("tenant_id")
     tmp_data = {
         "sources": {"tmp": {"type": "stdin"}},
         "sinks": {
@@ -1379,11 +1380,9 @@ async def parse_log(request):
     tmp_data["transforms"]["tmp_transforms"]["inputs"] = ["tmp"]
     tmp_data["transforms"]["tmp_transforms"]["drop_on_error"] = False
 
-    config = await Config.get_or_none(key=transforms_type, module="transforms")
+    config = await Config.get_or_none(Q(key=transforms_type, module="transforms") & (Q(tenant_id=tenant_id) | Q(default=True)))
     if not config:
         raise CustomError(ErrorCode.TYPE_NOT_SUPPORTED_ERROR)
-
-    tenant_id = request.ctx.session.get("tenant_id")
 
     event = await EventsIngestion.get_or_none(id=params.get("id"), deleted=False, tenant_id=tenant_id)
     if not event:
@@ -1581,6 +1580,308 @@ async def playbook_list(request):
     },
 )
 async def transforms_list(request):
-    transforms = await Config.filter(deleted=False, module="transforms").all()
+    tenant_id = request.ctx.session.get("tenant_id")
+    transforms = await Config.filter(Q(deleted=False, module="transforms") & (Q(tenant_id=tenant_id) | Q(default=True))).all()
 
-    return response_ok([{"key": transform.key, "type": transform.type} for transform in transforms])
+    return response_ok([transform.json for transform in transforms])
+
+
+@event_ingestion_bp.post("/transforms-add")
+@openapi.definition(
+    summary="新增transforms配置",
+    description="新增transforms配置",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["key", "value"],
+                "properties": {
+                    "key": {"type": "string", "description": "配置键"},
+                    "value": {"type": "string", "description": "配置值"},
+                    "type": {"type": "string", "description": "配置类型"},
+                    "default": {"type": "boolean", "description": "是否共享"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "新增成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:c")
+async def transforms_add(request):
+    tenant_id = request.ctx.session.get("tenant_id")
+    key = request.json.get("key")
+    value = request.json.get("value")
+    type_ = request.json.get("type")
+    default = request.json.get("default")
+
+    if not key or not value:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if await Config.filter(key=key, module="transforms", tenant_id=tenant_id).exists():
+        raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
+
+    await Config.create(key=key, value=value, type=type_, module="transforms", default=default, tenant_id=tenant_id)
+
+    return response_ok("success")
+
+
+@event_ingestion_bp.post("/transforms-update")
+@openapi.definition(
+    summary="更新transforms配置",
+    description="更新transforms配置",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "配置ID"},
+                    "value": {"type": "string", "description": "配置值"},
+                    "type": {"type": "string", "description": "配置类型"},
+                    "default": {"type": "boolean", "description": "是否共享"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:u")
+async def transforms_update(request):
+    id_ = request.json.get("id")
+    value = request.json.get("value")
+    type_ = request.json.get("type")
+    default = request.json.get("default")
+
+    if not id_:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    config = await Config.get_or_none(id=id_, deleted=False, module="transforms")
+    if not config:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    if value is not None:
+        config.value = value
+    if type_ is not None:
+        config.type = type_
+
+    if default is not None:
+        config.default = default
+
+    await config.save()
+    return response_ok("success")
+
+
+@event_ingestion_bp.post("/transforms-del")
+@openapi.definition(
+    summary="删除transforms配置",
+    description="删除transforms配置",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "配置ID"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:d")
+async def transforms_del(request):
+    id_ = request.json.get("id")
+
+    if not id_:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    config = await Config.get_or_none(id=id_, deleted=False, module="transforms")
+    if not config:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    if config.default:
+        raise CustomError(ErrorCode.CANNOT_DELETE_DEFAULT_CONFIG)
+
+    config.deleted = True
+    await config.save()
+    return response_ok("success")
+
+
+@event_ingestion_bp.post("/transforms-export")
+@openapi.definition(
+    summary="导出transforms配置",
+    description="导出transforms配置",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "配置ID列表，不传则导出所有",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导出成功",
+            "content": {"application/json": {"schema": {"type": "string", "format": "binary"}}},
+        }
+    },
+)
+@requires_permission("ingestion:r")
+async def transforms_export(request):
+    ids = request.json.get("ids")
+    tenant_id = request.ctx.session.get("tenant_id")
+    
+    query = Q(deleted=False, module="transforms") & (Q(tenant_id=tenant_id) | Q(default=True))
+    if ids:
+        query &= Q(id__in=ids)
+    
+    transforms = await Config.filter(query).all()
+    
+    data = [transform.json for transform in transforms]
+    
+    file_content = orjson.dumps(data, option=orjson.OPT_INDENT_2)
+    
+    return response.raw(
+        file_content,
+        headers={
+            "Content-Type": "application/json",
+            "Content-Disposition": f"attachment; filename=transforms_config_{int(time.time())}.json",
+        },
+    )
+
+
+@event_ingestion_bp.post("/transforms-import")
+@openapi.definition(
+    summary="导入transforms配置",
+    description="导入transforms配置",
+    body={
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "files": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "上传的文件",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导入成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:c")
+async def transforms_import(request):
+    files = request.files.get("files")
+    if not files:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    
+    if not isinstance(files, list):
+        files = [files]
+    
+    tenant_id = request.ctx.session.get("tenant_id")
+    
+    for file in files:
+        try:
+            content = file.body
+            configs = orjson.loads(content)
+            if not isinstance(configs, list):
+                configs = [configs]
+            
+            for config_data in configs:
+                key = config_data.get("key")
+                value = config_data.get("value")
+                type_ = config_data.get("type")
+                default = config_data.get("default", False)
+                
+                if not key or not value:
+                    continue
+                
+                existing = await Config.get_or_none(key=key, module="transforms", tenant_id=tenant_id)
+                if existing:
+                    existing.value = value
+                    if type_ is not None:
+                        existing.type = type_
+                    existing.default = default
+                    existing.deleted = False
+                    await existing.save()
+                else:
+                    await Config.create(
+                        key=key,
+                        value=value,
+                        type=type_,
+                        module="transforms",
+                        default=default,
+                        tenant_id=tenant_id
+                    )
+        except Exception as e:
+            logger.error(f"Import transforms failed: {e}")
+            raise CustomError(ErrorCode.PARAM_ERROR)
+            
+    return response_ok("success")
