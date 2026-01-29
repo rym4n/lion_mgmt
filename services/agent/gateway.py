@@ -141,19 +141,29 @@ class AgentGateway:
 
         formatted_msg = f"[User: {user['display_name']} ({user['role']})] {content}"
 
-        async with self.client.stream("POST", f"{self.base_url}/v1/agents/{agent_id}/messages", json={"messages": [{"role": "user", "content": formatted_msg}], "streaming": True}) as response:
+        headers = {"User-Agent": "letta-client/1.0.0"}
+        async with self.client.stream(
+            "POST",
+            f"{self.base_url}/v1/agents/{agent_id}/messages",
+            json={
+                "messages": [{"role": "user", "content": formatted_msg}],
+                "streaming": True,
+                "stream_steps": True,
+                "stream_tokens": True,
+            },
+            headers=headers,
+        ) as response:
             async for line in response.aiter_lines():
-                logger.info(f"SSE raw line: {line[:50]}")
                 if not line or not line.strip():
                     continue
 
                 # 处理 SSE 格式: 支持 "data: {...}" 和直接 JSON
                 if line.startswith("data: "):
-                    data_str = line[6:]  # Strip "data: "
+                    data_str = line[6:]
                 elif line.startswith("{"):
                     data_str = line
                 else:
-                    logger.debug(f"SSE skip non-data line: {line[:50]}")
+                    logger.warning(f"SSE skip non-data line: {line[:100]}")
                     continue
 
                 if data_str == "[DONE]":

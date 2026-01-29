@@ -214,7 +214,7 @@ async def chat_stream(request):
 
             # SSE 格式
             # await response.send(f"event: {event_type}\n")
-            await response.send(f"data: {orjson.dumps(data, ensure_ascii=False).decode()}\n\n")
+            await response.send(f"data: {orjson.dumps(data).decode()}\n\n")
 
         # 发送结束事件
         await response.send("event: done\ndata: {}\n\n")
