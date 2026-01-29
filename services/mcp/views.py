@@ -128,23 +128,14 @@ async def handle_messages(request: Request):
         # 解析请求体
         body = request.json
         # 转换为MCP JSONRPCMessage
-        # 使用model_validate (pydantic v2)还是parse_obj (v1)？
-        # mcp库使用pydantic。
         if isinstance(body, str):
             body = orjson.loads(body)
 
         message = JSONRPCMessage.model_validate(body)
 
-        # 包装为SessionMessage？
-        # mcp.server.Server.run期望SessionMessage | Exception的流
-        # 需要ServerMessageMetadata吗？
-        # run中的类型提示不是严格要求？
-        # 实际上run期望`MemoryObjectReceiveStream[SessionMessage | Exception]`
-
         # 需要构造SessionMessage
         # metadata = ServerMessageMetadata(request_context=request) # Request不可序列化/非标准？
         # 如果允许，让为metadata传递None，或简单字典
-
         session_message = SessionMessage(message, metadata=None)
 
         await writer.send(session_message)

@@ -1,7 +1,7 @@
 # coding=utf-8
 from datetime import datetime
-import json
 
+import orjson
 from sanic import Blueprint
 from sanic.log import logger
 from sanic_ext import openapi
@@ -208,18 +208,19 @@ async def chat_stream(request):
     try:
         # 流式发送消息
         async for chunk in gateway.send_message_stream(warroom_id=warroom_id, user=user_info, content=content):
-            event_type = chunk["type"]
+            # event_type = chunk["type"]
+            logger.info(chunk)
             data = chunk["data"]
 
             # SSE 格式
-            await response.send(f"event: {event_type}\n")
-            await response.send(f"data: {json.dumps(data, ensure_ascii=False)}\n\n")
+            # await response.send(f"event: {event_type}\n")
+            await response.send(f"data: {orjson.dumps(data, ensure_ascii=False).decode()}\n\n")
 
         # 发送结束事件
         await response.send("event: done\ndata: {}\n\n")
     except Exception as e:
         logger.error(f"Stream error: {e}")
-        await response.send(f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n")
+        await response.send(f"data: {orjson.dumps({'error': str(e)}).decode()}\n\n")
     finally:
         await response.eof()
 

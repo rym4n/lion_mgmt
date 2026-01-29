@@ -41,7 +41,7 @@ class AgentGateway:
         self._unlock_script_sha = None
 
         # Shared httpx client (optional, but good for connection pooling)
-        self.client = httpx.AsyncClient(base_url=self.base_url, timeout=30.0)
+        self.client = httpx.AsyncClient(base_url=self.base_url, timeout=60)
 
     async def close(self):
         await self.client.aclose()
@@ -121,7 +121,7 @@ class AgentGateway:
 
         formatted_msg = f"[User: {user['display_name']} ({user['role']})] {content}"
 
-        response = await self.client.post(f"{self.base_url}/v1/agents/{agent_id}/messages", json={"messages": [{"role": "user", "content": formatted_msg}], "streaming": False})
+        response = await self.client.post(f"{self.base_url}/v1/agents/{agent_id}/messages", json={"messages": [{"role": "user", "content": formatted_msg}]})
         response.raise_for_status()
         resp_data = response.json()
 
@@ -143,6 +143,7 @@ class AgentGateway:
 
         async with self.client.stream("POST", f"{self.base_url}/v1/agents/{agent_id}/messages", json={"messages": [{"role": "user", "content": formatted_msg}], "streaming": True}) as response:
             async for line in response.aiter_lines():
+                logger.info(f"SSE raw line: {line[:50]}")
                 if not line or not line.strip():
                     continue
 
@@ -193,7 +194,6 @@ class AgentGateway:
         if trigger_reflection:
             reflection_result = await self._trigger_reflection(agent_id)
 
-        # 删除 Agent: DELETE /v1/agents/{agent_id}
         try:
             await self.client.delete(f"{self.base_url}/v1/agents/{agent_id}")
         except Exception as e:
