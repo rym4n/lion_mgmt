@@ -512,6 +512,9 @@ async def acquire_members(request: Request):
     user_list = []
     for user in room.users:
         # 获取用户角色（用户和角色是多对多的关系）
+        tenant_ids = await user.member.all()
+        if tenant_id not in [t.id for t in tenant_ids]:
+            continue
         user_roles = await user.roles.all()
         roles_list = [role.name for role in user_roles]
         user_list.append(
