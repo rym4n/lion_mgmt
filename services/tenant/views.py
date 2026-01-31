@@ -1,5 +1,4 @@
 # coding=utf-8
-import time
 
 from sanic import Blueprint
 from sanic_ext import openapi

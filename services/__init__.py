@@ -9,10 +9,11 @@ from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.contrib.sanic import register_tortoise
 
-from core.exception_handlers import EXC_HDL_TUPLE, BaseExcHandler
-from core.listeners import LISTENER_TUPLE, BaseListener
-from core.middlewares import MIDDLEWARE_TUPLE, BaseMiddleware
+from core.exception_handlers import BaseExcHandler, EXC_HDL_TUPLE
+from core.listeners import BaseListener, LISTENER_TUPLE
+from core.middlewares import BaseMiddleware, MIDDLEWARE_TUPLE
 from libs.security.authorization import load_license
+from services.agent.views import agent_bp
 from services.ai.views import ai_bp
 from services.approvement.views import approve_bp
 from services.dashboard.views import dashboard_bp
@@ -24,7 +25,6 @@ from services.mcp.views import mcp_bp
 from services.others.views import activity, all_apps, playbook_list
 from services.role.views import role_bp
 from services.scene.views import scene_bp
-from services.agent.views import agent_bp
 from services.secure.views import secure_bp
 from services.system_config.views import system_bp
 from services.tenant.views import tenant_bp
@@ -49,7 +49,7 @@ def create_app() -> Sanic:
     return app
 
 
-def register_blueprints(app: Sanic) -> None:
+def register_blueprints(app: Sanic):
     app.add_route(activity, "/activity/<activityId>")
     app.add_route(playbook_list, "/playbooks", methods=["POST"])
     app.add_route(all_apps, "/apps", methods=["POST"])
@@ -62,7 +62,6 @@ def register_blueprints(app: Sanic) -> None:
     app.blueprint(warroom_bp)
     app.blueprint(approve_bp)
     app.blueprint(tenant_bp)
-    app.blueprint(agent_bp)
 
     try:
         bp_dict = {
@@ -89,10 +88,8 @@ def register_blueprints(app: Sanic) -> None:
     except Exception as ex:
         logger.info(f"{ex} | {traceback.format_exc()}")
 
-    return None
 
-
-def register_listener(app: Sanic) -> None:
+def register_listener(app: Sanic):
     for listener_cls in LISTENER_TUPLE:
         listener: BaseListener = listener_cls()
         for event in (
@@ -103,7 +100,6 @@ def register_listener(app: Sanic) -> None:
         ):
             if hasattr(listener, event):
                 app.register_listener(getattr(listener, event), event)
-    return None
 
 
 def register_middleware(app: Sanic):

@@ -37,8 +37,8 @@ async def handle_sse(request: Request):
     # 需要完整URL还是绝对路径？
     # MCP规范说明：带有POST到的URI的`endpoint`事件。
     # 如果客户端支持，相对路径也可以，但完整路径更安全。
-    # 让使用到/mcp/messages的相对路径
-    endpoint_url = f"/mcp/messages?session_id={session_id.hex}"
+    # 让使用到/api/mcp/messages的相对路径
+    endpoint_url = f"/api/mcp/messages?session_id={session_id.hex}"
 
     resp = await request.respond(
         content_type="text/event-stream",
