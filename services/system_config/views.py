@@ -97,9 +97,9 @@ async def upload_image(request):
         await Config.filter(key="platform_config", module="system").update(value=orjson.dumps(platform_config).decode())
     else:
         default = {
-            "Version": system_version or "3.0.0",
+            "Version": system_version or "3.0",
             "Title": system_name or "AIOE智能运营与自动化系统",
-            "Content": copyright_text or " © 2026",
+            "Content": copyright_text or f" © {datetime.now().year}",
             "FixedHeader": True,
             "HiddenSideBar": False,
             "MultiTagsCache": False,
