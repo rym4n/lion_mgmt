@@ -773,7 +773,11 @@ async def local_auth(request):
     if request.ip != "127.0.0.1":
         raise CustomError(ErrorCode.IP_FORBIDDEN)
 
-    account = await Account.get(username=request.json.get("username", ""), deleted=False)
+    username = request.json.get("username", "").strip()
+
+    account = await Account.get(username=username, tenant_id="8bce552d-c27c-41d4-8a1b-8c5bf38dfe18", deleted=False)
+    if not account:
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
     token = token_encode(
         account.id,
         account.username,

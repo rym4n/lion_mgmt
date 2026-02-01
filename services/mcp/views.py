@@ -16,7 +16,7 @@ mcp_bp = Blueprint("mcp", url_prefix="/mcp")
 _write_stream_writers = {}
 
 
-@mcp_bp.get("/sse")
+@mcp_bp.route("/sse", methods=["GET", "POST"])
 async def handle_sse(request: Request):
     """
     处理MCP的SSE连接。
