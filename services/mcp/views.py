@@ -27,6 +27,17 @@ MCP_REDIS_CHAN_PREFIX = "mcp:channel:"
 _write_stream_writers = {}
 
 
+def _wants_sse(request: Request) -> bool:
+    """检查客户端是否请求 SSE 传输模式。"""
+    accept = request.headers.get("Accept", "")
+    # SSE 模式：GET 请求或明确请求 text/event-stream
+    if request.method == "GET":
+        return True
+    if "text/event-stream" in accept:
+        return True
+    return False
+
+
 def _get_redis_client(request: Request):
     """获取 Redis 客户端（用于 MCP session 键与 pub/sub）。"""
     cache = getattr(request.app.ctx, "cache_client", None)
@@ -46,8 +57,157 @@ async def _remove_session_after_grace(session_id: UUID, delay: float) -> None:
 @mcp_bp.route("/sse", methods=["GET", "POST"])
 async def handle_sse(request: Request):
     """
-    处理MCP的SSE连接。
+    处理MCP连接，支持两种传输模式：
+    1. Streamable HTTP（默认）：POST 请求直接返回 JSON 响应
+    2. SSE：GET 请求或 Accept: text/event-stream 的 POST 请求使用流式传输
+
     多进程下：用 Redis 键标记 session 存在，用 Redis Pub/Sub 将 POST 消息转发到本 worker 的流。
+    """
+    # 根据请求类型选择传输模式
+    if not _wants_sse(request):
+        return await _handle_streamable_http(request)
+
+    # SSE 模式
+    return await _handle_sse_mode(request)
+
+
+async def _handle_streamable_http(request: Request):
+    """
+    Streamable HTTP 模式：处理单个 JSON-RPC 请求并返回 JSON 响应。
+    支持无状态请求处理，每个请求独立处理。
+    """
+    tenant_id = request.ctx.session.get("tenant_id")
+    body = request.json
+
+    if not body:
+        return response.json(
+            {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None},
+            status=400,
+        )
+
+    # 检查是否有 session_id（用于有状态会话）
+    session_id_str = request.args.get("session_id")
+
+    if session_id_str:
+        # 有状态模式：尝试使用现有会话
+        try:
+            session_id = UUID(hex=session_id_str)
+        except ValueError:
+            return response.json(
+                {"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid session_id"}, "id": body.get("id")},
+                status=400,
+            )
+
+        sid_hex = session_id.hex
+        body_raw = orjson.dumps(body).decode("utf-8") if not isinstance(body, str) else body
+
+        # 尝试本进程内会话
+        entry = _write_stream_writers.get(session_id)
+        if entry:
+            closed_at = entry.get("closed_at")
+            if closed_at is not None and (time.monotonic() - closed_at) > MCP_SESSION_GRACE_SECONDS:
+                del _write_stream_writers[session_id]
+            else:
+                try:
+                    body_obj = orjson.loads(body_raw) if isinstance(body_raw, str) else body_raw
+                    message = JSONRPCMessage.model_validate(body_obj)
+                    session_message = SessionMessage(message, metadata=None)
+                    await entry["writer"].send(session_message)
+                    return response.text("Accepted", status=202)
+                except Exception as e:
+                    logger.error(f"Streamable HTTP session send error: {e}")
+                    return response.json(
+                        {"jsonrpc": "2.0", "error": {"code": -32603, "message": str(e)}, "id": body.get("id")},
+                        status=500,
+                    )
+
+        # 尝试 Redis 转发
+        redis_client = _get_redis_client(request)
+        if redis_client:
+            try:
+                key = f"{MCP_REDIS_KEY_PREFIX}{sid_hex}"
+                exists = await redis_client.exists(key)
+                if exists:
+                    channel = f"{MCP_REDIS_CHAN_PREFIX}{sid_hex}"
+                    await redis_client.publish(channel, body_raw)
+                    return response.text("Accepted", status=202)
+            except Exception as e:
+                logger.error(f"MCP Redis publish: {e}")
+
+        return response.json(
+            {"jsonrpc": "2.0", "error": {"code": -32000, "message": "Session not found"}, "id": body.get("id")},
+            status=404,
+        )
+
+    # 无状态模式：为每个请求创建临时服务器实例处理
+    read_stream_writer, read_stream = anyio.create_memory_object_stream(10)
+    write_stream, write_stream_reader = anyio.create_memory_object_stream(10)
+
+    try:
+        # 解析并发送请求消息
+        message = JSONRPCMessage.model_validate(body)
+        session_message = SessionMessage(message, metadata=None)
+        await read_stream_writer.send(session_message)
+        await read_stream_writer.aclose()
+
+        # 创建服务器并处理
+        server = create_mcp_server(tenant_id)
+        responses = []
+
+        async with anyio.create_task_group() as tg:
+
+            async def run_server():
+                try:
+                    await server.run(
+                        read_stream,
+                        write_stream,
+                        server.create_initialization_options(),
+                        stateless=True,
+                    )
+                except Exception as e:
+                    logger.error(f"Streamable HTTP server error: {e}")
+                finally:
+                    await write_stream.aclose()
+
+            tg.start_soon(run_server)
+
+            # 收集响应（带超时）
+            async def collect_responses():
+                try:
+                    with anyio.move_on_after(30):  # 30秒超时
+                        async for msg in write_stream_reader:
+                            if isinstance(msg, Exception):
+                                logger.error(f"Streamable HTTP response error: {msg}")
+                                break
+                            responses.append(msg.message.model_dump(by_alias=True, exclude_none=True))
+                            # 对于单个请求，收到一个响应即可
+                            if body.get("id") is not None:
+                                break
+                except Exception as e:
+                    logger.error(f"Streamable HTTP collect error: {e}")
+                finally:
+                    tg.cancel_scope.cancel()
+
+            tg.start_soon(collect_responses)
+
+        if not responses:
+            # 无响应（可能是通知类型的请求）
+            return response.text("Accepted", status=202)
+
+        # 返回第一个响应（单请求模式）
+        return response.json(responses[0], status=200)
+
+    except Exception as e:
+        logger.error(f"Streamable HTTP error: {e}")
+        return response.json(
+            {"jsonrpc": "2.0", "error": {"code": -32603, "message": str(e)}, "id": body.get("id")},
+            status=500,
+        )
+
+
+async def _handle_sse_mode(request: Request):
+    """
+    SSE 模式：建立长连接，通过 Server-Sent Events 推送消息。
     """
     session_id = uuid4()
     sid_hex = session_id.hex
