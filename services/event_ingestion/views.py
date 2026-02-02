@@ -971,7 +971,7 @@ del(.datetime_str)
 """,}
         
         for script_id in script_ids:
-            data["sinks"][f"{topic}_sinks"] = {
+            data["sinks"][f"{topic}_{script_id}_sinks"] = {
                 "inputs": [f"{topic}_{script_id}_transforms"] if f"{topic}_{script_id}_transforms" in data["transforms"] else [f"{topic}_event_transforms"],
                 "type": "kafka",
                 "bootstrap_servers": KAFKA_SERVERS,
