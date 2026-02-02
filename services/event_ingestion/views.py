@@ -857,6 +857,11 @@ async def get_event_ingestion_kafka_sample(request):
                                     "type": "integer",
                                     "description": "并发数量，默认是1，最大是4",
                                 },
+                                "mapping": {
+                                    "type": "array",
+                                    "items": {"type": "object"},
+                                    "description": "解析日志和剧本输入参数之间的映射， 如果剧本存在输入参数则必填，不存在则非必填，示例：{'script_id': {'log_field1': 'script_field1'}}",
+                                },
                             },
                         },
                     },
@@ -955,13 +960,25 @@ del(.datetime_str)
 """,
         }
 
-        data["sinks"][f"{topic}_sinks"] = {
-            "inputs": [f"{topic}_event_transforms"],
-            "type": "kafka",
-            "bootstrap_servers": KAFKA_SERVERS,
-            "topic": topic,
-            "encoding": {"codec": "json"},
-        }
+        if request_data.get("mapping"):
+            for key, value in request_data.get("mapping").items():
+                for log_field, script_field in value.items():
+                    data.setdefault("transforms", {})[f"{topic}_{key}_transforms"] = {
+                        "type": "remap",
+                        "inputs": [f"{topic}_event_transforms"],
+                        "source": f"""
+.log.{script_field} = .log.{log_field}
+""",}
+        
+        for script_id in script_ids:
+            data["sinks"][f"{topic}_sinks"] = {
+                "inputs": [f"{topic}_{script_id}_transforms"] if f"{topic}_{script_id}_transforms" in data["transforms"] else [f"{topic}_event_transforms"],
+                "type": "kafka",
+                "bootstrap_servers": KAFKA_SERVERS,
+                "topic": f"{topic}_{script_id}",
+                "encoding": {"codec": "json"},
+            }
+
         endpoint = f'postgresql://{os.environ.get("RY_DB_USER")}:{urllib.parse.quote(os.environ.get("RY_DB_PASS"))}@{os.environ.get("RY_DB_HOST")}:{os.environ.get("RY_DB_PORT", 5432)}/{os.environ.get("RY_DB_NAME")}'
         data["sinks"][f"{topic}_event_sinks"] = {
             "inputs": [f"{topic}_event_transforms"],
@@ -1003,7 +1020,7 @@ del(.datetime_str)
             else:
                 for script_id in script_ids:
                     process_name = hashlib.md5(f"{event.id}_{script_id}".encode()).hexdigest()
-                    command = f"python start.py -m auto -f {script_id} -t {topic}"
+                    command = f"python start.py -m auto -f {script_id} -t {topic}_{script_id}"
                     supervisor.add_process(process_name, command, concurrency)
                     supervisor.start_process(process_name)
 
@@ -1299,13 +1316,6 @@ async def import_event_ingestion_script(request):
                         fields=ers["fields"],
                         tenant_id=tenant_id,
                     )
-
-                    if int(ers["status"]) == 1:
-                        for script_id in ers["script_id"]:
-                            process_name = hashlib.md5(f"{ei.id}_{script_id}".encode()).hexdigest()
-                            command = f"python start.py -m auto -f {script_id} -t {topic}"
-                            supervisor.add_process(process_name, command, ers["concurrency"])
-                            supervisor.start_process(process_name)
 
                 file_results.append({f"{vector_config['event_ingestion_name']}": "上传成功"})
     if bool(file_results) and all(file_results):
