@@ -144,6 +144,7 @@ class EventRelatedScript(BaseModel):
     status: int = fields.IntField(max_length=50, default=0, description="是否开启联动执行")
     numbers: int = fields.IntField(max_length=50, null=True, description="去重数量")
     concurrency: int = fields.IntField(max_length=50, null=True, description="并行数量")
+    mapping: Dict[str, Any] = fields.JSONField(null=True, description="剧本输入参数映射")
     fields: list[str] = fields.JSONField(null=True, description="去重字段")
 
     def validate(self) -> None:
@@ -164,6 +165,7 @@ class EventRelatedScript(BaseModel):
             "numbers": self.numbers,
             "concurrency": self.concurrency,
             "fields": self.fields,
+            "mapping": self.mapping,
         }
 
     class Meta:

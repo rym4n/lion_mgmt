@@ -1010,6 +1010,7 @@ del(.datetime_str)
             concurrency=concurrency,
             fields=request_data.get("fields"),
             tenant_id=tenant_id,
+            mapping=request_data.get("mapping"),
         )
 
         if linked_execution in [0, 1]:
@@ -1315,6 +1316,7 @@ async def import_event_ingestion_script(request):
                         concurrency=ers["concurrency"],
                         fields=ers["fields"],
                         tenant_id=tenant_id,
+                        mapping=ers.get("mapping"),
                     )
 
                 file_results.append({f"{vector_config['event_ingestion_name']}": "上传成功"})
