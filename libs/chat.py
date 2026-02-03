@@ -14,7 +14,7 @@ from sanic.log import logger
 from tortoise.expressions import Q
 from tortoise.functions import Max
 
-from libs.kafka import aconsume
+from libs.kafka import aconsume, aproduce
 from models import (
     Approvement,
     Events,
@@ -33,6 +33,7 @@ from settings import (
     RUNLOG_TOPIC,
     TZ,
     WR_TOPIC,
+    TASK_TOPIC,
 )
 
 
@@ -373,6 +374,32 @@ class ChatManager:
                         "user": user.id,
                     }
                     await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+                pvdata = await PlaybookVersion.get_or_none(id=log["flow_id"])
+                for node in pvdata.flow_json["nodes"]:
+                    if node["id"] != log["audit_app"]:
+                        continue
+                    if node["properties"].get("callback") == "on":
+                        callback_datas = node.get("callback_data")
+                        for callback_data in callback_datas:
+                            data = {}
+                            for input_data in callback_data["input"]:
+                                data[input_data.get("key")] = input_data.get("value")
+                            params = {
+                                "resource": callback_data["resource"],
+                                "node_name": callback_data["description"],
+                                "action": callback_data["func"],
+                                "action_name": callback_data["name"],
+                                "app_name": callback_data["tool_name"],
+                                "name": callback_data["description"],
+                                "app_ver": callback_data["version"],
+                                "main": callback_data["tool_main"],
+                                "action_input": data,
+                                "retry_times": int(callback_data["retry_times"]),
+                                "timeout": int(callback_data["timeout"]),
+                                "executor": log["executor"],
+                            }
+                            msg = {"run_type": "action", "run_id": log["run_id"], "run_args": params, "tenant_id": log["tenant_id"]}
+                            await aproduce(TASK_TOPIC, msg)
             else:
                 key = log.get("run_id", "")
 
