@@ -968,8 +968,9 @@ del(.datetime_str)
                         "inputs": [f"{topic}_event_transforms"],
                         "source": f"""
 .log.{script_field} = .log.{log_field}
-""",}
-        
+""",
+                    }
+
         for script_id in script_ids:
             data["sinks"][f"{topic}_{script_id}_sinks"] = {
                 "inputs": [f"{topic}_{script_id}_transforms"] if f"{topic}_{script_id}_transforms" in data["transforms"] else [f"{topic}_event_transforms"],

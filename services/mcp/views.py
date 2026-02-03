@@ -3,7 +3,7 @@
 import asyncio
 import time
 from uuid import UUID, uuid4
-
+import traceback
 import anyio
 from mcp.shared.message import SessionMessage
 from mcp.types import JSONRPCMessage
@@ -350,7 +350,7 @@ async def handle_messages(request: Request):
                 await entry["writer"].send(session_message)
                 return response.text("Accepted", status=202)
             except Exception as e:
-                logger.error(f"消息处理错误: {e}")
+                logger.error(f"消息处理错误: {e}, body_raw={body_raw}, traceback={traceback.format_exc()}")
                 return response.text(f"Error: {str(e)}", status=500)
 
     redis_client = _get_redis_client(request)
