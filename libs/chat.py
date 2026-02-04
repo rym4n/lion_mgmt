@@ -411,12 +411,10 @@ class ChatManager:
                     event = await Events.get_or_none(room_id=data["room_id"], tenant_id=data["tenant_id"])
                     log["event_id"] = event.id
                 if log["event_id"]:
-                    event = await Events.get_or_none(id=log["event_id"], tenant_id=log["tenant_id"])
-                    if event:
-                        if log.get("node_type") == "start-node":
-                            event.event_process_status = "处理中"
-                            await event.save()
-                        elif log.get("node_type") == "end-node":
+                    if log.get("node_type") == "end-node":
+                        event = await Events.get_or_none(id=log["event_id"], tenant_id=log["tenant_id"])
+                        if event:
+                            logger.info("event_update")
                             event.event_process_status = "已处理"
                             event.close_time = TZ.localize(datetime.now())
                             await event.save()
