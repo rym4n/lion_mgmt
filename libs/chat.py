@@ -409,6 +409,9 @@ class ChatManager:
                     data["log"] = log
                     await self.msg_pub.publish(WR_TOPIC, orjson.dumps(data).decode())
                     event = await Events.get_or_none(room_id=data["room_id"], tenant_id=data["tenant_id"])
+                    log["event_id"] = event.id
+                if log["event_id"]:
+                    event = await Events.get_or_none(id=log["event_id"], tenant_id=log["tenant_id"])
                     if event:
                         if log.get("node_type") == "start-node":
                             event.event_process_status = "处理中"
@@ -417,7 +420,6 @@ class ChatManager:
                             event.event_process_status = "已处理"
                             event.close_time = TZ.localize(datetime.now())
                             await event.save()
-                        log["event_id"] = event.id
                 to_insert.append(Runlog(**log))
         try:
             await Runlog.bulk_create(
