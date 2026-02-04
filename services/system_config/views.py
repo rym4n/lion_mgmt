@@ -1093,7 +1093,7 @@ async def outgoing(request):
         content = await f.read()
         old_data = yaml.safe_load(content)
 
-    data = {"sources": old_data["sources"], "sinks": {}}
+    data = {"sources": old_data["sources"], "transforms": old_data["transforms"], "sinks": {}}
     data["sinks"]["aioe_default_audit"] = old_data["sinks"]["aioe_default_audit"]
     json_data = request.json
     seen_addresses = set()
@@ -1122,7 +1122,7 @@ async def outgoing(request):
             seen_addresses.add(addr)
 
         sink_key_suffix = str(i)
-        common_config = {"inputs": ["aioe_audit_mask"], "encoding": {"codec": "json"}}
+        common_config = {"inputs": old_data["sinks"]["aioe_default_audit"]["inputs"], "encoding": {"codec": "json"}}
 
         if sink_type == "kafka":
             topic = item.get("kafka_topic")
