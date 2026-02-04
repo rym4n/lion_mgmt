@@ -140,10 +140,10 @@ async def get_playbook_prompt_words(prompt_word, tenant_id):
 async def get_or_create_private_chat_room(cache_client, sender: Account, receiver: Account, tenant_id) -> dict:
     # 保证顺序
     key = f"{sender.id}&{receiver.id}"
-    private_room_name = f"{sender.display_name}和{receiver.display_name}的私聊"
+    private_room_name = f"{sender.username}({sender.display_name})_{receiver.username}({receiver.display_name})"
     if sender.id > receiver.id:
         key = f"{receiver.id}&{sender.id}"
-        private_room_name = f"{receiver.display_name}和{sender.display_name}的私聊"
+        private_room_name = f"{receiver.username}({receiver.display_name})_{sender.username}({sender.display_name})"
     user_private_chat_rooms = await cache_client.get(f"user_private_chat_rooms_{tenant_id}") or {}
     if key not in user_private_chat_rooms:
         # 作战室名字
