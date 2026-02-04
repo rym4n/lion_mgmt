@@ -413,6 +413,7 @@ class ChatManager:
                 if log["event_id"]:
                     if log.get("node_type") == "end-node":
                         event = await Events.get_or_none(id=log["event_id"], tenant_id=log["tenant_id"])
+                        logger.info("event_update_start")
                         if event:
                             logger.info("event_update")
                             event.event_process_status = "已处理"
