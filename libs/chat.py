@@ -320,6 +320,7 @@ class ChatManager:
             await msg_sub.unsubscribe(WR_TOPIC)
 
     async def _flush_events(self):
+        logger.info(f"开始更新事件状态，当前缓冲区大小: {len(self.event_update_buffer)}")
         if not self.event_update_buffer:
             return
 
@@ -348,6 +349,7 @@ class ChatManager:
             logger.error(f"Failed to bulk update events: {e} | {traceback.format_exc()}")
 
     async def periodic_flush_task(self):
+        logger.info("启动更新事件状态任务")
         while True:
             await asyncio.sleep(1)
             await self._flush_events()
@@ -448,7 +450,7 @@ class ChatManager:
                     if log.get("node_type") == "end-node":
                         self.event_update_buffer[log["event_id"]] = log["tenant_id"]
                         if len(self.event_update_buffer) >= 500:
-                                await self._flush_events()                            
+                            await self._flush_events()                            
                 to_insert.append(Runlog(**log))
         try:
             await Runlog.bulk_create(
