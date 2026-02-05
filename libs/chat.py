@@ -358,7 +358,7 @@ class ChatManager:
     async def periodic_flush_task(self):
         logger.info("启动更新事件状态任务")
         while True:
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
             await self._flush_events()
 
     async def log_listener(self):
