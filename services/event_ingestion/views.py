@@ -680,7 +680,8 @@ async def update_event_ingestion(request):
 
     event.vector_config = data
 
-    event.vector_config_raw = data
+    if event_source_type or transforms_type:
+        event.vector_config_raw = data 
 
     await event.save()
 
