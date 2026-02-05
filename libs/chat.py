@@ -14,7 +14,7 @@ from sanic.log import logger
 from tortoise.expressions import Q
 from tortoise.functions import Max
 
-from libs.kafka import aconsume
+from libs.kafka import aconsume, aproduce
 from models import (
     Approvement,
     Events,
@@ -33,6 +33,7 @@ from settings import (
     RUNLOG_TOPIC,
     TZ,
     WR_TOPIC,
+    TASK_TOPIC,
 )
 
 
@@ -139,10 +140,10 @@ async def get_playbook_prompt_words(prompt_word, tenant_id):
 async def get_or_create_private_chat_room(cache_client, sender: Account, receiver: Account, tenant_id) -> dict:
     # 保证顺序
     key = f"{sender.id}&{receiver.id}"
-    private_room_name = f"{sender.display_name}和{receiver.display_name}的私聊"
+    private_room_name = f"{sender.username}({sender.display_name})_{receiver.username}({receiver.display_name})"
     if sender.id > receiver.id:
         key = f"{receiver.id}&{sender.id}"
-        private_room_name = f"{receiver.display_name}和{sender.display_name}的私聊"
+        private_room_name = f"{receiver.username}({receiver.display_name})_{sender.username}({sender.display_name})"
     user_private_chat_rooms = await cache_client.get(f"user_private_chat_rooms_{tenant_id}") or {}
     if key not in user_private_chat_rooms:
         # 作战室名字
@@ -227,6 +228,7 @@ class ChatManager:
         self.cache_client = caches.get("redis_chat")
         self.msg_pub = self.cache_client.client
         self.active_connections: dict[str, dict] = {}
+        self.event_update_buffer = {}
 
     async def connect(self, user: Account, ws, session_id):
         """处理用户连接"""
@@ -317,6 +319,41 @@ class ChatManager:
                     break
             await msg_sub.unsubscribe(WR_TOPIC)
 
+    async def _flush_events(self):
+        logger.info(f"开始更新事件状态，当前缓冲区大小: {len(self.event_update_buffer)}")
+        if not self.event_update_buffer:
+            return
+
+        events_buffer = dict(self.event_update_buffer)
+        self.event_update_buffer.clear()
+
+        try:
+            if events_buffer:
+                event_ids = list(events_buffer.keys())
+                events = await Events.filter(id__in=event_ids).all()
+                
+                to_update = []
+                current_time = TZ.localize(datetime.now())
+                
+                for event in events:
+                    # 确保 tenant_id 匹配
+                    if str(event.tenant_id) == str(events_buffer.get(event.id)):
+                        event.event_process_status = "已处理"
+                        event.close_time = current_time
+                        to_update.append(event)
+                
+                if to_update:
+                    await Events.bulk_update(to_update, fields=["event_process_status", "close_time"])
+                    logger.info(f"Buffered update: {len(to_update)} events updated")
+        except Exception as e:
+            logger.error(f"Failed to bulk update events: {e} | {traceback.format_exc()}")
+
+    async def periodic_flush_task(self):
+        logger.info("启动更新事件状态任务")
+        while True:
+            await asyncio.sleep(1)
+            await self._flush_events()
+
     async def log_listener(self):
         logger.info("启动runlog消费任务")
         await aconsume(RUNLOG_TOPIC, "lion_mgmt_listener", self.handle_runlog, 500)
@@ -373,6 +410,32 @@ class ChatManager:
                         "user": user.id,
                     }
                     await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+                pvdata = await PlaybookVersion.get_or_none(id=log["flow_id"])
+                for node in pvdata.flow_json["nodes"]:
+                    if node["id"] != log["audit_app"]:
+                        continue
+                    if node["properties"].get("callback") == "on":
+                        callback_datas = node.get("callback_data")
+                        for callback_data in callback_datas:
+                            data = {}
+                            for input_data in callback_data["input"]:
+                                data[input_data.get("key")] = input_data.get("value")
+                            params = {
+                                "resource": callback_data["resource"],
+                                "node_name": callback_data["description"],
+                                "action": callback_data["func"],
+                                "action_name": callback_data["name"],
+                                "app_name": callback_data["tool_name"],
+                                "name": callback_data["description"],
+                                "app_ver": callback_data["version"],
+                                "main": callback_data["tool_main"],
+                                "action_input": data,
+                                "retry_times": int(callback_data["retry_times"]),
+                                "timeout": int(callback_data["timeout"]),
+                                "executor": log["executor"],
+                            }
+                            msg = {"run_type": "action", "run_id": log["run_id"], "run_args": params, "tenant_id": log["tenant_id"]}
+                            await aproduce(TASK_TOPIC, msg)
             else:
                 key = log.get("run_id", "")
 
@@ -382,15 +445,12 @@ class ChatManager:
                     data["log"] = log
                     await self.msg_pub.publish(WR_TOPIC, orjson.dumps(data).decode())
                     event = await Events.get_or_none(room_id=data["room_id"], tenant_id=data["tenant_id"])
-                    if event:
-                        if log.get("node_type") == "start-node":
-                            event.event_process_status = "处理中"
-                            await event.save()
-                        elif log.get("node_type") == "end-node":
-                            event.event_process_status = "已处理"
-                            event.close_time = TZ.localize(datetime.now())
-                            await event.save()
-                        log["event_id"] = event.id
+                    log["event_id"] = event.id
+                if log["event_id"]:
+                    if log.get("node_type") == "end-node":
+                        self.event_update_buffer[log["event_id"]] = log["tenant_id"]
+                        if len(self.event_update_buffer) >= 500:
+                            await self._flush_events()                            
                 to_insert.append(Runlog(**log))
         try:
             await Runlog.bulk_create(

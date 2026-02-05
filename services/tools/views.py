@@ -11,6 +11,7 @@ import time
 import zipfile
 
 from aiocache import caches
+from httpx import delete
 import orjson
 from sanic import Blueprint
 from sanic_ext import openapi
@@ -701,6 +702,103 @@ async def tool_actions(request):
                 )
         action.get("action")["playbook"] = pv_list
         action_list.append(action.get("action"))
+
+    return response_ok({"actions": action_list})
+
+
+@tools_bp.post("/actions/filter")
+@openapi.definition(
+    summary="获取工具当前版本动作列表（支持筛选）",
+    description="获取工具当前版本动作列表，支持按动作类型筛选（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["classify"],
+                "properties": {
+                    "classify": {"type": "string", "description": "动作类型"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "actions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "func": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "classify": {"type": "string"},
+                                                "input": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "key": {"type": "string"},
+                                                            "type": {"type": "string"},
+                                                            "required": {"type": "boolean"},
+                                                            "description": {"type": "string"},
+                                                        },
+                                                    },
+                                                },
+                                                "id": {"type": "string"},
+                                                "playbook": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "id": {"type": "string"},
+                                                            "pv_id": {"type": "string"},
+                                                            "name": {"type": "string"},
+                                                            "version": {"type": "string"},
+                                                            "status": {"type": "integer"},
+                                                        },
+                                                    },
+                                                },
+                                            },
+                                        },
+                                    }
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("tool:r")
+async def tool_actions_filter(request):
+    classify = request.json.get("classify")
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    actions = await ToolAction.filter(tenant_id=tenant_id).values("action", "id", "tool_name", "version_number")
+    action_list = []
+    for action in actions:
+        act_data = action.get("action")
+        if classify and act_data.get("classify") != classify:
+            continue
+
+        act_data["id"] = action.get("id")
+        act_data["tool_name"] = action.get("tool_name")
+        act_data["version"] = action.get("version_number")
+        tool = await Tool.get_or_none(name=action.get("tool_name"), version=action.get("version_number"), deleted=False, tenant_id=tenant_id)
+        act_data["description"] = tool.description
+        act_data["tool_main"] = tool.main
+        action_list.append(act_data)
 
     return response_ok({"actions": action_list})
 
@@ -2307,11 +2405,11 @@ async def tool_debug(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    tool = await Tool.filter(name="lion_mgmt", deleted=False, tenant_id=tenant_id).order_by("-ctime").first()
+    tool = await Tool.filter(name="lion_mgmt", deleted=False).order_by("-ctime").first()
     if not tool:
         return response_ok("工具开发运行APP缺失，请联系管理员处理")
 
-    resource = await ToolResources.filter(tool_name="lion_mgmt", deleted=False, tenant_id=tenant_id).order_by("-ctime").first()
+    resource = await ToolResources.filter(tool_name="lion_mgmt", deleted=False).order_by("-ctime").first()
     if not resource:
         return response_ok("工具开发运行资源不存在，请联系管理员处理")
 
@@ -2337,7 +2435,7 @@ async def tool_debug(request):
     for _ in range(30):
         await asyncio.sleep(1)
         log = await Runlog.get_or_none(run_id=run_id)
-        if log and log.result:
+        if log and log.result and log.result != "执行中":
             result = orjson.loads(log.result)
             data = result.get("data")
             return response_ok(data)

@@ -220,7 +220,7 @@ CACHE = {
         "port": os.environ.get("RY_REDIS_PORT"),
         "db": os.environ.get("RY_REDIS_DB"),
         "password": os.environ.get("RY_REDIS_PASS", ""),
-        "pool_max_size": 50,
+        "pool_max_size": 100,
     },
     "redis_chat": {
         "cache": "aiocache.RedisCache",
@@ -230,7 +230,7 @@ CACHE = {
         "port": os.environ.get("RY_REDIS_PORT"),
         "db": os.environ.get("RY_CHAT_DB"),
         "password": os.environ.get("RY_REDIS_PASS", ""),
-        "pool_max_size": 50,
+        "pool_max_size": 100,
     },
     "redis_action": {
         "cache": "aiocache.RedisCache",
@@ -241,7 +241,7 @@ CACHE = {
         "port": os.environ.get("RY_REDIS_PORT"),
         "db": os.environ.get("RY_ACTION_CACHE"),
         "password": os.environ.get("RY_REDIS_PASS", ""),
-        "pool_max_size": 2,
+        "pool_max_size": 100,
     },
 }
 
