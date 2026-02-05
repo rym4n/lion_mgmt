@@ -491,7 +491,7 @@ class ChatManager:
                     data["log"] = log
                     await self.msg_pub.publish(WR_TOPIC, orjson.dumps(data).decode())
                     event = await Events.get_or_none(room_id=data["room_id"], tenant_id=data["tenant_id"])
-                    log["event_id"] = event.id
+                    log["event_id"] = event.id if event else None
                 if log["event_id"]:
                     if log.get("node_type") == "end-node":
                         self.event_update_buffer[log["event_id"]] = log["tenant_id"]
