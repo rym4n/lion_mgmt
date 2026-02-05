@@ -1354,7 +1354,7 @@ async def oauth2_callback(request):
 
         default_tenants = request.app.ctx.oauth_cfg.get("default_tenants", "").split(",")
         logger.info(f"default_tenants: {default_tenants}")
-        if default_tenants:
+        if default_tenants not in [[""], [], None, ""]:
             tenants_by_id = await Tenant.filter(id__in=default_tenants).all()
             if tenants_by_id:
                 account.tenant_id = tenants_by_id[0].id
