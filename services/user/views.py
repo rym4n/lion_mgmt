@@ -1,5 +1,5 @@
 # coding=utf-8
-
+import traceback
 from datetime import datetime
 import time
 import uuid
@@ -1307,7 +1307,11 @@ async def oauth2_callback(request):
     logger.info(f"oauth2 config: {request.app.ctx.oauth_cfg}")
     cb_url = "https://" + request.host + "/api/user/oauth/callback"
     logger.info(f"get_access_token: code={code}, redirect_uri={cb_url}")
-    token_info = await request.app.ctx.oauth2.get_access_token(code, cb_url)
+    try:
+        token_info = await request.app.ctx.oauth2.get_access_token(code, cb_url)
+    except Exception as e:
+        logger.error(f"{e} | {traceback.format_exc()}")
+        raise CustomError(ErrorCode.GET_ACCESS_TOKEN_ERROR)
     logger.info(f"user token: {token_info}")
     access_token = jsonpath(token_info, request.app.ctx.oauth_cfg["token_path"])
     if not access_token:
