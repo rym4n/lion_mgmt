@@ -320,7 +320,6 @@ class ChatManager:
             await msg_sub.unsubscribe(WR_TOPIC)
 
     async def _flush_events(self):
-        logger.info(f"开始更新事件状态，当前缓冲区大小: {len(self.event_update_buffer)}")
         if not self.event_update_buffer:
             return
 
@@ -330,10 +329,8 @@ class ChatManager:
         try:
             if events_buffer:
                 event_ids = list(events_buffer.keys())
-                logger.info(f"Checking events IDs: {event_ids}")
 
                 events = await Events.filter(id__in=event_ids).all()
-                logger.info(f"Fetched {len(events)} events from DB")
 
                 to_update = []
                 current_time = TZ.localize(datetime.now())
@@ -346,12 +343,9 @@ class ChatManager:
                         event.event_process_status = "已处理"
                         event.close_time = current_time
                         to_update.append(event)
-                    else:
-                        logger.warning(f"Tenant mismatch for event {event.id}: expected {expected_tenant}, got {actual_tenant}")
-                
+
                 if to_update:
                     await Events.bulk_update(to_update, fields=["event_process_status", "close_time"])
-                    logger.info(f"Buffered update: {len(to_update)} events updated")
         except Exception as e:
             logger.error(f"Failed to bulk update events: {e} | {traceback.format_exc()}")
 
