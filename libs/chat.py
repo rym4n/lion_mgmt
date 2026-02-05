@@ -730,7 +730,7 @@ class ChatManager:
                     "timestamp": str(ma.ctime),
                     "room_id": chat_room.id,
                 },
-                "user": receiver,
+                "user": receiver.id,
             }
             await self.msg_pub.publish(WR_TOPIC, orjson.dumps(msg).decode())
 
