@@ -320,38 +320,65 @@ class ChatManager:
             await msg_sub.unsubscribe(WR_TOPIC)
 
     async def _flush_events(self):
-        logger.info(f"开始更新事件状态，当前数量为{len(self.event_update_buffer)}")
+        # 1. 检查是否有数据需要处理
         if not self.event_update_buffer:
             return
 
-        events_buffer = dict(self.event_update_buffer)
-        self.event_update_buffer.clear()
+        # 2. 取出当前所有待处理数据的快照，但先不清空 buffer
+        #    这样如果处理失败，我们可以选择不清除，或者只清除成功的
+        #    注意：这里假设 event_update_buffer 的 key 是唯一的，
+        #    如果有新数据进来会覆盖旧值（这在业务上是可以接受的，因为只需要最后的状态）
+        current_batch = dict(self.event_update_buffer)
         
+        # 暂时清空 buffer，防止后续新进来的数据混在一起
+        # 如果处理失败，我们需要把这些数据加回去
+        self.event_update_buffer.clear()
+
+        batch_size = 500
+        event_ids = list(current_batch.keys())
+        total_count = len(event_ids)
+        
+        logger.info(f"开始批量更新事件状态，总数: {total_count}")
+
         try:
-            if events_buffer:
-                event_ids = list(events_buffer.keys())
-                logger.info(f"Checking events IDs: {event_ids}")
+            # 3. 分批处理
+            for i in range(0, total_count, batch_size):
+                batch_ids = event_ids[i : i + batch_size]
+                logger.info(f"正在处理第 {i} 到 {i + len(batch_ids)} 条记录")
 
-                events = await Events.filter(id__in=event_ids).all()
-                logger.info(f"Fetched {len(events)} events from DB")
-
-                to_update = []
-                current_time = TZ.localize(datetime.now())
-                
-                for event in events:
-                    expected_tenant = str(events_buffer.get(event.id))
-                    actual_tenant = str(event.tenant_id)
+                try:
+                    events = await Events.filter(id__in=batch_ids).all()
                     
-                    if actual_tenant == expected_tenant:
-                        event.event_process_status = "已处理"
-                        event.close_time = current_time
-                        to_update.append(event)
+                    to_update = []
+                    current_time = TZ.localize(datetime.now())
+                    
+                    for event in events:
+                        expected_tenant = str(current_batch.get(event.id))
+                        actual_tenant = str(event.tenant_id)
+                        
+                        if actual_tenant == expected_tenant:
+                            event.event_process_status = "已处理"
+                            event.close_time = current_time
+                            to_update.append(event)
+                    
+                    if to_update:
+                        await Events.bulk_update(to_update, fields=["event_process_status", "close_time"])
+                        logger.info(f"批次更新成功: {len(to_update)} 条")
+                
+                except Exception as batch_error:
+                    # 单个批次失败，记录日志，并尝试将该批次数据放回 buffer（可选，防止彻底丢失）
+                    logger.error(f"批次处理失败: {batch_error} | {traceback.format_exc()}")
+                    # 恢复失败的数据到 buffer
+                    for eid in batch_ids:
+                        if eid not in self.event_update_buffer:
+                             self.event_update_buffer[eid] = current_batch[eid]
 
-                if to_update:
-                    await Events.bulk_update(to_update, fields=["event_process_status", "close_time"])
-                    logger.info(f"Buffered update: {len(to_update)} events updated")
         except Exception as e:
-            logger.error(f"Failed to bulk update events: {e} | {traceback.format_exc()}")
+            # 这里的异常通常是极其严重的（比如内存错误），恢复所有数据
+            logger.error(f"Failed to flush events: {e} | {traceback.format_exc()}")
+            for eid, tenant in current_batch.items():
+                if eid not in self.event_update_buffer:
+                    self.event_update_buffer[eid] = tenant
 
     async def periodic_flush_task(self):
         logger.info("启动更新事件状态任务")
