@@ -347,12 +347,15 @@ class ChatManager:
                 logger.info(f"正在处理第 {i} 到 {i + len(batch_ids)} 条记录")
 
                 try:
+                    # 尝试查询和更新
                     events = await Events.filter(id__in=batch_ids).all()
                     
                     to_update = []
+                    found_ids = set()
                     current_time = TZ.localize(datetime.now())
                     
                     for event in events:
+                        found_ids.add(event.id)
                         expected_tenant = str(current_batch.get(event.id))
                         actual_tenant = str(event.tenant_id)
                         
@@ -364,14 +367,25 @@ class ChatManager:
                     if to_update:
                         await Events.bulk_update(to_update, fields=["event_process_status", "close_time"])
                         logger.info(f"批次更新成功: {len(to_update)} 条")
-                
+                    
+                    # 关键逻辑：处理未找到的 ID
+                    # 如果某些 ID 在数据库中还没查到（可能是主从延迟或写入滞后），将它们放回 buffer 重试
+                    for eid in batch_ids:
+                        if eid not in found_ids:
+                            logger.warning(f"Event ID {eid} not found in DB, re-queueing for retry")
+                            if eid not in self.event_update_buffer:
+                                self.event_update_buffer[eid] = current_batch[eid]
+
                 except Exception as batch_error:
-                    # 单个批次失败，记录日志，并尝试将该批次数据放回 buffer（可选，防止彻底丢失）
-                    logger.error(f"批次处理失败: {batch_error} | {traceback.format_exc()}")
-                    # 恢复失败的数据到 buffer
+                    # 无论是查询失败还是更新失败，都视为该批次处理失败
+                    logger.error(f"批次处理失败(将回滚该批次): {batch_error} | {traceback.format_exc()}")
+                    
+                    # 将该批次的所有 ID 重新放回 buffer
+                    # 注意：这里我们放回的是 batch_ids（原始请求的 ID），而不是 to_update（查到的 ID）
+                    # 这样可以保证即使是因为查询失败（导致 events 为空），ID 也能被放回去重试
                     for eid in batch_ids:
                         if eid not in self.event_update_buffer:
-                             self.event_update_buffer[eid] = current_batch[eid]
+                            self.event_update_buffer[eid] = current_batch[eid]
 
         except Exception as e:
             # 这里的异常通常是极其严重的（比如内存错误），恢复所有数据
