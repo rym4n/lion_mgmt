@@ -582,7 +582,7 @@ async def update_event_ingestion(request):
         event.enabled_status = enabled_status
         event.enabled_health_status = "healthy"
 
-    data = event.vector_config_raw
+    data = event.vector_config_raw if event_source_type or transforms_type else event.vector_config
 
     if event_source_type:
         if event_source_type == "syslog":
