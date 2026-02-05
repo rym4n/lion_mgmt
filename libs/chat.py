@@ -320,6 +320,7 @@ class ChatManager:
             await msg_sub.unsubscribe(WR_TOPIC)
 
     async def _flush_events(self):
+        logger.info(f"开始更新事件状态，当前数量为{len(self.event_update_buffer)}")
         if not self.event_update_buffer:
             return
 
