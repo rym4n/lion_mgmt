@@ -326,7 +326,7 @@ class ChatManager:
 
         events_buffer = dict(self.event_update_buffer)
         self.event_update_buffer.clear()
-        logger.info(f"开始更新事件状态，当前缓冲区大小: {len(events_buffer)}")
+        logger.info(f"当前缓冲区大小: {len(events_buffer)}")
         try:
             if events_buffer:
                 event_ids = list(events_buffer.keys())
