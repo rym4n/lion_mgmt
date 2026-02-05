@@ -320,17 +320,18 @@ class ChatManager:
             await msg_sub.unsubscribe(WR_TOPIC)
 
     async def _flush_events(self):
+        logger.info(f"开始更新事件状态，当前缓冲区大小: {len(self.event_update_buffer)}")
         if not self.event_update_buffer:
             return
 
         events_buffer = dict(self.event_update_buffer)
         self.event_update_buffer.clear()
-
+        logger.info(f"开始更新事件状态，当前缓冲区大小: {len(events_buffer)}")
         try:
             if events_buffer:
                 event_ids = list(events_buffer.keys())
                 logger.debug(f"Event IDs to check: {event_ids}")
-                
+
                 events = await Events.filter(id__in=event_ids).all()
                 logger.debug(f"Fetched {len(events)} events from DB")
 
