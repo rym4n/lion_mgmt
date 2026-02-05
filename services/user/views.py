@@ -1344,8 +1344,9 @@ async def oauth2_callback(request):
             permit_ip=None,
         )
 
+        logger.info(f"account: {account.json}")
         tenant = await Tenant.get_or_none(id=account.tenant_id)
-        logger.info(f"tenant: {tenant.json if tenant else None}")
+        logger.info(f"tenant: {tenant}")
         if tenant is not None:
             await tenant.member.add(account)
         else:

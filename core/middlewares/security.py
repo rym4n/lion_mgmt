@@ -91,7 +91,7 @@ class SecurityMiddleware(BaseMiddleware):
             data = {
                 "username": "",
                 "display_name": "",
-                "tenant_id": request.json.get("tenant_id", 0),
+                "tenant_id": "",
                 "client_ip": get_client_ip(request),
                 "result": "成功" if response.status < 400 else "失败",
                 "uri": request.path,
