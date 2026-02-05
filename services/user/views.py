@@ -1351,13 +1351,13 @@ async def oauth2_callback(request):
                 account.tenant_id = tenants_by_id[0].id
                 await account.save(update_fields=["tenant_id"])
                 for t in tenants_by_id:
-                    t.member.add(account)
+                    await t.member.add(account)
             else:
                 raise CustomError(ErrorCode.DEFAULT_TENANT_NOT_FOUND)
         else:
             tenant = await Tenant.get(id=account.tenant_id)
             if tenant:
-                tenant.member.add(account)
+                await tenant.member.add(account)
             else:
                 raise CustomError(ErrorCode.DEFAULT_TENANT_NOT_FOUND)
 
