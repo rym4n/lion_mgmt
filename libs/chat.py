@@ -700,7 +700,6 @@ class ChatManager:
 
             content = data.get("content", "")
             image_content = data.get("image_content", "")
-            specify_users = data.get("specify_user", "")
 
             # 获取或创建私聊房间
             chat_room = await get_or_create_private_chat_room(self.redis, user, receiver, tenant_id)
@@ -717,10 +716,23 @@ class ChatManager:
                 tenant_id=tenant_id,
             )
 
-            if specify_users:
-                # 指定用户发送消息
-                for specify_user in specify_users:
-                    await MessageAccount.create(message=message, account_id=specify_user, tenant_id=tenant_id)
+            ma = await MessageAccount.create(message=message, account_id=receiver, tenant_id=tenant_id)
+
+            msg = {
+                "mention": {
+                    "type": "mention",
+                    "message_id": str(ma.id),
+                    "sender_id": user.id,
+                    "sender_name": user.username,
+                    "sender_display_name": user.display_name,
+                    "content": ma.json,
+                    "image_content": image_content,
+                    "timestamp": str(ma.ctime),
+                    "room_id": chat_room.id,
+                },
+                "user": receiver,
+            }
+            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(msg).decode())
 
             # 构建消息数据
             message_data = {
