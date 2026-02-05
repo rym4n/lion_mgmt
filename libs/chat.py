@@ -228,6 +228,7 @@ class ChatManager:
         self.cache_client = caches.get("redis_chat")
         self.msg_pub = self.cache_client.client
         self.active_connections: dict[str, dict] = {}
+        self.event_update_buffer = {}
 
     async def connect(self, user: Account, ws, session_id):
         """处理用户连接"""
@@ -317,6 +318,25 @@ class ChatManager:
                     logger.error(f"{e} | {traceback.format_exc()}")
                     break
             await msg_sub.unsubscribe(WR_TOPIC)
+
+    async def _flush_events(self):
+        if not self.event_update_buffer:
+            return
+
+        events_to_update = list(self.event_update_buffer.values())
+        self.event_update_buffer.clear()
+
+        try:
+            if events_to_update:
+                await Events.bulk_update(events_to_update, fields=["event_process_status", "close_time"])
+                logger.info(f"Buffered update: {len(events_to_update)} events updated")
+        except Exception as e:
+            logger.error(f"Failed to bulk update events: {e} | {traceback.format_exc()}")
+
+    async def periodic_flush_task(self):
+        while True:
+            await asyncio.sleep(1)
+            await self._flush_events()
 
     async def log_listener(self):
         logger.info("启动runlog消费任务")
@@ -418,7 +438,9 @@ class ChatManager:
                             logger.info("event_update")
                             event.event_process_status = "已处理"
                             event.close_time = TZ.localize(datetime.now())
-                            await event.save()
+                            self.event_update_buffer[event.id] = event
+                            if len(self.event_update_buffer) >= 500:
+                                await self._flush_events()
                 to_insert.append(Runlog(**log))
         try:
             await Runlog.bulk_create(

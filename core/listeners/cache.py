@@ -59,12 +59,14 @@ class CacheListener(BaseListener):
 
         app.add_task(chat_manager.msg_listener, name="chat_msg_listener")
         app.add_task(chat_manager.log_listener, name="run_log_listener")
+        app.add_task(chat_manager.periodic_flush_task, name="periodic_flush_task")
 
     async def before_server_stop(self, app: Sanic, loop: BaseEventLoop) -> None:
         """关闭后台任务，释放连接"""
         try:
             await app.cancel_task("chat_msg_listener")
             await app.cancel_task("run_log_listener")
+            await app.cancel_task("periodic_flush_task")
         except Exception as e:
             logger.warning(f"释放资源异常: {e} | {traceback.format_exc()}")
         finally:
