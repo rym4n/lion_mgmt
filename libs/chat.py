@@ -329,8 +329,10 @@ class ChatManager:
         try:
             if events_buffer:
                 event_ids = list(events_buffer.keys())
+                logger.info(f"Checking events IDs: {event_ids}")
 
                 events = await Events.filter(id__in=event_ids).all()
+                logger.info(f"Fetched {len(events)} events from DB")
 
                 to_update = []
                 current_time = TZ.localize(datetime.now())
@@ -346,6 +348,7 @@ class ChatManager:
 
                 if to_update:
                     await Events.bulk_update(to_update, fields=["event_process_status", "close_time"])
+                    logger.info(f"Buffered update: {len(to_update)} events updated")
         except Exception as e:
             logger.error(f"Failed to bulk update events: {e} | {traceback.format_exc()}")
 
