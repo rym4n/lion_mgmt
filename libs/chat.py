@@ -323,13 +323,27 @@ class ChatManager:
         if not self.event_update_buffer:
             return
 
-        events_to_update = list(self.event_update_buffer.values())
+        events_buffer = dict(self.event_update_buffer)
         self.event_update_buffer.clear()
 
         try:
-            if events_to_update:
-                await Events.bulk_update(events_to_update, fields=["event_process_status", "close_time"])
-                logger.info(f"Buffered update: {len(events_to_update)} events updated")
+            if events_buffer:
+                event_ids = list(events_buffer.keys())
+                events = await Events.filter(id__in=event_ids).all()
+                
+                to_update = []
+                current_time = TZ.localize(datetime.now())
+                
+                for event in events:
+                    # 确保 tenant_id 匹配
+                    if str(event.tenant_id) == str(events_buffer.get(event.id)):
+                        event.event_process_status = "已处理"
+                        event.close_time = current_time
+                        to_update.append(event)
+                
+                if to_update:
+                    await Events.bulk_update(to_update, fields=["event_process_status", "close_time"])
+                    logger.info(f"Buffered update: {len(to_update)} events updated")
         except Exception as e:
             logger.error(f"Failed to bulk update events: {e} | {traceback.format_exc()}")
 
@@ -432,15 +446,9 @@ class ChatManager:
                     log["event_id"] = event.id
                 if log["event_id"]:
                     if log.get("node_type") == "end-node":
-                        event = await Events.get_or_none(id=log["event_id"], tenant_id=log["tenant_id"])
-                        logger.info("event_update_start")
-                        if event:
-                            logger.info("event_update")
-                            event.event_process_status = "已处理"
-                            event.close_time = TZ.localize(datetime.now())
-                            self.event_update_buffer[event.id] = event
-                            if len(self.event_update_buffer) >= 500:
-                                await self._flush_events()
+                        self.event_update_buffer[log["event_id"]] = log["tenant_id"]
+                        if len(self.event_update_buffer) >= 500:
+                                await self._flush_events()                            
                 to_insert.append(Runlog(**log))
         try:
             await Runlog.bulk_create(
