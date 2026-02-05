@@ -1344,7 +1344,15 @@ async def oauth2_callback(request):
             permit_ip=None,
         )
 
+        tenant = await Tenant.get_or_none(id=account.tenant_id)
+        logger.info(f"tenant: {tenant.json if tenant else None}")
+        if tenant is not None:
+            await tenant.member.add(account)
+        else:
+            raise CustomError(ErrorCode.DEFAULT_TENANT_NOT_FOUND)
+
         default_tenants = request.app.ctx.oauth_cfg.get("default_tenants", "").split(",")
+        logger.info(f"default_tenants: {default_tenants}")
         if default_tenants:
             tenants_by_id = await Tenant.filter(id__in=default_tenants).all()
             if tenants_by_id:
@@ -1352,12 +1360,6 @@ async def oauth2_callback(request):
                 await account.save(update_fields=["tenant_id"])
                 for t in tenants_by_id:
                     await t.member.add(account)
-            else:
-                raise CustomError(ErrorCode.DEFAULT_TENANT_NOT_FOUND)
-        else:
-            tenant = await Tenant.get(id=account.tenant_id)
-            if tenant:
-                await tenant.member.add(account)
             else:
                 raise CustomError(ErrorCode.DEFAULT_TENANT_NOT_FOUND)
 

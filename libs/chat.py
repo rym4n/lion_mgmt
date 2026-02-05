@@ -326,25 +326,28 @@ class ChatManager:
 
         events_buffer = dict(self.event_update_buffer)
         self.event_update_buffer.clear()
-        logger.info(f"当前缓冲区大小: {len(events_buffer)}")
+        
         try:
             if events_buffer:
                 event_ids = list(events_buffer.keys())
-                logger.debug(f"Event IDs to check: {event_ids}")
+                logger.info(f"Checking events IDs: {event_ids}")
 
                 events = await Events.filter(id__in=event_ids).all()
-                logger.debug(f"Fetched {len(events)} events from DB")
+                logger.info(f"Fetched {len(events)} events from DB")
 
                 to_update = []
                 current_time = TZ.localize(datetime.now())
                 
                 for event in events:
-                    tenant_match = str(event.tenant_id) == str(events_buffer.get(event.id))
-                    logger.debug(f"Checking event {event.id}, tenant match: {tenant_match}")
-                    if tenant_match:
+                    expected_tenant = str(events_buffer.get(event.id))
+                    actual_tenant = str(event.tenant_id)
+                    
+                    if actual_tenant == expected_tenant:
                         event.event_process_status = "已处理"
                         event.close_time = current_time
                         to_update.append(event)
+                    else:
+                        logger.warning(f"Tenant mismatch for event {event.id}: expected {expected_tenant}, got {actual_tenant}")
                 
                 if to_update:
                     await Events.bulk_update(to_update, fields=["event_process_status", "close_time"])
