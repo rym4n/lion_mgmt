@@ -856,7 +856,7 @@ async def transforms_update(request):
     for item in request.json.get("data"):
         await Config.update_or_create(
             key=item.get("key"),
-            defaults={"value": item.get("value"), "type": item.get("type"), "default": True},
+            defaults={"value": item.get("value"), "type": item.get("type"), "shared": True},
             module="transforms",
         )
 

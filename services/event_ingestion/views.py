@@ -612,7 +612,7 @@ async def update_event_ingestion(request):
         data["transforms"][first_transform]["inputs"] = [f"{event.vector_name}_date_transforms"]
         data["transforms"][first_transform]["drop_on_error"] = False
 
-        config = await Config.get_or_none(Q(key=transforms_type, module="transforms") & (Q(tenant_id=tenant_id) | Q(default=True)))
+        config = await Config.get_or_none(Q(key=transforms_type, module="transforms") & (Q(tenant_id=tenant_id) | Q(shared=True)))
         if not config:
             raise CustomError(ErrorCode.TYPE_NOT_SUPPORTED_ERROR)
         args = {
@@ -1394,7 +1394,7 @@ async def parse_log(request):
     tmp_data["transforms"]["tmp_transforms"]["inputs"] = ["tmp"]
     tmp_data["transforms"]["tmp_transforms"]["drop_on_error"] = False
 
-    config = await Config.get_or_none(Q(key=transforms_type, module="transforms") & (Q(tenant_id=tenant_id) | Q(default=True)))
+    config = await Config.get_or_none(Q(key=transforms_type, module="transforms") & (Q(tenant_id=tenant_id) | Q(shared=True)))
     if not config:
         raise CustomError(ErrorCode.TYPE_NOT_SUPPORTED_ERROR)
 
@@ -1595,7 +1595,7 @@ async def playbook_list(request):
 )
 async def transforms_list(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    transforms = await Config.filter(Q(deleted=False, module="transforms") & (Q(tenant_id=tenant_id) | Q(default=True))).all()
+    transforms = await Config.filter(Q(deleted=False, module="transforms") & (Q(tenant_id=tenant_id) | Q(shared=True))).all()
 
     return response_ok([transform.json for transform in transforms])
 
@@ -1612,8 +1612,7 @@ async def transforms_list(request):
                 "properties": {
                     "key": {"type": "string", "description": "配置键"},
                     "value": {"type": "string", "description": "配置值"},
-                    "type": {"type": "string", "description": "配置类型"},
-                    "default": {"type": "boolean", "description": "是否共享"},
+                    "type": {"type": "string", "description": "配置类型"}
                 },
             }
         }
@@ -1641,7 +1640,6 @@ async def transforms_add(request):
     key = request.json.get("key")
     value = request.json.get("value")
     type_ = request.json.get("type")
-    default = request.json.get("default")
 
     if not key or not value:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -1649,7 +1647,7 @@ async def transforms_add(request):
     if await Config.filter(key=key, module="transforms", tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
 
-    await Config.create(key=key, value=value, type=type_, module="transforms", default=default, tenant_id=tenant_id)
+    await Config.create(key=key, value=value, type=type_, module="transforms", tenant_id=tenant_id)
 
     return response_ok("success")
 
@@ -1667,7 +1665,7 @@ async def transforms_add(request):
                     "id": {"type": "string", "description": "配置ID"},
                     "value": {"type": "string", "description": "配置值"},
                     "type": {"type": "string", "description": "配置类型"},
-                    "default": {"type": "boolean", "description": "是否共享"},
+                    "shared": {"type": "boolean", "description": "是否共享"},
                 },
             }
         }
@@ -1694,7 +1692,7 @@ async def transforms_update(request):
     id_ = request.json.get("id")
     value = request.json.get("value")
     type_ = request.json.get("type")
-    default = request.json.get("default")
+    shared = request.json.get("shared")
 
     if not id_:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -1708,8 +1706,8 @@ async def transforms_update(request):
     if type_ is not None:
         config.type = type_
 
-    if default is not None:
-        config.default = default
+    if shared is not None:
+        config.shared = shared
 
     await config.save()
     return response_ok("success")
@@ -1758,7 +1756,7 @@ async def transforms_del(request):
     if not config:
         raise CustomError(ErrorCode.NOT_FOUND)
 
-    if config.default:
+    if config.shared:
         raise CustomError(ErrorCode.CANNOT_DELETE_DEFAULT_CONFIG)
 
     config.deleted = True
@@ -1796,7 +1794,7 @@ async def transforms_export(request):
     ids = request.json.get("ids")
     tenant_id = request.ctx.session.get("tenant_id")
 
-    query = Q(deleted=False, module="transforms") & (Q(tenant_id=tenant_id) | Q(default=True))
+    query = Q(deleted=False, module="transforms") & (Q(tenant_id=tenant_id) | Q(shared=True))
     if ids:
         query &= Q(id__in=ids)
 
@@ -1872,21 +1870,13 @@ async def transforms_import(request):
                 key = config_data.get("key")
                 value = config_data.get("value")
                 type_ = config_data.get("type")
-                default = config_data.get("default", False)
 
                 if not key or not value:
                     continue
 
                 existing = await Config.get_or_none(key=key, module="transforms", tenant_id=tenant_id)
-                if existing:
-                    existing.value = value
-                    if type_ is not None:
-                        existing.type = type_
-                    existing.default = default
-                    existing.deleted = False
-                    await existing.save()
-                else:
-                    await Config.create(key=key, value=value, type=type_, module="transforms", default=default, tenant_id=tenant_id)
+                if not existing:
+                    await Config.create(key=key, value=value, type=type_, module="transforms", shared=False, tenant_id=tenant_id)
         except Exception as e:
             logger.error(f"Import transforms failed: {e}")
             raise CustomError(ErrorCode.PARAM_ERROR)
