@@ -173,9 +173,11 @@ async def create_workflow(request):
         await playbook.fetch_related("tags", "scenes")
         print(tenant_id)
         for flow_json in flow_json_list:
+            flow_json_str = orjson.dumps(flow_json)
+            sha1_val = hashlib.sha1(flow_json_str).hexdigest()
             pv = await PlaybookVersion.create(
                 playbook=playbook,
-                version="",
+                version=sha1_val,
                 status=0,
                 change_desc=data.get("change_desc", ""),
                 flow_json=flow_json,
@@ -744,9 +746,11 @@ async def edit_workflow_flow(request):
     pv.updator = request.ctx.session["account_info"]
     # 已发布的剧本是不允许修改的
     if pv.status == 1:
+        flow_json_str = orjson.dumps(pv.flow_json)
+        sha1_val = hashlib.sha1(flow_json_str).hexdigest()
         pv = await PlaybookVersion.create(
             playbook=pv.playbook,
-            version="",
+            version=sha1_val,
             flow_json=pv.flow_json,
             change_desc=None,
             status=0,
@@ -813,12 +817,8 @@ async def publish_workflow(request):
     if not pv:
         raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
 
-    flow_json_str = orjson.dumps(pv.flow_json)
-    sha1_val = hashlib.sha1(flow_json_str).hexdigest()
-
     pv.status = 1
     pv.updator = request.ctx.session["account_info"]
-    pv.version = sha1_val
     pv.change_desc = request.json.get("change_desc")
     await pv.save()
     return response_ok("剧本发布成功")
