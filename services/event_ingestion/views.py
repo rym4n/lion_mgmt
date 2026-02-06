@@ -1707,6 +1707,17 @@ async def transforms_update(request):
         config.type = type_
 
     if shared is not None:
+        account = request.ctx.session.get("account_info")
+        allow = False
+        if account and hasattr(account, "roles"):
+            for role in account.roles:
+                if role.id == "111111":
+                    allow = True
+                    break
+
+        if not allow:
+            raise CustomError(ErrorCode.FORBIDDEN)
+
         config.shared = shared
 
     await config.save()
