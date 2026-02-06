@@ -461,7 +461,7 @@ class ChatManager:
                     if node["id"] != log["audit_app"]:
                         continue
                     if node["properties"].get("callback") == "on":
-                        callback_datas = node.get("callback_data")
+                        callback_datas = node["properties"].get("callback_data")
                         for callback_data in callback_datas:
                             data = {}
                             for input_data in callback_data["input"]:
