@@ -14,7 +14,7 @@ class Account(BaseModel):
     账号模型，包含以下属性：用户名、姓名、邮箱、手机号、密码、OAuth ID、是否禁用、角色
     """
 
-    username: str = fields.CharField(null=False, max_length=255)
+    username: str = fields.CharField(null=False, max_length=255, unique=True)
     display_name: str = fields.CharField(max_length=255, null=True)
     email: str = fields.CharField(
         max_length=150,
