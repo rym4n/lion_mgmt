@@ -1329,7 +1329,7 @@ async def oauth2_callback(request):
     if not username:
         raise CustomError(ErrorCode.GET_USER_INFO_ERROR)
     try:
-        account = await Account.get(username=username[0]).prefetch_related("roles")
+        account = await Account.get(username=username[0], deleted=False).prefetch_related("roles")
     except DoesNotExist:
         if request.app.ctx.oauth_cfg["auto_create"] != "true":
             raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
