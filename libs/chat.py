@@ -147,7 +147,18 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
     user_private_chat_rooms = await cache_client.get(f"user_private_chat_rooms_{tenant_id}") or {}
     if key not in user_private_chat_rooms:
         # 作战室名字
-        room = await Room.get_or_none(name=private_room_name, tenant_id=tenant_id)
+        # room = await Room.get_or_none(name=private_room_name, tenant_id=tenant_id)
+        if sender.id != receiver.id:
+            room = await Room.filter(room_type="private", tenant_id=tenant_id, users__id=sender.id).filter(users__id=receiver.id).first()
+        else:
+            # 只有自己
+            all_rooms = await Room.filter(room_type="private", tenant_id=tenant_id, users__id=sender.id).prefetch_related("users")
+            room = None
+            for r in all_rooms:
+                if len(r.users) == 1 and r.users[0].id == sender.id:
+                    room = r
+                    break
+
         # 先查后创
         if not room:
             room = await Room.create(name=private_room_name, creator=sender, tenant_id=tenant_id, room_type="private")
@@ -700,10 +711,13 @@ class ChatManager:
 
             content = data.get("content", "")
             image_content = data.get("image_content", "")
-
+            room_id = data.get("room_id")
+            chat_room = {}
             # 获取或创建私聊房间
-            chat_room = await get_or_create_private_chat_room(self.redis, user, receiver, tenant_id)
-
+            if not room_id:
+                chat_room = await get_or_create_private_chat_room(self.redis, user, receiver, tenant_id)
+            
+            chat_room["room_id"] = room_id
             chat_room = await Room.get_or_none(id=chat_room["room_id"], tenant_id=tenant_id)
 
             message = await Message.create(
