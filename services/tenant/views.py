@@ -55,7 +55,10 @@ async def get_tenant(request):
     tenants = await Tenant.filter().offset(offset).limit(size).all().prefetch_related("creator", "member")
     total = await Tenant.filter().count()
 
-    data = [tenant.json for tenant in tenants]
+    data = []
+    for tenant in tenants:
+        data.append(tenant.json)
+        data[-1]["member"] = len(tenant.member)
 
     return response_ok(
         {

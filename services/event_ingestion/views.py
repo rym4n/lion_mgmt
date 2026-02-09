@@ -1885,7 +1885,7 @@ async def transforms_import(request):
                 if not key or not value:
                     continue
 
-                existing = await Config.get_or_none(key=key, module="transforms", tenant_id=tenant_id)
+                existing = await Config.get_or_none(key=key, deleted=False, module="transforms", tenant_id=tenant_id)
                 if not existing:
                     await Config.create(key=key, value=value, type=type_, module="transforms", shared=False, tenant_id=tenant_id)
         except Exception as e:

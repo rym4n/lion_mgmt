@@ -11,7 +11,6 @@ import time
 import zipfile
 
 from aiocache import caches
-from httpx import delete
 import orjson
 from sanic import Blueprint
 from sanic_ext import openapi
