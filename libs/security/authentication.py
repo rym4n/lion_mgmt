@@ -7,6 +7,7 @@ import traceback
 import uuid
 
 import jwt
+from aiocache import cached
 from jsonpath import jsonpath
 from sanic import Request
 from sanic.log import logger
@@ -123,6 +124,17 @@ def refresh_token(old_data: dict, **kwargs) -> str:
     return token
 
 
+@cached(ttl=60)
+async def get_jwt_config() -> dict:
+    """获取JWT配置，缓存60秒"""
+    try:
+        jwt_configs = await Config.filter(module="jwt").all()
+        return {c.key: c.value for c in jwt_configs}
+    except Exception as e:
+        logger.error(f"Failed to load JWT config: {e}")
+        return {}
+
+
 async def token_decode(request: Request) -> dict:
     """
     将token解码成数据字典
@@ -134,9 +146,10 @@ async def token_decode(request: Request) -> dict:
     elif request.args.get("token"):
         # 支持通过URL参数token认证，使用Config中jwt配置进行校验
         token = request.args.get("token")
-        cfg = getattr(request.app.ctx, "jwt_cfg", {}) or {}
+        cfg = await get_jwt_config()
         
         # 必须启用JWT认证
+
         if cfg.get("jwt_enabled") != "true":
             raise CustomError(ErrorCode.SESSION_INVALID)
             
