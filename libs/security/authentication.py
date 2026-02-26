@@ -220,6 +220,17 @@ async def token_decode(request: Request) -> dict:
             # 注意：这里我们不需要再次生成aioe-auth token，而是直接返回构造好的payload
             # authenticate函数后续会根据这个payload设置request.ctx.session
             current = int(time.time())
+            
+            # 使用现有账号信息生成标准系统Token
+            aioe_token = token_encode(
+                account.id,
+                account.username,
+                account.display_name,
+                account.mfa_enable,
+                account.tenant_id,
+                str(uuid.uuid4()),
+            )
+            
             sys_payload = {
                 "id": str(uuid.uuid4()),
                 "sub": account.id,
@@ -228,7 +239,8 @@ async def token_decode(request: Request) -> dict:
                 "mfa_enable": account.mfa_enable,
                 "tenant_id": account.tenant_id,
                 "iat": current,
-                "exp": current + AUTHENTICATION_SESSION_EXPIRATION
+                "exp": current + AUTHENTICATION_SESSION_EXPIRATION,
+                "aioe_token": aioe_token  # 将生成的Token放入payload返回
             }
             
             # 缓存用户信息，避免后续频繁查库（虽然authenticate里也会查）
