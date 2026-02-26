@@ -29,9 +29,13 @@ class CacheListener(BaseListener):
     async def after_server_start(self, app: Sanic, loop: BaseEventLoop) -> None:
         """app绑定内存/Redis"""
         app.ctx.oauth_cfg = {}
+        app.ctx.jwt_cfg = {}
         try:
             records = await Config.filter(module="sso").values("key", "value")
             app.ctx.oauth_cfg = {c["key"]: c["value"] for c in records}
+            
+            jwt_configs = await Config.filter(module="jwt").all()
+            app.ctx.jwt_cfg = {c.key: c.value for c in jwt_configs}
 
             if app.ctx.oauth_cfg.get("use_oauth2") == "true":
                 logger.info("启用OAuth2认证")

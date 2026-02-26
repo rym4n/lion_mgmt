@@ -634,6 +634,56 @@ async def get_oauth_config(request):
     )
 
 
+@system_bp.post("/jwt/get")
+@openapi.definition(
+    summary="获取JWT单点配置",
+    description="获取JWT单点配置，需要sso:r权限",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "jwt_enabled": {"type": "string"},
+                                    "jwt_algorithm": {"type": "string"},
+                                    "jwt_secret": {"type": "string"},
+                                    "jwt_user_path": {"type": "string"},
+                                    "jwt_auto_create": {"type": "string"},
+                                    "jwt_default_roles": {"type": "string"},
+                                    "jwt_default_tenants": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("sso:r")
+async def get_jwt_config(request):
+    records = await Config.filter(module="jwt").values("key", "value")
+    cfg = {c["key"]: c["value"] for c in records}
+    secret = cfg.get("jwt_secret", "")
+    return response_ok(
+        {
+            "jwt_enabled": cfg.get("jwt_enabled", "false"),
+            "jwt_algorithm": cfg.get("jwt_algorithm", "HS256"),
+            "jwt_secret": secret[:3] + "******" + secret[-3:] if secret else "",
+            "jwt_user_path": cfg.get("jwt_user_path", ""),
+            "jwt_auto_create": cfg.get("jwt_auto_create", "false"),
+            "jwt_default_roles": cfg.get("jwt_default_roles", ""),
+            "jwt_default_tenants": cfg.get("jwt_default_tenants", ""),
+        }
+    )
+
+
 @system_bp.post("/oauth/update")
 @openapi.definition(
     summary="更新SSO配置",
@@ -807,6 +857,96 @@ async def update_oauth_config(request):
             if to_create:
                 await Config.bulk_create(to_create)
 
+    request.app.m.restart(zero_downtime=True, all_workers=True)
+    return response_ok("success")
+
+
+@system_bp.post("/jwt/update")
+@openapi.definition(
+    summary="更新JWT单点配置",
+    description="更新JWT单点配置，需要sso:u权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["jwt_enabled"],
+                "properties": {
+                    "jwt_enabled": {
+                        "type": "string",
+                        "description": "true 表示启用JWT单点, false 表示禁用",
+                    },
+                    "jwt_algorithm": {"type": "string", "description": "HS256 或 RS256"},
+                    "jwt_secret": {"type": "string", "description": "校验密钥或公钥"},
+                    "jwt_user_path": {"type": "string", "description": "提取用户ID的JSONPath"},
+                    "jwt_auto_create": {
+                        "type": "string",
+                        "description": "true 表示认证用户不存在自动新建",
+                    },
+                    "jwt_default_roles": {
+                        "type": "string",
+                        "description": "新用户默认角色ID，英文逗号分隔",
+                    },
+                    "jwt_default_tenants": {
+                        "type": "string",
+                        "description": "新用户默认工作空间ID，英文逗号分隔",
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {"code": {"type": "integer"}, "data": {"type": "string"}},
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("sso:u")
+async def update_jwt_config(request):
+    params = request.json
+    enabled = params.get("jwt_enabled")
+    if enabled not in ("true", "false"):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if enabled == "false":
+        old = await Config.get_or_none(key="jwt_enabled")
+        if old:
+            old.value = "false"
+            await old.save()
+        else:
+            await Config.create(key="jwt_enabled", value="false", module="jwt")
+    else:
+        required_fields = ["jwt_algorithm", "jwt_secret", "jwt_user_path"]
+        optional_fields = ["jwt_auto_create", "jwt_default_roles", "jwt_default_tenants"]
+        for field in required_fields:
+            if not params.get(field):
+                raise CustomError(ErrorCode.PARAM_ERROR)
+        updates = {key: params.get(key, "") for key in required_fields + optional_fields}
+        updates["jwt_enabled"] = "true"
+        if "******" in params.get("jwt_secret", ""):
+            updates.pop("jwt_secret")
+        async with in_transaction():
+            existing_configs = await Config.filter(key__in=updates.keys()).all()
+            existing_dict = {cfg.key: cfg for cfg in existing_configs}
+            to_update = []
+            to_create = []
+            for key, value in updates.items():
+                if key in existing_dict:
+                    config = existing_dict[key]
+                    config.value = value
+                    to_update.append(config)
+                else:
+                    to_create.append(Config(key=key, value=value, module="jwt"))
+            if to_update:
+                await Config.bulk_update(to_update, fields=["value"])
+            if to_create:
+                await Config.bulk_create(to_create)
     request.app.m.restart(zero_downtime=True, all_workers=True)
     return response_ok("success")
 
