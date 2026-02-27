@@ -55,23 +55,6 @@ class SecurityMiddleware(BaseMiddleware):
 
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
         """统一记录操作日志"""
-        
-        # 处理通过 URL Token 登录后的 Cookie 设置
-        if hasattr(request.ctx, "session") and "aioe_token" in request.ctx.session:
-            from settings import AUTHENTICATION_SESSION_EXPIRATION, SESSION_HTTPONLY, SESSION_SAMESITE, SESSION_SECURE
-            from libs.utils import get_expiration_date
-            
-            response.cookies.add_cookie(
-                "aioe-auth",
-                request.ctx.session["aioe_token"],
-                httponly=SESSION_HTTPONLY,
-                samesite=SESSION_SAMESITE,
-                secure=SESSION_SECURE,
-                expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
-            )
-            # 消费后删除，避免后续重复设置
-            del request.ctx.session["aioe_token"]
-
         data = None
 
         if hasattr(request.ctx, "session"):

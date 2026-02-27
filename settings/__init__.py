@@ -80,7 +80,7 @@ OAS_UI_SWAGGER = False
 # 安全相关
 SECRET = os.environ.get("RY_SECRET_KEY", "5tdPY^zTX6I$akvNtLXey3y#gFEG@^46f!iLUdSy$Y")
 
-SESSION_SAMESITE = None
+SESSION_SAMESITE = "None"  # 可选值: "Strict", "Lax", "None" (None 需要 HTTPS)
 SESSION_SECURE = True
 SESSION_HTTPONLY = True
 SESSION_DOMAIN = None
