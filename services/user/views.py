@@ -1375,8 +1375,7 @@ async def iframe_login(request):
             aioe_token,
             httponly=SESSION_HTTPONLY,
             samesite=SESSION_SAMESITE,
-            # secure=SESSION_SECURE,
-            secure=False,
+            secure=SESSION_SECURE,
             expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
         )
         return resp
