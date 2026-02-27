@@ -4,6 +4,7 @@ from datetime import datetime
 import time
 import uuid
 
+import jwt
 from argon2.exceptions import InvalidHashError, VerificationError
 from jsonpath import jsonpath
 import pyotp
@@ -17,6 +18,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authentication import (
+    get_jwt_config,
     get_secure_config_dict,
     refresh_token,
     token_encode,
@@ -1251,6 +1253,136 @@ async def assign_role_to_user(request):
     await account.roles.clear()
     await account.roles.add(*roles)
     return response_ok("success")
+
+
+@user_bp.get("/iframe-login")
+@openapi.definition(
+    summary="iframe认证登录",
+    description="通过第三方JWT Token进行认证，认证成功后写入Cookie并重定向",
+    parameter=[
+        {
+            "name": "token",
+            "location": "query",
+            "description": "第三方JWT Token",
+            "required": True,
+            "schema": {"type": "string"},
+        },
+        {
+            "name": "redirect",
+            "location": "query",
+            "description": "认证成功后的重定向地址",
+            "required": False,
+            "schema": {"type": "string"},
+        }
+    ],
+    response={"302": {"description": "重定向到目标页面"}},
+)
+async def iframe_login(request):
+    token = request.args.get("token")
+    redirect_uri = request.args.get("redirect")
+    
+    if not token or not redirect_uri:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    cfg = await get_jwt_config()
+    if cfg.get("jwt_enabled") != "true":
+        raise CustomError(ErrorCode.SESSION_INVALID)
+        
+    algo = cfg.get("jwt_algorithm", "HS256")
+    secret = cfg.get("jwt_secret", "")
+    user_path = cfg.get("jwt_user_path", "")
+    
+    if not all([algo, secret, user_path]):
+        logger.warning(f"JWT config incomplete: algo={algo}, secret=***, user_path={user_path}")
+        raise CustomError(ErrorCode.SESSION_INVALID)
+
+    try:
+        decode_key = secret
+        if algo == "RS256":
+            if not secret.strip().startswith("-----BEGIN PUBLIC KEY-----"):
+                secret = f"-----BEGIN PUBLIC KEY-----\n{secret.strip()}\n-----END PUBLIC KEY-----"
+            decode_key = secret.encode("utf-8")
+
+        payload = jwt.decode(token, decode_key, algorithms=[algo])
+        username = jsonpath(payload, user_path)
+        if not username:
+            logger.warning(f"JWT user path {user_path} not found in payload")
+            raise CustomError(ErrorCode.SESSION_INVALID)
+            
+        # 4. 查找或自动创建用户
+        try:
+            account = await Account.get(username=username[0], deleted=False).prefetch_related("roles")
+        except DoesNotExist:
+            if cfg.get("jwt_auto_create") != "true":
+                raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+            
+            # 自动创建用户逻辑
+            account = await Account.create(
+                username=username[0],
+                oauth_id=username[0],
+                password="",
+                display_name=None,
+                email=None,
+                phone=None,
+                disabled=False,
+                mfa_enable=False,
+                mfa_key=None,
+                creator="auto",
+                permit_ip=None,
+            )
+            
+            # 分配默认租户
+            tenant = await Tenant.get_or_none(id=account.tenant_id)
+            if tenant:
+                await tenant.member.add(account)
+            
+            default_tenants = cfg.get("jwt_default_tenants", "").split(",")
+            if default_tenants not in [[""], [], None, ""]:
+                tenants_by_id = await Tenant.filter(id__in=default_tenants).all()
+                if tenants_by_id:
+                    account.tenant_id = tenants_by_id[0].id
+                    await account.save(update_fields=["tenant_id"])
+                    for t in tenants_by_id:
+                        await t.member.add(account)
+            
+            # 分配默认角色
+            default_roles = cfg.get("jwt_default_roles", "").split(",")
+            if default_roles:
+                roles = await Role.filter(id__in=default_roles, tenant_id=account.tenant_id).all()
+                if roles:
+                    await account.roles.add(*roles)
+            
+            # 无论是否分配角色，都需要获取关联关系
+            await account.fetch_related("roles")
+
+        # 5. 生成系统Token
+        aioe_token = token_encode(
+            account.id,
+            account.username,
+            account.display_name,
+            account.mfa_enable,
+            account.tenant_id,
+            str(uuid.uuid4()),
+        )
+        
+        # 6. 缓存用户信息
+        await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
+        
+        # 7. 构造响应并重定向
+        resp = response.redirect(redirect_uri)
+        resp.cookies.add_cookie(
+            "aioe-auth",
+            aioe_token,
+            httponly=SESSION_HTTPONLY,
+            samesite=SESSION_SAMESITE,
+            secure=SESSION_SECURE,
+            expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
+        )
+        return resp
+        
+    except Exception as e:
+        logger.warning(f"JWT verify failed: {e} | {traceback.format_exc()}")
+        raise CustomError(ErrorCode.SESSION_INVALID)
 
 
 @user_bp.get("/oauth/login")

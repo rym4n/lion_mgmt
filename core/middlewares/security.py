@@ -47,6 +47,7 @@ class SecurityMiddleware(BaseMiddleware):
             "/user/oauth/login",
             "/user/oauth/callback",
             "/user/local-auth",
+            "/user/iframe-login",
         ]
         if request.path not in white_urls:
             await authenticate(request)
