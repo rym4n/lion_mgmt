@@ -4,19 +4,16 @@ import functools
 import re
 import time
 import traceback
-import uuid
 
 import jwt
 from aiocache import cached
-from jsonpath import jsonpath
 from sanic import Request
 from sanic.log import logger
-from tortoise.exceptions import DoesNotExist
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.utils import get_client_ip, ip_in_list
-from models import Account, Config, Role, Tenant
+from models import Account, Config, Tenant
 from settings import AUTHENTICATION_SESSION_EXPIRATION, SECRET, SECURE_CONFIG_DEFAULT, SESSION_ENCODING_ALGORITHM
 
 
@@ -143,115 +140,6 @@ async def token_decode(request: Request) -> dict:
         token = request.cookies.get("aioe-auth")
     elif request.headers.get("aioe-auth") and ":" in request.headers.get("aioe-auth"):
         token = request.headers.get("aioe-auth")
-    elif request.args.get("token"):
-        # 支持通过URL参数token认证，使用Config中jwt配置进行校验
-        token = request.args.get("token")
-        cfg = await get_jwt_config()
-        
-        # 必须启用JWT认证
-
-        if cfg.get("jwt_enabled") != "true":
-            raise CustomError(ErrorCode.SESSION_INVALID)
-            
-        algo = cfg.get("jwt_algorithm", "HS256")
-        secret = cfg.get("jwt_secret", "")
-        user_path = cfg.get("jwt_user_path", "")
-        
-        # 必须配置完整
-        if not all([algo, secret, user_path]):
-            logger.warning(f"JWT config incomplete: algo={algo}, secret=***, user_path={user_path}")
-            raise CustomError(ErrorCode.SESSION_INVALID)
-            
-        try:
-            # 1. 校验第三方JWT
-            payload = jwt.decode(token, secret, algorithms=[algo])
-            username = jsonpath(payload, user_path)
-            if not username:
-                logger.warning(f"JWT user path {user_path} not found in payload")
-                raise CustomError(ErrorCode.SESSION_INVALID)
-                
-            # 2. 查找或自动创建用户
-            try:
-                account = await Account.get(username=username[0], deleted=False).prefetch_related("roles")
-            except DoesNotExist:
-                if cfg.get("jwt_auto_create") != "true":
-                    raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
-                
-                # 自动创建用户逻辑
-                account = await Account.create(
-                    username=username[0],
-                    oauth_id=username[0],
-                    password="",
-                    display_name=None,
-                    email=None,
-                    phone=None,
-                    disabled=False,
-                    mfa_enable=False,
-                    mfa_key=None,
-                    creator="auto",
-                    permit_ip=None,
-                )
-                
-                # 分配默认租户
-                tenant = await Tenant.get_or_none(id=account.tenant_id)
-                if tenant:
-                    await tenant.member.add(account)
-                
-                default_tenants = cfg.get("jwt_default_tenants", "").split(",")
-                if default_tenants not in [[""], [], None, ""]:
-                    tenants_by_id = await Tenant.filter(id__in=default_tenants).all()
-                    if tenants_by_id:
-                        account.tenant_id = tenants_by_id[0].id
-                        await account.save(update_fields=["tenant_id"])
-                        for t in tenants_by_id:
-                            await t.member.add(account)
-                
-                # 分配默认角色
-                default_roles = cfg.get("jwt_default_roles", "").split(",")
-                if default_roles:
-                    roles = await Role.filter(id__in=default_roles, tenant_id=account.tenant_id).all()
-                    if roles:
-                        await account.roles.add(*roles)
-                
-                # 无论是否分配角色，都需要获取关联关系，否则后续访问会报错 NoValuesFetched
-                await account.fetch_related("roles")
-
-            # 3. 构造系统内部payload（模拟正常登录后的payload结构）
-            # 注意：这里我们不需要再次生成aioe-auth token，而是直接返回构造好的payload
-            # authenticate函数后续会根据这个payload设置request.ctx.session
-            current = int(time.time())
-            
-            # 使用现有账号信息生成标准系统Token
-            aioe_token = token_encode(
-                account.id,
-                account.username,
-                account.display_name,
-                account.mfa_enable,
-                account.tenant_id,
-                str(uuid.uuid4()),
-            )
-            
-            sys_payload = {
-                "id": str(uuid.uuid4()),
-                "sub": account.id,
-                "name": account.username,
-                "display_name": account.display_name,
-                "mfa_enable": account.mfa_enable,
-                "tenant_id": account.tenant_id,
-                "iat": current,
-                "exp": current + AUTHENTICATION_SESSION_EXPIRATION,
-                "aioe_token": aioe_token  # 将生成的Token放入payload返回
-            }
-            
-            # 缓存用户信息，避免后续频繁查库（虽然authenticate里也会查）
-            await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
-            
-            return sys_payload
-            
-        except Exception as e:
-            logger.warning(f"JWT verify failed: {e} | {traceback.format_exc()}")
-            raise CustomError(ErrorCode.SESSION_INVALID)
-
     else:
         raise CustomError(ErrorCode.SESSION_INVALID)
 
