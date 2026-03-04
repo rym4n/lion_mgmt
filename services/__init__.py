@@ -19,6 +19,7 @@ from services.approvement.views import approve_bp
 from services.dashboard.views import dashboard_bp
 from services.event.views import event_bp
 from services.event_ingestion.views import event_ingestion_bp
+from services.inspection.views import inspection_bp
 from services.license.views import license_bp
 from services.log_view.views import logs_bp
 from services.mcp.views import mcp_bp
@@ -62,6 +63,7 @@ def register_blueprints(app: Sanic):
     app.blueprint(warroom_bp)
     app.blueprint(approve_bp)
     app.blueprint(tenant_bp)
+    app.blueprint(inspection_bp)
 
     try:
         bp_dict = {

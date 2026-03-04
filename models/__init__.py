@@ -4,6 +4,7 @@ from .agent import *
 from .approvement import *
 from .config import *
 from .event import *
+from .inspection import *
 from .playbook import *
 from .runlog import *
 from .scene import *
