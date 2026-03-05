@@ -112,6 +112,7 @@ async def list_targets(
                 "category": target.category,
                 "standard": target.standard,
                 "action_name": target.action_name,
+                "action_input": target.action_input,
                 "app_name": target.app_name,
                 "resource_config": target.resource_config,
                 "enabled": target.enabled,
@@ -170,6 +171,55 @@ async def delete_target(target_id: str, tenant_id: str) -> bool:
     target.deleted = True
     await target.save()
     return True
+
+
+async def get_all_configs(tenant_id: str) -> List[Dict[str, Any]]:
+    """
+    获取全部巡检目标配置
+    Get all inspection target configurations
+    """
+    targets = await InspectionTarget.filter(
+        deleted=False,
+        tenant_id=tenant_id,
+        enabled=True
+    ).all()
+
+    if not targets:
+        return []
+
+    # 获取相关的工具信息
+    app_names = list(set(t.app_name for t in targets))
+    tools = await Tool.filter(
+        name__in=app_names,
+        tenant_id=tenant_id
+    ).all()
+    tool_map = {t.name: t for t in tools}
+
+    results = []
+    for target in targets:
+        tool = tool_map.get(target.app_name)
+        
+        # 构造 action_input
+        if target.action_input:
+            action_input = json.dumps(target.action_input)
+        else:
+            action_input = "{}"
+        
+        # 构造 resources
+        resources = json.dumps(target.resource_config) if target.resource_config else "{}"
+        
+        item = {
+            "main": tool.main if tool and tool.main else "main.py",
+            "timeout": "300",
+            "version": tool.version if tool else "",
+            "resources": resources,
+            "tool_name": target.app_name,
+            "action_name": target.action_name,
+            "action_input": action_input
+        }
+        results.append(item)
+        
+    return results
 
 
 # ==================== InspectionResult Operations ====================

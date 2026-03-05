@@ -34,6 +34,7 @@ class InspectionTarget(BaseModel):
     category = fields.CharField(max_length=100, description="巡检分类")
     standard = fields.TextField(description="巡检标准")
     action_name = fields.CharField(max_length=100, description="巡检动作名称")
+    action_input = fields.JSONField(description="动作输入参数", null=True)
     app_name = fields.CharField(max_length=100, description="应用名称")
     resource_config = fields.JSONField(description="资源配置(JSON格式)")
     enabled = fields.BooleanField(default=True, description="是否启用")

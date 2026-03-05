@@ -171,6 +171,7 @@ async def get_schedule(request: Request):
                     "category": {"type": "string", "description": "巡检分类"},
                     "standard": {"type": "string", "description": "巡检标准"},
                     "action_name": {"type": "string", "description": "动作名称"},
+                    "action_input": {"type": "object", "description": "动作输入参数"},
                     "app_name": {"type": "string", "description": "应用名称"},
                     "resource_config": {"type": "object", "description": "资源配置"},
                     "enabled": {"type": "boolean", "description": "是否启用"},
@@ -197,6 +198,7 @@ async def get_schedule(request: Request):
                                     "category": {"type": "string"},
                                     "standard": {"type": "string"},
                                     "action_name": {"type": "string"},
+                                    "action_input": {"type": "object"},
                                     "app_name": {"type": "string"},
                                     "resource_config": {"type": "object"},
                                     "enabled": {"type": "boolean"},
@@ -236,6 +238,7 @@ async def create_target(request: Request):
         "category": target.category,
         "standard": target.standard,
         "action_name": target.action_name,
+        "action_input": target.action_input,
         "app_name": target.app_name,
         "resource_config": target.resource_config,
         "enabled": target.enabled,
@@ -286,6 +289,7 @@ async def create_target(request: Request):
                                                 "category": {"type": "string"},
                                                 "standard": {"type": "string"},
                                                 "action_name": {"type": "string"},
+                                                "action_input": {"type": "object"},
                                                 "app_name": {"type": "string"},
                                                 "resource_config": {"type": "object"},
                                                 "enabled": {"type": "boolean"},
@@ -362,6 +366,7 @@ async def list_targets(request: Request):
                                     "category": {"type": "string"},
                                     "standard": {"type": "string"},
                                     "action_name": {"type": "string"},
+                                    "action_input": {"type": "object"},
                                     "app_name": {"type": "string"},
                                     "resource_config": {"type": "object"},
                                     "enabled": {"type": "boolean"},
@@ -400,6 +405,7 @@ async def get_target(request: Request):
         "category": target.category,
         "standard": target.standard,
         "action_name": target.action_name,
+        "action_input": target.action_input,
         "app_name": target.app_name,
         "resource_config": target.resource_config,
         "enabled": target.enabled,
@@ -425,6 +431,7 @@ async def get_target(request: Request):
                     "category": {"type": "string", "description": "巡检分类"},
                     "standard": {"type": "string", "description": "巡检标准"},
                     "action_name": {"type": "string", "description": "动作名称"},
+                    "action_input": {"type": "object", "description": "动作输入参数"},
                     "app_name": {"type": "string", "description": "应用名称"},
                     "resource_config": {"type": "object", "description": "资源配置"},
                     "enabled": {"type": "boolean", "description": "是否启用"},
@@ -451,6 +458,7 @@ async def get_target(request: Request):
                                     "category": {"type": "string"},
                                     "standard": {"type": "string"},
                                     "action_name": {"type": "string"},
+                                    "action_input": {"type": "object"},
                                     "app_name": {"type": "string"},
                                     "resource_config": {"type": "object"},
                                     "enabled": {"type": "boolean"},
@@ -490,6 +498,7 @@ async def update_target(request: Request):
         "category": target.category,
         "standard": target.standard,
         "action_name": target.action_name,
+        "action_input": target.action_input,
         "app_name": target.app_name,
         "resource_config": target.resource_config,
         "enabled": target.enabled,
@@ -553,6 +562,52 @@ async def delete_target(request: Request):
         raise CustomError(ErrorCode.NOT_FOUND)
 
     return response_ok(data={"message": "删除成功"})
+
+
+@inspection_bp.post("/target/all_configs")
+@openapi.definition(
+    summary="获取全部巡检目标配置",
+    description="获取全部巡检目标配置，用于执行器调用",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "main": {"type": "string"},
+                                        "timeout": {"type": "string"},
+                                        "version": {"type": "string"},
+                                        "resources": {"type": "string"},
+                                        "tool_name": {"type": "string"},
+                                        "action_name": {"type": "string"},
+                                        "action_input": {"type": "string"},
+                                    }
+                                }
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:r")
+async def get_all_configs(request: Request):
+    """
+    获取全部巡检目标配置
+    Get all inspection target configurations
+    """
+    tenant_id = request.ctx.session.get("tenant_id")
+    result = await logic.get_all_configs(tenant_id)
+    return response_ok(data=result)
 
 
 @inspection_bp.post("/parse")
@@ -652,7 +707,7 @@ async def start_inspection(request: Request):
     # 查询巡检调度配置
     schedule = await logic.get_schedule(tenant_id)
     if not schedule or not schedule.enabled:
-        raise CustomError(ErrorCode.PARAM_ERROR, "巡检调度配置未启用")
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     # 查询是否已经存在全局定时任务
     timed_name = f"inspection_{tenant_id}"
@@ -683,20 +738,20 @@ async def start_inspection(request: Request):
         # 获取巡检剧本 ID（需要配置环境变量 RY_INSPECTION_PLAYBOOK_ID）
         playbook_id = os.getenv("RY_INSPECTION_PLAYBOOK_ID")
         if not playbook_id:
-            raise CustomError(ErrorCode.PARAM_ERROR, "未配置巡检剧本ID，请设置环境变量 RY_INSPECTION_PLAYBOOK_ID")
+            raise CustomError(ErrorCode.PARAM_ERROR)
 
         playbook = await Playbook.get_or_none(id=playbook_id, deleted=False, tenant_id=tenant_id)
         if not playbook:
-            raise CustomError(ErrorCode.NOT_FOUND, "巡检剧本不存在")
+            raise CustomError(ErrorCode.NOT_FOUND)
 
         # 获取剧本版本 ID（需要配置环境变量 RY_INSPECTION_PLAYBOOK_VERSION_ID）
         playbook_version_id = os.getenv("RY_INSPECTION_PLAYBOOK_VERSION_ID")
         if not playbook_version_id:
-            raise CustomError(ErrorCode.PARAM_ERROR, "未配置巡检剧本版本ID，请设置环境变量 RY_INSPECTION_PLAYBOOK_VERSION_ID")
+            raise CustomError(ErrorCode.PARAM_ERROR)
 
         playbook_version = await PlaybookVersion.get_or_none(id=playbook_version_id, tenant_id=tenant_id)
         if not playbook_version:
-            raise CustomError(ErrorCode.NOT_FOUND, "巡检剧本版本不存在")
+            raise CustomError(ErrorCode.NOT_FOUND)
 
         # 构建剧本输入参数（不包含 target_id，剧本会自动查询所有启用的巡检项）
         playbook_input = {
@@ -777,7 +832,7 @@ async def pause_inspection(request: Request):
     timed = await Timed.filter(name=timed_name, deleted=False, tenant_id=tenant_id).first()
 
     if not timed:
-        raise CustomError(ErrorCode.NOT_FOUND, "全局巡检定时任务不存在")
+        raise CustomError(ErrorCode.NOT_FOUND)
 
     # 更新 enable=0
     if timed.enable == 1:
