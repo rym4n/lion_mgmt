@@ -160,24 +160,27 @@ async def get_schedule(request: Request):
 @inspection_bp.post("/target/create")
 @openapi.definition(
     summary="创建巡检目标",
-    description="创建巡检目标",
+    description="创建巡检目标（仅支持批量创建）",
     body={
         "application/json": {
             "schema": {
-                "type": "object",
-                "required": ["name", "content", "category", "standard", "action_name", "app_name", "resource_config"],
-                "properties": {
-                    "name": {"type": "string", "description": "目标名称"},
-                    "content": {"type": "string", "description": "巡检内容"},
-                    "category": {"type": "string", "description": "巡检分类"},
-                    "standard": {"type": "string", "description": "巡检标准"},
-                    "action_name": {"type": "string", "description": "动作名称"},
-                    "action_input": {"type": "object", "description": "动作输入参数"},
-                    "app_name": {"type": "string", "description": "应用名称"},
-                    "resource_config": {"type": "object", "description": "资源配置"},
-                    "enabled": {"type": "boolean", "description": "是否启用"},
-                    "description": {"type": "string", "description": "目标描述"},
-                },
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["name", "content", "category", "standard", "action_name", "app_name", "resource_config"],
+                    "properties": {
+                        "name": {"type": "string", "description": "目标名称"},
+                        "content": {"type": "string", "description": "巡检内容"},
+                        "category": {"type": "string", "description": "巡检分类"},
+                        "standard": {"type": "string", "description": "巡检标准"},
+                        "action_name": {"type": "string", "description": "动作名称"},
+                        "action_input": {"type": "object", "description": "动作输入参数"},
+                        "app_name": {"type": "string", "description": "应用名称"},
+                        "resource_config": {"type": "object", "description": "资源配置"},
+                        "enabled": {"type": "boolean", "description": "是否启用"},
+                        "description": {"type": "string", "description": "目标描述"},
+                    },
+                }
             }
         }
     },
@@ -191,21 +194,24 @@ async def get_schedule(request: Request):
                         "properties": {
                             "code": {"type": "integer"},
                             "data": {
-                                "type": "object",
-                                "properties": {
-                                    "id": {"type": "string"},
-                                    "name": {"type": "string"},
-                                    "content": {"type": "string"},
-                                    "category": {"type": "string"},
-                                    "standard": {"type": "string"},
-                                    "action_name": {"type": "string"},
-                                    "action_input": {"type": "object"},
-                                    "app_name": {"type": "string"},
-                                    "resource_config": {"type": "object"},
-                                    "enabled": {"type": "boolean"},
-                                    "description": {"type": "string"},
-                                    "ctime": {"type": "string"},
-                                    "utime": {"type": "string"},
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "name": {"type": "string"},
+                                        "content": {"type": "string"},
+                                        "category": {"type": "string"},
+                                        "standard": {"type": "string"},
+                                        "action_name": {"type": "string"},
+                                        "action_input": {"type": "object"},
+                                        "app_name": {"type": "string"},
+                                        "resource_config": {"type": "object"},
+                                        "enabled": {"type": "boolean"},
+                                        "description": {"type": "string"},
+                                        "ctime": {"type": "string"},
+                                        "utime": {"type": "string"},
+                                    },
                                 },
                             },
                         },
@@ -221,32 +227,62 @@ async def create_target(request: Request):
     创建巡检目标
     Create inspection target
     """
-    data = request.json or {}
+    raw_data = request.json
+    if raw_data is None:
+        raw_data = []
+        
     tenant_id = request.ctx.session.get("tenant_id")
-
-    # 验证必需字段
+    
+    # 强制要求输入为列表
+    if not isinstance(raw_data, list):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+        
+    data_list = raw_data
+    
+    # 验证必需字段并处理JSON字符串
     required_fields = ["name", "content", "category", "standard", "action_name", "app_name", "resource_config"]
-    for field in required_fields:
-        if field not in data:
-            raise CustomError(ErrorCode.PARAM_ERROR)
+    processed_list = []
+    
+    for item in data_list:
+        if not isinstance(item, dict):
+            continue
+            
+        # 验证必需字段
+        for field in required_fields:
+            if field not in item:
+                raise CustomError(ErrorCode.PARAM_ERROR)
+        
+        # 处理可能为字符串的JSON字段
+        processed_item = item.copy()      
+        processed_list.append(processed_item)
 
-    target = await logic.create_target(data, tenant_id)
+    if not processed_list and data_list:
+         if not data_list:
+             return response_ok(data=[])
+         raise CustomError(ErrorCode.PARAM_ERROR)
+         
+    targets = await logic.batch_create_targets(processed_list, tenant_id)
 
-    return response_ok(data={
-        "id": target.id,
-        "name": target.name,
-        "content": target.content,
-        "category": target.category,
-        "standard": target.standard,
-        "action_name": target.action_name,
-        "action_input": target.action_input,
-        "app_name": target.app_name,
-        "resource_config": target.resource_config,
-        "enabled": target.enabled,
-        "description": target.description,
-        "ctime": target.ctime.isoformat() if target.ctime else None,
-        "utime": target.utime.isoformat() if target.utime else None,
-    })
+    result_data = [
+        {
+            "id": target.id,
+            "name": target.name,
+            "content": target.content,
+            "category": target.category,
+            "standard": target.standard,
+            "action_name": target.action_name,
+            "action_input": target.action_input,
+            "app_name": target.app_name,
+            "resource_config": target.resource_config,
+            "enabled": target.enabled,
+            "description": target.description,
+            "ctime": target.ctime.isoformat() if target.ctime else None,
+            "utime": target.utime.isoformat() if target.utime else None,
+        }
+        for target in targets
+    ]
+
+    return response_ok(data=result_data)
 
 
 @inspection_bp.post("/target/list")
@@ -1173,3 +1209,88 @@ async def execute_sql(request: Request):
             response_ok(f"SQL执行失败 {e}")
 
     return response_ok(data=result)
+
+
+@inspection_bp.post("/result/add")
+@openapi.definition(
+    summary="添加巡检结果",
+    description="添加新的巡检结果记录",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["target_id", "status"],
+                "properties": {
+                    "target_id": {"type": "string", "description": "巡检目标ID"},
+                    "status": {"type": "string", "description": "执行状态: success/failed/timeout"},
+                    "result_data": {"type": "object", "description": "巡检结果数据"},
+                    "error_message": {"type": "string", "description": "错误信息"},
+                    "start_time": {"type": "string", "description": "开始时间 (ISO 8601)"},
+                    "end_time": {"type": "string", "description": "结束时间 (ISO 8601)"},
+                    "duration": {"type": "integer", "description": "执行耗时(秒)"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "添加成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "target_id": {"type": "string"},
+                                    "status": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:c")
+async def add_result(request: Request):
+    """
+    添加巡检结果
+    Add inspection result
+    """
+    request_data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    # 提取有效字段
+    valid_fields = ["target_id", "status", "result_data", "error_message", "start_time", "end_time", "duration"]
+    data = {k: v for k, v in request_data.items() if k in valid_fields}
+
+    if not data.get("target_id") or not data.get("status"):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 处理时间字段
+    if data.get("start_time"):
+        try:
+            if isinstance(data["start_time"], str):
+                data["start_time"] = datetime.fromisoformat(data["start_time"].replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if data.get("end_time"):
+        try:
+            if isinstance(data["end_time"], str):
+                data["end_time"] = datetime.fromisoformat(data["end_time"].replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+    result = await logic.create_result(data, tenant_id)
+
+    return response_ok(data={
+        "id": result.id,
+        "target_id": result.target_id,
+        "status": result.status
+    })

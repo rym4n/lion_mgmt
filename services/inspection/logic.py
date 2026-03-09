@@ -77,6 +77,19 @@ async def create_target(data: Dict[str, Any], tenant_id: str) -> InspectionTarge
     return target
 
 
+async def batch_create_targets(data_list: List[Dict[str, Any]], tenant_id: str) -> List[InspectionTarget]:
+    """
+    批量创建巡检目标
+    Batch create inspection targets
+    """
+    # 使用循环创建以获取完整的对象信息（包括ID）
+    targets = []
+    for data in data_list:
+        target = await create_target(data, tenant_id)
+        targets.append(target)
+    return targets
+
+
 async def list_targets(
     page: int,
     page_size: int,
@@ -223,6 +236,31 @@ async def get_all_configs(tenant_id: str) -> List[Dict[str, Any]]:
 
 
 # ==================== InspectionResult Operations ====================
+
+async def create_result(data: Dict[str, Any], tenant_id: str) -> InspectionResult:
+    """
+    创建巡检结果
+    Create inspection result
+    """
+    target_id = data.get("target_id")
+    if not target_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    
+    target = await InspectionTarget.filter(
+        id=target_id,
+        deleted=False,
+        tenant_id=tenant_id
+    ).first()
+    
+    if not target:
+        raise CustomError(ErrorCode.NOT_FOUND)
+        
+    result = await InspectionResult.create(
+        **data,
+        tenant_id=tenant_id
+    )
+    return result
+
 
 async def list_results(
     page: int,
@@ -392,7 +430,7 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
     available_actions = []
     for action in tool_actions:
         if action.action:
-            action_name = action.action.get("name") or action.action.get("func")
+            action_name = action.action.get("func")
             if action_name:
                 available_actions.append(action_name)
 
