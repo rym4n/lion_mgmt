@@ -1245,14 +1245,14 @@ async def assign_role_to_user(request):
     role_names = request.json.get("role_names", "").split(",")
     if not role_names:
         await account.roles.clear()
-        return response_ok("success")
+        return response_ok({"username": username, "roles": []})
     roles = await Role.filter(name__in=role_names, deleted=False, tenant_id=tenant_id).all()
     if len(roles) != len(role_names):
         raise CustomError(ErrorCode.ROLE_NOT_FOUND)
 
     await account.roles.clear()
     await account.roles.add(*roles)
-    return response_ok("success")
+    return response_ok({"username": username, "roles": role_names})
 
 
 @user_bp.get("/iframe-login")

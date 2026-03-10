@@ -126,6 +126,7 @@ async def upload_image(request):
         await Config.create(key="platform_config", module="system", value=orjson.dumps(default).decode())
 
     # 处理文件上传
+    uploaded_files = []
     for field in ["background", "logo"]:
         file = request.files.get(field)
         filename = ""
@@ -139,8 +140,9 @@ async def upload_image(request):
             if file and filename:
                 file_url = await upload_to_s3(file.body, "user", filename, "custom")
                 await Config.update_or_create(key=field, module="system", defaults={"value": file_url})
+                uploaded_files.append({"field": field, "url": file_url})
 
-    return response_ok("success")
+    return response_ok({"uploaded_files": uploaded_files})
 
 
 @system_bp.get("/picture")

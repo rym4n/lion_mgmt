@@ -10,6 +10,8 @@ import secrets
 import uuid
 import zipfile
 
+from sanic.log import logger
+
 from aiocache import caches
 import orjson
 import pytz
@@ -190,7 +192,7 @@ async def create_workflow(request):
             action_ids = await statistics_data(flow_json, tenant_id)
             await tool_action_update({pv.id: action_ids}, tenant_id)
 
-    return response_ok("success")
+    return response_ok({"playbook_id": str(playbook.id), "name": playbook.name})
 
 
 @workflow_bp.post("/list")
@@ -263,6 +265,7 @@ async def create_workflow(request):
 )
 @requires_permission("workflow:r")
 async def list_workflow(request):
+    logger.info("------------------agent------------------------")
     json_params = request.json
     page = int(json_params.get("page", 1)) if int(json_params.get("page", 1)) != 0 else 1
     size = max(1, min(int(json_params.get("size", 15)), 100))
@@ -821,7 +824,7 @@ async def publish_workflow(request):
     pv.updator = request.ctx.session["account_info"]
     pv.change_desc = request.json.get("change_desc")
     await pv.save()
-    return response_ok("剧本发布成功")
+    return response_ok(pv.json)
 
 
 @workflow_bp.post("/del")
@@ -945,7 +948,7 @@ async def delete_workflow_version(request):
 
     pv.deleted = True
     await pv.save()
-    return response_ok("success")
+    return response_ok({"flow_id": str(pv.id)})
 
 
 @workflow_bp.post("/stop")
@@ -984,7 +987,7 @@ async def stop_workflow(request):
     run_id = request.json.get("run_id")
     msg = {"run_type": "kill", "run_id": run_id, "run_args": {"executor": request.ctx.session["account_info"].id}, "tenant_id": request.ctx.session.get("tenant_id")}
     await aproduce(TASK_TOPIC, msg)
-    return response_ok("success")
+    return response_ok({"run_id": run_id})
 
 
 @workflow_bp.post("/debug")

@@ -206,7 +206,7 @@ async def delelte_variable(request):
     await caches.get("redis_chat").delete(f"global_{var.name}")
     var.deleted = True
     await var.save()
-    return response_ok("success")
+    return response_ok({"name": var.name})
 
 
 @var_bp.post("/update")
@@ -257,4 +257,4 @@ async def update_variable(request):
     var.updator = request.ctx.session["account_info"]
     await var.save()
     await caches.get("redis_chat").set(f"global_{var.name}", value)
-    return response_ok("success")
+    return response_ok({"name": var.name})

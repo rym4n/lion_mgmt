@@ -1647,9 +1647,9 @@ async def transforms_add(request):
     if await Config.filter(key=key, module="transforms", tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
 
-    await Config.create(key=key, value=value, type=type_, module="transforms", tenant_id=tenant_id)
+    config = await Config.create(key=key, value=value, type=type_, module="transforms", tenant_id=tenant_id)
 
-    return response_ok("success")
+    return response_ok(config.json)
 
 
 @event_ingestion_bp.post("/transforms-update")
