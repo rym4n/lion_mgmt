@@ -216,12 +216,20 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
     return {"tool": zip_filename, "msg": msg}
 
 
+def open_zip(zip_buffer):
+    try:
+        return zipfile.ZipFile(zip_buffer, "r", metadata_encoding="utf-8")
+    except UnicodeDecodeError:
+        zip_buffer.seek(0)
+        return zipfile.ZipFile(zip_buffer, "r", metadata_encoding="gbk")
+
+
 async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
     try:
         zip_buffer = BytesIO(zip_data)
         logo_data = None
 
-        with zipfile.ZipFile(zip_buffer, "r", metadata_encoding="utf-8") as zip_ref:
+        with open_zip(zip_buffer) as zip_ref:
             version = None
 
             files_info = zip_ref.infolist()

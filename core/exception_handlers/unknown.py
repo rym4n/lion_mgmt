@@ -20,6 +20,8 @@ class UnknownExcHandler(BaseExcHandler):
     def handle(self, request: Request, exception: Exception) -> HTTPResponse:
         if isinstance(exception, exceptions.NotFound) or isinstance(exception, DoesNotExist):
             return response_fail(ErrorCode.NOT_FOUND)
+        elif isinstance(exception, exceptions.PayloadTooLarge):
+            return response_fail(ErrorCode.FILE_TOO_LARGE)
         elif isinstance(exception, exceptions.BadRequest) or isinstance(exception, ValidationError) or isinstance(exception, ValueError) or isinstance(exception, TypeError) or isinstance(exception, KeyError) or isinstance(exception, FieldError):
             logger.exception(exception)
             return response_fail(ErrorCode.PARAM_ERROR)
