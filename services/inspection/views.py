@@ -30,18 +30,19 @@ __all__ = ["inspection_bp"]
 
 @inspection_bp.post("/schedule/save")
 @openapi.definition(
-    summary="创建或更新巡检调度配置",
-    description="创建或更新巡检调度配置",
+    summary="创建或更新巡检任务",
+    description="创建或更新巡检任务",
     body={
         "application/json": {
             "schema": {
                 "type": "object",
                 "required": ["schedule_cron"],
                 "properties": {
-                    "schedule_cron": {"type": "string", "description": "Cron表达式"},
-                    "name": {"type": "string", "description": "配置名称"},
+                    "schedule_cron": {"type": "string", "description": "定时周期(Cron表达式)"},
+                    "name": {"type": "string", "description": "任务名称"},
+                    "owner": {"type": "string", "description": "负责人"},
                     "enabled": {"type": "boolean", "description": "是否启用"},
-                    "description": {"type": "string", "description": "配置描述"},
+                    "description": {"type": "string", "description": "任务描述"},
                 },
             }
         }
@@ -93,6 +94,7 @@ async def save_schedule(request: Request):
         "id": schedule.id,
         "name": schedule.name,
         "schedule_cron": schedule.schedule_cron,
+        "owner": schedule.owner,
         "enabled": schedule.enabled,
         "description": schedule.description,
         "ctime": schedule.ctime.isoformat() if schedule.ctime else None,
@@ -102,8 +104,8 @@ async def save_schedule(request: Request):
 
 @inspection_bp.post("/schedule/get")
 @openapi.definition(
-    summary="获取巡检调度配置",
-    description="获取巡检调度配置",
+    summary="获取巡检任务配置",
+    description="获取巡检任务配置",
     response={
         "200": {
             "description": "获取成功",
@@ -135,7 +137,7 @@ async def save_schedule(request: Request):
 @requires_permission("inspection:r")
 async def get_schedule(request: Request):
     """
-    获取巡检调度配置
+    获取巡检任务配置
     Get inspection schedule configuration
     """
     tenant_id = request.ctx.session.get("tenant_id")
@@ -148,6 +150,7 @@ async def get_schedule(request: Request):
         "id": schedule.id,
         "name": schedule.name,
         "schedule_cron": schedule.schedule_cron,
+        "owner": schedule.owner,
         "enabled": schedule.enabled,
         "description": schedule.description,
         "ctime": schedule.ctime.isoformat() if schedule.ctime else None,
@@ -155,30 +158,427 @@ async def get_schedule(request: Request):
     })
 
 
-# ==================== Target Management ====================
+# ==================== Category Management ====================
 
-@inspection_bp.post("/target/create")
+@inspection_bp.post("/category/create")
 @openapi.definition(
-    summary="创建巡检目标",
-    description="创建巡检目标（仅支持批量创建）",
+    summary="创建巡检类别",
+    description="创建巡检类别（支持批量创建）",
     body={
         "application/json": {
             "schema": {
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "required": ["name", "content", "category", "standard", "action_name", "app_name", "resource_config"],
+                    "required": ["name", "schedule_id", "app_name", "resource_ids"],
                     "properties": {
-                        "name": {"type": "string", "description": "目标名称"},
+                        "name": {"type": "string", "description": "类别名称"},
+                        "schedule_id": {"type": "string", "description": "关联巡检任务ID"},
+                        "app_name": {"type": "string", "description": "应用名称"},
+                        "resource_ids": {"type": "array", "items": {"type": "string"}, "description": "资源ID列表"},
+                        "enabled": {"type": "boolean", "description": "是否启用"},
+                    },
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "创建成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "name": {"type": "string"},
+                                        "schedule_id": {"type": "string"},
+                                        "app_name": {"type": "string"},
+                                        "resource_ids": {"type": "array", "items": {"type": "string"}},
+                                        "enabled": {"type": "boolean"},
+                                        "ctime": {"type": "string"},
+                                        "utime": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:c")
+async def create_category(request: Request):
+    """
+    创建巡检类别
+    Create inspection category
+    """
+    raw_data = request.json
+    if raw_data is None:
+        raw_data = []
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    # 强制要求输入为列表
+    if not isinstance(raw_data, list):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    data_list = raw_data
+
+    # 验证必需字段
+    required_fields = ["name", "schedule_id", "app_name", "resource_ids"]
+    processed_list = []
+
+    for item in data_list:
+        if not isinstance(item, dict):
+            continue
+
+        # 验证必需字段
+        for field in required_fields:
+            if field not in item:
+                raise CustomError(ErrorCode.PARAM_ERROR)
+
+        processed_list.append(item)
+
+    if not processed_list and data_list:
+        if not data_list:
+            return response_ok(data=[])
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    categories = await logic.batch_create_categories(processed_list, tenant_id)
+
+    result_data = [
+        {
+            "id": category.id,
+            "name": category.name,
+            "schedule_id": category.schedule_id,
+            "app_name": category.app_name,
+            "resource_ids": category.resource_ids,
+            "enabled": category.enabled,
+            "ctime": category.ctime.isoformat() if category.ctime else None,
+            "utime": category.utime.isoformat() if category.utime else None,
+        }
+        for category in categories
+    ]
+
+    return response_ok(data=result_data)
+
+
+@inspection_bp.post("/category/list")
+@openapi.definition(
+    summary="获取巡检类别列表",
+    description="获取巡检类别列表",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "integer", "description": "页码"},
+                    "page_size": {"type": "integer", "description": "每页数量"},
+                    "schedule_id": {"type": "string", "description": "巡检任务ID"},
+                    "enabled": {"type": "boolean", "description": "是否启用"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "total": {"type": "integer"},
+                                    "items": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "schedule_id": {"type": "string"},
+                                                "app_name": {"type": "string"},
+                                                "resource_ids": {"type": "array", "items": {"type": "string"}},
+                                                "enabled": {"type": "boolean"},
+                                                "ctime": {"type": "string"},
+                                                "utime": {"type": "string"},
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:r")
+async def list_categories(request: Request):
+    """
+    获取巡检类别列表
+    Get inspection category list
+    """
+    data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    page = data.get("page", 1)
+    page_size = data.get("page_size", 20)
+    schedule_id = data.get("schedule_id")
+    enabled = data.get("enabled")
+
+    result = await logic.list_categories(
+        page=page,
+        page_size=page_size,
+        tenant_id=tenant_id,
+        schedule_id=schedule_id,
+        enabled=enabled
+    )
+
+    return response_ok(data=result)
+
+
+@inspection_bp.post("/category/get")
+@openapi.definition(
+    summary="获取巡检类别详情",
+    description="获取巡检类别详情",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "类别ID"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "name": {"type": "string"},
+                                    "schedule_id": {"type": "string"},
+                                    "app_name": {"type": "string"},
+                                    "resource_config": {"type": "object"},
+                                    "enabled": {"type": "boolean"},
+                                    "description": {"type": "string"},
+                                    "ctime": {"type": "string"},
+                                    "utime": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:r")
+async def get_category(request: Request):
+    """
+    获取巡检类别详情
+    Get inspection category details
+    """
+    data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    if "id" not in data:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    category = await logic.get_category(data["id"], tenant_id)
+    if not category:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    return response_ok(data={
+        "id": category.id,
+        "name": category.name,
+        "schedule_id": category.schedule_id,
+        "app_name": category.app_name,
+        "resource_ids": category.resource_ids,
+        "enabled": category.enabled,
+        "ctime": category.ctime.isoformat() if category.ctime else None,
+        "utime": category.utime.isoformat() if category.utime else None,
+    })
+
+
+@inspection_bp.post("/category/update")
+@openapi.definition(
+    summary="更新巡检类别",
+    description="更新巡检类别",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "类别ID"},
+                    "name": {"type": "string", "description": "类别名称"},
+                    "app_name": {"type": "string", "description": "应用名称"},
+                    "resource_ids": {"type": "array", "items": {"type": "string"}, "description": "资源ID列表"},
+                    "enabled": {"type": "boolean", "description": "是否启用"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "name": {"type": "string"},
+                                    "schedule_id": {"type": "string"},
+                                    "app_name": {"type": "string"},
+                                    "resource_config": {"type": "object"},
+                                    "enabled": {"type": "boolean"},
+                                    "description": {"type": "string"},
+                                    "ctime": {"type": "string"},
+                                    "utime": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:u")
+async def update_category(request: Request):
+    """
+    更新巡检类别
+    Update inspection category
+    """
+    data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    if "id" not in data:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    category_id = data.pop("id")
+    category = await logic.update_category(category_id, data, tenant_id)
+    if not category:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    return response_ok(data={
+        "id": category.id,
+        "name": category.name,
+        "schedule_id": category.schedule_id,
+        "app_name": category.app_name,
+        "resource_ids": category.resource_ids,
+        "enabled": category.enabled,
+        "ctime": category.ctime.isoformat() if category.ctime else None,
+        "utime": category.utime.isoformat() if category.utime else None,
+    })
+
+
+@inspection_bp.post("/category/delete")
+@openapi.definition(
+    summary="删除巡检类别",
+    description="删除巡检类别",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "类别ID"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:d")
+async def delete_category(request: Request):
+    """
+    删除巡检类别
+    Delete inspection category
+    """
+    data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    if "id" not in data:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    success = await logic.delete_category(data["id"], tenant_id)
+    if not success:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    return response_ok(data={"message": "删除成功"})
+
+
+# ==================== Target Management ====================
+
+@inspection_bp.post("/target/create")
+@openapi.definition(
+    summary="创建巡检项",
+    description="创建巡检项（仅支持批量创建）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["name", "content", "category_id", "standard", "action_name"],
+                    "properties": {
+                        "name": {"type": "string", "description": "巡检项名称"},
                         "content": {"type": "string", "description": "巡检内容"},
-                        "category": {"type": "string", "description": "巡检分类"},
+                        "category_id": {"type": "string", "description": "关联巡检类别ID"},
                         "standard": {"type": "string", "description": "巡检标准"},
                         "action_name": {"type": "string", "description": "动作名称"},
-                        "action_input": {"type": "object", "description": "动作输入参数"},
-                        "app_name": {"type": "string", "description": "应用名称"},
-                        "resource_config": {"type": "object", "description": "资源配置"},
                         "enabled": {"type": "boolean", "description": "是否启用"},
-                        "description": {"type": "string", "description": "目标描述"},
+                        "description": {"type": "string", "description": "巡检项描述"},
                     },
                 }
             }
@@ -201,12 +601,9 @@ async def get_schedule(request: Request):
                                         "id": {"type": "string"},
                                         "name": {"type": "string"},
                                         "content": {"type": "string"},
-                                        "category": {"type": "string"},
+                                        "category_id": {"type": "string"},
                                         "standard": {"type": "string"},
                                         "action_name": {"type": "string"},
-                                        "action_input": {"type": "object"},
-                                        "app_name": {"type": "string"},
-                                        "resource_config": {"type": "object"},
                                         "enabled": {"type": "boolean"},
                                         "description": {"type": "string"},
                                         "ctime": {"type": "string"},
@@ -224,43 +621,43 @@ async def get_schedule(request: Request):
 @requires_permission("inspection:c")
 async def create_target(request: Request):
     """
-    创建巡检目标
+    创建巡检项
     Create inspection target
     """
     raw_data = request.json
     if raw_data is None:
         raw_data = []
-        
+
     tenant_id = request.ctx.session.get("tenant_id")
-    
+
     # 强制要求输入为列表
     if not isinstance(raw_data, list):
         raise CustomError(ErrorCode.PARAM_ERROR)
-        
+
     data_list = raw_data
-    
+
     # 验证必需字段并处理JSON字符串
-    required_fields = ["name", "content", "category", "standard", "action_name", "app_name", "resource_config"]
+    required_fields = ["name", "content", "category_id", "standard", "action_name"]
     processed_list = []
-    
+
     for item in data_list:
         if not isinstance(item, dict):
             continue
-            
+
         # 验证必需字段
         for field in required_fields:
             if field not in item:
                 raise CustomError(ErrorCode.PARAM_ERROR)
-        
+
         # 处理可能为字符串的JSON字段
-        processed_item = item.copy()      
+        processed_item = item.copy()
         processed_list.append(processed_item)
 
     if not processed_list and data_list:
          if not data_list:
              return response_ok(data=[])
          raise CustomError(ErrorCode.PARAM_ERROR)
-         
+
     targets = await logic.batch_create_targets(processed_list, tenant_id)
 
     result_data = [
@@ -268,12 +665,9 @@ async def create_target(request: Request):
             "id": target.id,
             "name": target.name,
             "content": target.content,
-            "category": target.category,
+            "category_id": target.category_id,
             "standard": target.standard,
             "action_name": target.action_name,
-            "action_input": target.action_input,
-            "app_name": target.app_name,
-            "resource_config": target.resource_config,
             "enabled": target.enabled,
             "description": target.description,
             "ctime": target.ctime.isoformat() if target.ctime else None,
@@ -287,8 +681,8 @@ async def create_target(request: Request):
 
 @inspection_bp.post("/target/list")
 @openapi.definition(
-    summary="获取巡检目标列表",
-    description="获取巡检目标列表",
+    summary="获取巡检项列表",
+    description="获取巡检项列表",
     body={
         "application/json": {
             "schema": {
@@ -296,7 +690,7 @@ async def create_target(request: Request):
                 "properties": {
                     "page": {"type": "integer", "description": "页码"},
                     "page_size": {"type": "integer", "description": "每页数量"},
-                    "category": {"type": "string", "description": "巡检分类"},
+                    "category_id": {"type": "string", "description": "巡检类别ID"},
                     "enabled": {"type": "boolean", "description": "是否启用"},
                 },
             }
@@ -323,12 +717,9 @@ async def create_target(request: Request):
                                                 "id": {"type": "string"},
                                                 "name": {"type": "string"},
                                                 "content": {"type": "string"},
-                                                "category": {"type": "string"},
+                                                "category_id": {"type": "string"},
                                                 "standard": {"type": "string"},
                                                 "action_name": {"type": "string"},
-                                                "action_input": {"type": "object"},
-                                                "app_name": {"type": "string"},
-                                                "resource_config": {"type": "object"},
                                                 "enabled": {"type": "boolean"},
                                                 "description": {"type": "string"},
                                                 "ctime": {"type": "string"},
@@ -348,7 +739,7 @@ async def create_target(request: Request):
 @requires_permission("inspection:r")
 async def list_targets(request: Request):
     """
-    获取巡检目标列表
+    获取巡检项列表
     Get inspection target list
     """
     data = request.json or {}
@@ -356,14 +747,14 @@ async def list_targets(request: Request):
 
     page = data.get("page", 1)
     page_size = data.get("page_size", 20)
-    category = data.get("category")
+    category_id = data.get("category_id")
     enabled = data.get("enabled")
 
     result = await logic.list_targets(
         page=page,
         page_size=page_size,
         tenant_id=tenant_id,
-        category=category,
+        category_id=category_id,
         enabled=enabled
     )
 
@@ -372,8 +763,8 @@ async def list_targets(request: Request):
 
 @inspection_bp.post("/target/get")
 @openapi.definition(
-    summary="获取巡检目标详情",
-    description="获取巡检目标详情",
+    summary="获取巡检项详情",
+    description="获取巡检项详情",
     body={
         "application/json": {
             "schema": {
@@ -400,12 +791,9 @@ async def list_targets(request: Request):
                                     "id": {"type": "string"},
                                     "name": {"type": "string"},
                                     "content": {"type": "string"},
-                                    "category": {"type": "string"},
+                                    "category_id": {"type": "string"},
                                     "standard": {"type": "string"},
                                     "action_name": {"type": "string"},
-                                    "action_input": {"type": "object"},
-                                    "app_name": {"type": "string"},
-                                    "resource_config": {"type": "object"},
                                     "enabled": {"type": "boolean"},
                                     "description": {"type": "string"},
                                     "ctime": {"type": "string"},
@@ -422,7 +810,7 @@ async def list_targets(request: Request):
 @requires_permission("inspection:r")
 async def get_target(request: Request):
     """
-    获取巡检目标详情
+    获取巡检项详情
     Get inspection target details
     """
     data = request.json or {}
@@ -439,12 +827,9 @@ async def get_target(request: Request):
         "id": target.id,
         "name": target.name,
         "content": target.content,
-        "category": target.category,
+        "category_id": target.category_id,
         "standard": target.standard,
         "action_name": target.action_name,
-        "action_input": target.action_input,
-        "app_name": target.app_name,
-        "resource_config": target.resource_config,
         "enabled": target.enabled,
         "description": target.description,
         "ctime": target.ctime.isoformat() if target.ctime else None,
@@ -454,25 +839,22 @@ async def get_target(request: Request):
 
 @inspection_bp.post("/target/update")
 @openapi.definition(
-    summary="更新巡检目标",
-    description="更新巡检目标",
+    summary="更新巡检项",
+    description="更新巡检项",
     body={
         "application/json": {
             "schema": {
                 "type": "object",
                 "required": ["id"],
                 "properties": {
-                    "id": {"type": "string", "description": "目标ID"},
-                    "name": {"type": "string", "description": "目标名称"},
+                    "id": {"type": "string", "description": "巡检项ID"},
+                    "name": {"type": "string", "description": "巡检项名称"},
                     "content": {"type": "string", "description": "巡检内容"},
-                    "category": {"type": "string", "description": "巡检分类"},
+                    "category_id": {"type": "string", "description": "关联巡检类别ID"},
                     "standard": {"type": "string", "description": "巡检标准"},
                     "action_name": {"type": "string", "description": "动作名称"},
-                    "action_input": {"type": "object", "description": "动作输入参数"},
-                    "app_name": {"type": "string", "description": "应用名称"},
-                    "resource_config": {"type": "object", "description": "资源配置"},
                     "enabled": {"type": "boolean", "description": "是否启用"},
-                    "description": {"type": "string", "description": "目标描述"},
+                    "description": {"type": "string", "description": "巡检项描述"},
                 },
             }
         }
@@ -492,12 +874,9 @@ async def get_target(request: Request):
                                     "id": {"type": "string"},
                                     "name": {"type": "string"},
                                     "content": {"type": "string"},
-                                    "category": {"type": "string"},
+                                    "category_id": {"type": "string"},
                                     "standard": {"type": "string"},
                                     "action_name": {"type": "string"},
-                                    "action_input": {"type": "object"},
-                                    "app_name": {"type": "string"},
-                                    "resource_config": {"type": "object"},
                                     "enabled": {"type": "boolean"},
                                     "description": {"type": "string"},
                                     "ctime": {"type": "string"},
@@ -514,7 +893,7 @@ async def get_target(request: Request):
 @requires_permission("inspection:u")
 async def update_target(request: Request):
     """
-    更新巡检目标
+    更新巡检项
     Update inspection target
     """
     data = request.json or {}
@@ -532,12 +911,9 @@ async def update_target(request: Request):
         "id": target.id,
         "name": target.name,
         "content": target.content,
-        "category": target.category,
+        "category_id": target.category_id,
         "standard": target.standard,
         "action_name": target.action_name,
-        "action_input": target.action_input,
-        "app_name": target.app_name,
-        "resource_config": target.resource_config,
         "enabled": target.enabled,
         "description": target.description,
         "ctime": target.ctime.isoformat() if target.ctime else None,
@@ -547,8 +923,8 @@ async def update_target(request: Request):
 
 @inspection_bp.post("/target/delete")
 @openapi.definition(
-    summary="删除巡检目标",
-    description="删除巡检目标",
+    summary="删除巡检项",
+    description="删除巡检项",
     body={
         "application/json": {
             "schema": {
@@ -655,9 +1031,9 @@ async def get_all_configs(request: Request):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["app_name", "text"],
+                "required": ["category_id", "text"],
                 "properties": {
-                    "app_name": {"type": "string", "description": "应用名称"},
+                    "category_id": {"type": "string", "description": "巡检类别ID"},
                     "text": {"type": "string", "description": "巡检描述文本"},
                 },
             }
@@ -697,13 +1073,18 @@ async def parse_inspection(request: Request):
     data = request.json or {}
     tenant_id = request.ctx.session.get("tenant_id")
 
-    app_name = data.get("app_name")
+    category_id = data.get("category_id")
     text = data.get("text")
 
-    if not app_name or not text:
+    if not category_id or not text:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    result = await logic.parse_inspection_content(app_name, text, tenant_id)
+    # 查询巡检类别获取 app_name
+    category = await logic.get_category(category_id, tenant_id)
+    if not category:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    result = await logic.parse_inspection_content(category.app_name, text, tenant_id)
     return response_ok(data=result)
 
 
@@ -1286,6 +1667,21 @@ async def add_result(request: Request):
                 data["end_time"] = datetime.fromisoformat(data["end_time"].replace("Z", "+00:00"))
         except (ValueError, TypeError):
             raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 如果提供了 result_data，使用 AI 判断巡检结果
+    if data.get("result_data"):
+        try:
+            judgment = await logic.judge_inspection_result(
+                data["target_id"],
+                data["result_data"],
+                tenant_id
+            )
+            # 将判断结果添加到 result_data 中
+            if not isinstance(data["result_data"], dict):
+                data["result_data"] = {}
+            data["result_data"]["ai_judgment"] = judgment
+        except Exception as e:
+            logger.warning(f"AI判断巡检结果失败: {str(e)}")
 
     result = await logic.create_result(data, tenant_id)
 

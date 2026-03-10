@@ -12,33 +12,47 @@ from models.base import BaseModel
 
 class InspectionSchedule(BaseModel):
     """
-    巡检调度配置（每个租户一个配置）
-    Inspection Schedule Configuration (one per tenant)
+    巡检任务（最上层）
+    Inspection Task (Top Level)
     """
-    name = fields.CharField(max_length=255, default="默认巡检计划", description="配置名称")
-    schedule_cron = fields.CharField(max_length=100, description="Cron表达式")
+    name = fields.CharField(max_length=255, default="默认巡检计划", description="任务名称")
+    schedule_cron = fields.CharField(max_length=100, description="定时周期(Cron表达式)")
+    owner = fields.CharField(max_length=255, null=True, description="负责人")
     enabled = fields.BooleanField(default=True, description="是否启用")
-    description = fields.TextField(null=True, description="配置描述")
+    description = fields.TextField(null=True, description="任务描述")
 
     class Meta:
         table = "inspection_schedule"
 
 
+class InspectionCategory(BaseModel):
+    """
+    巡检类别（中间层）
+    Inspection Category (Middle Level)
+    """
+    name = fields.CharField(max_length=255, description="类别名称")
+    schedule_id = fields.CharField(max_length=36, description="关联巡检任务ID")
+    app_name = fields.CharField(max_length=100, description="应用名称")
+    resource_ids = fields.JSONField(description="资源ID列表(数组格式)")
+    enabled = fields.BooleanField(default=True, description="是否启用")
+
+    class Meta:
+        table = "inspection_category"
+
+
 class InspectionTarget(BaseModel):
     """
-    巡检目标配置
-    Inspection Target Configuration
+    巡检项（最底层）
+    Inspection Item (Bottom Level)
     """
-    name = fields.CharField(max_length=255, description="目标名称")
+    name = fields.CharField(max_length=255, description="巡检项名称")
     content = fields.TextField(description="巡检内容")
-    category = fields.CharField(max_length=100, description="巡检分类")
+    category_id = fields.CharField(max_length=36, description="关联巡检类别ID")
     standard = fields.TextField(description="巡检标准")
     action_name = fields.CharField(max_length=100, description="巡检动作名称")
     action_input = fields.JSONField(description="动作输入参数", null=True)
-    app_name = fields.CharField(max_length=100, description="应用名称")
-    resource_config = fields.JSONField(description="资源配置(JSON格式)")
     enabled = fields.BooleanField(default=True, description="是否启用")
-    description = fields.TextField(null=True, description="目标描述")
+    description = fields.TextField(null=True, description="巡检项描述")
 
     class Meta:
         table = "inspection_target"

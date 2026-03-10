@@ -15,6 +15,7 @@ from tortoise.functions import Count, Avg
 from litellm import acompletion
 from models import (
     InspectionSchedule,
+    InspectionCategory,
     InspectionTarget,
     InspectionResult,
     Tool,
@@ -63,6 +64,123 @@ async def get_schedule(tenant_id: str) -> Optional[InspectionSchedule]:
     ).first()
 
 
+# ==================== InspectionCategory Operations ====================
+
+async def create_category(data: Dict[str, Any], tenant_id: str) -> InspectionCategory:
+    """
+    创建巡检类别
+    Create inspection category
+    """
+    category = await InspectionCategory.create(
+        **data,
+        tenant_id=tenant_id
+    )
+    return category
+
+
+async def batch_create_categories(data_list: List[Dict[str, Any]], tenant_id: str) -> List[InspectionCategory]:
+    """
+    批量创建巡检类别
+    Batch create inspection categories
+    """
+    categories = []
+    for data in data_list:
+        category = await create_category(data, tenant_id)
+        categories.append(category)
+    return categories
+
+
+async def list_categories(
+    page: int,
+    page_size: int,
+    tenant_id: str,
+    schedule_id: Optional[str] = None,
+    enabled: Optional[bool] = None
+) -> Dict[str, Any]:
+    """
+    获取巡检类别列表（分页）
+    Get inspection category list (paginated)
+    """
+    query = InspectionCategory.filter(deleted=False, tenant_id=tenant_id)
+
+    # 可选过滤条件
+    if schedule_id:
+        query = query.filter(schedule_id=schedule_id)
+    if enabled is not None:
+        query = query.filter(enabled=enabled)
+
+    # 计算总数
+    total = await query.count()
+
+    # 分页查询
+    items = await query.offset((page - 1) * page_size).limit(page_size).all()
+
+    return {
+        "total": total,
+        "items": [
+            {
+                "id": category.id,
+                "name": category.name,
+                "schedule_id": category.schedule_id,
+                "app_name": category.app_name,
+                "resource_ids": category.resource_ids,
+                "enabled": category.enabled,
+                "ctime": category.ctime.isoformat() if category.ctime else None,
+                "utime": category.utime.isoformat() if category.utime else None,
+            }
+            for category in items
+        ]
+    }
+
+
+async def get_category(category_id: str, tenant_id: str) -> Optional[InspectionCategory]:
+    """
+    获取巡检类别详情
+    Get inspection category details
+    """
+    return await InspectionCategory.filter(
+        id=category_id,
+        deleted=False,
+        tenant_id=tenant_id
+    ).first()
+
+
+async def update_category(
+    category_id: str,
+    data: Dict[str, Any],
+    tenant_id: str
+) -> Optional[InspectionCategory]:
+    """
+    更新巡检类别
+    Update inspection category
+    """
+    category = await get_category(category_id, tenant_id)
+    if not category:
+        return None
+
+    # 更新字段
+    for key, value in data.items():
+        if hasattr(category, key):
+            setattr(category, key, value)
+
+    await category.save()
+    return category
+
+
+async def delete_category(category_id: str, tenant_id: str) -> bool:
+    """
+    删除巡检类别（软删除）
+    Delete inspection category (soft delete)
+    """
+    category = await get_category(category_id, tenant_id)
+    if not category:
+        return False
+
+    category.deleted = True
+    await category.save()
+    return True
+
+
 # ==================== InspectionTarget Operations ====================
 
 async def create_target(data: Dict[str, Any], tenant_id: str) -> InspectionTarget:
@@ -94,7 +212,7 @@ async def list_targets(
     page: int,
     page_size: int,
     tenant_id: str,
-    category: Optional[str] = None,
+    category_id: Optional[str] = None,
     enabled: Optional[bool] = None
 ) -> Dict[str, Any]:
     """
@@ -104,8 +222,8 @@ async def list_targets(
     query = InspectionTarget.filter(deleted=False, tenant_id=tenant_id)
 
     # 可选过滤条件
-    if category:
-        query = query.filter(category=category)
+    if category_id:
+        query = query.filter(category_id=category_id)
     if enabled is not None:
         query = query.filter(enabled=enabled)
 
@@ -122,12 +240,9 @@ async def list_targets(
                 "id": target.id,
                 "name": target.name,
                 "content": target.content,
-                "category": target.category,
+                "category_id": target.category_id,
                 "standard": target.standard,
                 "action_name": target.action_name,
-                "action_input": target.action_input,
-                "app_name": target.app_name,
-                "resource_config": target.resource_config,
                 "enabled": target.enabled,
                 "description": target.description,
                 "ctime": target.ctime.isoformat() if target.ctime else None,
@@ -200,8 +315,18 @@ async def get_all_configs(tenant_id: str) -> List[Dict[str, Any]]:
     if not targets:
         return []
 
+    # 获取相关的巡检类别信息
+    category_ids = list(set(t.category_id for t in targets))
+    categories = await InspectionCategory.filter(
+        id__in=category_ids,
+        deleted=False,
+        tenant_id=tenant_id,
+        enabled=True
+    ).all()
+    category_map = {c.id: c for c in categories}
+
     # 获取相关的工具信息
-    app_names = list(set(t.app_name for t in targets))
+    app_names = list(set(c.app_name for c in categories))
     tools = await Tool.filter(
         name__in=app_names,
         tenant_id=tenant_id
@@ -210,28 +335,26 @@ async def get_all_configs(tenant_id: str) -> List[Dict[str, Any]]:
 
     results = []
     for target in targets:
-        tool = tool_map.get(target.app_name)
-        
-        # 构造 action_input
-        if target.action_input:
-            action_input = json.dumps(target.action_input)
-        else:
-            action_input = "{}"
-        
-        # 构造 resources
-        resources = json.dumps(target.resource_config) if target.resource_config else "{}"
-        
+        category = category_map.get(target.category_id)
+        if not category:
+            continue
+
+        tool = tool_map.get(category.app_name)
+
+
+        # 构造 resources（资源ID列表）
+        resources = json.dumps(category.resource_ids) if category.resource_ids else "[]"
+
         item = {
             "main": tool.main if tool and tool.main else "main.py",
             "timeout": "300",
             "version": tool.version if tool else "",
             "resources": resources,
-            "tool_name": target.app_name,
-            "action_name": target.action_name,
-            "action_input": action_input
+            "tool_name": category.app_name,
+            "action_name": target.action_name
         }
         results.append(item)
-        
+
     return results
 
 
@@ -374,7 +497,10 @@ INSPECTION_PARSE_PROMPT = """
 你是一个专业的IT运维巡检专家。请分析用户提供的巡检描述，推荐以下信息：
 
 1. **巡检标准** (standard): 明确的成功标准或阈值
-2. **动作名称** (action_name): 从以下可用动作中选择最合适的一个：{available_actions}
+2. **动作名称** (action_name): 从以下可用动作中选择最合适的一个
+
+可用动作及其输入定义：
+{available_actions}
 
 用户描述：
 {user_input}
@@ -426,19 +552,23 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
     if not tool_actions:
         raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
-    # 提取动作名称列表
+    # 提取动作名称和输入定义
     available_actions = []
+    action_map = {}  # 用于后续查找
     for action in tool_actions:
         if action.action:
             action_name = action.action.get("func")
             if action_name:
-                available_actions.append(action_name)
+                available_actions.append({
+                    "name": action_name
+                })
+                action_map[action_name] = action
 
     if not available_actions:
         raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
     # 准备prompt参数
-    available_actions_str = ", ".join(available_actions)
+    available_actions_str = json.dumps(available_actions, ensure_ascii=False, indent=2)
 
     prompt = INSPECTION_PARSE_PROMPT.format(
         user_input=text,
@@ -477,13 +607,14 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
         parsed_data = json.loads(ai_response)
 
         # 验证action_name是否在可用列表中
-        if parsed_data.get("action_name") not in available_actions:
+        action_names = [a["name"] for a in available_actions]
+        if parsed_data.get("action_name") not in action_names:
             if "suggestions" not in parsed_data:
                 parsed_data["suggestions"] = []
             parsed_data["suggestions"].append(
                 f"AI选择的动作不在可用列表中，已使用默认动作"
             )
-            parsed_data["action_name"] = available_actions[0] if available_actions else None
+            parsed_data["action_name"] = available_actions[0]["name"] if available_actions else None
             parsed_data["confidence"] = max(0, parsed_data.get("confidence", 0) - 0.2)
 
     except json.JSONDecodeError:
@@ -498,9 +629,105 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
         # 其他错误
         parsed_data = {
             "standard": None,
-            "action_name": available_actions[0] if available_actions else None,
+            "action_name": available_actions[0]["name"] if available_actions else None,
             "confidence": 0.0,
             "suggestions": [f"AI服务调用失败: {str(e)}"]
+        }
+
+    return parsed_data
+
+
+# ==================== AI Judgment Operations ====================
+
+async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
+    """
+    使用AI判断巡检结果是否符合标准
+    Judge inspection result using AI
+
+    Args:
+        target_id: 巡检目标ID
+        result_data: 执行完成的动作结果
+        tenant_id: 租户ID
+
+    Returns:
+        判断结果，包含 passed, reason, suggestions
+    """
+    # 查询 InspectionTarget 获取 standard
+    target = await InspectionTarget.filter(
+        id=target_id,
+        deleted=False,
+        tenant_id=tenant_id
+    ).first()
+
+    if not target:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    # 准备 prompt
+    prompt = f"""
+你是一个专业的IT运维巡检专家。请根据以下信息判断巡检结果是否符合标准：
+
+巡检标准：{target.standard}
+
+巡检结果：{json.dumps(result_data, ensure_ascii=False, indent=2)}
+
+请判断巡检结果是否符合标准，并返回JSON格式：
+{{
+  "passed": true/false,
+  "reason": "判断理由，说明为什么通过或不通过",
+  "suggestions": ["改进建议1", "改进建议2"]
+}}
+
+注意：
+- passed 为 true 表示符合标准，false 表示不符合标准
+- reason 要简洁明了，说明判断依据
+- suggestions 只在不通过时提供改进建议，通过时可以为空数组
+"""
+
+    # 使用litellm调用AI服务
+    model = RY_AI_MODEL
+    api_base = RY_AI_API_BASE
+    api_key = RY_OPENAI_API_KEY
+
+    # 构建acompletion参数
+    completion_params = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "你是一个专业的IT运维巡检专家。"},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.3,
+        "response_format": {"type": "json_object"}
+    }
+
+    if api_base:
+        completion_params["api_base"] = api_base
+    if api_key:
+        completion_params["api_key"] = api_key
+
+    try:
+        response = await acompletion(**completion_params)
+        ai_response = response.choices[0].message.content
+        parsed_data = json.loads(ai_response)
+
+        # 确保返回的数据包含必需字段
+        if "passed" not in parsed_data:
+            parsed_data["passed"] = False
+        if "reason" not in parsed_data:
+            parsed_data["reason"] = "AI判断失败"
+        if "suggestions" not in parsed_data:
+            parsed_data["suggestions"] = []
+
+    except json.JSONDecodeError:
+        parsed_data = {
+            "passed": False,
+            "reason": "AI返回格式错误",
+            "suggestions": ["请检查AI服务配置"]
+        }
+    except Exception as e:
+        parsed_data = {
+            "passed": False,
+            "reason": f"AI服务调用失败: {str(e)}",
+            "suggestions": ["请检查AI服务配置"]
         }
 
     return parsed_data
