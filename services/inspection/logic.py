@@ -301,29 +301,35 @@ async def delete_target(target_id: str, tenant_id: str) -> bool:
     return True
 
 
-async def get_all_configs(tenant_id: str) -> List[Dict[str, Any]]:
+async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     获取全部巡检目标配置
     Get all inspection target configurations
     """
+    # 获取相关的巡检类别信息
+    categories = InspectionCategory.filter(
+        deleted=False,
+        tenant_id=tenant_id,
+        enabled=True,
+        schedule_id=schedule_id
+    ).all()
+    
+    if not categories:
+        return []
+        
+    category_ids = [c.id for c in categories]
+    category_map = {c.id: c for c in categories}
+
+    # 获取巡检目标
     targets = await InspectionTarget.filter(
         deleted=False,
         tenant_id=tenant_id,
-        enabled=True
+        enabled=True,
+        category_id__in=category_ids
     ).all()
 
     if not targets:
         return []
-
-    # 获取相关的巡检类别信息
-    category_ids = list(set(t.category_id for t in targets))
-    categories = await InspectionCategory.filter(
-        id__in=category_ids,
-        deleted=False,
-        tenant_id=tenant_id,
-        enabled=True
-    ).all()
-    category_map = {c.id: c for c in categories}
 
     # 获取相关的工具信息
     app_names = list(set(c.app_name for c in categories))
@@ -336,6 +342,8 @@ async def get_all_configs(tenant_id: str) -> List[Dict[str, Any]]:
     results = []
     for target in targets:
         category = category_map.get(target.category_id)
+        # category is guaranteed to be in map because we fetched targets based on categories
+        # but keep safety check just in case
         if not category:
             continue
 
@@ -351,7 +359,8 @@ async def get_all_configs(tenant_id: str) -> List[Dict[str, Any]]:
             "version": tool.version if tool else "",
             "resources": resources,
             "tool_name": category.app_name,
-            "action_name": target.action_name
+            "action_name": target.action_name,
+            "action_input": target.action_input,  # User code snippet shows this field in response schema
         }
         results.append(item)
 

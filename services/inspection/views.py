@@ -981,6 +981,17 @@ async def delete_target(request: Request):
 @openapi.definition(
     summary="获取全部巡检目标配置",
     description="获取全部巡检目标配置，用于执行器调用",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["schedule_id"],
+                "properties": {
+                    "schedule_id": {"type": "string", "description": "巡检任务ID"},
+                },
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
@@ -1018,8 +1029,12 @@ async def get_all_configs(request: Request):
     获取全部巡检目标配置
     Get all inspection target configurations
     """
+    data = request.json or {}
+    schedule_id = data.get("schedule_id")
+    if not schedule_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
-    result = await logic.get_all_configs(tenant_id)
+    result = await logic.get_all_configs(tenant_id, schedule_id)
     return response_ok(data=result)
 
 
