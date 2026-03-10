@@ -748,12 +748,10 @@ async def update_event(request):
         if not isinstance(event.owner, dict) or not event.owner:
             event.owner = {"role": [], "user": []}
         owner_data = event.owner
-        for o in new_owner.get("user", []):
-            if o not in owner_data.get("user", []):
-                owner_data.get("user", []).append(o)
-        for o in new_owner.get("role", []):
-            if o not in owner_data.get("role", []):
-                owner_data.get("role", []).append(o)
+        if "user" in new_owner:
+            owner_data["user"] = new_owner["user"]
+        if "role" in new_owner:
+            owner_data["role"] = new_owner["role"]
         update_fields.append("owner")
 
     if update_fields:

@@ -35,6 +35,7 @@ _all__ = ["tenant_bp"]
                 "properties": {
                     "page": {"type": "integer", "description": "页码（默认1）"},
                     "size": {"type": "integer", "description": "每页数量（默认15）"},
+                    "name": {"type": "string", "description": "工作空间名称"},
                 },
             }
         }
@@ -50,10 +51,15 @@ _all__ = ["tenant_bp"]
 async def get_tenant(request):
     page = max(1, int(request.json.get("page", 1)))
     size = max(1, min(int(request.json.get("size", 15)), 100))
+    name = request.json.get("name")
     offset = (page - 1) * size
 
-    tenants = await Tenant.filter().offset(offset).limit(size).all().prefetch_related("creator", "member")
-    total = await Tenant.filter().count()
+    query = Tenant.filter()
+    if name:
+        query = query.filter(name__contains=name)
+
+    tenants = await query.offset(offset).limit(size).all().prefetch_related("creator", "member")
+    total = await query.count()
 
     data = []
     for tenant in tenants:
@@ -112,7 +118,7 @@ async def add_tenant(request):
             await tenant.member.add(*users)
         await tenant.member.add(request.ctx.session["account_info"])
 
-    return response_ok("添加成功")
+    return response_ok(tenant.json)
 
 
 @tenant_bp.post("/del")
