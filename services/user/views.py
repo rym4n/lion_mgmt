@@ -1308,7 +1308,9 @@ async def iframe_login(request):
         if not username:
             logger.warning(f"JWT user path {user_path} not found in payload")
             raise CustomError(ErrorCode.SESSION_INVALID)
-            
+
+        jwt_tenant_id = payload.get("tenant_id")
+        
         # 4. 查找或自动创建用户
         try:
             account = await Account.get(username=username[0], deleted=False).prefetch_related("roles")
@@ -1356,12 +1358,17 @@ async def iframe_login(request):
             await account.fetch_related("roles")
 
         # 5. 生成系统Token
+        target_tenant_id = account.tenant_id
+        if jwt_tenant_id:
+            if await Tenant.filter(id=jwt_tenant_id, deleted=False).exists():
+                target_tenant_id = jwt_tenant_id
+
         aioe_token = token_encode(
             account.id,
             account.username,
             account.display_name,
             account.mfa_enable,
-            account.tenant_id,
+            target_tenant_id,
             str(uuid.uuid4()),
         )
         

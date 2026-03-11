@@ -275,7 +275,7 @@ async def switch_tenant(request):
     request.ctx.session["tenant_id"] = tenant.id
     new_token = refresh_token(request.ctx.session)
 
-    resp_ok = response_ok("切换成功")
+    resp_ok = response_ok({"tenant_id": tenant.id})
     resp_ok.cookies.add_cookie(
         "aioe-auth",
         new_token,
