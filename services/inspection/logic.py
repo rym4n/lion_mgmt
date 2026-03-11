@@ -8,7 +8,7 @@ Inspection Module Business Logic Layer
 
 from typing import Dict, Any, Optional, List
 from datetime import datetime
-import json
+import orjson
 import os
 from tortoise.expressions import Q
 from tortoise.functions import Count, Avg
@@ -19,7 +19,8 @@ from models import (
     InspectionTarget,
     InspectionResult,
     Tool,
-    ToolAction
+    ToolAction,
+    ToolResources
 )
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
@@ -307,7 +308,7 @@ async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None) -> 
     Get all inspection target configurations
     """
     # 获取相关的巡检类别信息
-    categories = InspectionCategory.filter(
+    categories = await InspectionCategory.filter(
         deleted=False,
         tenant_id=tenant_id,
         enabled=True,
@@ -339,6 +340,19 @@ async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None) -> 
     ).all()
     tool_map = {t.name: t for t in tools}
 
+    # 获取相关的工具资源信息
+    all_resource_ids = set()
+    for c in categories:
+        if c.resource_ids:
+            all_resource_ids.update(c.resource_ids)
+
+    tool_resources = await ToolResources.filter(
+        id__in=list(all_resource_ids),
+        deleted=False,
+        tenant_id=tenant_id
+    ).all()
+    resource_map = {r.id: r for r in tool_resources}
+
     results = []
     for target in targets:
         category = category_map.get(target.category_id)
@@ -350,17 +364,26 @@ async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None) -> 
         tool = tool_map.get(category.app_name)
 
 
-        # 构造 resources（资源ID列表）
-        resources = json.dumps(category.resource_ids) if category.resource_ids else "[]"
+        # 构造 resources（资源配置）
+        resources_dict = {}
+        if category.resource_ids:
+            for r_id in category.resource_ids:
+                if r_id in resource_map:
+                    res = resource_map[r_id]
+                    res_data = {}
+                    for key, value in orjson.loads(res.resources).items():
+                        res_data[key] = value.get("value")
+                    resources_dict[res.name] = res_data
+        
+        resources = orjson.dumps(resources_dict)
 
         item = {
             "main": tool.main if tool and tool.main else "main.py",
             "timeout": "300",
             "version": tool.version if tool else "",
-            "resources": resources,
+            "resources": str(resources),
             "tool_name": category.app_name,
             "action_name": target.action_name,
-            "action_input": target.action_input,  # User code snippet shows this field in response schema
         }
         results.append(item)
 
@@ -577,7 +600,7 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
         raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
     # 准备prompt参数
-    available_actions_str = json.dumps(available_actions, ensure_ascii=False, indent=2)
+    available_actions_str = orjson.dumps(available_actions, ensure_ascii=False, indent=2)
 
     prompt = INSPECTION_PARSE_PROMPT.format(
         user_input=text,
@@ -613,7 +636,7 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
 
         # 解析AI返回的JSON
         ai_response = response.choices[0].message.content
-        parsed_data = json.loads(ai_response)
+        parsed_data = orjson.loads(ai_response)
 
         # 验证action_name是否在可用列表中
         action_names = [a["name"] for a in available_actions]
@@ -626,7 +649,7 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
             parsed_data["action_name"] = available_actions[0]["name"] if available_actions else None
             parsed_data["confidence"] = max(0, parsed_data.get("confidence", 0) - 0.2)
 
-    except json.JSONDecodeError:
+    except orjson.JSONDecodeError:
         # AI返回格式错误，返回默认结构
         parsed_data = {
             "standard": None,
@@ -677,7 +700,7 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
 
 巡检标准：{target.standard}
 
-巡检结果：{json.dumps(result_data, ensure_ascii=False, indent=2)}
+巡检结果：{orjson.dumps(result_data, ensure_ascii=False, indent=2)}
 
 请判断巡检结果是否符合标准，并返回JSON格式：
 {{
@@ -716,7 +739,7 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
     try:
         response = await acompletion(**completion_params)
         ai_response = response.choices[0].message.content
-        parsed_data = json.loads(ai_response)
+        parsed_data = orjson.loads(ai_response)
 
         # 确保返回的数据包含必需字段
         if "passed" not in parsed_data:
@@ -726,7 +749,7 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
         if "suggestions" not in parsed_data:
             parsed_data["suggestions"] = []
 
-    except json.JSONDecodeError:
+    except orjson.JSONDecodeError:
         parsed_data = {
             "passed": False,
             "reason": "AI返回格式错误",
