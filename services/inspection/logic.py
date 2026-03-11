@@ -30,18 +30,25 @@ from settings import RY_AI_MODEL, RY_AI_API_BASE, RY_OPENAI_API_KEY
 
 async def save_schedule(data: Dict[str, Any], tenant_id: str) -> InspectionSchedule:
     """
-    创建或更新巡检调度配置（每个租户只有一个配置）
-    Create or update inspection schedule configuration (one per tenant)
+    创建或更新巡检调度配置
+    Create or update inspection schedule configuration
     """
-    # 查找租户的现有配置
-    schedule = await InspectionSchedule.filter(
-        deleted=False,
-        tenant_id=tenant_id
-    ).first()
+    schedule_id = data.get("id")
 
-    if schedule:
+    if schedule_id:
         # 更新现有配置
-        for key, value in data.items():
+        schedule = await InspectionSchedule.filter(
+            id=schedule_id,
+            deleted=False,
+            tenant_id=tenant_id
+        ).first()
+
+        if not schedule:
+            raise CustomError(ErrorCode.NOT_FOUND)
+
+        # 更新字段（排除id）
+        update_data = {k: v for k, v in data.items() if k != "id"}
+        for key, value in update_data.items():
             setattr(schedule, key, value)
         await schedule.save()
     else:
@@ -56,13 +63,79 @@ async def save_schedule(data: Dict[str, Any], tenant_id: str) -> InspectionSched
 
 async def get_schedule(tenant_id: str) -> Optional[InspectionSchedule]:
     """
-    获取租户的巡检调度配置
-    Get tenant's inspection schedule configuration
+    获取租户的巡检调度配置（返回第一个，用于向后兼容）
+    Get tenant's inspection schedule configuration (returns first one, for backward compatibility)
     """
     return await InspectionSchedule.filter(
         deleted=False,
         tenant_id=tenant_id
     ).first()
+
+
+async def get_schedule_by_id(schedule_id: str, tenant_id: str) -> Optional[InspectionSchedule]:
+    """
+    根据ID获取巡检调度配置
+    Get inspection schedule configuration by ID
+    """
+    return await InspectionSchedule.filter(
+        id=schedule_id,
+        deleted=False,
+        tenant_id=tenant_id
+    ).first()
+
+
+async def list_schedules(
+    page: int,
+    page_size: int,
+    tenant_id: str,
+    enabled: Optional[bool] = None
+) -> Dict[str, Any]:
+    """
+    获取巡检调度配置列表（分页）
+    Get inspection schedule list (paginated)
+    """
+    query = InspectionSchedule.filter(deleted=False, tenant_id=tenant_id)
+
+    # 可选过滤条件
+    if enabled is not None:
+        query = query.filter(enabled=enabled)
+
+    # 计算总数
+    total = await query.count()
+
+    # 分页查询
+    items = await query.offset((page - 1) * page_size).limit(page_size).all()
+
+    return {
+        "total": total,
+        "items": [
+            {
+                "id": schedule.id,
+                "name": schedule.name,
+                "schedule_cron": schedule.schedule_cron,
+                "owner": schedule.owner,
+                "enabled": schedule.enabled,
+                "description": schedule.description,
+                "ctime": schedule.ctime.isoformat() if schedule.ctime else None,
+                "utime": schedule.utime.isoformat() if schedule.utime else None,
+            }
+            for schedule in items
+        ]
+    }
+
+
+async def delete_schedule(schedule_id: str, tenant_id: str) -> bool:
+    """
+    删除巡检调度配置（软删除）
+    Delete inspection schedule configuration (soft delete)
+    """
+    schedule = await get_schedule_by_id(schedule_id, tenant_id)
+    if not schedule:
+        return False
+
+    schedule.deleted = True
+    await schedule.save()
+    return True
 
 
 # ==================== InspectionCategory Operations ====================

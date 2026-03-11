@@ -31,13 +31,14 @@ __all__ = ["inspection_bp"]
 @inspection_bp.post("/schedule/save")
 @openapi.definition(
     summary="创建或更新巡检任务",
-    description="创建或更新巡检任务",
+    description="创建或更新巡检任务，如果提供id则更新，否则创建新的",
     body={
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["schedule_cron"],
+                "required": ["schedule_cron", "name"],
                 "properties": {
+                    "id": {"type": "string", "description": "巡检任务ID（更新时必填）"},
                     "schedule_cron": {"type": "string", "description": "定时周期(Cron表达式)"},
                     "name": {"type": "string", "description": "任务名称"},
                     "owner": {"type": "string", "description": "负责人"},
@@ -62,6 +63,7 @@ __all__ = ["inspection_bp"]
                                     "id": {"type": "string"},
                                     "name": {"type": "string"},
                                     "schedule_cron": {"type": "string"},
+                                    "owner": {"type": "string"},
                                     "enabled": {"type": "boolean"},
                                     "description": {"type": "string"},
                                     "ctime": {"type": "string"},
@@ -85,7 +87,7 @@ async def save_schedule(request: Request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     # 验证必需字段
-    if not data.get("schedule_cron"):
+    if not data.get("schedule_cron") or not data.get("name"):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     schedule = await logic.save_schedule(data, tenant_id)
@@ -105,7 +107,18 @@ async def save_schedule(request: Request):
 @inspection_bp.post("/schedule/get")
 @openapi.definition(
     summary="获取巡检任务配置",
-    description="获取巡检任务配置",
+    description="根据ID获取巡检任务配置",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "巡检任务ID"},
+                },
+            }
+        }
+    },
     response={
         "200": {
             "description": "获取成功",
@@ -121,6 +134,7 @@ async def save_schedule(request: Request):
                                     "id": {"type": "string"},
                                     "name": {"type": "string"},
                                     "schedule_cron": {"type": "string"},
+                                    "owner": {"type": "string"},
                                     "enabled": {"type": "boolean"},
                                     "description": {"type": "string"},
                                     "ctime": {"type": "string"},
@@ -140,9 +154,13 @@ async def get_schedule(request: Request):
     获取巡检任务配置
     Get inspection schedule configuration
     """
+    data = request.json or {}
     tenant_id = request.ctx.session.get("tenant_id")
 
-    schedule = await logic.get_schedule(tenant_id)
+    if "id" not in data:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    schedule = await logic.get_schedule_by_id(data["id"], tenant_id)
     if not schedule:
         raise CustomError(ErrorCode.NOT_FOUND)
 
@@ -156,6 +174,139 @@ async def get_schedule(request: Request):
         "ctime": schedule.ctime.isoformat() if schedule.ctime else None,
         "utime": schedule.utime.isoformat() if schedule.utime else None,
     })
+
+
+@inspection_bp.post("/schedule/list")
+@openapi.definition(
+    summary="获取巡检任务列表",
+    description="获取租户下所有巡检任务配置列表",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "integer", "description": "页码"},
+                    "page_size": {"type": "integer", "description": "每页数量"},
+                    "enabled": {"type": "boolean", "description": "是否启用"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "total": {"type": "integer"},
+                                    "items": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "schedule_cron": {"type": "string"},
+                                                "owner": {"type": "string"},
+                                                "enabled": {"type": "boolean"},
+                                                "description": {"type": "string"},
+                                                "ctime": {"type": "string"},
+                                                "utime": {"type": "string"},
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:r")
+async def list_schedules(request: Request):
+    """
+    获取巡检任务列表
+    Get inspection schedule list
+    """
+    data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    page = data.get("page", 1)
+    page_size = data.get("page_size", 20)
+    enabled = data.get("enabled")
+
+    result = await logic.list_schedules(
+        page=page,
+        page_size=page_size,
+        tenant_id=tenant_id,
+        enabled=enabled
+    )
+
+    return response_ok(data=result)
+
+
+@inspection_bp.post("/schedule/delete")
+@openapi.definition(
+    summary="删除巡检任务",
+    description="删除指定的巡检任务配置",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "巡检任务ID"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:d")
+async def delete_schedule(request: Request):
+    """
+    删除巡检任务
+    Delete inspection schedule
+    """
+    data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    if "id" not in data:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    success = await logic.delete_schedule(data["id"], tenant_id)
+    if not success:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    return response_ok(data={"message": "删除成功"})
 
 
 # ==================== Category Management ====================
@@ -1106,7 +1257,18 @@ async def parse_inspection(request: Request):
 @inspection_bp.post("/start")
 @openapi.definition(
     summary="启动巡检",
-    description="启动全局巡检定时任务",
+    description="启动指定巡检任务的定时任务",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["schedule_id"],
+                "properties": {
+                    "schedule_id": {"type": "string", "description": "巡检任务ID"},
+                },
+            }
+        }
+    },
     response={
         "200": {
             "description": "启动成功",
@@ -1133,17 +1295,23 @@ async def parse_inspection(request: Request):
 async def start_inspection(request: Request):
     """
     启动巡检
-    Start global inspection
+    Start inspection
     """
+    data = request.json or {}
     tenant_id = request.ctx.session.get("tenant_id")
 
+    if "schedule_id" not in data:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    schedule_id = data["schedule_id"]
+
     # 查询巡检调度配置
-    schedule = await logic.get_schedule(tenant_id)
+    schedule = await logic.get_schedule_by_id(schedule_id, tenant_id)
     if not schedule or not schedule.enabled:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    # 查询是否已经存在全局定时任务
-    timed_name = f"inspection_{tenant_id}"
+    # 查询是否已经存在定时任务
+    timed_name = f"inspection_{schedule_id}"
     timed = await Timed.filter(name=timed_name, deleted=False, tenant_id=tenant_id).first()
 
     if timed:
@@ -1167,7 +1335,7 @@ async def start_inspection(request: Request):
             }
             await aproduce(TASK_TOPIC, msg)
     else:
-        # 创建新的全局定时任务
+        # 创建新的定时任务
         # 获取巡检剧本 ID（需要配置环境变量 RY_INSPECTION_PLAYBOOK_ID）
         playbook_id = os.getenv("RY_INSPECTION_PLAYBOOK_ID")
         if not playbook_id:
@@ -1186,14 +1354,16 @@ async def start_inspection(request: Request):
         if not playbook_version:
             raise CustomError(ErrorCode.NOT_FOUND)
 
-        # 构建剧本输入参数（不包含 target_id，剧本会自动查询所有启用的巡检项）
+        # 构建剧本输入参数（传入 schedule_id，剧本会查询该 schedule 下所有启用的巡检项）
         playbook_input = {
             "flow_id": playbook_version_id,
-            "flow_input": {},
+            "flow_input": {
+                "schedule_id": schedule_id
+            },
             "executor": request.ctx.session.get("account_info").id
         }
 
-        # 创建全局定时任务
+        # 创建定时任务
         timed = await Timed.create(
             name=timed_name,
             type=0,  # 执行剧本
@@ -1229,7 +1399,18 @@ async def start_inspection(request: Request):
 @inspection_bp.post("/pause")
 @openapi.definition(
     summary="暂停巡检",
-    description="暂停全局巡检定时任务",
+    description="暂停指定巡检任务的定时任务",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["schedule_id"],
+                "properties": {
+                    "schedule_id": {"type": "string", "description": "巡检任务ID"},
+                },
+            }
+        }
+    },
     response={
         "200": {
             "description": "暂停成功",
@@ -1256,12 +1437,18 @@ async def start_inspection(request: Request):
 async def pause_inspection(request: Request):
     """
     暂停巡检
-    Pause global inspection
+    Pause inspection
     """
+    data = request.json or {}
     tenant_id = request.ctx.session.get("tenant_id")
 
-    # 查询全局定时任务
-    timed_name = f"inspection_{tenant_id}"
+    if "schedule_id" not in data:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    schedule_id = data["schedule_id"]
+
+    # 查询定时任务
+    timed_name = f"inspection_{schedule_id}"
     timed = await Timed.filter(name=timed_name, deleted=False, tenant_id=tenant_id).first()
 
     if not timed:
