@@ -50,7 +50,6 @@ class InspectionTarget(BaseModel):
     category_id = fields.CharField(max_length=36, description="关联巡检类别ID")
     standard = fields.TextField(description="巡检标准")
     action_name = fields.CharField(max_length=100, description="巡检动作名称")
-    action_input = fields.JSONField(description="动作输入参数", null=True)
     enabled = fields.BooleanField(default=True, description="是否启用")
     description = fields.TextField(null=True, description="巡检项描述")
 
