@@ -750,7 +750,7 @@ async def login(request):
         if not resp.get("force_change_password"):
             account.last_login_time = datetime.now()
             await account.save(update_fields=["last_login_time"])
-
+        resp["tenant_id"] = account.tenant_id
         tmp_resp = response_ok(resp)
         tmp_resp.cookies.add_cookie(
             "aioe-auth",

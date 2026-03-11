@@ -25,7 +25,7 @@ class PlaybookWebhook(BaseModel):
         return {
             "id": self.id,
             "playbook_version_id": self.playbook_version_id,
-            "webhook_url": f"/webhook/execute?key={self.webhook_token}",
+            "webhook_url": f"/webhook/execute?token={self.webhook_token}",
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
             "creator": (
