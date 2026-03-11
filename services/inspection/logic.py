@@ -334,11 +334,19 @@ async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None) -> 
 
     # 获取相关的工具信息
     app_names = list(set(c.app_name for c in categories))
+    # 按更新时间倒序查询，确保最新的在前面
     tools = await Tool.filter(
         name__in=app_names,
-        tenant_id=tenant_id
-    ).all()
-    tool_map = {t.name: t for t in tools}
+        tenant_id=tenant_id,
+        maintain=False,
+        deleted=False
+    ).order_by("-utime").all()
+
+    # 去重，只保留最新的
+    tool_map = {}
+    for t in tools:
+        if t.name not in tool_map:
+            tool_map[t.name] = t
 
     # 获取相关的工具资源信息
     all_resource_ids = set()
@@ -375,13 +383,13 @@ async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None) -> 
                         res_data[key] = value.get("value")
                     resources_dict[res.name] = res_data
         
-        resources = orjson.dumps(resources_dict)
+        resources = orjson.dumps(resources_dict).decode('utf-8')
 
         item = {
             "main": tool.main if tool and tool.main else "main.py",
             "timeout": "300",
             "version": tool.version if tool else "",
-            "resources": str(resources),
+            "resources": resources,
             "tool_name": category.app_name,
             "action_name": target.action_name,
         }
