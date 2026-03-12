@@ -468,7 +468,6 @@ async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None) -> 
 
         tool = tool_map.get(category.app_name)
 
-
         # 构造 resources（资源配置）
         resources_dict = {}
         if category.resource_ids:
@@ -489,6 +488,8 @@ async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None) -> 
             "resources": resources,
             "tool_name": category.app_name,
             "action_name": target.action_name,
+            "target_id": target.id,
+            "schedule_id": schedule_id
         }
         results.append(item)
 
