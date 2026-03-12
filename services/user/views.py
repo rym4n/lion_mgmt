@@ -25,7 +25,7 @@ from libs.security.authentication import (
     validate_password,
     validate_username,
 )
-from libs.security.authorization import requires_permission
+from libs.security.authorization import requires_permission, check_permissions
 from libs.utils import (
     get_client_ip,
     get_expiration_date,
@@ -71,6 +71,11 @@ __all__ = ["user_bp"]
                     "permit_ip": {
                         "type": "string",
                         "description": "允许访问的IP列表，逗号分隔 192.168.1.1,192.168.1.2 如果为空则为全部ip",
+                    },
+                    "tenant_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "工作空间列表,注意传入此参数会校验当前账户是否存在工作空间模块权限，不存在则创建失败",
                     },
                 },
             }
@@ -126,8 +131,10 @@ async def new_user(request):
     if request.json.get("permit_ip"):
         if validate_ips(request.json["permit_ip"]) is not True:
             raise CustomError(ErrorCode.INVALID_IP)
-
-    tenant_id = request.ctx.session.get("tenant_id")
+    t_ids = request.json.get("tenant_ids", [])
+    if t_ids:
+        await check_permissions(request, "tenant:c")
+    tenant_id = t_ids[0] if t_ids else request.ctx.session["tenant_id"]
 
     try:
         # 密码强度校验
@@ -145,7 +152,7 @@ async def new_user(request):
             mfa_enable=mfa_enable,
             mfa_key=pyotp.random_base32(32) if mfa_enable else None,
             permit_ip=request.json.get("permit_ip", "").strip(),
-            tenant_id=request.ctx.session["tenant_id"],
+            tenant_id=tenant_id,
         )
         # 添加角色
         if request.json.get("role_names"):
@@ -154,7 +161,7 @@ async def new_user(request):
         else:
             await account.fetch_related("roles")
 
-        ids = [request.ctx.session["tenant_id"]]
+        ids = t_ids if t_ids else [request.ctx.session["tenant_id"]]
         tenants = await Tenant.filter(id__in=ids).all()
         await account.member.add(*tenants)
 
@@ -1748,3 +1755,22 @@ async def set_default_tenant(request):
 async def get_user_details(request):
     account = request.ctx.session["account_info"]
     return response_ok(account.json)
+
+
+@user_bp.post("/tenant-list")
+@openapi.definition(
+    summary="获取当前用户所在的工作空间列表",
+    description="获取当前用户所在的工作空间列表",
+    response={
+        "200": {
+            "description": "Success",
+            "content": {"application/json": {"example": {"tenants": [], "total": 0, "page": 1, "size": 15, "total_pages": 0}}},
+        }
+    },
+)
+async def get_tenant_list(request):
+    account = request.ctx.session["account_info"]
+
+    tenants = await account.member.all()
+
+    return response_ok([{"id": tenant.id, "name": tenant.name} for tenant in tenants])
