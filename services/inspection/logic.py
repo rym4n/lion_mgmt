@@ -570,6 +570,11 @@ async def list_results(
     # 分页查询，按开始时间倒序
     items = await query.order_by("-start_time").offset((page - 1) * page_size).limit(page_size).all()
 
+    # 获取所有相关的巡检项 ID 并批量查询巡检项详细信息
+    target_ids = list(set(result.target_id for result in items if result.target_id))
+    targets = await InspectionTarget.filter(id__in=target_ids, tenant_id=tenant_id).all()
+    target_map = {target.id: target for target in targets}
+
     return {
         "total": total,
         "items": [
@@ -583,6 +588,8 @@ async def list_results(
                 "result_data": result.result_data,
                 "error_message": result.error_message,
                 "duration": result.duration,
+                "target_content": target_map.get(result.target_id).content if target_map.get(result.target_id) else None,
+                "target_standard": target_map.get(result.target_id).standard if target_map.get(result.target_id) else None,
             }
             for result in items
         ]
