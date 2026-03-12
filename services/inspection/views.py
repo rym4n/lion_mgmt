@@ -7,7 +7,7 @@ Inspection Module API Routes Layer
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from sanic import Blueprint, Request
 from sanic.log import logger
 from sanic_ext import openapi
@@ -1802,20 +1802,32 @@ async def execute_sql(request: Request):
 @inspection_bp.post("/result/add")
 @openapi.definition(
     summary="添加巡检结果",
-    description="添加新的巡检结果记录",
+    description="批量添加巡检结果记录，自动通过AI判断执行状态",
     body={
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["target_id", "status"],
+                "required": ["result_data"],
                 "properties": {
-                    "target_id": {"type": "string", "description": "巡检目标ID"},
-                    "status": {"type": "string", "description": "执行状态: success/failed/timeout"},
-                    "result_data": {"type": "object", "description": "巡检结果数据"},
-                    "error_message": {"type": "string", "description": "错误信息"},
+                    "result_data": {
+                        "type": "array",
+                        "description": "巡检结果数据数组",
+                        "items": {
+                            "type": "object",
+                            "required": ["target_id", "result"],
+                            "properties": {
+                                "target_id": {"type": "string", "description": "巡检目标ID"},
+                                "schedule_id": {"type": "string", "description": "巡检任务ID"},
+                                "tool_name": {"type": "string", "description": "工具名称"},
+                                "action_name": {"type": "string", "description": "动作名称"},
+                                "resource_name": {"type": "string", "description": "资源名称"},
+                                "result": {"type": "object", "description": "执行结果数据"},
+                                "execution_time": {"type": "number", "description": "执行耗时(秒)"},
+                                "end_time": {"type": "string", "description": "结束时间 (ISO 8601)"},
+                            }
+                        }
+                    },
                     "start_time": {"type": "string", "description": "开始时间 (ISO 8601)"},
-                    "end_time": {"type": "string", "description": "结束时间 (ISO 8601)"},
-                    "duration": {"type": "integer", "description": "执行耗时(秒)"},
                 },
             }
         }
@@ -1830,12 +1842,15 @@ async def execute_sql(request: Request):
                         "properties": {
                             "code": {"type": "integer"},
                             "data": {
-                                "type": "object",
-                                "properties": {
-                                    "id": {"type": "string"},
-                                    "target_id": {"type": "string"},
-                                    "status": {"type": "string"},
-                                },
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "target_id": {"type": "string"},
+                                        "status": {"type": "string"},
+                                    }
+                                }
                             },
                         },
                     }
@@ -1853,47 +1868,85 @@ async def add_result(request: Request):
     request_data = request.json or {}
     tenant_id = request.ctx.session.get("tenant_id")
 
-    # 提取有效字段
-    valid_fields = ["target_id", "status", "result_data", "error_message", "start_time", "end_time", "duration"]
-    data = {k: v for k, v in request_data.items() if k in valid_fields}
+    result_data_array = request_data.get("result_data")
+    start_time = request_data.get("start_time")
 
-    if not data.get("target_id") or not data.get("status"):
+    if not result_data_array or not isinstance(result_data_array, list):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    # 处理时间字段
-    if data.get("start_time"):
-        try:
-            if isinstance(data["start_time"], str):
-                data["start_time"] = datetime.fromisoformat(data["start_time"].replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            raise CustomError(ErrorCode.PARAM_ERROR)
+    created_results = []
 
-    if data.get("end_time"):
-        try:
-            if isinstance(data["end_time"], str):
-                data["end_time"] = datetime.fromisoformat(data["end_time"].replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            raise CustomError(ErrorCode.PARAM_ERROR)
+    for item in result_data_array:
+        # Extract required fields
+        target_id = item.get("target_id")
+        result = item.get("result")
 
-    # 如果提供了 result_data，使用 AI 判断巡检结果
-    if data.get("result_data"):
+        if not target_id or not result:
+            logger.warning(f"跳过无效的巡检结果项: 缺少target_id或result")
+            continue
+
+        # Extract optional fields
+        schedule_id = item.get("schedule_id")
+        end_time_str = item.get("end_time")
+        execution_time = item.get("execution_time", 0)
+
+        # Parse end_time
+        end_time = None
+        if end_time_str:
+            try:
+                if isinstance(end_time_str, str):
+                    end_time = datetime.fromisoformat(end_time_str.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                logger.warning(f"无效的end_time格式: {end_time_str}")
+
+        if not end_time:
+            end_time = datetime.now()
+
+        # Use AI to judge the result
+        status = "failed"
+        error_message = None
+
         try:
             judgment = await logic.judge_inspection_result(
-                data["target_id"],
-                data["result_data"],
+                target_id,
+                result,
                 tenant_id
             )
-            # 将判断结果添加到 result_data 中
-            if not isinstance(data["result_data"], dict):
-                data["result_data"] = {}
-            data["result_data"]["ai_judgment"] = judgment
+
+            # Determine status based on AI judgment
+            status = "success" if judgment.get("passed") else "failed"
+            error_message = None if judgment.get("passed") else judgment.get("reason")
+
+            # Add AI judgment to the item
+            item["ai_judgment"] = judgment
+
         except Exception as e:
             logger.warning(f"AI判断巡检结果失败: {str(e)}")
+            # Fallback: use status from item if available
+            if "status" in item:
+                status = item["status"]
+            error_message = f"AI判断失败: {str(e)}"
 
-    result = await logic.create_result(data, tenant_id)
+        # Create InspectionResult
+        try:
+            result_obj = await logic.create_result({
+                "target_id": target_id,
+                "schedule_id": schedule_id,
+                "start_time": start_time,
+                "end_time": end_time,
+                "duration": int(execution_time) if execution_time else 0,
+                "status": status,
+                "result_data": item,
+                "error_message": error_message
+            }, tenant_id)
 
-    return response_ok(data={
-        "id": result.id,
-        "target_id": result.target_id,
-        "status": result.status
-    })
+            created_results.append({
+                "id": result_obj.id,
+                "target_id": result_obj.target_id,
+                "status": result_obj.status
+            })
+        except Exception as e:
+            logger.error(f"创建巡检结果失败: {str(e)}")
+            continue
+
+    return response_ok(data=created_results)
