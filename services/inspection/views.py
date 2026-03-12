@@ -5,7 +5,7 @@
 巡检模块API路由层
 Inspection Module API Routes Layer
 """
-
+import ast
 import os
 from datetime import datetime, timedelta
 from sanic import Blueprint, Request
@@ -1871,10 +1871,12 @@ async def add_result(request: Request):
     result_data_array = request_data.get("result_data")
     start_time = request_data.get("start_time")
 
-    if not result_data_array or not isinstance(result_data_array, list):
+    if not result_data_array or not start_time:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     created_results = []
+
+    result_data_array = ast.literal_eval(result_data_array)
 
     for item in result_data_array:
         # Extract required fields
