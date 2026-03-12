@@ -341,7 +341,7 @@ async def get_account_tenant(request):
         }
     },
 )
-@requires_permission("tenant:c, u")
+@requires_permission("tenant:c, tenant: u")
 async def get_all_user_info(request):
     req_json = request.json or {}
     page = max(1, int(req_json.get("page", 1)))
