@@ -106,6 +106,29 @@ async def list_schedules(
     # 分页查询
     items = await query.offset((page - 1) * page_size).limit(page_size).all()
 
+    # 获取所有 schedule_id 对应的巡检结果日期
+    schedule_ids = [schedule.id for schedule in items]
+
+    # 查询这些 schedule 的所有结果，只需要 schedule_id 和 start_time
+    results = await InspectionResult.filter(
+        deleted=False,
+        tenant_id=tenant_id,
+        schedule_id__in=schedule_ids
+    ).only("schedule_id", "start_time").all()
+
+    # 构建 schedule_id -> 日期列表的映射
+    schedule_dates_map = {}
+    for result in results:
+        if result.start_time:
+            date_str = result.start_time.date().isoformat()
+            if result.schedule_id not in schedule_dates_map:
+                schedule_dates_map[result.schedule_id] = set()
+            schedule_dates_map[result.schedule_id].add(date_str)
+
+    # 转换为排序后的列表
+    for schedule_id in schedule_dates_map:
+        schedule_dates_map[schedule_id] = sorted(list(schedule_dates_map[schedule_id]), reverse=True)
+
     return {
         "total": total,
         "items": [
@@ -116,6 +139,7 @@ async def list_schedules(
                 "owner": schedule.owner,
                 "enabled": schedule.enabled,
                 "description": schedule.description,
+                "result_dates": schedule_dates_map.get(schedule.id, []),
                 "ctime": schedule.ctime.isoformat() if schedule.ctime else None,
                 "utime": schedule.utime.isoformat() if schedule.utime else None,
             }
@@ -481,16 +505,29 @@ async def create_result(data: Dict[str, Any], tenant_id: str) -> InspectionResul
     target_id = data.get("target_id")
     if not target_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    
+
     target = await InspectionTarget.filter(
         id=target_id,
         deleted=False,
         tenant_id=tenant_id
     ).first()
-    
+
     if not target:
         raise CustomError(ErrorCode.NOT_FOUND)
-        
+
+    # 获取 schedule_id: target -> category -> schedule
+    category = await InspectionCategory.filter(
+        id=target.category_id,
+        deleted=False,
+        tenant_id=tenant_id
+    ).first()
+
+    if not category:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    # 添加 schedule_id 到数据中
+    data["schedule_id"] = category.schedule_id
+
     result = await InspectionResult.create(
         **data,
         tenant_id=tenant_id
@@ -503,6 +540,7 @@ async def list_results(
     page_size: int,
     tenant_id: str,
     target_id: Optional[str] = None,
+    schedule_id: Optional[str] = None,
     status: Optional[str] = None,
     start_time: Optional[datetime] = None,
     end_time: Optional[datetime] = None
@@ -516,6 +554,8 @@ async def list_results(
     # 可选过滤条件
     if target_id:
         query = query.filter(target_id=target_id)
+    if schedule_id:
+        query = query.filter(schedule_id=schedule_id)
     if status:
         query = query.filter(status=status)
     if start_time:
@@ -535,6 +575,7 @@ async def list_results(
             {
                 "id": result.id,
                 "target_id": result.target_id,
+                "schedule_id": result.schedule_id,
                 "start_time": result.start_time.isoformat() if result.start_time else None,
                 "end_time": result.end_time.isoformat() if result.end_time else None,
                 "status": result.status,

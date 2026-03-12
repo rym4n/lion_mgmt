@@ -63,6 +63,7 @@ class InspectionResult(BaseModel):
     Inspection Result Record
     """
     target_id = fields.CharField(max_length=36, description="巡检目标ID")
+    schedule_id = fields.CharField(max_length=36, description="关联巡检任务ID")
     start_time = fields.DatetimeField(auto_now_add=True, description="开始时间")
     end_time = fields.DatetimeField(null=True, description="结束时间")
     status = fields.CharField(max_length=20, description="执行状态: success/failed/timeout")
@@ -72,4 +73,3 @@ class InspectionResult(BaseModel):
 
     class Meta:
         table = "inspection_result"
-        indexes = [("target_id", "start_time")]

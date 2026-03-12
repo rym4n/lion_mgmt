@@ -216,6 +216,7 @@ async def get_schedule(request: Request):
                                                 "owner": {"type": "string"},
                                                 "enabled": {"type": "boolean"},
                                                 "description": {"type": "string"},
+                                                "result_dates": {"type": "array", "items": {"type": "string"}, "description": "存在巡检结果的日期列表"},
                                                 "ctime": {"type": "string"},
                                                 "utime": {"type": "string"},
                                             },
@@ -1488,6 +1489,7 @@ async def pause_inspection(request: Request):
                     "page": {"type": "integer", "description": "页码"},
                     "page_size": {"type": "integer", "description": "每页数量"},
                     "target_id": {"type": "string", "description": "目标ID"},
+                    "schedule_id": {"type": "string", "description": "巡检任务ID"},
                     "status": {"type": "string", "description": "状态"},
                     "start_time": {"type": "string", "description": "开始时间"},
                     "end_time": {"type": "string", "description": "结束时间"},
@@ -1515,6 +1517,7 @@ async def pause_inspection(request: Request):
                                             "properties": {
                                                 "id": {"type": "string"},
                                                 "target_id": {"type": "string"},
+                                                "schedule_id": {"type": "string"},
                                                 "start_time": {"type": "string"},
                                                 "end_time": {"type": "string"},
                                                 "status": {"type": "string"},
@@ -1545,6 +1548,7 @@ async def list_results(request: Request):
     page = data.get("page", 1)
     page_size = data.get("page_size", 20)
     target_id = data.get("target_id")
+    schedule_id = data.get("schedule_id")
     status = data.get("status")
 
     # 解析时间参数
@@ -1567,6 +1571,7 @@ async def list_results(request: Request):
         page_size=page_size,
         tenant_id=tenant_id,
         target_id=target_id,
+        schedule_id=schedule_id,
         status=status,
         start_time=start_time,
         end_time=end_time
