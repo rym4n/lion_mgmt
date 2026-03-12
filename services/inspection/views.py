@@ -1925,8 +1925,6 @@ async def add_result(request: Request):
         except Exception as e:
             logger.warning(f"AI判断巡检结果失败: {str(e)}")
             # Fallback: use status from item if available
-            if "status" in item:
-                status = item["status"]
             error_message = f"AI判断失败: {str(e)}"
 
         # Create InspectionResult

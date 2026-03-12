@@ -735,6 +735,10 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
     api_base = RY_AI_API_BASE
     api_key = RY_OPENAI_API_KEY
 
+    # 如果使用自定义API base且模型名称不包含provider前缀，自动添加
+    if api_base and "/" not in model:
+        model = f"openai/{model}"
+
     # 构建acompletion参数
     completion_params = {
         "model": model,
@@ -823,9 +827,9 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
 
 巡检标准：{target.standard}
 
-巡检结果：{orjson.dumps(result_data, ensure_ascii=False, indent=2)}
+巡检结果：{result_data}
 
-请判断巡检结果是否符合标准，并返回JSON格式：
+请判断巡检结果是否符合标准，并严格返回JSON格式：
 {{
   "passed": true/false,
   "reason": "判断理由，说明为什么通过或不通过",
@@ -834,6 +838,7 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
 
 注意：
 - passed 为 true 表示符合标准，false 表示不符合标准
+- 直接返回原始JSON对象，不要包含任何解释或markdown代码块（例如 ```json）
 - reason 要简洁明了，说明判断依据
 - suggestions 只在不通过时提供改进建议，通过时可以为空数组
 """
@@ -842,6 +847,10 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
     model = RY_AI_MODEL
     api_base = RY_AI_API_BASE
     api_key = RY_OPENAI_API_KEY
+
+    # 如果使用自定义API base且模型名称不包含provider前缀，自动添加
+    if api_base and "/" not in model:
+        model = f"openai/{model}"
 
     # 构建acompletion参数
     completion_params = {
@@ -863,7 +872,6 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
         response = await acompletion(**completion_params)
         ai_response = response.choices[0].message.content
         parsed_data = orjson.loads(ai_response)
-
         # 确保返回的数据包含必需字段
         if "passed" not in parsed_data:
             parsed_data["passed"] = False
