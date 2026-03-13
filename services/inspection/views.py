@@ -722,15 +722,13 @@ async def delete_category(request: Request):
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "required": ["name", "content", "category_id", "standard", "action_name"],
+                    "required": ["content", "category_id", "standard", "action_name"],
                     "properties": {
-                        "name": {"type": "string", "description": "巡检项名称"},
                         "content": {"type": "string", "description": "巡检内容"},
                         "category_id": {"type": "string", "description": "关联巡检类别ID"},
                         "standard": {"type": "string", "description": "巡检标准"},
                         "action_name": {"type": "string", "description": "动作名称"},
                         "enabled": {"type": "boolean", "description": "是否启用"},
-                        "description": {"type": "string", "description": "巡检项描述"},
                     },
                 }
             }
@@ -751,13 +749,11 @@ async def delete_category(request: Request):
                                     "type": "object",
                                     "properties": {
                                         "id": {"type": "string"},
-                                        "name": {"type": "string"},
                                         "content": {"type": "string"},
                                         "category_id": {"type": "string"},
                                         "standard": {"type": "string"},
                                         "action_name": {"type": "string"},
                                         "enabled": {"type": "boolean"},
-                                        "description": {"type": "string"},
                                         "ctime": {"type": "string"},
                                         "utime": {"type": "string"},
                                     },
@@ -789,7 +785,7 @@ async def create_target(request: Request):
     data_list = raw_data
 
     # 验证必需字段并处理JSON字符串
-    required_fields = ["name", "content", "category_id", "standard", "action_name"]
+    required_fields = ["content", "category_id", "standard", "action_name"]
     processed_list = []
 
     for item in data_list:
@@ -815,13 +811,11 @@ async def create_target(request: Request):
     result_data = [
         {
             "id": target.id,
-            "name": target.name,
             "content": target.content,
             "category_id": target.category_id,
             "standard": target.standard,
             "action_name": target.action_name,
             "enabled": target.enabled,
-            "description": target.description,
             "ctime": target.ctime.isoformat() if target.ctime else None,
             "utime": target.utime.isoformat() if target.utime else None,
         }
@@ -867,13 +861,11 @@ async def create_target(request: Request):
                                             "type": "object",
                                             "properties": {
                                                 "id": {"type": "string"},
-                                                "name": {"type": "string"},
                                                 "content": {"type": "string"},
                                                 "category_id": {"type": "string"},
                                                 "standard": {"type": "string"},
                                                 "action_name": {"type": "string"},
                                                 "enabled": {"type": "boolean"},
-                                                "description": {"type": "string"},
                                                 "ctime": {"type": "string"},
                                                 "utime": {"type": "string"},
                                             },
@@ -941,13 +933,11 @@ async def list_targets(request: Request):
                                 "type": "object",
                                 "properties": {
                                     "id": {"type": "string"},
-                                    "name": {"type": "string"},
                                     "content": {"type": "string"},
                                     "category_id": {"type": "string"},
                                     "standard": {"type": "string"},
                                     "action_name": {"type": "string"},
                                     "enabled": {"type": "boolean"},
-                                    "description": {"type": "string"},
                                     "ctime": {"type": "string"},
                                     "utime": {"type": "string"},
                                 },
@@ -977,13 +967,11 @@ async def get_target(request: Request):
 
     return response_ok(data={
         "id": target.id,
-        "name": target.name,
         "content": target.content,
         "category_id": target.category_id,
         "standard": target.standard,
         "action_name": target.action_name,
         "enabled": target.enabled,
-        "description": target.description,
         "ctime": target.ctime.isoformat() if target.ctime else None,
         "utime": target.utime.isoformat() if target.utime else None,
     })
@@ -1000,13 +988,11 @@ async def get_target(request: Request):
                 "required": ["id"],
                 "properties": {
                     "id": {"type": "string", "description": "巡检项ID"},
-                    "name": {"type": "string", "description": "巡检项名称"},
                     "content": {"type": "string", "description": "巡检内容"},
                     "category_id": {"type": "string", "description": "关联巡检类别ID"},
                     "standard": {"type": "string", "description": "巡检标准"},
                     "action_name": {"type": "string", "description": "动作名称"},
                     "enabled": {"type": "boolean", "description": "是否启用"},
-                    "description": {"type": "string", "description": "巡检项描述"},
                 },
             }
         }
@@ -1024,13 +1010,11 @@ async def get_target(request: Request):
                                 "type": "object",
                                 "properties": {
                                     "id": {"type": "string"},
-                                    "name": {"type": "string"},
                                     "content": {"type": "string"},
                                     "category_id": {"type": "string"},
                                     "standard": {"type": "string"},
                                     "action_name": {"type": "string"},
                                     "enabled": {"type": "boolean"},
-                                    "description": {"type": "string"},
                                     "ctime": {"type": "string"},
                                     "utime": {"type": "string"},
                                 },
@@ -1061,13 +1045,11 @@ async def update_target(request: Request):
 
     return response_ok(data={
         "id": target.id,
-        "name": target.name,
         "content": target.content,
         "category_id": target.category_id,
         "standard": target.standard,
         "action_name": target.action_name,
         "enabled": target.enabled,
-        "description": target.description,
         "ctime": target.ctime.isoformat() if target.ctime else None,
         "utime": target.utime.isoformat() if target.utime else None,
     })

@@ -336,13 +336,11 @@ async def list_targets(
         "items": [
             {
                 "id": target.id,
-                "name": target.name,
                 "content": target.content,
                 "category_id": target.category_id,
                 "standard": target.standard,
                 "action_name": target.action_name,
                 "enabled": target.enabled,
-                "description": target.description,
                 "ctime": target.ctime.isoformat() if target.ctime else None,
                 "utime": target.utime.isoformat() if target.utime else None,
             }

@@ -45,13 +45,11 @@ class InspectionTarget(BaseModel):
     巡检项（最底层）
     Inspection Item (Bottom Level)
     """
-    name = fields.CharField(max_length=255, description="巡检项名称")
     content = fields.TextField(description="巡检内容")
     category_id = fields.CharField(max_length=36, description="关联巡检类别ID")
     standard = fields.TextField(description="巡检标准")
     action_name = fields.CharField(max_length=100, description="巡检动作名称")
     enabled = fields.BooleanField(default=True, description="是否启用")
-    description = fields.TextField(null=True, description="巡检项描述")
 
     class Meta:
         table = "inspection_target"
