@@ -1319,23 +1319,28 @@ async def start_inspection(request: Request):
             await aproduce(TASK_TOPIC, msg)
     else:
         # 创建新的定时任务
-        # 获取巡检剧本 ID（需要配置环境变量 RY_INSPECTION_PLAYBOOK_ID）
-        playbook_id = os.getenv("RY_INSPECTION_PLAYBOOK_ID")
-        if not playbook_id:
-            raise CustomError(ErrorCode.PARAM_ERROR)
+        # 查找名为"自动化巡检"的剧本
+        playbook = await Playbook.filter(
+            name="自动化巡检",
+            deleted=False,
+            tenant_id=tenant_id,
+            internal=True
+        ).first()
 
-        playbook = await Playbook.get_or_none(id=playbook_id, deleted=False, tenant_id=tenant_id)
         if not playbook:
-            raise CustomError(ErrorCode.NOT_FOUND)
+            return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
 
-        # 获取剧本版本 ID（需要配置环境变量 RY_INSPECTION_PLAYBOOK_VERSION_ID）
-        playbook_version_id = os.getenv("RY_INSPECTION_PLAYBOOK_VERSION_ID")
-        if not playbook_version_id:
-            raise CustomError(ErrorCode.PARAM_ERROR)
+        # 获取该剧本的最新发布版本
+        playbook_version = await PlaybookVersion.filter(
+            playbook_id=playbook.id,
+            tenant_id=tenant_id,
+            status=1  # 假设 status=1 表示已发布
+        ).order_by("-version").first()
 
-        playbook_version = await PlaybookVersion.get_or_none(id=playbook_version_id, tenant_id=tenant_id)
         if not playbook_version:
-            raise CustomError(ErrorCode.NOT_FOUND)
+            return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
+
+        playbook_version_id = playbook_version.id
 
         # 构建剧本输入参数（传入 schedule_id，剧本会查询该 schedule 下所有启用的巡检项）
         playbook_input = {
