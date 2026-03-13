@@ -1122,6 +1122,7 @@ async def delete_target(request: Request):
                 "required": ["schedule_id"],
                 "properties": {
                     "schedule_id": {"type": "string", "description": "巡检任务ID"},
+                    "target_id": {"type": "string", "description": "巡检项ID（可选，如果提供则只返回该巡检项的配置）"},
                 },
             }
         }
@@ -1167,8 +1168,9 @@ async def get_all_configs(request: Request):
     schedule_id = data.get("schedule_id")
     if not schedule_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
+    target_id = data.get("target_id") if "target_id" in data else None
     tenant_id = request.ctx.session.get("tenant_id")
-    result = await logic.get_all_configs(tenant_id, schedule_id)
+    result = await logic.get_all_configs(tenant_id, schedule_id, target_id)
     return response_ok(data=result)
 
 
@@ -1652,8 +1654,9 @@ async def get_result(request: Request):
         "application/json": {
             "schema": {
                 "type": "object",
+                "required": ["schedule_id"],
                 "properties": {
-                    "target_id": {"type": "string", "description": "目标ID"},
+                    "schedule_id": {"type": "string", "description": "巡检任务ID"},
                     "start_time": {"type": "string", "description": "开始时间"},
                     "end_time": {"type": "string", "description": "结束时间"},
                 },
@@ -1672,12 +1675,9 @@ async def get_result(request: Request):
                             "data": {
                                 "type": "object",
                                 "properties": {
-                                    "total_executions": {"type": "integer"},
-                                    "success_count": {"type": "integer"},
-                                    "failed_count": {"type": "integer"},
-                                    "timeout_count": {"type": "integer"},
-                                    "success_rate": {"type": "number"},
-                                    "avg_duration": {"type": "number"},
+                                    "success_rate": {"type": "number", "description": "巡检成功率"},
+                                    "success_count": {"type": "integer", "description": "巡检项成功数量"},
+                                    "failed_count": {"type": "integer", "description": "巡检项失败数量"},
                                 },
                             },
                         },
@@ -1696,7 +1696,9 @@ async def get_stats(request: Request):
     data = request.json or {}
     tenant_id = request.ctx.session.get("tenant_id")
 
-    target_id = data.get("target_id")
+    schedule_id = data.get("schedule_id")
+    if not schedule_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     # 解析时间参数
     start_time = None
@@ -1715,7 +1717,7 @@ async def get_stats(request: Request):
 
     stats = await logic.get_stats(
         tenant_id=tenant_id,
-        target_id=target_id,
+        schedule_id=schedule_id,
         start_time=start_time,
         end_time=end_time
     )

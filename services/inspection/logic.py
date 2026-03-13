@@ -397,7 +397,7 @@ async def delete_target(target_id: str, tenant_id: str) -> bool:
     return True
 
 
-async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None) -> List[Dict[str, Any]]:
+async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None, target_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     获取全部巡检目标配置
     Get all inspection target configurations
@@ -409,20 +409,25 @@ async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None) -> 
         enabled=True,
         schedule_id=schedule_id
     ).all()
-    
+
     if not categories:
         return []
-        
+
     category_ids = [c.id for c in categories]
     category_map = {c.id: c for c in categories}
-
+    print(category_ids)
     # 获取巡检目标
-    targets = await InspectionTarget.filter(
+    query = InspectionTarget.filter(
         deleted=False,
         tenant_id=tenant_id,
         enabled=True,
         category_id__in=category_ids
-    ).all()
+    )
+
+    if target_id:
+        query = query.filter(id=target_id)
+
+    targets = await query.all()
 
     if not targets:
         return []
@@ -607,7 +612,7 @@ async def get_result(result_id: str, tenant_id: str) -> Optional[InspectionResul
 
 async def get_stats(
     tenant_id: str,
-    target_id: Optional[str] = None,
+    schedule_id: str,
     start_time: Optional[datetime] = None,
     end_time: Optional[datetime] = None
 ) -> Dict[str, Any]:
@@ -615,11 +620,9 @@ async def get_stats(
     获取巡检统计信息
     Get inspection statistics
     """
-    query = InspectionResult.filter(deleted=False, tenant_id=tenant_id)
+    query = InspectionResult.filter(deleted=False, tenant_id=tenant_id, schedule_id=schedule_id)
 
     # 可选过滤条件
-    if target_id:
-        query = query.filter(target_id=target_id)
     if start_time:
         query = query.filter(start_time__gte=start_time)
     if end_time:
@@ -631,22 +634,15 @@ async def get_stats(
     # 各状态统计
     success_count = await query.filter(status="success").count()
     failed_count = await query.filter(status="failed").count()
-    timeout_count = await query.filter(status="timeout").count()
 
     # 成功率
     success_rate = success_count / total_executions if total_executions > 0 else 0
 
-    # 平均执行时长
-    results = await query.filter(duration__isnull=False).all()
-    avg_duration = sum(r.duration for r in results) / len(results) if results else 0
-
     return {
-        "total_executions": total_executions,
+        "success_rate": round(success_rate, 2),
         "success_count": success_count,
         "failed_count": failed_count,
-        "timeout_count": timeout_count,
-        "success_rate": round(success_rate, 2),
-        "avg_duration": round(avg_duration, 2)
+        "total_count": success_count + failed_count
     }
 
 
