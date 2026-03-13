@@ -989,7 +989,6 @@ async def get_target(request: Request):
                 "properties": {
                     "id": {"type": "string", "description": "巡检项ID"},
                     "content": {"type": "string", "description": "巡检内容"},
-                    "category_id": {"type": "string", "description": "关联巡检类别ID"},
                     "standard": {"type": "string", "description": "巡检标准"},
                     "action_name": {"type": "string", "description": "动作名称"},
                     "enabled": {"type": "boolean", "description": "是否启用"},
