@@ -824,7 +824,7 @@ async def publish_workflow(request):
     pv.updator = request.ctx.session["account_info"]
     pv.change_desc = request.json.get("change_desc")
     await pv.save()
-    return response_ok(pv.json)
+    return response_ok("发布成功")
 
 
 @workflow_bp.post("/del")
