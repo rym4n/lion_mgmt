@@ -85,7 +85,7 @@ async def get_tenant(request):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["name", "members"],
+                "required": ["name"],
                 "properties": {
                     "name": {"type": "string", "description": "工作空间名称"},
                     "members": {
