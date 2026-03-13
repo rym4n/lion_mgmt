@@ -18,7 +18,7 @@ from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.kafka import aproduce
-from models import Timed, Playbook, PlaybookVersion
+from models import Timed, Playbook, PlaybookVersion, InspectionTarget
 from settings import TASK_TOPIC
 from . import logic
 
@@ -1626,16 +1626,21 @@ async def get_result(request: Request):
     result = await logic.get_result(data["id"], tenant_id)
     if not result:
         raise CustomError(ErrorCode.NOT_FOUND)
+    
+    target = await InspectionTarget.get_or_none(id__in=[result.target_id], tenant_id=tenant_id, deleted=False)
 
     return response_ok(data={
         "id": result.id,
         "target_id": result.target_id,
+        "schedule_id": result.schedule_id,
         "start_time": result.start_time.isoformat() if result.start_time else None,
         "end_time": result.end_time.isoformat() if result.end_time else None,
         "status": result.status,
         "result_data": result.result_data,
         "error_message": result.error_message,
         "duration": result.duration,
+        "target_content": target.content if target else None,
+        "target_standard": target.standard if target else None,
     })
 
 

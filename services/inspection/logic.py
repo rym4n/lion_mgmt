@@ -570,7 +570,7 @@ async def list_results(
 
     # 获取所有相关的巡检项 ID 并批量查询巡检项详细信息
     target_ids = list(set(result.target_id for result in items if result.target_id))
-    targets = await InspectionTarget.filter(id__in=target_ids, tenant_id=tenant_id).all()
+    targets = await InspectionTarget.filter(id__in=target_ids, tenant_id=tenant_id, deleted=False).all()
     target_map = {target.id: target for target in targets}
 
     return {
@@ -583,7 +583,6 @@ async def list_results(
                 "start_time": result.start_time.isoformat() if result.start_time else None,
                 "end_time": result.end_time.isoformat() if result.end_time else None,
                 "status": result.status,
-                "result_data": result.result_data,
                 "error_message": result.error_message,
                 "duration": result.duration,
                 "target_content": target_map.get(result.target_id).content if target_map.get(result.target_id) else None,
@@ -834,7 +833,7 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
 
 巡检结果：{result_data}
 
-请判断巡检结果是否符合标准，并严格返回JSON格式：
+请判断巡检结果是否符合标准，并严格返回JSON格式不要使用markdown格式：
 {{
   "passed": true/false,
   "reason": "判断理由，说明为什么通过或不通过",
