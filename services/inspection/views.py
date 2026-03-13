@@ -1347,7 +1347,8 @@ async def start_inspection(request: Request):
         playbook_input = {
             "flow_id": playbook_version_id,
             "flow_input": {
-                "schedule_id": schedule_id
+                "schedule_id": schedule_id,
+                "target_id": None
             },
             "executor": request.ctx.session.get("account_info").id
         }
