@@ -936,6 +936,7 @@ async def list_targets(request: Request):
                                     "id": {"type": "string"},
                                     "content": {"type": "string"},
                                     "category_id": {"type": "string"},
+                                    "app_name": {"type": "string"},
                                     "standard": {"type": "string"},
                                     "action_name": {"type": "string"},
                                     "enabled": {"type": "boolean"},
@@ -976,7 +977,8 @@ async def get_target(request: Request):
     return response_ok(data={
         "id": target.id,
         "content": target.content,
-        "category_id": category_map.get(target.category_id),
+        "category_id": target.category_id,
+        "app_name": category_map.get(target.category_id),
         "standard": target.standard,
         "action_name": target.action_name,
         "enabled": target.enabled,
