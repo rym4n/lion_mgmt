@@ -18,6 +18,7 @@ from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.kafka import aproduce
+from libs.utils import gen_run_id
 from models import Timed, Playbook, PlaybookVersion, InspectionTarget
 from settings import TASK_TOPIC
 from . import logic
@@ -87,7 +88,7 @@ async def save_schedule(request: Request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     # 验证必需字段
-    if not data.get("schedule_cron") or not data.get("name"):
+    if not data.get("schedule_cron") or not data.get("name") or not data.get("id"):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     schedule = await logic.save_schedule(data, tenant_id)
@@ -1291,7 +1292,7 @@ async def start_inspection(request: Request):
 
     # 查询巡检调度配置
     schedule = await logic.get_schedule_by_id(schedule_id, tenant_id)
-    if not schedule or not schedule.enabled:
+    if not schedule:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     # 查询是否已经存在定时任务
@@ -1383,6 +1384,11 @@ async def start_inspection(request: Request):
         }
         await aproduce(TASK_TOPIC, msg)
 
+    # 更新巡检调度配置为启用状态
+    if not schedule.enabled:
+        schedule.enabled = True
+        await schedule.save()
+
     return response_ok(data={"message": "启动成功"})
 
 
@@ -1442,7 +1448,12 @@ async def pause_inspection(request: Request):
     timed = await Timed.filter(name=timed_name, deleted=False, tenant_id=tenant_id).first()
 
     if not timed:
-        raise CustomError(ErrorCode.NOT_FOUND)
+        # 更新巡检调度配置为暂停状态
+        schedule = await logic.get_schedule_by_id(schedule_id, tenant_id)
+        if schedule and schedule.enabled:
+            schedule.enabled = False
+            await schedule.save()
+        return response_ok(data={"message": "暂停成功"})
 
     # 更新 enable=0
     if timed.enable == 1:
@@ -1460,8 +1471,116 @@ async def pause_inspection(request: Request):
             "tenant_id": tenant_id
         }
         await aproduce(TASK_TOPIC, msg)
+    
+    # 更新巡检调度配置为暂停状态
+    schedule = await logic.get_schedule_by_id(schedule_id, tenant_id)
+    if schedule and schedule.enabled:
+        schedule.enabled = False
+        await schedule.save()
 
     return response_ok(data={"message": "暂停成功"})
+
+
+@inspection_bp.post("/execute")
+@openapi.definition(
+    summary="手动执行巡检项",
+    description="手动执行巡检项",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["schedule_id"],
+                "properties": {
+                    "schedule_id": {"type": "string", "description": "巡检任务ID"},
+                    "target_id": {"type": "string", "description": "巡检项ID"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "巡检成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:c")
+async def execute_inspection(request: Request):
+    """
+    手动执行巡检项
+    Start inspection
+    """
+    data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    if "schedule_id" not in data or "target_id" not in data:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    schedule_id = data["schedule_id"]
+    target_id = data["target_id"]
+
+    # 查询巡检调度配置
+    schedule = await logic.get_schedule_by_id(schedule_id, tenant_id)
+    if not schedule:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    playbook = await Playbook.filter(
+        name="自动化巡检",
+        deleted=False,
+        tenant_id=tenant_id,
+        internal=True
+    ).first()
+
+    if not playbook:
+        return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
+
+    # 获取该剧本的最新发布版本
+    playbook_version = await PlaybookVersion.filter(
+        playbook_id=playbook.id,
+        tenant_id=tenant_id,
+        status=1  # 假设 status=1 表示已发布
+    ).order_by("-version").first()
+
+    if not playbook_version:
+        return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
+
+    playbook_version_id = playbook_version.id
+
+    # 构建剧本输入参数（传入 schedule_id，剧本会查询该 schedule 下所有启用的巡检项）
+    playbook_input = {
+        "flow_id": playbook_version_id,
+        "flow_input": {
+            "schedule_id": schedule_id,
+            "target_id": target_id
+        },
+        "executor": request.ctx.session.get("account_info").id
+    }
+
+    # 发送消息到 Kafka
+    msg = {
+        "run_type": "flow",
+        "run_id": gen_run_id(),
+        "run_args": playbook_input,
+        "tenant_id": tenant_id
+    }
+    await aproduce(TASK_TOPIC, msg)
+
+    return response_ok(data={"message": "手动执行成功"})
 
 
 # ==================== Result Management ====================
