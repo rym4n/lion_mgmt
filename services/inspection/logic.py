@@ -20,7 +20,8 @@ from models import (
     InspectionResult,
     Tool,
     ToolAction,
-    ToolResources
+    ToolResources,
+    Timed
 )
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
@@ -150,13 +151,47 @@ async def list_schedules(
 
 async def delete_schedule(schedule_id: str, tenant_id: str) -> bool:
     """
-    删除巡检调度配置（软删除）
-    Delete inspection schedule configuration (soft delete)
+    删除巡检调度配置（软删除，级联删除关联的类别和巡检项，并清理定时任务）
+    Delete inspection schedule configuration (soft delete, cascade delete related categories and targets, cleanup scheduled tasks)
     """
     schedule = await get_schedule_by_id(schedule_id, tenant_id)
     if not schedule:
         return False
 
+    # 查找所有关联的类别
+    categories = await InspectionCategory.filter(
+        schedule_id=schedule_id,
+        deleted=False,
+        tenant_id=tenant_id
+    ).all()
+
+    # 收集所有类别ID
+    category_ids = [cat.id for cat in categories]
+
+    # 软删除所有关联的巡检项
+    if category_ids:
+        await InspectionTarget.filter(
+            category_id__in=category_ids,
+            deleted=False,
+            tenant_id=tenant_id
+        ).update(deleted=True)
+
+    # 软删除所有关联的类别
+    await InspectionCategory.filter(
+        schedule_id=schedule_id,
+        deleted=False,
+        tenant_id=tenant_id
+    ).update(deleted=True)
+
+    # 软删除关联的定时任务
+    timed_name = f"inspection_{schedule_id}"
+    await Timed.filter(
+        name=timed_name,
+        deleted=False,
+        tenant_id=tenant_id
+    ).update(deleted=True)
+
+    # 软删除调度配置
     schedule.deleted = True
     await schedule.save()
     return True
@@ -267,13 +302,21 @@ async def update_category(
 
 async def delete_category(category_id: str, tenant_id: str) -> bool:
     """
-    删除巡检类别（软删除）
-    Delete inspection category (soft delete)
+    删除巡检类别（软删除，级联删除关联的巡检项）
+    Delete inspection category (soft delete, cascade delete related targets)
     """
     category = await get_category(category_id, tenant_id)
     if not category:
         return False
 
+    # 软删除所有关联的巡检项
+    await InspectionTarget.filter(
+        category_id=category_id,
+        deleted=False,
+        tenant_id=tenant_id
+    ).update(deleted=True)
+
+    # 软删除类别
     category.deleted = True
     await category.save()
     return True
@@ -331,6 +374,17 @@ async def list_targets(
     # 分页查询
     items = await query.offset((page - 1) * page_size).limit(page_size).all()
 
+    # 获取巡检类别的 app_name
+    category_ids = list(set([target.category_id for target in items if target.category_id]))
+    category_map = {}
+    if category_ids:
+        categories = await InspectionCategory.filter(
+            id__in=category_ids,
+            deleted=False,
+            tenant_id=tenant_id
+        ).all()
+        category_map = {cat.id: cat.app_name for cat in categories}
+
     return {
         "total": total,
         "items": [
@@ -338,6 +392,7 @@ async def list_targets(
                 "id": target.id,
                 "content": target.content,
                 "category_id": target.category_id,
+                "app_name": category_map.get(target.category_id),
                 "standard": target.standard,
                 "action_name": target.action_name,
                 "enabled": target.enabled,
@@ -415,7 +470,6 @@ async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None, tar
 
     category_ids = [c.id for c in categories]
     category_map = {c.id: c for c in categories}
-    print(category_ids)
     # 获取巡检目标
     query = InspectionTarget.filter(
         deleted=False,
@@ -660,8 +714,10 @@ INSPECTION_PARSE_PROMPT = """
 用户描述：
 {user_input}
 
-请以JSON格式返回，包含以上字段。如果某些信息无法确定，使用null。
+请以JSON格式返回，包含以上字段，不要使用markdown格式。如果某些信息无法确定，使用null。
 同时返回confidence字段(0-1)表示推荐置信度，以及suggestions数组提供配置建议。
+
+注意：直接返回原始JSON对象，不要包含任何解释或markdown代码块（例如 ```json）
 
 返回格式示例：
 {{
@@ -723,13 +779,12 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
         raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
     # 准备prompt参数
-    available_actions_str = orjson.dumps(available_actions, ensure_ascii=False, indent=2)
+    available_actions_str = orjson.dumps(available_actions)
 
     prompt = INSPECTION_PARSE_PROMPT.format(
         user_input=text,
         available_actions=available_actions_str
     )
-
     # 使用litellm调用AI服务
     model = RY_AI_MODEL
     api_base = RY_AI_API_BASE
