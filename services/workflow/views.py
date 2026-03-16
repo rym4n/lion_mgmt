@@ -229,6 +229,12 @@ async def create_workflow(request):
                         "description": "搜索时使用，支持搜索创建时间（UTC格式：2025-01-01T00:00:00Z）",
                         "example": ["2025-01-01T00:00:00Z", "2025-02-01T00:00:00Z"],
                     },
+                    "playbook_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "剧本id列表，仅返回这些id对应的剧本",
+                        "example": ["111111", "2222222"],
+                    },
                 },
             }
         }
@@ -267,7 +273,7 @@ async def create_workflow(request):
 async def list_workflow(request):
     json_params = request.json
     page = int(json_params.get("page", 1)) if int(json_params.get("page", 1)) != 0 else 1
-    size = max(1, min(int(json_params.get("size", 15)), 100))
+    size = max(1, int(json_params.get("size", 15)))
     offset = (page - 1) * size
     limit = size
 
@@ -284,6 +290,8 @@ async def list_workflow(request):
     # 分页查询Account，返回总数和数据
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     condition = condition & Q(internal=maintenance_mode if maintenance_mode else False)
+    if json_params.get("playbook_ids"):
+        condition = condition & Q(id__in=json_params.get("playbook_ids"))
     if json_params.get("keyword"):
         # 模糊搜索name字段和remark字段
         keyword = json_params.get("keyword")
