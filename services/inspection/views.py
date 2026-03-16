@@ -19,7 +19,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.kafka import aproduce
 from libs.utils import gen_run_id
-from models import Timed, Playbook, PlaybookVersion, InspectionTarget
+from models import Timed, Playbook, PlaybookVersion, InspectionTarget, InspectionCategory
 from settings import TASK_TOPIC
 from . import logic
 
@@ -966,10 +966,17 @@ async def get_target(request: Request):
     if not target:
         raise CustomError(ErrorCode.NOT_FOUND)
 
+    categories = await InspectionCategory.filter(
+        id__in=[target.category_id],
+        deleted=False,
+        tenant_id=tenant_id
+    ).all()
+    category_map = {cat.id: cat.app_name for cat in categories}
+
     return response_ok(data={
         "id": target.id,
         "content": target.content,
-        "category_id": target.category_id,
+        "category_id": category_map.get(target.category_id),
         "standard": target.standard,
         "action_name": target.action_name,
         "enabled": target.enabled,
