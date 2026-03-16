@@ -117,8 +117,8 @@ HEALTH_ENDPOINT = True
 HEALTH_URL_PREFIX = "/health"
 
 # 跨域相关
-ENABLE_CORS: bool = os.environ.get("RY_CORS", True)
-CORS_SUPPORTS_CREDENTIALS: bool = os.environ.get("RY_CORS_CREDENTIAL", True)
+ENABLE_CORS: bool = bool(os.environ.get("RY_CORS", True))
+CORS_SUPPORTS_CREDENTIALS: bool = bool(os.environ.get("RY_CORS_CREDENTIAL", True))
 
 # Websocket
 WEBSOCKET_MAX_SIZE = 2**20  # 消息最大1MB
@@ -258,7 +258,7 @@ RY_EMBEDDING_API_BASE = os.environ.get("RY_EMBEDDING_API_BASE", "https://api-inf
 RY_AGENT_DEFAULT_LLM = os.environ.get("RY_AGENT_MODEL", "openai-proxy/gpt-4o")
 RY_AGENT_CONTEXT_WINDOW = int(os.environ.get("RY_AGENT_CONTEXT_WINDOW", "8000"))
 
-#自动化巡检AI配置
-RY_AI_MODEL=os.environ.get("RY_AI_MODEL")
-RY_OPENAI_API_KEY=os.environ.get("RY_OPENAI_API_KEY")
-RY_AI_API_BASE=os.environ.get("RY_AI_API_BASE")
+# 自动化巡检AI配置
+RY_AI_MODEL = os.environ.get("RY_AI_MODEL")
+RY_OPENAI_API_KEY = os.environ.get("RY_OPENAI_API_KEY")
+RY_AI_API_BASE = os.environ.get("RY_AI_API_BASE")
