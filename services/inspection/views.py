@@ -1245,6 +1245,7 @@ async def parse_inspection(request: Request):
         raise CustomError(ErrorCode.NOT_FOUND)
 
     result = await logic.parse_inspection_content(category.app_name, text, tenant_id)
+    result["app_name"] = category.app_name
     return response_ok(data=result)
 
 
