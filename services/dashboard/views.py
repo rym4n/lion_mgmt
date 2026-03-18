@@ -70,6 +70,7 @@ _all__ = ["dashboard_bp"]
 @requires_permission("dashboard:r")
 async def view_dashboard(request):
     params = request.json
+    tenant_id = request.ctx.tenant_id
 
     start_time = params.get("start_time")
     end_time = params.get("end_time")
@@ -85,15 +86,15 @@ async def view_dashboard(request):
     async with in_transaction() as tconn:
         if static_type == "events_day":
             records = await tconn.execute_query_dict(
-                "SELECT day, total FROM events_day WHERE day >= $1 AND day <= $2",
-                (start_time, end_time),
+                "SELECT day, total FROM events_day WHERE day >= $1 AND day <= $2 AND tenant_id = $3",
+                (start_time, end_time, tenant_id),
             )
             result = [{"day": row["day"], "counts": row["total"]} for row in records]
             await tconn.execute_query("REFRESH MATERIALIZED VIEW events_day")
         elif static_type == "events_status":
             records = await tconn.execute_query_dict(
-                "SELECT event_process_status, SUM(total) FROM events_status WHERE day >= $1 AND day <= $2 GROUP BY event_process_status",
-                (start_time, end_time),
+                "SELECT event_process_status, SUM(total) FROM events_status WHERE day >= $1 AND day <= $2 AND tenant_id = $3 GROUP BY event_process_status",
+                (start_time, end_time, tenant_id),
             )
             result = [
                 {
@@ -105,15 +106,15 @@ async def view_dashboard(request):
             await tconn.execute_query("REFRESH MATERIALIZED VIEW events_status")
         elif static_type == "runlog_playbook":
             records = await tconn.execute_query_dict(
-                "SELECT playbook_name, SUM(total) FROM runlog_playbook WHERE day >= $1 AND day <= $2 GROUP BY playbook_name",
-                (start_time, end_time),
+                "SELECT playbook_name, SUM(total) FROM runlog_playbook WHERE day >= $1 AND day <= $2 AND tenant_id = $3 GROUP BY playbook_name",
+                (start_time, end_time, tenant_id),
             )
             result = [{"playbook_name": row["playbook_name"], "counts": int(row["sum"])} for row in records]
             await tconn.execute_query("REFRESH MATERIALIZED VIEW runlog_playbook")
         elif static_type == "runlog_action":
             records = await tconn.execute_query_dict(
-                "SELECT action_display_name, SUM(total) FROM runlog_action WHERE day >= $1 AND day <= $2 GROUP BY action_display_name",
-                (start_time, end_time),
+                "SELECT action_display_name, SUM(total) FROM runlog_action WHERE day >= $1 AND day <= $2 AND tenant_id = $3 GROUP BY action_display_name",
+                (start_time, end_time, tenant_id),
             )
             result = [
                 {
