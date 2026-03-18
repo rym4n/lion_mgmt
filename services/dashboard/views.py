@@ -70,7 +70,7 @@ _all__ = ["dashboard_bp"]
 @requires_permission("dashboard:r")
 async def view_dashboard(request):
     params = request.json
-    tenant_id = request.ctx.tenant_id
+    tenant_id = request.ctx.session.get("tenant_id")
 
     start_time = params.get("start_time")
     end_time = params.get("end_time")
