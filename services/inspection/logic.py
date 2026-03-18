@@ -353,54 +353,92 @@ async def list_targets(
     page: int,
     page_size: int,
     tenant_id: str,
-    category_id: Optional[str] = None,
-    enabled: Optional[bool] = None
+    schedule_id: Optional[str] = None,
+    enabled: Optional[bool] = None,
+    keyword: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     获取巡检目标列表（分页）
     Get inspection target list (paginated)
     """
-    query = InspectionTarget.filter(deleted=False, tenant_id=tenant_id)
+    from collections import defaultdict
 
-    # 可选过滤条件
-    if category_id:
-        query = query.filter(category_id=category_id)
-    if enabled is not None:
-        query = query.filter(enabled=enabled)
+    # 1. 获取所有相关的巡检类别
+    categories_query = InspectionCategory.filter(deleted=False, tenant_id=tenant_id)
+    if schedule_id:
+        categories_query = categories_query.filter(schedule_id=schedule_id)
+    
+    categories = await categories_query.all()
+    category_ids = [cat.id for cat in categories]
 
-    # 计算总数
-    total = await query.count()
-
-    # 分页查询
-    items = await query.offset((page - 1) * page_size).limit(page_size).all()
-
-    # 获取巡检类别的 app_name
-    category_ids = list(set([target.category_id for target in items if target.category_id]))
-    category_map = {}
+    # 2. 获取所有相关的巡检目标
+    targets_query = InspectionTarget.filter(deleted=False, tenant_id=tenant_id)
     if category_ids:
-        categories = await InspectionCategory.filter(
-            id__in=category_ids,
-            deleted=False,
-            tenant_id=tenant_id
-        ).all()
-        category_map = {cat.id: cat.app_name for cat in categories}
+        targets_query = targets_query.filter(category_id__in=category_ids)
+    elif schedule_id:
+        return {"total": 0, "items": []}
+        
+    if enabled is not None:
+        targets_query = targets_query.filter(enabled=enabled)
+    
+    if keyword is not None:
+        targets_query = targets_query.filter(Q(content__icontains=keyword) | Q(standard__icontains=keyword))
+    
+    targets = await targets_query.all()
+
+    # 3. 组织数据：按类别分组
+    category_targets = defaultdict(list)
+    for t in targets:
+        category_targets[t.category_id].append(t)
+
+    all_items = []
+    # 遍历所有类别，确保每个类别至少出现一次
+    for cat in categories:
+        # 如果提供了 enabled 过滤，且类别状态不匹配，跳过
+        if enabled is not None and cat.enabled != enabled:
+            continue
+            
+        targets_in_cat = category_targets.get(cat.id, [])
+        if not targets_in_cat and keyword is None:
+            # 无 target 时返回 category 信息，target 相关字段设为 None
+            all_items.append({
+                "id": None,
+                "content": None,
+                "category_id": cat.id,
+                "category_name": cat.name,
+                "category_enabled": cat.enabled,
+                "app_name": cat.app_name,
+                "standard": None,
+                "action_name": None,
+                "enabled": None,
+                "ctime": cat.ctime.isoformat() if hasattr(cat, 'ctime') and cat.ctime else None,
+                "utime": cat.utime.isoformat() if hasattr(cat, 'utime') and cat.utime else None,
+            })
+        else:
+            for target in targets_in_cat:
+                all_items.append({
+                    "id": target.id,
+                    "content": target.content,
+                    "category_id": target.category_id,
+                    "category_name": cat.name,
+                    "category_enabled": cat.enabled,
+                    "app_name": cat.app_name,
+                    "standard": target.standard,
+                    "action_name": target.action_name,
+                    "enabled": target.enabled,
+                    "ctime": target.ctime.isoformat() if target.ctime else None,
+                    "utime": target.utime.isoformat() if target.utime else None,
+                })
+
+    # 4. 手动分页
+    total = len(all_items)
+    start = (page - 1) * page_size
+    end = start + page_size
+    items = all_items[start:end]
 
     return {
         "total": total,
-        "items": [
-            {
-                "id": target.id,
-                "content": target.content,
-                "category_id": target.category_id,
-                "app_name": category_map.get(target.category_id),
-                "standard": target.standard,
-                "action_name": target.action_name,
-                "enabled": target.enabled,
-                "ctime": target.ctime.isoformat() if target.ctime else None,
-                "utime": target.utime.isoformat() if target.utime else None,
-            }
-            for target in items
-        ]
+        "items": items
     }
 
 
@@ -601,7 +639,8 @@ async def list_results(
     schedule_id: Optional[str] = None,
     status: Optional[str] = None,
     start_time: Optional[datetime] = None,
-    end_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None,
+    keyword: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     获取巡检结果列表（分页）
@@ -620,6 +659,14 @@ async def list_results(
         query = query.filter(start_time__gte=start_time)
     if end_time:
         query = query.filter(end_time__lte=end_time)
+    if keyword:
+        # 模糊匹配 target_content 和 target_standard
+        matching_target_ids = await InspectionTarget.filter(
+            Q(content__icontains=keyword) | Q(standard__icontains=keyword),
+            tenant_id=tenant_id,
+            deleted=False
+        ).values_list("id", flat=True)
+        query = query.filter(target_id__in=matching_target_ids)
 
     # 计算总数
     total = await query.count()

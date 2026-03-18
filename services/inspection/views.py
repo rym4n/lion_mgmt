@@ -837,8 +837,9 @@ async def create_target(request: Request):
                 "properties": {
                     "page": {"type": "integer", "description": "页码"},
                     "page_size": {"type": "integer", "description": "每页数量"},
-                    "category_id": {"type": "string", "description": "巡检类别ID"},
+                    "schedule_id": {"type": "string", "description": "巡检任务ID"},
                     "enabled": {"type": "boolean", "description": "是否启用"},
+                    "keyword": {"type": "string", "description": "搜索关键词"},
                 },
             }
         }
@@ -892,15 +893,20 @@ async def list_targets(request: Request):
 
     page = data.get("page", 1)
     page_size = data.get("page_size", 20)
-    category_id = data.get("category_id")
+    schedule_id = data.get("schedule_id")
     enabled = data.get("enabled")
+    keyword = data.get("keyword")
+
+    if not schedule_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     result = await logic.list_targets(
         page=page,
         page_size=page_size,
         tenant_id=tenant_id,
-        category_id=category_id,
-        enabled=enabled
+        schedule_id=schedule_id,
+        enabled=enabled,
+        keyword=keyword
     )
 
     return response_ok(data=result)
@@ -1611,6 +1617,7 @@ async def execute_inspection(request: Request):
                     "status": {"type": "string", "description": "状态"},
                     "start_time": {"type": "string", "description": "开始时间"},
                     "end_time": {"type": "string", "description": "结束时间"},
+                    "keyword": {"type": "string", "description": "搜索关键词"},
                 },
             }
         }
@@ -1668,6 +1675,7 @@ async def list_results(request: Request):
     target_id = data.get("target_id")
     schedule_id = data.get("schedule_id")
     status = data.get("status")
+    keyword = data.get("keyword")
 
     # 解析时间参数
     start_time = None
@@ -1692,7 +1700,8 @@ async def list_results(request: Request):
         schedule_id=schedule_id,
         status=status,
         start_time=start_time,
-        end_time=end_time
+        end_time=end_time,
+        keyword=keyword
     )
 
     return response_ok(data=result)

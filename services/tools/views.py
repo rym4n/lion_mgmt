@@ -3,6 +3,7 @@ import asyncio
 from collections import defaultdict
 from functools import reduce
 import hashlib
+import inspect
 from io import BytesIO
 import operator
 import os
@@ -2516,3 +2517,59 @@ async def add_config(request):
 async def get_health_check_result(request):
     result = await Config.get_or_none(key="health_check", module="tools")
     return response_ok(result.json if result else {})
+
+
+@tools_bp.post("/resource-search")
+@openapi.definition(
+    summary="资源搜索接口",
+    description="模糊搜索资源名称（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "keyword": {"type": "string", "description": "资源名称"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "resource_name": {"type": "string"},
+                                        "tool_name": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("tool:r")
+async def resource_search(request):
+    """
+    模糊搜索资源名称，并在返回结果中带上对应的工具英文名
+    """
+    keyword = request.json.get("keyword", "")
+    if not keyword:
+        return response_ok([])
+
+    resources = await ToolResources.filter(name__icontains=keyword, deleted=False, internal=False).all()
+    result = []
+    for res in resources:
+        result.append(res.json)
+    return response_ok(result)
