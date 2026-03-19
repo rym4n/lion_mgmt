@@ -1146,9 +1146,13 @@ async def run(request):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["run_id"],
+                "required": ["run_ids"],
                 "properties": {
-                    "run_id": {"type": "string", "description": "请求run接口返回的ID"},
+                    "run_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "run_id列表",
+                    },
                 },
             }
         }
@@ -1184,9 +1188,10 @@ async def run(request):
 )
 @requires_permission("warroom:r")
 async def get_runlog(request):
-    if not request.json.get("run_id"):
+    # 保留request.json.get("run_id")，兼容之前只传单个run_id的情况
+    if not request.json.get("run_ids") and not request.json.get("run_id"):
         raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
-    logs = await Runlog.filter(run_id=request.json.get("run_id"), deleted=False).all()
+    logs = await Runlog.filter(run_id__in=request.json.get("run_ids") if request.json.get("run_ids") else [request.json.get("run_id")], deleted=False).all()
 
     run_logs = await runlog_list(logs)
 
