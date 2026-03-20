@@ -7,6 +7,7 @@ Inspection Module API Routes Layer
 """
 import ast
 import os
+import orjson
 from datetime import datetime, timedelta
 from sanic import Blueprint, Request
 from sanic.log import logger
@@ -22,6 +23,7 @@ from libs.utils import gen_run_id
 from models import Timed, Playbook, PlaybookVersion, InspectionTarget, InspectionCategory
 from settings import TASK_TOPIC
 from . import logic
+from sanic.response import json
 
 inspection_bp = Blueprint("inspection", url_prefix="/inspection")
 __all__ = ["inspection_bp"]
@@ -189,6 +191,7 @@ async def get_schedule(request: Request):
                     "page": {"type": "integer", "description": "页码"},
                     "page_size": {"type": "integer", "description": "每页数量"},
                     "enabled": {"type": "boolean", "description": "是否启用"},
+                    "keyword": {"type": "string", "description": "搜索关键词"},
                 },
             }
         }
@@ -244,12 +247,14 @@ async def list_schedules(request: Request):
     page = data.get("page", 1)
     page_size = data.get("page_size", 20)
     enabled = data.get("enabled")
+    keyword = data.get("keyword")
 
     result = await logic.list_schedules(
         page=page,
         page_size=page_size,
         tenant_id=tenant_id,
-        enabled=enabled
+        enabled=enabled,
+        keyword=keyword
     )
 
     return response_ok(data=result)
@@ -2082,3 +2087,147 @@ async def add_result(request: Request):
             continue
 
     return response_ok(data=created_results)
+
+
+@inspection_bp.post("/target/export")
+@openapi.definition(
+    summary="导出巡检项为JSON文件",
+    description="导出巡检项及其关联的类别和任务为JSON文件",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["target_ids"],
+                "properties": {
+                    "target_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "巡检项ID列表"
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导出成功，返回JSON文件",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object"
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:r")
+async def export_targets(request: Request):
+    """
+    导出巡检项为JSON文件
+    Export inspection targets as JSON file
+    """
+    data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    target_ids = data.get("target_ids")
+    if not target_ids or not isinstance(target_ids, list):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    result = await logic.export_targets(target_ids, tenant_id)
+
+    # 生成文件名
+    filename = f"inspection_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+
+    # 返回JSON文件
+    response = json(result)
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response.headers["Content-Type"] = "application/json"
+    return response
+
+
+@inspection_bp.post("/target/import")
+@openapi.definition(
+    summary="导入巡检项JSON文件",
+    description="导入巡检项及其关联的类别和任务，如果存在同名则添加日期后缀，默认禁用",
+    body={
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "JSON文件"
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导入成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "schedules_created": {"type": "integer"},
+                                    "categories_created": {"type": "integer"},
+                                    "targets_created": {"type": "integer"},
+                                    "schedule_ids": {
+                                        "type": "array",
+                                        "items": {"type": "string"}
+                                    },
+                                    "category_ids": {
+                                        "type": "array",
+                                        "items": {"type": "string"}
+                                    },
+                                    "target_ids": {
+                                        "type": "array",
+                                        "items": {"type": "string"}
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:c")
+async def import_targets(request: Request):
+    """
+    导入巡检项JSON文件
+    Import inspection targets from JSON file
+    """
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    # 获取上传的文件
+    if not request.files or "file" not in request.files:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    uploaded_file = request.files.get("file")[0]
+
+    try:
+        # 读取并解析JSON文件
+        file_content = uploaded_file.body
+        import_data = orjson.loads(file_content)
+    except orjson.JSONDecodeError:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    except Exception as e:
+        logger.error(f"文件读取失败: {str(e)}")
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if not isinstance(import_data, dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    result = await logic.import_targets(import_data, tenant_id)
+    return response_ok(data=result)
+

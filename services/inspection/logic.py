@@ -89,7 +89,8 @@ async def list_schedules(
     page: int,
     page_size: int,
     tenant_id: str,
-    enabled: Optional[bool] = None
+    enabled: Optional[bool] = None,
+    keyword: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     获取巡检调度配置列表（分页）
@@ -100,6 +101,13 @@ async def list_schedules(
     # 可选过滤条件
     if enabled is not None:
         query = query.filter(enabled=enabled)
+
+    # 可选搜索关键词
+    if keyword:
+        query = query.filter(
+            Q(name__icontains=keyword) |
+            Q(description__icontains=keyword)
+        )
 
     # 计算总数
     total = await query.count()
@@ -996,3 +1004,218 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
         }
 
     return parsed_data
+
+
+# ==================== Import/Export Operations ====================
+
+async def export_targets(target_ids: List[str], tenant_id: str) -> Dict[str, Any]:
+    """
+    导出巡检项及其关联的类别和任务
+    Export inspection targets with their categories and schedules
+
+    Args:
+        target_ids: 巡检项ID列表
+        tenant_id: 租户ID
+
+    Returns:
+        包含巡检任务、类别和项的完整数据
+    """
+    # 查询巡检项
+    targets = await InspectionTarget.filter(
+        id__in=target_ids,
+        deleted=False,
+        tenant_id=tenant_id
+    ).all()
+
+    if not targets:
+        return {"schedules": [], "categories": [], "targets": []}
+
+    # 获取所有关联的类别ID
+    category_ids = list(set(t.category_id for t in targets))
+    categories = await InspectionCategory.filter(
+        id__in=category_ids,
+        deleted=False,
+        tenant_id=tenant_id
+    ).all()
+
+    # 获取所有关联的任务ID
+    schedule_ids = list(set(c.schedule_id for c in categories))
+    schedules = await InspectionSchedule.filter(
+        id__in=schedule_ids,
+        deleted=False,
+        tenant_id=tenant_id
+    ).all()
+
+    # 构建导出数据
+    export_data = {
+        "schedules": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "schedule_cron": s.schedule_cron,
+                "owner": s.owner,
+                "description": s.description,
+            }
+            for s in schedules
+        ],
+        "categories": [
+            {
+                "id": c.id,
+                "name": c.name,
+                "schedule_id": c.schedule_id,
+                "app_name": c.app_name,
+                "resource_ids": c.resource_ids,
+            }
+            for c in categories
+        ],
+        "targets": [
+            {
+                "id": t.id,
+                "content": t.content,
+                "category_id": t.category_id,
+                "standard": t.standard,
+                "action_name": t.action_name,
+            }
+            for t in targets
+        ]
+    }
+
+    return export_data
+
+
+async def import_targets(import_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
+    """
+    导入巡检项及其关联的类别和任务
+    Import inspection targets with their categories and schedules
+
+    Args:
+        import_data: 导入的数据（包含schedules, categories, targets）
+        tenant_id: 租户ID
+
+    Returns:
+        导入结果统计
+    """
+    from datetime import datetime
+
+    # 生成时间后缀
+    date_suffix = datetime.now().strftime("%Y%m%d")
+
+    # ID映射表（旧ID -> 新ID）
+    schedule_id_map = {}
+    category_id_map = {}
+
+    schedules_data = import_data.get("schedules", [])
+    categories_data = import_data.get("categories", [])
+    targets_data = import_data.get("targets", [])
+
+    created_schedules = []
+    created_categories = []
+    created_targets = []
+
+    # 1. 导入巡检任务
+    for schedule_data in schedules_data:
+        old_schedule_id = schedule_data.get("id")
+        schedule_name = schedule_data.get("name")
+
+        # 检查是否存在同名任务
+        existing_schedule = await InspectionSchedule.filter(
+            name=schedule_name,
+            deleted=False,
+            tenant_id=tenant_id
+        ).first()
+
+        if existing_schedule:
+            # 添加日期后缀
+            schedule_name = f"{schedule_name}_{date_suffix}"
+
+        # 创建新任务（默认禁用）
+        new_schedule = await InspectionSchedule.create(
+            name=schedule_name,
+            schedule_cron=schedule_data.get("schedule_cron"),
+            owner=schedule_data.get("owner"),
+            description=schedule_data.get("description"),
+            enabled=False,  # 默认禁用
+            tenant_id=tenant_id
+        )
+
+        schedule_id_map[old_schedule_id] = new_schedule.id
+        created_schedules.append(new_schedule)
+
+    # 2. 导入巡检类别
+    for category_data in categories_data:
+        old_category_id = category_data.get("id")
+        old_schedule_id = category_data.get("schedule_id")
+        category_name = category_data.get("name")
+
+        # 映射到新的schedule_id
+        new_schedule_id = schedule_id_map.get(old_schedule_id)
+        if not new_schedule_id:
+            continue
+
+        # 检查是否存在同名类别（在同一任务下）
+        existing_category = await InspectionCategory.filter(
+            name=category_name,
+            schedule_id=new_schedule_id,
+            deleted=False,
+            tenant_id=tenant_id
+        ).first()
+
+        if existing_category:
+            # 添加日期后缀
+            category_name = f"{category_name}_{date_suffix}"
+
+        # 创建新类别（默认禁用）
+        new_category = await InspectionCategory.create(
+            name=category_name,
+            schedule_id=new_schedule_id,
+            app_name=category_data.get("app_name"),
+            resource_ids=category_data.get("resource_ids", []),
+            enabled=False,  # 默认禁用
+            tenant_id=tenant_id
+        )
+
+        category_id_map[old_category_id] = new_category.id
+        created_categories.append(new_category)
+
+    # 3. 导入巡检项
+    for target_data in targets_data:
+        old_category_id = target_data.get("category_id")
+        target_content = target_data.get("content")
+
+        # 映射到新的category_id
+        new_category_id = category_id_map.get(old_category_id)
+        if not new_category_id:
+            continue
+
+        # 检查是否存在同内容的巡检项（在同一类别下）
+        existing_target = await InspectionTarget.filter(
+            content=target_content,
+            category_id=new_category_id,
+            deleted=False,
+            tenant_id=tenant_id
+        ).first()
+
+        if existing_target:
+            # 添加日期后缀
+            target_content = f"{target_content}_{date_suffix}"
+
+        # 创建新巡检项（默认禁用）
+        new_target = await InspectionTarget.create(
+            content=target_content,
+            category_id=new_category_id,
+            standard=target_data.get("standard"),
+            action_name=target_data.get("action_name"),
+            enabled=False,  # 默认禁用
+            tenant_id=tenant_id
+        )
+
+        created_targets.append(new_target)
+
+    return {
+        "schedules_created": len(created_schedules),
+        "categories_created": len(created_categories),
+        "targets_created": len(created_targets),
+        "schedule_ids": [s.id for s in created_schedules],
+        "category_ids": [c.id for c in created_categories],
+        "target_ids": [t.id for t in created_targets],
+    }
