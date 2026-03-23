@@ -827,5 +827,9 @@ async def get_report(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     event = await Events.get(id=event_id, tenant_id=tenant_id)
-
-    return response_ok(event.download_url if event.download_url else "")
+    if event.download_url:
+        return response_ok(event.download_url)
+    else:
+        event.download_url = await create_ai_report(event.id, tenant_id)
+        await event.save()
+        return response_ok(event.download_url)
