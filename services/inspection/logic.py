@@ -1098,7 +1098,7 @@ async def import_targets(import_data: Dict[str, Any], tenant_id: str) -> Dict[st
     from datetime import datetime
 
     # 生成时间后缀
-    date_suffix = datetime.now().strftime("%Y%m%d")
+    date_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
 
     # ID映射表（旧ID -> 新ID）
     schedule_id_map = {}

@@ -2213,8 +2213,7 @@ async def import_targets(request: Request):
     if not request.files or "file" not in request.files:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    uploaded_file = request.files.get("file")[0]
-
+    uploaded_file = request.files.getlist("file")[0]
     try:
         # 读取并解析JSON文件
         file_content = uploaded_file.body
