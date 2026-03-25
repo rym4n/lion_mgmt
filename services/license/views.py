@@ -8,6 +8,7 @@ import time
 from sanic import Blueprint, response
 from sanic.log import logger
 from sanic.request import Request
+from sanic_ext import openapi
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -22,6 +23,41 @@ _all__ = ["license_bp"]
 
 
 @license_bp.post("/verify")
+@openapi.definition(
+    summary="验证并上传 License 文件",
+    description="验证 License 文件的有效性并上传，成功后会重启服务加载新配置",
+    body={
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "License 文件 (.lic 格式)",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "上传成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {"type": "string", "example": "上传成功，正在加载配置文件，请稍后！"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 @requires_permission("lic:c")
 async def verify_license_api(request: Request):
     """
