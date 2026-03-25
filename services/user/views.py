@@ -615,7 +615,7 @@ async def update_api_user(request):
 @user_bp.post("/login")
 @openapi.definition(
     summary="用户登录",
-    description="用户登录系统",
+    description="用户登录系统，验证成功后返回 token",
     body={
         "application/json": {
             "schema": {
@@ -637,29 +637,9 @@ async def update_api_user(request):
                             "data": {
                                 "type": "object",
                                 "properties": {
-                                    "id": {"type": "string"},
-                                    "ctime": {"type": "string"},
-                                    "utime": {"type": "string"},
-                                    "username": {"type": "string"},
-                                    "display_name": {"type": "string"},
-                                    "email": {"type": "string"},
-                                    "phone": {"type": "string"},
-                                    "disabled": {"type": "boolean"},
-                                    "mfa_enable": {"type": "boolean"},
-                                    "mfa_uri": {"type": "string"},
-                                    "permit_ip": {"type": "string"},
-                                    "force_change_password": {"type": "boolean"},
-                                    "roles": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "object",
-                                            "properties": {
-                                                "id": {"type": "string"},
-                                                "name": {"type": "string"},
-                                                "description": {"type": "string"},
-                                            },
-                                        },
-                                    },
+                                    "mfa_enable": {"type": "boolean", "description": "是否需要 MFA 验证"},
+                                    "mfa_uri": {"type": "string", "description": "MFA 二维码 URI（首次绑定时返回）"},
+                                    "force_change_password": {"type": "boolean", "description": "是否需要强制修改密码"}
                                 },
                             },
                         },
@@ -704,7 +684,7 @@ async def login(request):
         if account.permit_ip and ip_in_list(client_ip, account.permit_ip.split(",")) is False:
             raise CustomError(ErrorCode.IP_FORBIDDEN)
 
-        # 2. 账号自动冻结检查
+        # 账号自动冻结检查
         if secure_config["account_auto_freeze_enabled"]:
             if (time.time() - account.last_login_time.timestamp()) > (secure_config["account_auto_freeze_days"] * 86400):
                 account.disabled = True
@@ -722,16 +702,15 @@ async def login(request):
         # 登录成功，清除错误次数
         await request.app.ctx.cache_client.delete(f"{username}_login_attempts")
 
-        resp = account.json
+        resp = {}
         token_id = str(uuid.uuid4())
 
-        # 3. MFA 强制开启检查
-        # 如果全局开启了 MFA，或者用户自己开启了 MFA
+        # MFA 强制开启检查
         mfa_enabled = secure_config["mfa_enabled"] or account.mfa_enable
 
-        token = token_encode(account.id, account.username, account.display_name, mfa_enabled, account.tenant_id, token_id, ip=client_ip)  # 使用计算后的 mfa 状态
+        token = token_encode(account.id, account.username, account.display_name, mfa_enabled, account.tenant_id, token_id, ip=client_ip)
         await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
-        # resp['aioe-auth'] = token
+
         # 如果开启了MFA，缓存记录MFA密钥，便于mfa认证
         if mfa_enabled:
             # 如果全局开启，但用户没有 key，生成一个
@@ -749,7 +728,9 @@ async def login(request):
             if not account.mfa_bind:
                 resp["mfa_uri"] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name="AIOE")
 
-        # 4. 首次登录强制修改密码
+        resp["mfa_enable"] = mfa_enabled
+
+        # 首次登录强制修改密码
         if secure_config["force_change_password_first_login"]:
             if not account.last_login_time:
                 resp["force_change_password"] = True
@@ -757,7 +738,7 @@ async def login(request):
         if not resp.get("force_change_password"):
             account.last_login_time = datetime.now()
             await account.save(update_fields=["last_login_time"])
-        resp["tenant_id"] = account.tenant_id
+
         tmp_resp = response_ok(resp)
         tmp_resp.cookies.add_cookie(
             "aioe-auth",
@@ -774,6 +755,66 @@ async def login(request):
         await request.app.ctx.cache_client.set(f"{username}_login_attempts", user_attempts + 1, lock_duration)
         await request.app.ctx.cache_client.set(f"{client_ip}_login_attempts", ip_attempts + 1, lock_duration)
         raise CustomError(ErrorCode.CREDENTIALS_ERROR)
+
+
+@user_bp.post("/user-info")
+@openapi.definition(
+    summary="获取当前登录用户信息",
+    description="获取当前登录用户的详细信息，包括角色和权限",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "ctime": {"type": "string"},
+                                    "utime": {"type": "string"},
+                                    "username": {"type": "string"},
+                                    "display_name": {"type": "string"},
+                                    "email": {"type": "string"},
+                                    "phone": {"type": "string"},
+                                    "disabled": {"type": "boolean"},
+                                    "mfa_enable": {"type": "boolean"},
+                                    "permit_ip": {"type": "string"},
+                                    "tenant_id": {"type": "string"},
+                                    "roles": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {"type": "string"},
+                                                "name": {"type": "string"},
+                                                "description": {"type": "string"},
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+async def get_user_info(request):
+    """获取当前登录用户的详细信息"""
+    account = request.ctx.session.get("account_info")
+    if not account:
+        raise CustomError(ErrorCode.SESSION_INVALID)
+
+    # 重新从数据库获取最新的用户信息（包括角色）
+    account = await Account.get(id=account.id, deleted=False).prefetch_related("roles")
+    resp = account.json
+    resp["tenant_id"] = request.ctx.session.get("tenant_id")
+    return response_ok()
 
 
 @user_bp.post("/local-auth")
