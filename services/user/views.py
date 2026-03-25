@@ -814,7 +814,7 @@ async def get_user_info(request):
     account = await Account.get(id=account.id, deleted=False).prefetch_related("roles")
     resp = account.json
     resp["tenant_id"] = request.ctx.session.get("tenant_id")
-    return response_ok()
+    return response_ok(resp)
 
 
 @user_bp.post("/local-auth")
