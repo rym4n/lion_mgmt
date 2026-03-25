@@ -559,6 +559,7 @@ async def get_oauth_status(request):
             if account:
                 resp = account.json
                 resp["use_oauth2"] = request.app.ctx.oauth_cfg.get("use_oauth2") == "true"
+                resp["tenant_id"] = request.ctx.session.get("tenant_id")
                 return response_ok(resp)
         except Exception:
             pass
