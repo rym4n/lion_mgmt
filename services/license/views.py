@@ -50,7 +50,7 @@ _all__ = ["license_bp"]
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer", "example": 0},
-                            "data": {"type": "string", "example": "上传成功，正在加载配置文件，请稍后！"},
+                            "data": {"type": "string", "example": "上传成功"},
                         },
                     }
                 }
