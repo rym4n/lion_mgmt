@@ -1391,6 +1391,7 @@ async def iframe_login(request):
             samesite=SESSION_SAMESITE,
             secure=SESSION_SECURE,
             partitioned=True,
+            host_prefix=True,
             expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
         )
         return resp
