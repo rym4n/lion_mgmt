@@ -90,6 +90,44 @@ async def verify_license_api(request: Request):
 
 
 @license_bp.post("/get")
+@openapi.definition(
+    summary="获取用户菜单权限",
+    description="根据用户角色和 License 授权情况返回可访问的菜单列表",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "language": {
+                        "type": "string",
+                        "enum": ["CN", "TW", "EN"],
+                        "default": "CN",
+                        "description": "语言选项：CN-简体中文, TW-繁体中文, EN-英文",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "菜单列表",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {
+                                "type": "array",
+                                "description": "菜单项列表",
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 async def get_license(request: Request):
     """
     根据权限加载页面
@@ -202,6 +240,48 @@ async def get_license(request: Request):
 
 
 @license_bp.post("/show")
+@openapi.definition(
+    summary="查看 License 详细信息",
+    description="获取当前 License 的详细信息，包括授权公司、版本、有效期、模块授权情况等",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "License 详细信息",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "example": 0},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string", "description": "授权公司名称"},
+                                    "version": {"type": "string", "description": "License 版本"},
+                                    "createTime": {"type": "string", "description": "创建时间"},
+                                    "expireTime": {"type": "string", "description": "过期时间"},
+                                    "lic_status": {"type": "boolean", "description": "License 是否有效"},
+                                    "serial_number": {"type": "string", "description": "序列号"},
+                                    "menuInfo": {
+                                        "type": "object",
+                                        "description": "模块授权信息",
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
 @requires_permission("lic:r")
 async def get_all_license(request: Request):
     """
