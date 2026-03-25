@@ -138,6 +138,8 @@ async def token_decode(request: Request) -> dict:
     """
     if request.cookies.get("aioe-auth") and ":" not in request.cookies.get("aioe-auth"):
         token = request.cookies.get("aioe-auth")
+    elif request.cookies.get("__Host-aioe-auth") and ":" not in request.cookies.get("__Host-aioe-auth"):
+        token = request.cookies.get("__Host-aioe-auth")
     elif request.headers.get("aioe-auth") and ":" in request.headers.get("aioe-auth"):
         token = request.headers.get("aioe-auth")
     else:

@@ -1384,6 +1384,13 @@ async def iframe_login(request):
 
         # 7. 构造响应并重定向
         resp = response.redirect(redirect_uri)
+
+        # 添加 CORS 头以支持跨域 iframe 场景
+        resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+        resp.headers["Access-Control-Allow-Credentials"] = "true"
+        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+
         resp.cookies.add_cookie(
             "aioe-auth",
             aioe_token,
