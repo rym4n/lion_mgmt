@@ -1,13 +1,13 @@
 # coding=utf-8
-import traceback
-from datetime import datetime
 import time
+import traceback
 import uuid
+from datetime import datetime
 
 import jwt
+import pyotp
 from argon2.exceptions import InvalidHashError, VerificationError
 from jsonpath import jsonpath
-import pyotp
 from sanic import Blueprint, response
 from sanic.log import logger
 from sanic_ext import openapi
@@ -25,7 +25,7 @@ from libs.security.authentication import (
     validate_password,
     validate_username,
 )
-from libs.security.authorization import requires_permission, check_permissions
+from libs.security.authorization import check_permissions, requires_permission
 from libs.utils import (
     get_client_ip,
     get_expiration_date,
@@ -1280,25 +1280,25 @@ async def assign_role_to_user(request):
             "description": "认证成功后的重定向地址",
             "required": False,
             "schema": {"type": "string"},
-        }
+        },
     ],
     response={"302": {"description": "重定向到目标页面"}},
 )
 async def iframe_login(request):
     token = request.args.get("token")
     redirect_uri = request.args.get("redirect")
-    
+
     if not token or not redirect_uri:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     cfg = await get_jwt_config()
     if cfg.get("jwt_enabled") != "true":
         raise CustomError(ErrorCode.SESSION_INVALID)
-        
+
     algo = cfg.get("jwt_algorithm", "HS256")
     secret = cfg.get("jwt_secret", "")
     user_path = cfg.get("jwt_user_path", "")
-    
+
     if not all([algo, secret, user_path]):
         logger.warning(f"JWT config incomplete: algo={algo}, secret=***, user_path={user_path}")
         raise CustomError(ErrorCode.SESSION_INVALID)
@@ -1317,14 +1317,14 @@ async def iframe_login(request):
             raise CustomError(ErrorCode.SESSION_INVALID)
 
         jwt_tenant_id = payload.get("tenant_id")
-        
+
         # 4. 查找或自动创建用户
         try:
             account = await Account.get(username=username[0], deleted=False).prefetch_related("roles")
         except DoesNotExist:
             if cfg.get("jwt_auto_create") != "true":
                 raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
-            
+
             # 自动创建用户逻辑
             account = await Account.create(
                 username=username[0],
@@ -1339,12 +1339,12 @@ async def iframe_login(request):
                 creator="auto",
                 permit_ip=None,
             )
-            
+
             # 分配默认租户
             tenant = await Tenant.get_or_none(id=account.tenant_id)
             if tenant:
                 await tenant.member.add(account)
-            
+
             default_tenants = cfg.get("jwt_default_tenants", "").split(",")
             if default_tenants not in [[""], [], None, ""]:
                 tenants_by_id = await Tenant.filter(id__in=default_tenants).all()
@@ -1353,14 +1353,14 @@ async def iframe_login(request):
                     await account.save(update_fields=["tenant_id"])
                     for t in tenants_by_id:
                         await t.member.add(account)
-            
+
             # 分配默认角色
             default_roles = cfg.get("jwt_default_roles", "").split(",")
             if default_roles:
                 roles = await Role.filter(id__in=default_roles, tenant_id=account.tenant_id).all()
                 if roles:
                     await account.roles.add(*roles)
-            
+
             # 无论是否分配角色，都需要获取关联关系
             await account.fetch_related("roles")
 
@@ -1378,10 +1378,10 @@ async def iframe_login(request):
             target_tenant_id,
             str(uuid.uuid4()),
         )
-        
+
         # 6. 缓存用户信息
         await request.app.ctx.cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
-        
+
         # 7. 构造响应并重定向
         resp = response.redirect(redirect_uri)
         resp.cookies.add_cookie(
@@ -1390,10 +1390,11 @@ async def iframe_login(request):
             httponly=SESSION_HTTPONLY,
             samesite=SESSION_SAMESITE,
             secure=SESSION_SECURE,
+            partitioned=True,
             expires=get_expiration_date(AUTHENTICATION_SESSION_EXPIRATION),
         )
         return resp
-        
+
     except Exception as e:
         logger.warning(f"JWT verify failed: {e} | {traceback.format_exc()}")
         raise CustomError(ErrorCode.SESSION_INVALID)
