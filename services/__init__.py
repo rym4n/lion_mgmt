@@ -46,7 +46,6 @@ def create_app() -> Sanic:
     register_middleware(app)
     register_exception_handler(app)
     register_blueprints(app)
-    openapi.exclude(bp=license_bp)
     return app
 
 
