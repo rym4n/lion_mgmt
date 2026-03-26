@@ -40,11 +40,25 @@ from models import (
 )
 from settings import TASK_TOPIC
 
+from PIL import Image
+
 # 定义 Blueprint
 tools_bp = Blueprint("tools", url_prefix="/tools")
 __all__ = ["tools_bp", "tool_action_update", "tool_action_playbook_delete"]
 # 预期的文件结构
 EXPECTED_STRUCTURE = {"required_files": ["config.json"]}
+
+ACTION_TYPE_MAP = {
+    "string": "text",
+    "integer": "text",
+    "password": "password",
+    "long": "text",
+    "date": "date",
+    "boolean": "boolean",
+    "outside_file": "file",
+    "json": "text",
+    "jsonarray": "text",
+}
 
 connected_clients = {}
 
@@ -225,6 +239,70 @@ def open_zip(zip_buffer):
         return zipfile.ZipFile(zip_buffer, "r", metadata_encoding="gbk")
 
 
+def convert_wz_config(data):
+    """转换WZ格式的config.json到AIOE格式"""
+    new_data = {
+        "name": data.get("name"),
+        "main": data.get("jar"),
+        "logo": data.get("logo"),
+        "description": data.get("description"),
+        "internal": data.get("internal", False),
+        "resource": data.get("configuration", {}),
+        "actions": [],
+    }
+    for a in data.get("actions", []):
+        tmp = {
+            "name": a.get("description") or a.get("name"),
+            "func": a.get("class_name") or a.get("func"),
+            "classify": a.get("classify", "query"),
+            "input": [],
+        }
+        for k, v in (a.get("parameters") or {}).items():
+            tmp["input"].append(
+                {
+                    "key": k,
+                    "type": ACTION_TYPE_MAP.get(v.get("data_type"), "text"),
+                    "required": v.get("required", False),
+                    "description": v.get("description") or k,
+                    "order": v.get("order", 0),
+                }
+            )
+        new_data["actions"].append(tmp)
+    return new_data
+
+
+def convert_logo_to_ico(logo_data):
+    """将logo转换为ICO格式 (32x32)"""
+    try:
+        with Image.open(BytesIO(logo_data)) as img:
+            if img.format == "JPEG":
+                rgba_img = Image.new("RGBA", img.size)
+                rgba_img.paste(img, (0, 0))
+                img = rgba_img
+            else:
+                img = img.convert("RGBA")
+
+            width, height = img.size
+            max_size = 32
+
+            if width != height:
+                canvas_size = max_size
+                position = ((canvas_size - min(width, max_size)) // 2, (canvas_size - min(height, max_size)) // 2)
+                new_img = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+                resized_img = img.copy()
+                resized_img.thumbnail((max_size, max_size), Image.LANCZOS)
+                new_img.paste(resized_img, position, resized_img)
+                img = new_img
+            else:
+                img.thumbnail((max_size, max_size), Image.LANCZOS)
+
+            out_buffer = BytesIO()
+            img.save(out_buffer, format="ICO", optimize=True, compress_level=9, sizes=[(max_size, max_size)])
+            return out_buffer.getvalue()
+    except Exception:
+        return logo_data
+
+
 async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
     try:
         zip_buffer = BytesIO(zip_data)
@@ -250,6 +328,53 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
 
             with zip_ref.open(config_path) as config_file:
                 config_data = orjson.loads(config_file.read().decode())
+
+            # 转换WZ格式到AIOE格式
+            is_wz_format = "jar" in config_data and "main" not in config_data
+            if is_wz_format:
+                original_config = config_data.copy()
+                config_data = convert_wz_config(config_data)
+                # 重新构建ZIP以符合新格式 (将config.json放在根目录，转换logo为ICO)
+                new_zip_buffer = BytesIO()
+                with zipfile.ZipFile(new_zip_buffer, "w", zipfile.ZIP_DEFLATED) as new_zip:
+                    # 获取新logo名称
+                    new_logo_name = config_data.get("logo")
+                    if "/" in new_logo_name:
+                        new_logo_name = new_logo_name.split("/")[-1]
+                    if not new_logo_name.lower().endswith(".ico"):
+                        new_logo_name = os.path.splitext(new_logo_name)[0] + ".ico"
+                    config_data["logo"] = new_logo_name
+
+                    # 写入新config.json
+                    new_zip.writestr("config.json", orjson.dumps(config_data, option=orjson.OPT_INDENT_2))
+
+                    # 遍历原ZIP文件并写入新ZIP
+                    for info in files_info:
+                        if os.path.basename(info.filename) == "config.json":
+                            continue
+
+                        with zip_ref.open(info) as f:
+                            file_data = f.read()
+                            # 处理logo转换
+                            if info.filename == original_config.get("logo") or os.path.basename(info.filename) == os.path.basename(original_config.get("logo")):
+                                logo_data = convert_logo_to_ico(file_data)
+                                new_zip.writestr(new_logo_name, logo_data)
+                                continue
+
+                            # 将其他文件放在根目录或保持原样
+                            target_filename = os.path.basename(info.filename)
+                            if target_filename and not info.is_dir():
+                                if target_filename not in new_zip.namelist():
+                                    new_zip.writestr(target_filename, file_data)
+
+                zip_data = new_zip_buffer.getvalue()
+                zip_buffer = BytesIO(zip_data)
+                # 重新打开新ZIP以更新files_info等
+                zip_ref.close()
+                zip_ref = open_zip(zip_buffer)
+                files_info = zip_ref.infolist()
+                actual_files = {os.path.basename(f.filename) for f in files_info if not f.is_dir()}
+                py_files_dict = {os.path.basename(f.filename): f for f in files_info if f.filename.endswith(".py")}
 
             tool_name = config_data.get("name")
             pattern = r"^[A-Za-z][A-Za-z0-9_]*$"
@@ -399,6 +524,7 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
             await redis_client.set(name + "_" + version, config_data, 2592000)
 
             return config_data, version, tool.name, "success"
+            
     except zipfile.BadZipFile as e:
         return config_data, version, tool_name, str(e)
 
