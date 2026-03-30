@@ -90,7 +90,7 @@ async def save_schedule(request: Request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     # 验证必需字段
-    if not data.get("schedule_cron") or not data.get("name") or not data.get("id"):
+    if not data.get("schedule_cron") or not data.get("name"):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     schedule = await logic.save_schedule(data, tenant_id)
