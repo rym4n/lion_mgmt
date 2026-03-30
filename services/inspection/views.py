@@ -6,9 +6,8 @@
 Inspection Module API Routes Layer
 """
 import ast
-import os
 import orjson
-from datetime import datetime, timedelta
+from datetime import datetime
 from sanic import Blueprint, Request
 from sanic.log import logger
 from sanic_ext import openapi
