@@ -9,9 +9,8 @@ Inspection Module Business Logic Layer
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 import orjson
-import os
+import ast
 from tortoise.expressions import Q
-from tortoise.functions import Count, Avg
 from litellm import acompletion
 from models import (
     InspectionSchedule,
@@ -498,7 +497,7 @@ async def delete_target(target_id: str, tenant_id: str) -> bool:
     return True
 
 
-async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List[str]]] = None, target_id: Optional[Union[str, List[str]]] = None) -> List[Dict[str, Any]]:
+async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List[str]]] = None, target_ids: Optional[Union[str, List[str]]] = None) -> List[Dict[str, Any]]:
     """
     获取全部巡检目标配置
     Get all inspection target configurations
@@ -506,6 +505,8 @@ async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List
     # 转换为列表处理
     if isinstance(schedule_ids, str):
         schedule_ids = [s.strip() for s in schedule_ids.split(",") if s.strip()]
+    if isinstance(target_ids, str):
+        target_ids = ast.literal_eval(target_ids)
 
     # 获取相关的巡检类别信息
     categories_query = InspectionCategory.filter(
@@ -532,8 +533,8 @@ async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List
         category_id__in=category_ids
     )
 
-    if target_id:
-        query = query.filter(id=target_id)
+    if target_ids:
+        query = query.filter(id__in=target_ids)
 
     targets = await query.all()
 
