@@ -6,7 +6,7 @@
 Inspection Module Business Logic Layer
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 import orjson
 import os
@@ -498,18 +498,26 @@ async def delete_target(target_id: str, tenant_id: str) -> bool:
     return True
 
 
-async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None, target_id: Optional[str] = None) -> List[Dict[str, Any]]:
+async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List[str]]] = None, target_id: Optional[Union[str, List[str]]] = None) -> List[Dict[str, Any]]:
     """
     获取全部巡检目标配置
     Get all inspection target configurations
     """
+    # 转换为列表处理
+    if isinstance(schedule_ids, str):
+        schedule_ids = [s.strip() for s in schedule_ids.split(",") if s.strip()]
+
     # 获取相关的巡检类别信息
-    categories = await InspectionCategory.filter(
+    categories_query = InspectionCategory.filter(
         deleted=False,
         tenant_id=tenant_id,
-        enabled=True,
-        schedule_id=schedule_id
-    ).all()
+        enabled=True
+    )
+
+    if schedule_ids:
+        categories_query = categories_query.filter(schedule_id__in=schedule_ids)
+
+    categories = await categories_query.all()
 
     if not categories:
         return []
@@ -592,7 +600,7 @@ async def get_all_configs(tenant_id: str, schedule_id: Optional[str] = None, tar
             "tool_name": category.app_name,
             "action_name": target.action_name,
             "target_id": target.id,
-            "schedule_id": schedule_id
+            "schedule_id": category.schedule_id
         }
         results.append(item)
 
