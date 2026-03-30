@@ -3,7 +3,6 @@ import asyncio
 from collections import defaultdict
 from functools import reduce
 import hashlib
-import inspect
 from io import BytesIO
 import operator
 import os
