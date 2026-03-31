@@ -227,6 +227,63 @@ async def creat_message(room_id, log, user, redis):
 
     return message_data
 
+# 创建AI回复消息
+async def creat_ai_message(msg, redis):
+    sender = await Account.get(username="system")
+    user = await Account.get_or_none(id=msg["receiver_id"])
+
+    if not user:
+        return None
+
+    # 构造一个唯一 key（防止内容太长，建议 hash）
+    key_hash = hashlib.sha1(f"{msg['room_id']}:{str(msg["content"])}".encode()).hexdigest()
+    lock_key = f"create_message_lock:{key_hash}"
+
+    # 尝试获取锁（5 秒自动过期）
+    try:
+        got_lock = await redis.add(lock_key, "1", ttl=5)
+    except ValueError:
+        got_lock = False  # key 已存在，没拿到锁
+    
+    content = msg["content"]
+    room_id = msg["room_id"]
+    tenant_id = msg['tenant_id']
+    msg_type = msg['type']
+    if got_lock:
+        # 当前是第一个拿到锁的人，创建记录
+        msg, _ = await Message.update_or_create(
+            type=msg_type,
+            sender=sender,
+            room_id=room_id,
+            content=content,
+            receiver=user,
+            defaults={"image_content": ""},
+            tenant_id=tenant_id,
+        )
+    else:
+        # 其他执行引擎进入这里：稍等一下，再尝试获取已创建的记录
+        for i in range(5):
+            msg = await Message.get_or_none(content=content, room_id=room_id, receiver=user, tenant_id=tenant_id)
+            if msg:
+                break
+            await asyncio.sleep(0.01 * (i + 1))  # 指数轮询避免数据库压力过大
+
+    message_data = {
+        "type": msg_type,
+        "message_id": str(msg.id),
+        "sender_id": sender.id,
+        "sender_name": sender.username,
+        "sender_display_name": sender.display_name,
+        "content": content,
+        "image_content": "",
+        "timestamp": str(msg.ctime),
+        "room_id": room_id,
+        "tenant_id": tenant_id,
+    }
+
+    return message_data
+
+
 
 class ChatManager:
     """
@@ -312,6 +369,10 @@ class ChatManager:
                                 redis=self.redis,
                             )
                         )
+                    if msg.get("type") == "ai-reply":
+                        message["data"] = orjson.dumps(await creat_ai_message(msg, self.redis))
+                        if not message["data"]:
+                            continue
                     room_id = msg.get("room_id")
                     for key, values in self.active_connections.items():
                         for k, v in values.items():
@@ -528,6 +589,8 @@ class ChatManager:
                 await self._handle_public_message(user, data, tenant_id)
             elif message_type == "private":
                 await self._handle_private_message(user, data, tenant_id)
+            elif message_type == "ai":
+                await self._handle_ai_message(user, data, tenant_id)
             elif message_type == "audit":
                 await self._handle_audit_message(user, data, tenant_id)
             elif message_type == "file":
@@ -624,6 +687,7 @@ class ChatManager:
                         "image_content": image_content,
                         "timestamp": str(ma.ctime),
                         "room_id": current_room_id,
+                        "tenant_id": tenant_id,
                     },
                     "user": specify_user,
                 }
@@ -640,63 +704,50 @@ class ChatManager:
             "image_content": image_content,
             "timestamp": str(message.ctime),
             "room_id": current_room_id,
+            "tenant_id": tenant_id,
         }
 
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
-    # 现在使用动作实现ai相关代码注释以防动作代码出问题可以进行对比维护
-    # async def _handle_ai_message(self, user: Account, data: dict):
-    #     """处理发送ai消息"""
-    #     current_room_id = data.get("room_id")
-    #     room = await Room.filter(id=current_room_id).get()
-    #     if not room:
-    #         raise Exception("作战室不存在")
-    #
-    #     content = data.get("content", "")
-    #     image_content = data.get("image_content", "")
-    #
-    #     if not content and not image_content:
-    #         raise Exception("消息不能为空")
-    #     sender = await Account.get(username="system")
-    #     # 保存消息到数据库
-    #     message = await Message.create(
-    #         type="ai-question",
-    #         sender=user,
-    #         room=room,
-    #         content=content,
-    #         image_content=image_content,
-    #         receiver=user  # 群聊消息设为发送者自己作为占位符
-    #     )
-    #
-    #     # 广播
-    #     message_data = {
-    #         "type": "ai-question",
-    #         "message_id": str(message.id),
-    #         "sender_id": user.id,
-    #         "sender_name": user.username,
-    #         "sender_display_name": user.display_name,
-    #         "content": content,
-    #         "image_content": image_content,
-    #         "timestamp": str(message.ctime),
-    #         "room_id": current_room_id
-    #     }
-    #
-    #     await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
-    #     # 在发送完用户消息后，切换系统回复AI消息
-    #     message_data["sender_id"] = sender.id
-    #     message_data["sender_name"] = sender.username
-    #     message_data["type"] = "ai"
-    #     message_data = await self.stream_chat_completion(content, message_data)
-    #
-    #     if message_data.get("content"):
-    #         await Message.create(
-    #             type=message_data.get("type"),
-    #             sender=sender,
-    #             room=room,
-    #             content=message_data.get("content"),
-    #             image_content=image_content,
-    #             receiver=user  # 群聊消息设为发送者自己作为占位符
-    #         )
+    async def _handle_ai_message(self, user: Account, data: dict, tenant_id):
+        """处理发送ai消息"""
+        current_room_id = data.get("room_id")
+        room = await Room.filter(id=current_room_id, tenant_id=tenant_id).get()
+        if not room:
+            raise Exception("作战室不存在")
+    
+        content = data.get("content", "")
+        image_content = data.get("image_content", "")
+    
+        if not content and not image_content:
+            raise Exception("消息不能为空")
+
+        # 保存消息到数据库
+        message = await Message.create(
+            type="ai",
+            sender=user,
+            room=room,
+            content=content,
+            image_content=image_content,
+            receiver=user, # 群聊消息设为发送者自己作为占位符
+            tenant_id=tenant_id
+        )
+    
+        # 广播
+        message_data = {
+            "type": "ai",
+            "message_id": str(message.id),
+            "sender_id": user.id,
+            "sender_name": user.username,
+            "sender_display_name": user.display_name,
+            "content": content,
+            "image_content": image_content,
+            "timestamp": str(message.ctime),
+            "room_id": current_room_id,
+            "tenant_id": tenant_id,
+        }
+    
+        await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
     async def _handle_private_message(self, user: Account, data: dict, tenant_id):
         """处理发送私聊消息"""
@@ -743,6 +794,7 @@ class ChatManager:
                     "image_content": image_content,
                     "timestamp": str(ma.ctime),
                     "room_id": chat_room.id,
+                    "tenant_id": tenant_id,
                 },
                 "user": receiver.id,
             }
@@ -761,6 +813,7 @@ class ChatManager:
                 "image_content": image_content,
                 "timestamp": str(message.ctime),
                 "room_id": chat_room.id,
+                "tenant_id": tenant_id,
             }
             await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
         except Exception as e:
@@ -790,6 +843,7 @@ class ChatManager:
                         "content": [runlog.json],
                         "timestamp": "",
                         "room_id": room_id,
+                        "tenant_id": tenant_id,
                     }
 
                     await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
@@ -824,6 +878,7 @@ class ChatManager:
             "image_content": image_content,
             "timestamp": str(message.ctime),
             "room_id": current_room_id,
+            "tenant_id": tenant_id,
         }
 
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
@@ -857,6 +912,7 @@ class ChatManager:
             "sender_id": user.id,
             "room_id": message.room.id,
             "timestamp": str(now),
+            "tenant_id": tenant_id,
         }
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(recall_notice).decode())
 
@@ -887,6 +943,7 @@ class ChatManager:
                     "sender_name": user.username,
                     "sender_id": user.id,
                     "room_id": room_id,
+                    "tenant_id": tenant_id,
                 }
             ).decode(),
         )
@@ -916,6 +973,7 @@ class ChatManager:
             "sender_name": user.username,
             "sender_id": user.id,
             "room_id": announcement.room.id,
+            "tenant_id": tenant_id,
         }
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(msg).decode())
 
