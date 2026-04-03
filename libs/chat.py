@@ -236,7 +236,7 @@ async def creat_ai_message(msg, redis):
         return None
 
     # 构造一个唯一 key（防止内容太长，建议 hash）
-    key_hash = hashlib.sha1(f"{msg['room_id']}:{str(msg["content"])}".encode()).hexdigest()
+    key_hash = hashlib.sha1(f"{msg['room_id']}:{str(msg['content'])}".encode()).hexdigest()
     lock_key = f"create_message_lock:{key_hash}"
 
     # 尝试获取锁（5 秒自动过期）
