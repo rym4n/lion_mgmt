@@ -236,11 +236,9 @@ async def get_license(request: Request):
     else:
         menus.append({"tenant": False})
 
-    # 工作空间判定：不在特定工作空间内则隐藏以下菜单
     SPECIAL_TENANT_ID = "8bce552d-c27c-41d4-8a1b-8c5bf38dfe18"
     current_tenant_id = request.ctx.session.get("tenant_id")
 
-    # 需要隐藏的菜单标题（多语言）
     hidden_menus = {
         "产品许可", "產品許可", "License",
         "SSO集成", "SSO Integration",
