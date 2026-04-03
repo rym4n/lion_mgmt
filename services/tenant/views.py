@@ -12,7 +12,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authentication import refresh_token
 from libs.security.authorization import requires_permission
 from libs.utils import get_expiration_date
-from models import Account, Tenant
+from models import Account, Role, Tenant
 from settings import (
     AUTHENTICATION_SESSION_EXPIRATION,
     SESSION_HTTPONLY,
@@ -109,14 +109,23 @@ async def add_tenant(request):
         raise CustomError(ErrorCode.TENANT_ALREADY_EXISTS)
 
     members = request.json.get("members")
+    creator: Account = request.ctx.session["account_info"]
 
     async with in_transaction():
-        tenant = await Tenant.create(name=name, creator=request.ctx.session["account_info"])
+        tenant = await Tenant.create(name=name, creator=creator)
 
         if members:
             users = await Account.filter(id__in=members).all()
             await tenant.member.add(*users)
-        await tenant.member.add(request.ctx.session["account_info"])
+        await tenant.member.add(creator)
+        
+        role = await Role.create(
+            name="空间管理员",
+            description="空间管理员",
+            permissions=["*:*"],
+            tenant_id=tenant.id,
+        )
+        await creator.roles.add(role)
 
     return response_ok(tenant.json)
 
