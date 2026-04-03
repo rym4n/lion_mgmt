@@ -557,7 +557,7 @@ async def get_oauth_status(request):
             payload = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
             account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")
             if account:
-                resp = account.json
+                resp = account.to_json(request.ctx.session.get("tenant_id"))
                 resp["use_oauth2"] = request.app.ctx.oauth_cfg.get("use_oauth2") == "true"
                 resp["tenant_id"] = request.ctx.session.get("tenant_id")
                 return response_ok(resp)

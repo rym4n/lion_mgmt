@@ -166,7 +166,7 @@ async def new_user(request):
         await account.member.add(*tenants)
 
         await account.fetch_related("roles")
-        res = account.json
+        res = account.to_json(tenant_id)
         if mfa_enable:
             res["mfa_uri"] = pyotp.totp.TOTP(account.mfa_key).provisioning_uri(name=account.username, issuer_name="AIOE")
         return response_ok(res)
@@ -313,7 +313,7 @@ async def all_users(request):
             "page": page,
             "size": size,
             "total_pages": (total + size - 1) // size,
-            "data": [u.json for u in users],
+            "data": [u.to_json(request.ctx.session.get("tenant_id")) for u in users],
         }
     )
 
@@ -437,7 +437,7 @@ async def create_api_user(request):
     await account.fetch_related("roles")
     await request.app.ctx.cache_client.set(f"account_{account.id}", account, 7 * 24 * 3600)
 
-    data_json = account.api_json
+    data_json = account.to_api_json(tenant_id)
     data_json["token"] = account.id + ":" + token
     return response_ok(data_json)
 
@@ -552,7 +552,7 @@ async def list_api_users(request):
     api_users = await qs.offset(offset).limit(size).all().prefetch_related("roles")
     data = []
     for u in api_users:
-        data.append(u.api_json)
+        data.append(u.to_api_json(tenant_id))
 
     return response_ok(
         {
@@ -812,7 +812,7 @@ async def get_user_info(request):
 
     # 重新从数据库获取最新的用户信息（包括角色）
     account = await Account.get(id=account.id, deleted=False).prefetch_related("roles")
-    resp = account.json
+    resp = account.to_json(request.ctx.session.get("tenant_id"))
     resp["tenant_id"] = request.ctx.session.get("tenant_id")
     return response_ok(resp)
 
@@ -1154,7 +1154,7 @@ async def edit_user(request):
                 setattr(user, p, params[p])
     if need_update:
         await user.save()
-    res = user.json
+    res = user.to_json(request.ctx.session.get("tenant_id"))
     if mfa_uri:
         res["mfa_uri"] = mfa_uri
     return response_ok(res)
@@ -1245,20 +1245,30 @@ async def refresh_mfa_key(request):
     return response_ok(mfa_uri)
 
 
+def _parse_comma_separated_names(value) -> list[str]:
+    if not value:
+        return []
+    return [x.strip() for x in str(value).split(",") if x.strip()]
+
+
 @user_bp.post("/set-user-role")
 @openapi.definition(
     summary="给账号分配角色",
-    description="给指定账号分配角色，需要user:u权限",
+    description="给指定账号增量增删角色（先删后增），需要user:u权限",
     body={
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["username", "role_names"],
+                "required": ["username"],
                 "properties": {
                     "username": {"type": "string", "description": "用户名"},
-                    "role_names": {
+                    "add_role_names": {
                         "type": "string",
-                        "description": "角色名称，多个用英文逗号隔开",
+                        "description": "要新增的角色名称，多个用英文逗号隔开",
+                    },
+                    "remove_role_names": {
+                        "type": "string",
+                        "description": "要移除的角色名称，多个用英文逗号隔开",
                     },
                 },
             }
@@ -1273,7 +1283,16 @@ async def refresh_mfa_key(request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer"},
-                            "data": {"type": "string"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "username": {"type": "string"},
+                                    "roles": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                    },
+                                },
+                            },
                         },
                     }
                 }
@@ -1290,17 +1309,31 @@ async def assign_role_to_user(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    role_names = request.json.get("role_names", "").split(",")
-    if not role_names:
-        await account.roles.clear()
-        return response_ok({"username": username, "roles": []})
-    roles = await Role.filter(name__in=role_names, deleted=False, tenant_id=tenant_id).all()
-    if len(roles) != len(role_names):
-        raise CustomError(ErrorCode.ROLE_NOT_FOUND)
+    add_names = list(dict.fromkeys(_parse_comma_separated_names(request.json.get("add_role_names"))))
+    remove_names = list(dict.fromkeys(_parse_comma_separated_names(request.json.get("remove_role_names"))))
 
-    await account.roles.clear()
-    await account.roles.add(*roles)
-    return response_ok({"username": username, "roles": role_names})
+    if not add_names and not remove_names:
+        await account.fetch_related("roles")
+        final_roles = [r.name for r in account._roles_for_tenant(tenant_id)]
+        return response_ok({"username": username, "roles": final_roles})
+
+    if remove_names:
+        remove_roles = await Role.filter(
+            name__in=remove_names, deleted=False, tenant_id=tenant_id
+        ).all()
+        if len(remove_roles) != len(remove_names):
+            raise CustomError(ErrorCode.ROLE_NOT_FOUND)
+        await account.roles.remove(*remove_roles)
+
+    if add_names:
+        add_roles = await Role.filter(name__in=add_names, deleted=False, tenant_id=tenant_id).all()
+        if len(add_roles) != len(add_names):
+            raise CustomError(ErrorCode.ROLE_NOT_FOUND)
+        await account.roles.add(*add_roles)
+
+    await account.fetch_related("roles")
+    final_roles = [r.name for r in account._roles_for_tenant(tenant_id)]
+    return response_ok({"username": username, "roles": final_roles})
 
 
 @user_bp.get("/iframe-login")
@@ -1804,7 +1837,7 @@ async def set_default_tenant(request):
 )
 async def get_user_details(request):
     account = request.ctx.session["account_info"]
-    return response_ok(account.json)
+    return response_ok(account.to_json(request.ctx.session.get("tenant_id")))
 
 
 @user_bp.post("/tenant-list")
