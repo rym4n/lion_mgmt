@@ -105,7 +105,7 @@ async def add_tenant(request):
     if not name:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    if await Tenant.filter(name=name).exists():
+    if await Tenant.filter(name=name, deleted=False).exists():
         raise CustomError(ErrorCode.TENANT_ALREADY_EXISTS)
 
     members = request.json.get("members")
