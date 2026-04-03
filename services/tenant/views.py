@@ -122,7 +122,29 @@ async def add_tenant(request):
         role = await Role.create(
             name="空间管理员",
             description="空间管理员",
-            permissions=["*:*"],
+            permissions=[
+                "dashboard:r",
+                "logs:r,d",
+                "status:r",
+                "sso:r,u",
+                "audit:r",
+                "ingestion:c,d,u,r",
+                "warroom:c,u,r",
+                "lic:c,r",
+                "timed:c,d,u,r",
+                "scene:c,d,u,r",
+                "system:c,d,u,r",
+                "inspection:c,d,u,r",
+                "tenant:c,d,u,r",
+                "secure:c,d,u,r",
+                "workflow:c,d,u,r",
+                "tool:c,d,u,r",
+                "approve:u,r",
+                "var:c,d,u,r",
+                "event:c,d,u,r",
+                "role:c,d,u,r",
+                "user:c,d,u,r"
+                ],
             tenant_id=tenant.id,
         )
         await creator.roles.add(role)
