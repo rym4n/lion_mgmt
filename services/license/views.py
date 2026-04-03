@@ -223,19 +223,6 @@ async def get_license(request: Request):
         "Event Ingestion": 1,
     }
 
-    menus = list(menu_dict.values())
-    for menu in menus:
-        children = menu["children"]
-        if menu["meta"]["title"] in ["系统设置", "系統設置", "System Settings"]:
-            menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
-        elif menu["meta"]["title"] in ["事件管理", "Event Management"]:
-            menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
-
-    if tenant_type:
-        menus.append({"tenant": True})
-    else:
-        menus.append({"tenant": False})
-
     SPECIAL_TENANT_ID = "8bce552d-c27c-41d4-8a1b-8c5bf38dfe18"
     current_tenant_id = request.ctx.session.get("tenant_id")
 
@@ -247,8 +234,23 @@ async def get_license(request: Request):
         "安全设置", "安全設置", "Security Settings",
     }
 
-    if current_tenant_id != SPECIAL_TENANT_ID:
-        menus = [menu for menu in menus if menu.get("meta", {}).get("title") not in hidden_menus]
+    menus = list(menu_dict.values())
+    for menu in menus:
+        children = menu["children"]
+        if menu["meta"]["title"] in ["系统设置", "系統設置", "System Settings"]:
+            # 非特殊工作空间时，先把不允许的子菜单删掉再排序
+            if current_tenant_id != SPECIAL_TENANT_ID:
+                children = [
+                    c for c in children if c.get("meta", {}).get("title") not in hidden_menus
+                ]
+            menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
+        elif menu["meta"]["title"] in ["事件管理", "Event Management"]:
+            menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
+
+    if tenant_type:
+        menus.append({"tenant": True})
+    else:
+        menus.append({"tenant": False})
 
     return response_ok(menus)
 
