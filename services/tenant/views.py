@@ -54,7 +54,7 @@ async def get_tenant(request):
     name = request.json.get("name")
     offset = (page - 1) * size
 
-    query = Tenant.filter()
+    query = Tenant.filter(deleted=False)
     if name:
         query = query.filter(name__contains=name)
 
@@ -185,7 +185,8 @@ async def del_tenant(request):
             raise CustomError(ErrorCode.TENANT_HAS_MEMBERS)
         if str(tenant.member[0].id) != "43782755-6382-4f42-82a2-5e557370d858":
             raise CustomError(ErrorCode.TENANT_HAS_MEMBERS)
-
+    account = await Account.get_or_none(id="43782755-6382-4f42-82a2-5e557370d858")
+    await tenant.member.remove(account)
     tenant.deleted = True
     await tenant.save()
 
