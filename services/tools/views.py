@@ -641,21 +641,37 @@ async def all_tools(request):
     if available_only:
         # 获取所有工具的资源模型
         tool_names = [pair["name"] for pair in subquery_results]
-        tool_resources = await ToolResourcesModel.filter(
+        tool_resources_model = await ToolResourcesModel.filter(
             tool_name__in=tool_names,
             deleted=False,
             tenant_id=tenant_id
         ).values("tool_name", "status")
 
         # 构建工具资源状态映射
-        tool_resource_map = {tr["tool_name"]: tr["status"] for tr in tool_resources}
+        tool_resource_map = {tr["tool_name"]: tr["status"] for tr in tool_resources_model}
 
-        # 过滤出可用的工具（status=0 或不存在资源模型）
+        # 获取所有实际存在的资源（用于判断status=1的工具是否有资源）
+        actual_resources = await ToolResources.filter(
+            tool_name__in=tool_names,
+            deleted=False,
+            tenant_id=tenant_id
+        ).values_list("tool_name", flat=True)
+        tools_with_resources = set(actual_resources)
+
+        # 过滤出可用的工具
+        # 可用定义：
+        # 1. 无需资源（status=0 或不存在资源模型）
+        # 2. 存在资源（status=1 且 ToolResources 中存在该工具的资源）
         available_tools = []
         for pair in subquery_results:
             tool_name = pair["name"]
-            # 如果工具没有资源模型，或者资源模型的status=0，则认为可用
-            if tool_name not in tool_resource_map or tool_resource_map[tool_name] == 0:
+            tool_status = tool_resource_map.get(tool_name)
+
+            if tool_status is None or tool_status == 0:
+                # 没有资源模型或status=0，认为可用
+                available_tools.append(pair)
+            elif tool_status == 1 and tool_name in tools_with_resources:
+                # status=1 且存在实际资源，认为可用
                 available_tools.append(pair)
 
         subquery_results = available_tools
@@ -2769,7 +2785,10 @@ async def resource_search(request):
 async def get_available_actions(request):
     """
     获取所有可用动作列表
-    可用定义为：工具资源已配置（status=0）或不需要资源的动作，且工具的maintain字段为False
+    可用定义为：
+    1. 无需资源（status=0 或不存在资源模型）
+    2. 存在资源（status=1 且 ToolResources 中存在该工具的资源）
+    且工具的maintain字段为False
     """
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -2786,6 +2805,14 @@ async def get_available_actions(request):
     # 构建工具名称到资源状态的映射
     tool_resource_status = {tr.tool_name: tr.status for tr in tool_resources}
 
+    # 获取所有实际存在的资源（用于判断status=1的工具是否有资源）
+    actual_resources = await ToolResources.filter(
+        deleted=False,
+        tenant_id=tenant_id,
+        tool_name__in=available_tool_names
+    ).values_list("tool_name", flat=True)
+    tools_with_resources = set(actual_resources)
+
     # 获取这些工具的动作（只查询 maintain=False 的工具）
     actions = await ToolAction.filter(
         deleted=False,
@@ -2798,11 +2825,22 @@ async def get_available_actions(request):
         # 检查该动作的工具是否可用
         # 可用条件：
         # 1. 工具没有资源模型（不需要资源）
-        # 2. 工具资源模型的status为0（资源已配置或不需要必填资源）
+        # 2. 工具资源模型的status为0（无需资源或资源已配置）
+        # 3. 工具资源模型的status为1 且 ToolResources中存在该工具的资源
         tool_status = tool_resource_status.get(action.tool_name)
 
         if tool_status is None or tool_status == 0:
-            # 动作可用
+            # 没有资源模型或status=0，认为可用
+            action_data = action.action
+            result.append({
+                "id": str(action.id),
+                "name": action_data.get("name", ""),
+                "description": action_data.get("name", ""),
+                "tool_name": action.tool_name,
+                "version": action.version_number,
+            })
+        elif tool_status == 1 and action.tool_name in tools_with_resources:
+            # status=1 且存在实际资源，认为可用
             action_data = action.action
             result.append({
                 "id": str(action.id),
