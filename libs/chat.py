@@ -235,23 +235,25 @@ async def creat_ai_message(msg, redis):
     if not user:
         return None
 
-    # 构造一个唯一 key（防止内容太长，建议 hash）
-    key_hash = hashlib.sha1(f"{msg['room_id']}:{str(msg['content'])}".encode()).hexdigest()
-    lock_key = f"create_message_lock:{key_hash}"
+    content = msg["content"]
+    room_id = msg["room_id"]
+    tenant_id = msg['tenant_id']
+    # 流式场景下 type 可能是 ai-reply-end，存入数据库时设为 ai
+    msg_type = "ai-reply-delta" if msg.get("type") == "ai-reply-end" else msg.get("type")
+
+    # 构造一个唯一 key（流式场景下使用 room_id 和 receiver_id，不再用 content hash）
+    key = f"{room_id}:{user.id}"
+    lock_key = f"create_ai_message_lock:{key}"
 
     # 尝试获取锁（5 秒自动过期）
     try:
         got_lock = await redis.add(lock_key, "1", ttl=5)
     except ValueError:
         got_lock = False  # key 已存在，没拿到锁
-    
-    content = msg["content"]
-    room_id = msg["room_id"]
-    tenant_id = msg['tenant_id']
-    msg_type = msg['type']
+
     if got_lock:
         # 当前是第一个拿到锁的人，创建记录
-        msg, _ = await Message.update_or_create(
+        ai_msg, _ = await Message.update_or_create(
             type=msg_type,
             sender=sender,
             room_id=room_id,
@@ -263,20 +265,20 @@ async def creat_ai_message(msg, redis):
     else:
         # 其他执行引擎进入这里：稍等一下，再尝试获取已创建的记录
         for i in range(5):
-            msg = await Message.get_or_none(content=content, room_id=room_id, receiver=user, tenant_id=tenant_id)
-            if msg:
+            ai_msg = await Message.get_or_none(room_id=room_id, receiver=user, tenant_id=tenant_id)
+            if ai_msg:
                 break
             await asyncio.sleep(0.01 * (i + 1))  # 指数轮询避免数据库压力过大
 
     message_data = {
         "type": msg_type,
-        "message_id": str(msg.id),
+        "message_id": str(ai_msg.id),
         "sender_id": sender.id,
         "sender_name": sender.username,
         "sender_display_name": sender.display_name,
         "content": content,
         "image_content": "",
-        "timestamp": str(msg.ctime),
+        "timestamp": str(ai_msg.ctime),
         "room_id": room_id,
         "tenant_id": tenant_id,
     }
@@ -297,6 +299,7 @@ class ChatManager:
         self.msg_pub = self.cache_client.client
         self.active_connections: dict[str, dict] = {}
         self.event_update_buffer = {}
+        self.ai_stream_buffer = {}  # 流式消息缓冲区，key 为 room_id:receiver_id
 
     async def connect(self, user: Account, ws, session_id):
         """处理用户连接"""
@@ -369,9 +372,32 @@ class ChatManager:
                                 redis=self.redis,
                             )
                         )
-                    if msg.get("type") == "ai-reply":
-                        message["data"] = orjson.dumps(await creat_ai_message(msg, self.redis))
-                        if not message["data"]:
+                    if msg.get("type") in ["ai-reply-delta", "ai-reply-end"]:
+                        # 流式回复，累积内容并直接转发给前端
+                        buffer_key = f"{msg.get('room_id')}:{msg.get('receiver_id')}"
+                        if buffer_key not in self.ai_stream_buffer:
+                            self.ai_stream_buffer[buffer_key] = {
+                                "content": "",
+                                "room_id": msg.get("room_id"),
+                                "receiver_id": msg.get("receiver_id"),
+                                "tenant_id": msg.get("tenant_id"),
+                                "type": "ai-reply-end",  # 用于 creat_ai_message 识别
+                            }
+                        self.ai_stream_buffer[buffer_key]["content"] += msg.get("content", "")
+                        stream_data = {
+                            "type": msg.get("type"),
+                            "content": msg.get("content", ""),
+                            "room_id": msg.get("room_id"),
+                            "tenant_id": msg.get("tenant_id"),
+                            "receiver_id": msg.get("receiver_id"),
+                        }
+                        message["data"] = orjson.dumps(stream_data)
+                    if msg.get("type") == "ai-reply-end":
+                        buffer_key = f"{msg.get('room_id')}:{msg.get('receiver_id')}"
+                        if buffer_key in self.ai_stream_buffer:
+                            buffer_data = self.ai_stream_buffer.pop(buffer_key)
+                            await creat_ai_message(buffer_data, self.redis)
+                        else:
                             continue
                     room_id = msg.get("room_id")
                     for key, values in self.active_connections.items():
@@ -724,7 +750,7 @@ class ChatManager:
 
         # 保存消息到数据库
         message = await Message.create(
-            type="ai",
+            type="ai-question",
             sender=user,
             room=room,
             content=content,
@@ -735,7 +761,7 @@ class ChatManager:
     
         # 广播
         message_data = {
-            "type": "ai",
+            "type": "ai-question",
             "message_id": str(message.id),
             "sender_id": user.id,
             "sender_name": user.username,

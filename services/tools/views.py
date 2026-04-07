@@ -551,6 +551,10 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                         "type": "integer",
                         "description": "是否需要logo数据 0为不需要，1为需要",
                     },
+                    "available_only": {
+                        "type": "boolean",
+                        "description": "是否只返回可用的工具（可用定义为：存在资源或无需资源）",
+                    },
                 },
             }
         }
@@ -602,6 +606,7 @@ async def all_tools(request):
     page = int(req_json.get("page", 1))
     size = int(req_json.get("size", 15))
     key = req_json.get("key", "").strip()
+    available_only = req_json.get("available_only", False)
 
     if size > 50:
         raise CustomError(ErrorCode.REQUEST_TOO_MANY_ERROR)
@@ -631,6 +636,33 @@ async def all_tools(request):
     subquery_results = await subquery.values("name", "latest_ctime")
     if not subquery_results:
         return response_ok({"tools": [], "total": 0, "page": page, "size": size, "total_pages": 0})
+
+    # 如果需要筛选可用工具
+    if available_only:
+        # 获取所有工具的资源模型
+        tool_names = [pair["name"] for pair in subquery_results]
+        tool_resources = await ToolResourcesModel.filter(
+            tool_name__in=tool_names,
+            deleted=False,
+            tenant_id=tenant_id
+        ).values("tool_name", "status")
+
+        # 构建工具资源状态映射
+        tool_resource_map = {tr["tool_name"]: tr["status"] for tr in tool_resources}
+
+        # 过滤出可用的工具（status=0 或不存在资源模型）
+        available_tools = []
+        for pair in subquery_results:
+            tool_name = pair["name"]
+            # 如果工具没有资源模型，或者资源模型的status=0，则认为可用
+            if tool_name not in tool_resource_map or tool_resource_map[tool_name] == 0:
+                available_tools.append(pair)
+
+        subquery_results = available_tools
+
+        if not subquery_results:
+            return response_ok({"tools": [], "total": 0, "page": page, "size": size, "total_pages": 0})
+
     condition = Q()
     for pair in subquery_results:
         condition |= Q(name=pair["name"], ctime=pair["latest_ctime"])
@@ -2697,4 +2729,76 @@ async def resource_search(request):
     result = []
     for res in resources:
         result.append(res.json)
+    return response_ok(result)
+
+
+@tools_bp.post("/actions/available")
+@openapi.definition(
+    summary="获取所有可用动作列表",
+    description="获取所有可用动作列表（可用定义为：存在资源或不需要资源的动作），需要工具查看权限",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "name": {"type": "string"},
+                                        "description": {"type": "string"},
+                                        "tool_name": {"type": "string"},
+                                        "version": {"type": "string"},
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("tool:r")
+async def get_available_actions(request):
+    """
+    获取所有可用动作列表
+    可用定义为：工具资源已配置（status=0）或不需要资源的动作
+    """
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    # 获取所有工具资源模型
+    tool_resources = await ToolResourcesModel.filter(deleted=False, tenant_id=tenant_id).all()
+
+    # 构建工具名称到资源状态的映射
+    tool_resource_status = {tr.tool_name: tr.status for tr in tool_resources}
+
+    # 获取所有动作
+    actions = await ToolAction.filter(deleted=False, tenant_id=tenant_id).all()
+
+    result = []
+    for action in actions:
+        # 检查该动作的工具是否可用
+        # 可用条件：
+        # 1. 工具没有资源模型（不需要资源）
+        # 2. 工具资源模型的status为0（资源已配置或不需要必填资源）
+        tool_status = tool_resource_status.get(action.tool_name)
+
+        if tool_status is None or tool_status == 0:
+            # 动作可用
+            action_data = action.action
+            result.append({
+                "id": str(action.id),
+                "name": action_data.get("name", ""),
+                "description": action_data.get("name", ""),
+                "tool_name": action.tool_name,
+                "version": action.version_number,
+            })
+
     return response_ok(result)

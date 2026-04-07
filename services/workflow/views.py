@@ -173,7 +173,6 @@ async def create_workflow(request):
             await caches.get("redis_chat").set(f"workflow_scene_{playbook.id}", ",".join([s.id for s in scenes]))
 
         await playbook.fetch_related("tags", "scenes")
-        print(tenant_id)
         for flow_json in flow_json_list:
             flow_json_str = orjson.dumps(flow_json)
             sha1_val = hashlib.sha1(flow_json_str).hexdigest()
@@ -352,6 +351,97 @@ async def list_workflow(request):
             "data": data,
         }
     )
+
+
+@workflow_bp.post("/published-versions")
+@openapi.definition(
+    summary="获取全部已发布的剧本版本",
+    description="获取全部已发布的剧本版本，包括剧本的描述、名称和版本id",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "playbook_id": {"type": "string"},
+                                        "playbook_name": {"type": "string"},
+                                        "playbook_remark": {"type": "string"},
+                                        "version_id": {"type": "string"},
+                                        "version": {"type": "string"},
+                                        "change_desc": {"type": "string"},
+                                    },
+                                },
+                            },
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("workflow:r")
+async def list_published_versions(request):
+    tenant_id = request.ctx.session.get("tenant_id")
+    user = request.ctx.session.get("account_info")
+    user_id = str(user.id)
+    user_roles = set(str(role.id) for role in user.roles)
+
+    # 获取用户有权限查看的剧本ID列表
+    permissions = await PlaybookPermissions.filter(
+        Q(users__id=user_id) | Q(roles__id__in=user_roles),
+        permissions__contains=["r"],
+        tenant_id=tenant_id
+    ).values_list("pb_id", flat=True)
+    pb_ids = set(permissions)
+
+    # 查询所有已发布的版本
+    pv = (
+        await PlaybookVersion.filter(
+            status=1,  # 已发布
+            deleted=False,
+            playbook__deleted=False,
+            playbook__id__in=pb_ids,
+            tenant_id=tenant_id
+        )
+        .only(
+            "id",
+            "playbook_id",
+            "version",
+            "change_desc",
+        )
+        .all()
+        .prefetch_related("playbook")
+    )
+
+    result = [
+        {
+            "playbook_id": p.playbook_id,
+            "playbook_name": p.playbook.name,
+            "playbook_remark": p.playbook.remark,
+            "version_id": p.id,
+            "version": p.version,
+            "change_desc": p.change_desc,
+        }
+        for p in pv
+    ]
+    return response_ok(result)
 
 
 @workflow_bp.post("/versions")
