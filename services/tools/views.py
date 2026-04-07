@@ -2769,9 +2769,16 @@ async def resource_search(request):
 async def get_available_actions(request):
     """
     获取所有可用动作列表
-    可用定义为：工具资源已配置（status=0）或不需要资源的动作
+    可用定义为：工具资源已配置（status=0）或不需要资源的动作，且工具的maintain字段为False
     """
     tenant_id = request.ctx.session.get("tenant_id")
+
+    # 获取所有 maintain=False 的工具名称
+    available_tool_names = await Tool.filter(
+        deleted=False,
+        maintain=False,
+        tenant_id=tenant_id
+    ).values_list("name", flat=True)
 
     # 获取所有工具资源模型
     tool_resources = await ToolResourcesModel.filter(deleted=False, tenant_id=tenant_id).all()
@@ -2779,8 +2786,12 @@ async def get_available_actions(request):
     # 构建工具名称到资源状态的映射
     tool_resource_status = {tr.tool_name: tr.status for tr in tool_resources}
 
-    # 获取所有动作
-    actions = await ToolAction.filter(deleted=False, tenant_id=tenant_id).all()
+    # 获取这些工具的动作（只查询 maintain=False 的工具）
+    actions = await ToolAction.filter(
+        deleted=False,
+        tenant_id=tenant_id,
+        tool_name__in=available_tool_names
+    ).all()
 
     result = []
     for action in actions:

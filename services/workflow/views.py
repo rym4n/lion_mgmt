@@ -417,6 +417,7 @@ async def list_published_versions(request):
             status=1,  # 已发布
             deleted=False,
             playbook__deleted=False,
+            playbook__internal=False,
             playbook__id__in=pb_ids,
             tenant_id=tenant_id
         )
