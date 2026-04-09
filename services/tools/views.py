@@ -608,8 +608,8 @@ async def all_tools(request):
     key = req_json.get("key", "").strip()
     available_only = req_json.get("available_only", False)
 
-    if size > 50:
-        raise CustomError(ErrorCode.REQUEST_TOO_MANY_ERROR)
+    # if size > 50:
+    #     raise CustomError(ErrorCode.REQUEST_TOO_MANY_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
