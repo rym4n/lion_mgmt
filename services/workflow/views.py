@@ -117,19 +117,19 @@ async def create_workflow(request):
     if not data.get("name") or not data.get("flow_json_list") or not data.get("scenes"):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    # total_up_value = 0
-    # # 判断剧本数量是否达到了创建上限
-    # total_count = await Playbook.filter(deleted=False, internal=False).count()
-    # lic = load_license()
-    # if not lic:
-    #     raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
-    # for key, item in lic["grouplist"].items():
-    #     if key == "剧本编排":
-    #         if int(item["expireTime"]) > int(time.time() * 1000):
-    #             total_up_value = int(item["value"])
-    #
-    # if total_up_value != 99999 and total_count >= total_up_value:
-    #     raise CustomError(ErrorCode.PLAYBOOK_CREATE_LIMIT)
+    total_up_value = 0
+    # 判断剧本数量是否达到了创建上限
+    total_count = await Playbook.filter(deleted=False, internal=False).count()
+    lic = load_license()
+    if not lic:
+        raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
+    for key, item in lic["grouplist"].items():
+        if key == "剧本编排":
+            if int(item["expireTime"]) > int(time.time() * 1000):
+                total_up_value = int(item["value"])
+    
+    if total_up_value != 99999 and total_count >= total_up_value:
+        raise CustomError(ErrorCode.PLAYBOOK_CREATE_LIMIT)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -147,6 +147,7 @@ async def create_workflow(request):
     flow_json_list = data.get("flow_json_list") or []
     creator = request.ctx.session["account_info"]
     admin = await Role.get(id="111111")
+    tenant_admin = await Role.get(name="空间管理员", deleted=False, tenant_id=tenant_id)
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     async with in_transaction():
         playbook = await Playbook.create(
@@ -164,6 +165,7 @@ async def create_workflow(request):
             tenant_id=tenant_id,
         )
         await PlaybookPermissions.create(pb=playbook, users=None, roles=admin, permissions=["r", "u", "d", "e", "p"], tenant_id=tenant_id)
+        await PlaybookPermissions.create(pb=playbook, users=None, roles=tenant_admin, permissions=["r", "u", "d", "e", "p"], tenant_id=tenant_id)
         if data.get("tags"):
             tags = await Tag.filter(name__in=data.get("tags"), tenant_id=tenant_id).all()
             await playbook.tags.add(*tags)
@@ -1563,18 +1565,25 @@ async def add_permission(request):
 @requires_permission("workflow:r")
 async def select_my_permission(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    pps = await PlaybookPermissions.filter(users__id=request.ctx.session["sub"], tenant_id=tenant_id).all()
+    pps = await PlaybookPermissions.filter(
+        users__id=request.ctx.session["sub"], tenant_id=tenant_id, deleted=False
+    ).all()
     account = await Account.get(id=request.ctx.session["sub"], deleted=False).prefetch_related("roles")
     account_roles = [role.id for role in account.roles]
-    account_pps = await PlaybookPermissions.filter(roles__id__in=account_roles, tenant_id=tenant_id).all()
-    data = [{"id": pp.pb_id, "permissions": pp.permissions} for pp in account_pps] + [{"id": pp.pb_id, "permissions": pp.permissions} for pp in pps]
-    seen = set()
-    result = []
+    account_pps = await PlaybookPermissions.filter(
+        roles__id__in=account_roles, tenant_id=tenant_id, deleted=False
+    ).all()
+    data = [{"id": pp.pb_id, "permissions": pp.permissions} for pp in account_pps] + [
+        {"id": pp.pb_id, "permissions": pp.permissions} for pp in pps
+    ]
+    merged_permissions = {}
     for item in data:
-        if item["id"] not in seen:
-            seen.add(item["id"])
-            result.append(item)
+        pb_id = item["id"]
+        if pb_id not in merged_permissions:
+            merged_permissions[pb_id] = set()
+        merged_permissions[pb_id].update(item["permissions"] or [])
 
+    result = [{"id": key, "permissions": sorted(value)} for key, value in merged_permissions.items()]
     return response_ok(result)
 
 
