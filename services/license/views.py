@@ -165,8 +165,10 @@ async def get_license(request: Request):
             # 超级权限处理
             if "*:*" not in role.permissions:
                 relo_permissions_model = [p.split(":")[0] for p in role.permissions]
-                permissions = await PermissionsMenu.filter(model__in=relo_permissions_model).all().values()
-            perm_models.update([p["model"] for p in permissions if p["description"] in valid_modules and p["description"] != "仪表盘"])
+                role_permissions = await PermissionsMenu.filter(model__in=relo_permissions_model).all().values()
+            else:
+                role_permissions = permissions
+            perm_models.update([p["model"] for p in role_permissions if p["description"] in valid_modules and p["description"] != "仪表盘"])
 
         logger.info(f"perm_models: {perm_models}")
         for model in perm_models:
