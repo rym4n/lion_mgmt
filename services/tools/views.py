@@ -1,5 +1,6 @@
 # coding=utf-8
 import asyncio
+import datetime
 from collections import defaultdict
 from functools import reduce
 import hashlib
@@ -37,7 +38,7 @@ from models import (
     ToolResources,
     ToolResourcesModel,
 )
-from settings import TASK_TOPIC
+from settings import TASK_TOPIC, TZ
 
 from PIL import Image
 
@@ -2469,6 +2470,10 @@ async def engine_list(request):
                     "action_input": {
                         "type": "object",
                         "properties": {
+                            "type": {
+                                "type": "string",
+                                "description": "类型 flow/action",
+                            },
                             "app_name": {
                                 "type": "string",
                                 "description": "应用名称，英文标识",
@@ -2511,56 +2516,35 @@ async def engine_list(request):
 )
 @requires_permission("tool:r")
 async def health_check(request):
-    data = request.json.get("data")
-    if not data:
-        raise CustomError(ErrorCode.PARAM_ERROR)
+    resp = await request.respond(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
+    utime = datetime.datetime.now(TZ)
+    message = request.json.get("action_input", {})
+    if message.get("type") in ("flow", "action"):
+        run_id = gen_run_id()
+        message["executor"] = request.ctx.session["account_info"].id
+        msg = {"run_type": message["type"], "run_id": run_id, "run_args": message, "tenant_id": request.ctx.session.get("tenant_id")}
+        await aproduce(TASK_TOPIC, msg)
+        sent_id = []
+        for _ in range(60):
+            log = await Runlog.get_or_none(run_id=run_id, utime__gte=utime)
+            if log:
+                if log.id not in sent_id:
+                    sent_id.append(log.id)
+                    await resp.send(f"data: {orjson.dumps(log.json).decode()}\n\n")
+                if log.result != "执行中":
+                    break
+            await asyncio.sleep(1)
 
-    tenant_id = request.ctx.session.get("tenant_id")
+    if resp:
+        await resp.eof()
 
-    tool_name = request.json.get("tool_name")
-    if not tool_name:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    resource_id = data.get("resource_id")
-    if not resource_id:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    tool = await Tool.filter(name=tool_name, deleted=False, tenant_id=tenant_id).order_by("-ctime").first()
-    if not tool:
-        return response_ok("工具开发运行APP缺失")
-
-    resource = await ToolResources.filter(id=resource_id, deleted=False, tenant_id=tenant_id).order_by("-ctime").first()
-    if not resource:
-        return response_ok("工具开发运行资源不存在")
-
-    user = request.ctx.session["account_info"]
-    params = {
-        "resource": resource.id,
-        "node_name": tool.description,
-        "action": "health_check",
-        "action_name": "健康检查",
-        "app_name": "lion_mgmt",
-        "name": tool.description,
-        "app_ver": tool.version,
-        "main": tool.main,
-        "action_input": {"data": data},
-        "retry_times": 0,
-        "timeout": 300,
-        "executor": user.id,
-    }
-    run_id = gen_run_id()
-    msg = {"run_type": "action", "run_id": run_id, "run_args": params, "tenant_id": request.ctx.session.get("tenant_id")}
-    await aproduce(TASK_TOPIC, msg)
-    for _ in range(30):
-        await asyncio.sleep(1)
-        log = await Runlog.get_or_none(run_id=run_id)
-        if log:
-            result = orjson.loads(log.result)
-            data = result.get("data")
-            if data:
-                return response_ok(data)
-
-    raise CustomError(ErrorCode.ACTION_TIMEOUT)
+    return resp
 
 
 @tools_bp.post("/debug")
