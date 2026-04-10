@@ -2673,7 +2673,11 @@ async def add_config(request):
 @requires_permission("tool:u")
 async def get_health_check_result(request):
     result = await Config.get_or_none(key="health_check", module="tools")
-    return response_ok(result.json if result else {})
+    data = {}
+    if result:
+        data = result.json
+        data["value"] = orjson.loads(data["value"])
+    return response_ok(data)
 
 
 @tools_bp.post("/resource-search")
