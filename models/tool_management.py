@@ -123,6 +123,7 @@ class ToolResources(BaseModel):
     internal: bool = fields.BooleanField(default=False, description="是否为维护模式资源")
     creator: str = fields.CharField(max_length=255, null=True, description="创建者")
     updater: str = fields.CharField(max_length=255, null=True, description="更新者")
+    status: str = fields.CharField(max_length=32, null=True, description="健康状态")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -144,6 +145,7 @@ class ToolResources(BaseModel):
             "creator": self.creator,
             "updater": self.updater,
             "engine": self.engine,
+            "status": self.status,
         }
 
     class Meta:
