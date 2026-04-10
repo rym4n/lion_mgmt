@@ -295,7 +295,7 @@ async def get_system_status(request):
     # 从VictoriaLog查询最新的健康检查数据
     # 查询最近5分钟的数据，确保能覆盖所有主机
     query = 'log_type:"health_check" | sort(_time desc)'
-    data_res = await query_vlog(query, project_id=0, limit=1)
+    data_res = await query_vlog(query, project_id=0, limit=100)
 
     if not data_res:
         return response_ok([])
@@ -325,8 +325,28 @@ async def get_system_status(request):
             except Exception:
                 pass
 
+        # 如果还是没有 data，尝试从展开的字段中重建（处理 Kafka 源的数据）
         if not data:
             data = {}
+            # 查找所有 data.xxx.yyy 格式的字段
+            for key, value in log_data.items():
+                if key.startswith("data."):
+                    parts = key.split(".", 2)  # 分割为 ["data", "service_name", "field_name"]
+                    if len(parts) == 3:
+                        service_name = parts[1]
+                        field_name = parts[2]
+                        if service_name not in data:
+                            data[service_name] = {}
+                        data[service_name][field_name] = value
+
+        # 如果没有 ctime，尝试使用 timestamp（Kafka 源的数据）
+        if not ctime:
+            ctime = log_data.get("timestamp", "")
+
+        # 如果 data 为空，跳过这个主机
+        if not data:
+            logger.warning(f"No service data found for host {log_ip}")
+            continue
 
         # 处理时间格式
         check_time = ""

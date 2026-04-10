@@ -253,19 +253,26 @@ async def creat_ai_message(msg, redis):
 
     if got_lock:
         # 当前是第一个拿到锁的人，创建记录
-        ai_msg, _ = await Message.update_or_create(
+        ai_msg = await Message.create(
             type=msg_type,
             sender=sender,
             room_id=room_id,
             content=content,
             receiver=user,
-            defaults={"image_content": ""},
+            image_content="",
             tenant_id=tenant_id,
         )
     else:
         # 其他执行引擎进入这里：稍等一下，再尝试获取已创建的记录
+        ai_msg = None
         for i in range(5):
-            ai_msg = await Message.get_or_none(room_id=room_id, receiver=user, tenant_id=tenant_id)
+            ai_msg = await Message.filter(
+                type=msg_type,
+                room_id=room_id,
+                receiver=user,
+                tenant_id=tenant_id,
+                deleted=False
+            ).order_by("-ctime").first()
             if ai_msg:
                 break
             await asyncio.sleep(0.01 * (i + 1))  # 指数轮询避免数据库压力过大
