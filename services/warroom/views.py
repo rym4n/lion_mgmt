@@ -187,14 +187,14 @@ async def create_room(request: Request):
                                 if r.permissions:
                                     m_perms.extend(r.permissions)
                             members.append({"id": m.id, "display_name": m.display_name, "role": m_roles[0].name if m_roles else "User", "permissions": m_perms})
-
-                await request.app.ctx.agent_lifecycle.on_warroom_created(
-                    warroom_id=str(room.id),
-                    tenant_id=tenant_id,
-                    event={"event_name": room_name, "event_source": "人工", "event_summary": "人工创建作战室"},
-                    creator={"id": creator.id, "display_name": creator.display_name},
-                    initial_members=members,
-                )
+                # 取消agent相关模块创建
+                # await request.app.ctx.agent_lifecycle.on_warroom_created(
+                #     warroom_id=str(room.id),
+                #     tenant_id=tenant_id,
+                #     event={"event_name": room_name, "event_source": "人工", "event_summary": "人工创建作战室"},
+                #     creator={"id": creator.id, "display_name": creator.display_name},
+                #     initial_members=members,
+                # )
             except Exception as e:
                 logger.error(f"Failed to init SecOps agent: {e} | {traceback.format_exc()}")
 
