@@ -2913,7 +2913,8 @@ async def sync_health_status(request):
                 tool_name=tool_name,
                 name=resource_name,
                 deleted=False,
-                tenant_id=tenant_id
+                tenant_id=tenant_id,
+                internal=False
             )
             if resource:
                 resource.status = state
@@ -2932,7 +2933,8 @@ async def sync_health_status(request):
                 tool_name=tool_name,
                 name=resource_name,
                 deleted=False,
-                tenant_id=tenant_id
+                tenant_id=tenant_id,
+                internal=False
             )
             if resource:
                 resource.status = state
@@ -2951,7 +2953,8 @@ async def sync_health_status(request):
                 tool_name=tool_name,
                 name=resource_name,
                 deleted=False,
-                tenant_id=tenant_id
+                tenant_id=tenant_id,
+                internal=False
             )
             if resource:
                 resource.status = state
