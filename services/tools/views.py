@@ -2839,3 +2839,128 @@ async def get_available_actions(request):
             })
 
     return response_ok(result)
+
+
+@tools_bp.post("/resource/sync-health-status")
+@openapi.definition(
+    summary="同步资源健康状态",
+    description="从Config表中获取健康检查数据并更新ToolResources的status字段（需要工具更新权限）",
+    response={
+        "200": {
+            "description": "同步成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"},
+                                    "updated_count": {"type": "integer"},
+                                    "details": {
+                                        "type": "object",
+                                        "properties": {
+                                            "available": {"type": "integer"},
+                                            "unavailable": {"type": "integer"},
+                                            "unknown": {"type": "integer"},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("tool:u")
+async def sync_health_status(request):
+    """
+    从Config表中获取健康检查数据并更新ToolResources的status字段
+    """
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    # 从Config表获取健康检查数据
+    health_check_config = await Config.get_or_none(key="health_check", module="tools")
+    if not health_check_config:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 解析健康检查数据
+    try:
+        health_data = orjson.loads(health_check_config.value)
+    except Exception:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 统计更新数量
+    updated_count = 0
+    status_counts = {
+        "available": 0,
+        "unavailable": 0,
+        "unknown": 0,
+    }
+
+    # 处理 available 列表
+    for item in health_data.get("available", []):
+        tool_name = item.get("tool_name")
+        resource_name = item.get("resource")
+        state = item.get("state", "available")
+
+        if tool_name and resource_name:
+            resource = await ToolResources.get_or_none(
+                tool_name=tool_name,
+                name=resource_name,
+                deleted=False,
+                tenant_id=tenant_id
+            )
+            if resource:
+                resource.status = state
+                await resource.save()
+                updated_count += 1
+                status_counts["available"] += 1
+
+    # 处理 unavailable 列表
+    for item in health_data.get("unavailable", []):
+        tool_name = item.get("tool_name")
+        resource_name = item.get("resource")
+        state = item.get("state", "unavailable")
+
+        if tool_name and resource_name:
+            resource = await ToolResources.get_or_none(
+                tool_name=tool_name,
+                name=resource_name,
+                deleted=False,
+                tenant_id=tenant_id
+            )
+            if resource:
+                resource.status = state
+                await resource.save()
+                updated_count += 1
+                status_counts["unavailable"] += 1
+
+    # 处理 no_check_action 列表
+    for item in health_data.get("no_check_action", []):
+        tool_name = item.get("tool_name")
+        resource_name = item.get("resource")
+        state = item.get("state", "unknown")
+
+        if tool_name and resource_name:
+            resource = await ToolResources.get_or_none(
+                tool_name=tool_name,
+                name=resource_name,
+                deleted=False,
+                tenant_id=tenant_id
+            )
+            if resource:
+                resource.status = state
+                await resource.save()
+                updated_count += 1
+                status_counts["unknown"] += 1
+
+    return response_ok({
+        "message": "资源健康状态同步成功",
+        "updated_count": updated_count,
+        "details": status_counts,
+    })
