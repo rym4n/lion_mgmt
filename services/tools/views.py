@@ -2683,7 +2683,7 @@ async def get_health_check_result(request):
 @tools_bp.post("/resource-search")
 @openapi.definition(
     summary="资源搜索接口",
-    description="模糊搜索资源名称（需要工具查看权限）",
+    description="根据资源名称模糊搜索资源（需要工具查看权限）",
     body={
         "application/json": {
             "schema": {
