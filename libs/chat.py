@@ -342,7 +342,7 @@ class ChatManager:
             await msg_sub.subscribe(WR_TOPIC)
             async for message in msg_sub.listen():
                 try:
-                    # logger.info(message)
+                    logger.info(message)
                     if message.get("type") != "message":
                         continue
                     msg = orjson.loads(message["data"])
@@ -407,6 +407,7 @@ class ChatManager:
                                     await v["conn"].send(message["data"].decode())
                                 elif room_id is None:
                                     await v["conn"].send(message["data"].decode())
+                                logger.info("已发送")
                             except WebsocketClosed as e:
                                 logger.warning(f"{e} | 用户 {key} 的 {k} 会话的连接已关闭，正在移除连接")
                                 await self.disconnect(key, k)
