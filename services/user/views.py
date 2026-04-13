@@ -399,9 +399,9 @@ async def create_api_user(request):
         if validate_ips(request.json["permit_ip"]) is not True:
             raise CustomError(ErrorCode.INVALID_IP)
 
-    tenant_id = request.ctx.session.get("tenant_id")
-
     t_ids = request.json.get("tenant_ids", [])
+
+    tenant_id = t_ids[0] if t_ids else request.ctx.session["tenant_id"]
 
     account = await Account.create(
         username=validate_username(request.json.get("name", "")),
@@ -411,7 +411,7 @@ async def create_api_user(request):
         expiration=datetime.fromtimestamp(int(time.time()) + request.json.get("expiration_time", AUTHENTICATION_SESSION_EXPIRATION)),
         creator=request.ctx.session["account_info"].username,
         permit_ip=request.json.get("permit_ip"),
-        tenant_id=t_ids[0] if t_ids else request.ctx.session["tenant_id"],
+        tenant_id=tenant_id,
     )
     # 添加角色
     if request.json.get("role_names"):
