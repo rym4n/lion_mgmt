@@ -366,7 +366,7 @@ async def update_approvement(request):
             "name": "remark",
             "in": "query",
             "description": "审批备注信息",
-            "required": False,
+            "required": True,
             "schema": {"type": "string"},
         },
         {
