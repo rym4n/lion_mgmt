@@ -366,7 +366,7 @@ async def update_approvement(request):
             "name": "remark",
             "in": "query",
             "description": "审批备注信息",
-            "required": True,
+            "required": False,
             "schema": {"type": "string"},
         },
         {
@@ -399,11 +399,22 @@ async def update_approvement_callback(request):
     param = dict(request.args)
 
     token = param.get("token")
-    agree = param.get("agree")
+    agree_str = param.get("agree")
     remark = param.get("remark", "")
     flow_input = param.get("params")
 
-    if not token or not isinstance(agree, bool) or not isinstance(remark, str):
+    # 将字符串转换为布尔值
+    if not token or not agree_str:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if agree_str.lower() in ("true", "1", "yes"):
+        agree = True
+    elif agree_str.lower() in ("false", "0", "no"):
+        agree = False
+    else:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if not isinstance(remark, str):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
@@ -442,6 +453,8 @@ async def update_approvement_callback(request):
 
     await approve.save()
 
+    if not flow_input:
+        flow_input = {}
     flow_input["approval_result"] = approve.results
 
     msg = {
