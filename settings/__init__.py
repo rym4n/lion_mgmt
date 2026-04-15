@@ -248,6 +248,9 @@ CACHE = {
 # Agent Server 配置
 RY_AGENT_SERVER = os.environ.get("RY_AGENT_SERVER", "http://192.168.12.254:8283")
 
+# 服务基础 URL（用于构造回调地址）
+RY_SERVICE_URL = os.environ.get("RY_SERVICE_URL", "http://localhost:8000")
+
 # Embedding 服务配置
 RY_EMBEDDING_PROVIDER = os.environ.get("RY_EMBEDDING_PROVIDER", "openai")  # openai | local
 RY_EMBEDDING_MODEL = os.environ.get("RY_EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-4B")

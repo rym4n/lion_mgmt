@@ -31,6 +31,7 @@ from settings import (
     AUTHENTICATION_SESSION_EXPIRATION,
     CACHE,
     RUNLOG_TOPIC,
+    RY_SERVICE_URL,
     TZ,
     WR_TOPIC,
     TASK_TOPIC,
@@ -566,12 +567,16 @@ class ChatManager:
                 for node in pvdata.flow_json["nodes"]:
                     if node["id"] != log["audit_app"]:
                         continue
-                    if node["properties"].get("callback") == "on":
+                    if node["properties"].get("callback_data"):
                         callback_datas = node["properties"].get("callback_data")
                         for callback_data in callback_datas:
                             data = {}
                             for input_data in callback_data["input"]:
-                                data[input_data.get("key")] = input_data.get("value")
+                                if node["properties"].get("callback") == "on":
+                                    if "{{callback_url}}" in input_data.get("value"):
+                                        callback_url = f"{RY_SERVICE_URL}/approve/callback?token={log.get('callback_token', '')}"
+                                        input_data["value"] = input_data["value"].replace("{{callback_url}}", callback_url)
+                                data[input_data.get("key")] = input_data["value"]
                             params = {
                                 "resource": callback_data["resource"],
                                 "node_name": callback_data["description"],
