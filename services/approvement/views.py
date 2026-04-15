@@ -394,14 +394,11 @@ async def update_approvement(request):
         }
     },
 )
-@requires_permission("approve:u")
 async def update_approvement_callback(request):
-    param = dict(request.args)
-
-    token = param.get("token")
-    agree_str = param.get("agree")
-    remark = param.get("remark", "")
-    flow_input = param.get("params")
+    token = request.args.get("token")
+    agree_str = request.args.get("agree")
+    remark = request.args.get("remark", "")
+    flow_input = request.args.get("params")
 
     # 将字符串转换为布尔值
     if not token or not agree_str:
@@ -417,15 +414,13 @@ async def update_approvement_callback(request):
     if not isinstance(remark, str):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    tenant_id = request.ctx.session.get("tenant_id")
-
     if flow_input:
         try:
             flow_input = orjson.loads(flow_input)
         except orjson.JSONDecodeError:
             raise CustomError(ErrorCode.PARAM_ERROR)
 
-    approve = await Approvement.filter(callback_token=token, tenant_id=tenant_id).select_for_update().prefetch_related("approvers").first()
+    approve = await Approvement.filter(callback_token=token).select_for_update().prefetch_related("approvers").first()
     if not approve:
         raise CustomError(ErrorCode.NOT_FOUND)
 
@@ -467,7 +462,7 @@ async def update_approvement_callback(request):
             "approval_status": approve.status,
             "executor": ",".join([p.id for p in approve.approvers]),
         },
-        "tenant_id": tenant_id,
+        "tenant_id": approve.tenant_id,
     }
     await aproduce(TASK_TOPIC, msg)
 
