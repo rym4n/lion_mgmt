@@ -306,9 +306,9 @@ async def get_all_license(request: Request):
     获取所有license文件信息用于页面展示
     """
     # 按工具名称去重统计应用数量（同一工具的多个版本只算一个应用）
-    tool_names = await Tool.filter(deleted=False, maintain=False).distinct().values_list("name", flat=True)
+    tool_names = await Tool.filter(deleted=False, maintain=False).values_list("name", flat=True)
     consume_info = {
-        "应用集成": len(tool_names),
+        "应用集成": len(set(tool_names)),
         "剧本编排": await Playbook.filter(deleted=False, internal=False).count(),
     }
 
