@@ -163,7 +163,9 @@ async def upload_and_extract_zip(request):
 
 
 async def upload_tool(zip_file, lic, creator, tenant_id, request):
-    total_count = await Tool.filter(deleted=False, maintain=False).count()
+    # 按工具名称去重统计应用数量（同一工具的多个版本只算一个应用）
+    tool_names = await Tool.filter(deleted=False, maintain=False).distinct().values_list("name", flat=True)
+    total_count = len(tool_names)
     zip_filename = zip_file.name
 
     total_up_value = 99999
