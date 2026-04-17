@@ -175,16 +175,16 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
                 total_up_value = int(lic["grouplist"][item.get("group")]["value"])
 
     if total_up_value != 99999 and total_count >= total_up_value:
-        return {"tool": zip_filename, "msg": "应用数量已达到上限"}
+        return {"tool": zip_filename, "msg": "应用数量已达到上限", "tool_name": ""}
 
     config_data, version, tool_name, msg = await unzip(zip_file.body, creator, request.app.ctx.cache_client, request.ctx.session["id"], tenant_id)
     if msg != "success":
-        return {"tool": zip_filename, "msg": msg}
+        return {"tool": zip_filename, "msg": msg, "tool_name": tool_name or ""}
 
     if "actions" in config_data.keys():
         action_key = "actions"
     else:
-        return {"tool": zip_filename, "msg": "config文件内容错误，缺失actions字段"}
+        return {"tool": zip_filename, "msg": "config文件内容错误，缺失actions字段", "tool_name": tool_name or ""}
 
     health_check = 0
     for action in config_data.get(action_key):
@@ -230,7 +230,7 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
         configuration.resources = config_data.get("resource")
         await configuration.save()
 
-    return {"tool": zip_filename, "msg": msg}
+    return {"tool": zip_filename, "msg": msg, "tool_name": tool_name}
 
 
 def open_zip(zip_buffer):
