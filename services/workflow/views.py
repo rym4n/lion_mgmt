@@ -2486,8 +2486,6 @@ async def list_ai_config(request):
         models = value.get("models", [])
         apikeys = value.get("apikeys", [])
 
-        # 脱敏 apikeys
-        masked_apikeys = [key[:6] + "******" + key[-4:] if len(key) > 10 else "******" for key in apikeys]
 
         data.append(
             {
@@ -2495,93 +2493,12 @@ async def list_ai_config(request):
                 "name": config.key,
                 "url": url,
                 "models": models,
-                "apikeys": masked_apikeys,
+                "apikeys": apikeys,
                 "ctime": strip_timezone_to_seconds(config.ctime),
                 "utime": strip_timezone_to_seconds(config.utime),
             }
         )
 
     return response_ok(data)
-
-
-@workflow_bp.post("/ai-config/get")
-@openapi.definition(
-    summary="查询单个AI服务配置",
-    description="查询单个AI服务配置，需要ai_config:r权限",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "required": ["name"],
-                "properties": {
-                    "name": {"type": "string", "description": "AI服务名称"},
-                },
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "查询成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "id": {"type": "string"},
-                                    "name": {"type": "string"},
-                                    "url": {"type": "string"},
-                                    "models": {"type": "array", "items": {"type": "string"}},
-                                    "apikeys": {"type": "array", "items": {"type": "string"}},
-                                    "ctime": {"type": "string"},
-                                    "utime": {"type": "string"},
-                                },
-                            },
-                        },
-                    }
-                }
-            },
-        }
-    },
-)
-@requires_permission("ai_config:r")
-async def get_ai_config(request):
-    from models import Config
-
-    params = request.json
-    name = params.get("name")
-
-    if not name:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    tenant_id = request.ctx.session.get("tenant_id")
-
-    # 查询配置
-    config = await Config.get_or_none(key=name, module="ai_service", deleted=False, tenant_id=tenant_id)
-    if not config:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    value = orjson.loads(config.value)
-    url = value.get("url", "")
-    models = value.get("models", [])
-    apikeys = value.get("apikeys", [])
-
-    # 脱敏 apikeys
-    masked_apikeys = [key[:6] + "******" + key[-4:] if len(key) > 10 else "******" for key in apikeys]
-
-    return response_ok(
-        {
-            "id": config.id,
-            "name": config.key,
-            "url": url,
-            "models": models,
-            "apikeys": masked_apikeys,
-            "ctime": strip_timezone_to_seconds(config.ctime),
-            "utime": strip_timezone_to_seconds(config.utime),
-        }
-    )
 
 
