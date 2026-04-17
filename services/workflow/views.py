@@ -34,7 +34,7 @@ from libs.security.authorization import (
     playbook_permission,
     requires_permission,
 )
-from libs.utils import gen_run_id, strip_timezone_to_seconds
+from libs.utils import gen_run_id, strip_timezone_to_seconds, runlog_list
 from models import (
     Account,
     EventRelatedScript,
@@ -2500,5 +2500,97 @@ async def list_ai_config(request):
         )
 
     return response_ok(data)
+
+
+@workflow_bp.post("/version-runlog")
+@openapi.definition(
+    summary="获取剧本版本的执行记录",
+    description="通过剧本版本ID获取该剧本的所有执行记录",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["flow_id"],
+                "properties": {
+                    "flow_id": {"type": "string", "description": "剧本版本ID"},
+                    "page": {"type": "integer", "description": "页码，默认1"},
+                    "size": {"type": "integer", "description": "每页大小，默认20"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "total": {"type": "integer", "description": "总记录数"},
+                                    "page": {"type": "integer"},
+                                    "size": {"type": "integer"},
+                                    "run_logs": {
+                                        "type": "array",
+                                        "description": "执行记录列表",
+                                    },
+                                },
+                            },
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("workflow:r")
+async def get_version_runlog(request):
+    flow_id = request.json.get("flow_id")
+    if not flow_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    page = int(request.json.get("page", 1)) if request.json.get("page") else 1
+    size = int(request.json.get("size", 20)) if request.json.get("size") else 20
+    offset = (page - 1) * size
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    # 验证剧本版本是否存在
+    pv = await PlaybookVersion.get_or_none(id=flow_id, deleted=False, tenant_id=tenant_id)
+    if not pv:
+        raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
+
+    # 检查权限
+    user = request.ctx.session.get("account_info")
+    has_access = await check_playbook_permission(
+        request=request,
+        user=user,
+        playbook_id=pv.playbook_id,
+        required_permissions=["r"],
+    )
+    if not has_access:
+        raise CustomError(ErrorCode.PLAYBOOK_UNAUTHORIZED)
+
+    # 查询总数
+    total = await Runlog.filter(playbook_version_id=flow_id, deleted=False, tenant_id=tenant_id).count()
+
+    # 查询日志
+    logs = await Runlog.filter(playbook_version_id=flow_id, deleted=False, tenant_id=tenant_id).order_by("-ctime").offset(offset).limit(size).all()
+
+    run_logs = await runlog_list(logs)
+
+    return response_ok(
+        {
+            "total": total,
+            "page": page,
+            "size": size,
+            "run_logs": run_logs,
+        }
+    )
 
 

@@ -513,3 +513,40 @@ async def get_url_from_s3(bucket_name: str, file_name: str, host, prefix="") -> 
         except Exception as e:
             logger.error(f"获取文件失败: {e} | {traceback.format_exc()}")
     return None
+
+
+async def runlog_list(all_logs):
+    """
+    统一处理 runlog 返回格式
+
+    Args:
+        all_logs: Runlog 对象列表
+
+    Returns:
+        三层嵌套列表结构：
+        - 最外层：按 run_id 分组
+        - 中间层：按 node_id 分组
+        - 最内层：具体的日志数据
+    """
+    from models import Account
+
+    run_logs = []
+    logs_by_run_id = {}
+    for log in all_logs:
+        # 处理runlog中的过期的审核节点
+        log_data = log.json
+        creator = await Account.get_or_none(id=log_data["creator"])
+        log_data["creator_username"] = creator.username if creator else None
+        log_data["creator_display_name"] = creator.display_name if creator else None
+        if (log.run_id, log.node_id) not in logs_by_run_id.setdefault(log.run_id, {}).keys():
+            logs_by_run_id[log.run_id][(log.run_id, log.node_id)] = [log_data]
+        else:
+            logs_by_run_id[log.run_id][(log.run_id, log.node_id)].append(log_data)
+
+    for value in logs_by_run_id.values():
+        data = []
+        for son_value in value.values():
+            data.append(son_value)
+        run_logs.append(data)
+
+    return run_logs

@@ -14,7 +14,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
-from libs.utils import strip_timezone_to_seconds
+from libs.utils import strip_timezone_to_seconds, runlog_list
 from models import (
     Account,
     ActionPermissions,
@@ -1099,30 +1099,6 @@ async def get_run_log(request):
         run_logs = await runlog_list(all_logs)
 
     return response_ok({"page": page, "size": size, "total": len(total), "data": run_logs})
-
-
-# 用于统一处理runlog返回格式
-async def runlog_list(all_logs):
-    run_logs = []
-    logs_by_run_id = {}
-    for log in all_logs:
-        # 处理runlog中的过期的审核节点
-        log_data = log.json
-        creator = await Account.get_or_none(id=log_data["creator"])
-        log_data["creator_username"] = creator.username if creator else None
-        log_data["creator_display_name"] = creator.display_name if creator else None
-        if (log.run_id, log.node_id) not in logs_by_run_id.setdefault(log.run_id, {}).keys():
-            logs_by_run_id[log.run_id][(log.run_id, log.node_id)] = [log_data]
-        else:
-            logs_by_run_id[log.run_id][(log.run_id, log.node_id)].append(log_data)
-
-    for value in logs_by_run_id.values():
-        data = []
-        for son_value in value.values():
-            data.append(son_value)
-        run_logs.append(data)
-
-    return run_logs
 
 
 async def timer_success_rate(timed: Timed):

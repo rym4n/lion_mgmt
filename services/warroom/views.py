@@ -20,7 +20,7 @@ from libs.utils import gen_random_code, gen_run_id
 from models import Events, Runlog, Tool, ToolAction
 from models.user import Account
 from models.warroom import Message, MessageAccount, Room
-from services.timed.views import runlog_list
+from libs.utils import runlog_list
 from settings import CACHE, TASK_TOPIC, WR_TOPIC
 
 warroom_bp = Blueprint("warroom", url_prefix="/warroom")
