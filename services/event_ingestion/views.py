@@ -91,22 +91,14 @@ async def gen_vector_config(sources, topic, project_id):
         "sources": sources,
         "sinks": {
             f"{topic}_sample_sinks": {
-                "type": "elasticsearch",
+                "type": "http",
                 "inputs": [f"{topic}_date_transforms"],
-                "api_version": "v8",
-                "compression": "gzip",
-                "doc_type": "_doc",
-                "endpoints": [f"{VL_HOST}/insert/elasticsearch/"],
-                "mode": "bulk",
-                "healthcheck": {
-                    "enabled": False,
-                },
-                "query": {
-                    "_msg_field": "message",
-                    "_time_field": "@timestamp",
-                    "_stream_fields": "host,source_type",
-                },
-                "request": {"headers": {"AccountID": "0", "ProjectID": str(project_id)}},
+                "uri": f"{VL_HOST}/insert/jsonline?_stream_fields=host,source_type&_time_field=datetime_str&_msg_field=message",
+                "encoding": {"codec": "json"},
+                "batch": {"max_bytes": 1048576},
+                "headers": {
+                    "Content-Type": "application/stream+json"
+                }
             }
         },
         "transforms": {
@@ -647,18 +639,18 @@ async def update_event_ingestion(request):
         max_project_id = await EventsIngestion.all().annotate(max_pid=Max("project_id")).values_list("max_pid", flat=True)
         project_id = max_project_id[0] + 1 if max_project_id and max_project_id[0] else 1
 
-    data["sinks"][f"{event.vector_name}_sample_sinks"]["query"] = {
-        "_msg_field": "message",
-        "_time_field": "@timestamp",
-        "_stream_fields": "host,source_type",
-    }
-    data["sinks"][f"{event.vector_name}_sample_sinks"]["request"] = {"headers": {"AccountID": "0", "ProjectID": str(project_id)}}
-    data["sinks"][f"{event.vector_name}_sample_sinks"]["api_version"] = "v8"
-    data["sinks"][f"{event.vector_name}_sample_sinks"]["compression"] = "gzip"
-    data["sinks"][f"{event.vector_name}_sample_sinks"]["endpoints"] = [f"{VL_HOST}/insert/elasticsearch/"]
-    data["sinks"][f"{event.vector_name}_sample_sinks"]["healthcheck"] = {"enabled": False}
-    data["sinks"][f"{event.vector_name}_sample_sinks"].pop("auth", None)
-    data["sinks"][f"{event.vector_name}_sample_sinks"].pop("bulk", None)
+    # data["sinks"][f"{event.vector_name}_sample_sinks"]["query"] = {
+    #     "_msg_field": "message",
+    #     "_time_field": "@timestamp",
+    #     "_stream_fields": "host,source_type",
+    # }
+    # data["sinks"][f"{event.vector_name}_sample_sinks"]["request"] = {"headers": {"AccountID": "0", "ProjectID": str(project_id)}}
+    # data["sinks"][f"{event.vector_name}_sample_sinks"]["api_version"] = "v8"
+    # data["sinks"][f"{event.vector_name}_sample_sinks"]["compression"] = "gzip"
+    # data["sinks"][f"{event.vector_name}_sample_sinks"]["endpoints"] = [f"{VL_HOST}/insert/elasticsearch/"]
+    # data["sinks"][f"{event.vector_name}_sample_sinks"]["healthcheck"] = {"enabled": False}
+    # data["sinks"][f"{event.vector_name}_sample_sinks"].pop("auth", None)
+    # data["sinks"][f"{event.vector_name}_sample_sinks"].pop("bulk", None)
 
     result = check_vector_config(data)
     if not result:
