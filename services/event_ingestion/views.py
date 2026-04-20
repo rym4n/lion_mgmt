@@ -613,10 +613,11 @@ async def update_event_ingestion(request):
         data["sources"][event.vector_name]["group_id"] = kafka_group_id
     if transforms_type:
         first_transform = f"{event.vector_name}_transforms"
-        data["sinks"][f"{event.vector_name}_sample_sinks"]["inputs"] = [first_transform]
+        # data["sinks"][f"{event.vector_name}_sample_sinks"]["inputs"] = [first_transform]
         data.setdefault("transforms", {}).setdefault(first_transform, {})["type"] = "remap"
         data["transforms"][first_transform]["inputs"] = [f"{event.vector_name}_date_transforms"]
         data["transforms"][first_transform]["drop_on_error"] = False
+        data["transforms"][f"{event.vector_name}_vl_transforms"]["inputs"] = [first_transform]
 
         config = await Config.get_or_none(Q(key=transforms_type, module="transforms") & (Q(tenant_id=tenant_id) | Q(shared=True)))
         if not config:
