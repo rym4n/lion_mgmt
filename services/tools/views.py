@@ -177,14 +177,14 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
     if total_up_value != 99999 and total_count >= total_up_value:
         return {"tool": zip_filename, "msg": "应用数量已达到上限", "tool_name": ""}
 
-    config_data, version, tool_name, msg = await unzip(zip_file.body, creator, request.app.ctx.cache_client, request.ctx.session["id"], tenant_id)
+    config_data, version, tool_name, tool_description, msg = await unzip(zip_file.body, creator, request.app.ctx.cache_client, request.ctx.session["id"], tenant_id)
     if msg != "success":
-        return {"tool": zip_filename, "msg": msg, "tool_name": tool_name or ""}
+        return {"tool": zip_filename, "msg": msg, "tool_name": tool_description or ""}
 
     if "actions" in config_data.keys():
         action_key = "actions"
     else:
-        return {"tool": zip_filename, "msg": "config文件内容错误，缺失actions字段", "tool_name": tool_name or ""}
+        return {"tool": zip_filename, "msg": "config文件内容错误，缺失actions字段", "tool_name": tool_description or ""}
 
     health_check = 0
     for action in config_data.get(action_key):
@@ -230,7 +230,7 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
         configuration.resources = config_data.get("resource")
         await configuration.save()
 
-    return {"tool": zip_filename, "msg": msg, "tool_name": tool_name}
+    return {"tool": zip_filename, "msg": msg, "tool_name": tool_description}
 
 
 def open_zip(zip_buffer):
@@ -306,6 +306,9 @@ def convert_logo_to_ico(logo_data):
 
 
 async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
+    config_data = None
+    tool_name = None
+    tool_description = None
     try:
         zip_buffer = BytesIO(zip_data)
         logo_data = None
@@ -323,10 +326,10 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
             )
 
             if config_path is None:
-                return None, None, None, "config文件不存在"
+                return None, None, None, None, "config文件不存在"
 
             if config_path.filename.replace("\\", "/") != "config.json":
-                return None, None, None, "config文件需要在最外层目录下"
+                return None, None, None, None, "config文件需要在最外层目录下"
 
             with zip_ref.open(config_path) as config_file:
                 config_data = orjson.loads(config_file.read().decode())
@@ -379,19 +382,21 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                 py_files_dict = {os.path.basename(f.filename): f for f in files_info if f.filename.endswith(".py")}
 
             tool_name = config_data.get("name")
+            tool_description = config_data.get("description")
             pattern = r"^[A-Za-z][A-Za-z0-9_]*$"
             if not bool(re.match(pattern, tool_name)):
-                return config_data, version, tool_name, "工具名称不合法"
+                return config_data, version, tool_name, tool_description, "工具名称不合法"
 
             for info in files_info:
                 if ".." in info.filename or info.filename.startswith("/"):
-                    return config_data, version, tool_name, "文件名包含非法字符"
+                    return config_data, version, tool_name, tool_description, "文件名包含非法字符"
 
             if "description" not in config_data.keys():
                 return (
                     config_data,
                     version,
                     tool_name,
+                    tool_description,
                     "config文件内容错误，缺失description字段",
                 )
 
@@ -401,6 +406,7 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                     config_data,
                     version,
                     tool_name,
+                    tool_description,
                     "Unsupported hash type. Use 'md5', 'sha1', 'sha256', or 'sha512'.",
                 )
 
@@ -410,11 +416,11 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                 hasher.update(chunk)
 
             if not config_path:
-                return config_data, version, tool_name, "缺失config文件"
+                return config_data, version, tool_name, tool_description, "缺失config文件"
 
             missing_files = set(EXPECTED_STRUCTURE["required_files"]) - actual_files
             if missing_files:
-                return config_data, version, tool_name, "缺失config文件"
+                return config_data, version, tool_name, tool_description, "缺失config文件"
 
             name = config_data.get("name")
             py_file_name = config_data.get("main")
@@ -429,33 +435,34 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                     config_data,
                     version,
                     tool_name,
+                    tool_description,
                     "config文件内容错误，缺失actions字段",
                 )
             class_name_list = [action.get("func") for action in config_data.get(action_key, [])]
 
             for action in config_data.get(action_key, []):
                 if not all(k in action for k in ["func", "name", "input"]):
-                    return config_data, version, tool_name, "actions字段内容错误"
+                    return config_data, version, tool_name, tool_description, "actions字段内容错误"
 
                 inputs = action.get("input")
                 if not isinstance(inputs, list):
-                    return config_data, version, tool_name, "input字段内容错误"
+                    return config_data, version, tool_name, tool_description, "input字段内容错误"
 
                 for input_item in inputs:
                     if not all(k in input_item for k in ["key", "type", "required", "description"]):
-                        return config_data, version, tool_name, "input字段内容错误"
+                        return config_data, version, tool_name, tool_description, "input字段内容错误"
 
                     if any(input_item[k] in (None, "") for k in ["key", "type", "required", "description"]):
-                        return config_data, version, tool_name, "input字段内容错误"
+                        return config_data, version, tool_name, tool_description, "input字段内容错误"
 
             if not py_file_name:
-                return config_data, version, tool_name, "config文件内容错误"
+                return config_data, version, tool_name, tool_description, "config文件内容错误"
 
             if py_file_name not in py_files_dict:
-                return config_data, version, tool_name, "缺失py文件"
+                return config_data, version, tool_name, tool_description, "缺失py文件"
 
             if logo_name not in actual_files:
-                return config_data, version, tool_name, "缺少logo文件"
+                return config_data, version, tool_name, tool_description, "缺少logo文件"
 
             logo_found = False
             for file_info in files_info:
@@ -467,18 +474,19 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                                 config_data,
                                 version,
                                 tool_name,
+                                tool_description,
                                 "logo文件大小超过5KB限制，请压缩后重新上传",
                             )
                         logo_data = logo_file.read()
 
             if not logo_found:
-                return config_data, version, tool_name, "缺少logo文件"
+                return config_data, version, tool_name, tool_description, "缺少logo文件"
 
             with zip_ref.open(py_files_dict[py_file_name]) as py_file:
                 py_data = py_file.read().decode()
 
             if any(f"def {class_name}(" not in py_data for class_name in class_name_list):
-                return config_data, version, tool_name, "Python文件内容错误"
+                return config_data, version, tool_name, tool_description, "Python文件内容错误"
 
             configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).first().values("resources")
             if configuration and configuration["resources"] != config_data.get("resource", {}):
@@ -488,6 +496,7 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                             config_data,
                             version,
                             tool_name,
+                            tool_description,
                             "工具资源不一致，请新建工具或删除原工具后再次上传",
                         )
                     if key in configuration["resources"].keys() and config_data.get("resource", {})[key].get("data_type") != configuration["resources"][key].get("data_type"):
@@ -495,11 +504,12 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                             config_data,
                             version,
                             tool_name,
+                            tool_description,
                             "工具资源不一致，请新建工具或删除原工具后再次上传",
                         )
 
             if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id, version=hasher.hexdigest()).exists():
-                return config_data, version, tool_name, "工具已存在"
+                return config_data, version, tool_name, tool_description, "工具已存在"
 
             version = hasher.hexdigest()
             suffix = logo_name.split(".")[-1]
@@ -525,10 +535,10 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
             # 将config数据存入redis
             await redis_client.set(name + "_" + version, config_data, 2592000)
 
-            return config_data, version, tool.name, "success"
-            
+            return config_data, version, tool.name, tool_description, "success"
+
     except zipfile.BadZipFile as e:
-        return config_data, version, tool_name, str(e)
+        return config_data, version, tool_name, tool_description, str(e)
 
 
 @tools_bp.post("/all")
