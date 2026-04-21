@@ -24,9 +24,10 @@ async def check_permissions(request: Request, *required_permissions: str) -> boo
     #     raise CustomError(ErrorCode.SESSION_INVALID)
     # request.ctx.session['account_info'] = account
     # roles = await account.roles.filter(deleted=False).all()
-    logger.info(f"account: {request.ctx.session["account_info"]}")
-    logger.info(f"roles fetched? {request.ctx.session["account_info"].roles is not None}")
-    logger.info(f"roles type: {type(request.ctx.session["account_info"].roles)}")
+    account = request.ctx.session["account_info"]
+    logger.info(f"account: {account}")
+    logger.info(f"roles fetched? {account.roles is not None}")
+    logger.info(f"roles type: {type(account.roles)}")
     for role in request.ctx.session["account_info"].roles:
         for role_permission in role.permissions:
             for required_permission in required_permissions:
