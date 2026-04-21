@@ -25,9 +25,29 @@ async def check_permissions(request: Request, *required_permissions: str) -> boo
     # request.ctx.session['account_info'] = account
     # roles = await account.roles.filter(deleted=False).all()
     account = request.ctx.session["account_info"]
-    logger.info(f"account: {account}")
-    logger.info(f"roles fetched? {account.roles is not None}")
+
+    # 打印 account 的详细信息
+    logger.info(f"=== Account Debug Info ===")
+    logger.info(f"account type: {type(account)}")
+    logger.info(f"account id: {getattr(account, 'id', 'N/A')}")
+    logger.info(f"account username: {getattr(account, 'username', 'N/A')}")
+    logger.info(f"account __dict__: {account.__dict__}")
+
+    # 打印 roles 的详细信息
+    logger.info(f"=== Roles Debug Info ===")
     logger.info(f"roles type: {type(account.roles)}")
+    logger.info(f"roles object: {account.roles}")
+    logger.info(f"roles _fetched: {getattr(account.roles, '_fetched', 'N/A')}")
+    logger.info(f"roles _custom_generated_pk: {getattr(account.roles, '_custom_generated_pk', 'N/A')}")
+
+    # 尝试获取 roles 的内部数据
+    try:
+        logger.info(f"roles._fetched_objects: {getattr(account.roles, '_fetched_objects', 'N/A')}")
+    except Exception as e:
+        logger.info(f"无法访问 _fetched_objects: {e}")
+
+    logger.info(f"=== End Debug Info ===")
+
     for role in request.ctx.session["account_info"].roles:
         for role_permission in role.permissions:
             for required_permission in required_permissions:
