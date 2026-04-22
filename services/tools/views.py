@@ -640,9 +640,10 @@ async def all_tools(request):
 
         cond = Q(name__icontains=key) | Q(description__icontains=key)
         if tool_name_version_set:
-            cond |= Q()
-            for name, version in tool_name_version_set:
-                cond |= Q(name=name, version=version)
+            version_conds = [Q(name=name, version=version) for name, version in tool_name_version_set]
+            if version_conds:
+                version_cond = reduce(operator.or_, version_conds)
+                cond |= version_cond
         subquery = subquery.filter(cond)
     if req_json.get("tag"):
         subquery = subquery.filter(tag__contains=[req_json.get("tag")])
