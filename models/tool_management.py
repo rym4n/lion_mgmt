@@ -130,9 +130,13 @@ class ToolResources(BaseModel):
 
     @property
     def json(self) -> dict:
+        resources_data = None
         if self.resources:
-            self.resources = orjson.loads(self.resources)
-            for value in self.resources.values():
+            if isinstance(self.resources, dict):
+                resources_data = self.resources.copy()
+            else:
+                resources_data = orjson.loads(self.resources)
+            for value in resources_data.values():
                 if value["data_type"] == "password":
                     value["value"] = "******"
         return {
@@ -141,7 +145,7 @@ class ToolResources(BaseModel):
             "utime": strip_timezone_to_seconds(self.utime),
             "tool_name": self.tool_name,
             "name": self.name,
-            "resources": self.resources,
+            "resources": resources_data,
             "creator": self.creator,
             "updater": self.updater,
             "engine": self.engine,
