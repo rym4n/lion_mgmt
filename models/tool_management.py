@@ -135,10 +135,35 @@ class ToolResources(BaseModel):
             if isinstance(self.resources, dict):
                 resources_data = self.resources.copy()
             else:
-                resources_data = orjson.loads(self.resources)
-            for value in resources_data.values():
-                if value["data_type"] == "password":
-                    value["value"] = "******"
+                try:
+                    # 确保是字符串类型
+                    if isinstance(self.resources, bytes):
+                        resources_str = self.resources.decode('utf-8')
+                    else:
+                        resources_str = str(self.resources) if self.resources else ""
+
+                    # 跳过空字符串
+                    if not resources_str or resources_str.strip() == "":
+                        resources_data = None
+                    else:
+                        resources_data = orjson.loads(resources_str)
+                except Exception as e:
+                    # 记录详细错误信息
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(
+                        f"Failed to parse resources JSON for ToolResources(id={self.id}, name={self.name}): "
+                        f"error={e}, type={type(self.resources).__name__}, "
+                        f"value_preview={repr(str(self.resources)[:200]) if self.resources else 'None'}"
+                    )
+                    resources_data = None
+
+            # 隐藏密码字段
+            if resources_data and isinstance(resources_data, dict):
+                for value in resources_data.values():
+                    if isinstance(value, dict) and value.get("data_type") == "password":
+                        value["value"] = "******"
+
         return {
             "id": self.id,
             "ctime": strip_timezone_to_seconds(self.ctime),
