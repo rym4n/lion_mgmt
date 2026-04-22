@@ -50,6 +50,7 @@ class InspectionTarget(BaseModel):
     standard = fields.TextField(description="巡检标准")
     action_name = fields.CharField(max_length=100, description="巡检动作名称")
     enabled = fields.BooleanField(default=True, description="是否启用")
+    has_action = fields.BooleanField(default=True, description="是否存在动作（True=有动作，False=需要AI执行）")
 
     class Meta:
         table = "inspection_target"
