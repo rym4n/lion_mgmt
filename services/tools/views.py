@@ -631,19 +631,18 @@ async def all_tools(request):
     subquery = subquery.filter(maintain=maintenance_mode if maintenance_mode else False)
     if key:
         actions = await ToolAction.filter(deleted=False, tenant_id=tenant_id).values("tool_name", "version_number", "action")
-        tool_name_version_set = set()
+        tool_names_from_actions = set()
 
         for act in actions:
             act_data = act["action"]
             if isinstance(act_data, dict) and (key.lower() in act_data.get("func", "").lower() or key.lower() in act_data.get("name", "").lower()):
-                tool_name_version_set.add((act["tool_name"], act["version_number"]))
+                tool_names_from_actions.add(act["tool_name"])
 
         cond = Q(name__icontains=key) | Q(description__icontains=key)
-        if tool_name_version_set:
-            version_conds = [Q(name=name, version=version) for name, version in tool_name_version_set]
-            if version_conds:
-                version_cond = reduce(operator.or_, version_conds)
-                cond |= version_cond
+        # 由于后面使用了 group_by("name")，只需要匹配工具名称即可，不需要精确匹配版本
+        # 这样可以大大简化查询条件，避免递归深度超限，同时保证查询结果完整
+        if tool_names_from_actions:
+            cond |= Q(name__in=list(tool_names_from_actions))
         subquery = subquery.filter(cond)
     if req_json.get("tag"):
         subquery = subquery.filter(tag__contains=[req_json.get("tag")])
@@ -693,9 +692,12 @@ async def all_tools(request):
         if not subquery_results:
             return response_ok({"tools": [], "total": 0, "page": page, "size": size, "total_pages": 0})
 
-    condition = Q()
-    for pair in subquery_results:
-        condition |= Q(name=pair["name"], ctime=pair["latest_ctime"])
+    # 使用 reduce 避免循环中的深度嵌套
+    if subquery_results:
+        conditions = [Q(name=pair["name"], ctime=pair["latest_ctime"]) for pair in subquery_results]
+        condition = reduce(operator.or_, conditions)
+    else:
+        condition = Q()
 
     latest_tools = await Tool.filter(condition, deleted=False, tenant_id=tenant_id).offset((page - 1) * size).limit(size).values()
     for tool in latest_tools:
