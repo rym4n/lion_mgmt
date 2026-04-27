@@ -2,8 +2,10 @@
 
 import ast
 import asyncio
+import io
 import os
 import uuid
+import zipfile
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -20,10 +22,12 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_fail, response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import requires_permission
+from libs.security.authorization import load_license, requires_permission
 from libs.utils import get_from_s3, query_vlog, strip_timezone_to_seconds, upload_to_s3
-from models import Config
+from models import Config, Playbook, PlaybookPermissions, PlaybookVersion, Role, Tool, ToolResources
 from services.event_ingestion.views import check_vector_config
+from services.tools.views import upload_tool
+from services.workflow.views import statistics_data, tool_action_update
 from settings import AUTHENTICATION_SESSION_EXPIRATION, SECRET, SESSION_ENCODING_ALGORITHM, TZ, VECTOR_CFG
 
 system_bp = Blueprint("system", url_prefix="/system")
@@ -1567,3 +1571,173 @@ async def download_file(request, file_id):
             await asyncio.to_thread(os.remove, tmp_path)
     else:
         return response_ok("文件不存在")
+
+
+@system_bp.post("/init-data")
+@openapi.definition(
+    summary="初始化剧本和应用",
+    description="初始化剧本和应用（不受权限控制），支持维护模式",
+    body={
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "导入ZIP包",
+                    },
+                    "maintenance_mode": {
+                        "type": "string",
+                        "description": "是否上传到维护模式（true/false），默认false",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导入成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "object"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+async def init_data(request):
+    file_obj = request.files.get("file")
+    if not file_obj:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 获取维护模式参数
+    maintenance_mode_param = request.form.get("maintenance_mode", "false")
+    maintenance_mode = maintenance_mode_param.lower() == "true"
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    creator = request.ctx.session["account_info"]
+    admin = await Role.get(id="111111")
+
+    imported = {"playbooks": 0, "tools": 0, "resources": 0, "skipped_versions": 0, "skipped_resources": 0}
+
+    buf = io.BytesIO(file_obj.body)
+    with zipfile.ZipFile(buf, "r", metadata_encoding="utf-8") as zf:
+        names = zf.namelist()
+
+        # 导入资源
+        if "resources.json" in names:
+            data = orjson.loads(zf.read("resources.json"))
+            for res in data:
+                name = res.get("name")
+                id_ = res.get("id")
+                tool_name = res.get("tool_name")
+                engine = res.get("engine")
+                resources = res.get("resources") or {}
+                exist = await ToolResources.get_or_none(
+                    name=name,
+                    deleted=False,
+                    tool_name=tool_name,
+                    internal=maintenance_mode,
+                    tenant_id=tenant_id,
+                )
+                if exist:
+                    imported["skipped_resources"] += 1
+                    continue
+                await ToolResources.create(
+                    id=id_,
+                    tool_name=tool_name,
+                    name=name,
+                    engine=engine,
+                    resources=orjson.dumps(resources).decode(),
+                    internal=maintenance_mode,
+                    creator=creator.username,
+                    updater=creator.username,
+                    tenant_id=tenant_id,
+                )
+                imported["resources"] += 1
+
+        # 导入工具（安装时无需 License 验证，版本号自动生成）
+        mock_lic = {"moduleList": [], "grouplist": {}}
+
+        class MockFile:
+            def __init__(self, name, body):
+                self.name = name
+                self.body = body
+
+        for fn in names:
+            if not fn.endswith(".zip"):
+                continue
+
+            content = zf.read(fn)
+            mock_file = MockFile(name=fn, body=content)
+            result = await upload_tool(mock_file, mock_lic, creator.username, tenant_id, request)
+
+            if result and result.get("msg") == "success":
+                imported["tools"] += 1
+            elif result and result.get("msg") == "工具已存在":
+                imported["skipped_versions"] += 1
+
+        # 导入剧本
+        if "workflow.json" in names:
+            flows = orjson.loads(zf.read("workflow.json"))
+            for item in flows:
+                ver = item.get("version")
+                if await PlaybookVersion.filter(version=ver, deleted=False, tenant_id=tenant_id).exists():
+                    imported["skipped_versions"] += 1
+                    continue
+                name = item.get("name")
+                remark = item.get("remark", "")
+                change_desc = item.get("change_desc", "")
+                flow_json = item.get("flow_json") or {}
+                async with in_transaction():
+                    pb = await Playbook.get_or_none(name=name, deleted=False, tenant_id=tenant_id)
+                    if not pb:
+                        pb = await Playbook.create(
+                            id=str(uuid.uuid4()),
+                            name=name,
+                            remark=remark,
+                            creator=creator,
+                            internal=maintenance_mode,
+                            tenant_id=tenant_id,
+                        )
+                        await PlaybookPermissions.create(
+                            pb=pb,
+                            users=creator,
+                            roles=None,
+                            permissions=["r", "u", "d", "e", "p"],
+                            tenant_id=tenant_id,
+                        )
+                        await PlaybookPermissions.create(
+                            pb=pb,
+                            users=None,
+                            roles=admin,
+                            permissions=["r", "u", "d", "e", "p"],
+                            tenant_id=tenant_id,
+                        )
+                    pv = await PlaybookVersion.create(
+                        playbook=pb,
+                        version=ver,
+                        status=0,
+                        change_desc=change_desc,
+                        flow_json=flow_json,
+                        creator=creator,
+                        updator=creator,
+                        flow_timeout=300,
+                        tenant_id=tenant_id,
+                    )
+                    action_ids = await statistics_data(flow_json, tenant_id)
+                    await tool_action_update({pv.id: action_ids}, tenant_id)
+                    imported["playbooks"] += 1
+
+    if imported["skipped_resources"] > 0 or imported["skipped_versions"] > 0:
+        raise CustomError(ErrorCode.IMPORT_FLOW_ERROR)
+    return response_ok(imported)

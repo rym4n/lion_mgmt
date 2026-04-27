@@ -2134,7 +2134,7 @@ async def import_workflow(request):
             if idx <= 0:
                 continue
             t_name = base[:idx]
-            t_ver = base[idx + 1 :]
+            t_ver = base[idx + 1:]
             if await Tool.filter(name=t_name, deleted=False, tenant_id=tenant_id, version=t_ver).exists():
                 imported["skipped_versions"] += 1
                 continue
