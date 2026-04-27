@@ -6,6 +6,7 @@
 Inspection Module API Routes Layer
 """
 import ast
+import asyncio
 import orjson
 from datetime import datetime
 from sanic import Blueprint, Request
@@ -19,7 +20,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.kafka import aproduce
 from libs.utils import gen_run_id
-from models import Timed, Playbook, PlaybookVersion, InspectionTarget, InspectionCategory
+from models import Timed, Playbook, PlaybookVersion, InspectionTarget, InspectionCategory, InspectionResult
 from settings import TASK_TOPIC
 from . import logic
 from sanic.response import json
@@ -1513,7 +1514,7 @@ async def pause_inspection(request: Request):
                 "required": ["schedule_id"],
                 "properties": {
                     "schedule_id": {"type": "string", "description": "巡检任务ID"},
-                    "target_id": {"type": "string", "description": "巡检项ID"},
+                    "target_id": {"type": "array", "items": {"type": "string"}, "description": "巡检项ID列表"},
                 },
             }
         }
@@ -1522,19 +1523,8 @@ async def pause_inspection(request: Request):
         "200": {
             "description": "巡检成功",
             "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "message": {"type": "string"},
-                                },
-                            },
-                        },
-                    }
+                "text/event-stream": {
+                    "schema": {"type": "string"}
                 }
             },
         }
@@ -1553,7 +1543,10 @@ async def execute_inspection(request: Request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     schedule_id = data["schedule_id"]
-    target_id = data["target_id"]
+    target_ids = data["target_id"]
+    if not isinstance(target_ids, list) or not target_ids:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    start_time = datetime.now()
 
     # 查询巡检调度配置
     schedule = await logic.get_schedule_by_id(schedule_id, tenant_id)
@@ -1587,10 +1580,18 @@ async def execute_inspection(request: Request):
         "flow_id": playbook_version_id,
         "flow_input": {
             "schedule_id": schedule_id,
-            "target_id": target_id
+            "target_id": target_ids
         },
         "executor": request.ctx.session.get("account_info").id
     }
+
+    resp = await request.respond(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
 
     # 发送消息到 Kafka
     msg = {
@@ -1600,8 +1601,42 @@ async def execute_inspection(request: Request):
         "tenant_id": tenant_id
     }
     await aproduce(TASK_TOPIC, msg)
+    await resp.send(f"data: {orjson.dumps({'message': '手动执行已启动'}).decode()}\n\n")
 
-    return response_ok(data={"message": "手动执行成功"})
+    sent_id = []
+    for _ in range(60):
+        results = await InspectionResult.filter(
+            deleted=False,
+            tenant_id=tenant_id,
+            schedule_id=schedule_id,
+            target_id__in=target_ids,
+            ctime__gte=start_time,
+        ).order_by("ctime").all()
+
+        for result in results:
+            if result.id in sent_id:
+                continue
+            sent_id.append(result.id)
+            result_data = {
+                "id": result.id,
+                "target_id": result.target_id,
+                "schedule_id": result.schedule_id,
+                "start_time": result.start_time.isoformat() if result.start_time else None,
+                "end_time": result.end_time.isoformat() if result.end_time else None,
+                "status": result.status,
+                "result_data": result.result_data,
+                "error_message": result.error_message,
+                "duration": result.duration,
+            }
+            await resp.send(f"data: {orjson.dumps(result_data).decode()}\n\n")
+
+        if len(sent_id) >= len(target_ids):
+            break
+
+        await asyncio.sleep(1)
+
+    await resp.eof()
+    return resp
 
 
 # ==================== Result Management ====================
