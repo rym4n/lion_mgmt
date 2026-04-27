@@ -2048,9 +2048,35 @@ async def add_result(request: Request):
 
     created_results = []
 
-    result_data_array = ast.literal_eval(result_data_array)
+    if isinstance(result_data_array, str):
+        try:
+            result_data_array = orjson.loads(result_data_array)
+        except orjson.JSONDecodeError:
+            try:
+                result_data_array = ast.literal_eval(result_data_array)
+            except (ValueError, SyntaxError):
+                raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if isinstance(result_data_array, dict):
+        result_data_array = [result_data_array]
+
+    if not isinstance(result_data_array, list):
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     for item in result_data_array:
+        if isinstance(item, str):
+            try:
+                item = orjson.loads(item)
+            except orjson.JSONDecodeError:
+                try:
+                    item = ast.literal_eval(item)
+                except (ValueError, SyntaxError):
+                    logger.warning(f"跳过无效的巡检结果项: {item}")
+                    continue
+        if not isinstance(item, dict):
+            logger.warning(f"跳过无效的巡检结果项: {item}")
+            continue
+
         # Extract required fields
         target_id = item.get("target_id")
         result = item.get("result")

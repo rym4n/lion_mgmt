@@ -587,8 +587,18 @@ async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List
                 if r_id in resource_map:
                     res = resource_map[r_id]
                     res_data = {}
-                    for key, value in orjson.loads(res.resources).items():
-                        res_data[key] = value.get("value")
+                    resources = res.resources
+                    if isinstance(resources, str):
+                        try:
+                            resources = orjson.loads(resources)
+                        except orjson.JSONDecodeError:
+                            try:
+                                resources = ast.literal_eval(resources)
+                            except (ValueError, SyntaxError):
+                                resources = {}
+                    if isinstance(resources, dict):
+                        for key, value in resources.items():
+                            res_data[key] = value.get("value") if isinstance(value, dict) else value
                     resources_dict[res.name] = res_data
         
         resources = orjson.dumps(resources_dict).decode('utf-8')
