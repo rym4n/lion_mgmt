@@ -2,7 +2,7 @@
 import orjson
 from tortoise import fields
 
-from libs.utils import strip_timezone_to_seconds
+from libs.utils import decrypt_aes256_gcm, strip_timezone_to_seconds
 from models import BaseModel, EncryptedCharField
 
 
@@ -134,9 +134,12 @@ class ToolResources(BaseModel):
         if self.resources:
             if isinstance(self.resources, str):
                 try:
-                    resources_data = orjson.loads(self.resources)
-                except orjson.JSONDecodeError:
-                    resources_data = None
+                    resources_data = orjson.loads(decrypt_aes256_gcm(self.resources))
+                except ValueError:
+                    try:
+                        resources_data = orjson.loads(self.resources)
+                    except orjson.JSONDecodeError:
+                        resources_data = None
             elif isinstance(self.resources, dict):
                 resources_data = self.resources.copy()
 

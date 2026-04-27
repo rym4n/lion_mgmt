@@ -4,7 +4,6 @@
 import uuid
 
 from tortoise import Model, fields
-from tortoise.exceptions import ConfigurationError
 
 from libs.utils import decrypt_aes256_gcm, encrypt_aes256_gcm
 
@@ -46,16 +45,13 @@ class EncryptedCharField(fields.CharField):
             return value
         if isinstance(value, str):
             try:
-                decrypt_aes256_gcm(value)
-                return value
+                decrypted = decrypt_aes256_gcm(value)
+                if decrypted != value:
+                    return value
             except ValueError:
-                return encrypt_aes256_gcm(value)
+                pass
+            return encrypt_aes256_gcm(value)
         return value
 
     def to_python_value(self, value):
-        if value is None:
-            return value
-        try:
-            return decrypt_aes256_gcm(value)
-        except ValueError as e:
-            raise ConfigurationError(str(e)) from e
+        return value
