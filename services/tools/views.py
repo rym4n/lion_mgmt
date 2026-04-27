@@ -7,13 +7,16 @@ import hashlib
 from io import BytesIO
 import operator
 import os
+from pathlib import Path
 import re
+import subprocess
 import time
 import zipfile
 
 from aiocache import caches
 import orjson
 from sanic import Blueprint
+from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.expressions import Q
 from tortoise.functions import Max
@@ -1470,6 +1473,16 @@ async def update_tool_resource(request):
     return response_ok({"message": "工具资源更新成功"})
 
 
+def _contains_resource_id(value, resource_id):
+    if isinstance(value, dict):
+        return any(_contains_resource_id(item, resource_id) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_resource_id(item, resource_id) for item in value)
+    if isinstance(value, str):
+        return any(item.strip() == resource_id for item in value.split(","))
+    return False
+
+
 @tools_bp.post("/resource/delete")
 @openapi.definition(
     summary="删除工具资源",
@@ -1540,15 +1553,20 @@ async def delete_tool_resource(request):
             if tool_resource.id in str(playbook.flow_json):
                 return response_ok({"message": f"当前资源已被剧本{playbook.playbook.name}使用，请仔细检查后再删除！"})
 
-    timeds = await Timed.filter(deleted=False, tenant_id=tenant_id).all()
+    timeds = await Timed.filter(deleted=False, tenant_id=tenant_id).all().prefetch_related("playbook")
 
     for timed in timeds:
         if timed.type == 0:
-            if timed.playbook_input and timed.playbook_input["flow_id"] in playbook_ids:
+            playbook_version = await PlaybookVersion.get_or_none(
+                playbook=timed.playbook,
+                version=timed.playbook_version,
+                deleted=False,
+                tenant_id=tenant_id,
+            )
+            if playbook_version and _contains_resource_id(playbook_version.flow_json, tool_resource.id):
                 return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
-        else:
-            if timed.action_input and timed.action_input["resource"] == tool_resource.id:
-                return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
+        elif timed.action_input and _contains_resource_id(timed.action_input.get("resource"), tool_resource.id):
+            return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
 
     tool_resource.deleted = True
     await tool_resource.save()
@@ -2982,3 +3000,236 @@ async def sync_health_status(request):
         "updated_count": updated_count,
         "details": status_counts,
     })
+
+
+@tools_bp.post("/nanobot/generate")
+@openapi.definition(
+    summary="使用 Nanobot 生成 Python 脚本",
+    description="发送资源信息和动作描述给 Nanobot，生成对应的 Python 实现脚本（需要工具创建权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["resource_info", "action_description"],
+                "properties": {
+                    "resource_info": {
+                        "type": "object",
+                        "description": "资源配置信息"
+                    },
+                    "action_description": {
+                        "type": "string",
+                        "description": "动作描述"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "超时时间（秒），默认120秒"
+                    }
+                }
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "SSE流式返回生成过程与结果",
+            "content": {
+                "text/event-stream": {
+                    "schema": {"type": "string"}
+                }
+            },
+        }
+    }
+)
+@requires_permission("tool:c")
+async def generate_script_with_nanobot(request):
+    resource_info = request.json.get("resource_info")
+    action_description = request.json.get("action_description")
+    try:
+        timeout = int(request.json.get("timeout", 120))
+    except (TypeError, ValueError):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if not resource_info or not action_description or timeout <= 0:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    prompt = f"""请按照以下步骤操作：
+
+1. 根据提供的资源信息和动作描述，先执行一次实际的操作来验证资源配置，如果是有关浏览器的操作尽量使用requests库去处理
+2. 如果执行成功，根据执行过程生成对应的 Python 函数实现
+3. 返回一个 JSON 对象，包含以下字段：
+   - action_name: 动作名称（中文描述）
+   - func_name: 函数名（Python 函数名，英文）
+   - classify: 动作分类（query/action/notify 三选一）
+   - input: 输入参数列表
+   - script: Python 脚本代码
+
+资源信息：
+{orjson.dumps(resource_info, option=orjson.OPT_INDENT_2).decode()}
+
+动作描述：
+{action_description}
+
+要求：
+- 先执行动作验证资源配置是否正确
+- 执行成功后生成 Python 函数实现
+- 函数应该包含完整的错误处理和文档字符串
+- classify 必须是 query、action 或 notify 之一
+- input 参数列表中，type 通常为 text、password、file、boolean、date、 int等，资源并不作为输入参数储存
+- 只返回 JSON 对象，不要包含其他文字说明
+
+JSON 格式示例：
+{{
+  "action_name": "查询用户信息",
+  "func_name": "query_user_info",
+  "classify": "query",
+  "input": [
+    {{
+      "key": "user_id",
+      "type": "text",
+      "required": true,
+      "description": "用户ID",
+      "order": 序号
+    }}
+  ],
+  "script": "def query_user_info(user_id, **kwargs):\n    \\\"\\\"\\\"查询用户信息\\\"\\\"\\\"\n    ..."
+}}
+"""
+
+    resp = await request.respond(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+    async def _send_sse_data(data: dict, event: str | None = None):
+        lines = []
+        if event:
+            lines.append(f"event: {event}")
+        lines.append(f"data: {orjson.dumps(data).decode()}")
+        lines.append("")
+        await resp.send("\n".join(lines) + "\n")
+
+    process = None
+    stream_finished = False
+    full_output = ""
+    command = ["nanobot", "agent", "-m", prompt]
+
+    def _log_nanobot_output(status: str, return_code: int | None = None):
+        logger.info(
+            "nanobot_generate_script_output",
+            extra={
+                "resource_info": resource_info,
+                "action_description": action_description,
+                "timeout": timeout,
+                "status": status,
+                "return_code": return_code,
+                "output": full_output,
+            },
+        )
+
+    try:
+        await _send_sse_data({"type": "start"}, event="start")
+
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except FileNotFoundError:
+            await _send_sse_data({
+                "type": "error",
+                "code": ErrorCode.NANOBOT_NO_RESPONSE.code,
+                "message": "找不到 nanobot 命令，请确认已安装并配置到 PATH 中",
+            }, event="error")
+            return resp
+
+        if process.stdout is None:
+            await _send_sse_data({
+                "type": "error",
+                "code": ErrorCode.NANOBOT_NO_RESPONSE.code,
+                "message": ErrorCode.NANOBOT_NO_RESPONSE.message,
+            }, event="error")
+            return resp
+
+        async def _stream_stdout():
+            nonlocal stream_finished, full_output
+            while True:
+                line = await asyncio.to_thread(process.stdout.readline)
+                if not line:
+                    break
+                full_output += line
+                await _send_sse_data({"type": "nanobot-generate-reply-delta", "content": line})
+            stream_finished = True
+
+        try:
+            await asyncio.wait_for(_stream_stdout(), timeout=timeout)
+        except TimeoutError:
+            if process.poll() is None:
+                process.terminate()
+                await asyncio.to_thread(process.wait)
+            if full_output:
+                _log_nanobot_output("timeout")
+            await _send_sse_data({
+                "type": "error",
+                "code": ErrorCode.ACTION_TIMEOUT.code,
+                "message": ErrorCode.ACTION_TIMEOUT.message,
+            }, event="error")
+            return resp
+
+        return_code = await asyncio.to_thread(process.wait)
+        if return_code != 0:
+            if full_output:
+                _log_nanobot_output("failed", return_code)
+            await _send_sse_data({
+                "type": "error",
+                "code": ErrorCode.NANOBOT_NO_RESPONSE.code,
+                "message": f"nanobot 执行失败，退出码: {return_code}",
+            }, event="error")
+            return resp
+
+        if not stream_finished:
+            if full_output:
+                _log_nanobot_output("stream_not_finished")
+            await _send_sse_data({
+                "type": "error",
+                "code": ErrorCode.NANOBOT_NO_RESPONSE.code,
+                "message": ErrorCode.NANOBOT_NO_RESPONSE.message,
+            }, event="error")
+            return resp
+
+        _log_nanobot_output("success", return_code)
+        await _send_sse_data({
+            "type": "nanobot-generate-reply-end",
+            "content": "",
+            "done": True,
+        })
+
+    except asyncio.CancelledError:
+        if process and process.poll() is None:
+            process.terminate()
+            await asyncio.to_thread(process.wait)
+        raise
+
+    except Exception:
+        if process and process.poll() is None:
+            process.terminate()
+            await asyncio.to_thread(process.wait)
+        if full_output:
+            _log_nanobot_output("exception")
+        await _send_sse_data({
+            "type": "error",
+            "code": ErrorCode.NANOBOT_NO_RESPONSE.code,
+            "message": ErrorCode.NANOBOT_NO_RESPONSE.message,
+        }, event="error")
+
+    finally:
+        await resp.eof()
+
+    return resp
+
