@@ -132,7 +132,14 @@ class ToolResources(BaseModel):
     def json(self) -> dict:
         resources_data = None
         if self.resources:
-            resources_data = self.resources.copy()
+            if isinstance(self.resources, str):
+                try:
+                    resources_data = orjson.loads(self.resources)
+                except orjson.JSONDecodeError:
+                    resources_data = None
+            elif isinstance(self.resources, dict):
+                resources_data = self.resources.copy()
+
             if resources_data and isinstance(resources_data, dict):
                 for value in resources_data.values():
                     if isinstance(value, dict) and value.get("data_type") == "password":
