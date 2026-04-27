@@ -89,7 +89,7 @@ async def upload_image(request):
 
     cfg = await Config.get_or_none(key="platform_config", module="system")
     if cfg:
-        platform_config = orjson.loads(cfg.value)
+        platform_config = cfg.json_value or {}
 
         platform_config["Version"] = system_version
         platform_config["Content"] = copyright_text
@@ -250,7 +250,7 @@ async def get_platform_config(request):
     }
 
     if cfg:
-        return json(orjson.loads(cfg.value), dumps=orjson.dumps)
+        return json(cfg.json_value or default, dumps=orjson.dumps)
     else:
         return json(default, dumps=orjson.dumps)
 

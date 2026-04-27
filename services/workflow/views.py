@@ -632,7 +632,7 @@ async def export_workflow(request):
             resources_objs = await ToolResources.filter(id__in=list(resource_ids), deleted=False).all()
             resources_list = []
             for res in resources_objs:
-                resources_data = orjson.loads(res.resources) if res.resources else {}
+                resources_data = res.resources_json
                 for value in resources_data.values():
                     if value.get("data_type") == "password":
                         value["value"] = "******"
@@ -2344,7 +2344,7 @@ async def update_ai_config(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     # 解析现有 value
-    old_value = orjson.loads(config.value)
+    old_value = config.json_value or {}
 
     # 检查 apikeys 是否包含脱敏标记
     has_masked = any("******" in key for key in apikeys)
@@ -2481,7 +2481,7 @@ async def list_ai_config(request):
     # 格式化返回数据
     data = []
     for config in configs:
-        value = orjson.loads(config.value)
+        value = config.json_value or {}
         url = value.get("url", "")
         models = value.get("models", [])
         apikeys = value.get("apikeys", [])

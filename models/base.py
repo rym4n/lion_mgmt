@@ -8,6 +8,38 @@ from tortoise import Model, fields
 from libs.utils import decrypt_aes256_gcm, encrypt_aes256_gcm
 
 
+_ENCRYPTED_PREFIX = "enc::"
+
+
+def unwrap_encrypted_value(value):
+    if not isinstance(value, str):
+        return value
+
+    if value.startswith(_ENCRYPTED_PREFIX):
+        value = value[len(_ENCRYPTED_PREFIX) :]
+
+    try:
+        return decrypt_aes256_gcm(value)
+    except ValueError:
+        return value
+
+
+def parse_encrypted_json(value, default=None):
+    import orjson
+
+    value = unwrap_encrypted_value(value)
+    if value in (None, ""):
+        return default
+    if isinstance(value, (dict, list)):
+        return value.copy() if isinstance(value, dict) else list(value)
+    if isinstance(value, str):
+        try:
+            return orjson.loads(value)
+        except orjson.JSONDecodeError:
+            return default
+    return default
+
+
 class BaseModel(Model):
     """
     基础模型，维护所有模型的公共字段
@@ -44,14 +76,14 @@ class EncryptedCharField(fields.CharField):
         if value is None:
             return value
         if isinstance(value, str):
+            if value.startswith(_ENCRYPTED_PREFIX):
+                return value[len(_ENCRYPTED_PREFIX) :]
             try:
-                decrypted = decrypt_aes256_gcm(value)
-                if decrypted != value:
-                    return value
+                decrypt_aes256_gcm(value)
+                return value
             except ValueError:
-                pass
-            return encrypt_aes256_gcm(value)
+                return encrypt_aes256_gcm(value)
         return value
 
     def to_python_value(self, value):
-        return value
+        return unwrap_encrypted_value(value)

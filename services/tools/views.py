@@ -1459,7 +1459,7 @@ async def update_tool_resource(request):
         tool_resource.engine = engine
 
     if resources:
-        resources_old = orjson.loads(tool_resource.resources)
+        resources_old = tool_resource.resources_json
         for key, resource in resources.items():
             if resource.get("data_type") == "password" and resource.get("value") == "******":
                 resource["value"] = resources_old[key]["value"]
@@ -2714,7 +2714,7 @@ async def get_health_check_result(request):
     data = {}
     if result:
         data = result.json
-        data["value"] = orjson.loads(data["value"])
+        data["value"] = result.json_value
     return response_ok(data)
 
 

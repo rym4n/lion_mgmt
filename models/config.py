@@ -3,7 +3,7 @@
 from tortoise import fields
 
 from libs.utils import strip_timezone_to_seconds
-from models.base import BaseModel, EncryptedCharField
+from models.base import BaseModel, EncryptedCharField, parse_encrypted_json
 
 
 class Config(BaseModel):
@@ -19,6 +19,10 @@ class Config(BaseModel):
 
     def validate(self) -> None:
         raise NotImplementedError
+
+    @property
+    def json_value(self):
+        return parse_encrypted_json(self.value)
 
     @property
     def json(self) -> dict:
