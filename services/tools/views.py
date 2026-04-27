@@ -32,6 +32,7 @@ from libs.utils import gen_run_id
 from models import (
     ActionPermissions,
     Config,
+    InspectionCategory,
     PlaybookVersion,
     Runlog,
     Tag,
@@ -1572,6 +1573,13 @@ async def delete_tool_resource(request):
                 return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
         elif timed.action_input and _contains_resource_id(timed.action_input.get("resource"), tool_resource.id):
             return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
+
+    # 检查巡检类别是否使用该资源
+    inspection_categories = await InspectionCategory.filter(deleted=False, tenant_id=tenant_id).all()
+
+    for category in inspection_categories:
+        if category.resource_ids and tool_resource.id in category.resource_ids:
+            return response_ok({"message": f"当前资源已被巡检类别{category.name}使用，请仔细检查后再删除！"})
 
     tool_resource.deleted = True
     await tool_resource.save(update_fields=["deleted"])
