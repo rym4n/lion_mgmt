@@ -2203,6 +2203,23 @@ async def import_workflow(request):
     return response_ok("导入成功")
 
 
+def check_ai_permission():
+    """检查是否有 AI 模块权限"""
+    lic = load_license()
+    if not lic:
+        raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
+
+    ai_type = 0
+    for item in lic["moduleList"]:
+        group = item["group"]
+        if int(lic["grouplist"][group]["expireTime"]) > int(time.time() * 1000):
+            if item["module"] == "ai_bp":
+                ai_type += 1
+
+    if ai_type == 0:
+        raise CustomError(ErrorCode.NOT_FOUND_TO_AI)
+
+
 @workflow_bp.post("/ai-config/create")
 @openapi.definition(
     summary="创建AI服务配置",
@@ -2248,6 +2265,7 @@ async def import_workflow(request):
 )
 @requires_permission("ai_config:c")
 async def create_ai_config(request):
+    check_ai_permission()
     from models import Config
 
     params = request.json
@@ -2322,6 +2340,7 @@ async def create_ai_config(request):
 )
 @requires_permission("ai_config:u")
 async def update_ai_config(request):
+    check_ai_permission()
     from models import Config
 
     params = request.json
@@ -2394,6 +2413,7 @@ async def update_ai_config(request):
 )
 @requires_permission("ai_config:d")
 async def delete_ai_config(request):
+    check_ai_permission()
     from models import Config
 
     params = request.json
@@ -2463,6 +2483,7 @@ async def delete_ai_config(request):
 )
 @requires_permission("ai_config:r")
 async def list_ai_config(request):
+    check_ai_permission()
     from models import Config
 
     params = request.json or {}
