@@ -23,6 +23,10 @@ os.makedirs(SUPERVISOR_PATH, exist_ok=True)
 LICENSE_DIR = os.path.join(BASE_DIR, "data/license")
 os.makedirs(LICENSE_DIR, exist_ok=True)
 
+# Nanobot workspace 基础路径
+NANOBOT_WORKSPACE_BASE = os.path.join(BASE_DIR, "data/nanobot/workspaces")
+os.makedirs(NANOBOT_WORKSPACE_BASE, exist_ok=True)
+
 if os.environ.get("RY_ENV") == "DEV":
     try:
         from dotenv import load_dotenv

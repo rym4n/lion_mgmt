@@ -15,6 +15,7 @@ from tortoise.expressions import Q
 from tortoise.functions import Max
 
 from libs.kafka import aconsume, aproduce
+from libs.nanobot import NanobotClient, RedisStreamingHook
 from models import (
     Approvement,
     Events,
@@ -30,6 +31,7 @@ from models.warroom import Message, MessageAccount, Room
 from settings import (
     AUTHENTICATION_SESSION_EXPIRATION,
     CACHE,
+    NANOBOT_WORKSPACE_BASE,
     RUNLOG_TOPIC,
     RY_SERVICE_URL,
     TZ,
@@ -754,10 +756,10 @@ class ChatManager:
         room = await Room.filter(id=current_room_id, tenant_id=tenant_id).get()
         if not room:
             raise Exception("作战室不存在")
-    
+
         content = data.get("content", "")
         image_content = data.get("image_content", "")
-    
+
         if not content and not image_content:
             raise Exception("消息不能为空")
 
@@ -768,11 +770,11 @@ class ChatManager:
             room=room,
             content=content,
             image_content=image_content,
-            receiver=user, # 群聊消息设为发送者自己作为占位符
+            receiver=user,  # 群聊消息设为发送者自己作为占位符
             tenant_id=tenant_id
         )
-    
-        # 广播
+
+        # 广播问题消息到前端
         message_data = {
             "type": "ai-question",
             "message_id": str(message.id),
@@ -785,8 +787,49 @@ class ChatManager:
             "room_id": current_room_id,
             "tenant_id": tenant_id,
         }
-    
+
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+
+        # 使用 Nanobot SDK 调用 AI 服务
+        try:
+            client = NanobotClient(tenant_id=tenant_id, workspace_base=NANOBOT_WORKSPACE_BASE)
+
+            # 创建 Redis 流式 Hook
+            hook = RedisStreamingHook(
+                room_id=current_room_id,
+                receiver_id=user.id,
+                tenant_id=tenant_id,
+                redis_pub=self.msg_pub
+            )
+
+            # 调用 nanobot（异步执行）
+            # 使用 room_id 作为 session_key 以保持会话上下文
+            await client.ask(
+                message=content,
+                streaming=True,
+                session_key=f"room:{current_room_id}",
+                hooks=[hook]
+            )
+        except Exception as e:
+            logger.error(f"Nanobot 调用失败: {e} | {traceback.format_exc()}")
+            # 发送错误消息到前端
+            error_data = {
+                "type": "ai-reply-delta",
+                "content": f"AI 服务暂时不可用: {str(e)}",
+                "room_id": current_room_id,
+                "receiver_id": user.id,
+                "tenant_id": tenant_id,
+            }
+            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(error_data).decode())
+            # 发送结束消息
+            end_data = {
+                "type": "ai-reply-end",
+                "content": "",
+                "room_id": current_room_id,
+                "receiver_id": user.id,
+                "tenant_id": tenant_id,
+            }
+            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(end_data).decode())
 
     async def _handle_private_message(self, user: Account, data: dict, tenant_id):
         """处理发送私聊消息"""
