@@ -1673,18 +1673,27 @@ async def init_data(request):
                 self.name = name
                 self.body = body
 
-        for fn in names:
-            if not fn.endswith(".zip"):
-                continue
+        # 如果是维护模式，将标识写入 Redis，供 upload_tool 内部的 unzip 函数读取
+        session_id = request.ctx.session["id"]
+        if maintenance_mode:
+            await request.app.ctx.cache_client.set(session_id, True, 300)  # 5分钟过期
 
-            content = zf.read(fn)
-            mock_file = MockFile(name=fn, body=content)
-            result = await upload_tool(mock_file, mock_lic, creator.username, tenant_id, request)
+        try:
+            for fn in names:
+                if not fn.endswith(".zip"):
+                    continue
 
-            if result and result.get("msg") == "success":
-                imported["tools"] += 1
-            elif result and result.get("msg") == "工具已存在":
-                imported["skipped_versions"] += 1
+                content = zf.read(fn)
+                mock_file = MockFile(name=fn, body=content)
+                result = await upload_tool(mock_file, mock_lic, creator.username, tenant_id, request)
+
+                if result and result.get("msg") == "success":
+                    imported["tools"] += 1
+                elif result and result.get("msg") == "工具已存在":
+                    imported["skipped_versions"] += 1
+        finally:
+            if maintenance_mode:
+                await request.app.ctx.cache_client.delete(session_id)
 
         # 导入剧本
         if "workflow.json" in names:
