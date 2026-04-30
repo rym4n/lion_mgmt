@@ -27,14 +27,17 @@ metadata: {"nanobot":{"emoji":"🦁"}}
 1. 登录获取 token
 2. 调用接口获取 openapi.json（所有接口信息）
 3. 调用接口获取 playbook 列表
-4. 调用接口获取 action 列表
-5. 按优先级匹配：playbook → action → openapi → AI 推理
-6. 如果匹配到 action，查询资源 ID（使用资源 ID，不是资源名称）
-7. 调用对应接口（使用当前会话的作战室 ID）
-8. 处理响应：
+4. 匹配 playbook，匹配成功则直接从第10步继续执行
+5. 调用接口获取 action 列表
+6. 匹配 action，匹配成功则直接从第9步继续执行
+7. 匹配 openapi，匹配成功则直接从第10步继续执行
+8. 使用 AI 进行推理
+9. 如果匹配到 action，查询资源 ID（使用资源 ID，不是资源名称）
+10. 调用对应接口（使用当前会话的作战室 ID）
+11. 处理响应：
    - playbook/action: 提取 run_id，查询执行结果并返回
    - openapi: 直接返回业务数据
-9. 返回结果给用户
+12. 返回结果给用户
 ```
 
 ## 📋 执行清单（Checklist）
@@ -44,12 +47,21 @@ metadata: {"nanobot":{"emoji":"🦁"}}
 - [ ] **Step 1**: 调用 `/user/local-auth` 获取新的 token（⚠️ 每次必须执行，不要使用缓存的 token）
 - [ ] **Step 2**: 调用 `GET /docs/openapi.json` 获取所有接口信息
 - [ ] **Step 3**: 调用 `POST /playbook/published-versions` 获取剧本列表
-- [ ] **Step 4**: 调用 `POST /tools/actions/available` 获取动作列表
-- [ ] **Step 5**: 分析用户需求，按优先级匹配（playbook → action → openapi）
-- [ ] **Step 6**: 如果匹配到 action，查询资源 ID（POST `/tools/resource/detailed`）
-- [ ] **Step 7**: 调用对应接口（使用当前会话的作战室 ID）
-- [ ] **Step 8**: 处理响应（playbook/action 提取 run_id 并查询结果，openapi 提取业务数据）
-- [ ] **Step 9**: 返回结果给用户
+- [ ] **Step 4**: 尝试匹配 playbook
+  - 匹配成功 → 跳到 Step 10
+  - 匹配失败 → 继续 Step 5
+- [ ] **Step 5**: 调用 `POST /tools/actions/available` 获取动作列表
+- [ ] **Step 6**: 尝试匹配 action
+  - 匹配成功 → 继续 Step 9
+  - 匹配失败 → 继续 Step 7
+- [ ] **Step 7**: 尝试匹配 openapi
+  - 匹配成功 → 跳到 Step 10
+  - 匹配失败 → 继续 Step 8
+- [ ] **Step 8**: 使用 AI 进行推理（组合多个接口或提供建议）
+- [ ] **Step 9**: 如果匹配到 action，查询资源 ID（POST `/tools/resource/detailed`）
+- [ ] **Step 10**: 调用对应接口（使用当前会话的作战室 ID）
+- [ ] **Step 11**: 处理响应（playbook/action 提取 run_id 并查询结果，openapi 提取业务数据）
+- [ ] **Step 12**: 返回结果给用户
 
 ## 🔐 Step 1: 登录
 
@@ -82,7 +94,7 @@ print(f"Token: {token}")
 
 **响应**: 返回 token（格式：`account_id:jwt_token`），后续所有请求必须在 HTTP 请求头中添加 `aioe-auth: <token>`（将 `<token>` 替换为实际的 token 值）
 
-## 📂 Step 2-4: 调用接口获取数据
+## 📂 Step 2-5: 获取数据
 
 **⚠️ 强制要求**: 每次都必须调用接口获取最新数据，禁止使用记忆或缓存中的数据。
 
@@ -116,7 +128,7 @@ playbook_data = response.json()
 playbooks = playbook_data.get("data", {}).get("items", [])
 ```
 
-### Step 4: 获取 Action 列表
+### Step 5: 获取 Action 列表
 
 ```python
 response = requests.post(
@@ -134,7 +146,7 @@ actions = action_data.get("data", {}).get("items", [])
 - ❌ 不要跳过调用接口
 - ✅ 必须每次都重新调用接口获取最新数据
 
-## 🎯 Step 5: 匹配逻辑
+## 🎯 Step 4-8: 匹配逻辑
 
 **⚠️ 强制要求**: 每次都必须重新匹配，禁止使用记忆中的历史匹配结果。
 
@@ -142,12 +154,14 @@ actions = action_data.get("data", {}).get("items", [])
 - ❌ 不要说"我记得上次这个资源不可用"
 - ❌ 不要说"根据之前的匹配结果，这个动作不存在"
 - ❌ 不要因为记忆中的失败而跳过尝试
-- ✅ 必须每次都重新从读取的文件中查找匹配
+- ✅ 必须每次都重新从接口获取的数据中查找匹配
 - ✅ 即使记忆中显示"资源不可用"，也要重新尝试
 
-### 优先级 1: Playbook（剧本）
+### 优先级 1: Playbook（剧本）- Step 4
 
 **匹配字段**: `name`, `description`, `tags`
+
+**匹配成功后**: 直接跳到 **Step 10**（调用对应接口）
 
 **⚠️ 关键参数说明**:
 1. **作战室 ID (`id`)**: 
@@ -188,9 +202,11 @@ Content-Type: application/json
 
 **必须提取**: `run_id` 字段
 
-### 优先级 2: Action（动作）
+### 优先级 2: Action（动作）- Step 6
 
 **匹配字段**: `name`, `description`, `tags`
+
+**匹配成功后**: 继续 **Step 9**（查询资源 ID），然后执行 **Step 10**（调用对应接口）
 
 **⚠️ 关键参数说明**:
 1. **作战室 ID (`id`)**: 
@@ -264,20 +280,25 @@ Content-Type: application/json
 
 **必须提取**: `run_id`字段
 
-### 优先级 3: OpenAPI（底层接口）
+### 优先级 3: OpenAPI（底层接口）- Step 7
 
 **匹配字段**: `summary`, `description`, `operationId`
 
+**匹配成功后**: 直接跳到 **Step 10**（调用对应接口）
+
 **调用接口**: 根据 OpenAPI 定义构造 HTTP 请求
 
-### 优先级 4: AI 推理
+### 优先级 4: AI 推理 - Step 8
 
-如果前 3 个优先级都未匹配，使用 AI 能力：
+**触发条件**: 前 3 个优先级都未匹配成功
+
+**处理方式**:
 - 分析用户需求
 - 组合多个接口调用
 - 提供解决方案建议
+- 或告知用户当前系统无法直接满足需求
 
-## 📤 Step 6: 处理响应并返回结果
+## 📤 Step 11-12: 处理响应并返回结果
 
 ### Playbook/Action 响应处理（有 run_id）
 
@@ -388,17 +409,23 @@ Content-Type: application/json
 **用户**: "查询 IP 1.1.1.1 的威胁情报"
 
 **执行流程**:
-1. ✅ 登录获取 cookie
-2. ✅ 读取 playbook.json → 未找到匹配
-3. ✅ 读取 actions.json → 找到 "IP分析" 动作
-4. ✅ 调用 `/warroom/run` 执行动作
-5. ✅ 获取响应: `run_id: "run_12345"`
-6. ✅ 返回给用户:
-   ```
-   ✅ 已提交 IP 威胁情报查询任务
-   执行 ID: run_12345
-   结果: 1.1.1.1不危险
-   ```
+1. ✅ Step 1: 调用 `/user/local-auth` 获取 token
+2. ✅ Step 2: 调用 `GET /docs/openapi.json` 获取接口信息
+3. ✅ Step 3: 调用 `POST /playbook/published-versions` 获取剧本列表
+4. ✅ Step 4: 匹配 playbook → 未找到匹配
+5. ✅ Step 5: 调用 `POST /tools/actions/available` 获取动作列表
+6. ✅ Step 6: 匹配 action → 找到 "IP分析" 动作
+7. ✅ Step 9: 调用 `POST /tools/resource/detailed` 查询资源 ID
+8. ✅ Step 10: 调用 `POST /warroom/run` 执行动作
+9. ✅ Step 11: 获取响应并提取 `run_id: "run_12345"`
+10. ✅ Step 11: 调用 `GET /warroom/run/run_12345` 查询执行结果
+11. ✅ Step 12: 返回给用户:
+    ```
+    ✅ 已提交 IP 威胁情报查询任务
+    执行 ID: run_12345
+    状态: 已完成
+    结果: 1.1.1.1 不危险
+    ```
 
 ## 配置说明
 
