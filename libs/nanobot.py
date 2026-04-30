@@ -156,31 +156,45 @@ class RedisStreamingHook(AgentHook):
                 logger.info(f"[RedisStreamingHook] 发布工具调用消息失败: {e}")
 
     async def after_iteration(self, context: AgentHookContext) -> None:
-        """在每次迭代后发送工具执行结果"""
+        """在每次迭代后发送工具执行结果或错误信息"""
         from settings import WR_TOPIC
 
-        # 只有在有工具调用时才发送结果
-        if not context.tool_calls:
+        # 如果有错误，总是发送错误消息（无论是否有工具调用）
+        if context.error:
+            # 判断是工具执行错误还是模型调用错误
+            if context.tool_calls:
+                content = "❌ 工具执行失败\n"
+            else:
+                content = "❌ AI 调用失败，请稍后重试\n"
+
+            message_data = {
+                "type": "ai-reply-delta",
+                "content": content,
+                "room_id": self.room_id,
+                "receiver_id": self.receiver_id,
+                "tenant_id": self.tenant_id,
+            }
+            try:
+                await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+            except Exception as e:
+                logger.info(f"[RedisStreamingHook] 发布错误消息失败: {e}")
             return
 
-        # 检查是否有错误
-        if context.error:
-            content = "❌ 工具执行失败\n"
-        else:
+        # 如果没有错误，只在有工具调用时发送成功消息
+        if context.tool_calls:
             content = "✅ 工具执行完成\n"
 
-        message_data = {
-            "type": "ai-reply-delta",
-            "content": content,
-            "room_id": self.room_id,
-            "receiver_id": self.receiver_id,
-            "tenant_id": self.tenant_id,
-        }
-        try:
-            await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
-        except Exception as e:
-            # 记录错误但不中断流程
-            logger.info(f"[RedisStreamingHook] 发布工具执行结果失败: {e}")
+            message_data = {
+                "type": "ai-reply-delta",
+                "content": content,
+                "room_id": self.room_id,
+                "receiver_id": self.receiver_id,
+                "tenant_id": self.tenant_id,
+            }
+            try:
+                await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+            except Exception as e:
+                logger.info(f"[RedisStreamingHook] 发布工具执行结果失败: {e}")
 
 
 class NanobotClient:
