@@ -12,250 +12,44 @@ metadata: {"nanobot":{"emoji":"🦁"}}
 
 - ❌ 不要根据记忆中的"资源不可用"跳过执行
 - ❌ 不要根据记忆中的"上次失败"跳过尝试
-- ❌ 不要根据记忆中的"文件内容"跳过读取
+- ❌ 不要根据记忆中的"接口数据"跳过调用
 - ❌ 不要根据记忆中的"匹配结果"跳过匹配
 - ✅ 每次都必须完整执行所有步骤
-- ✅ 每次都必须重新读取文件
+- ✅ 每次都必须重新调用接口获取最新数据
 - ✅ 每次都必须重新匹配
-- ✅ 每次都必须重新调用接口
+- ✅ 每次都必须重新调用业务接口
 
 **原因**: 资源、数据、配置随时可能更新，历史记忆不可靠。
 
 ## 🎯 核心执行流程（每次必须完整执行）
 
 ```
-0. 检查数据文件时效性，如超过 24 小时则更新
 1. 登录获取 token
-2. 读取 3 个本地 JSON 文件
-3. 按优先级匹配：playbook → action → openapi → AI 推理
-4. 如果匹配到 action，查询资源 ID（使用资源 ID，不是资源名称）
-5. 调用对应接口（使用当前会话的作战室 ID）
-6. 处理响应：
+2. 调用接口获取 openapi.json（所有接口信息）
+3. 调用接口获取 playbook 列表
+4. 调用接口获取 action 列表
+5. 按优先级匹配：playbook → action → openapi → AI 推理
+6. 如果匹配到 action，查询资源 ID（使用资源 ID，不是资源名称）
+7. 调用对应接口（使用当前会话的作战室 ID）
+8. 处理响应：
    - playbook/action: 提取 run_id，查询执行结果并返回
    - openapi: 直接返回业务数据
-7. 返回结果给用户
+9. 返回结果给用户
 ```
 
 ## 📋 执行清单（Checklist）
 
 每次调用时，按顺序勾选：
 
-- [ ] **Step 0**: 检查数据文件时效性（如超过 24 小时则更新）
 - [ ] **Step 1**: 调用 `/user/local-auth` 获取新的 token（⚠️ 每次必须执行，不要使用缓存的 token）
-- [ ] **Step 2**: 读取 `nanobot/skills/lion-mgmt/scripts/playbook.json`
-- [ ] **Step 3**: 读取 `nanobot/skills/lion-mgmt/scripts/actions.json`
-- [ ] **Step 4**: 读取 `nanobot/skills/lion-mgmt/scripts/openapi.json`
-- [ ] **Step 5**: 分析用户需求，按优先级匹配
+- [ ] **Step 2**: 调用 `GET /docs/openapi.json` 获取所有接口信息
+- [ ] **Step 3**: 调用 `POST /playbook/published-versions` 获取剧本列表
+- [ ] **Step 4**: 调用 `POST /tools/actions/available` 获取动作列表
+- [ ] **Step 5**: 分析用户需求，按优先级匹配（playbook → action → openapi）
 - [ ] **Step 6**: 如果匹配到 action，查询资源 ID（POST `/tools/resource/detailed`）
 - [ ] **Step 7**: 调用对应接口（使用当前会话的作战室 ID）
 - [ ] **Step 8**: 处理响应（playbook/action 提取 run_id 并查询结果，openapi 提取业务数据）
 - [ ] **Step 9**: 返回结果给用户
-
-## 🔄 Step 0: 检查并更新数据文件
-
-**⚠️ 强制要求**: 每次执行 skill 时，必须先检查数据文件的时效性。
-
-### 检查逻辑
-
-检查以下三个文件的修改时间：
-1. `nanobot/skills/lion-mgmt/scripts/playbook.json`
-2. `nanobot/skills/lion-mgmt/scripts/actions.json`
-3. `nanobot/skills/lion-mgmt/scripts/openapi.json`
-
-**判断标准**: 如果任一文件的修改时间距离现在超过 24 小时（86400 秒），则需要更新所有文件。
-
-### 检查文件时间的方法
-
-使用 Python 检查文件修改时间：
-
-```python
-import time
-from pathlib import Path
-
-# 获取文件的修改时间戳（秒）
-playbook_file = Path("nanobot/skills/lion-mgmt/scripts/playbook.json")
-if playbook_file.exists():
-    file_time = playbook_file.stat().st_mtime
-    print(f"文件修改时间戳: {file_time}")
-else:
-    print("文件不存在")
-
-# 获取当前时间戳（秒）
-current_time = time.time()
-print(f"当前时间戳: {current_time}")
-
-# 计算时间差
-if playbook_file.exists():
-    file_time = playbook_file.stat().st_mtime
-    time_diff = current_time - file_time
-
-    # 判断是否超过 24 小时（86400 秒）
-    if time_diff > 86400:
-        print("需要更新文件")
-    else:
-        print("文件仍然有效")
-else:
-    print("文件不存在，需要创建")
-```
-
-**注意**: Python 的 `pathlib.Path` 和 `time` 模块在所有平台（Windows/Linux/macOS）上都可以正常工作。
-
-### 更新文件的步骤
-
-如果文件需要更新，按以下步骤执行：
-
-#### 1. 登录获取 token
-
-```python
-import requests
-
-response = requests.post(
-    "http://127.0.0.1:8000/user/local-auth",
-    headers={"Content-Type": "application/json"},
-    json={"username": "admin"}
-)
-data = response.json()
-token = data["data"]["token"]
-print(f"Token: {token}")
-```
-
-**响应示例**:
-```json
-{
-  "code": 0,
-  "data": {
-    "token": "account_id:jwt_token"
-  }
-}
-```
-
-**提取 token**: 从响应的 `data.token` 字段中提取，后续所有请求必须在 HTTP 请求头中添加 `aioe-auth: <token>`（将 `<token>` 替换为实际的 token 值）
-
-#### 2. 更新 playbook.json
-
-```python
-import requests
-import json
-
-token = "<token>"  # 从登录获取的 token
-
-response = requests.post(
-    "http://127.0.0.1:8000/playbook/published-versions",
-    headers={"aioe-auth": token}
-)
-
-with open("nanobot/skills/lion-mgmt/scripts/playbook.json", "w", encoding="utf-8") as f:
-    json.dump(response.json(), f, indent=2, ensure_ascii=False)
-```
-
-#### 3. 更新 actions.json
-
-```python
-import requests
-import json
-
-token = "<token>"  # 从登录获取的 token
-
-response = requests.post(
-    "http://127.0.0.1:8000/tools/actions/available",
-    headers={"aioe-auth": token}
-)
-
-with open("nanobot/skills/lion-mgmt/scripts/actions.json", "w", encoding="utf-8") as f:
-    json.dump(response.json(), f, indent=2, ensure_ascii=False)
-```
-
-#### 4. 更新 openapi.json
-
-```python
-import requests
-import json
-
-token = "<token>"  # 从登录获取的 token
-
-response = requests.get(
-    "http://127.0.0.1:8000/docs/openapi.json",
-    headers={"aioe-auth": token}
-)
-
-with open("nanobot/skills/lion-mgmt/scripts/openapi.json", "w", encoding="utf-8") as f:
-    json.dump(response.json(), f, indent=2, ensure_ascii=False)
-```
-
-### 完整示例
-
-```python
-import os
-import time
-import requests
-import json
-from pathlib import Path
-
-# 1. 检查文件时间
-playbook_file = Path("nanobot/skills/lion-mgmt/scripts/playbook.json")
-current_time = time.time()
-
-# 获取文件修改时间（如果文件不存在，返回 0）
-if playbook_file.exists():
-    file_time = playbook_file.stat().st_mtime
-else:
-    file_time = 0
-
-time_diff = current_time - file_time
-
-# 2. 如果超过 24 小时（86400 秒）或文件不存在，则更新
-if time_diff > 86400 or not playbook_file.exists():
-    print("数据文件已过期，正在更新...")
-
-    # 登录获取 token
-    response = requests.post(
-        "http://127.0.0.1:8000/user/local-auth",
-        headers={"Content-Type": "application/json"},
-        json={"username": "admin"}
-    )
-    data = response.json()
-    token = data["data"]["token"]
-
-    # 更新三个文件（使用 aioe-auth 请求头传递 token）
-    files_to_update = [
-        ("http://127.0.0.1:8000/playbook/published-versions", "POST", "playbook.json"),
-        ("http://127.0.0.1:8000/tools/actions/available", "POST", "actions.json"),
-        ("http://127.0.0.1:8000/docs/openapi.json", "GET", "openapi.json")
-    ]
-
-    for url, method, filename in files_to_update:
-        if method == "POST":
-            resp = requests.post(url, headers={"aioe-auth": token})
-        else:
-            resp = requests.get(url, headers={"aioe-auth": token})
-
-        filepath = Path(f"nanobot/skills/lion-mgmt/scripts/{filename}")
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(resp.json(), f, indent=2, ensure_ascii=False)
-
-    print("数据文件更新完成")
-else:
-    print("数据文件仍然有效，跳过更新")
-```
-
-### 错误处理
-
-| 错误 | 处理方式 |
-|------|----------|
-| 文件不存在 | 视为需要更新，执行完整更新流程 |
-| 登录失败 | 检查服务是否运行在 http://127.0.0.1:8000 |
-| 接口调用失败 | 返回错误信息，不继续执行后续步骤 |
-| 文件检查失败 | 视为文件不存在，执行更新流程 |
-
-### 重要提醒
-
-- ✅ 每次执行 skill 都必须先执行 Step 0
-- ✅ 即使记忆中显示"文件刚更新过"，也要重新检查
-- ✅ 文件检查失败时，视为需要更新
-- ❌ 不要跳过文件检查步骤
-- ❌ 不要假设文件是最新的
 
 ## 🔐 Step 1: 登录
 
@@ -288,23 +82,57 @@ print(f"Token: {token}")
 
 **响应**: 返回 token（格式：`account_id:jwt_token`），后续所有请求必须在 HTTP 请求头中添加 `aioe-auth: <token>`（将 `<token>` 替换为实际的 token 值）
 
-## 📂 Step 2-4: 读取数据文件
+## 📂 Step 2-4: 调用接口获取数据
 
-**前置条件**: 文件已在 Step 0 中检查时效性并更新（如需要），现在可以安全读取最新数据。
+**⚠️ 强制要求**: 每次都必须调用接口获取最新数据，禁止使用记忆或缓存中的数据。
 
-**⚠️ 强制要求**: 每次都必须使用 `read_file` 工具重新读取，禁止使用记忆或缓存中的文件内容。
+依次调用以下接口获取数据：
 
-使用 `read_file` 工具依次读取：
+### Step 2: 获取 OpenAPI 接口信息
 
-1. `nanobot/skills/lion-mgmt/scripts/playbook.json` → 提取 `data.items`
-2. `nanobot/skills/lion-mgmt/scripts/actions.json` → 提取 `data.items`
-3. `nanobot/skills/lion-mgmt/scripts/openapi.json` → 提取 `paths`
+```python
+import requests
+
+token = "<token>"  # 从 Step 1 获取的 token
+
+response = requests.get(
+    "http://127.0.0.1:8000/docs/openapi.json",
+    headers={"aioe-auth": token}
+)
+openapi_data = response.json()
+# 提取 paths 字段
+paths = openapi_data.get("paths", {})
+```
+
+### Step 3: 获取 Playbook 列表
+
+```python
+response = requests.post(
+    "http://127.0.0.1:8000/playbook/published-versions",
+    headers={"aioe-auth": token}
+)
+playbook_data = response.json()
+# 提取 data.items 字段
+playbooks = playbook_data.get("data", {}).get("items", [])
+```
+
+### Step 4: 获取 Action 列表
+
+```python
+response = requests.post(
+    "http://127.0.0.1:8000/tools/actions/available",
+    headers={"aioe-auth": token}
+)
+action_data = response.json()
+# 提取 data.items 字段
+actions = action_data.get("data", {}).get("items", [])
+```
 
 **禁止行为**:
-- ❌ 不要说"我记得上次读取的内容是..."
-- ❌ 不要说"根据之前的文件内容..."
-- ❌ 不要跳过读取步骤
-- ✅ 必须每次都重新调用 `read_file` 工具
+- ❌ 不要说"我记得上次的数据是..."
+- ❌ 不要说"根据之前的数据..."
+- ❌ 不要跳过调用接口
+- ✅ 必须每次都重新调用接口获取最新数据
 
 ## 🎯 Step 5: 匹配逻辑
 
@@ -525,33 +353,26 @@ Content-Type: application/json
    - ✅ 每次都重新调用 `/user/local-auth` 获取 token
    - ❌ 不要使用缓存的 token 或历史记忆中的 token
    - ❌ 不要假设 token 仍然有效
-   - ❌ 不要假设文件未变
+   - ❌ 不要假设数据未变
    - Token 可能会过期，使用过期的 token 会导致 401 错误
 3. **严格顺序**: 必须先尝试 playbook，失败后才尝试 action，再失败才尝试 openapi
-4. **路径必须完整**: 使用 `nanobot/skills/lion-mgmt/scripts/` 前缀
-5. **作战室 ID 获取**（重要）:
+4. **作战室 ID 获取**（重要）:
    - ✅ 从当前会话上下文中获取作战室 ID
    - ❌ 不要查询作战室列表 (`/warroom/list`)
    - ❌ 不要使用历史记忆中的旧作战室 ID
-6. **资源 ID 获取**（重要）:
+5. **资源 ID 获取**（重要）:
    - ✅ 调用 `POST /tools/resource/detailed` 获取资源 ID
    - ✅ 使用响应中的 `data[0].id` 字段
    - ❌ 不要使用资源名称（如"微步在线-个人"）
-7. **区分响应类型**:
+6. **区分响应类型**:
    - Playbook/Action: 必须从响应中提取 `run_id`，并通过 run_id 查询执行结果，返回给用户
    - OpenAPI: 直接返回业务数据，无需提取 run_id
-8. **禁止使用记忆中的资源状态**（重要）:
+7. **禁止使用记忆中的资源状态**（重要）:
    - ❌ 禁止说"我记得上次这个资源不可用，所以跳过"
    - ❌ 禁止说"根据历史记录，这个动作不存在"
    - ❌ 禁止说"之前尝试过失败了，所以不再尝试"
-   - ✅ 必须每次都重新读取文件、重新匹配、重新尝试
+   - ✅ 必须每次都重新调用接口、重新匹配、重新尝试
    - ✅ 资源、配置、数据随时可能更新，历史记忆不可靠
-
-## 🔧 数据同步
-
-**自动同步**: 文件会在每次执行 skill 时自动检查时效性（Step 0）。如果文件修改时间距离现在超过 24 小时，会自动调用接口更新。
-
-**注意**: 不需要配置定时任务或手动同步脚本，skill 会自动管理文件的时效性。
 
 ## 🐛 错误处理
 
