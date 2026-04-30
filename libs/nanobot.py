@@ -12,12 +12,32 @@ import asyncio
 import os
 from pathlib import Path
 import orjson
-
+from sanic.log import logger
 # 从项目内置的 nanobot 源码导入
 from nanobot import Nanobot
 from nanobot.agent import AgentHook, AgentHookContext
 
 from settings import NANOBOT_CONFIG_PATH
+
+
+# 工具名称到中文描述的映射
+TOOL_DESCRIPTIONS = {
+    "read_file": "正在读取文件",
+    "write_file": "正在写入文件",
+    "list_files": "正在列出文件",
+    "execute_command": "正在执行命令",
+    "search_files": "正在搜索文件",
+    "get_url": "正在获取网页内容",
+    "create_directory": "正在创建目录",
+    "delete_file": "正在删除文件",
+    "move_file": "正在移动文件",
+    "copy_file": "正在复制文件",
+    "run_python": "正在执行 Python 代码",
+    "run_shell": "正在执行 Shell 命令",
+    "search_code": "正在搜索代码",
+    "analyze_file": "正在分析文件",
+    "get_file_info": "正在获取文件信息",
+}
 
 
 class StreamingHook(AgentHook):
@@ -67,7 +87,11 @@ class RedisStreamingHook(AgentHook):
             "receiver_id": self.receiver_id,
             "tenant_id": self.tenant_id,
         }
-        await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+        try:
+            await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+        except Exception as e:
+            # 记录错误但不中断流程
+            logger.info(f"[RedisStreamingHook] 发布流式消息失败: {e}")
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         """流式输出结束时发布结束消息
@@ -90,8 +114,13 @@ class RedisStreamingHook(AgentHook):
                 "receiver_id": self.receiver_id,
                 "tenant_id": self.tenant_id,
             }
-            await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
-            self._has_content = False  # 重置标志
+            try:
+                await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+            except Exception as e:
+                # 记录错误但不中断流程
+                logger.info(f"[RedisStreamingHook] 发布结束消息失败: {e}")
+            finally:
+                self._has_content = False  # 重置标志
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         """在执行工具前发送工具调用信息，让用户知道 AI 正在执行什么操作"""
@@ -103,33 +132,15 @@ class RedisStreamingHook(AgentHook):
         # 为每个工具调用发送一条消息
         for tool_call in context.tool_calls:
             tool_name = tool_call.name
-            tool_args = tool_call.arguments
 
-            # 构造简洁的工具调用描述
-            content = f"\n🔧 执行工具: {tool_name}"
-
-            # 简化参数显示
-            if tool_args:
-                args_parts = []
-                for k, v in list(tool_args.items())[:3]:  # 只显示前3个参数
-                    if isinstance(v, str):
-                        # 字符串参数，截断到50个字符
-                        v_str = v[:50] + "..." if len(v) > 50 else v
-                        args_parts.append(f"{k}={repr(v_str)}")
-                    elif isinstance(v, (list, dict)):
-                        # 复杂对象，只显示类型和长度
-                        args_parts.append(f"{k}=<{type(v).__name__} len={len(v)}>")
-                    else:
-                        args_parts.append(f"{k}={v}")
-
-                if len(tool_args) > 3:
-                    args_parts.append("...")
-
-                content += f"({', '.join(args_parts)})"
+            # 获取工具的友好描述
+            if tool_name in TOOL_DESCRIPTIONS:
+                description = TOOL_DESCRIPTIONS[tool_name]
             else:
-                content += "()"
+                # 如果没有预定义的描述，使用通用格式
+                description = f"正在执行 {tool_name}"
 
-            content += "\n"
+            content = f"\n🔧 {description}\n"
 
             message_data = {
                 "type": "ai-reply-delta",
@@ -138,7 +149,11 @@ class RedisStreamingHook(AgentHook):
                 "receiver_id": self.receiver_id,
                 "tenant_id": self.tenant_id,
             }
-            await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+            try:
+                await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+            except Exception as e:
+                # 记录错误但不中断流程
+                logger.info(f"[RedisStreamingHook] 发布工具调用消息失败: {e}")
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         """在每次迭代后发送工具执行结果"""
@@ -161,7 +176,11 @@ class RedisStreamingHook(AgentHook):
             "receiver_id": self.receiver_id,
             "tenant_id": self.tenant_id,
         }
-        await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+        try:
+            await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+        except Exception as e:
+            # 记录错误但不中断流程
+            logger.info(f"[RedisStreamingHook] 发布工具执行结果失败: {e}")
 
 
 class NanobotClient:
