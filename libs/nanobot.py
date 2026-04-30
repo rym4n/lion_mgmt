@@ -50,6 +50,7 @@ class RedisStreamingHook(AgentHook):
         self.receiver_id = receiver_id
         self.tenant_id = tenant_id
         self.redis_pub = redis_pub
+        self._has_content = False  # 标记当前流式会话是否有内容
 
     def wants_streaming(self) -> bool:
         return True
@@ -58,6 +59,7 @@ class RedisStreamingHook(AgentHook):
         """流式输出时发布到 Redis"""
         from settings import WR_TOPIC
 
+        self._has_content = True  # 标记有内容被发送
         message_data = {
             "type": "ai-reply-delta",
             "content": delta,
@@ -73,9 +75,12 @@ class RedisStreamingHook(AgentHook):
         Args:
             resuming: True 表示后面还有 tool calls 要执行，False 表示真正结束
         """
-        # 只有在真正结束时（resuming=False）才发送结束消息
-        # resuming=True 表示 AI 还要继续执行 tool calls，之后还会有更多输出
-        if not resuming:
+        # 只有在有内容被发送时才发送结束消息
+        # 这样可以确保：
+        # 1. 每次 AI 生成文本后都保存消息记录
+        # 2. 如果 AI 崩溃，至少之前的文本已经保存
+        # 3. 避免创建空的消息记录
+        if self._has_content:
             from settings import WR_TOPIC
 
             message_data = {
@@ -86,6 +91,7 @@ class RedisStreamingHook(AgentHook):
                 "tenant_id": self.tenant_id,
             }
             await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+            self._has_content = False  # 重置标志
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         """在执行工具前发送工具调用信息，让用户知道 AI 正在执行什么操作"""
