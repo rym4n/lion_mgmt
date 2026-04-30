@@ -112,13 +112,13 @@ curl -X POST "http://127.0.0.1:8000/user/local-auth" \
 }
 ```
 
-**提取 token**: 从响应的 `data.token` 字段中提取，后续请求使用 Cookie: `aioe-auth=<token>`
+**提取 token**: 从响应的 `data.token` 字段中提取，后续请求使用 aioe-auth: `<token>`
 
 #### 2. 更新 playbook.json
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/playbook/published-versions" \
-  -H "Cookie: aioe-auth=<token>" \
+  -H "aioe-auth: <token>" \
   -o nanobot/skills/lion-mgmt/scripts/playbook.json
 ```
 
@@ -126,7 +126,7 @@ curl -X POST "http://127.0.0.1:8000/playbook/published-versions" \
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/tools/actions/available" \
-  -H "Cookie: aioe-auth=<token>" \
+  -H "aioe-auth: <token>" \
   -o nanobot/skills/lion-mgmt/scripts/actions.json
 ```
 
@@ -134,7 +134,7 @@ curl -X POST "http://127.0.0.1:8000/tools/actions/available" \
 
 ```bash
 curl -X GET "http://127.0.0.1:8000/docs/openapi.json" \
-  -H "Cookie: aioe-auth=<token>" \
+  -H "aioe-auth: <token>" \
   -o nanobot/skills/lion-mgmt/scripts/openapi.json
 ```
 
@@ -152,22 +152,21 @@ if [ $time_diff -gt 86400 ] || [ ! -f nanobot/skills/lion-mgmt/scripts/playbook.
 
   # 登录获取 token
   response=$(curl -s -X POST "http://127.0.0.1:8000/user/local-auth" \
-    -H "Content-Type: application/json" \
     -d '{"username":"admin"}')
 
   token=$(echo $response | jq -r '.data.token')
 
   # 更新三个文件
   curl -s -X POST "http://127.0.0.1:8000/playbook/published-versions" \
-    -H "Cookie: aioe-auth=$token" \
+    -H "aioe-auth: <token>" \
     -o nanobot/skills/lion-mgmt/scripts/playbook.json
 
   curl -s -X POST "http://127.0.0.1:8000/tools/actions/available" \
-    -H "Cookie: aioe-auth=$token" \
+    -H "aioe-auth: <token>" \
     -o nanobot/skills/lion-mgmt/scripts/actions.json
 
   curl -s -X GET "http://127.0.0.1:8000/docs/openapi.json" \
-    -H "Cookie: aioe-auth=<token>" \
+    -H "aioe-auth: <token>" \
     -o nanobot/skills/lion-mgmt/scripts/openapi.json
 
   echo "数据文件更新完成"
@@ -201,7 +200,7 @@ curl -X POST "${LION_MGMT_BASE_URL}/user/local-auth" \
   -d '{"username":"${LION_MGMT_USERNAME}"}'
 ```
 
-**响应**: 返回 token（格式：`account_id:jwt_token`），后续请求使用 Cookie: `aioe-auth=<token>`
+**响应**: 返回 token（格式：`account_id:jwt_token`），后续请求使用 aioe-auth: `<token>`
 
 ## 📂 Step 2-4: 读取数据文件
 
@@ -244,9 +243,10 @@ curl -X POST "${LION_MGMT_BASE_URL}/user/local-auth" \
    - ✅ 使用当前会话提供的作战室 ID
 
 **调用接口**:
+
 ```http
 POST ${LION_MGMT_BASE_URL}/warroom/run
-Cookie: aioe-auth=<cookie>
+aioe-auth: <token>
 Content-Type: application/json
 
 {
@@ -293,7 +293,7 @@ Content-Type: application/json
 **调用接口**:
 ```http
 POST ${LION_MGMT_BASE_URL}/warroom/run
-Cookie: aioe-auth=<cookie>
+aioe-auth: <token>
 Content-Type: application/json
 
 {
@@ -387,7 +387,7 @@ Content-Type: application/json
    如果用户需要查询执行结果，使用以下接口：
    ```http
    GET ${LION_MGMT_BASE_URL}/warroom/run/{run_id}
-   Cookie: aioe-auth=<cookie>
+   aioe-auth: <token>
    ```
 
 ### OpenAPI 接口响应处理（无 run_id）
