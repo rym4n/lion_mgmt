@@ -68,12 +68,89 @@ class RedisStreamingHook(AgentHook):
         await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
-        """流式输出结束时发布结束消息"""
+        """流式输出结束时发布结束消息
+
+        Args:
+            resuming: True 表示后面还有 tool calls 要执行，False 表示真正结束
+        """
+        # 只有在真正结束时（resuming=False）才发送结束消息
+        # resuming=True 表示 AI 还要继续执行 tool calls，之后还会有更多输出
+        if not resuming:
+            from settings import WR_TOPIC
+
+            message_data = {
+                "type": "ai-reply-end",
+                "content": "",
+                "room_id": self.room_id,
+                "receiver_id": self.receiver_id,
+                "tenant_id": self.tenant_id,
+            }
+            await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
+        """在执行工具前发送工具调用信息，让用户知道 AI 正在执行什么操作"""
         from settings import WR_TOPIC
 
+        if not context.tool_calls:
+            return
+
+        # 为每个工具调用发送一条消息
+        for tool_call in context.tool_calls:
+            tool_name = tool_call.name
+            tool_args = tool_call.arguments
+
+            # 构造简洁的工具调用描述
+            content = f"\n🔧 执行工具: {tool_name}"
+
+            # 简化参数显示
+            if tool_args:
+                args_parts = []
+                for k, v in list(tool_args.items())[:3]:  # 只显示前3个参数
+                    if isinstance(v, str):
+                        # 字符串参数，截断到50个字符
+                        v_str = v[:50] + "..." if len(v) > 50 else v
+                        args_parts.append(f"{k}={repr(v_str)}")
+                    elif isinstance(v, (list, dict)):
+                        # 复杂对象，只显示类型和长度
+                        args_parts.append(f"{k}=<{type(v).__name__} len={len(v)}>")
+                    else:
+                        args_parts.append(f"{k}={v}")
+
+                if len(tool_args) > 3:
+                    args_parts.append("...")
+
+                content += f"({', '.join(args_parts)})"
+            else:
+                content += "()"
+
+            content += "\n"
+
+            message_data = {
+                "type": "ai-reply-delta",
+                "content": content,
+                "room_id": self.room_id,
+                "receiver_id": self.receiver_id,
+                "tenant_id": self.tenant_id,
+            }
+            await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+
+    async def after_iteration(self, context: AgentHookContext) -> None:
+        """在每次迭代后发送工具执行结果"""
+        from settings import WR_TOPIC
+
+        # 只有在有工具调用时才发送结果
+        if not context.tool_calls:
+            return
+
+        # 检查是否有错误
+        if context.error:
+            content = "❌ 工具执行失败\n"
+        else:
+            content = "✅ 工具执行完成\n"
+
         message_data = {
-            "type": "ai-reply-end",
-            "content": "",
+            "type": "ai-reply-delta",
+            "content": content,
             "room_id": self.room_id,
             "receiver_id": self.receiver_id,
             "tenant_id": self.tenant_id,

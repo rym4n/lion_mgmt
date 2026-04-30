@@ -167,7 +167,7 @@ Content-Type: application/json
   "id": "<当前会话的作战室ID>",
   "type": "flow",
   "playbook_input": {
-    "flow_id": "<从 playbook 中提取>",
+    "flow_id": "<从 playbook 中提取，这是剧本的版本id>",
     "flow_input": {
       // 从用户对话中提取的参数
     }
