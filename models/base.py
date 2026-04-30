@@ -5,7 +5,39 @@ import uuid
 
 from tortoise import Model, fields
 
-from libs.utils import encrypt_aes256_gcm, decrypt_aes256_gcm
+from libs.utils import decrypt_aes256_gcm, encrypt_aes256_gcm
+
+
+_ENCRYPTED_PREFIX = "enc::"
+
+
+def unwrap_encrypted_value(value):
+    if not isinstance(value, str):
+        return value
+
+    if value.startswith(_ENCRYPTED_PREFIX):
+        value = value[len(_ENCRYPTED_PREFIX) :]
+
+    try:
+        return decrypt_aes256_gcm(value)
+    except ValueError:
+        return value
+
+
+def parse_encrypted_json(value, default=None):
+    import orjson
+
+    value = unwrap_encrypted_value(value)
+    if value in (None, ""):
+        return default
+    if isinstance(value, (dict, list)):
+        return value.copy() if isinstance(value, dict) else list(value)
+    if isinstance(value, str):
+        try:
+            return orjson.loads(value)
+        except orjson.JSONDecodeError:
+            return default
+    return default
 
 
 class BaseModel(Model):
@@ -40,14 +72,18 @@ class EncryptedCharField(fields.CharField):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def to_db_value(self, value, _):
-        if isinstance(value, str):
-            return encrypt_aes256_gcm(value)
-        else:
+    def to_db_value(self, value, instance):
+        if value is None:
             return value
+        if isinstance(value, str):
+            if value.startswith(_ENCRYPTED_PREFIX):
+                return value[len(_ENCRYPTED_PREFIX) :]
+            try:
+                decrypt_aes256_gcm(value)
+                return value
+            except ValueError:
+                return encrypt_aes256_gcm(value)
+        return value
 
     def to_python_value(self, value):
-        try:
-            return decrypt_aes256_gcm(value)
-        except:
-            return value
+        return unwrap_encrypted_value(value)

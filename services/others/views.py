@@ -220,7 +220,7 @@ async def all_apps(request):
                             "value": value.get("value"),
                             "type": value.get("data_type"),
                         }
-                        for key, value in orjson.loads(resource.resources).items()
+                        for key, value in resource.resources_json.items()
                     ],
                     "actionPermissionMap": {},
                     "lastHealthCheckTime": None,

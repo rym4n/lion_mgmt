@@ -89,18 +89,6 @@ def check_vector_config(vector_config, vector_config_yaml=None):
 async def gen_vector_config(sources, topic, project_id):
     config = {
         "sources": sources,
-        "sinks": {
-            f"{topic}_sample_sinks": {
-                "type": "http",
-                "inputs": [f"{topic}_date_transforms"],
-                "uri": f"{VL_HOST}/insert/jsonline?_stream_fields=host,source_type&_time_field=datetime_str&_msg_field=message",
-                "encoding": {"codec": "json"},
-                "batch": {"max_bytes": 1048576},
-                "headers": {
-                    "Content-Type": "application/stream+json"
-                }
-            }
-        },
         "transforms": {
             f"{topic}_date_transforms": {
                 "type": "remap",
@@ -108,6 +96,32 @@ async def gen_vector_config(sources, topic, project_id):
                 "source": r"""
 .datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
 """,
+            },
+            f"{topic}_vl_transforms": {
+                "type": "remap",
+                "inputs": [f"{topic}_date_transforms"],
+                "source": r"""
+._time = to_unix_timestamp(now()) * 1000000000
+._msg = to_string(.message) ?? ""
+._stream = "vector"
+.message = encode_json(.)
+""",
+            }
+        },
+        "sinks": {
+            f"{topic}_sample_sinks": {
+                "type": "http",
+                "inputs": [f"{topic}_vl_transforms"],
+                "uri": f"{VL_HOST}/insert/jsonline",
+                "encoding": {"codec": "text"},
+                "batch": {"max_bytes": 1048576},
+                "request": {
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "AccountID": "0",
+                        "ProjectID": str(project_id)
+                    }
+                }
             }
         },
     }
@@ -599,10 +613,11 @@ async def update_event_ingestion(request):
         data["sources"][event.vector_name]["group_id"] = kafka_group_id
     if transforms_type:
         first_transform = f"{event.vector_name}_transforms"
-        data["sinks"][f"{event.vector_name}_sample_sinks"]["inputs"] = [first_transform]
+        # data["sinks"][f"{event.vector_name}_sample_sinks"]["inputs"] = [first_transform]
         data.setdefault("transforms", {}).setdefault(first_transform, {})["type"] = "remap"
         data["transforms"][first_transform]["inputs"] = [f"{event.vector_name}_date_transforms"]
         data["transforms"][first_transform]["drop_on_error"] = False
+        data["transforms"][f"{event.vector_name}_vl_transforms"]["inputs"] = [first_transform]
 
         config = await Config.get_or_none(Q(key=transforms_type, module="transforms") & (Q(tenant_id=tenant_id) | Q(shared=True)))
         if not config:
@@ -644,13 +659,13 @@ async def update_event_ingestion(request):
     #     "_time_field": "@timestamp",
     #     "_stream_fields": "host,source_type",
     # }
-    # data["sinks"][f"{event.vector_name}_sample_sinks"]["request"] = {"headers": {"AccountID": "0", "ProjectID": str(project_id)}}
+    data["sinks"][f"{event.vector_name}_sample_sinks"]["request"] = {"headers": {"AccountID": "0", "ProjectID": str(project_id)}}
     # data["sinks"][f"{event.vector_name}_sample_sinks"]["api_version"] = "v8"
-    # data["sinks"][f"{event.vector_name}_sample_sinks"]["compression"] = "gzip"
+    data["sinks"][f"{event.vector_name}_sample_sinks"]["compression"] = "gzip"
     # data["sinks"][f"{event.vector_name}_sample_sinks"]["endpoints"] = [f"{VL_HOST}/insert/elasticsearch/"]
-    # data["sinks"][f"{event.vector_name}_sample_sinks"]["healthcheck"] = {"enabled": False}
-    # data["sinks"][f"{event.vector_name}_sample_sinks"].pop("auth", None)
-    # data["sinks"][f"{event.vector_name}_sample_sinks"].pop("bulk", None)
+    data["sinks"][f"{event.vector_name}_sample_sinks"]["healthcheck"] = {"enabled": False}
+    data["sinks"][f"{event.vector_name}_sample_sinks"].pop("auth", None)
+    data["sinks"][f"{event.vector_name}_sample_sinks"].pop("bulk", None)
 
     result = check_vector_config(data)
     if not result:

@@ -632,7 +632,7 @@ async def export_workflow(request):
             resources_objs = await ToolResources.filter(id__in=list(resource_ids), deleted=False).all()
             resources_list = []
             for res in resources_objs:
-                resources_data = orjson.loads(res.resources) if res.resources else {}
+                resources_data = res.resources_json
                 for value in resources_data.values():
                     if value.get("data_type") == "password":
                         value["value"] = "******"
@@ -2134,7 +2134,7 @@ async def import_workflow(request):
             if idx <= 0:
                 continue
             t_name = base[:idx]
-            t_ver = base[idx + 1 :]
+            t_ver = base[idx + 1:]
             if await Tool.filter(name=t_name, deleted=False, tenant_id=tenant_id, version=t_ver).exists():
                 imported["skipped_versions"] += 1
                 continue
@@ -2203,6 +2203,23 @@ async def import_workflow(request):
     return response_ok("导入成功")
 
 
+def check_ai_permission():
+    """检查是否有 AI 模块权限"""
+    lic = load_license()
+    if not lic:
+        raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
+
+    ai_type = 0
+    for item in lic["moduleList"]:
+        group = item["group"]
+        if int(lic["grouplist"][group]["expireTime"]) > int(time.time() * 1000):
+            if item["module"] == "ai_bp":
+                ai_type += 1
+
+    if ai_type == 0:
+        raise CustomError(ErrorCode.NOT_FOUND_TO_AI)
+
+
 @workflow_bp.post("/ai-config/create")
 @openapi.definition(
     summary="创建AI服务配置",
@@ -2248,6 +2265,7 @@ async def import_workflow(request):
 )
 @requires_permission("ai_config:c")
 async def create_ai_config(request):
+    check_ai_permission()
     from models import Config
 
     params = request.json
@@ -2322,6 +2340,7 @@ async def create_ai_config(request):
 )
 @requires_permission("ai_config:u")
 async def update_ai_config(request):
+    check_ai_permission()
     from models import Config
 
     params = request.json
@@ -2344,7 +2363,7 @@ async def update_ai_config(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     # 解析现有 value
-    old_value = orjson.loads(config.value)
+    old_value = config.json_value or {}
 
     # 检查 apikeys 是否包含脱敏标记
     has_masked = any("******" in key for key in apikeys)
@@ -2394,6 +2413,7 @@ async def update_ai_config(request):
 )
 @requires_permission("ai_config:d")
 async def delete_ai_config(request):
+    check_ai_permission()
     from models import Config
 
     params = request.json
@@ -2463,6 +2483,7 @@ async def delete_ai_config(request):
 )
 @requires_permission("ai_config:r")
 async def list_ai_config(request):
+    check_ai_permission()
     from models import Config
 
     params = request.json or {}
@@ -2481,7 +2502,7 @@ async def list_ai_config(request):
     # 格式化返回数据
     data = []
     for config in configs:
-        value = orjson.loads(config.value)
+        value = config.json_value or {}
         url = value.get("url", "")
         models = value.get("models", [])
         apikeys = value.get("apikeys", [])

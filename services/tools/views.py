@@ -7,13 +7,16 @@ import hashlib
 from io import BytesIO
 import operator
 import os
+from pathlib import Path
 import re
+import subprocess
 import time
 import zipfile
 
 from aiocache import caches
 import orjson
 from sanic import Blueprint
+from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.expressions import Q
 from tortoise.functions import Max
@@ -29,6 +32,7 @@ from libs.utils import gen_run_id
 from models import (
     ActionPermissions,
     Config,
+    InspectionCategory,
     PlaybookVersion,
     Runlog,
     Tag,
@@ -177,14 +181,14 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
     if total_up_value != 99999 and total_count >= total_up_value:
         return {"tool": zip_filename, "msg": "应用数量已达到上限", "tool_name": ""}
 
-    config_data, version, tool_name, msg = await unzip(zip_file.body, creator, request.app.ctx.cache_client, request.ctx.session["id"], tenant_id)
+    config_data, version, tool_name, tool_description, msg = await unzip(zip_file.body, creator, request.app.ctx.cache_client, request.ctx.session["id"], tenant_id)
     if msg != "success":
-        return {"tool": zip_filename, "msg": msg, "tool_name": tool_name or ""}
+        return {"tool": zip_filename, "msg": msg, "tool_name": tool_description or ""}
 
     if "actions" in config_data.keys():
         action_key = "actions"
     else:
-        return {"tool": zip_filename, "msg": "config文件内容错误，缺失actions字段", "tool_name": tool_name or ""}
+        return {"tool": zip_filename, "msg": "config文件内容错误，缺失actions字段", "tool_name": tool_description or ""}
 
     health_check = 0
     for action in config_data.get(action_key):
@@ -230,7 +234,7 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
         configuration.resources = config_data.get("resource")
         await configuration.save()
 
-    return {"tool": zip_filename, "msg": msg, "tool_name": tool_name}
+    return {"tool": zip_filename, "msg": msg, "tool_name": tool_description}
 
 
 def open_zip(zip_buffer):
@@ -306,6 +310,9 @@ def convert_logo_to_ico(logo_data):
 
 
 async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
+    config_data = None
+    tool_name = None
+    tool_description = None
     try:
         zip_buffer = BytesIO(zip_data)
         logo_data = None
@@ -323,10 +330,10 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
             )
 
             if config_path is None:
-                return None, None, None, "config文件不存在"
+                return None, None, None, None, "config文件不存在"
 
             if config_path.filename.replace("\\", "/") != "config.json":
-                return None, None, None, "config文件需要在最外层目录下"
+                return None, None, None, None, "config文件需要在最外层目录下"
 
             with zip_ref.open(config_path) as config_file:
                 config_data = orjson.loads(config_file.read().decode())
@@ -379,19 +386,21 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                 py_files_dict = {os.path.basename(f.filename): f for f in files_info if f.filename.endswith(".py")}
 
             tool_name = config_data.get("name")
+            tool_description = config_data.get("description")
             pattern = r"^[A-Za-z][A-Za-z0-9_]*$"
             if not bool(re.match(pattern, tool_name)):
-                return config_data, version, tool_name, "工具名称不合法"
+                return config_data, version, tool_name, tool_description, "工具名称不合法"
 
             for info in files_info:
                 if ".." in info.filename or info.filename.startswith("/"):
-                    return config_data, version, tool_name, "文件名包含非法字符"
+                    return config_data, version, tool_name, tool_description, "文件名包含非法字符"
 
             if "description" not in config_data.keys():
                 return (
                     config_data,
                     version,
                     tool_name,
+                    tool_description,
                     "config文件内容错误，缺失description字段",
                 )
 
@@ -401,6 +410,7 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                     config_data,
                     version,
                     tool_name,
+                    tool_description,
                     "Unsupported hash type. Use 'md5', 'sha1', 'sha256', or 'sha512'.",
                 )
 
@@ -410,11 +420,11 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                 hasher.update(chunk)
 
             if not config_path:
-                return config_data, version, tool_name, "缺失config文件"
+                return config_data, version, tool_name, tool_description, "缺失config文件"
 
             missing_files = set(EXPECTED_STRUCTURE["required_files"]) - actual_files
             if missing_files:
-                return config_data, version, tool_name, "缺失config文件"
+                return config_data, version, tool_name, tool_description, "缺失config文件"
 
             name = config_data.get("name")
             py_file_name = config_data.get("main")
@@ -429,33 +439,34 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                     config_data,
                     version,
                     tool_name,
+                    tool_description,
                     "config文件内容错误，缺失actions字段",
                 )
             class_name_list = [action.get("func") for action in config_data.get(action_key, [])]
 
             for action in config_data.get(action_key, []):
                 if not all(k in action for k in ["func", "name", "input"]):
-                    return config_data, version, tool_name, "actions字段内容错误"
+                    return config_data, version, tool_name, tool_description, "actions字段内容错误"
 
                 inputs = action.get("input")
                 if not isinstance(inputs, list):
-                    return config_data, version, tool_name, "input字段内容错误"
+                    return config_data, version, tool_name, tool_description, "input字段内容错误"
 
                 for input_item in inputs:
                     if not all(k in input_item for k in ["key", "type", "required", "description"]):
-                        return config_data, version, tool_name, "input字段内容错误"
+                        return config_data, version, tool_name, tool_description, "input字段内容错误"
 
                     if any(input_item[k] in (None, "") for k in ["key", "type", "required", "description"]):
-                        return config_data, version, tool_name, "input字段内容错误"
+                        return config_data, version, tool_name, tool_description, "input字段内容错误"
 
             if not py_file_name:
-                return config_data, version, tool_name, "config文件内容错误"
+                return config_data, version, tool_name, tool_description, "config文件内容错误"
 
             if py_file_name not in py_files_dict:
-                return config_data, version, tool_name, "缺失py文件"
+                return config_data, version, tool_name, tool_description, "缺失py文件"
 
             if logo_name not in actual_files:
-                return config_data, version, tool_name, "缺少logo文件"
+                return config_data, version, tool_name, tool_description, "缺少logo文件"
 
             logo_found = False
             for file_info in files_info:
@@ -467,18 +478,19 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                                 config_data,
                                 version,
                                 tool_name,
+                                tool_description,
                                 "logo文件大小超过5KB限制，请压缩后重新上传",
                             )
                         logo_data = logo_file.read()
 
             if not logo_found:
-                return config_data, version, tool_name, "缺少logo文件"
+                return config_data, version, tool_name, tool_description, "缺少logo文件"
 
             with zip_ref.open(py_files_dict[py_file_name]) as py_file:
                 py_data = py_file.read().decode()
 
             if any(f"def {class_name}(" not in py_data for class_name in class_name_list):
-                return config_data, version, tool_name, "Python文件内容错误"
+                return config_data, version, tool_name, tool_description, "Python文件内容错误"
 
             configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).first().values("resources")
             if configuration and configuration["resources"] != config_data.get("resource", {}):
@@ -488,6 +500,7 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                             config_data,
                             version,
                             tool_name,
+                            tool_description,
                             "工具资源不一致，请新建工具或删除原工具后再次上传",
                         )
                     if key in configuration["resources"].keys() and config_data.get("resource", {})[key].get("data_type") != configuration["resources"][key].get("data_type"):
@@ -495,11 +508,12 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                             config_data,
                             version,
                             tool_name,
+                            tool_description,
                             "工具资源不一致，请新建工具或删除原工具后再次上传",
                         )
 
             if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id, version=hasher.hexdigest()).exists():
-                return config_data, version, tool_name, "工具已存在"
+                return config_data, version, tool_name, tool_description, "工具已存在"
 
             version = hasher.hexdigest()
             suffix = logo_name.split(".")[-1]
@@ -525,10 +539,10 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
             # 将config数据存入redis
             await redis_client.set(name + "_" + version, config_data, 2592000)
 
-            return config_data, version, tool.name, "success"
-            
+            return config_data, version, tool.name, tool_description, "success"
+
     except zipfile.BadZipFile as e:
-        return config_data, version, tool_name, str(e)
+        return config_data, version, tool_name, tool_description, str(e)
 
 
 @tools_bp.post("/all")
@@ -621,18 +635,18 @@ async def all_tools(request):
     subquery = subquery.filter(maintain=maintenance_mode if maintenance_mode else False)
     if key:
         actions = await ToolAction.filter(deleted=False, tenant_id=tenant_id).values("tool_name", "version_number", "action")
-        tool_name_version_set = set()
+        tool_names_from_actions = set()
 
         for act in actions:
             act_data = act["action"]
             if isinstance(act_data, dict) and (key.lower() in act_data.get("func", "").lower() or key.lower() in act_data.get("name", "").lower()):
-                tool_name_version_set.add((act["tool_name"], act["version_number"]))
+                tool_names_from_actions.add(act["tool_name"])
 
         cond = Q(name__icontains=key) | Q(description__icontains=key)
-        if tool_name_version_set:
-            cond |= Q()
-            for name, version in tool_name_version_set:
-                cond |= Q(name=name, version=version)
+        # 由于后面使用了 group_by("name")，只需要匹配工具名称即可，不需要精确匹配版本
+        # 这样可以大大简化查询条件，避免递归深度超限，同时保证查询结果完整
+        if tool_names_from_actions:
+            cond |= Q(name__in=list(tool_names_from_actions))
         subquery = subquery.filter(cond)
     if req_json.get("tag"):
         subquery = subquery.filter(tag__contains=[req_json.get("tag")])
@@ -682,9 +696,12 @@ async def all_tools(request):
         if not subquery_results:
             return response_ok({"tools": [], "total": 0, "page": page, "size": size, "total_pages": 0})
 
-    condition = Q()
-    for pair in subquery_results:
-        condition |= Q(name=pair["name"], ctime=pair["latest_ctime"])
+    # 使用 reduce 避免循环中的深度嵌套
+    if subquery_results:
+        conditions = [Q(name=pair["name"], ctime=pair["latest_ctime"]) for pair in subquery_results]
+        condition = reduce(operator.or_, conditions)
+    else:
+        condition = Q()
 
     latest_tools = await Tool.filter(condition, deleted=False, tenant_id=tenant_id).offset((page - 1) * size).limit(size).values()
     for tool in latest_tools:
@@ -1443,7 +1460,7 @@ async def update_tool_resource(request):
         tool_resource.engine = engine
 
     if resources:
-        resources_old = orjson.loads(tool_resource.resources)
+        resources_old = tool_resource.resources_json
         for key, resource in resources.items():
             if resource.get("data_type") == "password" and resource.get("value") == "******":
                 resource["value"] = resources_old[key]["value"]
@@ -1453,8 +1470,23 @@ async def update_tool_resource(request):
         await caches.get("redis_chat").set("resource_" + tool_resource.id, r)
 
     tool_resource.updater = request.ctx.session["account_info"].username
-    await tool_resource.save()
+    update_fields = ["updater"]
+    if engine:
+        update_fields.append("engine")
+    if resources:
+        update_fields.append("resources")
+    await tool_resource.save(update_fields=update_fields)
     return response_ok({"message": "工具资源更新成功"})
+
+
+def _contains_resource_id(value, resource_id):
+    if isinstance(value, dict):
+        return any(_contains_resource_id(item, resource_id) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_resource_id(item, resource_id) for item in value)
+    if isinstance(value, str):
+        return any(item.strip() == resource_id for item in value.split(","))
+    return False
 
 
 @tools_bp.post("/resource/delete")
@@ -1527,18 +1559,30 @@ async def delete_tool_resource(request):
             if tool_resource.id in str(playbook.flow_json):
                 return response_ok({"message": f"当前资源已被剧本{playbook.playbook.name}使用，请仔细检查后再删除！"})
 
-    timeds = await Timed.filter(deleted=False, tenant_id=tenant_id).all()
+    timeds = await Timed.filter(deleted=False, tenant_id=tenant_id).all().prefetch_related("playbook")
 
     for timed in timeds:
         if timed.type == 0:
-            if timed.playbook_input and timed.playbook_input["flow_id"] in playbook_ids:
+            playbook_version = await PlaybookVersion.get_or_none(
+                playbook=timed.playbook,
+                version=timed.playbook_version,
+                deleted=False,
+                tenant_id=tenant_id,
+            )
+            if playbook_version and _contains_resource_id(playbook_version.flow_json, tool_resource.id):
                 return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
-        else:
-            if timed.action_input and timed.action_input["resource"] == tool_resource.id:
-                return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
+        elif timed.action_input and _contains_resource_id(timed.action_input.get("resource"), tool_resource.id):
+            return response_ok({"message": f"当前资源已被定时任务{timed.name}使用，请仔细检查后再删除！"})
+
+    # 检查巡检类别是否使用该资源
+    inspection_categories = await InspectionCategory.filter(deleted=False, tenant_id=tenant_id).all()
+
+    for category in inspection_categories:
+        if category.resource_ids and tool_resource.id in category.resource_ids:
+            return response_ok({"message": f"当前资源已被巡检类别{category.name}使用，请仔细检查后再删除！"})
 
     tool_resource.deleted = True
-    await tool_resource.save()
+    await tool_resource.save(update_fields=["deleted"])
 
     await caches.get("redis_chat").delete("resource_" + tool_resource.id)
 
@@ -2678,7 +2722,7 @@ async def get_health_check_result(request):
     data = {}
     if result:
         data = result.json
-        data["value"] = orjson.loads(data["value"])
+        data["value"] = result.json_value
     return response_ok(data)
 
 
@@ -2920,7 +2964,7 @@ async def sync_health_status(request):
             )
             if resource:
                 resource.status = state
-                await resource.save()
+                await resource.save(update_fields=["status"])
                 updated_count += 1
                 status_counts["available"] += 1
 
@@ -2940,7 +2984,7 @@ async def sync_health_status(request):
             )
             if resource:
                 resource.status = state
-                await resource.save()
+                await resource.save(update_fields=["status"])
                 updated_count += 1
                 status_counts["unavailable"] += 1
 
@@ -2960,7 +3004,7 @@ async def sync_health_status(request):
             )
             if resource:
                 resource.status = state
-                await resource.save()
+                await resource.save(update_fields=["status"])
                 updated_count += 1
                 status_counts["unknown"] += 1
 
@@ -2969,3 +3013,4 @@ async def sync_health_status(request):
         "updated_count": updated_count,
         "details": status_counts,
     })
+

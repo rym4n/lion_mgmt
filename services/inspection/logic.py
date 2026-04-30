@@ -587,8 +587,10 @@ async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List
                 if r_id in resource_map:
                     res = resource_map[r_id]
                     res_data = {}
-                    for key, value in orjson.loads(res.resources).items():
-                        res_data[key] = value.get("value")
+                    resources = res.resources_json
+                    if isinstance(resources, dict):
+                        for key, value in resources.items():
+                            res_data[key] = value.get("value") if isinstance(value, dict) else value
                     resources_dict[res.name] = res_data
         
         resources = orjson.dumps(resources_dict).decode('utf-8')
@@ -767,29 +769,39 @@ async def get_stats(
 # ==================== AI Parsing Operations ====================
 
 INSPECTION_PARSE_PROMPT = """
-你是一个专业的IT运维巡检专家。请分析用户提供的巡检描述，推荐以下信息：
+你是一个专业的IT运维巡检专家。请分析用户提供的巡检描述，推荐最合适的巡检配置。
 
-1. **巡检标准** (standard): 明确的成功标准或阈值
-2. **动作名称** (action_name): 从以下可用动作中选择最合适的一个
+## 任务要求
 
-可用动作及其输入定义：
+1. **巡检标准** (standard): 提取或推断明确的成功标准或阈值
+   - 应该是可量化、可验证的标准
+   - 例如："CPU使用率<80%"、"响应时间<1秒"、"服务状态为running"
+
+2. **动作名称** (action_name): 从可用动作列表中选择最合适的一个
+   - 必须从下面的可用动作中选择
+   - 选择最能满足巡检需求的动作
+
+## 可用动作列表
+
 {available_actions}
 
-用户描述：
+## 用户巡检描述
+
 {user_input}
 
-请以JSON格式返回，包含以上字段，不要使用markdown格式。如果某些信息无法确定，使用null。
-同时返回confidence字段(0-1)表示推荐置信度，以及suggestions数组提供配置建议。
+## 输出要求
 
-注意：直接返回原始JSON对象，不要包含任何解释或markdown代码块（例如 ```json）
+返回一个JSON格式的字符串，包含以下字段：
+- standard (string): 巡检标准，如果无法确定则为null
+- action_name (string): 选择的动作名称，必须从可用动作列表中选择
+- confidence (number): 推荐置信度，范围0-1，表示对推荐结果的信心程度
+- suggestions (array): 配置建议列表，提供额外的配置提示或注意事项
 
-返回格式示例：
-{{
-  "standard": "连接成功且响应时间<1秒",
-  "action_name": "check_connection",
-  "confidence": 0.95,
-  "suggestions": ["建议在资源配置中补充密码字段"]
-}}
+注意：
+1. 直接返回JSON格式的字符串，不要使用markdown代码块
+2. action_name必须是可用动作列表中的一个
+3. 如果用户描述不清晰，降低confidence值并在suggestions中说明
+4. suggestions应该提供实用的配置建议，而不是通用建议
 """
 
 
@@ -843,12 +855,13 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
         raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
     # 准备prompt参数
-    available_actions_str = orjson.dumps(available_actions)
+    available_actions_str = orjson.dumps(available_actions, option=orjson.OPT_INDENT_2).decode('utf-8')
 
     prompt = INSPECTION_PARSE_PROMPT.format(
         user_input=text,
         available_actions=available_actions_str
     )
+
     # 使用litellm调用AI服务
     model = RY_AI_MODEL
     api_base = RY_AI_API_BASE
@@ -858,16 +871,20 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
     if api_base and "/" not in model:
         model = f"openai/{model}"
 
-    # 构建acompletion参数
+    # 构建acompletion参数 - 针对GPT-5.4优化
     completion_params = {
         "model": model,
         "messages": [
-            {"role": "system", "content": "你是一个专业的IT运维巡检专家。"},
+            {"role": "system", "content": "你是一个专业的IT运维巡检专家，擅长分析巡检需求并提供精确的配置建议。"},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.3,
-        "response_format": {"type": "json_object"}
+        "response_format": {"type": "json_object"},
+        "max_tokens": 1000  # 限制输出长度
     }
+
+    # GPT-5系列模型只支持temperature=1，其他模型可以使用自定义temperature
+    if "gpt-5" not in model.lower():
+        completion_params["temperature"] = 0.2
 
     # 如果配置了API base URL，则添加到参数中
     if api_base:
@@ -877,42 +894,65 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
     if api_key:
         completion_params["api_key"] = api_key
 
-    try:
-        response = await acompletion(**completion_params)
+    # 重试逻辑
+    max_retries = 2
+    last_error = None
 
-        # 解析AI返回的JSON
-        ai_response = response.choices[0].message.content
-        parsed_data = orjson.loads(ai_response)
+    for attempt in range(max_retries):
+        try:
+            response = await acompletion(**completion_params)
 
-        # 验证action_name是否在可用列表中
-        action_names = [a["name"] for a in available_actions]
-        if parsed_data.get("action_name") not in action_names:
-            if "suggestions" not in parsed_data:
-                parsed_data["suggestions"] = []
-            parsed_data["suggestions"].append(
-                f"AI选择的动作不在可用列表中，已使用默认动作"
-            )
-            parsed_data["action_name"] = available_actions[0]["name"] if available_actions else None
-            parsed_data["confidence"] = max(0, parsed_data.get("confidence", 0) - 0.2)
+            # 解析AI返回的JSON
+            ai_response = response.choices[0].message.content
+            parsed_data = orjson.loads(ai_response)
 
-    except orjson.JSONDecodeError:
-        # AI返回格式错误，返回默认结构
-        parsed_data = {
-            "standard": None,
-            "action_name": available_actions[0] if available_actions else None,
-            "confidence": 0.0,
-            "suggestions": ["AI解析失败，请手动配置"]
-        }
-    except Exception as e:
-        # 其他错误
-        parsed_data = {
-            "standard": None,
-            "action_name": available_actions[0]["name"] if available_actions else None,
-            "confidence": 0.0,
-            "suggestions": [f"AI服务调用失败: {str(e)}"]
-        }
+            # 验证必需字段
+            required_fields = ["standard", "action_name", "confidence", "suggestions"]
+            for field in required_fields:
+                if field not in parsed_data:
+                    if field == "suggestions":
+                        parsed_data[field] = []
+                    elif field == "confidence":
+                        parsed_data[field] = 0.5
+                    else:
+                        parsed_data[field] = None
 
-    return parsed_data
+            # 验证action_name是否在可用列表中
+            action_names = [a["name"] for a in available_actions]
+            if parsed_data.get("action_name") not in action_names:
+                if not isinstance(parsed_data.get("suggestions"), list):
+                    parsed_data["suggestions"] = []
+                parsed_data["suggestions"].append(
+                    f"AI推荐的动作 '{parsed_data.get('action_name')}' 不在可用列表中，已自动选择默认动作"
+                )
+                parsed_data["action_name"] = available_actions[0]["name"] if available_actions else None
+                parsed_data["confidence"] = max(0, float(parsed_data.get("confidence", 0)) - 0.3)
+
+            # 验证confidence范围
+            if isinstance(parsed_data.get("confidence"), (int, float)):
+                parsed_data["confidence"] = max(0.0, min(1.0, float(parsed_data["confidence"])))
+            else:
+                parsed_data["confidence"] = 0.5
+
+            # 成功解析，返回结果
+            return parsed_data
+
+        except orjson.JSONDecodeError as e:
+            last_error = f"JSON解析失败: {str(e)}"
+            if attempt < max_retries - 1:
+                continue  # 重试
+        except Exception as e:
+            last_error = f"AI服务调用失败: {str(e)}"
+            if attempt < max_retries - 1:
+                continue  # 重试
+
+    # 所有重试都失败，返回默认结构
+    return {
+        "standard": None,
+        "action_name": available_actions[0]["name"] if available_actions else None,
+        "confidence": 0.0,
+        "suggestions": [last_error or "AI解析失败，请手动配置"]
+    }
 
 
 # ==================== AI Judgment Operations ====================
@@ -940,26 +980,39 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
     if not target:
         raise CustomError(ErrorCode.NOT_FOUND)
 
-    # 准备 prompt
+    # 格式化结果数据以便AI更好理解
+    result_str = orjson.dumps(result_data, option=orjson.OPT_INDENT_2).decode('utf-8')
+
+    # 准备 prompt - 针对GPT-5.4优化
     prompt = f"""
-你是一个专业的IT运维巡检专家。请根据以下信息判断巡检结果是否符合标准：
+你是一个专业的IT运维巡检专家。请根据以下信息判断巡检结果是否符合标准。
 
-巡检标准：{target.standard}
+## 巡检标准
 
-巡检结果：{result_data}
+{target.standard}
 
-请判断巡检结果是否符合标准，并严格返回JSON格式不要使用markdown格式：
-{{
-  "passed": true/false,
-  "reason": "判断理由，说明为什么通过或不通过",
-  "suggestions": ["改进建议1", "改进建议2"]
-}}
+## 巡检结果
 
-注意：
-- passed 为 true 表示符合标准，false 表示不符合标准
-- 直接返回原始JSON对象，不要包含任何解释或markdown代码块（例如 ```json）
-- reason 要简洁明了，说明判断依据
-- suggestions 只在不通过时提供改进建议，通过时可以为空数组
+{result_str}
+
+## 任务要求
+
+请仔细分析巡检结果，判断是否符合上述标准，并返回JSON格式的判断结果。
+
+判断时需要考虑：
+1. 结果数据中的关键指标是否满足标准要求
+2. 是否存在错误或异常信息
+3. 数值型指标是否在合理范围内
+4. 状态型指标是否符合预期
+
+## 输出要求
+
+返回一个JSON对象，包含以下字段：
+- passed (boolean): true表示符合标准，false表示不符合标准
+- reason (string): 判断理由，简洁说明为什么通过或不通过，引用具体的数据点
+- suggestions (array): 改进建议列表，如果通过则为空数组，如果不通过则提供具体的改进建议
+
+注意：直接返回JSON对象，不要使用markdown代码块。
 """
 
     # 使用litellm调用AI服务
@@ -971,48 +1024,69 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
     if api_base and "/" not in model:
         model = f"openai/{model}"
 
-    # 构建acompletion参数
+    # 构建acompletion参数 - 针对GPT-5.4优化
     completion_params = {
         "model": model,
         "messages": [
-            {"role": "system", "content": "你是一个专业的IT运维巡检专家。"},
+            {"role": "system", "content": "你是一个专业的IT运维巡检专家，擅长分析巡检结果并做出准确的判断。你的判断应该基于数据和标准，而不是主观臆断。"},
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.3,
-        "response_format": {"type": "json_object"}
+        "response_format": {"type": "json_object"},
+        "max_tokens": 800
     }
+
+    # GPT-5系列模型只支持temperature=1，其他模型可以使用自定义temperature
+    if "gpt-5" not in model.lower():
+        completion_params["temperature"] = 0.1
 
     if api_base:
         completion_params["api_base"] = api_base
     if api_key:
         completion_params["api_key"] = api_key
 
-    try:
-        response = await acompletion(**completion_params)
-        ai_response = response.choices[0].message.content
-        parsed_data = orjson.loads(ai_response)
-        # 确保返回的数据包含必需字段
-        if "passed" not in parsed_data:
-            parsed_data["passed"] = False
-        if "reason" not in parsed_data:
-            parsed_data["reason"] = "AI判断失败"
-        if "suggestions" not in parsed_data:
-            parsed_data["suggestions"] = []
+    # 重试逻辑
+    max_retries = 2
+    last_error = None
 
-    except orjson.JSONDecodeError:
-        parsed_data = {
-            "passed": False,
-            "reason": "AI返回格式错误",
-            "suggestions": ["请检查AI服务配置"]
-        }
-    except Exception as e:
-        parsed_data = {
-            "passed": False,
-            "reason": f"AI服务调用失败: {str(e)}",
-            "suggestions": ["请检查AI服务配置"]
-        }
+    for attempt in range(max_retries):
+        try:
+            response = await acompletion(**completion_params)
+            ai_response = response.choices[0].message.content
+            parsed_data = orjson.loads(ai_response)
 
-    return parsed_data
+            # 验证和规范化必需字段
+            if "passed" not in parsed_data:
+                parsed_data["passed"] = False
+            else:
+                # 确保passed是布尔值
+                parsed_data["passed"] = bool(parsed_data["passed"])
+
+            if "reason" not in parsed_data or not parsed_data["reason"]:
+                parsed_data["reason"] = "AI未提供判断理由"
+
+            if "suggestions" not in parsed_data:
+                parsed_data["suggestions"] = []
+            elif not isinstance(parsed_data["suggestions"], list):
+                parsed_data["suggestions"] = []
+
+            # 成功解析，返回结果
+            return parsed_data
+
+        except orjson.JSONDecodeError as e:
+            last_error = f"JSON解析失败: {str(e)}"
+            if attempt < max_retries - 1:
+                continue  # 重试
+        except Exception as e:
+            last_error = f"AI服务调用失败: {str(e)}"
+            if attempt < max_retries - 1:
+                continue  # 重试
+
+    # 所有重试都失败，返回保守的失败结果
+    return {
+        "passed": False,
+        "reason": last_error or "AI判断失败，无法确定巡检结果",
+        "suggestions": ["请检查AI服务配置", "建议人工复核巡检结果"]
+    }
 
 
 # ==================== Import/Export Operations ====================

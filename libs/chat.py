@@ -15,6 +15,7 @@ from tortoise.expressions import Q
 from tortoise.functions import Max
 
 from libs.kafka import aconsume, aproduce
+from libs.nanobot import NanobotClient, RedisStreamingHook
 from models import (
     Approvement,
     Events,
@@ -30,6 +31,7 @@ from models.warroom import Message, MessageAccount, Room
 from settings import (
     AUTHENTICATION_SESSION_EXPIRATION,
     CACHE,
+    NANOBOT_WORKSPACE_BASE,
     RUNLOG_TOPIC,
     RY_SERVICE_URL,
     TZ,
@@ -754,10 +756,10 @@ class ChatManager:
         room = await Room.filter(id=current_room_id, tenant_id=tenant_id).get()
         if not room:
             raise Exception("作战室不存在")
-    
+
         content = data.get("content", "")
         image_content = data.get("image_content", "")
-    
+
         if not content and not image_content:
             raise Exception("消息不能为空")
 
@@ -768,11 +770,11 @@ class ChatManager:
             room=room,
             content=content,
             image_content=image_content,
-            receiver=user, # 群聊消息设为发送者自己作为占位符
+            receiver=user,  # 群聊消息设为发送者自己作为占位符
             tenant_id=tenant_id
         )
-    
-        # 广播
+
+        # 广播问题消息到前端
         message_data = {
             "type": "ai-question",
             "message_id": str(message.id),
@@ -785,8 +787,80 @@ class ChatManager:
             "room_id": current_room_id,
             "tenant_id": tenant_id,
         }
-    
+
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+
+        # 使用 Nanobot SDK 调用 AI 服务
+        try:
+            logger.info(f"开始调用 Nanobot，tenant_id={tenant_id}, room_id={current_room_id}")
+            client = NanobotClient(tenant_id=tenant_id, workspace_base=NANOBOT_WORKSPACE_BASE)
+
+            # 创建 Redis 流式 Hook
+            hook = RedisStreamingHook(
+                room_id=current_room_id,
+                receiver_id=user.id,
+                tenant_id=tenant_id,
+                redis_pub=self.msg_pub
+            )
+            logger.info(f"RedisStreamingHook 已创建")
+
+            # 构建完整消息：将系统指令、消息上下文和用户消息合并
+            full_message = f"""<system_instruction>
+【身份】你是 Lion Management 平台的 AI 助手。
+
+【强制规则 - 必须严格遵守】
+1. 你必须立即调用 lion-mgmt skill 来处理，严禁仅用文字回复。
+
+【重要提醒】
+- 不要问用户"是否需要我调用 skill"，直接调用！
+- 不要说"我可以帮你..."，直接做！
+- 不要只用文字描述，必须调用 skill 获取实际数据！
+- 如果 skill 调用失败，告知用户具体的错误信息。
+</system_instruction>
+
+<message_context>
+{orjson.dumps(message_data).decode()}
+</message_context>
+
+<user_message>
+{content}
+</user_message>"""
+
+            # 调用 nanobot（异步执行）
+            # 使用 room_id 作为 session_key 以保持会话上下文
+            logger.info(f"准备调用 client.ask，session_key=room:{current_room_id}")
+            logger.info(f"消息内容长度: {len(full_message)} 字符")
+
+            result = await client.ask(
+                message=full_message,
+                streaming=True,
+                session_key=f"room:{current_room_id}",
+                hooks=[hook]
+            )
+
+            logger.info(f"Nanobot 调用完成，返回结果长度: {len(result) if result else 0} 字符")
+            if not result or len(result.strip()) == 0:
+                logger.warning(f"Nanobot 返回了空结果！tenant_id={tenant_id}, room_id={current_room_id}")
+        except Exception as e:
+            logger.error(f"Nanobot 调用失败: {e} | {traceback.format_exc()}")
+            # 发送错误消息到前端
+            error_data = {
+                "type": "ai-reply-delta",
+                "content": f"AI 服务暂时不可用: {str(e)}",
+                "room_id": current_room_id,
+                "receiver_id": user.id,
+                "tenant_id": tenant_id,
+            }
+            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(error_data).decode())
+            # 发送结束消息
+            end_data = {
+                "type": "ai-reply-end",
+                "content": "",
+                "room_id": current_room_id,
+                "receiver_id": user.id,
+                "tenant_id": tenant_id,
+            }
+            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(end_data).decode())
 
     async def _handle_private_message(self, user: Account, data: dict, tenant_id):
         """处理发送私聊消息"""

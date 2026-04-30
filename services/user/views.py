@@ -1604,8 +1604,7 @@ async def oauth2_callback(request):
                 await account.roles.add(*roles)
             else:
                 raise CustomError(ErrorCode.DEFAULT_ROLE_NOT_FOUND)
-        else:
-            await account.fetch_related("roles")
+        await account.fetch_related("roles")
 
     aioe_token = token_encode(
         account.id,

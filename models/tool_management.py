@@ -4,6 +4,7 @@ from tortoise import fields
 
 from libs.utils import strip_timezone_to_seconds
 from models import BaseModel, EncryptedCharField
+from models.base import parse_encrypted_json
 
 
 class ToolAction(BaseModel):
@@ -129,19 +130,24 @@ class ToolResources(BaseModel):
         raise NotImplementedError
 
     @property
+    def resources_json(self) -> dict:
+        return parse_encrypted_json(self.resources, {}) or {}
+
+    @property
     def json(self) -> dict:
-        if self.resources:
-            self.resources = orjson.loads(self.resources)
-            for value in self.resources.values():
-                if value["data_type"] == "password":
+        resources_data = self.resources_json.copy()
+        if resources_data:
+            for value in resources_data.values():
+                if isinstance(value, dict) and value.get("data_type") == "password":
                     value["value"] = "******"
+
         return {
             "id": self.id,
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
             "tool_name": self.tool_name,
             "name": self.name,
-            "resources": self.resources,
+            "resources": resources_data,
             "creator": self.creator,
             "updater": self.updater,
             "engine": self.engine,

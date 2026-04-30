@@ -168,3 +168,4 @@ class ErrorCode(BaseErrorCode):
     CANNOT_DELETE_DEFAULT_CONFIG = ErrorData(4133, "默认配置禁止删除")
 
     FILE_TOO_LARGE = ErrorData(4134, "文件过大，超过限制大小")
+    NOT_FOUND_TO_AI = ErrorData(4135, "缺少AI相关功能权限，请联系管理员")

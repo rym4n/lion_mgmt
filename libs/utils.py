@@ -1,6 +1,7 @@
 # coding=utf-8
 import asyncio
 import base64
+import binascii
 import datetime
 import ipaddress
 import random
@@ -270,10 +271,11 @@ def encrypt_aes256_gcm(plaintext: Optional[str | bytes]) -> str:
 def decrypt_aes256_gcm(encrypted_data: str) -> str:
     """AES-GCM解密，输入为字典格式"""
     try:
-        data = base64.b64decode(encrypted_data.encode())
-        if b"....." not in data:
-            return data.decode()
-        ciphertext, nonce, salt, tag = data.split(b".....")
+        data = base64.b64decode(encrypted_data.encode(), validate=True)
+        parts = data.split(b".....")
+        if len(parts) != 4:
+            raise ValueError("解密失败: 数据格式错误")
+        ciphertext, nonce, salt, tag = parts
 
         key = derive_key(RY_RES_KEY, salt)
         # 创建解密器
@@ -285,7 +287,7 @@ def decrypt_aes256_gcm(encrypted_data: str) -> str:
 
         return decrypted.decode()
 
-    except (KeyError, InvalidTag, UnicodeDecodeError) as e:
+    except (binascii.Error, ValueError, KeyError, InvalidTag, UnicodeDecodeError) as e:
         # 处理可能的错误：数据篡改、密码错误或格式错误
         raise ValueError("解密失败: 密码错误或数据损坏") from e
 
