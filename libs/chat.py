@@ -792,6 +792,7 @@ class ChatManager:
 
         # 使用 Nanobot SDK 调用 AI 服务
         try:
+            logger.info(f"开始调用 Nanobot，tenant_id={tenant_id}, room_id={current_room_id}")
             client = NanobotClient(tenant_id=tenant_id, workspace_base=NANOBOT_WORKSPACE_BASE)
 
             # 创建 Redis 流式 Hook
@@ -801,23 +802,55 @@ class ChatManager:
                 tenant_id=tenant_id,
                 redis_pub=self.msg_pub
             )
+            logger.info(f"RedisStreamingHook 已创建")
 
-            # 构建完整消息：将系统指令和用户消息合并，但保持清晰区分
+            # 构建完整消息：将系统指令、消息上下文和用户消息合并
             full_message = f"""<system_instruction>
-你是 Lion Management 平台的 AI 助手。在处理用户请求时，请遵循以下优先级：
+【身份】你是 Lion Management 平台的 AI 助手。
 
-1. **优先使用 lion-mgmt skill**：对于运维编排、剧本执行、事件处理、工作流管理等相关操作，优先调用 lion-mgmt skill 中的功能。
-2. **skill 能力范围**：
-   - 剧本管理：创建、查询、执行剧本
-   - 事件处理：查询事件、处理告警
-   - 工作流编排：查看工作流状态、执行任务
-   - 资源管理：查询工具、动作、资源配置
-   - 作战室协作：查询消息、管理房间
-3. **调用方式**：当用户询问"查询剧本"、"执行任务"、"查看事件"等请求时，直接调用对应的 lion-mgmt skill 功能，而不是仅提供文字说明。
-4. **友好交互**：如果用户请求不明确，主动询问具体需求，然后调用相应的 skill 完成操作。
+【强制规则 - 必须严格遵守】
+1. 对于任何与运维编排、剧本、事件、工作流、资源管理相关的请求，你必须立即调用 lion-mgmt skill 来处理，严禁仅用文字回复。
+2. 即使用户的请求看起来很简单（如"查询剧本"、"有哪些事件"、"帮我看看"），也必须调用相应的 skill 功能。
+3. 如果你不确定是否需要调用 skill，默认调用 skill。
+4. 只有在以下情况下才允许不调用 skill：
+   - 用户明确表示"不要执行，只需要解释"
+   - 用户的请求与 Lion Management 平台功能完全无关（如闲聊、天气查询等）
 
-请始终记住：能用 skill 完成的操作，就不要只用文字回复。
+【lion-mgmt skill 必须处理的请求类型】
+- 任何包含"查询"、"查看"、"列出"、"显示"、"有哪些"的请求 → 必须调用查询类 skill
+- 任何包含"创建"、"新建"、"添加"的请求 → 必须调用创建类 skill
+- 任何包含"执行"、"运行"、"启动"的请求 → 必须调用执行类 skill
+- 任何包含"修改"、"更新"、"编辑"的请求 → 必须调用修改类 skill
+- 任何包含"删除"、"移除"的请求 → 必须调用删除类 skill
+- 任何关于剧本、事件、工作流、资源、作战室的问题 → 必须调用对应的 skill
+
+【调用示例 - 必须遵循】
+用户："查询所有剧本" → 立即调用 lion-mgmt skill 的查询剧本功能
+用户："有哪些待处理的事件" → 立即调用 lion-mgmt skill 的查询事件功能
+用户："执行某个任务" → 立即调用 lion-mgmt skill 的执行功能
+用户："帮我看看最近的事件" → 立即调用 lion-mgmt skill 的查询事件功能
+用户："创建一个新剧本" → 立即调用 lion-mgmt skill 的创建剧本功能
+
+【错误示例 - 严禁这样做】
+❌ 用户："查询剧本" → 回复："好的，我可以帮你查询剧本..."（错误！必须直接调用 skill）
+❌ 用户："有哪些事件" → 回复："让我为你查询一下..."（错误！必须直接调用 skill）
+❌ 只用文字描述而不调用 skill（错误！）
+
+【正确做法】
+✅ 用户："查询剧本" → 直接调用 lion-mgmt skill，获取结果后展示给用户
+✅ 用户："有哪些事件" → 直接调用 lion-mgmt skill，获取结果后展示给用户
+
+【重要提醒】
+- 不要问用户"是否需要我调用 skill"，直接调用！
+- 不要说"我可以帮你..."，直接做！
+- 不要只用文字描述，必须调用 skill 获取实际数据！
+- 如果 skill 调用失败，告知用户具体的错误信息。
+- 第一步就是调用 skill，不要先回复文字再调用。
 </system_instruction>
+
+<message_context>
+{orjson.dumps(message_data).decode()}
+</message_context>
 
 <user_message>
 {content}
@@ -825,12 +858,19 @@ class ChatManager:
 
             # 调用 nanobot（异步执行）
             # 使用 room_id 作为 session_key 以保持会话上下文
-            await client.ask(
+            logger.info(f"准备调用 client.ask，session_key=room:{current_room_id}")
+            logger.info(f"消息内容长度: {len(full_message)} 字符")
+
+            result = await client.ask(
                 message=full_message,
                 streaming=True,
                 session_key=f"room:{current_room_id}",
                 hooks=[hook]
             )
+
+            logger.info(f"Nanobot 调用完成，返回结果长度: {len(result) if result else 0} 字符")
+            if not result or len(result.strip()) == 0:
+                logger.warning(f"Nanobot 返回了空结果！tenant_id={tenant_id}, room_id={current_room_id}")
         except Exception as e:
             logger.error(f"Nanobot 调用失败: {e} | {traceback.format_exc()}")
             # 发送错误消息到前端
