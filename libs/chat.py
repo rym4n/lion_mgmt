@@ -241,16 +241,16 @@ async def creat_ai_message(msg, redis):
     content = msg["content"]
     room_id = msg["room_id"]
     tenant_id = msg['tenant_id']
-    # 流式场景下 type 可能是 ai-reply-end，存入数据库时设为 ai
+    # 流式场景下 type 可能是 ai-reply-end，存入数据库时设为 ai-reply-delta
     msg_type = "ai-reply-delta" if msg.get("type") == "ai-reply-end" else msg.get("type")
 
-    # 构造一个唯一 key（流式场景下使用 room_id 和 receiver_id，不再用 content hash）
-    key = f"{room_id}:{user.id}"
-    lock_key = f"create_ai_message_lock:{key}"
+    # 使用时间戳作为唯一标识，避免重复创建
+    timestamp = msg.get("timestamp", int(time.time() * 1000))
+    lock_key = f"create_ai_message_lock:{room_id}:{user.id}:{timestamp}"
 
-    # 尝试获取锁（5 秒自动过期）
+    # 尝试获取锁（10 秒自动过期，给数据库操作留足时间）
     try:
-        got_lock = await redis.add(lock_key, "1", ttl=5)
+        got_lock = await redis.add(lock_key, "1", ttl=10)
     except ValueError:
         got_lock = False  # key 已存在，没拿到锁
 
@@ -278,7 +278,12 @@ async def creat_ai_message(msg, redis):
             ).order_by("-ctime").first()
             if ai_msg:
                 break
-            await asyncio.sleep(0.01 * (i + 1))  # 指数轮询避免数据库压力过大
+            await asyncio.sleep(0.02 * (i + 1))  # 指数轮询避免数据库压力过大
+
+        # 如果还是没找到，说明可能是主从延迟，记录警告但不创建新消息
+        if not ai_msg:
+            logger.warning(f"未找到已创建的 AI 消息，可能是数据库延迟。room_id={room_id}, user_id={user.id}")
+            return None
 
     message_data = {
         "type": msg_type,
@@ -392,6 +397,7 @@ class ChatManager:
                                 "receiver_id": msg.get("receiver_id"),
                                 "tenant_id": msg.get("tenant_id"),
                                 "type": "ai-reply-end",  # 用于 creat_ai_message 识别
+                                "timestamp": int(time.time() * 1000),  # 添加时间戳作为唯一标识
                             }
                         self.ai_stream_buffer[buffer_key]["content"] += msg.get("content", "")
                         stream_data = {
@@ -406,8 +412,14 @@ class ChatManager:
                         buffer_key = f"{msg.get('room_id')}:{msg.get('receiver_id')}"
                         if buffer_key in self.ai_stream_buffer:
                             buffer_data = self.ai_stream_buffer.pop(buffer_key)
-                            await creat_ai_message(buffer_data, self.redis)
+                            # 只有当内容不为空时才创建消息，避免空消息
+                            if buffer_data.get("content", "").strip():
+                                await creat_ai_message(buffer_data, self.redis)
+                            else:
+                                logger.warning(f"收到空的 AI 回复，跳过创建消息。room_id={buffer_data.get('room_id')}")
                         else:
+                            # buffer_key 不存在说明可能是重复的 ai-reply-end 消息，跳过
+                            logger.debug(f"收到重复的 ai-reply-end 消息，跳过。room_id={msg.get('room_id')}")
                             continue
                     room_id = msg.get("room_id")
                     for key, values in self.active_connections.items():
@@ -791,6 +803,7 @@ class ChatManager:
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
         # 使用 Nanobot SDK 调用 AI 服务
+        hook = None
         try:
             logger.info(f"开始调用 Nanobot，tenant_id={tenant_id}, room_id={current_room_id}")
             client = NanobotClient(tenant_id=tenant_id, workspace_base=NANOBOT_WORKSPACE_BASE)
@@ -852,15 +865,21 @@ class ChatManager:
                 "tenant_id": tenant_id,
             }
             await self.msg_pub.publish(WR_TOPIC, orjson.dumps(error_data).decode())
-            # 发送结束消息
-            end_data = {
-                "type": "ai-reply-end",
-                "content": "",
-                "room_id": current_room_id,
-                "receiver_id": user.id,
-                "tenant_id": tenant_id,
-            }
-            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(end_data).decode())
+            # 手动触发 Hook 的 on_stream_end，确保只发送一次 ai-reply-end
+            if hook:
+                try:
+                    await hook.send_end_message()
+                except Exception as hook_error:
+                    logger.error(f"Hook 发送结束消息失败: {hook_error}")
+                    # 如果 Hook 失败，手动发送结束消息
+                    end_data = {
+                        "type": "ai-reply-end",
+                        "content": "",
+                        "room_id": current_room_id,
+                        "receiver_id": user.id,
+                        "tenant_id": tenant_id,
+                    }
+                    await self.msg_pub.publish(WR_TOPIC, orjson.dumps(end_data).decode())
 
     async def _handle_private_message(self, user: Account, data: dict, tenant_id):
         """处理发送私聊消息"""

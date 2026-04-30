@@ -50,6 +50,7 @@ class RedisStreamingHook(AgentHook):
         self.receiver_id = receiver_id
         self.tenant_id = tenant_id
         self.redis_pub = redis_pub
+        self._end_sent = False  # 防止重复发送结束消息
 
     def wants_streaming(self) -> bool:
         return True
@@ -67,8 +68,12 @@ class RedisStreamingHook(AgentHook):
         }
         await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
-    async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
-        """流式输出结束时发布结束消息"""
+    async def send_end_message(self) -> None:
+        """发送结束消息（可被外部调用）"""
+        if self._end_sent:
+            return  # 避免重复发送
+
+        self._end_sent = True
         from settings import WR_TOPIC
 
         message_data = {
@@ -79,6 +84,10 @@ class RedisStreamingHook(AgentHook):
             "tenant_id": self.tenant_id,
         }
         await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+
+    async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+        """流式输出结束时发布结束消息"""
+        await self.send_end_message()
 
 
 class NanobotClient:
