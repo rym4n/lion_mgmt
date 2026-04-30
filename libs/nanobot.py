@@ -17,6 +17,8 @@ import orjson
 from nanobot import Nanobot
 from nanobot.agent import AgentHook, AgentHookContext
 
+from settings import NANOBOT_CONFIG_PATH
+
 
 class StreamingHook(AgentHook):
     """流式输出Hook"""
@@ -95,6 +97,9 @@ class NanobotClient:
         # 懒加载：确保 workspace 目录存在
         os.makedirs(self.workspace, exist_ok=True)
 
+        # 使用全局配置的配置文件路径
+        self.config_path = Path(NANOBOT_CONFIG_PATH)
+
     async def ask(
         self,
         message: str,
@@ -115,7 +120,7 @@ class NanobotClient:
         Returns:
             回答内容
         """
-        bot = Nanobot.from_config(workspace=self.workspace)
+        bot = Nanobot.from_config(config_path=self.config_path, workspace=self.workspace)
 
         # 处理 hooks
         if hooks is None and streaming:
@@ -137,7 +142,6 @@ async def ask(
     streaming: bool = True,
     session_key: str = "default",
     workspace: str | None = None,
-    config_path: str | None = None,
 ) -> str:
     """
     快速提问（不考虑租户隔离）
@@ -147,12 +151,11 @@ async def ask(
         streaming: 是否流式输出
         session_key: 会话标识
         workspace: 工作空间路径
-        config_path: 配置文件路径
 
     Returns:
         回答内容
     """
-    bot = Nanobot.from_config(config_path=config_path, workspace=workspace)
+    bot = Nanobot.from_config(config_path=NANOBOT_CONFIG_PATH, workspace=workspace)
     hooks = [StreamingHook()] if streaming else None
     result = await bot.run(message, session_key=session_key, hooks=hooks)
     return result.content
