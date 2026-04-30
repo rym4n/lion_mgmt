@@ -802,10 +802,31 @@ class ChatManager:
                 redis_pub=self.msg_pub
             )
 
+            # 构建完整消息：将系统指令和用户消息合并，但保持清晰区分
+            full_message = f"""<system_instruction>
+你是 Lion Management 平台的 AI 助手。在处理用户请求时，请遵循以下优先级：
+
+1. **优先使用 lion-mgmt skill**：对于运维编排、剧本执行、事件处理、工作流管理等相关操作，优先调用 lion-mgmt skill 中的功能。
+2. **skill 能力范围**：
+   - 剧本管理：创建、查询、执行剧本
+   - 事件处理：查询事件、处理告警
+   - 工作流编排：查看工作流状态、执行任务
+   - 资源管理：查询工具、动作、资源配置
+   - 作战室协作：查询消息、管理房间
+3. **调用方式**：当用户询问"查询剧本"、"执行任务"、"查看事件"等请求时，直接调用对应的 lion-mgmt skill 功能，而不是仅提供文字说明。
+4. **友好交互**：如果用户请求不明确，主动询问具体需求，然后调用相应的 skill 完成操作。
+
+请始终记住：能用 skill 完成的操作，就不要只用文字回复。
+</system_instruction>
+
+<user_message>
+{content}
+</user_message>"""
+
             # 调用 nanobot（异步执行）
             # 使用 room_id 作为 session_key 以保持会话上下文
             await client.ask(
-                message=content,
+                message=full_message,
                 streaming=True,
                 session_key=f"room:{current_room_id}",
                 hooks=[hook]
