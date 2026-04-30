@@ -25,7 +25,7 @@ metadata: {"nanobot":{"emoji":"🦁"}}
 
 ```
 0. 检查数据文件时效性，如超过 24 小时则更新
-1. 登录获取 cookie
+1. 登录获取 token
 2. 读取 3 个本地 JSON 文件
 3. 按优先级匹配：playbook → action → openapi → AI 推理
 4. 如果匹配到 action，查询资源 ID（使用资源 ID，不是资源名称）
@@ -41,7 +41,7 @@ metadata: {"nanobot":{"emoji":"🦁"}}
 每次调用时，按顺序勾选：
 
 - [ ] **Step 0**: 检查数据文件时效性（如超过 24 小时则更新）
-- [ ] **Step 1**: POST `/user/login` 获取 `aioe-auth` cookie
+- [ ] **Step 1**: 调用 `/user/local-auth` 获取新的 token（⚠️ 每次必须执行，不要使用缓存的 token）
 - [ ] **Step 2**: 读取 `nanobot/skills/lion-mgmt/scripts/playbook.json`
 - [ ] **Step 3**: 读取 `nanobot/skills/lion-mgmt/scripts/actions.json`
 - [ ] **Step 4**: 读取 `nanobot/skills/lion-mgmt/scripts/openapi.json`
@@ -258,6 +258,16 @@ else:
 - ❌ 不要假设文件是最新的
 
 ## 🔐 Step 1: 登录
+
+**⚠️ 强制要求**: 每次执行 skill 时，必须先调用登录接口获取新的 token。
+
+**禁止行为**:
+- ❌ 不要使用缓存的 token
+- ❌ 不要使用历史记忆中的 token
+- ❌ 不要假设 token 仍然有效
+- ✅ 必须每次都重新调用登录接口获取新的 token
+
+**原因**: Token 可能会过期，使用过期的 token 会导致请求失败（401 Unauthorized）。
 
 ```python
 import os
@@ -511,7 +521,12 @@ Content-Type: application/json
 ## ⚠️ 关键规则
 
 1. **禁止跳过步骤**: 即使记忆中有历史记录，也必须重新执行所有步骤
-2. **禁止假设**: 不能假设 cookie 有效、文件未变
+2. **禁止假设 token 有效**（重要）: 每次执行 skill 时，必须先调用登录接口获取新的 token
+   - ✅ 每次都重新调用 `/user/local-auth` 获取 token
+   - ❌ 不要使用缓存的 token 或历史记忆中的 token
+   - ❌ 不要假设 token 仍然有效
+   - ❌ 不要假设文件未变
+   - Token 可能会过期，使用过期的 token 会导致 401 错误
 3. **严格顺序**: 必须先尝试 playbook，失败后才尝试 action，再失败才尝试 openapi
 4. **路径必须完整**: 使用 `nanobot/skills/lion-mgmt/scripts/` 前缀
 5. **作战室 ID 获取**（重要）:
