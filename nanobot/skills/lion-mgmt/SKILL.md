@@ -66,29 +66,39 @@ metadata: {"nanobot":{"emoji":"🦁"}}
 
 ### 检查文件时间的方法
 
-使用 bash 命令检查文件修改时间：
+使用 Python 检查文件修改时间：
 
-```bash
+```python
+import time
+from pathlib import Path
+
 # 获取文件的修改时间戳（秒）
-stat -c %Y nanobot/skills/lion-mgmt/scripts/playbook.json
+playbook_file = Path("nanobot/skills/lion-mgmt/scripts/playbook.json")
+if playbook_file.exists():
+    file_time = playbook_file.stat().st_mtime
+    print(f"文件修改时间戳: {file_time}")
+else:
+    print("文件不存在")
 
 # 获取当前时间戳（秒）
-date +%s
+current_time = time.time()
+print(f"当前时间戳: {current_time}")
 
 # 计算时间差
-current_time=$(date +%s)
-file_time=$(stat -c %Y nanobot/skills/lion-mgmt/scripts/playbook.json)
-time_diff=$((current_time - file_time))
+if playbook_file.exists():
+    file_time = playbook_file.stat().st_mtime
+    time_diff = current_time - file_time
 
-# 判断是否超过 24 小时（86400 秒）
-if [ $time_diff -gt 86400 ]; then
-  echo "需要更新文件"
-else
-  echo "文件仍然有效"
-fi
+    # 判断是否超过 24 小时（86400 秒）
+    if time_diff > 86400:
+        print("需要更新文件")
+    else:
+        print("文件仍然有效")
+else:
+    print("文件不存在，需要创建")
 ```
 
-**注意**: Windows 环境下使用 Git Bash，stat 命令语法相同。
+**注意**: Python 的 `pathlib.Path` 和 `time` 模块在所有平台（Windows/Linux/macOS）上都可以正常工作。
 
 ### 更新文件的步骤
 
@@ -96,10 +106,17 @@ fi
 
 #### 1. 登录获取 token
 
-```bash
-curl -X POST "http://127.0.0.1:8000/user/local-auth" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin"}'
+```python
+import requests
+
+response = requests.post(
+    "http://127.0.0.1:8000/user/local-auth",
+    headers={"Content-Type": "application/json"},
+    json={"username": "admin"}
+)
+data = response.json()
+token = data["data"]["token"]
+print(f"Token: {token}")
 ```
 
 **响应示例**:
@@ -112,67 +129,115 @@ curl -X POST "http://127.0.0.1:8000/user/local-auth" \
 }
 ```
 
-**提取 token**: 从响应的 `data.token` 字段中提取，后续请求使用 aioe-auth: `<token>`
+**提取 token**: 从响应的 `data.token` 字段中提取，后续所有请求必须在 HTTP 请求头中添加 `aioe-auth: <token>`（将 `<token>` 替换为实际的 token 值）
 
 #### 2. 更新 playbook.json
 
-```bash
-curl -X POST "http://127.0.0.1:8000/playbook/published-versions" \
-  -H "aioe-auth: <token>" \
-  -o nanobot/skills/lion-mgmt/scripts/playbook.json
+```python
+import requests
+import json
+
+token = "<token>"  # 从登录获取的 token
+
+response = requests.post(
+    "http://127.0.0.1:8000/playbook/published-versions",
+    headers={"aioe-auth": token}
+)
+
+with open("nanobot/skills/lion-mgmt/scripts/playbook.json", "w", encoding="utf-8") as f:
+    json.dump(response.json(), f, indent=2, ensure_ascii=False)
 ```
 
 #### 3. 更新 actions.json
 
-```bash
-curl -X POST "http://127.0.0.1:8000/tools/actions/available" \
-  -H "aioe-auth: <token>" \
-  -o nanobot/skills/lion-mgmt/scripts/actions.json
+```python
+import requests
+import json
+
+token = "<token>"  # 从登录获取的 token
+
+response = requests.post(
+    "http://127.0.0.1:8000/tools/actions/available",
+    headers={"aioe-auth": token}
+)
+
+with open("nanobot/skills/lion-mgmt/scripts/actions.json", "w", encoding="utf-8") as f:
+    json.dump(response.json(), f, indent=2, ensure_ascii=False)
 ```
 
 #### 4. 更新 openapi.json
 
-```bash
-curl -X GET "http://127.0.0.1:8000/docs/openapi.json" \
-  -H "aioe-auth: <token>" \
-  -o nanobot/skills/lion-mgmt/scripts/openapi.json
+```python
+import requests
+import json
+
+token = "<token>"  # 从登录获取的 token
+
+response = requests.get(
+    "http://127.0.0.1:8000/docs/openapi.json",
+    headers={"aioe-auth": token}
+)
+
+with open("nanobot/skills/lion-mgmt/scripts/openapi.json", "w", encoding="utf-8") as f:
+    json.dump(response.json(), f, indent=2, ensure_ascii=False)
 ```
 
 ### 完整示例
 
-```bash
+```python
+import os
+import time
+import requests
+import json
+from pathlib import Path
+
 # 1. 检查文件时间
-current_time=$(date +%s)
-file_time=$(stat -c %Y nanobot/skills/lion-mgmt/scripts/playbook.json 2>/dev/null || echo 0)
-time_diff=$((current_time - file_time))
+playbook_file = Path("nanobot/skills/lion-mgmt/scripts/playbook.json")
+current_time = time.time()
 
-# 2. 如果超过 24 小时或文件不存在，则更新
-if [ $time_diff -gt 86400 ] || [ ! -f nanobot/skills/lion-mgmt/scripts/playbook.json ]; then
-  echo "数据文件已过期，正在更新..."
+# 获取文件修改时间（如果文件不存在，返回 0）
+if playbook_file.exists():
+    file_time = playbook_file.stat().st_mtime
+else:
+    file_time = 0
 
-  # 登录获取 token
-  response=$(curl -s -X POST "http://127.0.0.1:8000/user/local-auth" \
-    -d '{"username":"admin"}')
+time_diff = current_time - file_time
 
-  token=$(echo $response | jq -r '.data.token')
+# 2. 如果超过 24 小时（86400 秒）或文件不存在，则更新
+if time_diff > 86400 or not playbook_file.exists():
+    print("数据文件已过期，正在更新...")
 
-  # 更新三个文件
-  curl -s -X POST "http://127.0.0.1:8000/playbook/published-versions" \
-    -H "aioe-auth: <token>" \
-    -o nanobot/skills/lion-mgmt/scripts/playbook.json
+    # 登录获取 token
+    response = requests.post(
+        "http://127.0.0.1:8000/user/local-auth",
+        headers={"Content-Type": "application/json"},
+        json={"username": "admin"}
+    )
+    data = response.json()
+    token = data["data"]["token"]
 
-  curl -s -X POST "http://127.0.0.1:8000/tools/actions/available" \
-    -H "aioe-auth: <token>" \
-    -o nanobot/skills/lion-mgmt/scripts/actions.json
+    # 更新三个文件（使用 aioe-auth 请求头传递 token）
+    files_to_update = [
+        ("http://127.0.0.1:8000/playbook/published-versions", "POST", "playbook.json"),
+        ("http://127.0.0.1:8000/tools/actions/available", "POST", "actions.json"),
+        ("http://127.0.0.1:8000/docs/openapi.json", "GET", "openapi.json")
+    ]
 
-  curl -s -X GET "http://127.0.0.1:8000/docs/openapi.json" \
-    -H "aioe-auth: <token>" \
-    -o nanobot/skills/lion-mgmt/scripts/openapi.json
+    for url, method, filename in files_to_update:
+        if method == "POST":
+            resp = requests.post(url, headers={"aioe-auth": token})
+        else:
+            resp = requests.get(url, headers={"aioe-auth": token})
 
-  echo "数据文件更新完成"
-else
-  echo "数据文件仍然有效，跳过更新"
-fi
+        filepath = Path(f"nanobot/skills/lion-mgmt/scripts/{filename}")
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(resp.json(), f, indent=2, ensure_ascii=False)
+
+    print("数据文件更新完成")
+else:
+    print("数据文件仍然有效，跳过更新")
 ```
 
 ### 错误处理
@@ -182,7 +247,7 @@ fi
 | 文件不存在 | 视为需要更新，执行完整更新流程 |
 | 登录失败 | 检查服务是否运行在 http://127.0.0.1:8000 |
 | 接口调用失败 | 返回错误信息，不继续执行后续步骤 |
-| stat 命令失败 | 视为文件不存在，执行更新流程 |
+| 文件检查失败 | 视为文件不存在，执行更新流程 |
 
 ### 重要提醒
 
@@ -194,13 +259,24 @@ fi
 
 ## 🔐 Step 1: 登录
 
-```bash
-curl -X POST "${LION_MGMT_BASE_URL}/user/local-auth" \
-  -H "Content-Type: application/json" \
-  -d '{"username":"${LION_MGMT_USERNAME}"}'
+```python
+import os
+import requests
+
+base_url = os.getenv("LION_MGMT_BASE_URL", "http://127.0.0.1:8000")
+username = os.getenv("LION_MGMT_USERNAME", "admin")
+
+response = requests.post(
+    f"{base_url}/user/local-auth",
+    headers={"Content-Type": "application/json"},
+    json={"username": username}
+)
+data = response.json()
+token = data["data"]["token"]
+print(f"Token: {token}")
 ```
 
-**响应**: 返回 token（格式：`account_id:jwt_token`），后续请求使用 aioe-auth: `<token>`
+**响应**: 返回 token（格式：`account_id:jwt_token`），后续所有请求必须在 HTTP 请求头中添加 `aioe-auth: <token>`（将 `<token>` 替换为实际的 token 值）
 
 ## 📂 Step 2-4: 读取数据文件
 
