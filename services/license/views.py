@@ -22,6 +22,25 @@ license_bp = Blueprint("license", url_prefix="/license")
 _all__ = ["license_bp"]
 
 
+@license_bp.post("/machine-code")
+@openapi.definition(
+    summary="获取当前机器码",
+    description="返回当前服务器的机器指纹码，用于申请 License",
+)
+@requires_permission("lic:r")
+async def get_machine_code(request: Request):
+    from libs.utils import generate_fingerprint
+
+    try:
+        machine_code = generate_fingerprint()
+        return response_ok({"machine_code": machine_code})
+    except CustomError:
+        raise
+    except Exception as e:
+        logger.error(f"获取机器码失败: {e}")
+        raise CustomError(ErrorCode.ANCHOR_NOT_FOUND)
+
+
 @license_bp.post("/verify")
 @openapi.definition(
     summary="验证并上传 License 文件",
@@ -229,11 +248,20 @@ async def get_license(request: Request):
     current_tenant_id = request.ctx.session.get("tenant_id")
 
     hidden_menus = {
-        "产品许可", "產品許可", "License",
-        "SSO集成", "SSO Integration",
-        "工作空间", "工作空間", "Workspaces",
-        "个性化设置", "個性化設置", "Personalization",
-        "安全设置", "安全設置", "Security Settings",
+        "产品许可",
+        "產品許可",
+        "License",
+        "SSO集成",
+        "SSO Integration",
+        "工作空间",
+        "工作空間",
+        "Workspaces",
+        "个性化设置",
+        "個性化設置",
+        "Personalization",
+        "安全设置",
+        "安全設置",
+        "Security Settings",
     }
 
     menus = list(menu_dict.values())
@@ -242,9 +270,7 @@ async def get_license(request: Request):
         if menu["meta"]["title"] in ["系统设置", "系統設置", "System Settings"]:
             # 非特殊工作空间时，先把不允许的子菜单删掉再排序
             if current_tenant_id != SPECIAL_TENANT_ID:
-                children = [
-                    c for c in children if c.get("meta", {}).get("title") not in hidden_menus
-                ]
+                children = [c for c in children if c.get("meta", {}).get("title") not in hidden_menus]
             menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
         elif menu["meta"]["title"] in ["事件管理", "Event Management"]:
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
