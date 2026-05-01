@@ -40,6 +40,41 @@ TOOL_DESCRIPTIONS = {
 }
 
 
+def _generate_tool_description(tool_name: str, tool_args: dict) -> str:
+    """生成工具的友好描述
+
+    Args:
+        tool_name: 工具名称
+        tool_args: 工具参数
+
+    Returns:
+        友好的中文描述
+    """
+    # 如果有预定义的描述，直接使用
+    if tool_name in TOOL_DESCRIPTIONS:
+        return TOOL_DESCRIPTIONS[tool_name]
+
+    # 对于通用的执行类工具，尝试从参数中提取操作类型
+    if tool_name in ("exec", "execute", "run"):
+        if not tool_args:
+            return "正在执行操作"
+
+        # 根据参数类型判断操作类型
+        if "command" in tool_args or "cmd" in tool_args or "shell" in tool_args:
+            return "正在执行 Shell 命令"
+        elif "code" in tool_args or "python_code" in tool_args or "python" in tool_args:
+            return "正在执行 Python 代码"
+        elif "script" in tool_args or "script_path" in tool_args:
+            return "正在执行脚本"
+        elif "sql" in tool_args or "query" in tool_args:
+            return "正在执行数据库查询"
+        else:
+            return "正在执行操作"
+
+    # 默认使用通用格式
+    return f"正在执行 {tool_name}"
+
+
 class StreamingHook(AgentHook):
     """流式输出Hook"""
 
@@ -132,13 +167,10 @@ class RedisStreamingHook(AgentHook):
         # 为每个工具调用发送一条消息
         for tool_call in context.tool_calls:
             tool_name = tool_call.name
+            tool_args = tool_call.arguments or {}
 
-            # 获取工具的友好描述
-            if tool_name in TOOL_DESCRIPTIONS:
-                description = TOOL_DESCRIPTIONS[tool_name]
-            else:
-                # 如果没有预定义的描述，使用通用格式
-                description = f"正在执行 {tool_name}"
+            # 生成工具的友好描述
+            description = _generate_tool_description(tool_name, tool_args)
 
             content = f"\n🔧 {description}\n"
 
