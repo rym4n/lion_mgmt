@@ -168,4 +168,7 @@ class ErrorCode(BaseErrorCode):
     CANNOT_DELETE_DEFAULT_CONFIG = ErrorData(4133, "默认配置禁止删除")
 
     FILE_TOO_LARGE = ErrorData(4134, "文件过大，超过限制大小")
-    NOT_FOUND_TO_AI = ErrorData(4135, "缺少AI相关功能权限，请联系管理员")
+
+    ANCHOR_NOT_FOUND = ErrorData(4135, "宿主机标识文件未挂载，请检查 Docker 卷挂载配置")
+    MACHINE_CODE_MISMATCH = ErrorData(4136, "机器码不匹配，License与当前服务器不绑定")
+    NOT_FOUND_TO_AI = ErrorData(4137, "缺少AI相关功能权限，请联系管理员")

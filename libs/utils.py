@@ -3,7 +3,9 @@ import asyncio
 import base64
 import binascii
 import datetime
+import hashlib
 import ipaddress
+import os
 import random
 import secrets
 import subprocess
@@ -147,11 +149,27 @@ def rsa_chunk_decrypt(ciphertext: bytes, rsa_priv_key: rsa.RSAPrivateKey) -> byt
 
 
 def verify_license(data: bytes):
+    # 2026-05-01 00:00:00 UTC (毫秒)，此日期前签发的 License 使用旧 MAC 方案
+    _LEGACY_CUTOFF_MS = 1746057600000
     try:
         lic_enc = base64.b32decode(data)
         pkey = serialization.load_pem_private_key(base64.b64decode("AIOE_LICENSE_KEY"), password=None)
         decrypted = rsa_chunk_decrypt(lic_enc, pkey)
-        machine_id = generate_mac_uuid()
+
+        # 先解码获取 createTime（不验签）
+        lic_unverified = jwt.decode(decrypted, options={"verify_signature": False})
+        create_time = lic_unverified.get("createTime", 0)
+
+        # 根据创建时间选择验证方案
+        if create_time < _LEGACY_CUTOFF_MS:
+            # 旧 License：使用 MAC 地址方案
+            machine_id = generate_mac_uuid()
+            if not machine_id:
+                raise CustomError(ErrorCode.MACHINE_CODE_MISMATCH)
+        else:
+            # 新 License：使用宿主机指纹方案
+            machine_id = generate_fingerprint()
+
         lic = jwt.decode(decrypted, str(machine_id), "HS256")
         if lic.get("expireTime", 0) > int(time.time() * 1000):
             for m in lic["moduleList"]:
@@ -159,6 +177,10 @@ def verify_license(data: bytes):
             return lic
         else:
             raise CustomError(ErrorCode.LICENSE_EXPIRED)
+    except CustomError:
+        raise
+    except jwt.InvalidSignatureError:
+        raise CustomError(ErrorCode.MACHINE_CODE_MISMATCH)
     except Exception:
         raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
 
@@ -170,6 +192,77 @@ def generate_mac_uuid():
                 mac_address = addr.address.replace("-", ":").upper()
                 return str(uuid.uuid5(uuid.NAMESPACE_DNS, mac_address))
     return ""
+
+
+def extract_stable_fields(content: str, fields: list[str]) -> str:
+    """
+    从文本内容中提取指定字段的稳定值
+
+    Args:
+        content: 原始文本内容（如 /proc/cpuinfo）
+        fields: 要提取的字段名列表
+
+    Returns:
+        提取字段的拼接字符串
+    """
+    result = []
+    for field in fields:
+        # 查找字段行（格式: "field_name : value"）
+        for line in content.splitlines():
+            if line.strip().lower().startswith(field.lower()):
+                # 提取冒号后的值
+                if ":" in line:
+                    value = line.split(":", 1)[1].strip()
+                    result.append(f"{field}={value}")
+                    break
+    return "|".join(result)
+
+
+def generate_fingerprint() -> str:
+    """
+    生成稳定的机器指纹（容器环境适配）
+    """
+    machine_id_path = "/app/.host-identity/machine-id"
+    product_uuid_path = "/app/.host-identity/product_uuid"
+
+    if not os.path.exists(machine_id_path):
+        logger.error(f"License机器指纹锚点文件缺失: {machine_id_path}")
+        raise CustomError(ErrorCode.ANCHOR_NOT_FOUND)
+
+    if not os.path.exists(product_uuid_path):
+        logger.error(f"License机器指纹锚点文件缺失: {product_uuid_path}")
+        raise CustomError(ErrorCode.ANCHOR_NOT_FOUND)
+
+    with open(machine_id_path, "r") as f:
+        machine_id = f.read().strip()
+    factor_machine_id = hashlib.sha256(machine_id.encode()).hexdigest()[:16]
+
+    with open(product_uuid_path, "r") as f:
+        product_uuid = f.read().strip()
+    factor_product_uuid = hashlib.sha256(product_uuid.encode()).hexdigest()[:16]
+
+    with open("/proc/cpuinfo", "r") as f:
+        cpu_info = f.read()
+    cpu_sig = extract_stable_fields(cpu_info, ["model name", "cpu cores", "flags"])
+    factor_cpu = hashlib.sha256(cpu_sig.encode()).hexdigest()[:16]
+
+    factor_deploy_salt = get_or_create_deploy_salt("/app/data/license/.deploy_id")
+
+    fingerprint = "|".join([factor_machine_id, factor_product_uuid, factor_cpu, factor_deploy_salt])
+    return hashlib.sha256(fingerprint.encode()).hexdigest()
+
+
+def get_or_create_deploy_salt(path: str) -> str:
+    """首次部署时生成随机盐，后续读取"""
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return f.read().strip()
+    else:
+        salt = secrets.token_hex(32)
+        with open(path, "w") as f:
+            f.write(salt)
+        os.chmod(path, 0o400)  # 只读
+        return salt
 
 
 # 获取kafka指定主题最新消息
