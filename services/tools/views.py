@@ -1,5 +1,6 @@
 # coding=utf-8
 import asyncio
+import base64
 import datetime
 from collections import defaultdict
 from functools import reduce
@@ -27,8 +28,10 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
+from libs.nanobot import NanobotClient
 from libs.security.authorization import load_license, requires_permission
 from libs.utils import gen_run_id
+from nanobot.agent import AgentHook, AgentHookContext
 from models import (
     ActionPermissions,
     Config,
@@ -42,7 +45,7 @@ from models import (
     ToolResources,
     ToolResourcesModel,
 )
-from settings import TASK_TOPIC, TZ
+from settings import NANOBOT_WORKSPACE_BASE, TASK_TOPIC, TZ
 
 from PIL import Image
 
@@ -3013,4 +3016,232 @@ async def sync_health_status(request):
         "updated_count": updated_count,
         "details": status_counts,
     })
+
+
+class SSEStreamingHook(AgentHook):
+    """SSE 流式输出 Hook - 将 Nanobot 流式输出通过 SSE 发送"""
+
+    def __init__(self, sse_response, workspace_path: Path):
+        """
+        初始化 SSE 流式 Hook
+
+        Args:
+            sse_response: Sanic SSE 响应对象
+            workspace_path: nanobot workspace 路径，用于检测截图文件
+        """
+        self.sse_response = sse_response
+        self.workspace_path = workspace_path
+        self._has_content = False
+        self._screenshot_files = set()  # 记录已发送的截图文件
+
+    def wants_streaming(self) -> bool:
+        return True
+
+    async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+        """流式输出时通过 SSE 发送"""
+        self._has_content = True
+        try:
+            message = orjson.dumps({"status": "message", "content": delta}).decode()
+            await self.sse_response.send(f"data: {message}\n\n")
+        except Exception as e:
+            logger.error(f"[SSEStreamingHook] 发送流式消息失败: {e}")
+
+    async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+        """流式输出结束"""
+        pass  # 不需要发送结束消息，等待整个任务完成
+
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
+        """在执行工具前发送工具调用信息"""
+        if not context.tool_calls:
+            return
+
+        for tool_call in context.tool_calls:
+            tool_name = tool_call.name
+            try:
+                # 发送工具执行状态
+                message = orjson.dumps({
+                    "status": "executing",
+                    "message": f"正在执行 {tool_name}..."
+                }).decode()
+                await self.sse_response.send(f"data: {message}\n\n")
+            except Exception as e:
+                logger.error(f"[SSEStreamingHook] 发送工具调用消息失败: {e}")
+
+    async def after_iteration(self, context: AgentHookContext) -> None:
+        """在每次迭代后检查截图文件并发送"""
+        # 检查 workspace 中的截图文件
+        try:
+            screenshot_patterns = ["*.png", "*.jpg", "*.jpeg"]
+            for pattern in screenshot_patterns:
+                for screenshot_path in self.workspace_path.glob(f"**/{pattern}"):
+                    # 只发送新的截图文件
+                    if screenshot_path not in self._screenshot_files:
+                        self._screenshot_files.add(screenshot_path)
+                        await self._send_screenshot(screenshot_path)
+        except Exception as e:
+            logger.error(f"[SSEStreamingHook] 检查截图文件失败: {e}")
+
+        # 如果有错误，发送错误消息
+        if context.error:
+            try:
+                if context.tool_calls:
+                    error_msg = "工具执行失败"
+                else:
+                    error_msg = "AI 调用失败，请稍后重试"
+
+                message = orjson.dumps({
+                    "status": "error",
+                    "message": error_msg
+                }).decode()
+                await self.sse_response.send(f"data: {message}\n\n")
+            except Exception as e:
+                logger.error(f"[SSEStreamingHook] 发送错误消息失败: {e}")
+
+    async def _send_screenshot(self, screenshot_path: Path):
+        """发送截图文件（base64 编码）"""
+        try:
+            with open(screenshot_path, "rb") as f:
+                screenshot_data = base64.b64encode(f.read()).decode()
+
+            message = orjson.dumps({
+                "status": "screenshot",
+                "data": screenshot_data,
+                "filename": screenshot_path.name
+            }).decode()
+            await self.sse_response.send(f"data: {message}\n\n")
+            logger.info(f"[SSEStreamingHook] 已发送截图: {screenshot_path.name}")
+        except Exception as e:
+            logger.error(f"[SSEStreamingHook] 发送截图失败: {e}")
+
+
+@tools_bp.post("/browser/execute")
+@openapi.definition(
+    summary="执行浏览器自动化任务",
+    description="通过 nanobot 自然语言调用 agent-browser skill 执行浏览器自动化任务，支持会话上下文和截图返回（需要工具查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["task"],
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "浏览器自动化任务描述（自然语言）",
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "会话 ID（用于保持 nanobot 上下文历史，可选）",
+                    },
+                },
+            }
+        }
+    },
+    response={"200": {"description": "执行成功，返回 SSE 流（包含文本消息和截图数据）"}},
+)
+@requires_permission("tool:r")
+async def browser_execute(request):
+    """
+    通过 nanobot 执行浏览器自动化任务
+
+    工作流程：
+    1. 接收自然语言任务描述
+    2. 如果提供 session_id，加载历史上下文
+    3. 调用 nanobot 处理任务
+    4. nanobot 自动调用 agent-browser skill
+    5. 实时返回执行进度、结果和截图
+
+    SSE 事件类型：
+    - status: 状态更新（starting, processing, executing, completed, error）
+    - message: 文本消息
+    - screenshot: 截图数据（base64 编码）
+    """
+    resp = await request.respond(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+    try:
+        task = request.json.get("task")
+        session_id = request.json.get("session_id")
+
+        if not task:
+            await resp.send('data: {"status": "error", "message": "task 参数不能为空"}\n\n')
+            await resp.eof()
+            return resp
+
+        tenant_id = request.ctx.session.get("tenant_id")
+        user_info = request.ctx.session.get("account_info")
+        user_id = user_info.get("id") if user_info else "unknown"
+
+        await resp.send('data: {"status": "starting", "message": "开始处理浏览器自动化任务..."}\n\n')
+
+        # 1. 初始化 NanobotClient
+        logger.info(f"初始化 NanobotClient，tenant_id={tenant_id}, session_id={session_id}")
+        client = NanobotClient(tenant_id=tenant_id, workspace_base=NANOBOT_WORKSPACE_BASE)
+
+        # 获取 workspace 路径用于检测截图
+        workspace_path = Path(NANOBOT_WORKSPACE_BASE) / tenant_id
+
+        # 2. 创建 SSE 流式 Hook
+        hook = SSEStreamingHook(sse_response=resp, workspace_path=workspace_path)
+
+        # 3. 构建完整消息：系统指令 + 用户任务
+        full_message = f"""<system_instruction>
+【身份】你是浏览器自动化助手，专门帮助用户完成网页操作任务。
+
+【强制规则 - 必须严格遵守】
+1. 你必须立即调用 agent-browser skill 来处理浏览器任务，严禁仅用文字回复。
+2. 用户的任务描述是自然语言，你需要理解任务意图并转换为具体的浏览器操作。
+
+【重要提醒】
+- 不要问用户"是否需要我调用 skill"，直接调用！
+- 不要说"我可以帮你..."，直接做！
+- 不要只用文字描述，必须调用 agent-browser skill 执行实际操作！
+- 如果需要截图，使用 agent-browser 的截图功能。
+- 如果 skill 调用失败，告知用户具体的错误信息。
+</system_instruction>
+
+<user_task>
+{task}
+</user_task>"""
+
+        # 4. 发送处理状态
+        await resp.send('data: {"status": "processing", "message": "nanobot 正在理解任务..."}\n\n')
+
+        # 5. 调用 nanobot（使用 session_id 保持上下文）
+        # 如果提供了 session_id，使用它作为 session_key；否则使用 browser:{user_id} 作为默认 session
+        if session_id:
+            session_key = f"browser:{session_id}"
+        else:
+            session_key = f"browser:{user_id}"
+
+        logger.info(f"准备调用 nanobot，session_key={session_key}")
+        logger.info(f"消息内容长度: {len(full_message)} 字符")
+
+        result = await client.ask(
+            message=full_message,
+            streaming=True,
+            session_key=session_key,
+            hooks=[hook]
+        )
+
+        logger.info(f"Nanobot 调用完成，返回结果长度: {len(result) if result else 0} 字符")
+
+        # 6. 返回完成状态
+        await resp.send('data: {"status": "completed", "message": "任务执行完成"}\n\n')
+
+    except Exception as e:
+        logger.exception("浏览器自动化任务执行失败")
+        error_msg = str(e).replace('"', '\\"').replace('\n', ' ')
+        await resp.send(f'data: {{"status": "error", "message": "执行失败: {error_msg}"}}\n\n')
+
+    finally:
+        if resp:
+            await resp.eof()
+
+    return resp
 
