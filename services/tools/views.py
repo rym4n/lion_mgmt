@@ -3156,21 +3156,33 @@ async def browser_execute(request):
     - message: 文本消息
     - screenshot: 截图数据（base64 编码）
     """
-    resp = await request.respond(
-        content_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    resp = None
+    session_id = None
 
     try:
+        # 初始化 SSE 响应
+        resp = await request.respond(
+            content_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+        # 检查请求体是否有效
+        if not request.json:
+            error_data = orjson.dumps({"status": "error", "message": "请求体必须是有效的 JSON"}).decode()
+            await resp.send(f"data: {error_data}\n\n")
+            await resp.eof()
+            return resp
+
         task = request.json.get("task")
         session_id = request.json.get("session_id")
 
         if not task:
-            await resp.send('data: {"status": "error", "message": "task 参数不能为空"}\n\n')
+            error_data = orjson.dumps({"status": "error", "message": "task 参数不能为空"}).decode()
+            await resp.send(f"data: {error_data}\n\n")
             await resp.eof()
             return resp
 
@@ -3182,7 +3194,12 @@ async def browser_execute(request):
         tenant_id = request.ctx.session.get("tenant_id")
 
         # 返回 session_id 给客户端，用于后续请求
-        await resp.send(f'data: {{"status": "starting", "message": "开始处理浏览器自动化任务...", "session_id": "{session_id}"}}\n\n')
+        start_data = orjson.dumps({
+            "status": "starting",
+            "message": "开始处理浏览器自动化任务...",
+            "session_id": session_id
+        }).decode()
+        await resp.send(f"data: {start_data}\n\n")
 
         # 1. 初始化 NanobotClient
         logger.info(f"初始化 NanobotClient，tenant_id={tenant_id}, session_id={session_id}")
@@ -3233,7 +3250,7 @@ async def browser_execute(request):
    - 主要业务函数（根据任务命名，使用 snake_case）
    - 完整的异常处理（try-except）
    - 从 assets 获取配置参数
-   - 统一的返回格式（{"code": 0/-1, "msg": "", "data": ...}）
+   - 统一的返回格式（{{"code": 0/-1, "msg": "", "data": ...}}）
 4. 如果任务使用了 agent-browser，使用 agent-browser 操作模板
 5. 同时生成配套的 config.json 文件
 
@@ -3255,7 +3272,8 @@ async def browser_execute(request):
 </user_task>"""
 
         # 4. 发送处理状态
-        await resp.send('data: {"status": "processing", "message": "nanobot 正在理解任务..."}\n\n')
+        processing_data = orjson.dumps({"status": "processing", "message": "nanobot 正在理解任务..."}).decode()
+        await resp.send(f"data: {processing_data}\n\n")
 
         # 5. 调用 nanobot（使用 session_id 保持上下文）
         session_key = f"browser:{session_id}"
@@ -3273,16 +3291,29 @@ async def browser_execute(request):
         logger.info(f"Nanobot 调用完成，返回结果长度: {len(result) if result else 0} 字符")
 
         # 6. 返回完成状态
-        await resp.send('data: {"status": "completed", "message": "任务执行完成"}\n\n')
+        completed_data = orjson.dumps({"status": "completed", "message": "任务执行完成"}).decode()
+        await resp.send(f"data: {completed_data}\n\n")
 
     except Exception as e:
         logger.exception("浏览器自动化任务执行失败")
-        error_msg = str(e).replace('"', '\\"').replace('\n', ' ')
-        await resp.send(f'data: {{"status": "error", "message": "执行失败: {error_msg}"}}\n\n')
+        try:
+            if resp:
+                # 使用 orjson 确保 JSON 安全
+                error_data = orjson.dumps({
+                    "status": "error",
+                    "message": f"执行失败: {str(e)}",
+                    "session_id": session_id  # 即使失败也返回 session_id
+                }).decode()
+                await resp.send(f"data: {error_data}\n\n")
+        except Exception as send_error:
+            logger.error(f"发送错误消息失败: {send_error}")
 
     finally:
         if resp:
-            await resp.eof()
+            try:
+                await resp.eof()
+            except Exception as eof_error:
+                logger.error(f"关闭 SSE 响应失败: {eof_error}")
 
     return resp
 
