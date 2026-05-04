@@ -330,6 +330,33 @@ def call_api(params, assets, context):
 - 添加主要的业务函数
 - 确保代码格式正确、缩进一致
 
+### 5. 返回代码（重要）
+
+**不要使用 write_file 工具保存代码！** 而是直接在回复中返回 JSON 格式的代码：
+
+```json
+{
+    "config": "config.json 的完整内容（JSON 字符串）",
+    "main": "main.py 的完整内容（Python 代码字符串）"
+}
+```
+
+**返回格式示例**：
+
+```json
+{
+    "config": "{\"name\": \"服务器状态监控\", \"main\": \"main.py\", ...}",
+    "main": "# coding=utf-8\n\"\"\"\nAIOE 应用动作代码\n\"\"\"\n\nimport subprocess\n..."
+}
+```
+
+**注意事项**：
+- 必须在回复的最后以 JSON 代码块的形式返回
+- config 字段是 config.json 的完整 JSON 内容（作为字符串）
+- main 字段是 main.py 的完整 Python 代码（作为字符串，保留换行符 \n）
+- 在 JSON 代码块之前，可以添加简短的说明文字
+- 不要使用 write_file 工具，直接返回代码内容
+
 ## 完整示例
 
 ### 示例 1：查看服务器状态

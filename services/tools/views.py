@@ -3034,6 +3034,7 @@ class SSEStreamingHook(AgentHook):
         self.workspace_path = workspace_path
         self._has_content = False
         self._screenshot_files = set()  # 记录已发送的截图文件
+        self._accumulated_content = ""  # 累积内容，用于检测代码 JSON
 
     def wants_streaming(self) -> bool:
         return True
@@ -3041,6 +3042,8 @@ class SSEStreamingHook(AgentHook):
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         """流式输出时通过 SSE 发送"""
         self._has_content = True
+        self._accumulated_content += delta
+
         try:
             message = orjson.dumps({"status": "message", "content": delta}).decode()
             await self.sse_response.send(f"data: {message}\n\n")
@@ -3048,8 +3051,38 @@ class SSEStreamingHook(AgentHook):
             logger.error(f"[SSEStreamingHook] 发送流式消息失败: {e}")
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
-        """流式输出结束"""
-        pass  # 不需要发送结束消息，等待整个任务完成
+        """流式输出结束时检测并提取代码 JSON"""
+        # 尝试从累积内容中提取代码 JSON
+        await self._extract_and_send_code_json()
+
+    async def _extract_and_send_code_json(self):
+        """从累积内容中提取代码 JSON 并发送"""
+        try:
+            # 查找 JSON 代码块（```json ... ```）
+            json_pattern = r'```json\s*\n(.*?)\n```'
+            matches = re.findall(json_pattern, self._accumulated_content, re.DOTALL)
+
+            if matches:
+                # 取最后一个匹配（最新的代码）
+                json_str = matches[-1].strip()
+
+                # 尝试解析 JSON
+                try:
+                    code_data = orjson.loads(json_str)
+
+                    # 检查是否包含 config 和 main 字段
+                    if "config" in code_data and "main" in code_data:
+                        # 发送代码 JSON
+                        message = orjson.dumps({
+                            "status": "code",
+                            "data": code_data
+                        }).decode()
+                        await self.sse_response.send(f"data: {message}\n\n")
+                        logger.info("[SSEStreamingHook] 已发送代码 JSON")
+                except orjson.JSONDecodeError as e:
+                    logger.warning(f"[SSEStreamingHook] 解析代码 JSON 失败: {e}")
+        except Exception as e:
+            logger.error(f"[SSEStreamingHook] 提取代码 JSON 失败: {e}")
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         """在执行工具前发送工具调用信息"""
@@ -3137,7 +3170,7 @@ class SSEStreamingHook(AgentHook):
             }
         }
     },
-    response={"200": {"description": "执行成功，返回 SSE 流（包含文本消息和截图数据）"}},
+    response={"200": {"description": "执行成功，返回 SSE 流（包含文本消息、截图数据和生成的代码）"}},
 )
 @requires_permission("tool:r")
 async def browser_execute(request):
@@ -3152,9 +3185,14 @@ async def browser_execute(request):
     5. 实时返回执行进度、结果和截图
 
     SSE 事件类型：
-    - status: 状态更新（starting, processing, executing, completed, error）
-    - message: 文本消息
-    - screenshot: 截图数据（base64 编码）
+    - status: starting - 开始处理任务
+    - status: processing - nanobot 正在理解任务
+    - status: executing - 正在执行工具（如 agent-browser）
+    - status: message - 文本消息流式输出
+    - status: screenshot - 截图数据（base64 编码）
+    - status: code - 生成的代码（JSON 格式：{"config": "...", "main": "..."}）
+    - status: completed - 任务执行完成
+    - status: error - 执行出错
     """
     resp = None
     session_id = None
@@ -3241,7 +3279,7 @@ async def browser_execute(request):
    - 重新执行任务
    - 确保这次的结果符合用户的要求
 
-【生成代码的规则】
+【生成代码的规则 - 重要】
 1. 当用户要求生成代码时，回顾本次会话中的所有浏览器操作历史
 2. 根据 aioe-app-dev skill 的规范（AIOE 应用动作代码生成规范）生成 Python 代码
 3. 代码必须包含：
@@ -3254,11 +3292,30 @@ async def browser_execute(request):
 4. 如果任务使用了 agent-browser，使用 agent-browser 操作模板
 5. 同时生成配套的 config.json 文件
 
+【代码返回格式 - 必须遵守】
+生成代码后，**不要使用 write_file 工具保存文件**，而是直接在回复中以 JSON 格式返回：
+
+```json
+{{
+    "config": "config.json 的完整内容（JSON 字符串）",
+    "main": "main.py 的完整内容（Python 代码字符串，保留 \\n 换行符）"
+}}
+```
+
+示例：
+```json
+{{
+    "config": "{{\\"name\\": \\"时间戳工具\\", \\"main\\": \\"main.py\\", ...}}",
+    "main": "# coding=utf-8\\n\\"\\"\\"\\nAIOE 应用动作代码\\n\\"\\"\\"\\n\\nimport subprocess\\n..."
+}}
+```
+
 【重要提醒】
 - 不要问用户"是否需要我调用 skill"，直接调用！
 - 不要说"我可以帮你..."，直接做！
 - 执行浏览器任务时，不要只用文字描述，必须调用 agent-browser skill！
 - 生成代码时，必须严格遵循 aioe-app-dev skill 的规范和模板
+- **生成代码时，绝对不要使用 write_file 工具，必须以 JSON 格式返回代码内容**
 - 如果 skill 调用失败，告知用户具体的错误信息
 
 【上下文保持】
