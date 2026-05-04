@@ -3180,8 +3180,6 @@ async def browser_execute(request):
             logger.info(f"未提供 session_id，自动生成: {session_id}")
 
         tenant_id = request.ctx.session.get("tenant_id")
-        user_info = request.ctx.session.get("account_info")
-        user_id = user_info.get("id") if user_info else "unknown"
 
         # 返回 session_id 给客户端，用于后续请求
         await resp.send(f'data: {{"status": "starting", "message": "开始处理浏览器自动化任务...", "session_id": "{session_id}"}}\n\n')
