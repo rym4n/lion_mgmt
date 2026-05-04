@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import subprocess
 import time
+import uuid
 import zipfile
 
 from aiocache import caches
@@ -3173,11 +3174,17 @@ async def browser_execute(request):
             await resp.eof()
             return resp
 
+        # 如果没有提供 session_id，自动生成一个
+        if not session_id:
+            session_id = str(uuid.uuid4())
+            logger.info(f"未提供 session_id，自动生成: {session_id}")
+
         tenant_id = request.ctx.session.get("tenant_id")
         user_info = request.ctx.session.get("account_info")
         user_id = user_info.get("id") if user_info else "unknown"
 
-        await resp.send('data: {"status": "starting", "message": "开始处理浏览器自动化任务..."}\n\n')
+        # 返回 session_id 给客户端，用于后续请求
+        await resp.send(f'data: {{"status": "starting", "message": "开始处理浏览器自动化任务...", "session_id": "{session_id}"}}\n\n')
 
         # 1. 初始化 NanobotClient
         logger.info(f"初始化 NanobotClient，tenant_id={tenant_id}, session_id={session_id}")
@@ -3253,11 +3260,7 @@ async def browser_execute(request):
         await resp.send('data: {"status": "processing", "message": "nanobot 正在理解任务..."}\n\n')
 
         # 5. 调用 nanobot（使用 session_id 保持上下文）
-        # 如果提供了 session_id，使用它作为 session_key；否则使用 browser:{user_id} 作为默认 session
-        if session_id:
-            session_key = f"browser:{session_id}"
-        else:
-            session_key = f"browser:{user_id}"
+        session_key = f"browser:{session_id}"
 
         logger.info(f"准备调用 nanobot，session_key={session_key}")
         logger.info(f"消息内容长度: {len(full_message)} 字符")
