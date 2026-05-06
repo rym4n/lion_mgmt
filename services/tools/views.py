@@ -3289,7 +3289,7 @@ async def browser_execute(request):
    - 完整的异常处理（try-except）
    - 从 assets 获取配置参数
    - 统一的返回格式（{{"code": 0/-1, "msg": "", "data": ...}}）
-4. 如果任务使用了 agent-browser，使用 agent-browser 操作模板
+4. 如果任务使用了 agent-browser，则在代码中使用 requests 替换 agent-browser 的功能实现，并确保代码逻辑清晰、可读性强
 5. 同时生成配套的 config.json 文件
 
 【代码返回格式 - 必须遵守】
