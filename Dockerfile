@@ -24,7 +24,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN curl "https://dl.hongcloud.net/aioe?f=chrome-linux64.zip" -o /tmp/chrome.zip && unzip /tmp/chrome.zip -d /opt
+RUN curl -L "https://dl.hongcloud.net/aioe?f=chrome-linux64.zip" -o /tmp/chrome.zip && unzip /tmp/chrome.zip -d /opt
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
