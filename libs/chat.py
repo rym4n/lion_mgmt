@@ -382,7 +382,18 @@ class ChatManager:
                                 redis=self.redis,
                             )
                         )
-                    if msg.get("type") in ["ai-reply-delta", "ai-reply-end"]:
+                    if msg.get("type") == "ai-thinking":
+                        # AI 思考中消息，直接转发给前端，不保存到数据库
+                        thinking_data = {
+                            "type": "ai-thinking",
+                            "content": msg.get("content", ""),
+                            "tool_name": msg.get("tool_name", ""),
+                            "room_id": msg.get("room_id"),
+                            "tenant_id": msg.get("tenant_id"),
+                            "receiver_id": msg.get("receiver_id"),
+                        }
+                        message["data"] = orjson.dumps(thinking_data)
+                    elif msg.get("type") in ["ai-reply-delta", "ai-reply-end"]:
                         # 流式回复，累积内容并直接转发给前端
                         buffer_key = f"{msg.get('room_id')}:{msg.get('receiver_id')}"
                         if buffer_key not in self.ai_stream_buffer:
