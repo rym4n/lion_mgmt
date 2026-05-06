@@ -46,7 +46,6 @@ FROM python:3.11-slim AS runtime
 ENV VIRTUAL_ENV=/app/.venv \
     RY_ENV=PROD \
     PYTHONDONTWRITEBYTECODE=1 \
-    AGENT_BROWSER_CHROME_PATH=/opt/chrome-linux64/chrome \
     PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
@@ -61,7 +60,7 @@ COPY --from=vector /usr/bin/vector /usr/bin/vector
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
 COPY --from=builder /app/nanobot ./nanobot
-COPY --from=builder /opt/chrome-linux64 /opt/chrome-linux64
+COPY --from=builder /opt/chrome-linux64 /root/.agent-browser/browsers/chrome-linux64
 COPY migrations ./migrations
 COPY pyproject.toml ./
 COPY settings ./settings
