@@ -65,3 +65,4 @@ COPY migrations ./migrations
 COPY pyproject.toml ./
 COPY settings ./settings
 COPY server.py ./
+COPY config.json ./
