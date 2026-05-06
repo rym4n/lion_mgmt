@@ -2615,3 +2615,101 @@ async def get_version_runlog(request):
     )
 
 
+@workflow_bp.post("/ai-chat")
+@openapi.definition(
+    summary="AI对话接口",
+    description="使用大模型进行对话，支持流式返回",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["prompt"],
+                "properties": {
+                    "prompt": {"type": "string", "description": "用户输入的提示词"},
+                    "system_prompt": {"type": "string", "description": "系统提示词（可选）"},
+                    "temperature": {"type": "number", "description": "温度参数，默认0.7"},
+                    "max_tokens": {"type": "integer", "description": "最大token数，默认2000"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "流式返回AI响应",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        }
+    },
+)
+@requires_permission("workflow:r")
+async def ai_chat(request):
+    """
+    使用litellm调用大模型进行对话，流式返回结果
+    """
+    import os
+    from litellm import acompletion
+
+    data = request.json
+    prompt = data.get("prompt")
+    system_prompt = data.get("system_prompt", "你是一个专业的AI助手，请根据用户的问题提供准确、有帮助的回答。")
+    temperature = data.get("temperature", 0.7)
+    max_tokens = data.get("max_tokens", 2000)
+
+    if not prompt:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 从环境变量获取配置
+    model = os.environ.get("RY_AI_MODEL")
+    api_key = os.environ.get("RY_OPENAI_API_KEY")
+    api_base = os.environ.get("RY_AI_API_BASE")
+
+    if not model or not api_key:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 设置响应头
+    resp = await request.respond(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+    try:
+        # 构造消息
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ]
+
+        # 调用litellm进行流式对话
+        response = await acompletion(
+            model=model,
+            messages=messages,
+            api_key=api_key,
+            api_base=api_base,
+            stream=True,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+        # 流式返回结果
+        async for chunk in response:
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta
+                if hasattr(delta, "content") and delta.content:
+                    # 发送SSE格式的数据
+                    await resp.send(f"data: {orjson.dumps({'content': delta.content}).decode()}\n\n")
+
+        # 发送结束标记
+        await resp.send("data: [DONE]\n\n")
+
+    except Exception as e:
+        logger.error(f"AI chat error: {str(e)}")
+        error_msg = orjson.dumps({"error": str(e)}).decode()
+        await resp.send(f"data: {error_msg}\n\n")
+
+    await resp.eof()
+    return resp
+
+
