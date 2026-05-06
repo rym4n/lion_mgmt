@@ -10,6 +10,7 @@ import operator
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import time
 import uuid
@@ -3022,16 +3023,21 @@ async def sync_health_status(request):
 class SSEStreamingHook(AgentHook):
     """SSE 流式输出 Hook - 将 Nanobot 流式输出通过 SSE 发送"""
 
-    def __init__(self, sse_response, workspace_path: Path):
+    def __init__(self, sse_response, workspace_path: Path, session_id: str):
         """
         初始化 SSE 流式 Hook
 
         Args:
             sse_response: Sanic SSE 响应对象
             workspace_path: nanobot workspace 路径，用于检测截图文件
+            session_id: 会话ID，用于创建会话专属的截图文件夹
         """
         self.sse_response = sse_response
         self.workspace_path = workspace_path
+        self.session_id = session_id
+        # 创建会话专属的截图文件夹
+        self.screenshot_dir = workspace_path / session_id
+        self.screenshot_dir.mkdir(parents=True, exist_ok=True)
         self._has_content = False
         self._screenshot_files = set()  # 记录已发送的截图文件
         self._accumulated_content = ""  # 累积内容，用于检测代码 JSON
@@ -3103,11 +3109,11 @@ class SSEStreamingHook(AgentHook):
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         """在每次迭代后检查截图文件并发送"""
-        # 检查 workspace 中的截图文件
+        # 检查会话专属截图文件夹中的截图文件
         try:
             screenshot_patterns = ["*.png", "*.jpg", "*.jpeg"]
             for pattern in screenshot_patterns:
-                for screenshot_path in self.workspace_path.glob(f"**/{pattern}"):
+                for screenshot_path in self.screenshot_dir.glob(pattern):
                     # 只发送新的截图文件
                     if screenshot_path not in self._screenshot_files:
                         self._screenshot_files.add(screenshot_path)
@@ -3150,8 +3156,8 @@ class SSEStreamingHook(AgentHook):
 
 @tools_bp.post("/browser/execute")
 @openapi.definition(
-    summary="执行浏览器自动化任务",
-    description="通过 nanobot 自然语言调用 agent-browser skill 执行浏览器自动化任务，支持会话上下文和截图返回（需要工具查看权限）",
+    summary="执行应用智能开发任务",
+    description="通过 nanobot 自然语言调用 agent-browser skill 执行应用智能开发任务，支持会话上下文和截图返回（需要工具查看权限）",
     body={
         "application/json": {
             "schema": {
@@ -3160,7 +3166,7 @@ class SSEStreamingHook(AgentHook):
                 "properties": {
                     "task": {
                         "type": "string",
-                        "description": "浏览器自动化任务描述（自然语言）",
+                        "description": "应用智能开发任务描述（自然语言）",
                     },
                     "session_id": {
                         "type": "string",
@@ -3246,8 +3252,8 @@ async def browser_execute(request):
         # 获取 workspace 路径用于检测截图
         workspace_path = Path(NANOBOT_WORKSPACE_BASE) / tenant_id
 
-        # 2. 创建 SSE 流式 Hook
-        hook = SSEStreamingHook(sse_response=resp, workspace_path=workspace_path)
+        # 2. 创建 SSE 流式 Hook（传入 session_id）
+        hook = SSEStreamingHook(sse_response=resp, workspace_path=workspace_path, session_id=session_id)
 
         # 3. 构建完整消息：系统指令 + 用户任务
         full_message = f"""<system_instruction>
@@ -3373,4 +3379,87 @@ async def browser_execute(request):
                 logger.error(f"关闭 SSE 响应失败: {eof_error}")
 
     return resp
+
+
+@tools_bp.post("/browser/session/delete")
+@openapi.definition(
+    summary="删除应用智能开发会话",
+    description="删除指定会话的截图文件夹和 nanobot 会话历史（需要工具删除权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "会话 ID",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {"message": {"type": "string"}},
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("tool:d")
+async def delete_browser_session(request):
+    """
+    删除浏览器自动化会话
+
+    删除内容：
+    1. 会话专属的截图文件夹（{workspace}/{tenant_id}/{session_id}/）
+    2. nanobot 会话历史文件（{workspace}/{tenant_id}/sessions/browser_{session_id}.jsonl）
+    """
+    session_id = request.json.get("session_id")
+    if not session_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    workspace_path = Path(NANOBOT_WORKSPACE_BASE) / tenant_id
+
+    deleted_items = []
+
+    screenshot_dir = workspace_path / session_id
+    if screenshot_dir.exists() and screenshot_dir.is_dir():
+        try:
+            shutil.rmtree(screenshot_dir)
+            deleted_items.append("截图文件夹")
+            logger.info(f"已删除会话 {session_id} 的截图文件夹: {screenshot_dir}")
+        except Exception as e:
+            logger.error(f"删除截图文件夹失败: {e}")
+
+    try:
+        client = NanobotClient(tenant_id=tenant_id, workspace_base=NANOBOT_WORKSPACE_BASE)
+        session_key = f"browser:{session_id}"
+
+        from nanobot.session.manager import SessionManager
+        session_manager = SessionManager(workspace=Path(client.workspace))
+        if session_manager.delete_session(session_key):
+            deleted_items.append("会话历史")
+            logger.info(f"已删除会话 {session_id} 的 nanobot 历史")
+    except Exception as e:
+        logger.error(f"删除 nanobot 会话历史失败: {e}")
+
+    if not deleted_items:
+        return response_ok({"message": "会话不存在或已被删除"})
+
+    return response_ok({"message": f"会话删除成功，已删除: {', '.join(deleted_items)}"})
 
