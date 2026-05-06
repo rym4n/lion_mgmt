@@ -17,7 +17,10 @@ from sanic.log import logger
 from nanobot import Nanobot
 from nanobot.agent import AgentHook, AgentHookContext
 
-from settings import NANOBOT_CONFIG_PATH
+# 项目根目录（libs 的上一级目录）
+PROJECT_ROOT = Path(__file__).parent.parent
+# config.json 的绝对路径
+CONFIG_PATH = PROJECT_ROOT / "config.json"
 
 
 # 工具名称到中文描述的映射
@@ -246,7 +249,7 @@ class NanobotClient:
         os.makedirs(self.workspace, exist_ok=True)
 
         # 使用全局配置的配置文件路径
-        self.config_path = Path(NANOBOT_CONFIG_PATH)
+        self.config_path = CONFIG_PATH
 
     async def ask(
         self,
@@ -303,7 +306,7 @@ async def ask(
     Returns:
         回答内容
     """
-    bot = Nanobot.from_config(config_path=NANOBOT_CONFIG_PATH, workspace=workspace)
+    bot = Nanobot.from_config(config_path=CONFIG_PATH, workspace=workspace)
     hooks = [StreamingHook()] if streaming else None
     result = await bot.run(message, session_key=session_key, hooks=hooks)
     return result.content
