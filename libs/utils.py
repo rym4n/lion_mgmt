@@ -150,7 +150,7 @@ def rsa_chunk_decrypt(ciphertext: bytes, rsa_priv_key: rsa.RSAPrivateKey) -> byt
 
 def verify_license(data: bytes):
     # 2026-05-01 00:00:00 UTC (毫秒)，此日期前签发的 License 使用旧 MAC 方案
-    _LEGACY_CUTOFF_MS = 1746057600000
+    _LEGACY_CUTOFF_MS = 1777564800000
     try:
         lic_enc = base64.b32decode(data)
         pkey = serialization.load_pem_private_key(base64.b64decode("AIOE_LICENSE_KEY"), password=None)
@@ -164,11 +164,7 @@ def verify_license(data: bytes):
         logger.info(f"License createTime: {create_time} (截止时间: {_LEGACY_CUTOFF_MS})")
         logger.info(f"使用{'旧' if create_time < _LEGACY_CUTOFF_MS else '新'}验证方案")
 
-        # 根据创建时间选择验证方案
-        # 临时强制使用旧方案（调试用）
-        use_legacy = True  # 改为 False 恢复自动判断
-
-        if use_legacy or create_time < _LEGACY_CUTOFF_MS:
+        if create_time < _LEGACY_CUTOFF_MS:
             # 旧 License：使用 MAC 地址方案
             logger.info("使用 MAC 地址验证方案")
             machine_id = generate_mac_uuid()
