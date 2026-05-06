@@ -8,6 +8,9 @@ RUN apt update -y && apt install -y \
     libaio-dev \
     curl \
     unzip \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
+    fonts-freefont-ttf \
     ccache
 
 RUN pip install uv==0.9.22 nuitka==2.8.9
