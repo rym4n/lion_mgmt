@@ -3131,6 +3131,8 @@ class SSEStreamingHook(AgentHook):
                             await self.sse_response.send(f"data: {message}\n\n")
                             self._has_content = True
                             self._accumulated_content += content
+                            # 立即尝试提取代码 JSON
+                            await self._extract_and_send_code_json()
                         except Exception as e:
                             logger.error(f"[SSEStreamingHook] 发送 message 工具输出失败: {e}")
 
@@ -3453,7 +3455,6 @@ async def delete_browser_session(request):
 
     删除内容：
     1. 会话专属的截图文件夹（{workspace}/{tenant_id}/{session_id}/）
-    2. nanobot 会话历史文件（{workspace}/{tenant_id}/sessions/browser_{session_id}.jsonl）
     """
     session_id = request.json.get("session_id")
     if not session_id:
@@ -3472,18 +3473,6 @@ async def delete_browser_session(request):
             logger.info(f"已删除会话 {session_id} 的截图文件夹: {screenshot_dir}")
         except Exception as e:
             logger.error(f"删除截图文件夹失败: {e}")
-
-    try:
-        client = NanobotClient(tenant_id=tenant_id, workspace_base=NANOBOT_WORKSPACE_BASE)
-        session_key = f"browser:{session_id}"
-
-        from nanobot.session.manager import SessionManager
-        session_manager = SessionManager(workspace=Path(client.workspace))
-        if session_manager.delete_session(session_key):
-            deleted_items.append("会话历史")
-            logger.info(f"已删除会话 {session_id} 的 nanobot 历史")
-    except Exception as e:
-        logger.error(f"删除 nanobot 会话历史失败: {e}")
 
     if not deleted_items:
         return response_ok({"message": "会话不存在或已被删除"})
