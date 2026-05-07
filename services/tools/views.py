@@ -3119,6 +3119,21 @@ class SSEStreamingHook(AgentHook):
         logger.info(f"[SSEStreamingHook] context.tool_calls: {len(context.tool_calls) if context.tool_calls else 0}")
         logger.info(f"[SSEStreamingHook] context.error: {context.error}")
 
+        # 捕获 message() 工具的输出
+        if context.tool_calls:
+            for tool_call in context.tool_calls:
+                if tool_call.name == "message" and tool_call.arguments:
+                    content = tool_call.arguments.get("content", "")
+                    if content:
+                        logger.info(f"[SSEStreamingHook] 捕获到 message() 工具输出，长度: {len(content)}")
+                        try:
+                            message = orjson.dumps({"status": "message", "content": content}).decode()
+                            await self.sse_response.send(f"data: {message}\n\n")
+                            self._has_content = True
+                            self._accumulated_content += content
+                        except Exception as e:
+                            logger.error(f"[SSEStreamingHook] 发送 message 工具输出失败: {e}")
+
         # 检查会话专属截图文件夹中的截图文件
         try:
             screenshot_patterns = ["*.png", "*.jpg", "*.jpeg"]
@@ -3255,11 +3270,13 @@ async def browser_execute(request):
         }).decode()
         await resp.send(f"data: {start_data}\n\n")
 
-        # 1. 初始化 NanobotClient
+        # 1. 初始化 NanobotClient（使用 session_id 作为 tenant_id 以隔离 workspace）
         logger.info(f"初始化 NanobotClient，tenant_id={tenant_id}, session_id={session_id}")
-        client = NanobotClient(tenant_id=tenant_id, workspace_base=NANOBOT_WORKSPACE_BASE)
+        # 使用 tenant_id/session_id 作为完整的 workspace 路径
+        session_workspace_base = Path(NANOBOT_WORKSPACE_BASE) / tenant_id
+        client = NanobotClient(tenant_id=session_id, workspace_base=session_workspace_base)
 
-        # 获取 workspace 路径用于检测截图
+        # 获取 workspace 路径用于检测截图（与 nanobot 使用的路径一致）
         workspace_path = Path(NANOBOT_WORKSPACE_BASE) / tenant_id
 
         # 2. 创建 SSE 流式 Hook（传入 session_id）
