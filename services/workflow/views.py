@@ -2623,12 +2623,31 @@ async def get_version_runlog(request):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["prompt"],
+                "required": ["messages"],
                 "properties": {
-                    "prompt": {"type": "string", "description": "用户输入的提示词"},
-                    "system_prompt": {"type": "string", "description": "系统提示词（可选）"},
+                    "messages": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "对话消息列表，格式: [{'role': 'user', 'content': '...'}]",
+                    },
                     "temperature": {"type": "number", "description": "温度参数，默认0.7"},
-                    "max_tokens": {"type": "integer", "description": "最大token数，默认2000"},
+                    "tools": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "工具定义列表（可选）",
+                    },
+                    "parallel_tool_calls": {
+                        "type": "boolean",
+                        "description": "是否允许并行工具调用，默认false",
+                    },
+                    "tool_choice": {
+                        "type": "string",
+                        "description": "工具选择策略: auto/required/none 或具体工具名（可选）",
+                    },
+                    "verbosity": {
+                        "type": "string",
+                        "description": "详细程度级别",
+                    },
                 },
             }
         }
@@ -2649,12 +2668,14 @@ async def ai_chat(request):
     from litellm import acompletion
 
     data = request.json
-    prompt = data.get("prompt")
-    system_prompt = data.get("system_prompt", "你是一个专业的AI助手，请根据用户的问题提供准确、有帮助的回答。")
+    messages = data.get("messages")
     temperature = data.get("temperature", 0.7)
-    max_tokens = data.get("max_tokens", 2000)
+    tools = data.get("tools")
+    parallel_tool_calls = data.get("parallel_tool_calls", False)
+    tool_choice = data.get("tool_choice")
+    verbosity = data.get("verbosity", 0)
 
-    if not prompt:
+    if not messages or not isinstance(messages, list):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     # 从环境变量获取配置
@@ -2676,30 +2697,65 @@ async def ai_chat(request):
     )
 
     try:
-        # 构造消息
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt},
-        ]
+        # 构造litellm调用参数
+        completion_params = {
+            "model": model,
+            "messages": messages,
+            "api_key": api_key,
+            "api_base": api_base,
+            "stream": True,
+            "temperature": temperature,
+        }
+
+        # 添加可选参数
+        if tools:
+            completion_params["tools"] = tools
+        if parallel_tool_calls is not None:
+            completion_params["parallel_tool_calls"] = parallel_tool_calls
+        if tool_choice:
+            completion_params["tool_choice"] = tool_choice
+        if verbosity is not None:
+            completion_params["verbosity"] = verbosity
 
         # 调用litellm进行流式对话
-        response = await acompletion(
-            model=model,
-            messages=messages,
-            api_key=api_key,
-            api_base=api_base,
-            stream=True,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        response = await acompletion(**completion_params)
 
         # 流式返回结果
         async for chunk in response:
             if chunk.choices and len(chunk.choices) > 0:
-                delta = chunk.choices[0].delta
+                choice = chunk.choices[0]
+                delta = choice.delta
+
+                # 构造返回数据
+                chunk_data = {}
+
+                # 处理文本内容
                 if hasattr(delta, "content") and delta.content:
-                    # 发送SSE格式的数据
-                    await resp.send(f"data: {orjson.dumps({'content': delta.content}).decode()}\n\n")
+                    chunk_data["content"] = delta.content
+
+                # 处理工具调用
+                if hasattr(delta, "tool_calls") and delta.tool_calls:
+                    chunk_data["tool_calls"] = [
+                        {
+                            "id": tc.id if hasattr(tc, "id") else None,
+                            "type": tc.type if hasattr(tc, "type") else "function",
+                            "function": {
+                                "name": tc.function.name if hasattr(tc.function, "name") else None,
+                                "arguments": tc.function.arguments if hasattr(tc.function, "arguments") else None,
+                            },
+                        }
+                        for tc in delta.tool_calls
+                    ]
+
+                # 添加额外的元数据
+                if hasattr(choice, "finish_reason") and choice.finish_reason:
+                    chunk_data["finish_reason"] = choice.finish_reason
+                if hasattr(choice, "index"):
+                    chunk_data["index"] = choice.index
+
+                # 发送SSE格式的数据
+                if chunk_data:
+                    await resp.send(f"data: {orjson.dumps(chunk_data).decode()}\n\n")
 
         # 发送结束标记
         await resp.send("data: [DONE]\n\n")
