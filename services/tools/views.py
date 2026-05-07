@@ -3049,7 +3049,6 @@ class SSEStreamingHook(AgentHook):
         """流式输出时通过 SSE 发送"""
         self._has_content = True
         self._accumulated_content += delta
-        logger.info(f"[SSEStreamingHook] on_stream 被调用，delta 长度: {len(delta)}")
 
         try:
             message = orjson.dumps({"status": "message", "content": delta}).decode()
@@ -3065,14 +3064,22 @@ class SSEStreamingHook(AgentHook):
     async def _extract_and_send_code_json(self):
         """从累积内容中提取代码 JSON 并发送"""
         try:
-            # 查找 JSON 代码块（```json ... ```）
+            json_str = None
+
+            # 方式1: 查找 JSON 代码块（```json ... ```）
             json_pattern = r'```json\s*\n(.*?)\n```'
             matches = re.findall(json_pattern, self._accumulated_content, re.DOTALL)
-
             if matches:
-                # 取最后一个匹配（最新的代码）
                 json_str = matches[-1].strip()
 
+            # 方式2: 查找纯 JSON 对象（{"config":...,"main":...}）
+            if not json_str:
+                pure_json_pattern = r'\{["\']config["\']\s*:\s*["\'].*?["\'],\s*["\']main["\']\s*:\s*["\'].*?["\']\s*\}'
+                matches = re.findall(pure_json_pattern, self._accumulated_content, re.DOTALL)
+                if matches:
+                    json_str = matches[-1].strip()
+
+            if json_str:
                 # 尝试解析 JSON
                 try:
                     code_data = orjson.loads(json_str)
@@ -3158,7 +3165,7 @@ class SSEStreamingHook(AgentHook):
 @tools_bp.post("/browser/execute")
 @openapi.definition(
     summary="执行应用智能开发任务",
-    description="通过 nanobot 自然语言调用 agent-browser skill 执行应用智能开发任务，支持会话上下文和截图返回（需要工具查看权限）",
+    description="通过自然语言调用执行应用智能开发任务，支持会话上下文和截图返回（需要工具查看权限）",
     body={
         "application/json": {
             "schema": {
@@ -3171,7 +3178,7 @@ class SSEStreamingHook(AgentHook):
                     },
                     "session_id": {
                         "type": "string",
-                        "description": "会话 ID（用于保持 nanobot 上下文历史，可选）",
+                        "description": "会话 ID（用于保持上下文历史，可选）",
                     },
                 },
             }
@@ -3338,7 +3345,7 @@ async def browser_execute(request):
 </user_task>"""
 
         # 4. 发送处理状态
-        processing_data = orjson.dumps({"status": "processing", "message": "nanobot 正在理解任务..."}).decode()
+        processing_data = orjson.dumps({"status": "processing", "message": "正在理解任务..."}).decode()
         await resp.send(f"data: {processing_data}\n\n")
 
         # 5. 调用 nanobot（使用 session_id 保持上下文）
