@@ -1,7 +1,24 @@
-# Tool Usage Notes
+# 工具使用说明
 
-Tool signatures are provided automatically via function calling.
-This file documents non-obvious constraints and usage patterns.
+工具签名通过函数调用自动提供。
+此文件记录非显而易见的约束和使用模式。
+
+## 安全运维场景的工具使用建议
+
+### 日志分析
+- 使用 `grep` 搜索日志中的异常模式（如失败登录、错误代码）
+- 使用 `exec` 执行 `awk`/`sed` 进行复杂日志解析
+- 大文件使用 `head_limit` 和 `offset` 分页处理
+
+### 系统排查
+- 使用 `exec` 执行诊断命令（`ps`/`netstat`/`ss`/`lsof`）
+- 使用 `glob` 查找配置文件、日志文件、可疑文件
+- 使用 `read_file` 读取配置和日志内容
+
+### 威胁检测
+- 使用 `grep` 搜索 IOC（IP地址、域名、文件哈希）
+- 使用 `exec` 执行安全工具（`nmap`/`tcpdump`/`strings`）
+- 使用 `glob` 查找可疑文件（webshell特征、异常扩展名）
 
 ## exec — Safety Limits
 

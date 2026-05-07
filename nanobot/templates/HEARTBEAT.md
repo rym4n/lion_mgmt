@@ -1,16 +1,25 @@
-# Heartbeat Tasks
+# 心跳任务
 
-This file is checked every 30 minutes by your nanobot agent.
-Add tasks below that you want the agent to work on periodically.
+此文件每30分钟由智能体检查一次。
+在下方添加需要周期性执行的任务。
 
-If this file has no tasks (only headers and comments), the agent will skip the heartbeat.
+如果此文件没有任务（仅有标题和注释），智能体将跳过心跳检查。
 
-## Active Tasks
+## 活跃任务
 
-<!-- Add your periodic tasks below this line -->
+<!-- 在此行下方添加周期性任务 -->
 
+### 安全巡检示例
+- [ ] 检查系统异常登录（失败次数>10的IP）
+- [ ] 扫描高危端口暴露情况
+- [ ] 检查关键服务运行状态
 
-## Completed
+### 运维监控示例
+- [ ] 检查磁盘使用率（>80%告警）
+- [ ] 检查内存使用情况
+- [ ] 检查证书过期时间（<30天提醒）
 
-<!-- Move completed tasks here or delete them -->
+## 已完成
+
+<!-- 将完成的任务移至此处或删除 -->
 

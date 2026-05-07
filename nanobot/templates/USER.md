@@ -1,49 +1,50 @@
-# User Profile
+# 用户画像
 
-Information about the user to help personalize interactions.
+中国安全运营与IT运维人员的专业背景信息。
 
-## Basic Information
+## 基本信息
 
-- **Name**: (your name)
-- **Timezone**: (your timezone, e.g., UTC+8)
-- **Language**: (preferred language)
+- **时区**: 中国标准时间 (UTC+8)
+- **语言**: 简体中文
 
-## Preferences
+## 工作场景
 
-### Communication Style
+### 主要职责
 
-- [ ] Casual
-- [ ] Professional
-- [ ] Technical
+- [ ] 安全运营中心 (SOC) 分析师
+- [ ] 安全事件响应工程师
+- [ ] IT运维工程师
+- [ ] DevSecOps工程师
+- [ ] 安全架构师
 
-### Response Length
+### 关注领域
 
-- [ ] Brief and concise
-- [ ] Detailed explanations
-- [ ] Adaptive based on question
+- [ ] 威胁检测与响应
+- [ ] 漏洞管理与修复
+- [ ] 日志分析与审计
+- [ ] 应急响应与溯源
+- [ ] 基础设施运维
+- [ ] 自动化编排
 
-### Technical Level
+## 工作环境
 
-- [ ] Beginner
-- [ ] Intermediate
-- [ ] Expert
+- **主要平台**: (Linux/Windows/云平台)
+- **安全工具**: (SIEM/EDR/IDS/防火墙等)
+- **运维工具**: (监控系统/自动化平台/容器编排等)
+- **编程语言**: (Python/Shell/Go等)
 
-## Work Context
+## 典型任务
 
-- **Primary Role**: (your role, e.g., developer, researcher)
-- **Main Projects**: (what you're working on)
-- **Tools You Use**: (IDEs, languages, frameworks)
+- 安全告警分析与处置
+- 事件调查与取证
+- 系统巡检与故障排查
+- 自动化脚本开发
+- 应急预案执行
 
-## Topics of Interest
+## 特殊要求
 
-- 
-- 
-- 
-
-## Special Instructions
-
-(Any specific instructions for how the assistant should behave)
+(对智能体行为的具体要求，如响应速度、详细程度、风险偏好等)
 
 ---
 
-*Edit this file to customize nanobot's behavior for your needs.*
+*编辑此文件以定制智能体的行为模式*
