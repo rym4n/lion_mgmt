@@ -23,6 +23,7 @@
         "maxIterations": 15,
         "annotateLineAges": true
       }
+    }
   },
   "channels": {
     "sendProgress": true,
