@@ -3059,13 +3059,8 @@ class SSEStreamingHook(AgentHook):
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         """流式输出结束时检测并提取代码 JSON"""
-        logger.info(f"[SSEStreamingHook] on_stream_end 被调用，_has_content={self._has_content}, resuming={resuming}")
-        if self._has_content:
-            # 尝试从累积内容中提取代码 JSON
-            await self._extract_and_send_code_json()
-            # 重置标志和累积内容
-            self._has_content = False
-            self._accumulated_content = ""
+        # 尝试从累积内容中提取代码 JSON
+        await self._extract_and_send_code_json()
 
     async def _extract_and_send_code_json(self):
         """从累积内容中提取代码 JSON 并发送"""
@@ -3115,28 +3110,7 @@ class SSEStreamingHook(AgentHook):
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         """在每次迭代后检查截图文件并发送"""
-        logger.info(f"[SSEStreamingHook] after_iteration 被调用")
-        logger.info(f"[SSEStreamingHook] context.tool_calls: {len(context.tool_calls) if context.tool_calls else 0}")
-        logger.info(f"[SSEStreamingHook] context.error: {context.error}")
-
-        # 捕获 message() 工具的输出
-        if context.tool_calls:
-            for tool_call in context.tool_calls:
-                if tool_call.name == "message" and tool_call.arguments:
-                    content = tool_call.arguments.get("content", "")
-                    if content:
-                        logger.info(f"[SSEStreamingHook] 捕获到 message() 工具输出，长度: {len(content)}")
-                        try:
-                            message = orjson.dumps({"status": "message", "content": content}).decode()
-                            await self.sse_response.send(f"data: {message}\n\n")
-                            self._has_content = True
-                            self._accumulated_content += content
-                            # 立即尝试提取代码 JSON
-                            await self._extract_and_send_code_json()
-                        except Exception as e:
-                            logger.error(f"[SSEStreamingHook] 发送 message 工具输出失败: {e}")
-
-        # 检查会话专属截图文件夹中的截图文件
+        # 检查 workspace 中的截图文件
         try:
             screenshot_patterns = ["*.png", "*.jpg", "*.jpeg"]
             for pattern in screenshot_patterns:
