@@ -55,6 +55,7 @@ WORKDIR /app
 
 RUN apt update -y \
     && apt install -y curl libc-dev python3-dev libaio-dev \
+       fonts-noto-cjk fonts-noto-color-emoji fonts-freefont-ttf \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir /var/lib/vector \
     && mkdir tools
