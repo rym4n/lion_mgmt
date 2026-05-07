@@ -211,8 +211,36 @@ class NanobotClient:
         # 懒加载：确保 workspace 目录存在
         os.makedirs(self.workspace, exist_ok=True)
 
+        # 复制 skills 到 workspace（如果尚未复制）
+        self._ensure_skills_copied()
+
         # 使用全局配置的配置文件路径
         self.config_path = CONFIG_PATH
+
+    def _ensure_skills_copied(self):
+        """确保 skills 目录已复制到 workspace"""
+        import shutil
+
+        target_skills = Path(self.workspace) / "skills"
+        if target_skills.exists():
+            return
+
+        # 尝试多个可能的源路径
+        source_candidates = [
+            Path("/app/nanobot/skills"),  # 容器环境
+            PROJECT_ROOT / "nanobot" / "skills",  # 本地开发环境
+        ]
+
+        for source_skills in source_candidates:
+            if source_skills.exists() and source_skills.is_dir():
+                try:
+                    shutil.copytree(source_skills, target_skills)
+                    logger.info(f"[NanobotClient] 已复制 skills 到 workspace: {target_skills}")
+                    break
+                except Exception as e:
+                    logger.warning(f"[NanobotClient] 复制 skills 失败: {e}")
+        else:
+            logger.warning(f"[NanobotClient] 未找到 skills 源目录")
 
     async def ask(
         self,
