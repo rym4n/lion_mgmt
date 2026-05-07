@@ -53,7 +53,7 @@ WORKDIR /app
 
 RUN apt update -y \
     && apt install -y curl libc-dev python3-dev libaio-dev \
-       fonts-wqy-zenhei fonts-wqy-microhei \
+       fonts-wqy-zenhei fonts-wqy-microhei bubblewrap \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir /var/lib/vector \
     && mkdir tools
