@@ -19,6 +19,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
+    UV_HTTP_TIMEOUT=300 \
     PATH="/usr/lib/ccache:$PATH" \
     CCACHE_DIR="/root/.ccache" \
     CCACHE_MAXSIZE="2G" \
