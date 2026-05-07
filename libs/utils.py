@@ -227,8 +227,8 @@ def generate_fingerprint() -> str:
     """
     生成稳定的机器指纹（容器环境适配）
     """
-    machine_id_path = "/app/.host-identity/machine-id"
-    product_uuid_path = "/app/.host-identity/product_uuid"
+    machine_id_path = "/app/.id"
+    product_uuid_path = "/app/.uuid"
 
     if not os.path.exists(machine_id_path):
         logger.error(f"License机器指纹锚点文件缺失: {machine_id_path}")
