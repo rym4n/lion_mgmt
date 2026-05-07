@@ -8,9 +8,6 @@ RUN apt update -y && apt install -y \
     libaio-dev \
     curl \
     unzip \
-    fonts-noto-cjk \
-    fonts-noto-color-emoji \
-    fonts-freefont-ttf \
     ccache
 
 RUN pip install uv==0.9.22 nuitka==2.8.9
@@ -56,7 +53,7 @@ WORKDIR /app
 
 RUN apt update -y \
     && apt install -y curl libc-dev python3-dev libaio-dev \
-       fonts-noto-cjk fonts-noto-color-emoji fonts-freefont-ttf \
+       fonts-wqy-zenhei fonts-wqy-microhei \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir /var/lib/vector \
     && mkdir tools
