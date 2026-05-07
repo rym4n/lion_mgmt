@@ -10,6 +10,7 @@ import operator
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import time
 import uuid
@@ -3022,16 +3023,21 @@ async def sync_health_status(request):
 class SSEStreamingHook(AgentHook):
     """SSE 流式输出 Hook - 将 Nanobot 流式输出通过 SSE 发送"""
 
-    def __init__(self, sse_response, workspace_path: Path):
+    def __init__(self, sse_response, workspace_path: Path, session_id: str):
         """
         初始化 SSE 流式 Hook
 
         Args:
             sse_response: Sanic SSE 响应对象
             workspace_path: nanobot workspace 路径，用于检测截图文件
+            session_id: 会话ID，用于创建会话专属的截图文件夹
         """
         self.sse_response = sse_response
         self.workspace_path = workspace_path
+        self.session_id = session_id
+        # 创建会话专属的截图文件夹
+        self.screenshot_dir = workspace_path / session_id
+        self.screenshot_dir.mkdir(parents=True, exist_ok=True)
         self._has_content = False
         self._screenshot_files = set()  # 记录已发送的截图文件
         self._accumulated_content = ""  # 累积内容，用于检测代码 JSON
@@ -3043,6 +3049,7 @@ class SSEStreamingHook(AgentHook):
         """流式输出时通过 SSE 发送"""
         self._has_content = True
         self._accumulated_content += delta
+        logger.info(f"[SSEStreamingHook] on_stream 被调用，delta 长度: {len(delta)}")
 
         try:
             message = orjson.dumps({"status": "message", "content": delta}).decode()
@@ -3052,8 +3059,13 @@ class SSEStreamingHook(AgentHook):
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         """流式输出结束时检测并提取代码 JSON"""
-        # 尝试从累积内容中提取代码 JSON
-        await self._extract_and_send_code_json()
+        logger.info(f"[SSEStreamingHook] on_stream_end 被调用，_has_content={self._has_content}, resuming={resuming}")
+        if self._has_content:
+            # 尝试从累积内容中提取代码 JSON
+            await self._extract_and_send_code_json()
+            # 重置标志和累积内容
+            self._has_content = False
+            self._accumulated_content = ""
 
     async def _extract_and_send_code_json(self):
         """从累积内容中提取代码 JSON 并发送"""
@@ -3103,11 +3115,32 @@ class SSEStreamingHook(AgentHook):
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         """在每次迭代后检查截图文件并发送"""
-        # 检查 workspace 中的截图文件
+        logger.info(f"[SSEStreamingHook] after_iteration 被调用")
+        logger.info(f"[SSEStreamingHook] context.tool_calls: {len(context.tool_calls) if context.tool_calls else 0}")
+        logger.info(f"[SSEStreamingHook] context.error: {context.error}")
+
+        # 捕获 message() 工具的输出
+        if context.tool_calls:
+            for tool_call in context.tool_calls:
+                if tool_call.name == "message" and tool_call.arguments:
+                    content = tool_call.arguments.get("content", "")
+                    if content:
+                        logger.info(f"[SSEStreamingHook] 捕获到 message() 工具输出，长度: {len(content)}")
+                        try:
+                            message = orjson.dumps({"status": "message", "content": content}).decode()
+                            await self.sse_response.send(f"data: {message}\n\n")
+                            self._has_content = True
+                            self._accumulated_content += content
+                            # 立即尝试提取代码 JSON
+                            await self._extract_and_send_code_json()
+                        except Exception as e:
+                            logger.error(f"[SSEStreamingHook] 发送 message 工具输出失败: {e}")
+
+        # 检查会话专属截图文件夹中的截图文件
         try:
             screenshot_patterns = ["*.png", "*.jpg", "*.jpeg"]
             for pattern in screenshot_patterns:
-                for screenshot_path in self.workspace_path.glob(f"**/{pattern}"):
+                for screenshot_path in self.screenshot_dir.glob(pattern):
                     # 只发送新的截图文件
                     if screenshot_path not in self._screenshot_files:
                         self._screenshot_files.add(screenshot_path)
@@ -3150,8 +3183,8 @@ class SSEStreamingHook(AgentHook):
 
 @tools_bp.post("/browser/execute")
 @openapi.definition(
-    summary="执行浏览器自动化任务",
-    description="通过 nanobot 自然语言调用 agent-browser skill 执行浏览器自动化任务，支持会话上下文和截图返回（需要工具查看权限）",
+    summary="执行应用智能开发任务",
+    description="通过 nanobot 自然语言调用 agent-browser skill 执行应用智能开发任务，支持会话上下文和截图返回（需要工具查看权限）",
     body={
         "application/json": {
             "schema": {
@@ -3160,7 +3193,7 @@ class SSEStreamingHook(AgentHook):
                 "properties": {
                     "task": {
                         "type": "string",
-                        "description": "浏览器自动化任务描述（自然语言）",
+                        "description": "应用智能开发任务描述（自然语言）",
                     },
                     "session_id": {
                         "type": "string",
@@ -3239,15 +3272,17 @@ async def browser_execute(request):
         }).decode()
         await resp.send(f"data: {start_data}\n\n")
 
-        # 1. 初始化 NanobotClient
+        # 1. 初始化 NanobotClient（使用 session_id 作为 tenant_id 以隔离 workspace）
         logger.info(f"初始化 NanobotClient，tenant_id={tenant_id}, session_id={session_id}")
-        client = NanobotClient(tenant_id=tenant_id, workspace_base=NANOBOT_WORKSPACE_BASE)
+        # 使用 tenant_id/session_id 作为完整的 workspace 路径
+        session_workspace_base = Path(NANOBOT_WORKSPACE_BASE) / tenant_id
+        client = NanobotClient(tenant_id=session_id, workspace_base=session_workspace_base)
 
-        # 获取 workspace 路径用于检测截图
+        # 获取 workspace 路径用于检测截图（与 nanobot 使用的路径一致）
         workspace_path = Path(NANOBOT_WORKSPACE_BASE) / tenant_id
 
-        # 2. 创建 SSE 流式 Hook
-        hook = SSEStreamingHook(sse_response=resp, workspace_path=workspace_path)
+        # 2. 创建 SSE 流式 Hook（传入 session_id）
+        hook = SSEStreamingHook(sse_response=resp, workspace_path=workspace_path, session_id=session_id)
 
         # 3. 构建完整消息：系统指令 + 用户任务
         full_message = f"""<system_instruction>
@@ -3289,7 +3324,7 @@ async def browser_execute(request):
    - 完整的异常处理（try-except）
    - 从 assets 获取配置参数
    - 统一的返回格式（{{"code": 0/-1, "msg": "", "data": ...}}）
-4. 如果任务使用了 agent-browser，使用 agent-browser 操作模板
+4. 如果任务使用了 agent-browser，则在代码中使用 requests 替换 agent-browser 的功能实现，并确保代码逻辑清晰、可读性强
 5. 同时生成配套的 config.json 文件
 
 【代码返回格式 - 必须遵守】
@@ -3373,4 +3408,74 @@ async def browser_execute(request):
                 logger.error(f"关闭 SSE 响应失败: {eof_error}")
 
     return resp
+
+
+@tools_bp.post("/browser/session/delete")
+@openapi.definition(
+    summary="删除应用智能开发会话",
+    description="删除指定会话的截图文件夹和 nanobot 会话历史（需要工具删除权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["session_id"],
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "会话 ID",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {"message": {"type": "string"}},
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("tool:d")
+async def delete_browser_session(request):
+    """
+    删除浏览器自动化会话
+
+    删除内容：
+    1. 会话专属的截图文件夹（{workspace}/{tenant_id}/{session_id}/）
+    """
+    session_id = request.json.get("session_id")
+    if not session_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    workspace_path = Path(NANOBOT_WORKSPACE_BASE) / tenant_id
+
+    deleted_items = []
+
+    screenshot_dir = workspace_path / session_id
+    if screenshot_dir.exists() and screenshot_dir.is_dir():
+        try:
+            shutil.rmtree(screenshot_dir)
+            deleted_items.append("截图文件夹")
+            logger.info(f"已删除会话 {session_id} 的截图文件夹: {screenshot_dir}")
+        except Exception as e:
+            logger.error(f"删除截图文件夹失败: {e}")
+
+    if not deleted_items:
+        return response_ok({"message": "会话不存在或已被删除"})
+
+    return response_ok({"message": f"会话删除成功，已删除: {', '.join(deleted_items)}"})
 

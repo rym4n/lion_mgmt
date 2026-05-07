@@ -17,7 +17,10 @@ from sanic.log import logger
 from nanobot import Nanobot
 from nanobot.agent import AgentHook, AgentHookContext
 
-from settings import NANOBOT_CONFIG_PATH
+# 项目根目录（libs 的上一级目录）
+PROJECT_ROOT = Path(__file__).parent.parent
+# config.json 的绝对路径
+CONFIG_PATH = PROJECT_ROOT / "config.json"
 
 
 # 工具名称到中文描述的映射
@@ -164,7 +167,7 @@ class RedisStreamingHook(AgentHook):
         if not context.tool_calls:
             return
 
-        # 为每个工具调用发送一条消息
+        # 为每个工具调用发送一条"思考中"消息
         for tool_call in context.tool_calls:
             tool_name = tool_call.name
             tool_args = tool_call.arguments or {}
@@ -172,11 +175,10 @@ class RedisStreamingHook(AgentHook):
             # 生成工具的友好描述
             description = _generate_tool_description(tool_name, tool_args)
 
-            content = f"\n🔧 {description}\n"
-
             message_data = {
-                "type": "ai-reply-delta",
-                "content": content,
+                "type": "ai-thinking",
+                "content": description,
+                "tool_name": tool_name,
                 "room_id": self.room_id,
                 "receiver_id": self.receiver_id,
                 "tenant_id": self.tenant_id,
@@ -185,48 +187,12 @@ class RedisStreamingHook(AgentHook):
                 await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
             except Exception as e:
                 # 记录错误但不中断流程
-                logger.info(f"[RedisStreamingHook] 发布工具调用消息失败: {e}")
+                logger.info(f"[RedisStreamingHook] 发布思考中消息失败: {e}")
 
     async def after_iteration(self, context: AgentHookContext) -> None:
-        """在每次迭代后发送工具执行结果或错误信息"""
-        from settings import WR_TOPIC
-
-        # 如果有错误，总是发送错误消息（无论是否有工具调用）
-        if context.error:
-            # 判断是工具执行错误还是模型调用错误
-            if context.tool_calls:
-                content = "❌ 工具执行失败\n"
-            else:
-                content = "❌ AI 调用失败，请稍后重试\n"
-
-            message_data = {
-                "type": "ai-reply-delta",
-                "content": content,
-                "room_id": self.room_id,
-                "receiver_id": self.receiver_id,
-                "tenant_id": self.tenant_id,
-            }
-            try:
-                await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
-            except Exception as e:
-                logger.info(f"[RedisStreamingHook] 发布错误消息失败: {e}")
-            return
-
-        # 如果没有错误，只在有工具调用时发送成功消息
-        if context.tool_calls:
-            content = "✅ 工具执行完成\n"
-
-            message_data = {
-                "type": "ai-reply-delta",
-                "content": content,
-                "room_id": self.room_id,
-                "receiver_id": self.receiver_id,
-                "tenant_id": self.tenant_id,
-            }
-            try:
-                await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
-            except Exception as e:
-                logger.info(f"[RedisStreamingHook] 发布工具执行结果失败: {e}")
+        """在每次迭代后的回调（工具执行完成后）"""
+        # 不需要发送任何消息，工具执行状态由 before_execute_tools 已经通知
+        pass
 
 
 class NanobotClient:
@@ -246,7 +212,7 @@ class NanobotClient:
         os.makedirs(self.workspace, exist_ok=True)
 
         # 使用全局配置的配置文件路径
-        self.config_path = Path(NANOBOT_CONFIG_PATH)
+        self.config_path = CONFIG_PATH
 
     async def ask(
         self,
@@ -303,7 +269,7 @@ async def ask(
     Returns:
         回答内容
     """
-    bot = Nanobot.from_config(config_path=NANOBOT_CONFIG_PATH, workspace=workspace)
+    bot = Nanobot.from_config(config_path=CONFIG_PATH, workspace=workspace)
     hooks = [StreamingHook()] if streaming else None
     result = await bot.run(message, session_key=session_key, hooks=hooks)
     return result.content

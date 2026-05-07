@@ -2615,3 +2615,157 @@ async def get_version_runlog(request):
     )
 
 
+@workflow_bp.post("/ai-chat")
+@openapi.definition(
+    summary="AI对话接口",
+    description="使用大模型进行对话，支持流式返回",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["messages"],
+                "properties": {
+                    "messages": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "对话消息列表，格式: [{'role': 'user', 'content': '...'}]",
+                    },
+                    "temperature": {"type": "number", "description": "温度参数，默认0.7"},
+                    "tools": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "工具定义列表（可选）",
+                    },
+                    "parallel_tool_calls": {
+                        "type": "boolean",
+                        "description": "是否允许并行工具调用，默认false",
+                    },
+                    "tool_choice": {
+                        "type": "string",
+                        "description": "工具选择策略: auto/required/none 或具体工具名（可选）",
+                    },
+                    "verbosity": {
+                        "type": "string",
+                        "description": "详细程度级别",
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "流式返回AI响应",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        }
+    },
+)
+@requires_permission("workflow:r")
+async def ai_chat(request):
+    """
+    使用litellm调用大模型进行对话，流式返回结果
+    """
+    import os
+    from litellm import acompletion
+
+    data = request.json
+    messages = data.get("messages")
+    temperature = data.get("temperature", 0.7)
+    tools = data.get("tools")
+    parallel_tool_calls = data.get("parallel_tool_calls", False)
+    tool_choice = data.get("tool_choice")
+    verbosity = data.get("verbosity", 0)
+
+    if not messages or not isinstance(messages, list):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 从环境变量获取配置
+    model = os.environ.get("RY_AI_MODEL")
+    api_key = os.environ.get("RY_OPENAI_API_KEY")
+    api_base = os.environ.get("RY_AI_API_BASE")
+
+    if not model or not api_key:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 设置响应头
+    resp = await request.respond(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+    try:
+        # 构造litellm调用参数
+        completion_params = {
+            "model": model,
+            "messages": messages,
+            "api_key": api_key,
+            "api_base": api_base,
+            "stream": True,
+            "temperature": temperature,
+        }
+
+        # 添加可选参数
+        if tools:
+            completion_params["tools"] = tools
+        if parallel_tool_calls is not None:
+            completion_params["parallel_tool_calls"] = parallel_tool_calls
+        if tool_choice:
+            completion_params["tool_choice"] = tool_choice
+        if verbosity is not None:
+            completion_params["verbosity"] = verbosity
+
+        # 调用litellm进行流式对话
+        response = await acompletion(**completion_params)
+
+        # 流式返回结果
+        async for chunk in response:
+            if chunk.choices and len(chunk.choices) > 0:
+                choice = chunk.choices[0]
+                delta = choice.delta
+
+                # 构造返回数据
+                chunk_data = {}
+
+                # 处理文本内容
+                if hasattr(delta, "content") and delta.content:
+                    chunk_data["content"] = delta.content
+
+                # 处理工具调用
+                if hasattr(delta, "tool_calls") and delta.tool_calls:
+                    chunk_data["tool_calls"] = [
+                        {
+                            "id": tc.id if hasattr(tc, "id") else None,
+                            "type": tc.type if hasattr(tc, "type") else "function",
+                            "function": {
+                                "name": tc.function.name if hasattr(tc.function, "name") else None,
+                                "arguments": tc.function.arguments if hasattr(tc.function, "arguments") else None,
+                            },
+                        }
+                        for tc in delta.tool_calls
+                    ]
+
+                # 添加额外的元数据
+                if hasattr(choice, "finish_reason") and choice.finish_reason:
+                    chunk_data["finish_reason"] = choice.finish_reason
+                if hasattr(choice, "index"):
+                    chunk_data["index"] = choice.index
+
+                # 发送SSE格式的数据
+                if chunk_data:
+                    await resp.send(f"data: {orjson.dumps(chunk_data).decode()}\n\n")
+
+        # 发送结束标记
+        await resp.send("data: [DONE]\n\n")
+
+    except Exception as e:
+        logger.error(f"AI chat error: {str(e)}")
+        error_msg = orjson.dumps({"error": str(e)}).decode()
+        await resp.send(f"data: {error_msg}\n\n")
+
+    await resp.eof()
+    return resp
+
+

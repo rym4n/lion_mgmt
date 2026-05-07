@@ -382,7 +382,18 @@ class ChatManager:
                                 redis=self.redis,
                             )
                         )
-                    if msg.get("type") in ["ai-reply-delta", "ai-reply-end"]:
+                    if msg.get("type") == "ai-thinking":
+                        # AI 思考中消息，直接转发给前端，不保存到数据库
+                        thinking_data = {
+                            "type": "ai-thinking",
+                            "content": msg.get("content", ""),
+                            "tool_name": msg.get("tool_name", ""),
+                            "room_id": msg.get("room_id"),
+                            "tenant_id": msg.get("tenant_id"),
+                            "receiver_id": msg.get("receiver_id"),
+                        }
+                        message["data"] = orjson.dumps(thinking_data)
+                    elif msg.get("type") in ["ai-reply-delta", "ai-reply-end"]:
                         # 流式回复，累积内容并直接转发给前端
                         buffer_key = f"{msg.get('room_id')}:{msg.get('receiver_id')}"
                         if buffer_key not in self.ai_stream_buffer:
@@ -769,14 +780,43 @@ class ChatManager:
             full_message = f"""<system_instruction>
 【身份】你是 Lion Management 平台的 AI 助手。
 
-【强制规则 - 必须严格遵守】
-1. 你必须立即调用 lion-mgmt skill 来处理，严禁仅用文字回复。
+【意图识别 - 首先判断问题类型】
+在处理用户问题前，先判断问题类型：
+
+**类型 A：纯对话问题（直接回答，不调用 skill）**
+- 通用知识问答（"明天星期几"、"Python 怎么写循环"、"什么是 TCP/IP"）
+- 闲聊寒暄（"你好"、"天气怎么样"、"最近怎么样"）
+- 概念解释（"什么是 SOAR"、"威胁情报是什么"、"解释一下 XSS 攻击"）
+- 不涉及具体数据查询或操作的问题
+
+**处理方式**: 直接用你的知识回答，不要调用 lion-mgmt skill
+
+**类型 B：需要后台能力的问题（必须调用 skill）**
+- 明确的数据查询（"查询 IP 1.1.1.1"、"列出所有剧本"、"查看作战室状态"）
+- 明确的操作请求（"创建作战室"、"执行剧本"、"运行动作"）
+- 涉及系统状态的问题（"有哪些可用的动作"、"当前作战室列表"）
+- 需要调用工具或资源的任务（"用微步查询域名"、"分析这个文件哈希"）
+
+**处理方式**: 必须调用 lion-mgmt skill 来处理
+
+【判断示例】
+- "明天星期几" → 类型 A，直接回答
+- "什么是威胁情报" → 类型 A，直接解释概念
+- "查询 IP 1.1.1.1" → 类型 B，调用 skill
+- "列出所有剧本" → 类型 B，调用 skill
+- "你好" → 类型 A，直接回答
+- "创建一个作战室" → 类型 B，调用 skill
+
+【执行规则】
+1. 对于类型 A 问题：直接用你的知识回答，简洁友好
+2. 对于类型 B 问题：立即调用 lion-mgmt skill，不要只用文字描述
+3. 如果不确定类型，优先判断为类型 A（避免不必要的接口调用）
+4. 如果 skill 调用失败，告知用户具体的错误信息
 
 【重要提醒】
-- 不要问用户"是否需要我调用 skill"，直接调用！
-- 不要说"我可以帮你..."，直接做！
-- 不要只用文字描述，必须调用 skill 获取实际数据！
-- 如果 skill 调用失败，告知用户具体的错误信息。
+- 不要问用户"是否需要我调用 skill"，根据问题类型自动决定
+- 不要说"我可以帮你..."，直接做
+- 类型 B 问题必须调用 skill 获取实际数据，不要凭记忆回答
 </system_instruction>
 
 <message_context>
