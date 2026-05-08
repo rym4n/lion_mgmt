@@ -3116,7 +3116,7 @@ class SSEStreamingHook(AgentHook):
         """在每次迭代后检查截图文件并发送"""
         # 检查 workspace 中的截图文件
         try:
-            screenshot_patterns = ["*.png", "*.jpg", "*.jpeg"]
+            screenshot_patterns = ["*.png", "*.jpg", "*.jpeg", "*.svg"]
             for pattern in screenshot_patterns:
                 for screenshot_path in self.workspace_path.glob(pattern):
                     # 只发送新的截图文件
