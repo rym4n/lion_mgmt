@@ -198,18 +198,18 @@ class RedisStreamingHook(AgentHook):
 
 
 class NanobotClient:
-    """Nanobot 客户端，支持多租户 workspace 隔离"""
+    """Nanobot 客户端，支持会话隔离"""
 
-    def __init__(self, tenant_id: str, *, workspace_base: str | Path):
+    def __init__(self, session_id: str, *, workspace: str | Path):
         """
         初始化 Nanobot 客户端
 
         Args:
-            tenant_id: 租户ID
-            workspace_base: workspace 基础路径，实际路径为 {workspace_base}/{tenant_id}/workspace
+            session_id: 会话ID（用于区分不同的对话会话）
+            workspace: workspace 路径
         """
-        self.tenant_id = tenant_id
-        self.workspace = str(Path(workspace_base) / tenant_id / "workspace")
+        self.session_id = session_id
+        self.workspace = str(workspace)
         workspace_path = Path(self.workspace)
 
         # 如果 workspace 不存在，从模板复制
@@ -236,7 +236,7 @@ class NanobotClient:
         Args:
             message: 问题内容
             streaming: 是否流式输出
-            session_key: 会话标识，默认使用 tenant_id
+            session_key: 会话标识，默认使用 session_id
             hooks: 自定义 hooks，如果为 None 且 streaming=True 则使用默认 StreamingHook
 
         Returns:
@@ -248,9 +248,9 @@ class NanobotClient:
         if hooks is None and streaming:
             hooks = [StreamingHook()]
 
-        # 使用租户ID作为默认 session_key
+        # 使用会话ID作为默认 session_key
         if session_key is None:
-            session_key = f"tenant:{self.tenant_id}"
+            session_key = self.session_id
 
         # 执行查询
         result = await bot.run(message, session_key=session_key, hooks=hooks)

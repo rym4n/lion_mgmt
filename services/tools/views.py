@@ -3253,12 +3253,13 @@ async def browser_execute(request):
         }).decode()
         await resp.send(f"data: {start_data}\n\n")
 
-        # 1. 初始化 NanobotClient（使用 browser-session_id 作为 tenant_id 以隔离 workspace）
-        logger.info(f"初始化 NanobotClient，tenant_id={tenant_id}, session_id={session_id}")
-        client = NanobotClient(tenant_id=f"browser-{session_id}", workspace_base=NANOBOT_WORKSPACE_BASE)
+        # 1. 初始化 NanobotClient（使用当前租户的 workspace）
+        tenant_workspace = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace"
+        logger.info(f"初始化 NanobotClient，tenant_id={tenant_id}, session_id={session_id}, workspace={tenant_workspace}")
+        client = NanobotClient(session_id=session_id, workspace=tenant_workspace)
 
-        # 获取 workspace 路径用于检测截图（与 nanobot 使用的路径一致）
-        workspace_path = Path(NANOBOT_WORKSPACE_BASE) / tenant_id
+        # 获取 workspace 路径用于检测截图
+        workspace_path = tenant_workspace
 
         # 2. 创建 SSE 流式 Hook（传入 session_id）
         hook = SSEStreamingHook(sse_response=resp, workspace_path=workspace_path, session_id=session_id)

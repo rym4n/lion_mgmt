@@ -766,7 +766,8 @@ class ChatManager:
         """在后台执行 nanobot 任务（独立于 websocket 连接）"""
         try:
             logger.info(f"开始调用 Nanobot，tenant_id={tenant_id}, room_id={current_room_id}")
-            client = NanobotClient(tenant_id=tenant_id, workspace_base=NANOBOT_WORKSPACE_BASE)
+            tenant_workspace = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace"
+            client = NanobotClient(session_id=current_room_id, workspace=tenant_workspace)
 
             # 创建 Redis 流式 Hook
             hook = RedisStreamingHook(
@@ -829,14 +830,13 @@ class ChatManager:
 </user_message>"""
 
             # 调用 nanobot（异步执行）
-            # 使用 room_id 作为 session_key 以保持会话上下文
-            logger.info(f"准备调用 client.ask，session_key=room:{current_room_id}")
+            # session_key 已在 NanobotClient 初始化时设置为 room_id
+            logger.info(f"准备调用 client.ask")
             logger.info(f"消息内容长度: {len(full_message)} 字符")
 
             result = await client.ask(
                 message=full_message,
                 streaming=True,
-                session_key=f"room:{current_room_id}",
                 hooks=[hook]
             )
 
