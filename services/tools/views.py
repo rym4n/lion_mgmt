@@ -3146,7 +3146,7 @@ class SSEStreamingHook(AgentHook):
                 logger.error(f"[SSEStreamingHook] 发送错误消息失败: {e}")
 
     async def _send_screenshot(self, screenshot_path: Path):
-        """发送截图文件（base64 编码）"""
+        """发送截图文件（base64 编码）并删除文件"""
         try:
             with open(screenshot_path, "rb") as f:
                 screenshot_data = base64.b64encode(f.read()).decode()
@@ -3158,6 +3158,13 @@ class SSEStreamingHook(AgentHook):
             }).decode()
             await self.sse_response.send(f"data: {message}\n\n")
             logger.info(f"[SSEStreamingHook] 已发送截图: {screenshot_path.name}")
+
+            # 发送后立即删除文件，节省磁盘空间
+            try:
+                screenshot_path.unlink()
+                logger.info(f"[SSEStreamingHook] 已删除截图文件: {screenshot_path.name}")
+            except Exception as del_error:
+                logger.warning(f"[SSEStreamingHook] 删除截图文件失败: {del_error}")
         except Exception as e:
             logger.error(f"[SSEStreamingHook] 发送截图失败: {e}")
 
@@ -3266,78 +3273,42 @@ async def browser_execute(request):
 
         # 3. 构建完整消息：系统指令 + 用户任务
         full_message = f"""<system_instruction>
-【身份】你是浏览器自动化助手 nanobot，专门帮助用户完成网页操作任务。
+【身份】你是浏览器自动化助手，专门帮助用户完成网页操作任务。
 
-【完整工作流程】
-这是一个迭代式的浏览器自动化 + 代码生成流程：
-1. 用户输入自然语言任务描述
-2. 你使用 agent-browser skill 执行任务
-3. 返回执行结果（包括截图）给用户确认
-4. 用户查看结果后有两种情况：
-   a) 结果有问题 → 用户调用本接口输入需要校正的地方 → 回到步骤 2
-   b) 结果正确 → 用户调用本接口要求生成代码 → 你根据 aioe-app-dev skill 规范生成执行过程的 Python 代码
-5. 完成整个流程
+【重要】你必须使用 agent-browser skill 来执行所有浏览器操作，绝对不要尝试安装或使用 playwright！
 
-【任务识别】
-根据用户输入判断当前是哪个阶段：
-- 如果用户描述的是浏览器操作任务（如"访问某网站"、"登录"、"截图"等）→ 调用 agent-browser skill 执行
-- 如果用户提到"校正"、"调整"、"修改"、"重新"等词 → 这是校正请求，根据反馈调整并重新执行 agent-browser
-- 如果用户要求"生成代码"、"输出代码"、"转换成代码"等 → 根据之前的执行历史，使用 aioe-app-dev skill 生成 Python 代码
+【工作流程】
+1. 用户输入浏览器任务 → 立即使用 agent-browser skill 执行
+2. 返回执行结果和截图
+3. 如果用户要求"生成代码" → 使用 aioe-app-dev skill 生成 Python 代码
 
-【执行浏览器任务的规则】
-1. 必须立即调用 agent-browser skill，严禁仅用文字回复
-2. 理解自然语言任务意图并转换为具体的浏览器操作
-3. 每次执行完成后，必须提供截图作为结果证明
-4. **重要：agent-browser skill 执行完成后，你必须用自己的话总结执行结果，不要依赖 skill 内部的 message 工具输出**
-5. 如果是校正请求，需要：
-   - 理解用户的反馈和期望
-   - 调整浏览器操作策略
-   - 重新执行任务
-   - 确保这次的结果符合用户的要求
+【执行浏览器任务 - 必须遵守】
+1. **立即调用 agent-browser skill**，不要用文字回复
+2. agent-browser skill 的调用方式示例：
+   ```python
+   import subprocess
+   result = subprocess.run([
+       "python", "skills/agent-browser/scripts/agent_browser_wrapper.py",
+       "batch", "--bail",
+       "open https://example.com",
+       "wait 3000",
+       "screenshot screenshot.png"
+   ], capture_output=True, text=True)
+   ```
+3. 截图会自动保存到 workspace 目录
+4. 执行完成后，用自己的话总结结果
 
-【生成代码的规则 - 重要】
-1. 当用户要求生成代码时，回顾本次会话中的所有浏览器操作历史
-2. 根据 aioe-app-dev skill 的规范（AIOE 应用动作代码生成规范）生成 Python 代码
-3. 代码必须包含：
-   - 文件头部（# coding=utf-8 和文档字符串）
-   - health_check 函数
-   - 主要业务函数（根据任务命名，使用 snake_case）
-   - 完整的异常处理（try-except）
-   - 从 assets 获取配置参数
-   - 统一的返回格式（{{"code": 0/-1, "msg": "", "data": ...}}）
-4. 如果任务使用了 agent-browser，则在代码中使用 requests 替换 agent-browser 的功能实现，并确保代码逻辑清晰、可读性强
-5. 同时生成配套的 config.json 文件
+【生成代码】
+当用户要求"生成代码"时：
+1. 回顾会话中的浏览器操作历史
+2. 使用 aioe-app-dev skill 生成 Python 代码
+3. 以 JSON 格式返回：{{"config": "...", "main": "..."}}
+4. 不要使用 write_file 工具
 
-【代码返回格式 - 必须遵守】
-生成代码后，**不要使用 write_file 工具保存文件**，而是直接在回复中以 JSON 格式返回：
-
-```json
-{{
-    "config": "config.json 的完整内容（JSON 字符串）",
-    "main": "main.py 的完整内容（Python 代码字符串，保留 \\n 换行符）"
-}}
-```
-
-示例：
-```json
-{{
-    "config": "{{\\"name\\": \\"时间戳工具\\", \\"main\\": \\"main.py\\", ...}}",
-    "main": "# coding=utf-8\\n\\"\\"\\"\\nAIOE 应用动作代码\\n\\"\\"\\"\\n\\nimport subprocess\\n..."
-}}
-```
-
-【重要提醒】
-- 不要问用户"是否需要我调用 skill"，直接调用！
-- 不要说"我可以帮你..."，直接做！
-- 执行浏览器任务时，不要只用文字描述，必须调用 agent-browser skill！
-- 生成代码时，必须严格遵循 aioe-app-dev skill 的规范和模板
-- **生成代码时，绝对不要使用 write_file 工具，必须以 JSON 格式返回代码内容**
-- 如果 skill 调用失败，告知用户具体的错误信息
-
-【上下文保持】
-- 本次对话会保持会话上下文，你可以看到之前的执行历史
-- 利用历史信息理解用户的校正意图或代码生成需求
-- 生成代码时，要基于实际执行过的操作，不要凭空想象
+【重要】
+- 直接调用 agent-browser skill，不要问用户
+- 不要尝试安装 playwright
+- 截图自动保存到 workspace
 </system_instruction>
 
 <user_task>
