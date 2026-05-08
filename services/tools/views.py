@@ -3035,9 +3035,6 @@ class SSEStreamingHook(AgentHook):
         self.sse_response = sse_response
         self.workspace_path = workspace_path
         self.session_id = session_id
-        # 创建会话专属的截图文件夹
-        self.screenshot_dir = workspace_path / session_id
-        self.screenshot_dir.mkdir(parents=True, exist_ok=True)
         self._has_content = False
         self._screenshot_files = set()  # 记录已发送的截图文件
         self._accumulated_content = ""  # 累积内容，用于检测代码 JSON
@@ -3121,7 +3118,7 @@ class SSEStreamingHook(AgentHook):
         try:
             screenshot_patterns = ["*.png", "*.jpg", "*.jpeg"]
             for pattern in screenshot_patterns:
-                for screenshot_path in self.screenshot_dir.glob(pattern):
+                for screenshot_path in self.workspace_path.glob(pattern):
                     # 只发送新的截图文件
                     if screenshot_path not in self._screenshot_files:
                         self._screenshot_files.add(screenshot_path)
