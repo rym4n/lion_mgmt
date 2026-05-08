@@ -2649,7 +2649,7 @@ async def ai_chat(request):
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                RY_AI_API_BASE,
+                RY_AI_API_BASE + "/chat/completions",
                 json=request.json,
                 headers={"Authorization": f"Bearer {LLM_KEY}"},
                 timeout=aiohttp.ClientTimeout(total=300)
