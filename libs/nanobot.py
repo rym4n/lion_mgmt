@@ -10,8 +10,10 @@
 
 import asyncio
 import os
-from pathlib import Path
+import shutil
 import orjson
+
+from pathlib import Path
 from sanic.log import logger
 # 从项目内置的 nanobot 源码导入
 from nanobot import Nanobot
@@ -204,43 +206,21 @@ class NanobotClient:
 
         Args:
             tenant_id: 租户ID
-            workspace_base: workspace 基础路径，实际路径为 {workspace_base}/{tenant_id}
+            workspace_base: workspace 基础路径，实际路径为 {workspace_base}/{tenant_id}/workspace
         """
         self.tenant_id = tenant_id
-        self.workspace = str(Path(workspace_base) / tenant_id)
-        # 懒加载：确保 workspace 目录存在
-        os.makedirs(self.workspace, exist_ok=True)
+        self.workspace = str(Path(workspace_base) / tenant_id / "workspace")
+        workspace_path = Path(self.workspace)
 
-        # 复制 skills 到 workspace（如果尚未复制）
-        self._ensure_skills_copied()
+        # 如果 workspace 不存在，从模板复制
+        if not workspace_path.exists():
+            template_path = PROJECT_ROOT / "workspace-template"
+            if template_path.exists():
+                shutil.copytree(template_path, workspace_path, dirs_exist_ok=True)
+                logger.info(f"[NanobotClient] 已从模板创建 workspace: {workspace_path}")
 
         # 使用全局配置的配置文件路径
         self.config_path = CONFIG_PATH
-
-    def _ensure_skills_copied(self):
-        """确保 skills 目录已复制到 workspace"""
-        import shutil
-
-        target_skills = Path(self.workspace) / "skills"
-        if target_skills.exists():
-            return
-
-        # 尝试多个可能的源路径
-        source_candidates = [
-            Path("/app/nanobot/skills"),  # 容器环境
-            PROJECT_ROOT / "nanobot" / "skills",  # 本地开发环境
-        ]
-
-        for source_skills in source_candidates:
-            if source_skills.exists() and source_skills.is_dir():
-                try:
-                    shutil.copytree(source_skills, target_skills)
-                    logger.info(f"[NanobotClient] 已复制 skills 到 workspace: {target_skills}")
-                    break
-                except Exception as e:
-                    logger.warning(f"[NanobotClient] 复制 skills 失败: {e}")
-        else:
-            logger.warning(f"[NanobotClient] 未找到 skills 源目录")
 
     async def ask(
         self,

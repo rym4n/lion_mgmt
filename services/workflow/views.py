@@ -53,7 +53,7 @@ from models import (
 )
 from services.tools.views import upload_tool
 from services.tools.views import tool_action_playbook_delete, tool_action_update
-from settings import TASK_TOPIC, TZ
+from settings import TASK_TOPIC, TZ, RY_AI_MODEL, RY_AI_API_BASE, LLM_KEY
 
 workflow_bp = Blueprint("workflow", url_prefix="/playbook")
 _all__ = ["workflow_bp"]
@@ -2679,9 +2679,9 @@ async def ai_chat(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     # 从环境变量获取配置
-    model = os.environ.get("RY_AI_MODEL")
-    api_key = os.environ.get("RY_OPENAI_API_KEY")
-    api_base = os.environ.get("RY_AI_API_BASE")
+    model = RY_AI_MODEL
+    api_base = RY_AI_API_BASE
+    api_key = LLM_KEY
 
     if not model or not api_key:
         raise CustomError(ErrorCode.PARAM_ERROR)

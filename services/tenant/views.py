@@ -1,5 +1,8 @@
 # coding=utf-8
 
+import shutil
+from pathlib import Path
+
 from sanic import Blueprint
 from sanic_ext import openapi
 from tortoise.expressions import Q
@@ -15,6 +18,8 @@ from libs.utils import get_expiration_date
 from models import Account, Role, Tenant
 from settings import (
     AUTHENTICATION_SESSION_EXPIRATION,
+    BASE_DIR,
+    NANOBOT_WORKSPACE_BASE,
     SESSION_HTTPONLY,
     SESSION_SAMESITE,
     SESSION_SECURE,
@@ -118,7 +123,7 @@ async def add_tenant(request):
             users = await Account.filter(id__in=members).all()
             await tenant.member.add(*users)
         await tenant.member.add(creator)
-        
+
         role = await Role.create(
             name="空间管理员",
             description="空间管理员",
@@ -148,6 +153,12 @@ async def add_tenant(request):
             tenant_id=tenant.id,
         )
         await creator.roles.add(role)
+
+    # 复制 workspace-template 到工作空间目录
+    template_path = Path(BASE_DIR) / "workspace-template"
+    workspace_path = Path(NANOBOT_WORKSPACE_BASE) / str(tenant.id) / "workspace"
+    if template_path.exists():
+        shutil.copytree(template_path, workspace_path, dirs_exist_ok=True)
 
     return response_ok(tenant.json)
 

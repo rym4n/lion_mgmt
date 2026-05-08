@@ -176,7 +176,7 @@
   },
   "providers": {
     "custom": {
-      "apiKey": "${RY_OPENAI_API_KEY}",
+      "apiKey": "${LLM_KEY}",
       "apiBase": "${RY_AI_API_BASE}",
       "extraHeaders": null
     },

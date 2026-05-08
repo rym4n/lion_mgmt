@@ -24,7 +24,7 @@ from models import (
 )
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from settings import RY_AI_MODEL, RY_AI_API_BASE, RY_OPENAI_API_KEY
+from settings import RY_AI_MODEL, RY_AI_API_BASE, LLM_KEY
 
 # ==================== InspectionSchedule Operations ====================
 
@@ -865,7 +865,7 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
     # 使用litellm调用AI服务
     model = RY_AI_MODEL
     api_base = RY_AI_API_BASE
-    api_key = RY_OPENAI_API_KEY
+    api_key = LLM_KEY
 
     # 如果使用自定义API base且模型名称不包含provider前缀，自动添加
     if api_base and "/" not in model:
@@ -1018,7 +1018,7 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
     # 使用litellm调用AI服务
     model = RY_AI_MODEL
     api_base = RY_AI_API_BASE
-    api_key = RY_OPENAI_API_KEY
+    api_key = LLM_KEY
 
     # 如果使用自定义API base且模型名称不包含provider前缀，自动添加
     if api_base and "/" not in model:

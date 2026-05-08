@@ -68,3 +68,4 @@ COPY pyproject.toml ./
 COPY settings ./settings
 COPY server.py ./
 COPY config.json ./
+COPY workspace-template ./workspace-template

@@ -3253,11 +3253,9 @@ async def browser_execute(request):
         }).decode()
         await resp.send(f"data: {start_data}\n\n")
 
-        # 1. 初始化 NanobotClient（使用 session_id 作为 tenant_id 以隔离 workspace）
+        # 1. 初始化 NanobotClient（使用 browser-session_id 作为 tenant_id 以隔离 workspace）
         logger.info(f"初始化 NanobotClient，tenant_id={tenant_id}, session_id={session_id}")
-        # 使用 tenant_id/session_id 作为完整的 workspace 路径
-        session_workspace_base = Path(NANOBOT_WORKSPACE_BASE) / tenant_id
-        client = NanobotClient(tenant_id=session_id, workspace_base=session_workspace_base)
+        client = NanobotClient(tenant_id=f"browser-{session_id}", workspace_base=NANOBOT_WORKSPACE_BASE)
 
         # 获取 workspace 路径用于检测截图（与 nanobot 使用的路径一致）
         workspace_path = Path(NANOBOT_WORKSPACE_BASE) / tenant_id
@@ -3289,7 +3287,8 @@ async def browser_execute(request):
 1. 必须立即调用 agent-browser skill，严禁仅用文字回复
 2. 理解自然语言任务意图并转换为具体的浏览器操作
 3. 每次执行完成后，必须提供截图作为结果证明
-4. 如果是校正请求，需要：
+4. **重要：agent-browser skill 执行完成后，你必须用自己的话总结执行结果，不要依赖 skill 内部的 message 工具输出**
+5. 如果是校正请求，需要：
    - 理解用户的反馈和期望
    - 调整浏览器操作策略
    - 重新执行任务
@@ -3435,28 +3434,21 @@ async def delete_browser_session(request):
     删除浏览器自动化会话
 
     删除内容：
-    1. 会话专属的截图文件夹（{workspace}/{tenant_id}/{session_id}/）
+    1. 会话专属的 workspace 文件夹（{workspace_base}/browser-{session_id}/）
     """
     session_id = request.json.get("session_id")
     if not session_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    tenant_id = request.ctx.session.get("tenant_id")
-    workspace_path = Path(NANOBOT_WORKSPACE_BASE) / tenant_id
-
-    deleted_items = []
-
-    screenshot_dir = workspace_path / session_id
-    if screenshot_dir.exists() and screenshot_dir.is_dir():
+    workspace_dir = Path(NANOBOT_WORKSPACE_BASE) / f"browser-{session_id}"
+    if workspace_dir.exists() and workspace_dir.is_dir():
         try:
-            shutil.rmtree(screenshot_dir)
-            deleted_items.append("截图文件夹")
-            logger.info(f"已删除会话 {session_id} 的截图文件夹: {screenshot_dir}")
+            shutil.rmtree(workspace_dir)
+            logger.info(f"已删除会话 {session_id} 的 workspace: {workspace_dir}")
+            return response_ok({"message": "会话删除成功"})
         except Exception as e:
-            logger.error(f"删除截图文件夹失败: {e}")
+            logger.error(f"删除 workspace 失败: {e}")
+            return response_ok({"message": "会话删除失败"})
 
-    if not deleted_items:
-        return response_ok({"message": "会话不存在或已被删除"})
-
-    return response_ok({"message": f"会话删除成功，已删除: {', '.join(deleted_items)}"})
+    return response_ok({"message": "会话删除成功"})
 
