@@ -24,8 +24,7 @@ if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"
     from langfuse.openai import AsyncOpenAI
 else:
     if os.environ.get("LANGFUSE_SECRET_KEY"):
-        import logging
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "LANGFUSE_SECRET_KEY is set but langfuse is not installed; "
             "install with `pip install langfuse` to enable tracing"
         )
@@ -232,6 +231,25 @@ def _responses_circuit_key(
     return f"{model_name}:{effort}"
 
 
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge *override* into *base*, returning a new dict.
+
+    Nested dicts are merged key-by-key; all other types in *override*
+    replace the corresponding key in *base*.
+    """
+    merged = dict(base)
+    for key, value in override.items():
+        if (
+            key in merged
+            and isinstance(merged[key], dict)
+            and isinstance(value, dict)
+        ):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 class OpenAICompatProvider(LLMProvider):
     """Unified provider for all OpenAI-compatible APIs.
 
@@ -246,11 +264,13 @@ class OpenAICompatProvider(LLMProvider):
         default_model: str = "gpt-4o",
         extra_headers: dict[str, str] | None = None,
         spec: ProviderSpec | None = None,
+        extra_body: dict[str, Any] | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._spec = spec
+        self._extra_body = extra_body or {}
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -428,47 +448,6 @@ class OpenAICompatProvider(LLMProvider):
                 clean["content"] = self._coerce_content_to_string(clean.get("content"))
         return self._enforce_role_alternation(sanitized)
 
-    def _drop_deepseek_incomplete_reasoning_history(
-        self,
-        messages: list[dict[str, Any]],
-        reasoning_effort: str | None,
-    ) -> list[dict[str, Any]]:
-        if (
-            not self._spec
-            or self._spec.name != "deepseek"
-            or not reasoning_effort
-            or reasoning_effort.lower() == "none"
-        ):
-            return messages
-
-        bad_idx = None
-        for idx, msg in enumerate(messages):
-            if (
-                msg.get("role") == "assistant"
-                and msg.get("tool_calls")
-                and not msg.get("reasoning_content")
-            ):
-                bad_idx = idx
-        if bad_idx is None:
-            return messages
-
-        keep_from = None
-        for idx in range(bad_idx + 1, len(messages)):
-            if messages[idx].get("role") == "user":
-                keep_from = idx
-                break
-
-        if keep_from is None:
-            trimmed = messages[:bad_idx]
-        else:
-            prefix = [msg for msg in messages[:keep_from] if msg.get("role") == "system"]
-            trimmed = prefix + messages[keep_from:]
-        logger.warning(
-            "Dropped {} DeepSeek thinking history message(s) with incomplete reasoning_content",
-            len(messages) - len(trimmed),
-        )
-        return trimmed
-
     # ------------------------------------------------------------------
     # Build kwargs
     # ------------------------------------------------------------------
@@ -509,10 +488,6 @@ class OpenAICompatProvider(LLMProvider):
         if spec and spec.strip_model_prefix:
             model_name = model_name.split("/")[-1]
 
-        messages = self._drop_deepseek_incomplete_reasoning_history(
-            messages,
-            reasoning_effort,
-        )
         kwargs: dict[str, Any] = {
             "model": model_name,
             "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
@@ -549,7 +524,7 @@ class OpenAICompatProvider(LLMProvider):
             # DashScope accepts none/minimum/low/medium/high/xhigh; "minimal" 400s.
             wire_effort = "minimum"
 
-        if wire_effort:
+        if wire_effort and semantic_effort != "none":
             kwargs["reasoning_effort"] = wire_effort
 
         # Provider-specific thinking parameters.
@@ -558,7 +533,7 @@ class OpenAICompatProvider(LLMProvider):
         # The mapping is driven by ProviderSpec.thinking_style so that adding
         # a new provider never requires touching this function.
         if spec and spec.thinking_style and reasoning_effort is not None:
-            thinking_enabled = semantic_effort != "minimal"
+            thinking_enabled = semantic_effort not in ("none", "minimal")
             extra = _THINKING_STYLE_MAP.get(spec.thinking_style, lambda _: None)(thinking_enabled)
             if extra:
                 kwargs.setdefault("extra_body", {}).update(extra)
@@ -568,7 +543,7 @@ class OpenAICompatProvider(LLMProvider):
         # so that OpenRouter-style names like "moonshotai/kimi-k2.5" are handled
         # identically to bare names like "kimi-k2.5".
         if reasoning_effort is not None and _is_kimi_thinking_model(model_name):
-            thinking_enabled = semantic_effort != "minimal"
+            thinking_enabled = semantic_effort not in ("none", "minimal")
             kwargs.setdefault("extra_body", {}).update(
                 {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
             )
@@ -577,25 +552,34 @@ class OpenAICompatProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
 
-        # Backfill reasoning_content on legacy assistant messages.
-        # DeepSeek V4 (and potentially others) rejects thinking-mode
-        # requests that contain assistant messages without reasoning_content
-        # — even on turns that had no tool calls. This happens when a
-        # session was started with a non-thinking model or without
-        # reasoning_effort, then the user switches thinking mode on
-        # mid-session. Injecting an empty string satisfies the API
-        # without altering semantics (the model treats it as "no
-        # thinking happened on that turn").
-        thinking_active = (
-            (spec and spec.thinking_style and reasoning_effort is not None
-             and semantic_effort != "minimal")
-            or (reasoning_effort is not None and _is_kimi_thinking_model(model_name)
-                and semantic_effort != "minimal")
+        # Backfill reasoning_content="" on assistants missing it: DeepSeek
+        # thinking mode rejects history otherwise (#3554, #3584); "" reads
+        # as "no thinking that turn". DeepSeek-V4/reasoner reason natively,
+        # so backfill even without explicit reasoning_effort.
+        explicit_thinking = (
+            reasoning_effort is not None
+            and semantic_effort not in ("none", "minimal")
+            and ((spec and spec.thinking_style) or _is_kimi_thinking_model(model_name))
         )
-        if thinking_active:
+        implicit_deepseek_thinking = (
+            spec is not None
+            and spec.name == "deepseek"
+            and semantic_effort not in ("none", "minimal", "minimum")
+            and any(t in model_name.lower() for t in ("deepseek-v4", "deepseek-reasoner"))
+        )
+        if explicit_thinking or implicit_deepseek_thinking:
             for msg in kwargs["messages"]:
                 if msg.get("role") == "assistant" and "reasoning_content" not in msg:
                     msg["reasoning_content"] = ""
+
+        # Merge user-configured extra_body last so it can override or
+        # extend provider-specific defaults (e.g. chat_template_kwargs,
+        # guided_json, repetition_penalty).  Uses recursive merge so
+        # nested dicts like {"chat_template_kwargs": {"enable_thinking": false}}
+        # do not clobber sibling keys already set by thinking-style logic.
+        if self._extra_body:
+            existing = kwargs.get("extra_body", {})
+            kwargs["extra_body"] = _deep_merge(existing, self._extra_body)
 
         return kwargs
 
