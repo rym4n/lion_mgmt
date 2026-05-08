@@ -3168,8 +3168,8 @@ class SSEStreamingHook(AgentHook):
 
 @tools_bp.post("/browser/execute")
 @openapi.definition(
-    summary="执行应用智能开发任务",
-    description="通过自然语言调用执行应用智能开发任务，支持会话上下文和截图返回（需要工具查看权限）",
+    summary="执行智能任务",
+    description="通过自然语言执行各类智能任务（浏览器自动化、SSH服务器操作、API调用等），支持会话上下文（需要工具查看权限）",
     body={
         "application/json": {
             "schema": {
@@ -3178,7 +3178,7 @@ class SSEStreamingHook(AgentHook):
                 "properties": {
                     "task": {
                         "type": "string",
-                        "description": "应用智能开发任务描述（自然语言）",
+                        "description": "任务描述（自然语言）",
                     },
                     "session_id": {
                         "type": "string",
@@ -3193,19 +3193,19 @@ class SSEStreamingHook(AgentHook):
 @requires_permission("tool:r")
 async def browser_execute(request):
     """
-    通过 nanobot 执行浏览器自动化任务
+    通过 nanobot 执行智能任务
 
     工作流程：
     1. 接收自然语言任务描述
     2. 如果提供 session_id，加载历史上下文
     3. 调用 nanobot 处理任务
-    4. nanobot 自动调用 agent-browser skill
+    4. nanobot 根据任务类型自动调用相应的 skill（浏览器自动化、SSH操作、API调用等）
     5. 实时返回执行进度、结果和截图
 
     SSE 事件类型：
     - status: starting - 开始处理任务
     - status: processing - nanobot 正在理解任务
-    - status: executing - 正在执行工具（如 agent-browser）
+    - status: executing - 正在执行工具
     - status: message - 文本消息流式输出
     - status: screenshot - 截图数据（base64 编码）
     - status: code - 生成的代码（JSON 格式：{"config": "...", "main": "..."}）
@@ -3252,7 +3252,7 @@ async def browser_execute(request):
         # 返回 session_id 给客户端，用于后续请求
         start_data = orjson.dumps({
             "status": "starting",
-            "message": "开始处理浏览器自动化任务...",
+            "message": "开始处理任务...",
             "session_id": session_id
         }).decode()
         await resp.send(f"data: {start_data}\n\n")
@@ -3270,7 +3270,18 @@ async def browser_execute(request):
 
         # 3. 构建完整消息：系统指令 + 用户任务
         full_message = f"""<system_instruction>
-【身份】你是浏览器自动化助手，专门帮助用户完成网页操作任务。
+【身份】你是智能任务执行助手，能够帮助用户完成多种类型的任务。
+
+【能力范围】
+- 浏览器自动化：网页操作、数据抓取、表单填写等
+- SSH服务器操作：远程命令执行、文件管理、系统配置等
+- API调用：接口测试、数据查询、文档生成等
+
+【工作方式】
+根据用户的任务描述，自动选择合适的工具和方法来完成任务，并实时反馈执行进度和结果。
+
+【重要要求】
+执行结果必须包含截图证明，确保任务完成的可验证性。
 </system_instruction>
 
 <user_task>
