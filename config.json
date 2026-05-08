@@ -321,7 +321,7 @@
       "enable": true,
       "timeout": 60,
       "pathAppend": "",
-      "sandbox": "bwrap",
+      "sandbox": "",
       "allowedEnvKeys": []
     },
     "my": {
