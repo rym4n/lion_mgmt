@@ -15,6 +15,22 @@ AIOE 应用动作代码生成规范 - 告诉 AI 如何生成符合 aioe_app 格�
 
 ## 代码规范
 
+### 重要约束：禁止使用 agent-browser
+
+**所有涉及 Web 访问、HTTP 请求的场景，必须使用 `requests` 库实现，禁止使用 `agent-browser`。**
+
+理由：
+- `requests` 库更轻量、稳定，无需额外的浏览器进程
+- 避免浏览器依赖和环境配置问题
+- 更适合自动化和批量操作
+- 性能更好，资源占用更少
+
+如果用户的执行过程中使用了 agent-browser，在生成代码时应转换为 requests 实现：
+- `agent-browser open <url>` → `requests.get(url)` 或 `requests.post(url)`
+- 登录操作 → 使用 `requests.Session()` 保持会话
+- 截图需求 → 改为获取 HTML 内容或 API 数据
+- 页面交互 → 改为直接调用后端 API
+
 ### 文件头部
 
 所有代码文件必须以以下内容开头：
@@ -133,9 +149,9 @@ def your_function(params, assets, context):
     return json_ret
 ```
 
-### 2. agent-browser 操作模板
+### 2. HTTP 请求模板（替代 agent-browser）
 
-适用于 Web 自动化操作（访问网页、登录、截图等）：
+适用于 Web 访问、API 调用、登录等操作（使用 requests 库）：
 
 ```python
 # coding=utf-8
@@ -143,9 +159,7 @@ def your_function(params, assets, context):
 AIOE 应用动作代码
 """
 
-import subprocess
-import os
-from pathlib import Path
+import requests
 
 
 def health_check(params, assets, context):
@@ -154,49 +168,45 @@ def health_check(params, assets, context):
     return json_ret
 
 
-def web_automation(params, assets, context):
-    """Web 自动化操作"""
+def web_request(params, assets, context):
+    """Web 请求操作"""
 
     # 从 assets 获取配置参数
     url = assets.get('url', '')
     username = assets.get('username', '')
     password = assets.get('password', '')
+    timeout = assets.get('timeout', 30)
 
     try:
-        # 获取 agent-browser 路径
-        skill_dir = Path(__file__).parent.parent / "skills" / "agent-browser"
-        agent_browser = skill_dir / "scripts" / "agent-browser.exe"
+        # 创建会话以保持登录状态
+        session = requests.Session()
+        session.verify = False  # 忽略 HTTPS 证书错误
 
-        # 设置环境变量
-        env = os.environ.copy()
-        env['AGENT_BROWSER_IGNORE_HTTPS_ERRORS'] = '1'
+        # 如果需要登录，先执行登录请求
+        if username and password:
+            login_data = {
+                'username': username,
+                'password': password
+            }
+            login_response = session.post(f"{url}/login", json=login_data, timeout=timeout)
+            login_response.raise_for_status()
 
-        # 构建命令列表
-        commands = [
-            f"open {url}",
-            "wait 3000",
-            # 如果需要登录，添加登录操作
-            # f"fill input[type='text'] {username}",
-            # f"fill input[type='password'] {password}",
-            # "click button[type='submit']",
-            # "wait 5000",
-            "screenshot --full screenshot.png"
-        ]
+        # 执行主要请求
+        response = session.get(url, timeout=timeout)
+        response.raise_for_status()
 
-        # 执行批量命令
-        cmd = [str(agent_browser), "batch", "--bail"] + commands
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
+        # 返回响应内容（可以是 JSON、HTML 或文本）
+        try:
+            result = response.json()
+        except:
+            result = response.text
 
-        # 关闭浏览器
-        subprocess.run([str(agent_browser), "close"], timeout=10, capture_output=True)
+        json_ret = {"code": 0, "msg": "", "data": result}
 
-        if result.returncode == 0:
-            json_ret = {"code": 0, "msg": "", "data": "screenshot.png"}
-        else:
-            json_ret = {"code": -1, "msg": result.stderr or "执行失败"}
-
-    except subprocess.TimeoutExpired:
-        json_ret = {"code": -1, "msg": "操作超时"}
+    except requests.exceptions.Timeout:
+        json_ret = {"code": -1, "msg": f"请求超时（{timeout}秒）"}
+    except requests.exceptions.RequestException as e:
+        json_ret = {"code": -1, "msg": f"请求失败: {str(e)}"}
     except Exception as e:
         json_ret = {"code": -1, "msg": str(e)}
 
@@ -305,13 +315,14 @@ def call_api(params, assets, context):
 
 ### 1. 分析执行过程
 
-- 识别使用了哪些工具（agent-browser、bash、API 等）
+- 识别使用了哪些工具（Web 访问、bash、API 等）
+- **如果使用了 agent-browser，必须转换为 requests 库实现**
 - 识别需要哪些配置参数（从执行过程中提取）
 - 识别返回什么数据
 
 ### 2. 选择合适的模板
 
-- 如果使用了 agent-browser → 使用 **agent-browser 操作模板**
+- 如果使用了 agent-browser 或需要 Web 访问 → 使用 **HTTP 请求模板**（使用 requests 库）
 - 如果执行了 bash 命令 → 使用 **bash 命令模板**
 - 如果调用了 API → 使用 **API 调用模板**
 - 如果是其他操作 → 使用 **基础模板**
@@ -366,8 +377,8 @@ def call_api(params, assets, context):
 **执行过程**：
 1. 使用 agent-browser 访问 https://1.1.1.1/status
 2. 登录（用户名：admin，密码：password）
-3. 截图保存到 screenshot.png
-4. 返回截图路径
+3. 获取状态信息
+4. 返回状态数据
 
 **生成的代码**（main.py）：
 
@@ -377,9 +388,7 @@ def call_api(params, assets, context):
 AIOE 应用动作代码
 """
 
-import subprocess
-import os
-from pathlib import Path
+import requests
 
 
 def health_check(params, assets, context):
@@ -397,39 +406,33 @@ def get_system_status(params, assets, context):
     password = assets.get('password', '')
 
     try:
-        # 获取 agent-browser 路径
-        skill_dir = Path(__file__).parent.parent / "skills" / "agent-browser"
-        agent_browser = skill_dir / "scripts" / "agent-browser.exe"
+        # 创建会话
+        session = requests.Session()
+        session.verify = False  # 忽略 HTTPS 证书错误
 
-        # 设置环境变量
-        env = os.environ.copy()
-        env['AGENT_BROWSER_IGNORE_HTTPS_ERRORS'] = '1'
+        # 登录
+        login_url = f"https://{server_ip}/login"
+        login_data = {'username': username, 'password': password}
+        login_response = session.post(login_url, json=login_data, timeout=30)
+        login_response.raise_for_status()
 
-        # 构建命令列表
-        commands = [
-            f"open https://{server_ip}/status",
-            "wait 3000",
-            f"fill input[type='text'] {username}",
-            f"fill input[type='password'] {password}",
-            "click button[type='submit']",
-            "wait 5000",
-            "screenshot --full screenshot.png"
-        ]
+        # 获取状态信息
+        status_url = f"https://{server_ip}/status"
+        status_response = session.get(status_url, timeout=30)
+        status_response.raise_for_status()
 
-        # 执行批量命令
-        cmd = [str(agent_browser), "batch", "--bail"] + commands
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
+        # 解析响应
+        try:
+            result = status_response.json()
+        except:
+            result = status_response.text
 
-        # 关闭浏览器
-        subprocess.run([str(agent_browser), "close"], timeout=10, capture_output=True)
+        json_ret = {"code": 0, "msg": "", "data": result}
 
-        if result.returncode == 0:
-            json_ret = {"code": 0, "msg": "", "data": "screenshot.png"}
-        else:
-            json_ret = {"code": -1, "msg": result.stderr or "执行失败"}
-
-    except subprocess.TimeoutExpired:
-        json_ret = {"code": -1, "msg": "操作超时"}
+    except requests.exceptions.Timeout:
+        json_ret = {"code": -1, "msg": "请求超时"}
+    except requests.exceptions.RequestException as e:
+        json_ret = {"code": -1, "msg": f"请求失败: {str(e)}"}
     except Exception as e:
         json_ret = {"code": -1, "msg": str(e)}
 
@@ -551,8 +554,9 @@ def get_server_info(params, assets, context):
 6. **编码声明**：文件开头必须有 `# coding=utf-8`
 7. **函数命名**：使用下划线命名法（snake_case），例如：get_system_status
 8. **超时处理**：对于可能长时间运行的操作（网络请求、命令执行），设置合理的超时时间
-9. **资源清理**：使用完资源后要清理（例如：关闭浏览器）
+9. **资源清理**：使用完资源后要清理（例如：关闭会话）
 10. **错误信息**：返回的错误信息应该清晰、有用
+11. **禁止使用 agent-browser**：所有 Web 访问必须使用 requests 库，不得使用 agent-browser 工具
 
 ## config.json 规范
 

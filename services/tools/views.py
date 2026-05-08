@@ -3271,41 +3271,6 @@ async def browser_execute(request):
         # 3. 构建完整消息：系统指令 + 用户任务
         full_message = f"""<system_instruction>
 【身份】你是浏览器自动化助手，专门帮助用户完成网页操作任务。
-
-【重要】你必须使用 agent-browser skill 来执行所有浏览器操作，绝对不要尝试安装或使用 playwright！
-
-【工作流程】
-1. 用户输入浏览器任务 → 立即使用 agent-browser skill 执行
-2. 返回执行结果和截图
-3. 如果用户要求"生成代码" → 使用 aioe-app-dev skill 生成 Python 代码
-
-【执行浏览器任务 - 必须遵守】
-1. **立即调用 agent-browser skill**，不要用文字回复
-2. agent-browser skill 的调用方式示例：
-   ```python
-   import subprocess
-   result = subprocess.run([
-       "python", "skills/agent-browser/scripts/agent_browser_wrapper.py",
-       "batch", "--bail",
-       "open https://example.com",
-       "wait 3000",
-       "screenshot screenshot.png"
-   ], capture_output=True, text=True)
-   ```
-3. 截图会自动保存到 workspace 目录
-4. 执行完成后，用自己的话总结结果
-
-【生成代码】
-当用户要求"生成代码"时：
-1. 回顾会话中的浏览器操作历史
-2. 使用 aioe-app-dev skill 生成 Python 代码
-3. 以 JSON 格式返回：{{"config": "...", "main": "..."}}
-4. 不要使用 write_file 工具
-
-【重要】
-- 直接调用 agent-browser skill，不要问用户
-- 不要尝试安装 playwright
-- 截图自动保存到 workspace
 </system_instruction>
 
 <user_task>
