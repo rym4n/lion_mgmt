@@ -151,9 +151,13 @@ def call_api(params, assets, context):
 ```json
 {
     "config": "config.json 完整内容（JSON 字符串）",
-    "main": "main.py 完整代码（保留 \\n）"
+    "main": "main.py 完整代码（使用真正的换行符，不要转义）"
 }
 ```
+
+**注意**：
+- `main` 字段中的代码必须使用真正的换行符（`\n`），而不是字符串字面量（`\\n`）
+- 代码应该可以直接保存为 .py 文件使用，无需额外处理
 
 ## 完整示例
 

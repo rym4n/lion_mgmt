@@ -31,8 +31,8 @@ _all__ = ["tenant_bp"]
 
 @tenant_bp.post("/list")
 @openapi.definition(
-    summary="获取指定页数的工作空间列表",
-    description="获取指定页数的工作空间 (需要工作空间查询权限)",
+    summary="获取指定页数的租户列表",
+    description="获取指定页数的租户 (需要租户查询权限)",
     body={
         "application/json": {
             "schema": {
@@ -40,7 +40,7 @@ _all__ = ["tenant_bp"]
                 "properties": {
                     "page": {"type": "integer", "description": "页码（默认1）"},
                     "size": {"type": "integer", "description": "每页数量（默认15）"},
-                    "name": {"type": "string", "description": "工作空间名称"},
+                    "name": {"type": "string", "description": "租户名称"},
                 },
             }
         }
@@ -84,15 +84,15 @@ async def get_tenant(request):
 
 @tenant_bp.post("/add")
 @openapi.definition(
-    summary="添加工作空间",
-    description="添加工作空间 (需要新增工作空间权限)",
+    summary="添加租户",
+    description="添加租户 (需要新增租户权限)",
     body={
         "application/json": {
             "schema": {
                 "type": "object",
                 "required": ["name"],
                 "properties": {
-                    "name": {"type": "string", "description": "工作空间名称"},
+                    "name": {"type": "string", "description": "租户名称"},
                     "members": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -154,7 +154,7 @@ async def add_tenant(request):
         )
         await creator.roles.add(role)
 
-    # 复制 workspace-template 到工作空间目录
+    # 复制 workspace-template 到租户目录
     template_path = Path(BASE_DIR) / "workspace-template"
     workspace_path = Path(NANOBOT_WORKSPACE_BASE) / str(tenant.id) / "workspace"
     if template_path.exists():
@@ -165,14 +165,14 @@ async def add_tenant(request):
 
 @tenant_bp.post("/del")
 @openapi.definition(
-    summary="删除工作空间",
-    description="删除工作空间 (需要删除工作空间权限)",
+    summary="删除租户",
+    description="删除租户 (需要删除租户权限)",
     body={
         "application/json": {
             "schema": {
                 "type": "object",
                 "required": ["id"],
-                "properties": {"id": {"type": "string", "description": "工作空间id"}},
+                "properties": {"id": {"type": "string", "description": "租户id"}},
             }
         }
     },
@@ -206,16 +206,16 @@ async def del_tenant(request):
 
 @tenant_bp.post("/edit")
 @openapi.definition(
-    summary="编辑工作空间",
-    description="编辑工作空间 (需要更新工作空间权限)",
+    summary="编辑租户",
+    description="编辑租户 (需要更新租户权限)",
     body={
         "application/json": {
             "schema": {
                 "type": "object",
                 "required": ["id", "members"],
                 "properties": {
-                    "id": {"type": "string", "description": "工作空间id"},
-                    "name": {"type": "string", "description": "工作空间名称"},
+                    "id": {"type": "string", "description": "租户id"},
+                    "name": {"type": "string", "description": "租户名称"},
                     "add_members": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -266,13 +266,13 @@ async def edit_tenant(request):
 
         if del_member_ids:
             current_ids = set(await tenant.member.filter(id__in=del_member_ids).values_list("id", flat=True))
-            # 筛选存在这个工作空间下的用户id
+            # 筛选存在这个租户下的用户id
             ids_to_remove = current_ids
             if ids_to_remove:
                 unsafe_users = await Account.filter(id__in=ids_to_remove).annotate(tenant_count=Count("member")).filter(tenant_count__lte=1)
                 unsafe_ids = {u.id for u in unsafe_users}
                 unsafe_usernames = [{"display_name": u.display_name, "username": u.username} for u in unsafe_users]
-                # 剔除只有一个工作空间的用户
+                # 剔除只有一个租户的用户
                 ids_to_remove -= unsafe_ids
             if ids_to_remove:
                 remove_users = await Account.filter(id__in=ids_to_remove)
@@ -291,14 +291,14 @@ async def edit_tenant(request):
 
 @tenant_bp.post("/switch")
 @openapi.definition(
-    summary="切换工作空间",
-    description="切换工作空间",
+    summary="切换租户",
+    description="切换租户",
     body={
         "application/json": {
             "schema": {
                 "type": "object",
                 "required": ["id"],
-                "properties": {"id": {"type": "string", "description": "工作空间id"}},
+                "properties": {"id": {"type": "string", "description": "租户id"}},
             }
         }
     },
@@ -333,8 +333,8 @@ async def switch_tenant(request):
 
 @tenant_bp.post("/get")
 @openapi.definition(
-    summary="获取当前用户所有的工作空间",
-    description="获取当前用户所有的工作空间",
+    summary="获取当前用户所有的租户",
+    description="获取当前用户所有的租户",
     body={
         "application/json": {
             "schema": {
@@ -424,7 +424,7 @@ async def get_all_user_info(request):
                 "properties": {
                     "page": {"type": "integer", "description": "分页的页码，默认1"},
                     "size": {"type": "integer", "description": "分页的大小，默认10"},
-                    "tenant_id": {"type": "string", "description": "工作空间id"},
+                    "tenant_id": {"type": "string", "description": "租户id"},
                     "username": {"type": "string", "description": "用户名，搜索时使用"},
                 },
             }
