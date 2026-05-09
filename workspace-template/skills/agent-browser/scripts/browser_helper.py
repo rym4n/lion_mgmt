@@ -32,6 +32,8 @@ def _run_command(args: List[str], timeout: int = 30) -> str:
     """
     env = os.environ.copy()
     env['AGENT_BROWSER_IGNORE_HTTPS_ERRORS'] = '1'
+    # 添加更多参数以避免 ERR_BLOCKED_BY_CLIENT 错误
+    env['AGENT_BROWSER_ARGS'] = '--disable-web-security --disable-features=IsolateOrigins,site-per-process --disable-site-isolation-trials'
 
     cmd = [str(AGENT_BROWSER)] + args
     result = subprocess.run(

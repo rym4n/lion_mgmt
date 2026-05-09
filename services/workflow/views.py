@@ -2618,12 +2618,12 @@ async def get_version_runlog(request):
 @workflow_bp.post("/ai-chat")
 @openapi.definition(
     summary="AI对话接口",
-    description="转发AI请求到后端服务，支持流式返回",
+    description="转发AI请求到后端服务",
     body={"application/json": {"schema": {"type": "object"}}},
     response={
         "200": {
-            "description": "流式返回AI响应",
-            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+            "description": "返回AI响应",
+            "content": {"application/json": {"schema": {"type": "object"}}},
         }
     },
 )
@@ -2637,37 +2637,14 @@ async def ai_chat(request):
     if not RY_AI_API_BASE or not LLM_KEY:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    resp = await request.respond(
-        content_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                RY_AI_API_BASE + "/chat/completions",
-                json=request.json,
-                headers={"Authorization": f"Bearer {LLM_KEY}"},
-                timeout=aiohttp.ClientTimeout(total=300)
-            ) as ai_resp:
-                if ai_resp.status != 200:
-                    error_text = await ai_resp.text()
-                    logger.error(f"AI API error: {ai_resp.status} - {error_text}")
-                    await resp.send(f"data: {orjson.dumps({'error': f'AI service error: {ai_resp.status}'}).decode()}\n\n")
-                else:
-                    async for chunk in ai_resp.content.iter_any():
-                        if chunk:
-                            await resp.send(f"data: {chunk.decode()}\n\n")
-                            # await resp.send(chunk)
-    except Exception as e:
-        logger.error(f"AI chat error: {str(e)}")
-        await resp.send(f"data: {orjson.dumps({'error': str(e)}).decode()}\n\n")
-
-    await resp.eof()
-    return resp
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            RY_AI_API_BASE + "/chat/completions",
+            json=request.json,
+            headers={"Authorization": f"Bearer {LLM_KEY}"},
+            timeout=aiohttp.ClientTimeout(total=300)
+        ) as ai_resp:
+            result = await ai_resp.json()
+            return response_ok(result)
 
 
