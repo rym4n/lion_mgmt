@@ -3038,6 +3038,7 @@ class SSEStreamingHook(AgentHook):
         self._has_content = False
         self._screenshot_files = set()  # 记录已发送的截图文件
         self._accumulated_content = ""  # 累积内容，用于检测代码 JSON
+        self._skip_streaming = False  # 是否跳过流式输出（检测到代码 JSON 时设置）
 
     def wants_streaming(self) -> bool:
         return True
@@ -3046,6 +3047,19 @@ class SSEStreamingHook(AgentHook):
         """流式输出时通过 SSE 发送"""
         self._has_content = True
         self._accumulated_content += delta
+
+        # 检测是否包含代码 JSON 特征，如果是则停止流式输出
+        if not self._skip_streaming:
+            # 检测代码 JSON 的开始标志
+            if ('"config"' in self._accumulated_content and '"main"' in self._accumulated_content) or \
+               ('```json' in self._accumulated_content and '"config"' in self._accumulated_content):
+                self._skip_streaming = True
+                logger.info("[SSEStreamingHook] 检测到代码 JSON，停止流式输出")
+                return
+
+        # 如果已经检测到代码 JSON，跳过流式输出
+        if self._skip_streaming:
+            return
 
         try:
             message = orjson.dumps({"status": "message", "content": delta}).decode()
@@ -3059,10 +3073,14 @@ class SSEStreamingHook(AgentHook):
         code_from_file = await self._extract_code_from_files()
         if code_from_file:
             await self._send_code_json(code_from_file)
+            # 恢复流式输出
+            self._skip_streaming = False
             return
 
         # 如果文件中没有，再尝试从累积内容中提取
         await self._extract_and_send_code_json()
+        # 恢复流式输出
+        self._skip_streaming = False
 
     async def _extract_code_from_files(self):
         """从 workspace 文件中提取代码"""
