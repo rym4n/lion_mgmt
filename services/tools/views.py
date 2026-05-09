@@ -3083,6 +3083,12 @@ class SSEStreamingHook(AgentHook):
 
                     # 检查是否包含 config 和 main 字段
                     if "config" in code_data and "main" in code_data:
+                        # 将转义的换行符转换为真正的换行符
+                        if "config" in code_data and isinstance(code_data["config"], str):
+                            code_data["config"] = code_data["config"].replace("\\n", "\n").replace("\\t", "\t")
+                        if "main" in code_data and isinstance(code_data["main"], str):
+                            code_data["main"] = code_data["main"].replace("\\n", "\n").replace("\\t", "\t")
+
                         # 发送代码 JSON
                         message = orjson.dumps({
                             "status": "code",
@@ -3092,6 +3098,7 @@ class SSEStreamingHook(AgentHook):
                         logger.info("[SSEStreamingHook] 已发送代码 JSON")
                 except orjson.JSONDecodeError as e:
                     logger.warning(f"[SSEStreamingHook] 解析代码 JSON 失败: {e}")
+                    logger.debug(f"[SSEStreamingHook] 失败的 JSON 字符串前100字符: {json_str[:100]}")
         except Exception as e:
             logger.error(f"[SSEStreamingHook] 提取代码 JSON 失败: {e}")
 
