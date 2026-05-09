@@ -3282,6 +3282,18 @@ async def browser_execute(request):
 
 【重要要求】
 最终的执行结果必须包含截图证明，确保任务完成的可验证性。
+
+【工作流程】
+1. 用户输入任务 → 选择合适的 skill 执行
+2. 返回执行结果和截图
+3. 如果用户要求"生成代码" → 使用 aioe-app-dev skill 生成 Python 代码
+
+【生成代码】
+当用户要求"生成代码"时：
+1. 回顾会话中的浏览器操作历史
+2. 使用 aioe-app-dev skill 生成 Python 代码
+3. 以 JSON 格式返回：{{"config": "...", "main": "..."}}
+4. 不要使用 write_file 工具
 </system_instruction>
 
 <user_task>
