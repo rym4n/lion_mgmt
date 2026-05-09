@@ -3055,8 +3055,58 @@ class SSEStreamingHook(AgentHook):
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         """流式输出结束时检测并提取代码 JSON"""
-        # 尝试从累积内容中提取代码 JSON
+        # 先检查 workspace 中是否有代码文件（优先从文件读取）
+        code_from_file = await self._extract_code_from_files()
+        if code_from_file:
+            await self._send_code_json(code_from_file)
+            return
+
+        # 如果文件中没有，再尝试从累积内容中提取
         await self._extract_and_send_code_json()
+
+    async def _extract_code_from_files(self):
+        """从 workspace 文件中提取代码"""
+        try:
+            # 查找 config.json 和 main.py
+            config_path = self.workspace_path / "config.json"
+            main_path = self.workspace_path / "main.py"
+
+            if config_path.exists() and main_path.exists():
+                logger.info(f"[SSEStreamingHook] 从文件中提取代码: {config_path}, {main_path}")
+
+                # 读取文件内容
+                config_content = config_path.read_text(encoding='utf-8')
+                main_content = main_path.read_text(encoding='utf-8')
+
+                # 读取完成后删除文件
+                try:
+                    config_path.unlink()
+                    main_path.unlink()
+                    logger.info(f"[SSEStreamingHook] 已删除代码文件: {config_path}, {main_path}")
+                except Exception as e:
+                    logger.warning(f"[SSEStreamingHook] 删除代码文件失败: {e}")
+
+                return {
+                    "config": config_content,
+                    "main": main_content
+                }
+        except Exception as e:
+            logger.error(f"[SSEStreamingHook] 从文件提取代码失败: {e}")
+
+        return None
+
+    async def _send_code_json(self, code_data):
+        """发送代码 JSON"""
+        try:
+            # 发送代码 JSON
+            message = orjson.dumps({
+                "status": "code",
+                "data": code_data
+            }).decode()
+            await self.sse_response.send(f"data: {message}\n\n")
+            logger.info("[SSEStreamingHook] 已发送代码 JSON")
+        except Exception as e:
+            logger.error(f"[SSEStreamingHook] 发送代码 JSON 失败: {e}")
 
     async def _extract_and_send_code_json(self):
         """从累积内容中提取代码 JSON 并发送"""
@@ -3070,11 +3120,33 @@ class SSEStreamingHook(AgentHook):
                 json_str = matches[-1].strip()
 
             # 方式2: 查找纯 JSON 对象（{"config":...,"main":...}）
+            # 使用更宽松的匹配策略，查找完整的 JSON 对象
             if not json_str:
-                pure_json_pattern = r'\{["\']config["\']\s*:\s*["\'].*?["\'],\s*["\']main["\']\s*:\s*["\'].*?["\']\s*\}'
-                matches = re.findall(pure_json_pattern, self._accumulated_content, re.DOTALL)
-                if matches:
-                    json_str = matches[-1].strip()
+                # 查找所有可能的 JSON 对象起始位置
+                start_positions = [i for i, char in enumerate(self._accumulated_content) if char == '{']
+
+                for start_pos in reversed(start_positions):  # 从后往前尝试
+                    # 尝试找到匹配的右括号
+                    brace_count = 0
+                    for end_pos in range(start_pos, len(self._accumulated_content)):
+                        if self._accumulated_content[end_pos] == '{':
+                            brace_count += 1
+                        elif self._accumulated_content[end_pos] == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                # 找到完整的 JSON 对象
+                                potential_json = self._accumulated_content[start_pos:end_pos + 1]
+                                try:
+                                    # 尝试解析
+                                    test_data = orjson.loads(potential_json)
+                                    # 检查是否包含 config 和 main 字段
+                                    if "config" in test_data and "main" in test_data:
+                                        json_str = potential_json
+                                        break
+                                except:
+                                    continue
+                    if json_str:
+                        break
 
             if json_str:
                 # 尝试解析 JSON
@@ -3090,12 +3162,7 @@ class SSEStreamingHook(AgentHook):
                             code_data["main"] = code_data["main"].replace("\\n", "\n").replace("\\t", "\t")
 
                         # 发送代码 JSON
-                        message = orjson.dumps({
-                            "status": "code",
-                            "data": code_data
-                        }).decode()
-                        await self.sse_response.send(f"data: {message}\n\n")
-                        logger.info("[SSEStreamingHook] 已发送代码 JSON")
+                        await self._send_code_json(code_data)
                 except orjson.JSONDecodeError as e:
                     logger.warning(f"[SSEStreamingHook] 解析代码 JSON 失败: {e}")
                     logger.debug(f"[SSEStreamingHook] 失败的 JSON 字符串前100字符: {json_str[:100]}")
@@ -3301,7 +3368,6 @@ async def browser_execute(request):
 1. 回顾会话中的操作历史
 2. 使用 aioe-app-dev skill 生成 Python 代码
 3. 以 JSON 格式返回：{{"config": "...", "main": "..."}}
-4. 不要使用 write_file 工具
 </system_instruction>
 
 <user_task>

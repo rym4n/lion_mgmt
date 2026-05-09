@@ -146,20 +146,23 @@ def call_api(params, assets, context):
 
 ## 返回格式（重要）
 
-**直接返回 JSON，不使用 write_file**：
+**使用 write_file 工具保存代码文件**：
 
-```json
-{
-    "config": "config.json 完整内容（JSON 字符串）",
-    "main": "main.py 完整代码（使用 \\n 表示换行符）"
-}
+1. 使用 `write_file` 工具将 `config.json` 保存到 workspace
+2. 使用 `write_file` 工具将 `main.py` 保存到 workspace
+3. 完成后简单说明"代码已生成"即可，无需返回 JSON
+
+**示例**：
+```
+使用 write_file 保存 config.json
+使用 write_file 保存 main.py
+代码已生成完成。
 ```
 
 **注意**：
-- 返回的必须是合法的 JSON 格式
-- `main` 字段中的代码使用 `\n` 表示换行符（JSON 转义格式）
-- 不要在 JSON 字符串中使用真正的换行符，这会导致 JSON 解析失败
-- 示例：`"import requests\nfrom pathlib import Path\n\ndef main():"`
+- 必须使用 `write_file` 工具，不要直接返回 JSON
+- 文件名必须是 `config.json` 和 `main.py`
+- 代码会自动从文件中提取并返回给用户
 
 ## 完整示例
 
