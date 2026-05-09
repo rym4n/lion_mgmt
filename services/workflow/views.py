@@ -2654,8 +2654,15 @@ async def ai_chat(request):
                 headers={"Authorization": f"Bearer {LLM_KEY}"},
                 timeout=aiohttp.ClientTimeout(total=300)
             ) as ai_resp:
-                async for chunk in ai_resp.content.iter_any():
-                    await resp.send(chunk)
+                if ai_resp.status != 200:
+                    error_text = await ai_resp.text()
+                    logger.error(f"AI API error: {ai_resp.status} - {error_text}")
+                    await resp.send(f"data: {orjson.dumps({'error': f'AI service error: {ai_resp.status}'}).decode()}\n\n")
+                else:
+                    async for chunk in ai_resp.content.iter_any():
+                        if chunk:
+                            await resp.send(f"data: {chunk.decode()}\n\n")
+                            # await resp.send(chunk)
     except Exception as e:
         logger.error(f"AI chat error: {str(e)}")
         await resp.send(f"data: {orjson.dumps({'error': str(e)}).decode()}\n\n")
