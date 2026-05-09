@@ -15,7 +15,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authentication import refresh_token
 from libs.security.authorization import requires_permission
 from libs.utils import get_expiration_date
-from models import Account, Role, Tenant
+from models import Account, Role, Scene, Tenant
 from settings import (
     AUTHENTICATION_SESSION_EXPIRATION,
     BASE_DIR,
@@ -153,6 +153,16 @@ async def add_tenant(request):
             tenant_id=tenant.id,
         )
         await creator.roles.add(role)
+
+        # 创建默认场景"日常运营"
+        await Scene.create(
+            name="日常运营",
+            remark="默认场景",
+            status=1,
+            creator=creator,
+            updator=creator,
+            tenant_id=tenant.id
+        )
 
     # 复制 workspace-template 到租户目录
     template_path = Path(BASE_DIR) / "workspace-template"

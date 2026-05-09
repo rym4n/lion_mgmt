@@ -3398,7 +3398,7 @@ async def browser_execute(request):
         await resp.send(f"data: {completed_data}\n\n")
 
     except Exception as e:
-        logger.exception("浏览器自动化任务执行失败")
+        logger.exception("自动化任务执行失败")
         try:
             if resp:
                 # 使用 orjson 确保 JSON 安全

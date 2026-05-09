@@ -230,13 +230,13 @@ Content-Type: application/json
   "type": "action",
   "action_input": {
     "resource": "<资源ID，不是资源名称>",
-    "node_name": "<从 action 中提取>",
-    "action": "<从 action 中提取>",
-    "action_name": "<从 action 中提取>",
-    "app_name": "<从 action 中提取>",
-    "name": "<从 action 中提取>",
-    "app_ver": "<从 action 中提取>",
-    "main": "<从 action 中提取>",
+    "node_name": "<应用描述>",
+    "action": "<从 action 中提取 func>",
+    "action_name": "<从 action 中提取 name>",
+    "app_name": "<应用名称>",
+    "name": "<应用描述>",
+    "app_ver": "<应用版本>",
+    "main": "<应用主文件>",
     "action_input": {
       // 从用户对话中提取的参数
     },
