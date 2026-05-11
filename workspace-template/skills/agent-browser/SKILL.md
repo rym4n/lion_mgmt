@@ -277,7 +277,13 @@ fill @e2 text
 4. **HTTPS 证书**: 自动忽略证书错误，适用于内网站点
 5. **超时设置**: 默认 30 秒，可通过 `AGENT_BROWSER_DEFAULT_TIMEOUT` 调整
 6. **截图路径**: 支持相对路径和绝对路径
-7. **ERR_BLOCKED_BY_CLIENT**: 已自动配置浏览器参数（禁用 web 安全、跨域隔离等）避免此错误
+7. **ERR_BLOCKED_BY_CLIENT 自动修复**: 已自动配置以下参数避免此错误：
+   - 禁用 HTTPS 自动升级（HttpsUpgrades）
+   - 禁用私有网络访问检查（Private Network Access）
+   - 禁用 Safe Browsing 和广告过滤
+   - 使用临时用户目录（清除 HSTS/ServiceWorker 缓存）
+   - 禁用代理和 IPv6
+8. **内网 HTTP 站点**: 对于内网 HTTP 站点（如 http://paas.hongcloud.net），可通过环境变量 `AGENT_BROWSER_INSECURE_ORIGINS` 指定信任的源
 
 ## 🔍 高级功能
 
@@ -290,6 +296,8 @@ env['AGENT_BROWSER_HEADLESS'] = '1'  # 无头模式
 env['AGENT_BROWSER_SESSION_NAME'] = 'my-session'
 env['AGENT_BROWSER_SCREENSHOT_DIR'] = '/tmp/screenshots'
 env['AGENT_BROWSER_DEFAULT_TIMEOUT'] = '60000'
+# 信任特定的不安全源（用于内网 HTTP 站点）
+env['AGENT_BROWSER_INSECURE_ORIGINS'] = 'http://paas.hongcloud.net,http://internal.example.com'
 
 result = subprocess.run([
     "python", "nanobot/skills/agent-browser/scripts/agent_browser_wrapper.py",
@@ -314,3 +322,91 @@ nanobot/skills/agent-browser/scripts/agent-browser-linux-x64 screenshot screensh
 ```bash
 nanobot/skills/agent-browser/scripts/agent-browser-linux-x64 --help
 ```
+
+## 🔧 故障排查
+
+### ERR_BLOCKED_BY_CLIENT 错误
+
+如果遇到 `net::ERR_BLOCKED_BY_CLIENT` 错误，本 skill 已自动配置以下修复措施：
+
+**自动修复项**：
+1. ✅ 禁用 HTTPS 自动升级（`HttpsUpgrades`）
+2. ✅ 禁用私有网络访问检查（`PrivateNetworkAccessSendPreflights`）
+3. ✅ 禁用 Safe Browsing 和广告过滤
+4. ✅ 使用临时用户目录（清除 HSTS/ServiceWorker 缓存）
+5. ✅ 禁用所有扩展和组件扩展
+6. ✅ 禁用代理和 IPv6
+
+**如果问题仍然存在**，可能的原因和解决方案：
+
+#### 原因 1：agent-browser 内部的请求拦截
+如果 agent-browser 工具内部使用了 `route.abort()` 拦截特定请求，需要检查工具源码。
+
+**诊断方法**：
+```python
+# 在命令中添加详细日志
+commands = [
+    "open http://your-site.com",
+    "wait 5000",
+    "get text body",  # 尝试获取页面内容
+    "screenshot --full debug.png"
+]
+```
+
+如果 `get text body` 返回空或错误，说明页面加载失败。
+
+#### 原因 2：特定域名需要信任
+对于内网 HTTP 站点，使用环境变量指定信任的源：
+
+```python
+import os, subprocess
+
+env = os.environ.copy()
+env['AGENT_BROWSER_INSECURE_ORIGINS'] = 'http://paas.hongcloud.net'
+
+result = subprocess.run([
+    "python", "nanobot/skills/agent-browser/scripts/agent_browser_wrapper.py",
+    "batch", "--bail",
+    "open http://paas.hongcloud.net",
+    "wait 5000",
+    "screenshot --full result.png"
+], env=env, capture_output=True, text=True)
+```
+
+#### 原因 3：DNS 解析问题
+如果域名解析有问题，可以直接使用 IP 地址：
+
+```python
+# 先解析域名
+import socket
+ip = socket.gethostbyname('paas.hongcloud.net')
+print(f"Resolved IP: {ip}")
+
+# 使用 IP 访问
+commands = [f"open http://{ip}", "wait 5000", "screenshot --full result.png"]
+```
+
+#### 原因 4：需要开启网络日志
+如果以上都无法解决，开启 Chromium NetLog 进行深度诊断：
+
+```python
+env = os.environ.copy()
+# 在现有参数基础上添加 NetLog
+env['AGENT_BROWSER_ARGS'] = env.get('AGENT_BROWSER_ARGS', '') + ' --log-net-log=/tmp/netlog.json --net-log-capture-mode=Everything'
+```
+
+然后访问 https://netlog-viewer.appspot.com/ 上传 `/tmp/netlog.json` 分析详细错误。
+
+### 其他常见问题
+
+**问题：截图为空白页**
+- 原因：页面加载时间不足
+- 解决：增加 `wait` 时间，或使用 `wait <selector>` 等待特定元素
+
+**问题：无法找到元素**
+- 原因：选择器错误或页面结构变化
+- 解决：使用 `snapshot -i` 查看页面结构，确认正确的选择器
+
+**问题：浏览器进程残留**
+- 原因：未正确关闭浏览器
+- 解决：在命令末尾添加 `close` 命令，或使用 `close --all` 清理所有会话

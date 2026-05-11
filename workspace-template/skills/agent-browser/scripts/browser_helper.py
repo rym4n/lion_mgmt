@@ -30,18 +30,48 @@ def _run_command(args: List[str], timeout: int = 30) -> str:
     Returns:
         命令输出
     """
+    import tempfile
+    import time
+
     env = os.environ.copy()
     env['AGENT_BROWSER_IGNORE_HTTPS_ERRORS'] = '1'
 
     # 添加浏览器启动参数以避免 ERR_BLOCKED_BY_CLIENT 错误
     browser_args = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
         '--disable-web-security',
         '--disable-features=IsolateOrigins,site-per-process',
         '--disable-site-isolation-trials',
         '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disable-setuid-sandbox'
+        '--disable-features=HttpsUpgrades',
+        '--disable-features=PrivateNetworkAccessSendPreflights',
+        '--disable-features=PrivateNetworkAccessRespectPreflightResults',
+        '--disable-features=BlockInsecurePrivateNetworkRequests',
+        '--disable-features=SafeBrowsing',
+        '--disable-features=SubresourceFilter',
+        '--disable-features=HeavyAdIntervention',
+        '--safebrowsing-disable-auto-update',
+        '--allow-running-insecure-content',
+        '--disable-features=InsecureDownloadWarnings',
+        '--disable-extensions',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-default-apps',
+        '--disable-plugins',
+        '--no-proxy-server',
+        '--ignore-certificate-errors',
+        '--disable-ipv6'
     ]
+
+    # 使用临时用户目录
+    temp_dir = tempfile.mkdtemp(prefix=f'agent-browser-{int(time.time())}-')
+    browser_args.append(f'--user-data-dir={temp_dir}')
+
+    # 支持通过环境变量指定需要信任的不安全源
+    insecure_origins = os.environ.get('AGENT_BROWSER_INSECURE_ORIGINS', '')
+    if insecure_origins:
+        browser_args.append(f'--unsafely-treat-insecure-origin-as-secure={insecure_origins}')
+
     env['AGENT_BROWSER_ARGS'] = ' '.join(browser_args)
 
     cmd = [str(AGENT_BROWSER)] + args

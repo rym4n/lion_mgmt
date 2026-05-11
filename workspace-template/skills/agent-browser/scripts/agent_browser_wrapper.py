@@ -32,15 +32,52 @@ def main():
     env['AGENT_BROWSER_IGNORE_HTTPS_ERRORS'] = '1'
 
     # 添加浏览器启动参数以避免 ERR_BLOCKED_BY_CLIENT 错误
-    # 这些参数会禁用广告拦截、跨域限制等安全特性
+    # 根据诊断报告，重点解决：HTTPS Upgrade、Private Network Access、Safe Browsing
     browser_args = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
         '--disable-web-security',
         '--disable-features=IsolateOrigins,site-per-process',
         '--disable-site-isolation-trials',
         '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disable-setuid-sandbox'
+        # 禁用 HTTP 自动升级为 HTTPS（优先级 2）
+        '--disable-features=HttpsUpgrades',
+        # 禁用 Private Network Access 检查（优先级 3）
+        '--disable-features=PrivateNetworkAccessSendPreflights',
+        '--disable-features=PrivateNetworkAccessRespectPreflightResults',
+        '--disable-features=BlockInsecurePrivateNetworkRequests',
+        # 禁用 Safe Browsing 和广告过滤（优先级 5）
+        '--disable-features=SafeBrowsing',
+        '--disable-features=SubresourceFilter',
+        '--disable-features=HeavyAdIntervention',
+        '--safebrowsing-disable-auto-update',
+        # 允许混合内容和不安全内容
+        '--allow-running-insecure-content',
+        '--disable-features=InsecureDownloadWarnings',
+        # 禁用扩展和组件扩展
+        '--disable-extensions',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-default-apps',
+        '--disable-plugins',
+        # 禁用代理（排除代理干扰）
+        '--no-proxy-server',
+        # 忽略证书错误
+        '--ignore-certificate-errors',
+        # 禁用 IPv6（避免连接问题）
+        '--disable-ipv6'
     ]
+
+    # 使用临时用户目录（清除 HSTS/ServiceWorker 缓存）
+    import tempfile
+    import time
+    temp_dir = tempfile.mkdtemp(prefix=f'agent-browser-{int(time.time())}-')
+    browser_args.append(f'--user-data-dir={temp_dir}')
+
+    # 支持通过环境变量指定需要信任的不安全源
+    insecure_origins = os.environ.get('AGENT_BROWSER_INSECURE_ORIGINS', '')
+    if insecure_origins:
+        browser_args.append(f'--unsafely-treat-insecure-origin-as-secure={insecure_origins}')
+
     env['AGENT_BROWSER_ARGS'] = ' '.join(browser_args)
 
     # 如果环境变量中指定了截图目录，传递给 agent-browser
