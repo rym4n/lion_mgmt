@@ -3374,9 +3374,7 @@ async def browser_execute(request):
 - API调用：接口测试、数据查询、文档生成等
 
 【重要规则】
-- 浏览器任务：必须使用 agent-browser skill，禁止使用 playwright/selenium
-- 必须提供真实执行结果（截图/输出），禁止伪造
-- 截图会自动保存到 workspace 并发送给用户
+- 必须提供真实执行结果（截图和输出），禁止伪造，截图必须是真实截图，即使拥有真实数据也不能自己生成图片当作截图
 
 【生成代码】
 用户要求"生成代码"时，回顾会话中的操作历史，使用 aioe-app-dev skill 生成，返回 JSON 格式：{{"config": "...", "main": "..."}}
