@@ -18,6 +18,12 @@ metadata: {"nanobot":{"emoji":"🌐"}}
 - **认证管理**: 保存和使用登录凭据
 - **HTTPS 支持**: 自动忽略证书错误（适用于内网站点）
 
+## 🔄 标准工作流程
+
+1. **接收任务**: 获取目标 URL、操作步骤、认证信息
+2. **执行操作**: 使用 batch 模式执行浏览器自动化命令
+3. **截图保存**: 截图自动保存到 workspace 目录
+
 ## 🚀 使用方式
 
 ### 方式 1: 批量命令执行（推荐）
@@ -281,9 +287,3 @@ nanobot/skills/agent-browser/scripts/agent-browser-linux-x64 screenshot screensh
 ```bash
 nanobot/skills/agent-browser/scripts/agent-browser-linux-x64 --help
 ```
-
-## 🔄 标准工作流程
-
-1. **接收任务**: 获取目标 URL、操作步骤、认证信息
-2. **执行操作**: 使用 batch 模式执行浏览器自动化命令
-3. **截图保存**: 截图自动保存到 workspace 目录

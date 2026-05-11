@@ -232,14 +232,13 @@ def get_system_status(params, assets, context):
 
 ## 注意事项
 
-1. **必须包含 health_check 函数**
-2. **使用 try-except 包裹业务逻辑**
-3. **从 assets 获取配置，提供默认值**
-4. **返回格式统一**：`{"code": 0/-1, "msg": "", "data": ...}`
-5. **文件开头必须有 `# coding=utf-8`**
-6. **函数命名使用 snake_case**
-7. **设置合理的超时时间**
-8. **禁止使用 agent-browser，必须用 requests**
+1. **使用 try-except 包裹业务逻辑**
+2. **从 assets 获取配置，提供默认值**
+3. **返回格式统一**：`{"code": 0/-1, "data": ...}`
+4. **文件开头必须有 `# coding=utf-8`**
+5. **函数命名使用 snake_case**
+6. **设置合理的超时时间**
+7. **禁止使用 agent-browser，必须用 requests**
 
 ## config.json 规范
 
@@ -262,7 +261,7 @@ def get_system_status(params, assets, context):
         {
             "name": "动作名称",
             "func": "函数名",
-            "classify": "query|action|mutation",
+            "classify": "query|action|notify",
             "input": []
         }
     ]
