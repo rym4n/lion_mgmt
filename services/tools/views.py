@@ -3352,6 +3352,10 @@ async def browser_execute(request):
         # 1. 初始化 NanobotClient（使用当前租户的 workspace）
         tenant_workspace = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace"
         logger.info(f"初始化 NanobotClient，tenant_id={tenant_id}, session_id={session_id}, workspace={tenant_workspace}")
+
+        # 设置环境变量，让 agent-browser 将截图保存到 workspace
+        os.environ['AGENT_BROWSER_SCREENSHOT_DIR'] = str(tenant_workspace)
+
         client = NanobotClient(session_id=session_id, workspace=tenant_workspace)
 
         # 获取 workspace 路径用于检测截图
@@ -3377,9 +3381,10 @@ async def browser_execute(request):
 根据任务类型提供真实的执行结果证明：
 
 1. **浏览器任务**（网页操作、数据抓取等）
-   - 必须获取浏览器真实截图
+   - 必须使用 agent-browser skill 获取浏览器真实截图
    - 截图必须显示任务完成后的页面状态
    - 禁止生成、绘制或伪造图片
+   - 截图命令示例：`screenshot --full screenshot.png` 或 `screenshot result.png`
 
 2. **SSH/命令行任务**（服务器操作、脚本执行等）
    - 必须在响应中完整展示命令执行的输出结果
@@ -3391,16 +3396,18 @@ async def browser_execute(request):
    - 包含状态码、响应头、响应体
    - 对于大型响应，提供结构化摘要
 
-【截图保存规则】
-- 所有截图文件必须保存到 workspace 目录
-- 系统会自动检测 workspace 中的图片文件（.png/.jpg/.jpeg/.svg）并发送
-- 不要尝试在响应中直接返回图片数据
+【浏览器截图规则 - 必须遵守】
+- 使用 agent-browser skill 时，截图会自动保存到当前 workspace 目录
+- 截图文件名可以自定义（如 screenshot.png, result.png 等）
+- 系统会自动检测 workspace 中的图片文件并发送给用户
+- 不要在响应中描述图片内容，让用户直接看到真实截图
+```
 
 【工作流程】
 1. 用户输入任务 → 分析任务类型
 2. 选择合适的 skill 执行任务
-3. 根据任务类型提供相应的结果证明（截图或输出）
-4. 返回执行结果
+3. 对于浏览器任务，必须执行截图命令获取真实页面截图
+4. 返回执行结果（截图会自动发送）
 
 【生成代码】
 当用户要求"生成代码"时：

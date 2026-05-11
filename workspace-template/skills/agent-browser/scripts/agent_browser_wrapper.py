@@ -31,6 +31,10 @@ def main():
     env = os.environ.copy()
     env['AGENT_BROWSER_IGNORE_HTTPS_ERRORS'] = '1'
 
+    # 如果环境变量中指定了截图目录，传递给 agent-browser
+    if 'AGENT_BROWSER_SCREENSHOT_DIR' in os.environ:
+        env['AGENT_BROWSER_SCREENSHOT_DIR'] = os.environ['AGENT_BROWSER_SCREENSHOT_DIR']
+
     # 如果没有传入参数，显示帮助信息
     if len(sys.argv) < 2:
         print("用法: python agent_browser_wrapper.py <command> [args...]")
