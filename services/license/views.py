@@ -179,6 +179,8 @@ async def get_license(request: Request):
                     if item["module"] == "tenant_bp":
                         tenant_type = True
                     valid_modules.add(name)
+                    if name == "工作空间":
+                        valid_modules.add("租户管理")
             valid_modules.update(["许可管理"])
             logger.info(f"valid_modules: {valid_modules}")
             # 超级权限处理
@@ -218,9 +220,9 @@ async def get_license(request: Request):
         "角色管理": 2,
         "SSO集成": 3,
         "审计日志": 4,
-        "工作空间": 5,
-        "工作空間": 5,
-        "Workspaces": 5,
+        "租户管理": 5,
+        "租戶管理": 5,
+        "Tenant": 5,
         "个性化设置": 6,
         "系统状态": 7,
         "個性化設置": 6,
@@ -253,9 +255,9 @@ async def get_license(request: Request):
         "License",
         "SSO集成",
         "SSO Integration",
-        "工作空间",
-        "工作空間",
-        "Workspaces",
+        "租户管理",
+        "租戶管理",
+        "Tenant",
         "个性化设置",
         "個性化設置",
         "Personalization",
@@ -268,7 +270,7 @@ async def get_license(request: Request):
     for menu in menus:
         children = menu["children"]
         if menu["meta"]["title"] in ["系统设置", "系統設置", "System Settings"]:
-            # 非特殊工作空间时，先把不允许的子菜单删掉再排序
+            # 非特殊租户时，先把不允许的子菜单删掉再排序
             if current_tenant_id != SPECIAL_TENANT_ID:
                 children = [c for c in children if c.get("meta", {}).get("title") not in hidden_menus]
             menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))

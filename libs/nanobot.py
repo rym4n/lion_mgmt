@@ -272,7 +272,7 @@ async def ask(
         message: 问题内容
         streaming: 是否流式输出
         session_key: 会话标识
-        workspace: 工作空间路径
+        workspace: 租户路径
 
     Returns:
         回答内容

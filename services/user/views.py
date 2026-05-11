@@ -75,7 +75,7 @@ __all__ = ["user_bp"]
                     "tenant_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "工作空间列表,注意传入此参数会校验当前账户是否存在工作空间模块权限，不存在则创建失败",
+                        "description": "租户列表,注意传入此参数会校验当前账户是否存在租户模块权限，不存在则创建失败",
                     },
                 },
             }
@@ -346,7 +346,7 @@ async def all_users(request):
                     "tenant_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "工作空间列表",
+                        "description": "租户列表",
                     },
                 },
             }
@@ -418,7 +418,7 @@ async def create_api_user(request):
         roles = await Role.filter(name__in=request.json.get("role_names"), tenant_id=tenant_id, deleted=False).all()
         await account.roles.add(*roles)
 
-    # 添加工作空间
+    # 添加租户
     ids = t_ids if t_ids else [request.ctx.session["tenant_id"]]
     tenants = await Tenant.filter(id__in=ids, deleted=False).all()
     await account.member.add(*tenants)
@@ -1759,7 +1759,7 @@ async def init_role_list(request):
             "schema": {
                 "type": "object",
                 "properties": {
-                    "tenant_id": {"type": "string", "description": "工作空间id"},
+                    "tenant_id": {"type": "string", "description": "租户id"},
                 },
             }
         }
@@ -1841,8 +1841,8 @@ async def get_user_details(request):
 
 @user_bp.post("/tenant-list")
 @openapi.definition(
-    summary="获取当前用户所在的工作空间列表",
-    description="获取当前用户所在的工作空间列表",
+    summary="获取当前用户所在的租户列表",
+    description="获取当前用户所在的租户列表",
     response={
         "200": {
             "description": "Success",
