@@ -1,6 +1,6 @@
 ---
 name: agent-browser
-description: "浏览器自动化工具。重要：禁止使用 playwright/selenium 库，必须使用本 skill。所有浏览器任务必须截图证明，截图自动保存到 workspace。"
+description: "浏览器自动化工具。重要：1) 禁止使用 playwright/selenium 库，必须使用本 skill；2) 每次浏览器操作后必须执行 screenshot --full 命令获取截图；3) 截图自动保存到 workspace 并发送给用户。"
 metadata: {"nanobot":{"emoji":"🌐"}}
 ---
 
@@ -12,7 +12,7 @@ metadata: {"nanobot":{"emoji":"🌐"}}
 
 1. **禁止直接使用浏览器库**：不要使用 playwright、selenium、puppeteer 等库
 2. **必须使用本 skill**：所有浏览器操作必须通过本 skill 执行
-3. **必须截图证明**：每个浏览器任务完成后必须执行 `screenshot --full` 命令
+3. **必须执行截图命令**：每次浏览器操作后必须在 commands 列表末尾添加 `screenshot --full result.png`
 4. **截图自动发送**：截图保存到 workspace 后会自动发送给用户
 
 ## 🎯 核心能力
@@ -20,7 +20,7 @@ metadata: {"nanobot":{"emoji":"🌐"}}
 - **页面导航**: 打开网页、等待加载
 - **元素交互**: 点击、输入、选择
 - **内容提取**: 获取文本、HTML、属性值
-- **截图**: 全页/区域/带标注截图
+- **截图**: 全页/区域/带标注截图（必须执行）
 - **表单操作**: 填写表单、提交
 - **认证管理**: 保存和使用登录凭据
 - **HTTPS 支持**: 自动忽略证书错误（适用于内网站点）
@@ -29,24 +29,42 @@ metadata: {"nanobot":{"emoji":"🌐"}}
 
 1. **接收任务**: 获取目标 URL、操作步骤、认证信息
 2. **执行操作**: 使用 batch 模式执行浏览器自动化命令
-3. **截图保存**: 截图自动保存到 workspace 目录
+3. **截图保存**: 必须执行 screenshot --full 命令，截图自动保存到 workspace 目录
 
 ## 🚀 使用方式
 
 ### 方式 1: 批量命令执行（推荐）
+
+**注意：commands 列表末尾必须包含 screenshot --full 命令**
 
 ```python
 import subprocess
 
 commands = [
     "open https://example.com",
+    "wait 3000",
+    "screenshot --full result.png"  # 必须包含此命令
+]
+
+result = subprocess.run([
+    "python", "nanobot/skills/agent-browser/scripts/agent_browser_wrapper.py",
+    "batch", "--bail"
+] + commands, capture_output=True, text=True)
+```
+
+### 完整示例（带登录）
+
+```python
+import subprocess
+
+commands = [
+    "open https://example.com/login",
     "wait 2000",
     "fill input[name='username'] admin",
     "fill input[name='password'] password123",
     "click button[type='submit']",
     "wait 3000",
-    "screenshot --full result.png",
-    "get text .result"
+    "screenshot --full result.png"  # 必须包含此命令
 ]
 
 result = subprocess.run([
