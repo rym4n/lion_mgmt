@@ -27,9 +27,21 @@ def main():
     except Exception as e:
         print(f"警告: 无法设置执行权限: {e}", file=sys.stderr)
 
-    # 设置环境变量（自动处理 HTTPS 证书错误）
+    # 设置环境变量（自动处理 HTTPS 证书错误和 ERR_BLOCKED_BY_CLIENT）
     env = os.environ.copy()
     env['AGENT_BROWSER_IGNORE_HTTPS_ERRORS'] = '1'
+
+    # 添加浏览器启动参数以避免 ERR_BLOCKED_BY_CLIENT 错误
+    # 这些参数会禁用广告拦截、跨域限制等安全特性
+    browser_args = [
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process',
+        '--disable-site-isolation-trials',
+        '--disable-blink-features=AutomationControlled',
+        '--no-sandbox',
+        '--disable-setuid-sandbox'
+    ]
+    env['AGENT_BROWSER_ARGS'] = ' '.join(browser_args)
 
     # 如果环境变量中指定了截图目录，传递给 agent-browser
     if 'AGENT_BROWSER_SCREENSHOT_DIR' in os.environ:

@@ -14,6 +14,7 @@ metadata: {"nanobot":{"emoji":"🌐"}}
 2. **必须使用本 skill**：所有浏览器操作必须通过本 skill 执行
 3. **必须执行截图命令**：每次浏览器操作后必须在 commands 列表末尾添加 `screenshot --full result.png`
 4. **截图自动发送**：截图保存到 workspace 后会自动发送给用户
+5. **自动处理安全限制**：已自动配置参数避免 ERR_BLOCKED_BY_CLIENT 等错误
 
 ## 🎯 核心能力
 
@@ -276,6 +277,7 @@ fill @e2 text
 4. **HTTPS 证书**: 自动忽略证书错误，适用于内网站点
 5. **超时设置**: 默认 30 秒，可通过 `AGENT_BROWSER_DEFAULT_TIMEOUT` 调整
 6. **截图路径**: 支持相对路径和绝对路径
+7. **ERR_BLOCKED_BY_CLIENT**: 已自动配置浏览器参数（禁用 web 安全、跨域隔离等）避免此错误
 
 ## 🔍 高级功能
 
