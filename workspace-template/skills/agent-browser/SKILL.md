@@ -1,12 +1,19 @@
 ---
 name: agent-browser
-description: "通用浏览器自动化工具，支持打开网页、截图、表单填写、元素交互、页面内容提取等操作"
+description: "浏览器自动化工具。重要：禁止使用 playwright/selenium 库，必须使用本 skill。所有浏览器任务必须截图证明，截图自动保存到 workspace。"
 metadata: {"nanobot":{"emoji":"🌐"}}
 ---
 
 # Skill: agent-browser
 
-通用浏览器自动化工具，专为 AI 代理设计，支持灵活的浏览器操作。
+浏览器自动化工具，专为 AI 代理设计。
+
+## ⚠️ 重要规则
+
+1. **禁止直接使用浏览器库**：不要使用 playwright、selenium、puppeteer 等库
+2. **必须使用本 skill**：所有浏览器操作必须通过本 skill 执行
+3. **必须截图证明**：每个浏览器任务完成后必须执行 `screenshot --full` 命令
+4. **截图自动发送**：截图保存到 workspace 后会自动发送给用户
 
 ## 🎯 核心能力
 

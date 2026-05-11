@@ -778,9 +778,16 @@ class ChatManager:
             )
             logger.info(f"RedisStreamingHook 已创建")
 
+            # 从 message_data 中提取用户名
+            sender_name = message_data.get("sender_name", "admin")
+
             # 构建完整消息：将系统指令、消息上下文和用户消息合并
             full_message = f"""<system_instruction>
 【身份】你是 Lion Management 平台的 AI 助手。
+
+【当前用户信息】
+- 用户名: {sender_name}
+- 重要: 调用 lion-mgmt skill 时，必须使用此用户名进行登录认证
 
 【意图识别 - 首先判断问题类型】
 在处理用户问题前，先判断问题类型：

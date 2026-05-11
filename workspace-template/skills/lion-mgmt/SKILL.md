@@ -76,12 +76,19 @@ Step 13: 返回结果给用户
 
 **原因**: Token 可能会过期，使用过期的 token 会导致请求失败（401 Unauthorized）。
 
+**获取用户名的优先级**:
+1. 从 `<message_context>` 中提取 `sender_name` 字段（最高优先级）
+2. 从 `<system_instruction>` 中查找"用户名:"字段
+3. 如果以上都没有，使用默认值 "admin"
+
 ```python
 import os
 import requests
+import re
 
 base_url = os.getenv("LION_MGMT_BASE_URL", "http://127.0.0.1:8000")
-username = os.getenv("LION_MGMT_USERNAME", "admin")
+
+username = message_context.get("sender_name", "admin")
 
 response = requests.post(
     f"{base_url}/user/local-auth",
