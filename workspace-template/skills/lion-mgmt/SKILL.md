@@ -110,14 +110,23 @@ print(f"Token: {token}")
 
 ### Step 2: 获取 OpenAPI 接口信息
 
+**⚠️ 特殊要求**: 此接口仅 admin 用户有权限访问，必须使用 admin 账户的 token。
+
 ```python
 import requests
 
-token = "<token>"  # 从 Step 1 获取的 token
+# 使用 admin 账户获取 token（仅用于此接口）
+admin_response = requests.post(
+    f"{base_url}/user/local-auth",
+    headers={"Content-Type": "application/json"},
+    json={"username": "admin"}
+)
+admin_token = admin_response.json()["data"]["token"]
 
+# 使用 admin token 获取 OpenAPI 信息
 response = requests.get(
-    "http://127.0.0.1:8000/docs/openapi.json",
-    headers={"aioe-auth": token}
+    f"{base_url}/docs/openapi.json",
+    headers={"aioe-auth": admin_token}
 )
 openapi_data = response.json()
 # 提取 paths 字段
@@ -127,8 +136,9 @@ paths = openapi_data.get("paths", {})
 ### Step 3: 获取 Playbook 列表
 
 ```python
+# 使用普通用户 token（从 Step 1 获取）
 response = requests.post(
-    "http://127.0.0.1:8000/playbook/published-versions",
+    f"{base_url}/playbook/published-versions",
     headers={"aioe-auth": token}
 )
 playbook_data = response.json()
@@ -139,8 +149,9 @@ playbooks = playbook_data.get("data", {}).get("items", [])
 ### Step 5: 获取 Action 列表
 
 ```python
+# 使用普通用户 token（从 Step 1 获取）
 response = requests.post(
-    "http://127.0.0.1:8000/tools/actions/available",
+    f"{base_url}/tools/actions/available",
     headers={"aioe-auth": token}
 )
 action_data = response.json()
@@ -445,24 +456,29 @@ Content-Type: application/json
    - ❌ 不要假设 token 仍然有效
    - ❌ 不要假设数据未变
    - Token 可能会过期，使用过期的 token 会导致 401 错误
-3. **严格顺序**: 必须先尝试 playbook，失败后才尝试 action，再失败才尝试 openapi
-4. **作战室 ID 获取**（重要）:
+3. **账户权限隔离**（重要）:
+   - ✅ Step 2 获取 OpenAPI 信息时，必须使用 admin 账户
+   - ❌ Step 3-13 的所有其他接口，严禁使用 admin 账户，必须使用普通用户账户
+   - ❌ 不要在业务接口（playbook、action、warroom 等）中使用 admin token
+   - 原因：admin 账户拥有超级权限，业务操作必须使用普通用户以确保权限隔离和审计追踪
+4. **严格顺序**: 必须先尝试 playbook，失败后才尝试 action，再失败才尝试 openapi
+5. **作战室 ID 获取**（重要）:
    - ✅ 从当前会话上下文中获取作战室 ID
    - ❌ 不要查询作战室列表 (`/warroom/list`)
    - ❌ 不要使用历史记忆中的旧作战室 ID
-5. **资源 ID 获取**（重要）:
+6. **资源 ID 获取**（重要）:
    - ✅ 调用 `POST /tools/resource/detailed` 获取资源 ID
    - ✅ 使用响应中的 `data[0].id` 字段
    - ❌ 不要使用资源名称（如"微步在线-个人"）
-6. **工具信息获取**（重要）:
+7. **工具信息获取**（重要）:
    - ✅ 调用 `POST /tools/all` 获取工具详细信息
    - ✅ 使用 action 中的 `app_name` 作为搜索关键字
    - ✅ 从响应的 `data.tools[0]` 中提取 `name` 和 `main` 字段
    - ❌ 不要直接使用 action 中的 `node_name`、`app_name`、`name`、`main` 字段
-7. **区分响应类型**:
+8. **区分响应类型**:
    - Playbook/Action: 必须从响应中提取 `run_id`，并通过 run_id 查询执行结果，返回给用户
    - OpenAPI: 直接返回业务数据，无需提取 run_id
-8. **禁止使用记忆中的资源状态**（重要）:
+9. **禁止使用记忆中的资源状态**（重要）:
    - ❌ 禁止说"我记得上次这个资源不可用，所以跳过"
    - ❌ 禁止说"根据历史记录，这个动作不存在"
    - ❌ 禁止说"之前尝试过失败了，所以不再尝试"
