@@ -6,17 +6,42 @@ agent-browser 辅助函数库
 """
 
 import os
+import sys
 import subprocess
+import platform
 from pathlib import Path
 from typing import Optional, Dict, List, Union
 
 # 获取 agent-browser 可执行文件路径
 SKILL_DIR = Path(__file__).parent.parent
-AGENT_BROWSER = SKILL_DIR / "scripts" / "agent-browser-linux-x64"
 
-# 确保可执行文件有执行权限
-if AGENT_BROWSER.exists():
-    os.chmod(AGENT_BROWSER, 0o755)
+def get_agent_browser_path() -> Path:
+    """根据系统架构获取正确的 agent-browser 可执行文件路径"""
+    machine = platform.machine().lower()
+
+    # 判断架构类型
+    if machine in ('aarch64', 'arm64'):
+        executable_name = "agent-browser-linux-arm64"
+    elif machine in ('x86_64', 'amd64'):
+        executable_name = "agent-browser-linux-x64"
+    else:
+        raise RuntimeError(f"不支持的系统架构: {machine}")
+
+    agent_browser = SKILL_DIR / "scripts" / executable_name
+
+    # 检查可执行文件是否存在
+    if not agent_browser.exists():
+        raise FileNotFoundError(f"找不到可执行文件: {agent_browser}")
+
+    # 确保可执行文件有执行权限
+    try:
+        os.chmod(agent_browser, 0o755)
+    except Exception as e:
+        print(f"警告: 无法设置执行权限: {e}", file=sys.stderr)
+
+    return agent_browser
+
+AGENT_BROWSER = get_agent_browser_path()
 
 
 def _run_command(args: List[str], timeout: int = 30) -> str:

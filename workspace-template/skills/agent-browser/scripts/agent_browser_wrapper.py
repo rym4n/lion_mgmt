@@ -8,13 +8,24 @@ agent-browser 包装脚本 - 自动处理环境变量和路径
 import os
 import sys
 import subprocess
+import platform
 from pathlib import Path
 
-def main():
-    """包装脚本入口"""
-    # 获取 agent-browser 可执行文件路径
+def get_agent_browser_path() -> Path:
+    """根据系统架构获取正确的 agent-browser 可执行文件路径"""
     skill_dir = Path(__file__).parent.parent
-    agent_browser = skill_dir / "scripts" / "agent-browser-linux-x64"
+    machine = platform.machine().lower()
+
+    # 判断架构类型
+    if machine in ('aarch64', 'arm64'):
+        executable_name = "agent-browser-linux-arm64"
+    elif machine in ('x86_64', 'amd64'):
+        executable_name = "agent-browser-linux-x64"
+    else:
+        print(f"错误: 不支持的系统架构: {machine}", file=sys.stderr)
+        sys.exit(1)
+
+    agent_browser = skill_dir / "scripts" / executable_name
 
     # 检查可执行文件是否存在
     if not agent_browser.exists():
@@ -26,6 +37,13 @@ def main():
         os.chmod(agent_browser, 0o755)
     except Exception as e:
         print(f"警告: 无法设置执行权限: {e}", file=sys.stderr)
+
+    return agent_browser
+
+def main():
+    """包装脚本入口"""
+    # 获取 agent-browser 可执行文件路径
+    agent_browser = get_agent_browser_path()
 
     # 设置环境变量（自动处理 HTTPS 证书错误和 ERR_BLOCKED_BY_CLIENT）
     env = os.environ.copy()
