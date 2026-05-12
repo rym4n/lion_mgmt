@@ -10,8 +10,6 @@ import operator
 import os
 from pathlib import Path
 import re
-import shutil
-import subprocess
 import time
 import uuid
 import zipfile
@@ -3475,17 +3473,17 @@ async def delete_browser_session(request):
     删除浏览器自动化会话
 
     删除内容：
-    1. 会话专属的 workspace 文件夹（{workspace_base}/browser-{session_id}/）
+    1. 应用开发会话
     """
     session_id = request.json.get("session_id")
     if not session_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
 
-    workspace_dir = Path(NANOBOT_WORKSPACE_BASE) / f"browser-{session_id}"
-    if workspace_dir.exists() and workspace_dir.is_dir():
+    sessions_file = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace/sessions" / f"browser-{session_id}"
+    if sessions_file.exists():
         try:
-            shutil.rmtree(workspace_dir)
-            logger.info(f"已删除会话 {session_id} 的 workspace: {workspace_dir}")
+            os.remove(sessions_file)
             return response_ok({"message": "会话删除成功"})
         except Exception as e:
             logger.error(f"删除 workspace 失败: {e}")
