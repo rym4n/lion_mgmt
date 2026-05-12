@@ -8,6 +8,8 @@ Inspection Module API Routes Layer
 import ast
 import asyncio
 import orjson
+import os
+
 from datetime import datetime
 from sanic import Blueprint, Request
 from sanic.log import logger
@@ -23,7 +25,7 @@ from libs.utils import gen_run_id
 from models import Timed, Playbook, PlaybookVersion, InspectionTarget, InspectionCategory, InspectionResult
 from settings import TASK_TOPIC
 from . import logic
-from sanic.response import json
+from sanic.response import raw
 
 inspection_bp = Blueprint("inspection", url_prefix="/inspection")
 __all__ = ["inspection_bp"]
@@ -2152,8 +2154,8 @@ async def add_result(request: Request):
 
 @inspection_bp.post("/target/export")
 @openapi.definition(
-    summary="导出巡检项为JSON文件",
-    description="导出巡检项及其关联的类别和任务为JSON文件",
+    summary="导出巡检项为Excel文件",
+    description="导出巡检项及其关联的类别和任务为Excel文件",
     body={
         "application/json": {
             "schema": {
@@ -2171,11 +2173,12 @@ async def add_result(request: Request):
     },
     response={
         "200": {
-            "description": "导出成功，返回JSON文件",
+            "description": "导出成功，返回Excel文件",
             "content": {
-                "application/json": {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
                     "schema": {
-                        "type": "object"
+                        "type": "string",
+                        "format": "binary"
                     }
                 }
             },
@@ -2185,9 +2188,11 @@ async def add_result(request: Request):
 @requires_permission("inspection:r")
 async def export_targets(request: Request):
     """
-    导出巡检项为JSON文件
-    Export inspection targets as JSON file
+    导出巡检项为Excel文件
+    Export inspection targets as Excel file
     """
+    from sanic.response import raw
+
     data = request.json or {}
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -2195,22 +2200,22 @@ async def export_targets(request: Request):
     if not target_ids or not isinstance(target_ids, list):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    result = await logic.export_targets(target_ids, tenant_id)
+    excel_data = await logic.export_targets_to_excel(target_ids, tenant_id)
 
     # 生成文件名
-    filename = f"inspection_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    filename = f"inspection_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
-    # 返回JSON文件
-    response = json(result)
+    # 返回Excel文件
+    response = raw(excel_data)
     response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-    response.headers["Content-Type"] = "application/json"
+    response.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     return response
 
 
 @inspection_bp.post("/target/import")
 @openapi.definition(
-    summary="导入巡检项JSON文件",
-    description="导入巡检项及其关联的类别和任务，如果存在同名则添加日期后缀，默认禁用",
+    summary="导入巡检项Excel文件",
+    description="导入巡检项及其关联的类别和任务，如果存在同名则跳过或使用已存在的，默认禁用",
     body={
         "multipart/form-data": {
             "schema": {
@@ -2220,7 +2225,7 @@ async def export_targets(request: Request):
                     "file": {
                         "type": "string",
                         "format": "binary",
-                        "description": "JSON文件"
+                        "description": "Excel文件(.xlsx)"
                     },
                 },
             }
@@ -2265,8 +2270,8 @@ async def export_targets(request: Request):
 @requires_permission("inspection:c")
 async def import_targets(request: Request):
     """
-    导入巡检项JSON文件
-    Import inspection targets from JSON file
+    导入巡检项Excel文件
+    Import inspection targets from Excel file
     """
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -2275,19 +2280,71 @@ async def import_targets(request: Request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     uploaded_file = request.files.getlist("file")[0]
-    try:
-        # 读取并解析JSON文件
-        file_content = uploaded_file.body
-        import_data = orjson.loads(file_content)
-    except orjson.JSONDecodeError:
+
+    # 验证文件类型
+    if not uploaded_file.name.endswith(('.xlsx', '.xls')):
         raise CustomError(ErrorCode.PARAM_ERROR)
+
+    try:
+        # 读取文件内容
+        file_content = uploaded_file.body
     except Exception as e:
         logger.error(f"文件读取失败: {str(e)}")
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    if not isinstance(import_data, dict):
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    result = await logic.import_targets(import_data, tenant_id)
+    result = await logic.import_targets_from_excel(file_content, tenant_id)
     return response_ok(data=result)
+
+
+@inspection_bp.get("/target/template")
+@openapi.definition(
+    summary="下载巡检项导入模板",
+    description="下载Excel格式的巡检项导入模板文件",
+    response={
+        "200": {
+            "description": "下载成功，返回Excel模板文件",
+            "content": {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                    "schema": {
+                        "type": "string",
+                        "format": "binary"
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:r")
+async def download_template(request: Request):
+    """
+    下载巡检项导入模板
+    Download inspection import template
+    """
+
+    # 模板文件路径
+    template_path = os.path.join(
+        os.path.dirname(__file__),
+        "inspection_template_model.xlsx"
+    )
+
+    # 检查模板文件是否存在
+    if not os.path.exists(template_path):
+        raise CustomError(ErrorCode.NOT_FOUND_TO_INSPECTION)
+
+    try:
+        # 读取模板文件
+        with open(template_path, "rb") as f:
+            template_data = f.read()
+    except Exception as e:
+        logger.error(f"读取模板文件失败: {str(e)}")
+        raise CustomError(ErrorCode.READ_FAILED_TO_INSPECTION)
+
+    # 生成文件名
+    filename = "inspection_template.xlsx"
+
+    # 返回Excel文件
+    response = raw(template_data)
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return response
 

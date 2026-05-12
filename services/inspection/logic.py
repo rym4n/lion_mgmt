@@ -1091,18 +1091,23 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
 
 # ==================== Import/Export Operations ====================
 
-async def export_targets(target_ids: List[str], tenant_id: str) -> Dict[str, Any]:
+async def export_targets_to_excel(target_ids: List[str], tenant_id: str) -> bytes:
     """
-    导出巡检项及其关联的类别和任务
-    Export inspection targets with their categories and schedules
+    导出巡检项及其关联的类别和任务为Excel文件（单表格式，带单元格合并和说明）
+    Export inspection targets with their categories and schedules to Excel (single sheet with merged cells and instructions)
 
     Args:
         target_ids: 巡检项ID列表
         tenant_id: 租户ID
 
     Returns:
-        包含巡检任务、类别和项的完整数据
+        Excel文件的字节数据
     """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+    from collections import defaultdict
+
     # 查询巡检项
     targets = await InspectionTarget.filter(
         id__in=target_ids,
@@ -1111,7 +1116,7 @@ async def export_targets(target_ids: List[str], tenant_id: str) -> Dict[str, Any
     ).all()
 
     if not targets:
-        return {"schedules": [], "categories": [], "targets": []}
+        raise CustomError(ErrorCode.NOT_FOUND)
 
     # 获取所有关联的类别ID
     category_ids = list(set(t.category_id for t in targets))
@@ -1129,169 +1134,313 @@ async def export_targets(target_ids: List[str], tenant_id: str) -> Dict[str, Any
         tenant_id=tenant_id
     ).all()
 
-    # 构建导出数据
-    export_data = {
-        "schedules": [
-            {
-                "id": s.id,
-                "name": s.name,
-                "schedule_cron": s.schedule_cron,
-                "owner": s.owner,
-                "description": s.description,
-            }
-            for s in schedules
-        ],
-        "categories": [
-            {
-                "id": c.id,
-                "name": c.name,
-                "schedule_id": c.schedule_id,
-                "app_name": c.app_name,
-                "resource_ids": c.resource_ids,
-            }
-            for c in categories
-        ],
-        "targets": [
-            {
-                "id": t.id,
-                "content": t.content,
-                "category_id": t.category_id,
-                "standard": t.standard,
-                "action_name": t.action_name,
-            }
-            for t in targets
-        ]
-    }
+    # 创建映射表
+    schedule_map = {s.id: s for s in schedules}
+    category_map = {c.id: c for c in categories}
 
-    return export_data
+    # 按任务和类别组织数据
+    data_structure = defaultdict(lambda: defaultdict(list))
+    for target in targets:
+        category = category_map.get(target.category_id)
+        if not category:
+            continue
+        schedule = schedule_map.get(category.schedule_id)
+        if not schedule:
+            continue
+
+        data_structure[schedule.id][category.id].append(target)
+
+    # 创建Excel工作簿
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "巡检配置"
+
+    # 定义样式
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    center_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left_alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    # 边框样式
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+
+    # 设置表头
+    headers = [
+        "任务名称", "Cron表达式", "负责人", "任务描述",
+        "类别名称", "应用名称", "资源ID列表",
+        "巡检内容", "巡检标准", "动作名称"
+    ]
+    ws.append(headers)
+
+    # 应用表头样式
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    # 添加填写说明（第2-23行，整体合并）
+    instructions_text = """填写说明：
+
+【必填字段】
+• 任务名称：巡检任务的名称，相同任务名称的行会归属到同一个任务下
+• Cron表达式：定时执行规则，如 '0 9 * * *' 表示每天9点执行
+• 类别名称：巡检类别名称，相同任务下的相同类别会归属到一起
+• 应用名称：执行巡检的工具应用名称
+• 巡检内容：具体要检查的内容描述
+• 动作名称：执行巡检的具体动作名称
+【选填字段】
+• 负责人：负责该巡检任务的人员
+• 任务描述：任务的详细说明
+• 资源ID列表：多个资源ID用英文逗号分隔
+• 巡检标准：判断巡检是否通过的标准
+【填写技巧】
+1. 同一个任务的多个巡检项，任务信息（前4列）可以合并或重复填写
+2. 同一个类别的多个巡检项，类别信息（第5-7列）可以合并或重复填写
+3. 每一行代表一个巡检项，可以复制行来快速添加相似的巡检项
+4. 导入时会自动去重，相同名称的任务/类别会合并
+5. 所有导入的数据默认为禁用状态，需要在系统中手动启用
+
+下面为示例，导入时请切换为正确内容！"""
+
+    # 添加22行空行（第2-23行）
+    for i in range(23):
+        ws.append(["", "", "", "", "", "", "", "", "", ""])
+
+    # 合并第2-23行的所有列
+    ws.merge_cells('A2:J24')
+    ws['A2'] = instructions_text
+    ws['A2'].alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    ws['A2'].border = thin_border
+
+    ws.merge_cells(f'A{ws.max_row}:J{ws.max_row}')
+
+    current_row = ws.max_row + 1
+
+    for schedule_id in sorted(data_structure.keys()):
+        schedule = schedule_map[schedule_id]
+        schedule_start_row = current_row
+
+        for category_id in sorted(data_structure[schedule_id].keys()):
+            category = category_map[category_id]
+            category_start_row = current_row
+            targets_list = data_structure[schedule_id][category_id]
+
+            resource_ids_str = ",".join(category.resource_ids) if category.resource_ids else ""
+
+            for target in targets_list:
+                ws.append([
+                    schedule.name,
+                    schedule.schedule_cron,
+                    schedule.owner or "",
+                    schedule.description or "",
+                    category.name,
+                    category.app_name,
+                    resource_ids_str,
+                    target.content,
+                    target.standard or "",
+                    target.action_name
+                ])
+
+                # 应用边框和对齐
+                for col in range(1, 11):
+                    cell = ws.cell(current_row, col)
+                    cell.border = thin_border
+                    if col <= 7:
+                        cell.alignment = center_alignment
+                    else:
+                        cell.alignment = left_alignment
+
+                current_row += 1
+
+            # 合并类别单元格（列E-G）
+            if len(targets_list) > 1:
+                category_end_row = current_row - 1
+                ws.merge_cells(f'E{category_start_row}:E{category_end_row}')
+                ws.merge_cells(f'F{category_start_row}:F{category_end_row}')
+                ws.merge_cells(f'G{category_start_row}:G{category_end_row}')
+
+        # 合并任务单元格（列A-D）
+        schedule_end_row = current_row - 1
+        if schedule_end_row > schedule_start_row:
+            ws.merge_cells(f'A{schedule_start_row}:A{schedule_end_row}')
+            ws.merge_cells(f'B{schedule_start_row}:B{schedule_end_row}')
+            ws.merge_cells(f'C{schedule_start_row}:C{schedule_end_row}')
+            ws.merge_cells(f'D{schedule_start_row}:D{schedule_end_row}')
+
+    # 设置列宽
+    ws.column_dimensions['A'].width = 20  # 任务名称
+    ws.column_dimensions['B'].width = 15  # Cron表达式
+    ws.column_dimensions['C'].width = 12  # 负责人
+    ws.column_dimensions['D'].width = 25  # 任务描述
+    ws.column_dimensions['E'].width = 20  # 类别名称
+    ws.column_dimensions['F'].width = 15  # 应用名称
+    ws.column_dimensions['G'].width = 25  # 资源ID列表
+    ws.column_dimensions['H'].width = 30  # 巡检内容
+    ws.column_dimensions['I'].width = 30  # 巡检标准
+    ws.column_dimensions['J'].width = 15  # 动作名称
+
+    # 设置行高
+    ws.row_dimensions[1].height = 30  # 表头行高
+
+    # 保存到字节流
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return output.getvalue()
 
 
-async def import_targets(import_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
+async def import_targets_from_excel(file_content: bytes, tenant_id: str) -> Dict[str, Any]:
     """
-    导入巡检项及其关联的类别和任务
-    Import inspection targets with their categories and schedules
+    从Excel文件导入巡检项及其关联的类别和任务（单表格式，支持说明行）
+    Import inspection targets with their categories and schedules from Excel (single sheet, skip instruction rows)
 
     Args:
-        import_data: 导入的数据（包含schedules, categories, targets）
+        file_content: Excel文件的字节数据
         tenant_id: 租户ID
 
     Returns:
         导入结果统计
     """
+    from openpyxl import load_workbook
+    from io import BytesIO
     from datetime import datetime
 
     # 生成时间后缀
     date_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
 
-    # ID映射表（旧ID -> 新ID）
-    schedule_id_map = {}
-    category_id_map = {}
+    # 加载Excel文件
+    try:
+        wb = load_workbook(BytesIO(file_content))
+        ws = wb.active  # 使用第一个工作表
+    except Exception as e:
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
-    schedules_data = import_data.get("schedules", [])
-    categories_data = import_data.get("categories", [])
-    targets_data = import_data.get("targets", [])
+    # 缓存映射表
+    schedule_cache = {}  # name -> schedule object
+    category_cache = {}  # (schedule_name, category_name) -> category object
 
     created_schedules = []
     created_categories = []
     created_targets = []
 
-    # 1. 导入巡检任务
-    for schedule_data in schedules_data:
-        old_schedule_id = schedule_data.get("id")
-        schedule_name = schedule_data.get("name")
-
-        # 检查是否存在同名任务
-        existing_schedule = await InspectionSchedule.filter(
-            name=schedule_name,
-            deleted=False,
-            tenant_id=tenant_id
-        ).first()
-
-        if existing_schedule:
-            # 添加日期后缀
-            schedule_name = f"{schedule_name}_{date_suffix}"
-
-        # 创建新任务（默认禁用）
-        new_schedule = await InspectionSchedule.create(
-            name=schedule_name,
-            schedule_cron=schedule_data.get("schedule_cron"),
-            owner=schedule_data.get("owner"),
-            description=schedule_data.get("description"),
-            enabled=False,  # 默认禁用
-            tenant_id=tenant_id
-        )
-
-        schedule_id_map[old_schedule_id] = new_schedule.id
-        created_schedules.append(new_schedule)
-
-    # 2. 导入巡检类别
-    for category_data in categories_data:
-        old_category_id = category_data.get("id")
-        old_schedule_id = category_data.get("schedule_id")
-        category_name = category_data.get("name")
-
-        # 映射到新的schedule_id
-        new_schedule_id = schedule_id_map.get(old_schedule_id)
-        if not new_schedule_id:
+    # 跳过表头和说明行，从第2行开始读取
+    for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        # 检查是否为空行
+        if not any(row):
             continue
 
-        # 检查是否存在同名类别（在同一任务下）
-        existing_category = await InspectionCategory.filter(
-            name=category_name,
-            schedule_id=new_schedule_id,
-            deleted=False,
-            tenant_id=tenant_id
-        ).first()
-
-        if existing_category:
-            # 添加日期后缀
-            category_name = f"{category_name}_{date_suffix}"
-
-        # 创建新类别（默认禁用）
-        new_category = await InspectionCategory.create(
-            name=category_name,
-            schedule_id=new_schedule_id,
-            app_name=category_data.get("app_name"),
-            resource_ids=category_data.get("resource_ids", []),
-            enabled=False,  # 默认禁用
-            tenant_id=tenant_id
-        )
-
-        category_id_map[old_category_id] = new_category.id
-        created_categories.append(new_category)
-
-    # 3. 导入巡检项
-    for target_data in targets_data:
-        old_category_id = target_data.get("category_id")
-        target_content = target_data.get("content")
-
-        # 映射到新的category_id
-        new_category_id = category_id_map.get(old_category_id)
-        if not new_category_id:
+        # 跳过说明行（第一列包含"填写说明"、"必填字段"、"选填字段"、"填写技巧"、"导入规则"等关键词）
+        first_cell = str(row[0]).strip() if row[0] else ""
+        if any(keyword in first_cell for keyword in ["填写说明", "【", "•", "1.", "2.", "3.", "4.", "5."]):
             continue
 
-        # 检查是否存在同内容的巡检项（在同一类别下）
+        # 解析列数据
+        try:
+            schedule_name = str(row[0]).strip() if row[0] else ""
+            schedule_cron = str(row[1]).strip() if row[1] else ""
+            owner = str(row[2]).strip() if row[2] else ""
+            schedule_desc = str(row[3]).strip() if row[3] else ""
+            category_name = str(row[4]).strip() if row[4] else ""
+            app_name = str(row[5]).strip() if row[5] else ""
+            resource_ids_str = str(row[6]).strip() if row[6] else ""
+            target_content = str(row[7]).strip() if row[7] else ""
+            target_standard = str(row[8]).strip() if row[8] else ""
+            action_name = str(row[9]).strip() if row[9] else ""
+        except IndexError:
+            # 行数据不完整，跳过
+            continue
+
+        # 验证必填字段
+        if not schedule_name or not schedule_cron or not category_name or not app_name or not target_content or not action_name:
+            continue
+
+        # ===== 1. 处理巡检任务 =====
+        if schedule_name not in schedule_cache:
+            # 先从数据库查找
+            existing_schedule = await InspectionSchedule.filter(
+                name=schedule_name,
+                deleted=False,
+                tenant_id=tenant_id
+            ).first()
+
+            if existing_schedule:
+                schedule_cache[schedule_name] = existing_schedule
+            else:
+                # 创建新任务
+                new_schedule = await InspectionSchedule.create(
+                    name=schedule_name,
+                    schedule_cron=schedule_cron,
+                    owner=owner,
+                    description=schedule_desc,
+                    enabled=False,
+                    tenant_id=tenant_id
+                )
+                schedule_cache[schedule_name] = new_schedule
+                created_schedules.append(new_schedule)
+
+        schedule = schedule_cache[schedule_name]
+
+        # ===== 2. 处理巡检类别 =====
+        category_key = (schedule_name, category_name)
+        if category_key not in category_cache:
+            # 先从数据库查找
+            existing_category = await InspectionCategory.filter(
+                name=category_name,
+                schedule_id=schedule.id,
+                deleted=False,
+                tenant_id=tenant_id
+            ).first()
+
+            if existing_category:
+                category_cache[category_key] = existing_category
+            else:
+                # 解析资源ID列表
+                resource_ids = [rid.strip() for rid in resource_ids_str.split(",") if rid.strip()] if resource_ids_str else []
+
+                # 创建新类别
+                new_category = await InspectionCategory.create(
+                    name=category_name,
+                    schedule_id=schedule.id,
+                    app_name=app_name,
+                    resource_ids=resource_ids,
+                    enabled=False,
+                    tenant_id=tenant_id
+                )
+                category_cache[category_key] = new_category
+                created_categories.append(new_category)
+
+        category = category_cache[category_key]
+
+        # ===== 3. 处理巡检项 =====
+        # 检查是否存在相同内容的巡检项
         existing_target = await InspectionTarget.filter(
             content=target_content,
-            category_id=new_category_id,
+            category_id=category.id,
             deleted=False,
             tenant_id=tenant_id
         ).first()
 
         if existing_target:
-            # 添加日期后缀
-            target_content = f"{target_content}_{date_suffix}"
+            # 跳过已存在的巡检项
+            continue
 
-        # 创建新巡检项（默认禁用）
+        # 创建新巡检项
         new_target = await InspectionTarget.create(
             content=target_content,
-            category_id=new_category_id,
-            standard=target_data.get("standard"),
-            action_name=target_data.get("action_name"),
-            enabled=False,  # 默认禁用
+            category_id=category.id,
+            standard=target_standard,
+            action_name=action_name,
+            enabled=False,
             tenant_id=tenant_id
         )
-
         created_targets.append(new_target)
 
     return {

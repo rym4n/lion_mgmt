@@ -172,3 +172,5 @@ class ErrorCode(BaseErrorCode):
     ANCHOR_NOT_FOUND = ErrorData(4135, "宿主机标识文件未挂载，请检查 Docker 卷挂载配置")
     MACHINE_CODE_MISMATCH = ErrorData(4136, "机器码不匹配，License与当前服务器不绑定")
     NOT_FOUND_TO_AI = ErrorData(4137, "缺少AI相关功能权限，请联系管理员")
+    NOT_FOUND_TO_INSPECTION = ErrorData(4137, "缺少巡检导入模板文件，请联系管理员")
+    READ_FAILED_TO_INSPECTION = ErrorData(4137, "模板文件读取失败，请联系管理员")
