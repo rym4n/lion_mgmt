@@ -1558,7 +1558,6 @@ async def execute_inspection(request: Request):
     playbook = await Playbook.filter(
         name="自动化巡检",
         deleted=False,
-        tenant_id=tenant_id,
         internal=True
     ).first()
 
