@@ -1145,6 +1145,7 @@ async def delete_target(request: Request):
                 "properties": {
                     "schedule_id": {"type": "string", "description": "巡检任务ID"},
                     "target_id": {"type": "string", "description": "巡检项ID（可选，如果提供则只返回该巡检项的配置）"},
+                    "tenant_id": {"type": "string", "description": "租户ID"},
                 },
             }
         }
@@ -1191,7 +1192,7 @@ async def get_all_configs(request: Request):
     if not schedule_ids:
         raise CustomError(ErrorCode.PARAM_ERROR)
     target_ids = data.get("target_id") if "target_id" in data else None
-    tenant_id = request.ctx.session.get("tenant_id")
+    tenant_id = data.get("tenant_id")
     result = await logic.get_all_configs(tenant_id, schedule_ids, target_ids)
     return response_ok(data=result)
 
@@ -1372,7 +1373,8 @@ async def start_inspection(request: Request):
             "flow_id": playbook_version_id,
             "flow_input": {
                 "schedule_id": schedule_id,
-                "target_id": None
+                "target_id": None,
+                "tenant_id": tenant_id
             },
             "executor": request.ctx.session.get("account_info").id
         }
@@ -1580,7 +1582,8 @@ async def execute_inspection(request: Request):
         "flow_id": playbook_version_id,
         "flow_input": {
             "schedule_id": schedule_id,
-            "target_id": target_ids
+            "target_id": target_ids,
+            "tenant_id": tenant_id
         },
         "executor": request.ctx.session.get("account_info").id
     }
@@ -2084,6 +2087,7 @@ async def execute_sql(request: Request):
                         }
                     },
                     "start_time": {"type": "string", "description": "开始时间 (ISO 8601)"},
+                    "tenant_id": {"type": "string", "description": "租户ID"},
                 },
             }
         }
@@ -2122,7 +2126,7 @@ async def add_result(request: Request):
     Add inspection result
     """
     request_data = request.json or {}
-    tenant_id = request.ctx.session.get("tenant_id")
+    tenant_id = request_data.get("tenant_id")
 
     result_data_array = request_data.get("result_data")
     start_time = request_data.get("start_time")
