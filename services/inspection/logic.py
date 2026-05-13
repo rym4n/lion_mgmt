@@ -61,6 +61,27 @@ async def save_schedule(data: Dict[str, Any], tenant_id: str) -> InspectionSched
     return schedule
 
 
+async def notify_config(schedule_id: str, notify_enabled: bool, notify_config: Dict[str, Any], tenant_id: str) -> InspectionSchedule:
+    """
+    巡检通知配置
+    inspection notification configuration
+    """
+    schedule = await InspectionSchedule.filter(
+        id=schedule_id,
+        deleted=False,
+        tenant_id=tenant_id
+    ).first()
+
+    if not schedule:
+        raise CustomError(ErrorCode.SCHEDULE_NOT_FOUND)
+
+    schedule.notify_enabled = notify_enabled
+    schedule.notify_config = notify_config
+    await schedule.save()
+
+    return schedule
+
+
 async def get_schedule(tenant_id: str) -> Optional[InspectionSchedule]:
     """
     获取租户的巡检调度配置（返回第一个，用于向后兼容）
@@ -150,6 +171,8 @@ async def list_schedules(
                 "result_dates": schedule_dates_map.get(schedule.id, []),
                 "ctime": schedule.ctime.isoformat() if schedule.ctime else None,
                 "utime": schedule.utime.isoformat() if schedule.utime else None,
+                "notify_enabled": schedule.notify_enabled,
+                "notify_config": schedule.notify_config,
             }
             for schedule in items
         ]

@@ -318,6 +318,77 @@ async def delete_schedule(request: Request):
     return response_ok(data={"message": "删除成功"})
 
 
+# ==================== Notify Config Management ====================
+
+@inspection_bp.post("/schedule/notify")
+@openapi.definition(
+    summary="巡检通知配置",
+    description="为指定巡检任务配置通知（注意：通知动作配置是覆盖式）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["schedule_id", "notify_enabled", "notify_config"],
+                "properties": {
+                    "schedule_id": {"type": "string", "description": "巡检任务ID"},
+                    "notify_enabled": {"type": "boolean", "description": "是否启用通知"},
+                    "notify_config": {"type": "object", "description": "通知动作配置"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "创建成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "schedule_id": {"type": "string"},
+                                    "notify_enabled": {"type": "boolean"},
+                                    "notify_config": {"type": "object"},
+                                    "utime": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:c")
+async def create_notify_config(request: Request):
+    """
+    巡检通知配置
+    Create inspection notification configuration
+    """
+    data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    schedule_id = data.get("schedule_id")
+    notify_enabled = data.get("notify_enabled")
+    notify_config = data.get("notify_config")
+
+    if not schedule_id or notify_enabled is None or notify_config is None:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    schedule = await logic.notify_config(schedule_id, notify_enabled, notify_config, tenant_id)
+
+    return response_ok(data={
+        "id": schedule.id,
+        "schedule_id": schedule_id,
+        "notify_enabled": schedule.notify_enabled,
+        "notify_config": schedule.notify_config,
+        "utime": schedule.utime.isoformat() if schedule.utime else None,
+    })
+
 # ==================== Category Management ====================
 
 @inspection_bp.post("/category/create")
