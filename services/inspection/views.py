@@ -1361,7 +1361,7 @@ async def start_inspection(request: Request):
             playbook_id=playbook.id,
             tenant_id=tenant_id,
             status=1  # 假设 status=1 表示已发布
-        ).order_by("-version").first()
+        ).order_by("-utime").first()
 
         if not playbook_version:
             return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
@@ -1570,7 +1570,7 @@ async def execute_inspection(request: Request):
     playbook_version = await PlaybookVersion.filter(
         playbook_id=playbook.id,
         status=1  # 假设 status=1 表示已发布
-    ).order_by("-version").first()
+    ).order_by("-utime").first()
 
     if not playbook_version:
         return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
