@@ -1567,7 +1567,6 @@ async def execute_inspection(request: Request):
     # 获取该剧本的最新发布版本
     playbook_version = await PlaybookVersion.filter(
         playbook_id=playbook.id,
-        tenant_id=tenant_id,
         status=1  # 假设 status=1 表示已发布
     ).order_by("-version").first()
 
