@@ -2775,10 +2775,11 @@ async def resource_search(request):
     模糊搜索资源名称，并在返回结果中带上对应的工具英文名
     """
     keyword = request.json.get("keyword", "")
+    tenant_id = request.ctx.session.get("tenant_id")
     if not keyword:
         return response_ok([])
 
-    resources = await ToolResources.filter(name__icontains=keyword, deleted=False, internal=False).all()
+    resources = await ToolResources.filter(name__icontains=keyword, deleted=False, internal=False, tenant_id=tenant_id).all()
     result = []
     for res in resources:
         result.append(res.json)
