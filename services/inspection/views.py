@@ -2190,7 +2190,6 @@ async def add_result(request: Request):
 
         # Use AI to judge the result
         status = "failed"
-        error_message = None
 
         try:
             judgment = await logic.judge_inspection_result(

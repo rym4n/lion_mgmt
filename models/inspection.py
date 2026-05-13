@@ -20,6 +20,8 @@ class InspectionSchedule(BaseModel):
     owner = fields.CharField(max_length=255, null=True, description="负责人")
     enabled = fields.BooleanField(default=True, description="是否启用")
     description = fields.TextField(null=True, description="任务描述")
+    notify_enabled = fields.BooleanField(default=False, description="是否启用通知")
+    notify_config = fields.JSONField(null=True, description="通知动作配置")
 
     class Meta:
         table = "inspection_schedule"
