@@ -1451,3 +1451,181 @@ async def import_targets_from_excel(file_content: bytes, tenant_id: str) -> Dict
         "category_ids": [c.id for c in created_categories],
         "target_ids": [t.id for t in created_targets],
     }
+
+
+async def export_results_to_excel(
+    schedule_id: str,
+    start_time: Optional[datetime],
+    end_time: Optional[datetime],
+    columns: List[str],
+    tenant_id: str
+) -> bytes:
+    """
+    导出巡检结果为Excel文件
+    Export inspection results to Excel file
+
+    Args:
+        schedule_id: 巡检任务ID
+        start_time: 开始时间
+        end_time: 结束时间
+        columns: 需要导出的列名列表
+        tenant_id: 租户ID
+
+    Returns:
+        Excel文件的字节数据
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+
+    # 定义列名映射
+    column_mapping = {
+        "巡检内容": "target_content",
+        "巡检标准": "target_standard",
+        "巡检状态": "status",
+        "耗时": "duration",
+        "错误信息": "error_message",
+        "开始时间": "start_time",
+        "结束时间": "end_time",
+        "AI裁决结果": "ai_judgment",
+        "执行结果": "result_data"
+    }
+
+    # 验证列名
+    invalid_columns = [col for col in columns if col not in column_mapping]
+    if invalid_columns:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 构建查询
+    query = InspectionResult.filter(
+        deleted=False,
+        tenant_id=tenant_id,
+        schedule_id=schedule_id
+    )
+
+    if start_time:
+        query = query.filter(start_time__gte=start_time)
+    if end_time:
+        query = query.filter(end_time__lte=end_time)
+
+    results = await query.order_by("-start_time").all()
+
+    if not results:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    # 获取所有关联的巡检项
+    target_ids = list(set(r.target_id for r in results))
+    targets = await InspectionTarget.filter(
+        id__in=target_ids,
+        deleted=False,
+        tenant_id=tenant_id
+    ).all()
+    target_map = {t.id: t for t in targets}
+
+    # 创建Excel工作簿
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "巡检结果"
+
+    # 定义样式
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    center_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left_alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    # 边框样式
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+
+    # 设置表头
+    ws.append(columns)
+
+    # 应用表头样式
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    # 填充数据
+    for result in results:
+        target = target_map.get(result.target_id)
+        row_data = []
+
+        for col_name in columns:
+            field_name = column_mapping[col_name]
+
+            if field_name == "target_content":
+                value = target.content if target else ""
+            elif field_name == "target_standard":
+                value = target.standard if target else ""
+            elif field_name == "status":
+                status_map = {"success": "成功", "failed": "失败", "running": "运行中"}
+                value = status_map.get(result.status, result.status)
+            elif field_name == "duration":
+                value = f"{result.duration}秒" if result.duration is not None else "0秒"
+            elif field_name == "error_message":
+                value = result.error_message or ""
+            elif field_name == "start_time":
+                value = result.start_time.strftime("%Y-%m-%d %H:%M:%S") if result.start_time else ""
+            elif field_name == "end_time":
+                value = result.end_time.strftime("%Y-%m-%d %H:%M:%S") if result.end_time else ""
+            elif field_name == "ai_judgment":
+                # 从 result_data 中提取 AI 裁决结果
+                if result.result_data and isinstance(result.result_data, dict):
+                    ai_judgment = result.result_data.get("ai_judgment", {})
+                    if isinstance(ai_judgment, dict):
+                        passed = ai_judgment.get("passed", False)
+                        reason = ai_judgment.get("reason", "")
+                        value = f"{'通过' if passed else '不通过'}: {reason}" if reason else ('通过' if passed else '不通过')
+                    else:
+                        value = ""
+                else:
+                    value = ""
+            elif field_name == "result_data":
+                # 将执行结果转换为字符串
+                if result.result_data:
+                    try:
+                        import json
+                        value = json.dumps(result.result_data, ensure_ascii=False, indent=2)
+                    except:
+                        value = str(result.result_data)
+                else:
+                    value = ""
+            else:
+                value = ""
+
+            row_data.append(value)
+
+        ws.append(row_data)
+
+    # 应用数据行样式
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+        for cell in row:
+            cell.alignment = left_alignment
+            cell.border = thin_border
+
+    # 自动调整列宽
+    for column in ws.columns:
+        max_length = 0
+        column_letter = column[0].column_letter
+        for cell in column:
+            try:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            except:
+                pass
+        adjusted_width = min(max_length + 2, 50)
+        ws.column_dimensions[column_letter].width = adjusted_width
+
+    # 保存到字节流
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return output.getvalue()

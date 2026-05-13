@@ -1905,6 +1905,90 @@ async def get_stats(request: Request):
     return response_ok(data=stats)
 
 
+@inspection_bp.post("/result/export")
+@openapi.definition(
+    summary="导出巡检结果为Excel文件",
+    description="导出巡检结果为Excel文件，支持自定义导出列",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["schedule_id", "columns", "start_time", "end_time"],
+                "properties": {
+                    "schedule_id": {"type": "string", "description": "巡检任务ID"},
+                    "start_time": {"type": "string", "description": "开始时间 (ISO 8601)"},
+                    "end_time": {"type": "string", "description": "结束时间 (ISO 8601)"},
+                    "columns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "需要导出的列名列表，可选值：巡检内容、巡检标准、巡检状态、耗时、错误信息、开始时间、结束时间、AI裁决结果、执行结果"
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导出成功，返回Excel文件",
+            "content": {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                    "schema": {
+                        "type": "string",
+                        "format": "binary"
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:r")
+async def export_results(request: Request):
+    """
+    导出巡检结果为Excel文件
+    Export inspection results as Excel file
+    """
+    data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    schedule_id = data.get("schedule_id")
+    columns = data.get("columns")
+
+    if not schedule_id or not columns or not isinstance(columns, list):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 解析时间参数
+    start_time = None
+    end_time = None
+    if data.get("start_time"):
+        try:
+            start_time = datetime.fromisoformat(str(data["start_time"]).replace("Z", "+00:00"))
+        except (ValueError, TypeError, AttributeError):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if data.get("end_time"):
+        try:
+            end_time = datetime.fromisoformat(str(data["end_time"]).replace("Z", "+00:00"))
+        except (ValueError, TypeError, AttributeError):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+    excel_data = await logic.export_results_to_excel(
+        schedule_id=schedule_id,
+        start_time=start_time,
+        end_time=end_time,
+        columns=columns,
+        tenant_id=tenant_id
+    )
+
+    # 生成文件名
+    filename = f"inspection_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+    # 返回Excel文件
+    response = raw(excel_data)
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return response
+
+
 @inspection_bp.post("/sql/execute")
 @openapi.definition(
     summary="执行SQL语句",
