@@ -1399,6 +1399,7 @@ async def start_inspection(request: Request):
         if timed.enable == 0:
             timed.enable = 1
             timed.updator = request.ctx.session["account_info"]
+            timed.tactics = schedule.schedule_cron  # 更新定时规则，确保修改了调度配置后能生效
             await timed.save()
 
             # 发送消息到 Kafka
