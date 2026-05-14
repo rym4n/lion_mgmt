@@ -2342,8 +2342,8 @@ async def add_result(request: Request):
         )
 
         # 构建下载地址
-        excel_download_url = f"{request.scheme}://{request.host}/system/down-file/{excel_file_id}" if excel_file_id else ""
-        doc_download_url = f"{request.scheme}://{request.host}/system/down-file/{doc_file_id}" if doc_file_id else ""
+        excel_download_url = f"{request.scheme}://{request.host}/{excel_file_id}" if excel_file_id else ""
+        doc_download_url = f"{request.scheme}://{request.host}/{doc_file_id}" if doc_file_id else ""
 
         # 执行通知动作
         if schedule and schedule.notify_enabled and schedule.notify_config:

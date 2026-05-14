@@ -1519,10 +1519,10 @@ async def generate_and_upload_inspection_excel(
 
         # 生成文件名并上传
         excel_file_id = str(uuid.uuid4()) + ".xlsx"
-        await upload_to_s3(excel_data, "user", excel_file_id, "inspection_reports")
+        excel_url = await upload_to_s3(excel_data, "user", excel_file_id, "inspection_reports")
 
-        logger.info(f"巡检结果 Excel 已上传: {excel_file_id}")
-        return excel_file_id
+        logger.info(f"巡检结果 Excel 已上传: {excel_url}")
+        return excel_url
     except Exception as e:
         logger.error(f"生成或上传巡检结果 Excel 失败: {e}")
         return None
@@ -1615,10 +1615,10 @@ async def generate_and_upload_inspection_word(
 
         # 生成文件名并上传
         doc_file_id = str(uuid.uuid4()) + ".docx"
-        await upload_to_s3(doc_data, "user", doc_file_id, "inspection_reports")
+        doc_url = await upload_to_s3(doc_data, "user", doc_file_id, "inspection_reports")
 
-        logger.info(f"巡检报告 Word 文档已上传: {doc_file_id}")
-        return doc_file_id
+        logger.info(f"巡检报告 Word 文档已上传: {doc_url}")
+        return doc_url
     except Exception as e:
         logger.error(f"生成或上传巡检报告失败: {e}")
         return None
