@@ -596,8 +596,6 @@ async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List
     results = []
     for target in targets:
         category = category_map.get(target.category_id)
-        # category is guaranteed to be in map because we fetched targets based on categories
-        # but keep safety check just in case
         if not category:
             continue
 
@@ -1474,6 +1472,156 @@ async def import_targets_from_excel(file_content: bytes, tenant_id: str) -> Dict
         "category_ids": [c.id for c in created_categories],
         "target_ids": [t.id for t in created_targets],
     }
+
+
+async def generate_and_upload_inspection_excel(
+    schedule_id: str,
+    start_time: Union[str, datetime],
+    tenant_id: str,
+    schedule: Optional[InspectionSchedule] = None
+) -> Optional[str]:
+    """
+    生成并上传巡检结果 Excel
+    Generate and upload inspection results Excel file
+
+    Args:
+        schedule_id: 巡检任务ID
+        start_time: 开始时间
+        tenant_id: 租户ID
+        schedule: 巡检任务对象（可选）
+
+    Returns:
+        上传成功的文件ID，失败返回None
+    """
+    import uuid
+    from sanic.log import logger
+    from libs.utils import upload_to_s3
+
+    try:
+        # 解析 start_time
+        if isinstance(start_time, str):
+            start_time_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+        else:
+            start_time_dt = start_time
+
+        end_time_dt = datetime.now()
+
+        # 定义导出列
+        columns = ["巡检内容", "巡检标准", "巡检状态", "耗时", "错误信息", "开始时间", "结束时间", "AI裁决结果", "执行结果"]
+
+        excel_data = await export_results_to_excel(
+            schedule_id=schedule_id,
+            start_time=start_time_dt,
+            end_time=end_time_dt,
+            columns=columns,
+            tenant_id=tenant_id
+        )
+
+        # 生成文件名并上传
+        excel_file_id = str(uuid.uuid4()) + ".xlsx"
+        await upload_to_s3(excel_data, "user", excel_file_id, "inspection_reports")
+
+        logger.info(f"巡检结果 Excel 已上传: {excel_file_id}")
+        return excel_file_id
+    except Exception as e:
+        logger.error(f"生成或上传巡检结果 Excel 失败: {e}")
+        return None
+
+
+async def generate_and_upload_inspection_word(
+    schedule_id: str,
+    created_results: List[Dict[str, Any]],
+    tenant_id: str,
+    schedule: Optional[InspectionSchedule] = None
+) -> Optional[str]:
+    """
+    生成并上传巡检报告 Word 文档
+    Generate and upload inspection report Word document
+
+    Args:
+        schedule_id: 巡检任务ID
+        created_results: 创建的巡检结果列表
+        tenant_id: 租户ID
+        schedule: 巡检任务对象（可选）
+
+    Returns:
+        上传成功的文件ID，失败返回None
+    """
+    import uuid
+    import io
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from sanic.log import logger
+    from libs.utils import upload_to_s3
+
+    try:
+        # 生成 Word 文档
+        doc = Document()
+
+        # 添加标题
+        title = doc.add_heading(f"巡检报告 - {schedule.name if schedule else schedule_id}", 0)
+        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        # 添加基本信息
+        doc.add_heading("基本信息", level=1)
+        info_table = doc.add_table(rows=4, cols=2)
+        info_table.style = 'Light Grid Accent 1'
+
+        info_data = [
+            ("巡检任务", schedule.name if schedule else "未知"),
+            ("执行时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            ("巡检项数量", str(len(created_results))),
+            ("成功率", f"{sum(1 for r in created_results if r['status'] == 'success') / len(created_results) * 100:.2f}%" if created_results else "0%")
+        ]
+
+        for i, (key, value) in enumerate(info_data):
+            info_table.rows[i].cells[0].text = key
+            info_table.rows[i].cells[1].text = value
+
+        # 添加巡检结果汇总
+        doc.add_heading("巡检结果汇总", level=1)
+
+        success_count = sum(1 for r in created_results if r['status'] == 'success')
+        failed_count = len(created_results) - success_count
+
+        doc.add_paragraph(f"成功: {success_count} 项")
+        doc.add_paragraph(f"失败: {failed_count} 项")
+
+        # 添加详细结果
+        doc.add_heading("详细结果", level=1)
+
+        for i, result in enumerate(created_results, 1):
+            # 获取目标信息
+            target = await InspectionTarget.get_or_none(id=result['target_id'], tenant_id=tenant_id, deleted=False)
+
+            doc.add_heading(f"巡检项 {i}", level=2)
+
+            result_table = doc.add_table(rows=3, cols=2)
+            result_table.style = 'Light Grid Accent 1'
+
+            result_table.rows[0].cells[0].text = "巡检内容"
+            result_table.rows[0].cells[1].text = target.content if target else "未知"
+
+            result_table.rows[1].cells[0].text = "巡检状态"
+            result_table.rows[1].cells[1].text = "成功" if result['status'] == 'success' else "失败"
+
+            result_table.rows[2].cells[0].text = "目标ID"
+            result_table.rows[2].cells[1].text = result['target_id']
+
+        # 保存文档到字节流
+        doc_buffer = io.BytesIO()
+        doc.save(doc_buffer)
+        doc_data = doc_buffer.getvalue()
+
+        # 生成文件名并上传
+        doc_file_id = str(uuid.uuid4()) + ".docx"
+        await upload_to_s3(doc_data, "user", doc_file_id, "inspection_reports")
+
+        logger.info(f"巡检报告 Word 文档已上传: {doc_file_id}")
+        return doc_file_id
+    except Exception as e:
+        logger.error(f"生成或上传巡检报告失败: {e}")
+        return None
 
 
 async def export_results_to_excel(

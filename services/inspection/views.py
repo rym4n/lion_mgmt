@@ -21,7 +21,7 @@ from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.kafka import aproduce
-from libs.utils import gen_run_id
+from libs.utils import gen_run_id, upload_to_s3
 from models import Timed, Playbook, PlaybookVersion, InspectionTarget, InspectionCategory, InspectionResult
 from settings import TASK_TOPIC
 from . import logic
@@ -2159,6 +2159,7 @@ async def execute_sql(request: Request):
                     },
                     "start_time": {"type": "string", "description": "开始时间 (ISO 8601)"},
                     "tenant_id": {"type": "string", "description": "租户ID"},
+                    "send_notify": {"type": "boolean", "description": "是否触发通知动作（依据巡检任务通知配置发送），默认 false"},
                 },
             }
         }
@@ -2201,6 +2202,7 @@ async def add_result(request: Request):
 
     result_data_array = request_data.get("result_data")
     start_time = request_data.get("start_time")
+    send_notify = request_data.get("send_notify", False)
 
     if not result_data_array or not start_time:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -2304,6 +2306,82 @@ async def add_result(request: Request):
         except Exception as e:
             logger.error(f"创建巡检结果失败: {str(e)}")
             continue
+
+    # 推断 schedule_id（从原始数据取第一条有效的 schedule_id）
+    batch_schedule_id = None
+    if isinstance(result_data_array, list):
+        for item in result_data_array:
+            if isinstance(item, dict) and item.get("schedule_id"):
+                batch_schedule_id = item["schedule_id"]
+                break
+
+    # 触发通知
+    if send_notify and batch_schedule_id and created_results:
+        # 获取巡检任务信息（用于 Excel 和 Word 生成）
+        schedule = None
+        try:
+            schedule = await logic.get_schedule_by_id(batch_schedule_id, tenant_id)
+        except Exception as e:
+            logger.warning(f"获取巡检任务信息失败: {e}")
+
+        # 生成并上传 Excel
+        excel_file_id = await logic.generate_and_upload_inspection_excel(
+            schedule_id=batch_schedule_id,
+            start_time=start_time,
+            tenant_id=tenant_id,
+            schedule=schedule
+        )
+
+        # 生成并上传 Word 报告
+        doc_file_id = await logic.generate_and_upload_inspection_word(
+            schedule_id=batch_schedule_id,
+            created_results=created_results,
+            tenant_id=tenant_id,
+            schedule=schedule
+        )
+
+        # 构建下载地址
+        excel_download_url = f"{request.scheme}://{request.host}/system/down-file/{excel_file_id}" if excel_file_id else ""
+        doc_download_url = f"{request.scheme}://{request.host}/system/down-file/{doc_file_id}" if doc_file_id else ""
+
+        # 执行通知动作
+        if schedule and schedule.notify_enabled and schedule.notify_config:
+            notify_actions = schedule.notify_config if isinstance(schedule.notify_config, list) else schedule.notify_config.get("callback_data", [])
+
+            for action in notify_actions:
+                data = {}
+                for input_data in action.get("input", []):
+                    value = input_data.get("value", "")
+                    # 替换内置变量
+                    if "${巡检结果}" in value:
+                        value = value.replace("${巡检结果}", excel_download_url)
+                    if "${巡检报告}" in value:
+                        value = value.replace("${巡检报告}", doc_download_url)
+                    data[input_data.get("key")] = value
+
+                params = {
+                    "resource": action.get("resource", ""),
+                    "node_name": action.get("description", ""),
+                    "action": action.get("func", ""),
+                    "action_name": action.get("name", ""),
+                    "app_name": action.get("tool_name", ""),
+                    "name": action.get("description", ""),
+                    "app_ver": action.get("version", ""),
+                    "main": action.get("tool_main", ""),
+                    "action_input": data,
+                    "retry_times": int(action.get("retry_times", 3)),
+                    "timeout": int(action.get("timeout", 300)),
+                    "executor": request.ctx.session.get("account_info").id,
+                }
+
+                msg = {
+                    "run_type": "action",
+                    "run_id": gen_run_id(),
+                    "run_args": params,
+                    "tenant_id": tenant_id
+                }
+                await aproduce(TASK_TOPIC, msg)
+                logger.info(f"已发送巡检通知动作: {action.get('name', '')}")
 
     return response_ok(data=created_results)
 
