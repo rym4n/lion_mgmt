@@ -1262,7 +1262,7 @@ async def get_all_configs(request: Request):
     schedule_ids = data.get("schedule_id")
     if not schedule_ids:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    target_ids = data.get("target_id") if "target_id" in data else None
+    target_ids = data.get("target_id") if data.get("target_id") != "None" else None
     tenant_id = data.get("tenant_id")
     result = await logic.get_all_configs(tenant_id, schedule_ids, target_ids)
     return response_ok(data=result)
@@ -1445,7 +1445,7 @@ async def start_inspection(request: Request):
             "flow_id": playbook_version_id,
             "flow_input": {
                 "schedule_id": schedule_id,
-                "target_id": None,
+                "target_id": "None",
                 "tenant_id": tenant_id
             },
             "executor": request.ctx.session.get("account_info").id
