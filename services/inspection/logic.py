@@ -1031,9 +1031,13 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
 返回一个JSON对象，包含以下字段：
 - passed (boolean): true表示符合标准，false表示不符合标准
 - reason (string): 判断理由，简洁说明为什么通过或不通过，引用具体的数据点
+- diagnosis (string): 诊断分析，说明导致巡检失败的根本原因和建议的排查方向。如果通过则为空字符串，如果不通过则提供详细的根因分析和排查建议
 - suggestions (array): 改进建议列表，如果通过则为空数组，如果不通过则提供具体的改进建议
 
-注意：直接返回JSON对象，不要使用markdown代码块。
+注意：
+1. 直接返回JSON对象，不要使用markdown代码块
+2. diagnosis字段应该深入分析问题的根本原因，而不是简单重复reason的内容
+3. diagnosis应该包含具体的排查方向，例如：检查哪些配置、查看哪些日志、验证哪些依赖等
 """
 
     # 使用litellm调用AI服务
@@ -1085,6 +1089,11 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
             if "reason" not in parsed_data or not parsed_data["reason"]:
                 parsed_data["reason"] = "AI未提供判断理由"
 
+            if "diagnosis" not in parsed_data:
+                parsed_data["diagnosis"] = ""
+            elif not isinstance(parsed_data["diagnosis"], str):
+                parsed_data["diagnosis"] = str(parsed_data["diagnosis"]) if parsed_data["diagnosis"] else ""
+
             if "suggestions" not in parsed_data:
                 parsed_data["suggestions"] = []
             elif not isinstance(parsed_data["suggestions"], list):
@@ -1106,6 +1115,7 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
     return {
         "passed": False,
         "reason": last_error or "AI判断失败，无法确定巡检结果",
+        "diagnosis": "AI服务异常，无法进行根因分析。建议检查AI服务配置和网络连接，或人工复核巡检结果。",
         "suggestions": ["请检查AI服务配置", "建议人工复核巡检结果"]
     }
 
