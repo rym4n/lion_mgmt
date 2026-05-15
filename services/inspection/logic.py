@@ -1551,69 +1551,198 @@ async def generate_and_upload_inspection_word(
     import io
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import RGBColor, Pt
     from sanic.log import logger
     from libs.utils import upload_to_s3
 
     try:
+        # 获取完整的巡检结果数据
+        result_ids = [r['id'] for r in created_results]
+        full_results = await InspectionResult.filter(
+            id__in=result_ids,
+            tenant_id=tenant_id,
+            deleted=False
+        ).all()
+
+        # 获取所有目标信息
+        target_ids = [r.target_id for r in full_results]
+        targets = await InspectionTarget.filter(
+            id__in=target_ids,
+            tenant_id=tenant_id,
+            deleted=False
+        ).all()
+        target_map = {t.id: t for t in targets}
+
+        # 获取类别信息用于概述
+        category_ids = list(set(t.category_id for t in targets))
+        categories = await InspectionCategory.filter(
+            id__in=category_ids,
+            tenant_id=tenant_id,
+            deleted=False
+        ).all()
+        category_names = [c.name for c in categories]
+
+        # 统计数据
+        success_count = sum(1 for r in full_results if r.status == 'success')
+        failed_count = len(full_results) - success_count
+        success_rate = (success_count / len(full_results) * 100) if full_results else 0
+
+        # 收集AI建议
+        all_suggestions = []
+        failed_items = []
+        for result in full_results:
+            if result.result_data and isinstance(result.result_data, dict):
+                ai_judgment = result.result_data.get('ai_judgment', {})
+                if isinstance(ai_judgment, dict):
+                    suggestions = ai_judgment.get('suggestions', [])
+                    if suggestions:
+                        all_suggestions.extend(suggestions)
+                    if not ai_judgment.get('passed', True):
+                        target = target_map.get(result.target_id)
+                        failed_items.append({
+                            'content': target.content if target else '未知',
+                            'reason': ai_judgment.get('reason', ''),
+                            'suggestions': suggestions
+                        })
+
         # 生成 Word 文档
         doc = Document()
 
-        # 添加标题
+        # 标题
         title = doc.add_heading(f"巡检报告 - {schedule.name if schedule else schedule_id}", 0)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-        # 添加基本信息
-        doc.add_heading("基本信息", level=1)
-        info_table = doc.add_table(rows=4, cols=2)
-        info_table.style = 'Light Grid Accent 1'
+        # 概述
+        doc.add_heading("概述", level=1)
+        doc.add_paragraph(f"巡检目的：定期检查系统运行状态，及时发现和处理潜在问题，确保系统稳定可靠运行。")
+        doc.add_paragraph(f"巡检内容：{', '.join(category_names) if category_names else '系统全面巡检'}")
+        doc.add_paragraph(f"巡检范围：共 {len(full_results)} 个巡检项，覆盖 {len(categories)} 个类别")
+        doc.add_paragraph(f"巡检日期：{datetime.now().strftime('%Y年%m月%d日')}")
 
-        info_data = [
+        # 目录
+        doc.add_page_break()
+        doc.add_heading("目录", level=1)
+        doc.add_paragraph("一、执行摘要")
+        doc.add_paragraph("二、AI分析与建议")
+        if failed_items:
+            doc.add_paragraph("三、风险项汇总")
+        doc.add_paragraph("四、详细巡检结果")
+        doc.add_paragraph("五、总结")
+        doc.add_page_break()
+
+        # 一、执行摘要
+        doc.add_heading("一、执行摘要", level=1)
+        summary_table = doc.add_table(rows=5, cols=2)
+        summary_table.style = 'Light Grid Accent 1'
+        summary_data = [
             ("巡检任务", schedule.name if schedule else "未知"),
             ("执行时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            ("巡检项数量", str(len(created_results))),
-            ("成功率", f"{sum(1 for r in created_results if r['status'] == 'success') / len(created_results) * 100:.2f}%" if created_results else "0%")
+            ("巡检项总数", str(len(full_results))),
+            ("成功率", f"{success_rate:.1f}%"),
+            ("健康状态", "良好" if success_rate >= 90 else "警告" if success_rate >= 70 else "异常")
         ]
+        for i, (key, value) in enumerate(summary_data):
+            summary_table.rows[i].cells[0].text = key
+            summary_table.rows[i].cells[1].text = value
 
-        for i, (key, value) in enumerate(info_data):
-            info_table.rows[i].cells[0].text = key
-            info_table.rows[i].cells[1].text = value
+        # 二、AI分析与建议
+        doc.add_heading("二、AI分析与建议", level=1)
+        if all_suggestions:
+            doc.add_paragraph("基于本次巡检结果，AI系统提供以下建议：")
+            for idx, suggestion in enumerate(set(all_suggestions), 1):
+                p = doc.add_paragraph(f"{idx}. {suggestion}", style='List Number')
+        else:
+            doc.add_paragraph("本次巡检未发现需要改进的问题。")
 
-        # 添加巡检结果汇总
-        doc.add_heading("巡检结果汇总", level=1)
+        # 三、风险项汇总
+        if failed_items:
+            doc.add_heading("三、风险项汇总", level=1)
+            doc.add_paragraph(f"共发现 {len(failed_items)} 项风险，需要重点关注：")
+            for idx, item in enumerate(failed_items, 1):
+                doc.add_heading(f"风险项 {idx}: {item['content']}", level=3)
+                doc.add_paragraph(f"问题原因：{item['reason']}")
+                if item['suggestions']:
+                    doc.add_paragraph("改进建议：")
+                    for suggestion in item['suggestions']:
+                        doc.add_paragraph(f"• {suggestion}", style='List Bullet')
 
-        success_count = sum(1 for r in created_results if r['status'] == 'success')
-        failed_count = len(created_results) - success_count
+        # 四、详细巡检结果
+        doc.add_heading("四、详细巡检结果", level=1)
 
-        doc.add_paragraph(f"成功: {success_count} 项")
-        doc.add_paragraph(f"失败: {failed_count} 项")
+        # 成功项
+        doc.add_heading(f"4.1 通过项 ({success_count})", level=2)
+        for result in full_results:
+            if result.status == 'success':
+                target = target_map.get(result.target_id)
+                doc.add_paragraph(f"✓ {target.content if target else '未知'}", style='List Bullet')
 
-        # 添加详细结果
-        doc.add_heading("详细结果", level=1)
+                # AI判断详情
+                if result.result_data and isinstance(result.result_data, dict):
+                    ai_judgment = result.result_data.get('ai_judgment', {})
+                    if isinstance(ai_judgment, dict) and ai_judgment.get('reason'):
+                        p = doc.add_paragraph(f"  判断依据：{ai_judgment['reason']}")
+                        p.runs[0].font.size = Pt(9)
+                        p.runs[0].font.color.rgb = RGBColor(100, 100, 100)
 
-        for i, result in enumerate(created_results, 1):
-            # 获取目标信息
-            target = await InspectionTarget.get_or_none(id=result['target_id'], tenant_id=tenant_id, deleted=False)
+        # 失败项
+        if failed_count > 0:
+            doc.add_heading(f"4.2 未通过项 ({failed_count})", level=2)
+            for result in full_results:
+                if result.status != 'success':
+                    target = target_map.get(result.target_id)
+                    doc.add_paragraph(f"✗ {target.content if target else '未知'}", style='List Bullet')
 
-            doc.add_heading(f"巡检项 {i}", level=2)
+                    # 标准
+                    if target and target.standard:
+                        p = doc.add_paragraph(f"  巡检标准：{target.standard}")
+                        p.runs[0].font.size = Pt(9)
 
-            result_table = doc.add_table(rows=3, cols=2)
-            result_table.style = 'Light Grid Accent 1'
+                    # AI判断详情
+                    if result.result_data and isinstance(result.result_data, dict):
+                        ai_judgment = result.result_data.get('ai_judgment', {})
+                        if isinstance(ai_judgment, dict):
+                            if ai_judgment.get('reason'):
+                                p = doc.add_paragraph(f"  失败原因：{ai_judgment['reason']}")
+                                p.runs[0].font.size = Pt(9)
+                                p.runs[0].font.color.rgb = RGBColor(200, 0, 0)
 
-            result_table.rows[0].cells[0].text = "巡检内容"
-            result_table.rows[0].cells[1].text = target.content if target else "未知"
+                    # 错误信息
+                    if result.error_message:
+                        p = doc.add_paragraph(f"  错误信息：{result.error_message}")
+                        p.runs[0].font.size = Pt(9)
+                        p.runs[0].font.color.rgb = RGBColor(150, 0, 0)
 
-            result_table.rows[1].cells[0].text = "巡检状态"
-            result_table.rows[1].cells[1].text = "成功" if result['status'] == 'success' else "失败"
+        # 五、总结
+        doc.add_heading("五、总结", level=1)
 
-            result_table.rows[2].cells[0].text = "目标ID"
-            result_table.rows[2].cells[1].text = result['target_id']
+        # 5.1 巡检结果总结
+        doc.add_heading("5.1 巡检结果总结", level=2)
+        doc.add_paragraph(f"本次巡检共执行 {len(full_results)} 个巡检项，成功 {success_count} 项，失败 {failed_count} 项，成功率为 {success_rate:.1f}%。")
 
-        # 保存文档到字节流
+        if success_rate >= 90:
+            doc.add_paragraph("系统整体运行状态良好，各项指标均符合预期标准，未发现重大风险。建议继续保持当前运维策略，定期进行巡检监控。")
+        elif success_rate >= 70:
+            doc.add_paragraph("系统运行基本正常，但存在部分风险项需要关注。建议优先处理失败的巡检项，加强对相关指标的监控频率，并制定应急预案以应对潜在故障。")
+        else:
+            doc.add_paragraph("系统存在较多异常情况，运行状态不佳。建议立即组织技术团队进行问题排查，紧急处理所有失败的巡检项，必要时启动应急响应流程。")
+
+        # 5.2 AI分析建议
+        doc.add_heading("5.2 AI分析建议", level=2)
+        if all_suggestions:
+            doc.add_paragraph("基于AI智能分析，针对本次巡检结果提出以下改进建议：")
+            for idx, suggestion in enumerate(set(all_suggestions), 1):
+                doc.add_paragraph(f"{idx}. {suggestion}", style='List Number')
+            doc.add_paragraph()
+            doc.add_paragraph("建议运维团队根据上述AI建议，结合实际情况制定改进计划，持续优化系统运行质量。")
+        else:
+            doc.add_paragraph("本次巡检所有项目均符合标准，AI系统未发现需要改进的问题。建议继续保持良好的运维水平。")
+
+        # 保存文档
         doc_buffer = io.BytesIO()
         doc.save(doc_buffer)
         doc_data = doc_buffer.getvalue()
 
-        # 生成文件名并上传
+        # 上传
         doc_file_id = str(uuid.uuid4()) + ".docx"
         doc_url = await upload_to_s3(doc_data, "user", doc_file_id, "inspection_reports")
 
