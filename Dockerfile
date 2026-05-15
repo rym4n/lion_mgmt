@@ -72,3 +72,5 @@ COPY settings ./settings
 COPY server.py ./
 COPY config.json ./
 COPY workspace-template ./workspace-template
+COPY services/inspection/inspection_report_template.docx ./services/inspection/inspection_report_template.docx
+COPY services/inspection/inspection_template_model.xlsx ./services/inspection/inspection_template_model.xlsx
