@@ -1536,7 +1536,6 @@ async def generate_and_upload_inspection_word(
 ) -> Optional[str]:
     """
     生成并上传巡检报告 Word 文档
-    Generate and upload inspection report Word document
 
     Args:
         schedule_id: 巡检任务ID
