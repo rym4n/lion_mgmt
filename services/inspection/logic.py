@@ -1617,30 +1617,31 @@ async def generate_and_upload_inspection_word(
         # 生成 Word 文档
         doc = Document()
 
-        # 标题
+        # 第一页：标题（单独一页）
         title = doc.add_heading(f"巡检报告 - {schedule.name if schedule else schedule_id}", 0)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        doc.add_page_break()
 
-        # 概述
-        doc.add_heading("概述", level=1)
-        doc.add_paragraph(f"巡检目的：定期检查系统运行状态，及时发现和处理潜在问题，确保系统稳定可靠运行。")
+        # 第二页：目录（手动编写）
+        doc.add_heading("目录", level=1)
+        doc.add_paragraph("一、概述")
+        doc.add_paragraph("二、执行摘要")
+        doc.add_paragraph("三、详细执行结果")
+        doc.add_paragraph("四、总结")
+        doc.add_paragraph("    4.1 巡检结果总结")
+        doc.add_paragraph("    4.2 AI分析建议")
+        doc.add_page_break()
+
+        # 第三页开始：正文内容
+        # 一、概述
+        doc.add_heading("一、概述", level=1)
+        doc.add_paragraph(f"巡检目的：通过定期的预防性系统巡检，建立起被检系统关键指标的基准状态，对巡检过程中发现的任何异常状态进行分析和处理，及时发现系统中存在的故障隐患，将问题在没有产生危害前就进行解决，从而保证被检系统的正常运行。")
         doc.add_paragraph(f"巡检内容：{', '.join(category_names) if category_names else '系统全面巡检'}")
         doc.add_paragraph(f"巡检范围：共 {len(full_results)} 个巡检项，覆盖 {len(categories)} 个类别")
         doc.add_paragraph(f"巡检日期：{datetime.now().strftime('%Y年%m月%d日')}")
 
-        # 目录
-        doc.add_page_break()
-        doc.add_heading("目录", level=1)
-        doc.add_paragraph("一、执行摘要")
-        doc.add_paragraph("二、AI分析与建议")
-        if failed_items:
-            doc.add_paragraph("三、风险项汇总")
-        doc.add_paragraph("四、详细巡检结果")
-        doc.add_paragraph("五、总结")
-        doc.add_page_break()
-
-        # 一、执行摘要
-        doc.add_heading("一、执行摘要", level=1)
+        # 二、执行摘要
+        doc.add_heading("二、执行摘要", level=1)
         summary_table = doc.add_table(rows=5, cols=2)
         summary_table.style = 'Light Grid Accent 1'
         summary_data = [
@@ -1654,78 +1655,65 @@ async def generate_and_upload_inspection_word(
             summary_table.rows[i].cells[0].text = key
             summary_table.rows[i].cells[1].text = value
 
-        # 二、AI分析与建议
-        doc.add_heading("二、AI分析与建议", level=1)
-        if all_suggestions:
-            doc.add_paragraph("基于本次巡检结果，AI系统提供以下建议：")
-            for idx, suggestion in enumerate(set(all_suggestions), 1):
-                p = doc.add_paragraph(f"{idx}. {suggestion}", style='List Number')
-        else:
-            doc.add_paragraph("本次巡检未发现需要改进的问题。")
+        # 三、详细执行结果
+        doc.add_heading("三、详细执行结果", level=1)
 
-        # 三、风险项汇总
-        if failed_items:
-            doc.add_heading("三、风险项汇总", level=1)
-            doc.add_paragraph(f"共发现 {len(failed_items)} 项风险，需要重点关注：")
-            for idx, item in enumerate(failed_items, 1):
-                doc.add_heading(f"风险项 {idx}: {item['content']}", level=3)
-                doc.add_paragraph(f"问题原因：{item['reason']}")
-                if item['suggestions']:
-                    doc.add_paragraph("改进建议：")
-                    for suggestion in item['suggestions']:
-                        doc.add_paragraph(f"• {suggestion}", style='List Bullet')
+        for idx, result in enumerate(full_results, 1):
+            target = target_map.get(result.target_id)
 
-        # 四、详细巡检结果
-        doc.add_heading("四、详细巡检结果", level=1)
+            # 巡检项标题
+            status_icon = "✓" if result.status == 'success' else "✗"
+            status_text = "通过" if result.status == 'success' else "未通过"
+            doc.add_heading(f"{status_icon} 巡检项 {idx}: {target.content if target else '未知'} ({status_text})", level=3)
 
-        # 成功项
-        doc.add_heading(f"4.1 通过项 ({success_count})", level=2)
-        for result in full_results:
-            if result.status == 'success':
-                target = target_map.get(result.target_id)
-                doc.add_paragraph(f"✓ {target.content if target else '未知'}", style='List Bullet')
+            # 执行结果
+            if result.result_data and isinstance(result.result_data, dict):
+                # 提取执行结果（排除ai_judgment）
+                result_data_display = {k: v for k, v in result.result_data.items() if k != 'ai_judgment'}
+                if result_data_display:
+                    doc.add_paragraph("执行结果：")
+                    import json
+                    result_str = json.dumps(result_data_display, ensure_ascii=False, indent=2)
+                    p = doc.add_paragraph(result_str)
+                    p.runs[0].font.size = Pt(9)
+                    p.runs[0].font.color.rgb = RGBColor(80, 80, 80)
 
-                # AI判断详情
-                if result.result_data and isinstance(result.result_data, dict):
-                    ai_judgment = result.result_data.get('ai_judgment', {})
-                    if isinstance(ai_judgment, dict) and ai_judgment.get('reason'):
-                        p = doc.add_paragraph(f"  判断依据：{ai_judgment['reason']}")
-                        p.runs[0].font.size = Pt(9)
-                        p.runs[0].font.color.rgb = RGBColor(100, 100, 100)
+                # AI分析
+                ai_judgment = result.result_data.get('ai_judgment', {})
+                if isinstance(ai_judgment, dict):
+                    if result.status == 'success':
+                        # 通过项：显示判断依据
+                        if ai_judgment.get('reason'):
+                            doc.add_paragraph("判断依据：")
+                            p = doc.add_paragraph(ai_judgment['reason'])
+                            p.runs[0].font.size = Pt(10)
+                            p.runs[0].font.color.rgb = RGBColor(0, 128, 0)
+                    else:
+                        # 未通过项：显示AI分析原因和排查方向
+                        if ai_judgment.get('reason'):
+                            doc.add_paragraph("失败原因：")
+                            p = doc.add_paragraph(ai_judgment['reason'])
+                            p.runs[0].font.size = Pt(10)
+                            p.runs[0].font.color.rgb = RGBColor(200, 0, 0)
 
-        # 失败项
-        if failed_count > 0:
-            doc.add_heading(f"4.2 未通过项 ({failed_count})", level=2)
-            for result in full_results:
-                if result.status != 'success':
-                    target = target_map.get(result.target_id)
-                    doc.add_paragraph(f"✗ {target.content if target else '未知'}", style='List Bullet')
+                        if ai_judgment.get('diagnosis'):
+                            doc.add_paragraph("排查方向：")
+                            p = doc.add_paragraph(ai_judgment['diagnosis'])
+                            p.runs[0].font.size = Pt(10)
+                            p.runs[0].font.color.rgb = RGBColor(200, 100, 0)
 
-                    # 标准
-                    if target and target.standard:
-                        p = doc.add_paragraph(f"  巡检标准：{target.standard}")
-                        p.runs[0].font.size = Pt(9)
+            # 如果有错误信息也显示
+            if result.error_message:
+                doc.add_paragraph("错误信息：")
+                p = doc.add_paragraph(result.error_message)
+                p.runs[0].font.size = Pt(9)
+                p.runs[0].font.color.rgb = RGBColor(150, 0, 0)
 
-                    # AI判断详情
-                    if result.result_data and isinstance(result.result_data, dict):
-                        ai_judgment = result.result_data.get('ai_judgment', {})
-                        if isinstance(ai_judgment, dict):
-                            if ai_judgment.get('reason'):
-                                p = doc.add_paragraph(f"  失败原因：{ai_judgment['reason']}")
-                                p.runs[0].font.size = Pt(9)
-                                p.runs[0].font.color.rgb = RGBColor(200, 0, 0)
+        # 四、总结
+        doc.add_heading("四、总结", level=1)
 
-                    # 错误信息
-                    if result.error_message:
-                        p = doc.add_paragraph(f"  错误信息：{result.error_message}")
-                        p.runs[0].font.size = Pt(9)
-                        p.runs[0].font.color.rgb = RGBColor(150, 0, 0)
-
-        # 五、总结
-        doc.add_heading("五、总结", level=1)
-
-        # 5.1 巡检结果总结
-        doc.add_heading("5.1 巡检结果总结", level=2)
+        # 4.1 巡检结果总结
+        doc.add_heading("4.1 巡检结果总结", level=2)
         doc.add_paragraph(f"本次巡检共执行 {len(full_results)} 个巡检项，成功 {success_count} 项，失败 {failed_count} 项，成功率为 {success_rate:.1f}%。")
 
         if success_rate >= 90:
@@ -1735,8 +1723,8 @@ async def generate_and_upload_inspection_word(
         else:
             doc.add_paragraph("系统存在较多异常情况，运行状态不佳。建议立即组织技术团队进行问题排查，紧急处理所有失败的巡检项，必要时启动应急响应流程。")
 
-        # 5.2 AI分析建议
-        doc.add_heading("5.2 AI分析建议", level=2)
+        # 4.2 AI分析建议
+        doc.add_heading("4.2 AI分析建议", level=2)
         if all_suggestions:
             doc.add_paragraph("基于AI智能分析，针对本次巡检结果提出以下改进建议：")
             for idx, suggestion in enumerate(set(all_suggestions), 1):
