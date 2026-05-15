@@ -1545,7 +1545,8 @@ async def generate_and_upload_inspection_word(
     schedule: Optional[InspectionSchedule] = None
 ) -> Optional[str]:
     """
-    生成并上传巡检报告 Word 文档
+    生成并上传巡检报告 Word 文档（使用模板）
+    Generate and upload inspection report Word document (using template)
 
     Args:
         schedule_id: 巡检任务ID
@@ -1558,9 +1559,8 @@ async def generate_and_upload_inspection_word(
     """
     import uuid
     import io
-    from docx import Document
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import RGBColor, Pt
+    import os
+    from docxtpl import DocxTemplate
     from sanic.log import logger
     from libs.utils import upload_to_s3
 
@@ -1582,14 +1582,13 @@ async def generate_and_upload_inspection_word(
         ).all()
         target_map = {t.id: t for t in targets}
 
-        # 获取类别信息用于概述
+        # 获取类别信息
         category_ids = list(set(t.category_id for t in targets))
         categories = await InspectionCategory.filter(
             id__in=category_ids,
             tenant_id=tenant_id,
             deleted=False
         ).all()
-        category_names = [c.name for c in categories]
 
         # 统计数据
         success_count = sum(1 for r in full_results if r.status == 'success')
@@ -1598,7 +1597,6 @@ async def generate_and_upload_inspection_word(
 
         # 收集AI建议
         all_suggestions = []
-        failed_items = []
         for result in full_results:
             if result.result_data and isinstance(result.result_data, dict):
                 ai_judgment = result.result_data.get('ai_judgment', {})
@@ -1606,133 +1604,82 @@ async def generate_and_upload_inspection_word(
                     suggestions = ai_judgment.get('suggestions', [])
                     if suggestions:
                         all_suggestions.extend(suggestions)
-                    if not ai_judgment.get('passed', True):
-                        target = target_map.get(result.target_id)
-                        failed_items.append({
-                            'content': target.content if target else '未知',
-                            'reason': ai_judgment.get('reason', ''),
-                            'suggestions': suggestions
-                        })
 
-        # 生成 Word 文档
-        doc = Document()
+        # 去重AI建议
+        unique_suggestions = list(set(all_suggestions))
 
-        # 第一页：标题（单独一页）
-        title = doc.add_heading(f"巡检报告 - {schedule.name if schedule else schedule_id}", 0)
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        doc.add_page_break()
+        # 准备模板数据
+        context = {
+            'schedule_name': schedule.name if schedule else schedule_id,
+            'check_date': datetime.now().strftime('%Y年%m月%d日'),
+            'execution_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'total_count': str(len(full_results)),
+            'success_count': str(success_count),
+            'failed_count': str(failed_count),
+            'success_rate': f"{success_rate:.1f}",
+            'health_status': "良好" if success_rate >= 90 else "警告" if success_rate >= 70 else "异常",
+            'categories': [
+                {
+                    'name': c.name,
+                    'app_name': c.app_name
+                }
+                for c in categories
+            ],
+            'targets': [
+                {
+                    'content': t.content
+                }
+                for t in targets
+            ],
+            'results': [],
+            'summary_text': '',
+            'ai_suggestions': unique_suggestions
+        }
 
-        # 第二页：目录（手动编写）
-        doc.add_heading("目录", level=1)
-        doc.add_paragraph("一、概述")
-        doc.add_paragraph("二、执行摘要")
-        doc.add_paragraph("三、详细执行结果")
-        doc.add_paragraph("四、总结")
-        doc.add_paragraph("    4.1 巡检结果总结")
-        doc.add_paragraph("    4.2 AI分析建议")
-        doc.add_page_break()
-
-        # 第三页开始：正文内容
-        # 一、概述
-        doc.add_heading("一、概述", level=1)
-        doc.add_paragraph(f"巡检目的：通过定期的预防性系统巡检，建立起被检系统关键指标的基准状态，对巡检过程中发现的任何异常状态进行分析和处理，及时发现系统中存在的故障隐患，将问题在没有产生危害前就进行解决，从而保证被检系统的正常运行。")
-        doc.add_paragraph(f"巡检内容：{', '.join(category_names) if category_names else '系统全面巡检'}")
-        doc.add_paragraph(f"巡检范围：共 {len(full_results)} 个巡检项，覆盖 {len(categories)} 个类别")
-        doc.add_paragraph(f"巡检日期：{datetime.now().strftime('%Y年%m月%d日')}")
-
-        # 二、执行摘要
-        doc.add_heading("二、执行摘要", level=1)
-        summary_table = doc.add_table(rows=5, cols=2)
-        summary_table.style = 'Light Grid Accent 1'
-        summary_data = [
-            ("巡检任务", schedule.name if schedule else "未知"),
-            ("执行时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-            ("巡检项总数", str(len(full_results))),
-            ("成功率", f"{success_rate:.1f}%"),
-            ("健康状态", "良好" if success_rate >= 90 else "警告" if success_rate >= 70 else "异常")
-        ]
-        for i, (key, value) in enumerate(summary_data):
-            summary_table.rows[i].cells[0].text = key
-            summary_table.rows[i].cells[1].text = value
-
-        # 三、详细执行结果
-        doc.add_heading("三、详细执行结果", level=1)
-
+        # 准备巡检结果数据
         for idx, result in enumerate(full_results, 1):
             target = target_map.get(result.target_id)
-
-            # 巡检项标题
             status_icon = "✓" if result.status == 'success' else "✗"
             status_text = "通过" if result.status == 'success' else "未通过"
-            doc.add_heading(f"{status_icon} 巡检项 {idx}: {target.content if target else '未知'} ({status_text})", level=3)
 
-            # 执行结果
+            result_data = {
+                'index': str(idx),
+                'content': target.content if target else '未知',
+                'status': result.status,
+                'status_icon': status_icon,
+                'status_text': status_text,
+                'reason': '',
+                'diagnosis': '',
+                'error_message': result.error_message or ''
+            }
+
+            # 提取AI判断信息
             if result.result_data and isinstance(result.result_data, dict):
-                # 提取执行结果（排除ai_judgment）
-                result_data_display = {k: v for k, v in result.result_data.items() if k != 'ai_judgment'}
-                if result_data_display:
-                    doc.add_paragraph("执行结果：")
-                    import json
-                    result_str = json.dumps(result_data_display, ensure_ascii=False, indent=2)
-                    p = doc.add_paragraph(result_str)
-                    p.runs[0].font.size = Pt(9)
-                    p.runs[0].font.color.rgb = RGBColor(80, 80, 80)
-
-                # AI分析
                 ai_judgment = result.result_data.get('ai_judgment', {})
                 if isinstance(ai_judgment, dict):
-                    if result.status == 'success':
-                        # 通过项：显示判断依据
-                        if ai_judgment.get('reason'):
-                            doc.add_paragraph("判断依据：")
-                            p = doc.add_paragraph(ai_judgment['reason'])
-                            p.runs[0].font.size = Pt(10)
-                            p.runs[0].font.color.rgb = RGBColor(0, 128, 0)
-                    else:
-                        # 未通过项：显示AI分析原因和排查方向
-                        if ai_judgment.get('reason'):
-                            doc.add_paragraph("失败原因：")
-                            p = doc.add_paragraph(ai_judgment['reason'])
-                            p.runs[0].font.size = Pt(10)
-                            p.runs[0].font.color.rgb = RGBColor(200, 0, 0)
+                    result_data['reason'] = ai_judgment.get('reason', '')
+                    result_data['diagnosis'] = ai_judgment.get('diagnosis', '')
 
-                        if ai_judgment.get('diagnosis'):
-                            doc.add_paragraph("排查方向：")
-                            p = doc.add_paragraph(ai_judgment['diagnosis'])
-                            p.runs[0].font.size = Pt(10)
-                            p.runs[0].font.color.rgb = RGBColor(200, 100, 0)
+            context['results'].append(result_data)
 
-            # 如果有错误信息也显示
-            if result.error_message:
-                doc.add_paragraph("错误信息：")
-                p = doc.add_paragraph(result.error_message)
-                p.runs[0].font.size = Pt(9)
-                p.runs[0].font.color.rgb = RGBColor(150, 0, 0)
-
-        # 四、总结
-        doc.add_heading("四、总结", level=1)
-
-        # 4.1 巡检结果总结
-        doc.add_heading("4.1 巡检结果总结", level=2)
-        doc.add_paragraph(f"本次巡检共执行 {len(full_results)} 个巡检项，成功 {success_count} 项，失败 {failed_count} 项，成功率为 {success_rate:.1f}%。")
-
+        # 准备总结文本
         if success_rate >= 90:
-            doc.add_paragraph("系统整体运行状态良好，各项指标均符合预期标准，未发现重大风险。建议继续保持当前运维策略，定期进行巡检监控。")
+            context['summary_text'] = "系统整体运行状态良好，各项指标均符合预期标准，未发现重大风险。建议继续保持当前运维策略，定期进行巡检监控。"
         elif success_rate >= 70:
-            doc.add_paragraph("系统运行基本正常，但存在部分风险项需要关注。建议优先处理失败的巡检项，加强对相关指标的监控频率，并制定应急预案以应对潜在故障。")
+            context['summary_text'] = "系统运行基本正常，但存在部分风险项需要关注。建议优先处理失败的巡检项，加强对相关指标的监控频率，并制定应急预案以应对潜在故障。"
         else:
-            doc.add_paragraph("系统存在较多异常情况，运行状态不佳。建议立即组织技术团队进行问题排查，紧急处理所有失败的巡检项，必要时启动应急响应流程。")
+            context['summary_text'] = "系统存在较多异常情况，运行状态不佳。建议立即组织技术团队进行问题排查，紧急处理所有失败的巡检项，必要时启动应急响应流程。"
 
-        # 4.2 AI分析建议
-        doc.add_heading("4.2 AI分析建议", level=2)
-        if all_suggestions:
-            doc.add_paragraph("基于AI智能分析，针对本次巡检结果提出以下改进建议：")
-            for idx, suggestion in enumerate(set(all_suggestions), 1):
-                doc.add_paragraph(f"{idx}. {suggestion}", style='List Number')
-            doc.add_paragraph()
-            doc.add_paragraph("建议运维团队根据上述AI建议，结合实际情况制定改进计划，持续优化系统运行质量。")
-        else:
-            doc.add_paragraph("本次巡检所有项目均符合标准，AI系统未发现需要改进的问题。建议继续保持良好的运维水平。")
+        # 加载模板
+        template_path = os.path.join(os.path.dirname(__file__), "inspection_report_template.docx")
+
+        if not os.path.exists(template_path):
+            raise FileNotFoundError(f"模板文件不存在: {template_path}。请先运行 generate_template.py 生成模板文件。")
+
+        doc = DocxTemplate(template_path)
+
+        # 渲染模板
+        doc.render(context)
 
         # 保存文档
         doc_buffer = io.BytesIO()
