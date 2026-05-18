@@ -69,3 +69,11 @@ COPY settings ./settings
 COPY server.py ./
 COPY config.json ./
 COPY workspace-template ./workspace-template
+COPY docker-entrypoint.sh ./
+
+RUN chmod +x docker-entrypoint.sh
+
+# 在镜像构建时初始化 aerich 配置（不需要数据库连接）
+RUN aerich init -t settings.TORTOISE || true
+
+ENTRYPOINT ["./docker-entrypoint.sh"]
