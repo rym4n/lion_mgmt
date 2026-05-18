@@ -15,11 +15,14 @@ class InspectionSchedule(BaseModel):
     巡检任务（最上层）
     Inspection Task (Top Level)
     """
+
     name = fields.CharField(max_length=255, default="默认巡检计划", description="任务名称")
     schedule_cron = fields.CharField(max_length=100, description="定时周期(Cron表达式)")
     owner = fields.CharField(max_length=255, null=True, description="负责人")
     enabled = fields.BooleanField(default=True, description="是否启用")
     description = fields.TextField(null=True, description="任务描述")
+    notify_enabled = fields.BooleanField(default=False, description="是否启用通知")
+    notify_config = fields.JSONField(null=True, description="通知动作配置")
 
     class Meta:
         table = "inspection_schedule"
@@ -30,6 +33,7 @@ class InspectionCategory(BaseModel):
     巡检类别（中间层）
     Inspection Category (Middle Level)
     """
+
     name = fields.CharField(max_length=255, description="类别名称")
     schedule_id = fields.CharField(max_length=36, description="关联巡检任务ID")
     app_name = fields.CharField(max_length=100, description="应用名称")
@@ -45,6 +49,7 @@ class InspectionTarget(BaseModel):
     巡检项（最底层）
     Inspection Item (Bottom Level)
     """
+
     content = fields.TextField(description="巡检内容")
     category_id = fields.CharField(max_length=36, description="关联巡检类别ID")
     standard = fields.TextField(description="巡检标准")
@@ -60,6 +65,7 @@ class InspectionResult(BaseModel):
     巡检结果记录
     Inspection Result Record
     """
+
     target_id = fields.CharField(max_length=36, description="巡检目标ID")
     schedule_id = fields.CharField(max_length=36, description="关联巡检任务ID")
     start_time = fields.DatetimeField(auto_now_add=True, description="开始时间")

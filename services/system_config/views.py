@@ -782,7 +782,7 @@ async def get_jwt_config(request):
                     },
                     "default_tenants": {
                         "type": "string",
-                        "description": "新用户默认工作空间ID，多个用英文逗号分隔",
+                        "description": "新用户默认租户ID，多个用英文逗号分隔",
                     },
                     "scopes_alias": {
                         "type": "string",
@@ -915,7 +915,7 @@ async def update_oauth_config(request):
                     },
                     "jwt_default_tenants": {
                         "type": "string",
-                        "description": "新用户默认工作空间ID，英文逗号分隔",
+                        "description": "新用户默认租户ID，英文逗号分隔",
                     },
                 },
             }
@@ -1591,7 +1591,7 @@ async def download_file(request, file_id):
                     "maintenance_mode": {
                         "type": "string",
                         "description": "是否上传到维护模式（true/false），默认false",
-                    }
+                    },
                 },
             }
         }

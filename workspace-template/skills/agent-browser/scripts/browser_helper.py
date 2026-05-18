@@ -6,17 +6,44 @@ agent-browser 辅助函数库
 """
 
 import os
+import sys
 import subprocess
+import platform
 from pathlib import Path
 from typing import Optional, Dict, List, Union
 
 # 获取 agent-browser 可执行文件路径
 SKILL_DIR = Path(__file__).parent.parent
-AGENT_BROWSER = SKILL_DIR / "scripts" / "agent-browser-linux-x64"
 
-# 确保可执行文件有执行权限
-if AGENT_BROWSER.exists():
-    os.chmod(AGENT_BROWSER, 0o755)
+
+def get_agent_browser_path() -> Path:
+    """根据系统架构获取正确的 agent-browser 可执行文件路径"""
+    machine = platform.machine().lower()
+
+    # 判断架构类型
+    if machine in ("aarch64", "arm64"):
+        executable_name = "agent-browser-linux-arm64"
+    elif machine in ("x86_64", "amd64"):
+        executable_name = "agent-browser-linux-x64"
+    else:
+        raise RuntimeError(f"不支持的系统架构: {machine}")
+
+    agent_browser = SKILL_DIR / "scripts" / executable_name
+
+    # 检查可执行文件是否存在
+    if not agent_browser.exists():
+        raise FileNotFoundError(f"找不到可执行文件: {agent_browser}")
+
+    # 确保可执行文件有执行权限
+    try:
+        os.chmod(agent_browser, 0o755)
+    except Exception as e:
+        print(f"警告: 无法设置执行权限: {e}", file=sys.stderr)
+
+    return agent_browser
+
+
+AGENT_BROWSER = get_agent_browser_path()
 
 
 def _run_command(args: List[str], timeout: int = 30) -> str:
@@ -30,19 +57,52 @@ def _run_command(args: List[str], timeout: int = 30) -> str:
     Returns:
         命令输出
     """
+    import tempfile
+    import time
+
     env = os.environ.copy()
-    env['AGENT_BROWSER_IGNORE_HTTPS_ERRORS'] = '1'
+    env["AGENT_BROWSER_IGNORE_HTTPS_ERRORS"] = "1"
+
+    # 添加浏览器启动参数以避免 ERR_BLOCKED_BY_CLIENT 错误
+    browser_args = [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--disable-site-isolation-trials",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-features=HttpsUpgrades",
+        "--disable-features=PrivateNetworkAccessSendPreflights",
+        "--disable-features=PrivateNetworkAccessRespectPreflightResults",
+        "--disable-features=BlockInsecurePrivateNetworkRequests",
+        "--disable-features=SafeBrowsing",
+        "--disable-features=SubresourceFilter",
+        "--disable-features=HeavyAdIntervention",
+        "--safebrowsing-disable-auto-update",
+        "--allow-running-insecure-content",
+        "--disable-features=InsecureDownloadWarnings",
+        "--disable-extensions",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-default-apps",
+        "--disable-plugins",
+        "--no-proxy-server",
+        "--ignore-certificate-errors",
+        "--disable-ipv6",
+    ]
+
+    # 使用临时用户目录
+    temp_dir = tempfile.mkdtemp(prefix=f"agent-browser-{int(time.time())}-")
+    browser_args.append(f"--user-data-dir={temp_dir}")
+
+    # 支持通过环境变量指定需要信任的不安全源
+    insecure_origins = os.environ.get("AGENT_BROWSER_INSECURE_ORIGINS", "")
+    if insecure_origins:
+        browser_args.append(f"--unsafely-treat-insecure-origin-as-secure={insecure_origins}")
+
+    env["AGENT_BROWSER_ARGS"] = " ".join(browser_args)
 
     cmd = [str(AGENT_BROWSER)] + args
-    result = subprocess.run(
-        cmd,
-        env=env,
-        capture_output=True,
-        text=True,
-        encoding='utf-8',
-        errors='ignore',
-        timeout=timeout
-    )
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True, encoding="utf-8", errors="ignore", timeout=timeout)
 
     if result.returncode != 0 and result.stderr:
         raise RuntimeError(f"命令执行失败: {result.stderr}")
@@ -61,10 +121,7 @@ def open_page(url: str, wait_ms: int = 2000) -> str:
     Returns:
         命令输出
     """
-    return batch_execute([
-        f"open {url}",
-        f"wait {wait_ms}"
-    ])
+    return batch_execute([f"open {url}", f"wait {wait_ms}"])
 
 
 def take_screenshot(path: str, full_page: bool = False, annotate: bool = False) -> str:
@@ -114,10 +171,7 @@ def click_element(selector: str, wait_after: int = 1000) -> str:
     Returns:
         命令输出
     """
-    return batch_execute([
-        f"click {selector}",
-        f"wait {wait_after}"
-    ])
+    return batch_execute([f"click {selector}", f"wait {wait_after}"])
 
 
 def get_page_text(selector: str = "body") -> str:
@@ -224,12 +278,7 @@ def save_auth(name: str, url: str, username: str, password: str) -> str:
     Returns:
         命令输出
     """
-    return _run_command([
-        "auth", "save", name,
-        "--url", url,
-        "--username", username,
-        "--password", password
-    ])
+    return _run_command(["auth", "save", name, "--url", url, "--username", username, "--password", password])
 
 
 def login_with_auth(name: str) -> str:
@@ -255,13 +304,7 @@ def list_auth() -> str:
     return _run_command(["auth", "list"])
 
 
-def login_and_navigate(
-    login_url: str,
-    target_url: str,
-    credentials: Dict[str, str],
-    screenshot_path: Optional[str] = None,
-    extract_text: bool = False
-) -> Dict[str, str]:
+def login_and_navigate(login_url: str, target_url: str, credentials: Dict[str, str], screenshot_path: Optional[str] = None, extract_text: bool = False) -> Dict[str, str]:
     """
     登录并导航到目标页面（常用场景）
 
@@ -289,7 +332,7 @@ def login_and_navigate(
         f"click {credentials['submit_selector']}",
         "wait 5000",
         f"open {target_url}",
-        "wait 3000"
+        "wait 3000",
     ]
 
     if screenshot_path:
@@ -307,16 +350,12 @@ def login_and_navigate(
         result["screenshot_path"] = screenshot_path
     if extract_text:
         # 提取最后的文本输出
-        result["text"] = output.strip().split('\n')[-1] if output else ""
+        result["text"] = output.strip().split("\n")[-1] if output else ""
 
     return result
 
 
-def navigate_and_extract(
-    url: str,
-    selectors: Dict[str, str],
-    screenshot_path: Optional[str] = None
-) -> Dict[str, str]:
+def navigate_and_extract(url: str, selectors: Dict[str, str], screenshot_path: Optional[str] = None) -> Dict[str, str]:
     """
     导航到页面并提取指定元素的内容
 
@@ -328,10 +367,7 @@ def navigate_and_extract(
     Returns:
         提取结果字典
     """
-    commands = [
-        f"open {url}",
-        "wait 3000"
-    ]
+    commands = [f"open {url}", "wait 3000"]
 
     if screenshot_path:
         commands.append(f"screenshot --full {screenshot_path}")

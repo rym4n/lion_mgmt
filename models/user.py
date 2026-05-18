@@ -41,7 +41,7 @@ class Account(BaseModel):
     star_rooms = fields.ManyToManyField("models.Room", through="account_star_room")
 
     def _roles_for_tenant(self, tenant_id: str | None):
-        """仅返回属于指定工作空间(tenant_id)的角色；tenant_id 为 None 时不做过滤。"""
+        """仅返回属于指定租户(tenant_id)的角色；tenant_id 为 None 时不做过滤。"""
         if not self.roles:
             return []
         roles_list = list(self.roles)
@@ -162,20 +162,20 @@ class PermissionsMenu(BaseModel):
 
 class Tenant(Model):
     """
-    工作空间管理
+    租户管理
     """
 
     id: str = fields.CharField(pk=True, max_length=36, default=lambda: str(uuid.uuid4()))
     ctime = fields.DatetimeField(null=False, auto_now_add=True, description="创建时间")
     utime = fields.DatetimeField(null=False, auto_now=True, description="更新时间")
     deleted: bool = fields.BooleanField(default=False, description="删除标识")
-    name: str = fields.CharField(max_length=255, null=True, description="工作空间名称")
+    name: str = fields.CharField(max_length=255, null=True, description="租户名称")
     creator = fields.ForeignKeyField("models.Account", null=True, related_name="creator_tenant", description="创建人")
     member = fields.ManyToManyField(
         model_name="models.Account",
         related_name="member",
         through="tenant_member",
-        description="工作空间成员",
+        description="租户成员",
     )
 
     def validate(self) -> None:

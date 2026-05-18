@@ -231,6 +231,7 @@ async def creat_message(room_id, log, user, redis):
 
     return message_data
 
+
 # 创建AI回复消息
 async def creat_ai_message(msg, redis):
     sender = await Account.get(username="system")
@@ -241,7 +242,7 @@ async def creat_ai_message(msg, redis):
 
     content = msg["content"]
     room_id = msg["room_id"]
-    tenant_id = msg['tenant_id']
+    tenant_id = msg["tenant_id"]
     # 流式场景下 type 可能是 ai-reply-end，存入数据库时设为 ai
     msg_type = "ai-reply-delta" if msg.get("type") == "ai-reply-end" else msg.get("type")
 
@@ -270,13 +271,7 @@ async def creat_ai_message(msg, redis):
         # 其他执行引擎进入这里：稍等一下，再尝试获取已创建的记录
         ai_msg = None
         for i in range(5):
-            ai_msg = await Message.filter(
-                type=msg_type,
-                room_id=room_id,
-                receiver=user,
-                tenant_id=tenant_id,
-                deleted=False
-            ).order_by("-ctime").first()
+            ai_msg = await Message.filter(type=msg_type, room_id=room_id, receiver=user, tenant_id=tenant_id, deleted=False).order_by("-ctime").first()
             if ai_msg:
                 break
             await asyncio.sleep(0.01 * (i + 1))  # 指数轮询避免数据库压力过大
@@ -295,7 +290,6 @@ async def creat_ai_message(msg, redis):
     }
 
     return message_data
-
 
 
 class ChatManager:
@@ -450,7 +444,7 @@ class ChatManager:
         #    注意：这里假设 event_update_buffer 的 key 是唯一的，
         #    如果有新数据进来会覆盖旧值（这在业务上是可以接受的，因为只需要最后的状态）
         current_batch = dict(self.event_update_buffer)
-        
+
         # 暂时清空 buffer，防止后续新进来的数据混在一起
         # 如果处理失败，我们需要把这些数据加回去
         self.event_update_buffer.clear()
@@ -458,7 +452,7 @@ class ChatManager:
         batch_size = 500
         event_ids = list(current_batch.keys())
         total_count = len(event_ids)
-        
+
         logger.info(f"开始批量更新事件状态，总数: {total_count}")
 
         try:
@@ -470,25 +464,25 @@ class ChatManager:
                 try:
                     # 尝试查询和更新
                     events = await Events.filter(id__in=batch_ids).all()
-                    
+
                     to_update = []
                     found_ids = set()
                     current_time = TZ.localize(datetime.now())
-                    
+
                     for event in events:
                         found_ids.add(event.id)
                         expected_tenant = str(current_batch.get(event.id))
                         actual_tenant = str(event.tenant_id)
-                        
+
                         if actual_tenant == expected_tenant:
                             event.event_process_status = "已处理"
                             event.close_time = current_time
                             to_update.append(event)
-                    
+
                     if to_update:
                         await Events.bulk_update(to_update, fields=["event_process_status", "close_time"])
                         logger.info(f"批次更新成功: {len(to_update)} 条")
-                    
+
                     # 关键逻辑：处理未找到的 ID
                     # 如果某些 ID 在数据库中还没查到（可能是主从延迟或写入滞后），将它们放回 buffer 重试
                     for eid in batch_ids:
@@ -500,7 +494,7 @@ class ChatManager:
                 except Exception as batch_error:
                     # 无论是查询失败还是更新失败，都视为该批次处理失败
                     logger.error(f"批次处理失败(将回滚该批次): {batch_error} | {traceback.format_exc()}")
-                    
+
                     # 将该批次的所有 ID 重新放回 buffer
                     # 注意：这里我们放回的是 batch_ids（原始请求的 ID），而不是 to_update（查到的 ID）
                     # 这样可以保证即使是因为查询失败（导致 events 为空），ID 也能被放回去重试
@@ -621,7 +615,7 @@ class ChatManager:
                     if log.get("node_type") == "end-node":
                         self.event_update_buffer[log["event_id"]] = log["tenant_id"]
                         if len(self.event_update_buffer) >= 500:
-                            await self._flush_events()                            
+                            await self._flush_events()
                 to_insert.append(Runlog(**log))
         try:
             await Runlog.bulk_create(
@@ -770,17 +764,19 @@ class ChatManager:
             client = NanobotClient(session_id=current_room_id, workspace=tenant_workspace)
 
             # 创建 Redis 流式 Hook
-            hook = RedisStreamingHook(
-                room_id=current_room_id,
-                receiver_id=user_id,
-                tenant_id=tenant_id,
-                redis_pub=self.msg_pub
-            )
+            hook = RedisStreamingHook(room_id=current_room_id, receiver_id=user_id, tenant_id=tenant_id, redis_pub=self.msg_pub)
             logger.info(f"RedisStreamingHook 已创建")
+
+            # 从 message_data 中提取用户名
+            sender_name = message_data.get("sender_name", "admin")
 
             # 构建完整消息：将系统指令、消息上下文和用户消息合并
             full_message = f"""<system_instruction>
 【身份】你是 Lion Management 平台的 AI 助手。
+
+【当前用户信息】
+- 用户名: {sender_name}
+- 重要: 调用 lion-mgmt skill 时，必须使用此用户名进行登录认证
 
 【意图识别 - 首先判断问题类型】
 在处理用户问题前，先判断问题类型：
@@ -834,11 +830,7 @@ class ChatManager:
             logger.info(f"准备调用 client.ask")
             logger.info(f"消息内容长度: {len(full_message)} 字符")
 
-            result = await client.ask(
-                message=full_message,
-                streaming=True,
-                hooks=[hook]
-            )
+            result = await client.ask(message=full_message, streaming=True, hooks=[hook])
 
             logger.info(f"Nanobot 调用完成，返回结果长度: {len(result) if result else 0} 字符")
             if not result or len(result.strip()) == 0:
@@ -878,15 +870,7 @@ class ChatManager:
             raise Exception("消息不能为空")
 
         # 保存消息到数据库
-        message = await Message.create(
-            type="ai-question",
-            sender=user,
-            room=room,
-            content=content,
-            image_content=image_content,
-            receiver=user,  # 群聊消息设为发送者自己作为占位符
-            tenant_id=tenant_id
-        )
+        message = await Message.create(type="ai-question", sender=user, room=room, content=content, image_content=image_content, receiver=user, tenant_id=tenant_id)  # 群聊消息设为发送者自己作为占位符
 
         # 广播问题消息到前端
         message_data = {
@@ -906,15 +890,7 @@ class ChatManager:
 
         # 使用后台任务执行 nanobot，避免 websocket 断开时任务被取消
         # 这样即使用户断开连接，nanobot 也会继续执行，结果通过 Redis Pub/Sub 发送
-        asyncio.create_task(
-            self._execute_nanobot_task(
-                user_id=user.id,
-                tenant_id=tenant_id,
-                current_room_id=current_room_id,
-                content=content,
-                message_data=message_data
-            )
-        )
+        asyncio.create_task(self._execute_nanobot_task(user_id=user.id, tenant_id=tenant_id, current_room_id=current_room_id, content=content, message_data=message_data))
         logger.info(f"Nanobot 后台任务已启动，room_id={current_room_id}")
 
     async def _handle_private_message(self, user: Account, data: dict, tenant_id):
@@ -935,7 +911,7 @@ class ChatManager:
             # 获取或创建私聊房间
             if not room_id:
                 chat_room = await get_or_create_private_chat_room(self.redis, user, receiver, tenant_id)
-            
+
             chat_room["room_id"] = room_id
             chat_room = await Room.get_or_none(id=chat_room["room_id"], tenant_id=tenant_id)
 

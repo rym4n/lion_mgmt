@@ -128,7 +128,7 @@ async def create_workflow(request):
         if key == "剧本编排":
             if int(item["expireTime"]) > int(time.time() * 1000):
                 total_up_value = int(item["value"])
-    
+
     if total_up_value != 99999 and total_count >= total_up_value:
         raise CustomError(ErrorCode.PLAYBOOK_CREATE_LIMIT)
 
@@ -407,23 +407,12 @@ async def list_published_versions(request):
     user_roles = set(str(role.id) for role in user.roles)
 
     # 获取用户有权限查看的剧本ID列表
-    permissions = await PlaybookPermissions.filter(
-        Q(users__id=user_id) | Q(roles__id__in=user_roles),
-        permissions__contains=["r"],
-        tenant_id=tenant_id
-    ).values_list("pb_id", flat=True)
+    permissions = await PlaybookPermissions.filter(Q(users__id=user_id) | Q(roles__id__in=user_roles), permissions__contains=["r"], tenant_id=tenant_id).values_list("pb_id", flat=True)
     pb_ids = set(permissions)
 
     # 查询所有已发布的版本
     pv = (
-        await PlaybookVersion.filter(
-            status=1,  # 已发布
-            deleted=False,
-            playbook__deleted=False,
-            playbook__internal=False,
-            playbook__id__in=pb_ids,
-            tenant_id=tenant_id
-        )
+        await PlaybookVersion.filter(status=1, deleted=False, playbook__deleted=False, playbook__internal=False, playbook__id__in=pb_ids, tenant_id=tenant_id)  # 已发布
         .only(
             "id",
             "playbook_id",
@@ -1566,17 +1555,11 @@ async def add_permission(request):
 @requires_permission("workflow:r")
 async def select_my_permission(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    pps = await PlaybookPermissions.filter(
-        users__id=request.ctx.session["sub"], tenant_id=tenant_id, deleted=False
-    ).all()
+    pps = await PlaybookPermissions.filter(users__id=request.ctx.session["sub"], tenant_id=tenant_id, deleted=False).all()
     account = await Account.get(id=request.ctx.session["sub"], deleted=False).prefetch_related("roles")
     account_roles = [role.id for role in account.roles]
-    account_pps = await PlaybookPermissions.filter(
-        roles__id__in=account_roles, tenant_id=tenant_id, deleted=False
-    ).all()
-    data = [{"id": pp.pb_id, "permissions": pp.permissions} for pp in account_pps] + [
-        {"id": pp.pb_id, "permissions": pp.permissions} for pp in pps
-    ]
+    account_pps = await PlaybookPermissions.filter(roles__id__in=account_roles, tenant_id=tenant_id, deleted=False).all()
+    data = [{"id": pp.pb_id, "permissions": pp.permissions} for pp in account_pps] + [{"id": pp.pb_id, "permissions": pp.permissions} for pp in pps]
     merged_permissions = {}
     for item in data:
         pb_id = item["id"]
@@ -2134,7 +2117,7 @@ async def import_workflow(request):
             if idx <= 0:
                 continue
             t_name = base[:idx]
-            t_ver = base[idx + 1:]
+            t_ver = base[idx + 1 :]
             if await Tool.filter(name=t_name, deleted=False, tenant_id=tenant_id, version=t_ver).exists():
                 imported["skipped_versions"] += 1
                 continue
@@ -2507,7 +2490,6 @@ async def list_ai_config(request):
         models = value.get("models", [])
         apikeys = value.get("apikeys", [])
 
-
         data.append(
             {
                 "id": config.id,
@@ -2618,12 +2600,12 @@ async def get_version_runlog(request):
 @workflow_bp.post("/ai-chat")
 @openapi.definition(
     summary="AI对话接口",
-    description="转发AI请求到后端服务，支持流式返回",
+    description="转发AI请求到后端服务",
     body={"application/json": {"schema": {"type": "object"}}},
     response={
         "200": {
-            "description": "流式返回AI响应",
-            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+            "description": "返回AI响应",
+            "content": {"application/json": {"schema": {"type": "object"}}},
         }
     },
 )
@@ -2637,30 +2619,7 @@ async def ai_chat(request):
     if not RY_AI_API_BASE or not LLM_KEY:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    resp = await request.respond(
-        content_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                RY_AI_API_BASE,
-                json=request.json,
-                headers={"Authorization": f"Bearer {LLM_KEY}"},
-                timeout=aiohttp.ClientTimeout(total=300)
-            ) as ai_resp:
-                async for chunk in ai_resp.content.iter_any():
-                    await resp.send(chunk)
-    except Exception as e:
-        logger.error(f"AI chat error: {str(e)}")
-        await resp.send(f"data: {orjson.dumps({'error': str(e)}).decode()}\n\n")
-
-    await resp.eof()
-    return resp
-
-
+    async with aiohttp.ClientSession() as session:
+        async with session.post(RY_AI_API_BASE + "/chat/completions", json=request.json, headers={"Authorization": f"Bearer {LLM_KEY}"}, timeout=aiohttp.ClientTimeout(total=300)) as ai_resp:
+            result = await ai_resp.json()
+            return response_ok(result)

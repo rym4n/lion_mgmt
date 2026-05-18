@@ -13,22 +13,23 @@ Step 1: 登录获取 token
 Step 2: 调用接口获取 openapi.json（所有接口信息）
 Step 3: 调用接口获取 playbook 列表
 Step 4: 匹配 playbook
-  → 匹配成功: 跳到 Step 10
+  → 匹配成功: 跳到 Step 11
   → 匹配失败: 继续 Step 5
 Step 5: 调用接口获取 action 列表
 Step 6: 匹配 action
   → 匹配成功: 继续 Step 9
   → 匹配失败: 继续 Step 7
 Step 7: 匹配 openapi
-  → 匹配成功: 跳到 Step 10
+  → 匹配成功: 跳到 Step 11
   → 匹配失败: 继续 Step 8
 Step 8: AI 推理（组合接口或提供建议）
 Step 9: 如果匹配到 action，查询资源 ID
-Step 10: 调用对应接口
-Step 11: 处理响应
+Step 10: 查询工具信息（获取 node_name、app_name、name、main）
+Step 11: 调用对应接口
+Step 12: 处理响应
   - playbook/action: 提取 run_id，查询执行结果
   - openapi: 直接返回业务数据
-Step 12: 返回结果给用户
+Step 13: 返回结果给用户
 ```
 
 ## 🚨 重要提醒
@@ -47,20 +48,21 @@ Step 12: 返回结果给用户
 - [ ] **Step 2**: 调用 `GET /docs/openapi.json` 获取所有接口信息
 - [ ] **Step 3**: 调用 `POST /playbook/published-versions` 获取剧本列表
 - [ ] **Step 4**: 尝试匹配 playbook
-  - 匹配成功 → 跳到 Step 10
+  - 匹配成功 → 跳到 Step 11
   - 匹配失败 → 继续 Step 5
 - [ ] **Step 5**: 调用 `POST /tools/actions/available` 获取动作列表
 - [ ] **Step 6**: 尝试匹配 action
   - 匹配成功 → 继续 Step 9
   - 匹配失败 → 继续 Step 7
 - [ ] **Step 7**: 尝试匹配 openapi
-  - 匹配成功 → 跳到 Step 10
+  - 匹配成功 → 跳到 Step 11
   - 匹配失败 → 继续 Step 8
 - [ ] **Step 8**: 使用 AI 进行推理（组合多个接口或提供建议）
 - [ ] **Step 9**: 如果匹配到 action，查询资源 ID（POST `/tools/resource/detailed`）
-- [ ] **Step 10**: 调用对应接口（使用当前会话的作战室 ID）
-- [ ] **Step 11**: 处理响应（playbook/action 提取 run_id 并查询结果，openapi 提取业务数据）
-- [ ] **Step 12**: 返回结果给用户
+- [ ] **Step 10**: 查询工具信息（POST `/tools/all`，获取 node_name、app_name、name、main）
+- [ ] **Step 11**: 调用对应接口（使用当前会话的作战室 ID）
+- [ ] **Step 12**: 处理响应（playbook/action 提取 run_id 并查询结果，openapi 提取业务数据）
+- [ ] **Step 13**: 返回结果给用户
 
 ## 🔐 Step 1: 登录
 
@@ -74,12 +76,19 @@ Step 12: 返回结果给用户
 
 **原因**: Token 可能会过期，使用过期的 token 会导致请求失败（401 Unauthorized）。
 
+**获取用户名的优先级**:
+1. 从 `<message_context>` 中提取 `sender_name` 字段（最高优先级）
+2. 从 `<system_instruction>` 中查找"用户名:"字段
+3. 如果以上都没有，使用默认值 "admin"
+
 ```python
 import os
 import requests
+import re
 
 base_url = os.getenv("LION_MGMT_BASE_URL", "http://127.0.0.1:8000")
-username = os.getenv("LION_MGMT_USERNAME", "admin")
+
+username = message_context.get("sender_name", "admin")
 
 response = requests.post(
     f"{base_url}/user/local-auth",
@@ -101,14 +110,23 @@ print(f"Token: {token}")
 
 ### Step 2: 获取 OpenAPI 接口信息
 
+**⚠️ 特殊要求**: 此接口仅 admin 用户有权限访问，必须使用 admin 账户的 token。
+
 ```python
 import requests
 
-token = "<token>"  # 从 Step 1 获取的 token
+# 使用 admin 账户获取 token（仅用于此接口）
+admin_response = requests.post(
+    f"{base_url}/user/local-auth",
+    headers={"Content-Type": "application/json"},
+    json={"username": "admin"}
+)
+admin_token = admin_response.json()["data"]["token"]
 
+# 使用 admin token 获取 OpenAPI 信息
 response = requests.get(
-    "http://127.0.0.1:8000/docs/openapi.json",
-    headers={"aioe-auth": token}
+    f"{base_url}/docs/openapi.json",
+    headers={"aioe-auth": admin_token}
 )
 openapi_data = response.json()
 # 提取 paths 字段
@@ -118,8 +136,9 @@ paths = openapi_data.get("paths", {})
 ### Step 3: 获取 Playbook 列表
 
 ```python
+# 使用普通用户 token（从 Step 1 获取）
 response = requests.post(
-    "http://127.0.0.1:8000/playbook/published-versions",
+    f"{base_url}/playbook/published-versions",
     headers={"aioe-auth": token}
 )
 playbook_data = response.json()
@@ -130,8 +149,9 @@ playbooks = playbook_data.get("data", {}).get("items", [])
 ### Step 5: 获取 Action 列表
 
 ```python
+# 使用普通用户 token（从 Step 1 获取）
 response = requests.post(
-    "http://127.0.0.1:8000/tools/actions/available",
+    f"{base_url}/tools/actions/available",
     headers={"aioe-auth": token}
 )
 action_data = response.json()
@@ -160,7 +180,7 @@ actions = action_data.get("data", {}).get("items", [])
 
 **匹配字段**: `name`, `description`, `tags`
 
-**匹配成功后**: 直接跳到 **Step 10**（调用对应接口）
+**匹配成功后**: 直接跳到 **Step 11**（调用对应接口）
 
 **⚠️ 关键参数说明**:
 1. **作战室 ID (`id`)**:
@@ -205,7 +225,7 @@ Content-Type: application/json
 
 **匹配字段**: `name`, `description`, `tags`
 
-**匹配成功后**: 继续 **Step 9**（查询资源 ID），然后执行 **Step 10**（调用对应接口）
+**匹配成功后**: 继续 **Step 9**（查询资源 ID）→ **Step 10**（查询工具信息）→ **Step 11**（调用对应接口）
 
 **⚠️ 关键参数说明**:
 1. **作战室 ID (`id`)**:
@@ -214,12 +234,73 @@ Content-Type: application/json
    - ❌ 不要使用历史记忆中的旧 ID
    - ✅ 使用当前会话提供的作战室 ID
 
-2. **资源 ID (`resource`)**:
+2. **资源 ID (`resource`)** - Step 9 获取:
    - ❌ 不要使用资源名称（如"微步在线-个人"）
    - ✅ 必须使用资源 ID（如"7b07b298-8afa-4384-ae36-8b131aaf06bb"）
    - 获取方式: 调用 `POST /tools/resource/detailed` 接口，传入 `{"name": "工具名称"}`，从响应的 `data[0].id` 中提取
 
-**调用接口**:
+3. **工具信息 (`node_name`, `app_name`, `name`, `main`)** - Step 10 获取:
+   - ✅ 必须调用 `POST /tools/all` 接口获取工具详细信息
+   - ✅ 从响应的 `data.tools[0]` 中提取 `name`、`main` 字段
+   - ✅ `node_name`、`app_name`、`name` 通常使用工具的 `name` 字段
+   - ❌ 不要直接使用 action 中的这些字段，必须从 `/tools/all` 接口获取
+
+**Step 9: 查询资源 ID**:
+```python
+response = requests.post(
+    "http://127.0.0.1:8000/tools/resource/detailed",
+    headers={"aioe-auth": token},
+    json={"name": "工具名称"}  # 从 action 中提取工具名称
+)
+resource_data = response.json()
+resource_id = resource_data["data"][0]["id"]
+```
+
+**Step 10: 查询工具信息**:
+```python
+# 从 action 中提取 app_name（工具的英文名称）
+app_name_from_action = action["app_name"]  # 例如: "threatbook"
+
+response = requests.post(
+    "http://127.0.0.1:8000/tools/all",
+    headers={"aioe-auth": token},
+    json={
+        "page": 1,
+        "size": 15,
+        "key": app_name_from_action,  # 使用 action 中的 app_name 作为搜索关键字
+        "scope": 0
+    }
+)
+tools_data = response.json()
+tool_info = tools_data["data"]["tools"][0]
+
+# 提取必需字段
+node_name = tool_info["description"]      # 工具描述
+app_name = tool_info["name"]       # 工具名称
+name = tool_info["description"]           # 工具描述（与 node_name 相同）
+main = tool_info["main"]           # 主文件名，例如: "blueking_cmdb.py"
+```
+
+**响应结构示例**:
+```json
+{
+    "code": 0,
+    "data": {
+        "tools": [
+            {
+                "id": "fbd7a395-ac55-4b9d-95a9-b7427e7817c8",
+                "name": "blueking_cmdb",
+                "main": "blueking_cmdb.py",
+                "version": "8a7bcfb30614afef55cb1ed674c8a11c43704424",
+                "description": "蓝鲸cmdb API版",
+                "status": 1
+            }
+        ]
+    }
+}
+```
+
+**Step 11: 调用接口**:
 ```http
 POST ${LION_MGMT_BASE_URL}/warroom/run
 aioe-auth: <token>
@@ -229,14 +310,14 @@ Content-Type: application/json
   "id": "<当前会话的作战室ID>",
   "type": "action",
   "action_input": {
-    "resource": "<资源ID，不是资源名称>",
-    "node_name": "<从 action 中提取>",
-    "action": "<从 action 中提取>",
-    "action_name": "<从 action 中提取>",
-    "app_name": "<从 action 中提取>",
-    "name": "<从 action 中提取>",
+    "resource": "<从 Step 9 获取的资源ID>",
+    "node_name": "<从 Step 10 获取的 name>",
+    "action": "<从 action 中提取 func>",
+    "action_name": "<从 action 中提取 name>",
+    "app_name": "<从 Step 10 获取的 name>",
+    "name": "<从 Step 10 获取的 name>",
     "app_ver": "<从 action 中提取>",
-    "main": "<从 action 中提取>",
+    "main": "<从 Step 10 获取的 main>",
     "action_input": {
       // 从用户对话中提取的参数
     },
@@ -252,11 +333,11 @@ Content-Type: application/json
   "type": "action",
   "action_input": {
     "resource": "7b07b298-8afa-4384-ae36-8b131aaf06bb",
-    "node_name": "微步在线",
+    "node_name": "threatbook",
     "action": "ip_query",
     "action_name": "IP分析，目前支持单个查询",
     "app_name": "threatbook",
-    "name": "微步在线",
+    "name": "threatbook",
     "app_ver": "6d86a27ac2f7be76154e986c05f13994daff0a60",
     "main": "main.py",
     "action_input": {
@@ -283,7 +364,7 @@ Content-Type: application/json
 
 **匹配字段**: `summary`, `description`, `operationId`
 
-**匹配成功后**: 直接跳到 **Step 10**（调用对应接口）
+**匹配成功后**: 直接跳到 **Step 11**（调用对应接口）
 
 **调用接口**: 根据 OpenAPI 定义构造 HTTP 请求
 
@@ -375,19 +456,29 @@ Content-Type: application/json
    - ❌ 不要假设 token 仍然有效
    - ❌ 不要假设数据未变
    - Token 可能会过期，使用过期的 token 会导致 401 错误
-3. **严格顺序**: 必须先尝试 playbook，失败后才尝试 action，再失败才尝试 openapi
-4. **作战室 ID 获取**（重要）:
+3. **账户权限隔离**（重要）:
+   - ✅ Step 2 获取 OpenAPI 信息时，必须使用 admin 账户
+   - ❌ Step 3-13 的所有其他接口，严禁使用 admin 账户，必须使用普通用户账户
+   - ❌ 不要在业务接口（playbook、action、warroom 等）中使用 admin token
+   - 原因：admin 账户拥有超级权限，业务操作必须使用普通用户以确保权限隔离和审计追踪
+4. **严格顺序**: 必须先尝试 playbook，失败后才尝试 action，再失败才尝试 openapi
+5. **作战室 ID 获取**（重要）:
    - ✅ 从当前会话上下文中获取作战室 ID
    - ❌ 不要查询作战室列表 (`/warroom/list`)
    - ❌ 不要使用历史记忆中的旧作战室 ID
-5. **资源 ID 获取**（重要）:
+6. **资源 ID 获取**（重要）:
    - ✅ 调用 `POST /tools/resource/detailed` 获取资源 ID
    - ✅ 使用响应中的 `data[0].id` 字段
    - ❌ 不要使用资源名称（如"微步在线-个人"）
-6. **区分响应类型**:
+7. **工具信息获取**（重要）:
+   - ✅ 调用 `POST /tools/all` 获取工具详细信息
+   - ✅ 使用 action 中的 `app_name` 作为搜索关键字
+   - ✅ 从响应的 `data.tools[0]` 中提取 `name` 和 `main` 字段
+   - ❌ 不要直接使用 action 中的 `node_name`、`app_name`、`name`、`main` 字段
+8. **区分响应类型**:
    - Playbook/Action: 必须从响应中提取 `run_id`，并通过 run_id 查询执行结果，返回给用户
    - OpenAPI: 直接返回业务数据，无需提取 run_id
-7. **禁止使用记忆中的资源状态**（重要）:
+9. **禁止使用记忆中的资源状态**（重要）:
    - ❌ 禁止说"我记得上次这个资源不可用，所以跳过"
    - ❌ 禁止说"根据历史记录，这个动作不存在"
    - ❌ 禁止说"之前尝试过失败了，所以不再尝试"
@@ -415,10 +506,11 @@ Content-Type: application/json
 5. ✅ Step 5: 调用 `POST /tools/actions/available` 获取动作列表
 6. ✅ Step 6: 匹配 action → 找到 "IP分析" 动作
 7. ✅ Step 9: 调用 `POST /tools/resource/detailed` 查询资源 ID
-8. ✅ Step 10: 调用 `POST /warroom/run` 执行动作
-9. ✅ Step 11: 获取响应并提取 `run_id: "run_12345"`
-10. ✅ Step 11: 调用 `GET /warroom/run/run_12345` 查询执行结果
-11. ✅ Step 12: 返回给用户:
+8. ✅ Step 10: 调用 `POST /tools/all` 查询工具信息（获取 name、main 等字段）
+9. ✅ Step 11: 调用 `POST /warroom/run` 执行动作
+10. ✅ Step 12: 获取响应并提取 `run_id: "run_12345"`
+11. ✅ Step 12: 调用 `GET /warroom/run/run_12345` 查询执行结果
+12. ✅ Step 13: 返回给用户:
     ```
     ✅ 已提交 IP 威胁情报查询任务
     执行 ID: run_12345

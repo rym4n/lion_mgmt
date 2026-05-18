@@ -150,16 +150,16 @@ class ErrorCode(BaseErrorCode):
     MCP_EXECUTION_FAILED = ErrorData(4117, "Execution failed")
     MCP_RATE_LIMIT_EXCEEDED = ErrorData(4118, "Rate limit exceeded")
 
-    TENANT_ALREADY_EXISTS = ErrorData(4119, "已存在同名工作空间")
-    TENANT_HAS_MEMBERS = ErrorData(4120, "工作空间存在成员，禁止删除")
-    TENANT_NOT_FOUND = ErrorData(4121, "工作空间不存在")
-    CANNOT_DELETE_TENANT = ErrorData(4122, "默认工作空间禁止删除")
+    TENANT_ALREADY_EXISTS = ErrorData(4119, "已存在同名租户")
+    TENANT_HAS_MEMBERS = ErrorData(4120, "租户存在成员，禁止删除")
+    TENANT_NOT_FOUND = ErrorData(4121, "租户不存在")
+    CANNOT_DELETE_TENANT = ErrorData(4122, "默认租户禁止删除")
     ROLE_CANNOT_DELETE = ErrorData(4123, "超管角色禁止删除")
 
     ACTION_TIMEOUT = ErrorData(4124, "执行超时")
-    DELETE_SONG_USERS_FAILED = ErrorData(4125, "部分用户由于只存在一个工作空间删除失败")
-    NOT_EXIST_IN_TENANT = ErrorData(4126, "当前用户不存在工作空间下")
-    DEFAULT_TENANT_NOT_FOUND = ErrorData(4127, "默认工作空间未配置")
+    DELETE_SONG_USERS_FAILED = ErrorData(4125, "部分用户由于只存在一个租户删除失败")
+    NOT_EXIST_IN_TENANT = ErrorData(4126, "当前用户不存在租户下")
+    DEFAULT_TENANT_NOT_FOUND = ErrorData(4127, "默认租户未配置")
     DEFAULT_ROLE_NOT_FOUND = ErrorData(4128, "默认角色未配置")
     IMPORT_PART_EVENT_INGESTION_FAIL = ErrorData(4129, "部分事件接入导入失败，请检查名称或端口是否重复")
     IMPORT_FLOW_ERROR = ErrorData(4130, "部分剧本导入失败，请检查是否存在相同剧本")
@@ -171,4 +171,8 @@ class ErrorCode(BaseErrorCode):
 
     ANCHOR_NOT_FOUND = ErrorData(4135, "宿主机标识文件未挂载，请检查 Docker 卷挂载配置")
     MACHINE_CODE_MISMATCH = ErrorData(4136, "机器码不匹配，License与当前服务器不绑定")
+
     NOT_FOUND_TO_AI = ErrorData(4137, "缺少AI相关功能权限，请联系管理员")
+    NOT_FOUND_TO_INSPECTION = ErrorData(4138, "缺少巡检导入模板文件，请联系管理员")
+    READ_FAILED_TO_INSPECTION = ErrorData(4139, "模板文件读取失败，请联系管理员")
+    SCHEDULE_NOT_FOUND = ErrorData(4140, "巡检任务不存在，请检查后重新上传")

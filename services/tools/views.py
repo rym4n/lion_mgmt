@@ -10,8 +10,6 @@ import operator
 import os
 from pathlib import Path
 import re
-import shutil
-import subprocess
 import time
 import uuid
 import zipfile
@@ -663,21 +661,13 @@ async def all_tools(request):
     if available_only:
         # 获取所有工具的资源模型
         tool_names = [pair["name"] for pair in subquery_results]
-        tool_resources_model = await ToolResourcesModel.filter(
-            tool_name__in=tool_names,
-            deleted=False,
-            tenant_id=tenant_id
-        ).values("tool_name", "status")
+        tool_resources_model = await ToolResourcesModel.filter(tool_name__in=tool_names, deleted=False, tenant_id=tenant_id).values("tool_name", "status")
 
         # 构建工具资源状态映射
         tool_resource_map = {tr["tool_name"]: tr["status"] for tr in tool_resources_model}
 
         # 获取所有实际存在的资源（用于判断status=1的工具是否有资源）
-        actual_resources = await ToolResources.filter(
-            tool_name__in=tool_names,
-            deleted=False,
-            tenant_id=tenant_id
-        ).values_list("tool_name", flat=True)
+        actual_resources = await ToolResources.filter(tool_name__in=tool_names, deleted=False, tenant_id=tenant_id).values_list("tool_name", flat=True)
         tools_with_resources = set(actual_resources)
 
         # 过滤出可用的工具
@@ -2777,10 +2767,11 @@ async def resource_search(request):
     模糊搜索资源名称，并在返回结果中带上对应的工具英文名
     """
     keyword = request.json.get("keyword", "")
+    tenant_id = request.ctx.session.get("tenant_id")
     if not keyword:
         return response_ok([])
 
-    resources = await ToolResources.filter(name__icontains=keyword, deleted=False, internal=False).all()
+    resources = await ToolResources.filter(name__icontains=keyword, deleted=False, internal=False, tenant_id=tenant_id).all()
     result = []
     for res in resources:
         result.append(res.json)
@@ -2832,11 +2823,7 @@ async def get_available_actions(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     # 获取所有 maintain=False 的工具名称
-    available_tool_names = await Tool.filter(
-        deleted=False,
-        maintain=False,
-        tenant_id=tenant_id
-    ).values_list("name", flat=True)
+    available_tool_names = await Tool.filter(deleted=False, maintain=False, tenant_id=tenant_id).values_list("name", flat=True)
 
     # 获取所有工具资源模型
     tool_resources = await ToolResourcesModel.filter(deleted=False, tenant_id=tenant_id).all()
@@ -2845,19 +2832,11 @@ async def get_available_actions(request):
     tool_resource_status = {tr.tool_name: tr.status for tr in tool_resources}
 
     # 获取所有实际存在的资源（用于判断status=1的工具是否有资源）
-    actual_resources = await ToolResources.filter(
-        deleted=False,
-        tenant_id=tenant_id,
-        tool_name__in=available_tool_names
-    ).values_list("tool_name", flat=True)
+    actual_resources = await ToolResources.filter(deleted=False, tenant_id=tenant_id, tool_name__in=available_tool_names).values_list("tool_name", flat=True)
     tools_with_resources = set(actual_resources)
 
     # 获取这些工具的动作（只查询 maintain=False 的工具）
-    actions = await ToolAction.filter(
-        deleted=False,
-        tenant_id=tenant_id,
-        tool_name__in=available_tool_names
-    ).all()
+    actions = await ToolAction.filter(deleted=False, tenant_id=tenant_id, tool_name__in=available_tool_names).all()
 
     result = []
     for action in actions:
@@ -2871,23 +2850,27 @@ async def get_available_actions(request):
         if tool_status is None or tool_status == 0:
             # 没有资源模型或status=0，认为可用
             action_data = action.action
-            result.append({
-                "id": str(action.id),
-                "name": action_data.get("name", ""),
-                "description": action_data.get("name", ""),
-                "tool_name": action.tool_name,
-                "version": action.version_number,
-            })
+            result.append(
+                {
+                    "id": str(action.id),
+                    "name": action_data.get("name", ""),
+                    "description": action_data.get("name", ""),
+                    "tool_name": action.tool_name,
+                    "version": action.version_number,
+                }
+            )
         elif tool_status == 1 and action.tool_name in tools_with_resources:
             # status=1 且存在实际资源，认为可用
             action_data = action.action
-            result.append({
-                "id": str(action.id),
-                "name": action_data.get("name", ""),
-                "description": action_data.get("name", ""),
-                "tool_name": action.tool_name,
-                "version": action.version_number,
-            })
+            result.append(
+                {
+                    "id": str(action.id),
+                    "name": action_data.get("name", ""),
+                    "description": action_data.get("name", ""),
+                    "tool_name": action.tool_name,
+                    "version": action.version_number,
+                }
+            )
 
     return response_ok(result)
 
@@ -2960,13 +2943,7 @@ async def sync_health_status(request):
         state = item.get("state", "available")
 
         if tool_name and resource_name:
-            resource = await ToolResources.get_or_none(
-                tool_name=tool_name,
-                name=resource_name,
-                deleted=False,
-                tenant_id=tenant_id,
-                internal=False
-            )
+            resource = await ToolResources.get_or_none(tool_name=tool_name, name=resource_name, deleted=False, tenant_id=tenant_id, internal=False)
             if resource:
                 resource.status = state
                 await resource.save(update_fields=["status"])
@@ -2980,13 +2957,7 @@ async def sync_health_status(request):
         state = item.get("state", "unavailable")
 
         if tool_name and resource_name:
-            resource = await ToolResources.get_or_none(
-                tool_name=tool_name,
-                name=resource_name,
-                deleted=False,
-                tenant_id=tenant_id,
-                internal=False
-            )
+            resource = await ToolResources.get_or_none(tool_name=tool_name, name=resource_name, deleted=False, tenant_id=tenant_id, internal=False)
             if resource:
                 resource.status = state
                 await resource.save(update_fields=["status"])
@@ -3000,24 +2971,20 @@ async def sync_health_status(request):
         state = item.get("state", "unknown")
 
         if tool_name and resource_name:
-            resource = await ToolResources.get_or_none(
-                tool_name=tool_name,
-                name=resource_name,
-                deleted=False,
-                tenant_id=tenant_id,
-                internal=False
-            )
+            resource = await ToolResources.get_or_none(tool_name=tool_name, name=resource_name, deleted=False, tenant_id=tenant_id, internal=False)
             if resource:
                 resource.status = state
                 await resource.save(update_fields=["status"])
                 updated_count += 1
                 status_counts["unknown"] += 1
 
-    return response_ok({
-        "message": "资源健康状态同步成功",
-        "updated_count": updated_count,
-        "details": status_counts,
-    })
+    return response_ok(
+        {
+            "message": "资源健康状态同步成功",
+            "updated_count": updated_count,
+            "details": status_counts,
+        }
+    )
 
 
 class SSEStreamingHook(AgentHook):
@@ -3038,6 +3005,7 @@ class SSEStreamingHook(AgentHook):
         self._has_content = False
         self._screenshot_files = set()  # 记录已发送的截图文件
         self._accumulated_content = ""  # 累积内容，用于检测代码 JSON
+        self._skip_streaming = False  # 是否跳过流式输出（检测到代码 JSON 时设置）
 
     def wants_streaming(self) -> bool:
         return True
@@ -3047,6 +3015,18 @@ class SSEStreamingHook(AgentHook):
         self._has_content = True
         self._accumulated_content += delta
 
+        # 检测是否包含代码 JSON 特征，如果是则停止流式输出
+        if not self._skip_streaming:
+            # 检测代码 JSON 的开始标志
+            if ('"config"' in self._accumulated_content and '"main"' in self._accumulated_content) or ("```json" in self._accumulated_content and '"config"' in self._accumulated_content):
+                self._skip_streaming = True
+                logger.info("[SSEStreamingHook] 检测到代码 JSON，停止流式输出")
+                return
+
+        # 如果已经检测到代码 JSON，跳过流式输出
+        if self._skip_streaming:
+            return
+
         try:
             message = orjson.dumps({"status": "message", "content": delta}).decode()
             await self.sse_response.send(f"data: {message}\n\n")
@@ -3055,8 +3035,56 @@ class SSEStreamingHook(AgentHook):
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         """流式输出结束时检测并提取代码 JSON"""
-        # 尝试从累积内容中提取代码 JSON
+        # 先检查 workspace 中是否有代码文件（优先从文件读取）
+        code_from_file = await self._extract_code_from_files()
+        if code_from_file:
+            await self._send_code_json(code_from_file)
+            # 恢复流式输出
+            self._skip_streaming = False
+            return
+
+        # 如果文件中没有，再尝试从累积内容中提取
         await self._extract_and_send_code_json()
+        # 恢复流式输出
+        self._skip_streaming = False
+
+    async def _extract_code_from_files(self):
+        """从 workspace 文件中提取代码"""
+        try:
+            # 查找 config.json 和 main.py
+            config_path = self.workspace_path / "config.json"
+            main_path = self.workspace_path / "main.py"
+
+            if config_path.exists() and main_path.exists():
+                logger.info(f"[SSEStreamingHook] 从文件中提取代码: {config_path}, {main_path}")
+
+                # 读取文件内容
+                config_content = config_path.read_text(encoding="utf-8")
+                main_content = main_path.read_text(encoding="utf-8")
+
+                # 读取完成后删除文件
+                try:
+                    config_path.unlink()
+                    main_path.unlink()
+                    logger.info(f"[SSEStreamingHook] 已删除代码文件: {config_path}, {main_path}")
+                except Exception as e:
+                    logger.warning(f"[SSEStreamingHook] 删除代码文件失败: {e}")
+
+                return {"config": config_content, "main": main_content}
+        except Exception as e:
+            logger.error(f"[SSEStreamingHook] 从文件提取代码失败: {e}")
+
+        return None
+
+    async def _send_code_json(self, code_data):
+        """发送代码 JSON"""
+        try:
+            # 发送代码 JSON
+            message = orjson.dumps({"status": "code", "data": code_data}).decode()
+            await self.sse_response.send(f"data: {message}\n\n")
+            logger.info("[SSEStreamingHook] 已发送代码 JSON")
+        except Exception as e:
+            logger.error(f"[SSEStreamingHook] 发送代码 JSON 失败: {e}")
 
     async def _extract_and_send_code_json(self):
         """从累积内容中提取代码 JSON 并发送"""
@@ -3064,17 +3092,39 @@ class SSEStreamingHook(AgentHook):
             json_str = None
 
             # 方式1: 查找 JSON 代码块（```json ... ```）
-            json_pattern = r'```json\s*\n(.*?)\n```'
+            json_pattern = r"```json\s*\n(.*?)\n```"
             matches = re.findall(json_pattern, self._accumulated_content, re.DOTALL)
             if matches:
                 json_str = matches[-1].strip()
 
             # 方式2: 查找纯 JSON 对象（{"config":...,"main":...}）
+            # 使用更宽松的匹配策略，查找完整的 JSON 对象
             if not json_str:
-                pure_json_pattern = r'\{["\']config["\']\s*:\s*["\'].*?["\'],\s*["\']main["\']\s*:\s*["\'].*?["\']\s*\}'
-                matches = re.findall(pure_json_pattern, self._accumulated_content, re.DOTALL)
-                if matches:
-                    json_str = matches[-1].strip()
+                # 查找所有可能的 JSON 对象起始位置
+                start_positions = [i for i, char in enumerate(self._accumulated_content) if char == "{"]
+
+                for start_pos in reversed(start_positions):  # 从后往前尝试
+                    # 尝试找到匹配的右括号
+                    brace_count = 0
+                    for end_pos in range(start_pos, len(self._accumulated_content)):
+                        if self._accumulated_content[end_pos] == "{":
+                            brace_count += 1
+                        elif self._accumulated_content[end_pos] == "}":
+                            brace_count -= 1
+                            if brace_count == 0:
+                                # 找到完整的 JSON 对象
+                                potential_json = self._accumulated_content[start_pos : end_pos + 1]
+                                try:
+                                    # 尝试解析
+                                    test_data = orjson.loads(potential_json)
+                                    # 检查是否包含 config 和 main 字段
+                                    if "config" in test_data and "main" in test_data:
+                                        json_str = potential_json
+                                        break
+                                except:
+                                    continue
+                    if json_str:
+                        break
 
             if json_str:
                 # 尝试解析 JSON
@@ -3083,15 +3133,17 @@ class SSEStreamingHook(AgentHook):
 
                     # 检查是否包含 config 和 main 字段
                     if "config" in code_data and "main" in code_data:
+                        # 将转义的换行符转换为真正的换行符
+                        if "config" in code_data and isinstance(code_data["config"], str):
+                            code_data["config"] = code_data["config"].replace("\\n", "\n").replace("\\t", "\t")
+                        if "main" in code_data and isinstance(code_data["main"], str):
+                            code_data["main"] = code_data["main"].replace("\\n", "\n").replace("\\t", "\t")
+
                         # 发送代码 JSON
-                        message = orjson.dumps({
-                            "status": "code",
-                            "data": code_data
-                        }).decode()
-                        await self.sse_response.send(f"data: {message}\n\n")
-                        logger.info("[SSEStreamingHook] 已发送代码 JSON")
+                        await self._send_code_json(code_data)
                 except orjson.JSONDecodeError as e:
                     logger.warning(f"[SSEStreamingHook] 解析代码 JSON 失败: {e}")
+                    logger.debug(f"[SSEStreamingHook] 失败的 JSON 字符串前100字符: {json_str[:100]}")
         except Exception as e:
             logger.error(f"[SSEStreamingHook] 提取代码 JSON 失败: {e}")
 
@@ -3104,10 +3156,7 @@ class SSEStreamingHook(AgentHook):
             tool_name = tool_call.name
             try:
                 # 发送工具执行状态
-                message = orjson.dumps({
-                    "status": "executing",
-                    "message": f"正在执行 {tool_name}..."
-                }).decode()
+                message = orjson.dumps({"status": "executing", "message": f"正在执行 {tool_name}..."}).decode()
                 await self.sse_response.send(f"data: {message}\n\n")
             except Exception as e:
                 logger.error(f"[SSEStreamingHook] 发送工具调用消息失败: {e}")
@@ -3134,10 +3183,7 @@ class SSEStreamingHook(AgentHook):
                 else:
                     error_msg = "AI 调用失败，请稍后重试"
 
-                message = orjson.dumps({
-                    "status": "error",
-                    "message": error_msg
-                }).decode()
+                message = orjson.dumps({"status": "error", "message": error_msg}).decode()
                 await self.sse_response.send(f"data: {message}\n\n")
             except Exception as e:
                 logger.error(f"[SSEStreamingHook] 发送错误消息失败: {e}")
@@ -3148,11 +3194,7 @@ class SSEStreamingHook(AgentHook):
             with open(screenshot_path, "rb") as f:
                 screenshot_data = base64.b64encode(f.read()).decode()
 
-            message = orjson.dumps({
-                "status": "screenshot",
-                "data": screenshot_data,
-                "filename": screenshot_path.name
-            }).decode()
+            message = orjson.dumps({"status": "screenshot", "data": screenshot_data, "filename": screenshot_path.name}).decode()
             await self.sse_response.send(f"data: {message}\n\n")
             logger.info(f"[SSEStreamingHook] 已发送截图: {screenshot_path.name}")
 
@@ -3168,8 +3210,8 @@ class SSEStreamingHook(AgentHook):
 
 @tools_bp.post("/browser/execute")
 @openapi.definition(
-    summary="执行应用智能开发任务",
-    description="通过自然语言调用执行应用智能开发任务，支持会话上下文和截图返回（需要工具查看权限）",
+    summary="执行智能任务",
+    description="通过自然语言执行各类智能任务（浏览器自动化、SSH服务器操作、API调用等），支持会话上下文（需要工具查看权限）",
     body={
         "application/json": {
             "schema": {
@@ -3178,7 +3220,7 @@ class SSEStreamingHook(AgentHook):
                 "properties": {
                     "task": {
                         "type": "string",
-                        "description": "应用智能开发任务描述（自然语言）",
+                        "description": "任务描述（自然语言）",
                     },
                     "session_id": {
                         "type": "string",
@@ -3193,19 +3235,19 @@ class SSEStreamingHook(AgentHook):
 @requires_permission("tool:r")
 async def browser_execute(request):
     """
-    通过 nanobot 执行浏览器自动化任务
+    通过 nanobot 执行智能任务
 
     工作流程：
     1. 接收自然语言任务描述
     2. 如果提供 session_id，加载历史上下文
     3. 调用 nanobot 处理任务
-    4. nanobot 自动调用 agent-browser skill
+    4. nanobot 根据任务类型自动调用相应的 skill（浏览器自动化、SSH操作、API调用等）
     5. 实时返回执行进度、结果和截图
 
     SSE 事件类型：
     - status: starting - 开始处理任务
     - status: processing - nanobot 正在理解任务
-    - status: executing - 正在执行工具（如 agent-browser）
+    - status: executing - 正在执行工具
     - status: message - 文本消息流式输出
     - status: screenshot - 截图数据（base64 编码）
     - status: code - 生成的代码（JSON 格式：{"config": "...", "main": "..."}）
@@ -3250,16 +3292,16 @@ async def browser_execute(request):
         tenant_id = request.ctx.session.get("tenant_id")
 
         # 返回 session_id 给客户端，用于后续请求
-        start_data = orjson.dumps({
-            "status": "starting",
-            "message": "开始处理浏览器自动化任务...",
-            "session_id": session_id
-        }).decode()
+        start_data = orjson.dumps({"status": "starting", "message": "开始处理任务...", "session_id": session_id}).decode()
         await resp.send(f"data: {start_data}\n\n")
 
         # 1. 初始化 NanobotClient（使用当前租户的 workspace）
         tenant_workspace = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace"
         logger.info(f"初始化 NanobotClient，tenant_id={tenant_id}, session_id={session_id}, workspace={tenant_workspace}")
+
+        # 设置环境变量，让 agent-browser 将截图保存到 workspace
+        os.environ["AGENT_BROWSER_SCREENSHOT_DIR"] = str(tenant_workspace)
+
         client = NanobotClient(session_id=session_id, workspace=tenant_workspace)
 
         # 获取 workspace 路径用于检测截图
@@ -3270,42 +3312,18 @@ async def browser_execute(request):
 
         # 3. 构建完整消息：系统指令 + 用户任务
         full_message = f"""<system_instruction>
-【身份】你是浏览器自动化助手，专门帮助用户完成网页操作任务。
+【身份】你是智能任务执行助手，根据用户任务选择合适的 skill 完成工作。
 
-【重要】你必须使用 agent-browser skill 来执行所有浏览器操作，绝对不要尝试安装或使用 playwright！
+【能力范围】
+- 浏览器自动化：网页操作、数据抓取、表单填写等
+- SSH服务器操作：远程命令执行、文件管理、系统配置等
+- API调用：接口测试、数据查询、文档生成等
 
-【工作流程】
-1. 用户输入浏览器任务 → 立即使用 agent-browser skill 执行
-2. 返回执行结果和截图
-3. 如果用户要求"生成代码" → 使用 aioe-app-dev skill 生成 Python 代码
-
-【执行浏览器任务 - 必须遵守】
-1. **立即调用 agent-browser skill**，不要用文字回复
-2. agent-browser skill 的调用方式示例：
-   ```python
-   import subprocess
-   result = subprocess.run([
-       "python", "skills/agent-browser/scripts/agent_browser_wrapper.py",
-       "batch", "--bail",
-       "open https://example.com",
-       "wait 3000",
-       "screenshot screenshot.png"
-   ], capture_output=True, text=True)
-   ```
-3. 截图会自动保存到 workspace 目录
-4. 执行完成后，用自己的话总结结果
+【重要规则】
+- 必须提供真实执行结果（截图和输出），禁止伪造，截图必须是真实截图，即使拥有真实数据也不能自己生成图片当作截图
 
 【生成代码】
-当用户要求"生成代码"时：
-1. 回顾会话中的浏览器操作历史
-2. 使用 aioe-app-dev skill 生成 Python 代码
-3. 以 JSON 格式返回：{{"config": "...", "main": "..."}}
-4. 不要使用 write_file 工具
-
-【重要】
-- 直接调用 agent-browser skill，不要问用户
-- 不要尝试安装 playwright
-- 截图自动保存到 workspace
+用户要求"生成代码"时，回顾会话中的操作历史，必须使用 aioe-app-dev skill 生成，返回 JSON 格式：{{"config": "...", "main": "..."}}
 </system_instruction>
 
 <user_task>
@@ -3322,12 +3340,7 @@ async def browser_execute(request):
         logger.info(f"准备调用 nanobot，session_key={session_key}")
         logger.info(f"消息内容长度: {len(full_message)} 字符")
 
-        result = await client.ask(
-            message=full_message,
-            streaming=True,
-            session_key=session_key,
-            hooks=[hook]
-        )
+        result = await client.ask(message=full_message, streaming=True, session_key=session_key, hooks=[hook])
 
         logger.info(f"Nanobot 调用完成，返回结果长度: {len(result) if result else 0} 字符")
 
@@ -3336,15 +3349,11 @@ async def browser_execute(request):
         await resp.send(f"data: {completed_data}\n\n")
 
     except Exception as e:
-        logger.exception("浏览器自动化任务执行失败")
+        logger.exception("自动化任务执行失败")
         try:
             if resp:
                 # 使用 orjson 确保 JSON 安全
-                error_data = orjson.dumps({
-                    "status": "error",
-                    "message": f"执行失败: {str(e)}",
-                    "session_id": session_id  # 即使失败也返回 session_id
-                }).decode()
+                error_data = orjson.dumps({"status": "error", "message": f"执行失败: {str(e)}", "session_id": session_id}).decode()  # 即使失败也返回 session_id
                 await resp.send(f"data: {error_data}\n\n")
         except Exception as send_error:
             logger.error(f"发送错误消息失败: {send_error}")
@@ -3403,21 +3412,20 @@ async def delete_browser_session(request):
     删除浏览器自动化会话
 
     删除内容：
-    1. 会话专属的 workspace 文件夹（{workspace_base}/browser-{session_id}/）
+    1. 应用开发会话
     """
     session_id = request.json.get("session_id")
     if not session_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
 
-    workspace_dir = Path(NANOBOT_WORKSPACE_BASE) / f"browser-{session_id}"
-    if workspace_dir.exists() and workspace_dir.is_dir():
+    sessions_file = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace/sessions" / f"browser-{session_id}"
+    if sessions_file.exists():
         try:
-            shutil.rmtree(workspace_dir)
-            logger.info(f"已删除会话 {session_id} 的 workspace: {workspace_dir}")
+            os.remove(sessions_file)
             return response_ok({"message": "会话删除成功"})
         except Exception as e:
             logger.error(f"删除 workspace 失败: {e}")
             return response_ok({"message": "会话删除失败"})
 
     return response_ok({"message": "会话删除成功"})
-

@@ -5,9 +5,12 @@
 巡检模块API路由层
 Inspection Module API Routes Layer
 """
+
 import ast
 import asyncio
 import orjson
+import os
+
 from datetime import datetime
 from sanic import Blueprint, Request
 from sanic.log import logger
@@ -19,17 +22,18 @@ from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.kafka import aproduce
-from libs.utils import gen_run_id
+from libs.utils import gen_run_id, upload_to_s3
 from models import Timed, Playbook, PlaybookVersion, InspectionTarget, InspectionCategory, InspectionResult
 from settings import TASK_TOPIC
 from . import logic
-from sanic.response import json
+from sanic.response import raw
 
 inspection_bp = Blueprint("inspection", url_prefix="/inspection")
 __all__ = ["inspection_bp"]
 
 
 # ==================== Schedule Management ====================
+
 
 @inspection_bp.post("/schedule/save")
 @openapi.definition(
@@ -95,16 +99,18 @@ async def save_schedule(request: Request):
 
     schedule = await logic.save_schedule(data, tenant_id)
 
-    return response_ok(data={
-        "id": schedule.id,
-        "name": schedule.name,
-        "schedule_cron": schedule.schedule_cron,
-        "owner": schedule.owner,
-        "enabled": schedule.enabled,
-        "description": schedule.description,
-        "ctime": schedule.ctime.isoformat() if schedule.ctime else None,
-        "utime": schedule.utime.isoformat() if schedule.utime else None,
-    })
+    return response_ok(
+        data={
+            "id": schedule.id,
+            "name": schedule.name,
+            "schedule_cron": schedule.schedule_cron,
+            "owner": schedule.owner,
+            "enabled": schedule.enabled,
+            "description": schedule.description,
+            "ctime": schedule.ctime.isoformat() if schedule.ctime else None,
+            "utime": schedule.utime.isoformat() if schedule.utime else None,
+        }
+    )
 
 
 @inspection_bp.post("/schedule/get")
@@ -167,16 +173,18 @@ async def get_schedule(request: Request):
     if not schedule:
         raise CustomError(ErrorCode.NOT_FOUND)
 
-    return response_ok(data={
-        "id": schedule.id,
-        "name": schedule.name,
-        "schedule_cron": schedule.schedule_cron,
-        "owner": schedule.owner,
-        "enabled": schedule.enabled,
-        "description": schedule.description,
-        "ctime": schedule.ctime.isoformat() if schedule.ctime else None,
-        "utime": schedule.utime.isoformat() if schedule.utime else None,
-    })
+    return response_ok(
+        data={
+            "id": schedule.id,
+            "name": schedule.name,
+            "schedule_cron": schedule.schedule_cron,
+            "owner": schedule.owner,
+            "enabled": schedule.enabled,
+            "description": schedule.description,
+            "ctime": schedule.ctime.isoformat() if schedule.ctime else None,
+            "utime": schedule.utime.isoformat() if schedule.utime else None,
+        }
+    )
 
 
 @inspection_bp.post("/schedule/list")
@@ -249,13 +257,7 @@ async def list_schedules(request: Request):
     enabled = data.get("enabled")
     keyword = data.get("keyword")
 
-    result = await logic.list_schedules(
-        page=page,
-        page_size=page_size,
-        tenant_id=tenant_id,
-        enabled=enabled,
-        keyword=keyword
-    )
+    result = await logic.list_schedules(page=page, page_size=page_size, tenant_id=tenant_id, enabled=enabled, keyword=keyword)
 
     return response_ok(data=result)
 
@@ -316,7 +318,83 @@ async def delete_schedule(request: Request):
     return response_ok(data={"message": "删除成功"})
 
 
+# ==================== Notify Config Management ====================
+
+
+@inspection_bp.post("/schedule/notify")
+@openapi.definition(
+    summary="巡检通知配置",
+    description="为指定巡检任务配置通知（注意：通知动作配置是覆盖式）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["schedule_id", "notify_enabled", "notify_config"],
+                "properties": {
+                    "schedule_id": {"type": "string", "description": "巡检任务ID"},
+                    "notify_enabled": {"type": "boolean", "description": "是否启用通知"},
+                    "notify_config": {"type": "object", "description": "通知动作配置"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "创建成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "schedule_id": {"type": "string"},
+                                    "notify_enabled": {"type": "boolean"},
+                                    "notify_config": {"type": "object"},
+                                    "utime": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:c")
+async def create_notify_config(request: Request):
+    """
+    巡检通知配置
+    Create inspection notification configuration
+    """
+    data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    schedule_id = data.get("schedule_id")
+    notify_enabled = data.get("notify_enabled")
+    notify_config = data.get("notify_config")
+
+    if not schedule_id or notify_enabled is None or notify_config is None:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    schedule = await logic.notify_config(schedule_id, notify_enabled, notify_config, tenant_id)
+
+    return response_ok(
+        data={
+            "id": schedule.id,
+            "schedule_id": schedule_id,
+            "notify_enabled": schedule.notify_enabled,
+            "notify_config": schedule.notify_config,
+            "utime": schedule.utime.isoformat() if schedule.utime else None,
+        }
+    )
+
+
 # ==================== Category Management ====================
+
 
 @inspection_bp.post("/category/create")
 @openapi.definition(
@@ -336,7 +414,7 @@ async def delete_schedule(request: Request):
                         "resource_ids": {"type": "array", "items": {"type": "string"}, "description": "资源ID列表"},
                         "enabled": {"type": "boolean", "description": "是否启用"},
                     },
-                }
+                },
             }
         }
     },
@@ -498,13 +576,7 @@ async def list_categories(request: Request):
     schedule_id = data.get("schedule_id")
     enabled = data.get("enabled")
 
-    result = await logic.list_categories(
-        page=page,
-        page_size=page_size,
-        tenant_id=tenant_id,
-        schedule_id=schedule_id,
-        enabled=enabled
-    )
+    result = await logic.list_categories(page=page, page_size=page_size, tenant_id=tenant_id, schedule_id=schedule_id, enabled=enabled)
 
     return response_ok(data=result)
 
@@ -570,16 +642,18 @@ async def get_category(request: Request):
     if not category:
         raise CustomError(ErrorCode.NOT_FOUND)
 
-    return response_ok(data={
-        "id": category.id,
-        "name": category.name,
-        "schedule_id": category.schedule_id,
-        "app_name": category.app_name,
-        "resource_ids": category.resource_ids,
-        "enabled": category.enabled,
-        "ctime": category.ctime.isoformat() if category.ctime else None,
-        "utime": category.utime.isoformat() if category.utime else None,
-    })
+    return response_ok(
+        data={
+            "id": category.id,
+            "name": category.name,
+            "schedule_id": category.schedule_id,
+            "app_name": category.app_name,
+            "resource_ids": category.resource_ids,
+            "enabled": category.enabled,
+            "ctime": category.ctime.isoformat() if category.ctime else None,
+            "utime": category.utime.isoformat() if category.utime else None,
+        }
+    )
 
 
 @inspection_bp.post("/category/update")
@@ -648,16 +722,18 @@ async def update_category(request: Request):
     if not category:
         raise CustomError(ErrorCode.NOT_FOUND)
 
-    return response_ok(data={
-        "id": category.id,
-        "name": category.name,
-        "schedule_id": category.schedule_id,
-        "app_name": category.app_name,
-        "resource_ids": category.resource_ids,
-        "enabled": category.enabled,
-        "ctime": category.ctime.isoformat() if category.ctime else None,
-        "utime": category.utime.isoformat() if category.utime else None,
-    })
+    return response_ok(
+        data={
+            "id": category.id,
+            "name": category.name,
+            "schedule_id": category.schedule_id,
+            "app_name": category.app_name,
+            "resource_ids": category.resource_ids,
+            "enabled": category.enabled,
+            "ctime": category.ctime.isoformat() if category.ctime else None,
+            "utime": category.utime.isoformat() if category.utime else None,
+        }
+    )
 
 
 @inspection_bp.post("/category/delete")
@@ -718,6 +794,7 @@ async def delete_category(request: Request):
 
 # ==================== Target Management ====================
 
+
 @inspection_bp.post("/target/create")
 @openapi.definition(
     summary="创建巡检项",
@@ -736,7 +813,7 @@ async def delete_category(request: Request):
                         "action_name": {"type": "string", "description": "动作名称"},
                         "enabled": {"type": "boolean", "description": "是否启用"},
                     },
-                }
+                },
             }
         }
     },
@@ -808,9 +885,9 @@ async def create_target(request: Request):
         processed_list.append(processed_item)
 
     if not processed_list and data_list:
-         if not data_list:
-             return response_ok(data=[])
-         raise CustomError(ErrorCode.PARAM_ERROR)
+        if not data_list:
+            return response_ok(data=[])
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     targets = await logic.batch_create_targets(processed_list, tenant_id)
 
@@ -905,14 +982,7 @@ async def list_targets(request: Request):
     if not schedule_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    result = await logic.list_targets(
-        page=page,
-        page_size=page_size,
-        tenant_id=tenant_id,
-        schedule_id=schedule_id,
-        enabled=enabled,
-        keyword=keyword
-    )
+    result = await logic.list_targets(page=page, page_size=page_size, tenant_id=tenant_id, schedule_id=schedule_id, enabled=enabled, keyword=keyword)
 
     return response_ok(data=result)
 
@@ -978,24 +1048,22 @@ async def get_target(request: Request):
     if not target:
         raise CustomError(ErrorCode.NOT_FOUND)
 
-    categories = await InspectionCategory.filter(
-        id__in=[target.category_id],
-        deleted=False,
-        tenant_id=tenant_id
-    ).all()
+    categories = await InspectionCategory.filter(id__in=[target.category_id], deleted=False, tenant_id=tenant_id).all()
     category_map = {cat.id: cat.app_name for cat in categories}
 
-    return response_ok(data={
-        "id": target.id,
-        "content": target.content,
-        "category_id": target.category_id,
-        "app_name": category_map.get(target.category_id),
-        "standard": target.standard,
-        "action_name": target.action_name,
-        "enabled": target.enabled,
-        "ctime": target.ctime.isoformat() if target.ctime else None,
-        "utime": target.utime.isoformat() if target.utime else None,
-    })
+    return response_ok(
+        data={
+            "id": target.id,
+            "content": target.content,
+            "category_id": target.category_id,
+            "app_name": category_map.get(target.category_id),
+            "standard": target.standard,
+            "action_name": target.action_name,
+            "enabled": target.enabled,
+            "ctime": target.ctime.isoformat() if target.ctime else None,
+            "utime": target.utime.isoformat() if target.utime else None,
+        }
+    )
 
 
 @inspection_bp.post("/target/update")
@@ -1063,16 +1131,18 @@ async def update_target(request: Request):
     if not target:
         raise CustomError(ErrorCode.NOT_FOUND)
 
-    return response_ok(data={
-        "id": target.id,
-        "content": target.content,
-        "category_id": target.category_id,
-        "standard": target.standard,
-        "action_name": target.action_name,
-        "enabled": target.enabled,
-        "ctime": target.ctime.isoformat() if target.ctime else None,
-        "utime": target.utime.isoformat() if target.utime else None,
-    })
+    return response_ok(
+        data={
+            "id": target.id,
+            "content": target.content,
+            "category_id": target.category_id,
+            "standard": target.standard,
+            "action_name": target.action_name,
+            "enabled": target.enabled,
+            "ctime": target.ctime.isoformat() if target.ctime else None,
+            "utime": target.utime.isoformat() if target.utime else None,
+        }
+    )
 
 
 @inspection_bp.post("/target/delete")
@@ -1143,6 +1213,7 @@ async def delete_target(request: Request):
                 "properties": {
                     "schedule_id": {"type": "string", "description": "巡检任务ID"},
                     "target_id": {"type": "string", "description": "巡检项ID（可选，如果提供则只返回该巡检项的配置）"},
+                    "tenant_id": {"type": "string", "description": "租户ID"},
                 },
             }
         }
@@ -1168,8 +1239,8 @@ async def delete_target(request: Request):
                                         "tool_name": {"type": "string"},
                                         "action_name": {"type": "string"},
                                         "action_input": {"type": "string"},
-                                    }
-                                }
+                                    },
+                                },
                             },
                         },
                     }
@@ -1188,8 +1259,8 @@ async def get_all_configs(request: Request):
     schedule_ids = data.get("schedule_id")
     if not schedule_ids:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    target_ids = data.get("target_id") if "target_id" in data else None
-    tenant_id = request.ctx.session.get("tenant_id")
+    target_ids = data.get("target_id") if data.get("target_id") != "None" else None
+    tenant_id = data.get("tenant_id")
     result = await logic.get_all_configs(tenant_id, schedule_ids, target_ids)
     return response_ok(data=result)
 
@@ -1325,40 +1396,22 @@ async def start_inspection(request: Request):
         if timed.enable == 0:
             timed.enable = 1
             timed.updator = request.ctx.session["account_info"]
+            timed.tactics = schedule.schedule_cron  # 更新定时规则，确保修改了调度配置后能生效
             await timed.save()
 
             # 发送消息到 Kafka
-            msg = {
-                "run_type": "flow",
-                "run_args": timed.playbook_input,
-                "timer": "cron",
-                "timer_rule": {
-                    "end_date": timed.end_time,
-                    "crontab": schedule.schedule_cron
-                },
-                "timer_id": timed.id,
-                "tenant_id": tenant_id
-            }
+            msg = {"run_type": "flow", "run_args": timed.playbook_input, "timer": "cron", "timer_rule": {"end_date": timed.end_time, "crontab": schedule.schedule_cron}, "timer_id": timed.id, "tenant_id": tenant_id}
             await aproduce(TASK_TOPIC, msg)
     else:
         # 创建新的定时任务
         # 查找名为"自动化巡检"的剧本
-        playbook = await Playbook.filter(
-            name="自动化巡检",
-            deleted=False,
-            tenant_id=tenant_id,
-            internal=True
-        ).first()
+        playbook = await Playbook.filter(name="自动化巡检", deleted=False, tenant_id=tenant_id, internal=True).first()
 
         if not playbook:
             return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
 
         # 获取该剧本的最新发布版本
-        playbook_version = await PlaybookVersion.filter(
-            playbook_id=playbook.id,
-            tenant_id=tenant_id,
-            status=1  # 假设 status=1 表示已发布
-        ).order_by("-version").first()
+        playbook_version = await PlaybookVersion.filter(playbook_id=playbook.id, tenant_id=tenant_id, status=1).order_by("-utime").first()  # 假设 status=1 表示已发布
 
         if not playbook_version:
             return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
@@ -1366,14 +1419,7 @@ async def start_inspection(request: Request):
         playbook_version_id = playbook_version.id
 
         # 构建剧本输入参数（传入 schedule_id，剧本会查询该 schedule 下所有启用的巡检项）
-        playbook_input = {
-            "flow_id": playbook_version_id,
-            "flow_input": {
-                "schedule_id": schedule_id,
-                "target_id": None
-            },
-            "executor": request.ctx.session.get("account_info").id
-        }
+        playbook_input = {"flow_id": playbook_version_id, "flow_input": {"schedule_id": schedule_id, "target_id": "None", "tenant_id": tenant_id}, "executor": request.ctx.session.get("account_info").id}
 
         # 创建定时任务
         timed = await Timed.create(
@@ -1389,21 +1435,11 @@ async def start_inspection(request: Request):
             creator=request.ctx.session["account_info"],
             updator=request.ctx.session["account_info"],
             tenant_id=tenant_id,
-            internal=True
+            internal=True,
         )
 
         # 发送消息到 Kafka
-        msg = {
-            "run_type": "flow",
-            "run_args": playbook_input,
-            "timer": "cron",
-            "timer_rule": {
-                "end_date": timed.end_time,
-                "crontab": schedule.schedule_cron
-            },
-            "timer_id": timed.id,
-            "tenant_id": tenant_id
-        }
+        msg = {"run_type": "flow", "run_args": playbook_input, "timer": "cron", "timer_rule": {"end_date": timed.end_time, "crontab": schedule.schedule_cron}, "timer_id": timed.id, "tenant_id": tenant_id}
         await aproduce(TASK_TOPIC, msg)
 
     # 更新巡检调度配置为启用状态
@@ -1484,16 +1520,9 @@ async def pause_inspection(request: Request):
         await timed.save()
 
         # 发送消息到 Kafka（通知停止定时任务）
-        msg = {
-            "run_type": "flow",
-            "run_args": timed.playbook_input,
-            "timer": "remove",
-            "timer_rule": {},
-            "timer_id": timed.id,
-            "tenant_id": tenant_id
-        }
+        msg = {"run_type": "flow", "run_args": timed.playbook_input, "timer": "remove", "timer_rule": {}, "timer_id": timed.id, "tenant_id": tenant_id}
         await aproduce(TASK_TOPIC, msg)
-    
+
     # 更新巡检调度配置为暂停状态
     schedule = await logic.get_schedule_by_id(schedule_id, tenant_id)
     if schedule and schedule.enabled:
@@ -1522,11 +1551,7 @@ async def pause_inspection(request: Request):
     response={
         "200": {
             "description": "巡检成功",
-            "content": {
-                "text/event-stream": {
-                    "schema": {"type": "string"}
-                }
-            },
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
         }
     },
 )
@@ -1553,22 +1578,13 @@ async def execute_inspection(request: Request):
     if not schedule:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    playbook = await Playbook.filter(
-        name="自动化巡检",
-        deleted=False,
-        tenant_id=tenant_id,
-        internal=True
-    ).first()
+    playbook = await Playbook.filter(name="自动化巡检", deleted=False, internal=True).first()
 
     if not playbook:
         return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
 
     # 获取该剧本的最新发布版本
-    playbook_version = await PlaybookVersion.filter(
-        playbook_id=playbook.id,
-        tenant_id=tenant_id,
-        status=1  # 假设 status=1 表示已发布
-    ).order_by("-version").first()
+    playbook_version = await PlaybookVersion.filter(playbook_id=playbook.id, status=1).order_by("-utime").first()  # 假设 status=1 表示已发布
 
     if not playbook_version:
         return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
@@ -1576,14 +1592,7 @@ async def execute_inspection(request: Request):
     playbook_version_id = playbook_version.id
 
     # 构建剧本输入参数（传入 schedule_id，剧本会查询该 schedule 下所有启用的巡检项）
-    playbook_input = {
-        "flow_id": playbook_version_id,
-        "flow_input": {
-            "schedule_id": schedule_id,
-            "target_id": target_ids
-        },
-        "executor": request.ctx.session.get("account_info").id
-    }
+    playbook_input = {"flow_id": playbook_version_id, "flow_input": {"schedule_id": schedule_id, "target_id": target_ids, "tenant_id": tenant_id}, "executor": request.ctx.session.get("account_info").id}
 
     resp = await request.respond(
         content_type="text/event-stream",
@@ -1594,24 +1603,23 @@ async def execute_inspection(request: Request):
     )
 
     # 发送消息到 Kafka
-    msg = {
-        "run_type": "flow",
-        "run_id": gen_run_id(),
-        "run_args": playbook_input,
-        "tenant_id": tenant_id
-    }
+    msg = {"run_type": "flow", "run_id": gen_run_id(), "run_args": playbook_input, "tenant_id": tenant_id}
     await aproduce(TASK_TOPIC, msg)
     await resp.send(f"data: {orjson.dumps({'message': '手动执行已启动'}).decode()}\n\n")
 
     sent_id = []
     for _ in range(60):
-        results = await InspectionResult.filter(
-            deleted=False,
-            tenant_id=tenant_id,
-            schedule_id=schedule_id,
-            target_id__in=target_ids,
-            ctime__gte=start_time,
-        ).order_by("ctime").all()
+        results = (
+            await InspectionResult.filter(
+                deleted=False,
+                tenant_id=tenant_id,
+                schedule_id=schedule_id,
+                target_id__in=target_ids,
+                ctime__gte=start_time,
+            )
+            .order_by("ctime")
+            .all()
+        )
 
         for result in results:
             if result.id in sent_id:
@@ -1640,6 +1648,7 @@ async def execute_inspection(request: Request):
 
 
 # ==================== Result Management ====================
+
 
 @inspection_bp.post("/result/list")
 @openapi.definition(
@@ -1732,17 +1741,7 @@ async def list_results(request: Request):
         except (ValueError, TypeError, AttributeError):
             raise CustomError(ErrorCode.PARAM_ERROR)
 
-    result = await logic.list_results(
-        page=page,
-        page_size=page_size,
-        tenant_id=tenant_id,
-        target_id=target_id,
-        schedule_id=schedule_id,
-        status=status,
-        start_time=start_time,
-        end_time=end_time,
-        keyword=keyword
-    )
+    result = await logic.list_results(page=page, page_size=page_size, tenant_id=tenant_id, target_id=target_id, schedule_id=schedule_id, status=status, start_time=start_time, end_time=end_time, keyword=keyword)
 
     return response_ok(data=result)
 
@@ -1806,22 +1805,24 @@ async def get_result(request: Request):
     result = await logic.get_result(data["id"], tenant_id)
     if not result:
         raise CustomError(ErrorCode.NOT_FOUND)
-    
+
     target = await InspectionTarget.get_or_none(id__in=[result.target_id], tenant_id=tenant_id, deleted=False)
 
-    return response_ok(data={
-        "id": result.id,
-        "target_id": result.target_id,
-        "schedule_id": result.schedule_id,
-        "start_time": result.start_time.isoformat() if result.start_time else None,
-        "end_time": result.end_time.isoformat() if result.end_time else None,
-        "status": result.status,
-        "result_data": result.result_data,
-        "error_message": result.error_message,
-        "duration": result.duration,
-        "target_content": target.content if target else None,
-        "target_standard": target.standard if target else None,
-    })
+    return response_ok(
+        data={
+            "id": result.id,
+            "target_id": result.target_id,
+            "schedule_id": result.schedule_id,
+            "start_time": result.start_time.isoformat() if result.start_time else None,
+            "end_time": result.end_time.isoformat() if result.end_time else None,
+            "status": result.status,
+            "result_data": result.result_data,
+            "error_message": result.error_message,
+            "duration": result.duration,
+            "target_content": target.content if target else None,
+            "target_standard": target.standard if target else None,
+        }
+    )
 
 
 @inspection_bp.post("/result/stats")
@@ -1893,14 +1894,76 @@ async def get_stats(request: Request):
         except (ValueError, TypeError, AttributeError):
             raise CustomError(ErrorCode.PARAM_ERROR)
 
-    stats = await logic.get_stats(
-        tenant_id=tenant_id,
-        schedule_id=schedule_id,
-        start_time=start_time,
-        end_time=end_time
-    )
+    stats = await logic.get_stats(tenant_id=tenant_id, schedule_id=schedule_id, start_time=start_time, end_time=end_time)
 
     return response_ok(data=stats)
+
+
+@inspection_bp.post("/result/export")
+@openapi.definition(
+    summary="导出巡检结果为Excel文件",
+    description="导出巡检结果为Excel文件，支持自定义导出列",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["schedule_id", "columns", "start_time", "end_time"],
+                "properties": {
+                    "schedule_id": {"type": "string", "description": "巡检任务ID"},
+                    "start_time": {"type": "string", "description": "开始时间 (ISO 8601)"},
+                    "end_time": {"type": "string", "description": "结束时间 (ISO 8601)"},
+                    "columns": {"type": "array", "items": {"type": "string"}, "description": "需要导出的列名列表，可选值：巡检内容、巡检标准、巡检状态、耗时、错误信息、开始时间、结束时间、AI裁决结果、执行结果"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导出成功，返回Excel文件",
+            "content": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {"schema": {"type": "string", "format": "binary"}}},
+        }
+    },
+)
+@requires_permission("inspection:r")
+async def export_results(request: Request):
+    """
+    导出巡检结果为Excel文件
+    Export inspection results as Excel file
+    """
+    data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    schedule_id = data.get("schedule_id")
+    columns = data.get("columns")
+
+    if not schedule_id or not columns or not isinstance(columns, list):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 解析时间参数
+    start_time = None
+    end_time = None
+    if data.get("start_time"):
+        try:
+            start_time = datetime.fromisoformat(str(data["start_time"]).replace("Z", "+00:00"))
+        except (ValueError, TypeError, AttributeError):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if data.get("end_time"):
+        try:
+            end_time = datetime.fromisoformat(str(data["end_time"]).replace("Z", "+00:00"))
+        except (ValueError, TypeError, AttributeError):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+    excel_data = await logic.export_results_to_excel(schedule_id=schedule_id, start_time=start_time, end_time=end_time, columns=columns, tenant_id=tenant_id)
+
+    # 生成文件名
+    filename = f"inspection_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+    # 返回Excel文件
+    response = raw(excel_data)
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return response
 
 
 @inspection_bp.post("/sql/execute")
@@ -1927,10 +1990,7 @@ async def get_stats(request: Request):
                         "type": "object",
                         "properties": {
                             "code": {"type": "integer"},
-                            "data": {
-                                "type": "array",
-                                "items": {"type": "object"}
-                            },
+                            "data": {"type": "array", "items": {"type": "object"}},
                         },
                     }
                 }
@@ -1961,10 +2021,7 @@ async def execute_sql(request: Request):
                 # Execute non-query statements (e.g. INSERT, UPDATE, DELETE)
                 # execute_query 返回 (affected_rows, result)
                 row_count, _ = await conn.execute_query(sql)
-                result = [{
-                    "affected_rows": row_count,
-                    "message": "SQL executed successfully"
-                }]
+                result = [{"affected_rows": row_count, "message": "SQL executed successfully"}]
         except Exception as e:
             response_ok(f"SQL执行失败 {e}")
 
@@ -1996,10 +2053,12 @@ async def execute_sql(request: Request):
                                 "result": {"type": "object", "description": "执行结果数据"},
                                 "execution_time": {"type": "number", "description": "执行耗时(秒)"},
                                 "end_time": {"type": "string", "description": "结束时间 (ISO 8601)"},
-                            }
-                        }
+                            },
+                        },
                     },
                     "start_time": {"type": "string", "description": "开始时间 (ISO 8601)"},
+                    "tenant_id": {"type": "string", "description": "租户ID"},
+                    "send_notify": {"type": "boolean", "description": "是否触发通知动作（依据巡检任务通知配置发送），默认 false"},
                 },
             }
         }
@@ -2021,8 +2080,8 @@ async def execute_sql(request: Request):
                                         "id": {"type": "string"},
                                         "target_id": {"type": "string"},
                                         "status": {"type": "string"},
-                                    }
-                                }
+                                    },
+                                },
                             },
                         },
                     }
@@ -2038,10 +2097,11 @@ async def add_result(request: Request):
     Add inspection result
     """
     request_data = request.json or {}
-    tenant_id = request.ctx.session.get("tenant_id")
+    tenant_id = request_data.get("tenant_id")
 
     result_data_array = request_data.get("result_data")
     start_time = request_data.get("start_time")
+    send_notify = request_data.get("send_notify", False)
 
     if not result_data_array or not start_time:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -2104,14 +2164,9 @@ async def add_result(request: Request):
 
         # Use AI to judge the result
         status = "failed"
-        error_message = None
 
         try:
-            judgment = await logic.judge_inspection_result(
-                target_id,
-                result,
-                tenant_id
-            )
+            judgment = await logic.judge_inspection_result(target_id, result, tenant_id)
 
             # Determine status based on AI judgment
             status = "success" if judgment.get("passed") else "failed"
@@ -2127,67 +2182,109 @@ async def add_result(request: Request):
 
         # Create InspectionResult
         try:
-            result_obj = await logic.create_result({
-                "target_id": target_id,
-                "schedule_id": schedule_id,
-                "start_time": start_time,
-                "end_time": end_time,
-                "duration": int(execution_time) if execution_time else 0,
-                "status": status,
-                "result_data": item,
-                "error_message": error_message
-            }, tenant_id)
+            result_obj = await logic.create_result(
+                {"target_id": target_id, "schedule_id": schedule_id, "start_time": start_time, "end_time": end_time, "duration": int(execution_time) if execution_time else 0, "status": status, "result_data": item, "error_message": error_message}, tenant_id
+            )
 
-            created_results.append({
-                "id": result_obj.id,
-                "target_id": result_obj.target_id,
-                "status": result_obj.status
-            })
+            created_results.append({"id": result_obj.id, "target_id": result_obj.target_id, "status": result_obj.status})
         except Exception as e:
             logger.error(f"创建巡检结果失败: {str(e)}")
             continue
+
+    # 推断 schedule_id（从原始数据取第一条有效的 schedule_id）
+    batch_schedule_id = None
+    if isinstance(result_data_array, list):
+        for item in result_data_array:
+            if isinstance(item, dict) and item.get("schedule_id"):
+                batch_schedule_id = item["schedule_id"]
+                break
+
+    # 触发通知
+    if send_notify and batch_schedule_id and created_results:
+        # 获取巡检任务信息（用于 Excel 和 Word 生成）
+        schedule = None
+        try:
+            schedule = await logic.get_schedule_by_id(batch_schedule_id, tenant_id)
+        except Exception as e:
+            logger.warning(f"获取巡检任务信息失败: {e}")
+
+        # 生成并上传 Excel
+        excel_file_id = await logic.generate_and_upload_inspection_excel(schedule_id=batch_schedule_id, start_time=start_time, tenant_id=tenant_id, schedule=schedule)
+
+        # 生成并上传 Word 报告
+        doc_file_id = await logic.generate_and_upload_inspection_word(schedule_id=batch_schedule_id, created_results=created_results, tenant_id=tenant_id, schedule=schedule)
+
+        # 构建下载地址
+        excel_download_url = f"{request.scheme}://{request.host}{excel_file_id}" if excel_file_id else ""
+        doc_download_url = f"{request.scheme}://{request.host}{doc_file_id}" if doc_file_id else ""
+
+        # 执行通知动作
+        if schedule and schedule.notify_enabled and schedule.notify_config:
+            notify_actions = schedule.notify_config if isinstance(schedule.notify_config, list) else schedule.notify_config.get("callback_data", [])
+
+            for action in notify_actions:
+                data = {}
+                for input_data in action.get("input", []):
+                    value = input_data.get("value", "")
+                    # 替换内置变量
+                    if "${巡检结果}" in value:
+                        value = value.replace("${巡检结果}", excel_download_url)
+                    if "${巡检报告}" in value:
+                        value = value.replace("${巡检报告}", doc_download_url)
+                    data[input_data.get("key")] = value
+
+                params = {
+                    "resource": action.get("resource", ""),
+                    "node_name": action.get("description", ""),
+                    "action": action.get("func", ""),
+                    "action_name": action.get("name", ""),
+                    "app_name": action.get("tool_name", ""),
+                    "name": action.get("description", ""),
+                    "app_ver": action.get("version", ""),
+                    "main": action.get("tool_main", ""),
+                    "action_input": data,
+                    "retry_times": int(action.get("retry_times", 3)),
+                    "timeout": int(action.get("timeout", 300)),
+                    "executor": request.ctx.session.get("account_info").id,
+                }
+
+                msg = {"run_type": "action", "run_id": gen_run_id(), "run_args": params, "tenant_id": tenant_id}
+                await aproduce(TASK_TOPIC, msg)
+                logger.info(f"已发送巡检通知动作: {action.get('name', '')}")
 
     return response_ok(data=created_results)
 
 
 @inspection_bp.post("/target/export")
 @openapi.definition(
-    summary="导出巡检项为JSON文件",
-    description="导出巡检项及其关联的类别和任务为JSON文件",
+    summary="导出巡检项为Excel文件",
+    description="导出巡检项及其关联的类别和任务为Excel文件",
     body={
         "application/json": {
             "schema": {
                 "type": "object",
                 "required": ["target_ids"],
                 "properties": {
-                    "target_ids": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "巡检项ID列表"
-                    },
+                    "target_ids": {"type": "array", "items": {"type": "string"}, "description": "巡检项ID列表"},
                 },
             }
         }
     },
     response={
         "200": {
-            "description": "导出成功，返回JSON文件",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object"
-                    }
-                }
-            },
+            "description": "导出成功，返回Excel文件",
+            "content": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {"schema": {"type": "string", "format": "binary"}}},
         }
     },
 )
 @requires_permission("inspection:r")
 async def export_targets(request: Request):
     """
-    导出巡检项为JSON文件
-    Export inspection targets as JSON file
+    导出巡检项为Excel文件
+    Export inspection targets as Excel file
     """
+    from sanic.response import raw
+
     data = request.json or {}
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -2195,33 +2292,29 @@ async def export_targets(request: Request):
     if not target_ids or not isinstance(target_ids, list):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    result = await logic.export_targets(target_ids, tenant_id)
+    excel_data = await logic.export_targets_to_excel(target_ids, tenant_id)
 
     # 生成文件名
-    filename = f"inspection_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    filename = f"inspection_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
-    # 返回JSON文件
-    response = json(result)
+    # 返回Excel文件
+    response = raw(excel_data)
     response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-    response.headers["Content-Type"] = "application/json"
+    response.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     return response
 
 
 @inspection_bp.post("/target/import")
 @openapi.definition(
-    summary="导入巡检项JSON文件",
-    description="导入巡检项及其关联的类别和任务，如果存在同名则添加日期后缀，默认禁用",
+    summary="导入巡检项Excel文件",
+    description="导入巡检项及其关联的类别和任务，如果存在同名则跳过或使用已存在的，默认禁用",
     body={
         "multipart/form-data": {
             "schema": {
                 "type": "object",
                 "required": ["file"],
                 "properties": {
-                    "file": {
-                        "type": "string",
-                        "format": "binary",
-                        "description": "JSON文件"
-                    },
+                    "file": {"type": "string", "format": "binary", "description": "Excel文件(.xlsx)"},
                 },
             }
         }
@@ -2241,18 +2334,9 @@ async def export_targets(request: Request):
                                     "schedules_created": {"type": "integer"},
                                     "categories_created": {"type": "integer"},
                                     "targets_created": {"type": "integer"},
-                                    "schedule_ids": {
-                                        "type": "array",
-                                        "items": {"type": "string"}
-                                    },
-                                    "category_ids": {
-                                        "type": "array",
-                                        "items": {"type": "string"}
-                                    },
-                                    "target_ids": {
-                                        "type": "array",
-                                        "items": {"type": "string"}
-                                    },
+                                    "schedule_ids": {"type": "array", "items": {"type": "string"}},
+                                    "category_ids": {"type": "array", "items": {"type": "string"}},
+                                    "target_ids": {"type": "array", "items": {"type": "string"}},
                                 },
                             },
                         },
@@ -2265,8 +2349,8 @@ async def export_targets(request: Request):
 @requires_permission("inspection:c")
 async def import_targets(request: Request):
     """
-    导入巡检项JSON文件
-    Import inspection targets from JSON file
+    导入巡检项Excel文件
+    Import inspection targets from Excel file
     """
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -2275,19 +2359,60 @@ async def import_targets(request: Request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     uploaded_file = request.files.getlist("file")[0]
-    try:
-        # 读取并解析JSON文件
-        file_content = uploaded_file.body
-        import_data = orjson.loads(file_content)
-    except orjson.JSONDecodeError:
+
+    # 验证文件类型
+    if not uploaded_file.name.endswith((".xlsx", ".xls")):
         raise CustomError(ErrorCode.PARAM_ERROR)
+
+    try:
+        # 读取文件内容
+        file_content = uploaded_file.body
     except Exception as e:
         logger.error(f"文件读取失败: {str(e)}")
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    if not isinstance(import_data, dict):
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    result = await logic.import_targets(import_data, tenant_id)
+    result = await logic.import_targets_from_excel(file_content, tenant_id)
     return response_ok(data=result)
 
+
+@inspection_bp.get("/target/template")
+@openapi.definition(
+    summary="下载巡检项导入模板",
+    description="下载Excel格式的巡检项导入模板文件",
+    response={
+        "200": {
+            "description": "下载成功，返回Excel模板文件",
+            "content": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {"schema": {"type": "string", "format": "binary"}}},
+        }
+    },
+)
+@requires_permission("inspection:r")
+async def download_template(request: Request):
+    """
+    下载巡检项导入模板
+    Download inspection import template
+    """
+
+    # 模板文件路径
+    template_path = os.path.join(os.path.dirname(__file__), "inspection_template_model.xlsx")
+
+    # 检查模板文件是否存在
+    if not os.path.exists(template_path):
+        raise CustomError(ErrorCode.NOT_FOUND_TO_INSPECTION)
+
+    try:
+        # 读取模板文件
+        with open(template_path, "rb") as f:
+            template_data = f.read()
+    except Exception as e:
+        logger.error(f"读取模板文件失败: {str(e)}")
+        raise CustomError(ErrorCode.READ_FAILED_TO_INSPECTION)
+
+    # 生成文件名
+    filename = "inspection_template.xlsx"
+
+    # 返回Excel文件
+    response = raw(template_data)
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return response

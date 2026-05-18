@@ -15,6 +15,7 @@ import orjson
 
 from pathlib import Path
 from sanic.log import logger
+
 # 从项目内置的 nanobot 源码导入
 from nanobot import Nanobot
 from nanobot.agent import AgentHook, AgentHookContext
@@ -272,7 +273,7 @@ async def ask(
         message: 问题内容
         streaming: 是否流式输出
         session_key: 会话标识
-        workspace: 工作空间路径
+        workspace: 租户路径
 
     Returns:
         回答内容
