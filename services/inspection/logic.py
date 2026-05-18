@@ -6,10 +6,17 @@
 Inspection Module Business Logic Layer
 """
 
-from typing import Dict, Any, Optional, List, Union
-from datetime import datetime
 import orjson
 import ast
+import io
+import os
+import uuid
+
+from typing import Dict, Any, Optional, List, Union
+from datetime import datetime
+from docxtpl import DocxTemplate
+from sanic.log import logger
+from libs.utils import upload_to_s3
 from tortoise.expressions import Q
 from litellm import acompletion
 from models import (
@@ -1503,10 +1510,6 @@ async def generate_and_upload_inspection_excel(
     Returns:
         上传成功的文件ID，失败返回None
     """
-    import uuid
-    from sanic.log import logger
-    from libs.utils import upload_to_s3
-
     try:
         # 解析 start_time
         if isinstance(start_time, str):
@@ -1557,13 +1560,6 @@ async def generate_and_upload_inspection_word(
     Returns:
         上传成功的文件ID，失败返回None
     """
-    import uuid
-    import io
-    import os
-    from docxtpl import DocxTemplate
-    from sanic.log import logger
-    from libs.utils import upload_to_s3
-
     try:
         # 获取完整的巡检结果数据
         result_ids = [r['id'] for r in created_results]
