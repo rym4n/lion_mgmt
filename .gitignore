@@ -146,6 +146,7 @@ data/
 memory/
 _bmad*/
 docs/
+.wolf/
 
 # Codex local configuration
 .codex/

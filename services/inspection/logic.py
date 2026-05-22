@@ -609,6 +609,7 @@ async def list_results(
                 "duration": result.duration,
                 "target_content": target_map.get(result.target_id).content if target_map.get(result.target_id) else None,
                 "target_standard": target_map.get(result.target_id).standard if target_map.get(result.target_id) else None,
+                "reason": result.result_data.get("ai_judgment").get("reason") if result.result_data and result.result_data.get("ai_judgment") else None,
             }
             for result in items
         ],
