@@ -160,3 +160,5 @@ docs/
 .env.local
 .env.*.local
 .agents/
+
+.codegraph/
