@@ -398,7 +398,6 @@ async def delete_scene(request):
         for playbook in playbooks:
             await playbook.scenes.remove(scene)
 
-        scene.deleted = True
-        await scene.save()
+        await scene.delete()
 
     return response_ok("success")
