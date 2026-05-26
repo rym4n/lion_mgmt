@@ -140,6 +140,7 @@ async def add_tenant(request):
                 "scene:c,d,u,r",
                 "system:c,d,u,r",
                 "inspection:c,d,u,r",
+                "large_screen:c,d,u,r",
                 "tenant:c,d,u,r",
                 "secure:c,d,u,r",
                 "workflow:c,d,u,r",

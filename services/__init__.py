@@ -20,6 +20,7 @@ from services.dashboard.views import dashboard_bp
 from services.event.views import event_bp
 from services.event_ingestion.views import event_ingestion_bp
 from services.inspection.views import inspection_bp
+from services.large_screen.views import screen_bp
 from services.license.views import license_bp
 from services.log_view.views import logs_bp
 from services.mcp.views import mcp_bp
@@ -77,6 +78,7 @@ def register_blueprints(app: Sanic):
             "ai_bp": ai_bp,
             "agent_bp": agent_bp,
             "mcp_bp": mcp_bp,
+            "large_screen_bp": screen_bp,
         }
 
         license_data = load_license()
