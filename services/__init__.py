@@ -77,7 +77,6 @@ def register_blueprints(app: Sanic):
             "ai_bp": ai_bp,
             "agent_bp": agent_bp,
             "mcp_bp": mcp_bp,
-            "screen_bp": screen_bp,
         }
 
         license_data = load_license()
