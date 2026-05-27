@@ -1,6 +1,6 @@
 # coding=utf-8
 
-from sanic import Blueprint, Request
+from sanic import Request
 from sanic_ext import openapi
 from tortoise.expressions import Q
 
@@ -9,9 +9,9 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from models.large_screen import LargeScreen
+from services.dashboard.views import dashboard_bp
 
-screen_bp = Blueprint("large_screen", url_prefix="/large_screen")
-__all__ = ["screen_bp"]
+__all__ = []
 
 
 def _require_json(request: Request) -> dict:
@@ -23,7 +23,7 @@ def _validate_screen_data(screen_data):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
 
-@screen_bp.post("/add")
+@dashboard_bp.post("/large_screen/add")
 @openapi.definition(
     summary="新增大屏",
     description="新增一个大屏配置，需要large_screen:c权限",
@@ -60,7 +60,7 @@ async def add_large_screen(request: Request):
     return response_ok(large_screen.json)
 
 
-@screen_bp.post("/list")
+@dashboard_bp.post("/large_screen/list")
 @openapi.definition(
     summary="查询大屏列表",
     description="分页查询大屏配置，需要large_screen:r权限",
@@ -97,7 +97,7 @@ async def list_large_screens(request: Request):
     return response_ok({"total": total, "page": page, "size": size, "data": [item.json for item in records]})
 
 
-@screen_bp.post("/detail")
+@dashboard_bp.post("/large_screen/detail")
 @openapi.definition(
     summary="查询大屏详情",
     description="查询指定大屏配置，需要large_screen:r权限",
@@ -126,7 +126,7 @@ async def large_screen_detail(request: Request):
     return response_ok(large_screen.json)
 
 
-@screen_bp.post("/update")
+@dashboard_bp.post("/large_screen/update")
 @openapi.definition(
     summary="更新大屏",
     description="更新指定大屏配置，需要large_screen:u权限",
@@ -179,7 +179,7 @@ async def update_large_screen(request: Request):
     return response_ok(large_screen.json)
 
 
-@screen_bp.post("/delete")
+@dashboard_bp.post("/large_screen/delete")
 @openapi.definition(
     summary="删除大屏",
     description="删除指定大屏配置，需要large_screen:d权限",
