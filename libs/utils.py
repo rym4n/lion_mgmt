@@ -160,19 +160,11 @@ def verify_license(data: bytes):
         lic_unverified = jwt.decode(decrypted, options={"verify_signature": False})
         create_time = lic_unverified.get("createTime", 0)
 
-        # 调试日志：输出 License 创建时间
-        logger.info(f"License createTime: {create_time} (截止时间: {_LEGACY_CUTOFF_MS})")
-        logger.info(f"使用{'旧' if create_time < _LEGACY_CUTOFF_MS else '新'}验证方案")
-
         if create_time < _LEGACY_CUTOFF_MS:
-            # 旧 License：使用 MAC 地址方案
-            logger.info("使用 MAC 地址验证方案")
             machine_id = generate_mac_uuid()
             if not machine_id:
                 raise CustomError(ErrorCode.MACHINE_CODE_MISMATCH)
         else:
-            # 新 License：使用宿主机指纹方案
-            logger.info("使用宿主机指纹验证方案")
             machine_id = generate_fingerprint()
 
         lic = jwt.decode(decrypted, str(machine_id), "HS256")
