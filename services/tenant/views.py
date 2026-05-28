@@ -109,9 +109,9 @@ async def add_tenant(request):
     name = request.json.get("name")
     if not name:
         raise CustomError(ErrorCode.PARAM_ERROR)
-
-    if await Tenant.filter(name=name, deleted=False).exists():
-        raise CustomError(ErrorCode.TENANT_ALREADY_EXISTS)
+    tenant = await Tenant.get_or_none(name=name, deleted=False).prefetch_related("creator")
+    if tenant:
+        return response_ok(tenant.json)
 
     members = request.json.get("members")
     creator: Account = request.ctx.session["account_info"]
