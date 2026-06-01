@@ -523,7 +523,7 @@ async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List
             "resources": resources,
             "tool_name": category.app_name,
             "action_name": target.action_name,
-            "action_input": target.action_input or {},
+            "action_input": {"params": target.action_input} or {},
             "target_id": target.id,
             "schedule_id": category.schedule_id,
         }
