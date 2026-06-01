@@ -119,8 +119,18 @@ async def create_workflow(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     total_up_value = 0
-    # 判断剧本数量是否达到了创建上限
-    total_count = await Playbook.filter(deleted=False, internal=False).count()
+    # 判断剧本数量是否达到了创建上限：只有存在已发布版本的剧本才占用数量
+    # 如果一个剧本的所有版本都是未发布状态，则不计入许可数量上限
+    total_count = (
+        await Playbook.filter(
+            deleted=False,
+            internal=False,
+            playbook_versions__deleted=False,
+            playbook_versions__status=1,
+        )
+        .distinct()
+        .count()
+    )
     lic = load_license()
     if not lic:
         raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)

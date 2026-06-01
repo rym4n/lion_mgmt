@@ -337,7 +337,7 @@ async def get_all_license(request: Request):
     tool_names = await Tool.filter(deleted=False, maintain=False).values_list("name", flat=True)
     consume_info = {
         "应用集成": len(set(tool_names)),
-        "剧本编排": await Playbook.filter(deleted=False, internal=False).count(),
+        "剧本编排": await Playbook.filter(deleted=False, internal=False, playbook_versions__deleted=False, playbook_versions__status=1).distinct().count()
     }
 
     menu_dict = dict()
