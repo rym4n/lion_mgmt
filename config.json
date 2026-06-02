@@ -2,7 +2,7 @@
   "agents": {
     "defaults": {
       "workspace": "~/.nanobot/workspace",
-      "model": "${RY_AI_MODEL:-aioe}",
+      "model": "${RY_AI_MODEL}",
       "provider": "custom",
       "maxTokens": 64000,
       "contextWindowTokens": 200000,
@@ -177,7 +177,7 @@
   "providers": {
     "custom": {
       "apiKey": "${LLM_KEY}",
-      "apiBase": "${RY_AI_API_BASE:-https://oapi.hongcloud.net/v1}",
+      "apiBase": "${RY_AI_API_BASE}",
       "extraHeaders": null
     },
     "azureOpenai": {
