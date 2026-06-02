@@ -10,6 +10,7 @@ import ast
 import asyncio
 import orjson
 import os
+import re
 
 from datetime import datetime
 from sanic import Blueprint, Request
@@ -23,13 +24,16 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
 from libs.kafka import aproduce
 from libs.utils import gen_run_id, upload_to_s3
-from models import Timed, Playbook, PlaybookVersion, InspectionTarget, InspectionCategory, InspectionResult
+from models import Timed, Playbook, PlaybookVersion, InspectionTarget, InspectionCategory, InspectionResult, Runlog
 from settings import TASK_TOPIC
 from . import logic
 from sanic.response import raw
 
 inspection_bp = Blueprint("inspection", url_prefix="/inspection")
 __all__ = ["inspection_bp"]
+
+CUSTOM_REPORT_PLACEHOLDER = "${自定义报告}"
+INSPECTION_RESULT_ALL_OUTPUT_REFS = ("all", "全部", "所有", "全部巡检项", "所有巡检项", "*")
 
 
 def _normalize_action_input(action_input):
@@ -53,6 +57,293 @@ def _normalize_action_input(action_input):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     return action_input
+
+
+def _extract_config_actions(config):
+    """
+    兼容通知配置结构，提取动作列表。
+    支持：
+    1. [{"func": "...", "input": [...]}]
+    2. {"callback_data": [{"func": "..."}]}
+    3. {"actions": [{"func": "..."}]}
+    4. {"func": "...", "input": [...]} 单动作配置
+    """
+    if not config:
+        return []
+
+    if isinstance(config, list):
+        return [item for item in config if isinstance(item, dict)]
+
+    if isinstance(config, dict):
+        actions = config.get("callback_data") or config.get("actions")
+        if isinstance(actions, list):
+            return [item for item in actions if isinstance(item, dict)]
+        if any(key in config for key in ("func", "action", "tool_name", "app_name", "input", "action_input")):
+            return [config]
+
+    return []
+
+
+def _replace_builtin_placeholders(value, replacements):
+    if not isinstance(value, str):
+        return value
+
+    for placeholder, replacement in replacements.items():
+        if placeholder in value:
+            value = value.replace(placeholder, replacement or "")
+
+    return value
+
+
+def _serialize_inspection_result_reference(result_data):
+    if result_data in (None, ""):
+        return ""
+    return orjson.dumps(result_data, option=orjson.OPT_NON_STR_KEYS).decode()
+
+
+def _build_inspection_result_context(created_result_items):
+    """
+    构建本次 /result/add 的巡检结果引用上下文。
+    """
+    results = []
+    by_target_id = {}
+
+    for item in created_result_items:
+        if not isinstance(item, dict):
+            continue
+
+        output = item.get("output")
+        result_info = {
+            "id": item.get("id"),
+            "target_id": item.get("target_id"),
+            "schedule_id": item.get("schedule_id"),
+            "status": item.get("status"),
+            "output": output,
+            "result": output,
+            "error_message": item.get("error_message"),
+            "duration": item.get("duration"),
+        }
+        results.append(result_info)
+
+        if item.get("target_id"):
+            by_target_id[item["target_id"]] = result_info
+
+    return {"all": results, "by_target_id": by_target_id}
+
+
+def _get_value_by_path(data, path):
+    current = data
+    for part in path:
+        if part == "":
+            continue
+
+        if isinstance(current, dict):
+            if part not in current:
+                return ""
+            current = current[part]
+            continue
+
+        if isinstance(current, list):
+            try:
+                current = current[int(part)]
+            except (ValueError, IndexError):
+                return ""
+            continue
+
+        return ""
+
+    return current
+
+
+def _get_inspection_output_reference_value(reference, field_path, result_context, stringify=True):
+    if reference in INSPECTION_RESULT_ALL_OUTPUT_REFS:
+        if field_path:
+            return ""
+        all_outputs = [item.get("output") for item in result_context.get("all", [])]
+        return _serialize_inspection_result_reference(all_outputs) if stringify else all_outputs
+
+    target_result = result_context.get("by_target_id", {}).get(reference)
+    if not target_result:
+        return ""
+
+    output = target_result.get("output")
+    value = _get_value_by_path(output, field_path) if field_path else output
+    return _serialize_inspection_result_reference(value) if stringify else value
+
+
+def _replace_inspection_result_placeholders(value, result_context):
+    if not isinstance(value, str):
+        return value
+
+    output_pattern = r"\$\{([^}.]+)\.output(?:\.([^}]+))?\}"
+
+    def replace_output_ref(match):
+        reference = match.group(1).strip()
+        field_path = [part.strip() for part in (match.group(2) or "").split(".") if part.strip()]
+        return _stringify_action_result(_get_inspection_output_reference_value(reference, field_path, result_context, stringify=False))
+
+    return re.sub(output_pattern, replace_output_ref, value)
+
+
+def _replace_action_input_placeholders(value, replacements, result_context=None):
+    if isinstance(value, dict):
+        return {key: _replace_action_input_placeholders(item_value, replacements, result_context) for key, item_value in value.items()}
+
+    if isinstance(value, list):
+        return [_replace_action_input_placeholders(item_value, replacements, result_context) for item_value in value]
+
+    if result_context:
+        value = _replace_inspection_result_placeholders(value, result_context)
+
+    return _replace_builtin_placeholders(value, replacements)
+
+
+def _stringify_action_result(value):
+    if value in (None, ""):
+        return ""
+
+    if isinstance(value, (dict, list)):
+        return orjson.dumps(value, option=orjson.OPT_NON_STR_KEYS).decode()
+
+    return str(value)
+
+
+def _custom_report_result_to_text(raw_result):
+    if raw_result in (None, "", "执行中"):
+        return ""
+
+    parsed_result = raw_result
+    if isinstance(raw_result, (bytes, bytearray)):
+        raw_result = raw_result.decode()
+
+    if isinstance(raw_result, str):
+        try:
+            parsed_result = orjson.loads(raw_result)
+        except orjson.JSONDecodeError:
+            try:
+                parsed_result = ast.literal_eval(raw_result)
+            except (ValueError, SyntaxError):
+                return raw_result
+
+    if isinstance(parsed_result, dict):
+        data = parsed_result.get("data", parsed_result)
+        if isinstance(data, dict):
+            for key in ("download_link", "url", "file_url", "file_id", "result", "content", "message"):
+                if data.get(key) not in (None, ""):
+                    return _stringify_action_result(data.get(key))
+        return _stringify_action_result(data)
+
+    return _stringify_action_result(parsed_result)
+
+
+def _get_account_id(account_info):
+    if isinstance(account_info, dict):
+        return account_info.get("id")
+    return getattr(account_info, "id", account_info)
+
+
+def _safe_int(value, default):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _build_action_input(action, replacements, result_context=None):
+    if isinstance(action.get("action_input"), dict):
+        return _replace_action_input_placeholders(action.get("action_input"), replacements, result_context)
+
+    data = {}
+    for input_data in action.get("input", []):
+        if not isinstance(input_data, dict):
+            continue
+
+        key = input_data.get("key")
+        if not key:
+            continue
+
+        if input_data.get("source") == "inspection_result":
+            reference = input_data.get("target_id") or input_data.get("target") or "all"
+            field_path = input_data.get("field_path") or input_data.get("path") or []
+            if isinstance(field_path, str):
+                field_path = [part.strip() for part in field_path.split(".") if part.strip()]
+            data[key] = _get_inspection_output_reference_value(reference, field_path, result_context or {}, stringify=False)
+            continue
+
+        data[key] = _replace_action_input_placeholders(input_data.get("value", ""), replacements, result_context)
+
+    return data
+
+
+def _get_action_value(action, *keys, default=""):
+    for key in keys:
+        value = action.get(key)
+        if value not in (None, ""):
+            return value
+    return default
+
+
+async def _execute_custom_report_action(action, action_input, request, tenant_id):
+    account_id = _get_account_id(request.ctx.session.get("account_info"))
+    params = {
+        "resource": _get_action_value(action, "resource"),
+        "node_name": _get_action_value(action, "node_name", "description", "name"),
+        "action": _get_action_value(action, "action", "func"),
+        "action_name": _get_action_value(action, "action_name", "name"),
+        "app_name": _get_action_value(action, "app_name", "tool_name"),
+        "name": _get_action_value(action, "name", "description"),
+        "app_ver": _get_action_value(action, "app_ver", "version"),
+        "main": _get_action_value(action, "main", "tool_main"),
+        "action_input": action_input,
+        "retry_times": _safe_int(action.get("retry_times"), 3),
+        "timeout": _safe_int(action.get("timeout"), 300),
+        "executor": account_id,
+    }
+
+    run_id = gen_run_id()
+    msg = {"run_type": "action", "run_id": run_id, "run_args": params, "tenant_id": tenant_id}
+    await aproduce(TASK_TOPIC, msg)
+
+    wait_seconds = max(1, min(_safe_int(action.get("timeout"), 300), 300))
+    for _ in range(wait_seconds):
+        log = await Runlog.filter(run_id=run_id, deleted=False).order_by("-utime").first()
+        if log and log.result and log.result != "执行中":
+            return _custom_report_result_to_text(log.result)
+        if log and log.status in (-1, 2):
+            return _custom_report_result_to_text(log.result)
+        await asyncio.sleep(1)
+
+    logger.warning(f"自定义报告动作执行超时: {action.get('name', '')}, run_id={run_id}")
+    return ""
+
+
+async def _generate_custom_report_content(schedule, request, tenant_id, replacements, result_context):
+    if not schedule or not schedule.custom_report_config:
+        return ""
+
+    report_actions = _extract_config_actions(schedule.custom_report_config)
+    if not report_actions:
+        return ""
+
+    report_contents = []
+    for action in report_actions:
+        try:
+            action_input = _build_action_input(action, replacements, result_context)
+            report_content = await _execute_custom_report_action(action, action_input, request, tenant_id)
+            if report_content:
+                report_contents.append(report_content)
+        except Exception as e:
+            logger.warning(f"执行自定义报告动作失败: {action.get('name', '')}, error={e}")
+
+    return "\n".join(report_contents)
+
+
+def _actions_contain_custom_report_placeholder(actions):
+    for action in actions:
+        for input_data in action.get("input", []):
+            if isinstance(input_data, dict) and CUSTOM_REPORT_PLACEHOLDER in str(input_data.get("value", "")):
+                return True
+    return False
 
 
 # ==================== Schedule Management ====================
@@ -252,6 +543,7 @@ async def get_schedule(request: Request):
                                                 "enabled": {"type": "boolean"},
                                                 "description": {"type": "string"},
                                                 "result_dates": {"type": "array", "items": {"type": "string"}, "description": "存在巡检结果的日期列表"},
+                                                "custom_report_config": {"type": "object"},
                                                 "ctime": {"type": "string"},
                                                 "utime": {"type": "string"},
                                             },
@@ -411,6 +703,74 @@ async def create_notify_config(request: Request):
             "schedule_id": schedule_id,
             "notify_enabled": schedule.notify_enabled,
             "notify_config": schedule.notify_config,
+            "utime": schedule.utime.isoformat() if schedule.utime else None,
+        }
+    )
+
+
+@inspection_bp.post("/schedule/custom-report")
+@openapi.definition(
+    summary="巡检自定义报告配置",
+    description="为指定巡检任务配置自定义报告动作（注意：自定义报告动作配置是覆盖式）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["schedule_id", "custom_report_config"],
+                "properties": {
+                    "schedule_id": {"type": "string", "description": "巡检任务ID"},
+                    "custom_report_config": {"type": "object", "description": "自定义报告动作配置"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "配置成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string"},
+                                    "schedule_id": {"type": "string"},
+                                    "custom_report_config": {"type": "object"},
+                                    "utime": {"type": "string"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("inspection:c")
+async def create_custom_report_config(request: Request):
+    """
+    巡检自定义报告配置
+    Create inspection custom report configuration
+    """
+    data = request.json or {}
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    schedule_id = data.get("schedule_id")
+    custom_report_config = data.get("custom_report_config")
+
+    if not schedule_id or custom_report_config is None:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    schedule = await logic.custom_report_config(schedule_id, custom_report_config, tenant_id)
+
+    return response_ok(
+        data={
+            "id": schedule.id,
+            "schedule_id": schedule_id,
+            "custom_report_config": schedule.custom_report_config,
             "utime": schedule.utime.isoformat() if schedule.utime else None,
         }
     )
@@ -2143,6 +2503,7 @@ async def add_result(request: Request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     created_results = []
+    created_result_items = []
 
     if isinstance(result_data_array, str):
         try:
@@ -2223,6 +2584,17 @@ async def add_result(request: Request):
             )
 
             created_results.append({"id": result_obj.id, "target_id": result_obj.target_id, "status": result_obj.status})
+            created_result_items.append(
+                {
+                    "id": result_obj.id,
+                    "target_id": result_obj.target_id,
+                    "schedule_id": result_obj.schedule_id,
+                    "status": result_obj.status,
+                    "output": result,
+                    "error_message": result_obj.error_message,
+                    "duration": result_obj.duration,
+                }
+            )
         except Exception as e:
             logger.error(f"创建巡检结果失败: {str(e)}")
             continue
@@ -2256,18 +2628,16 @@ async def add_result(request: Request):
 
         # 执行通知动作
         if schedule and schedule.notify_enabled and schedule.notify_config:
-            notify_actions = schedule.notify_config if isinstance(schedule.notify_config, list) else schedule.notify_config.get("callback_data", [])
+            notify_actions = _extract_config_actions(schedule.notify_config)
+            builtin_replacements = {"${巡检结果}": excel_download_url, "${巡检报告}": doc_download_url}
+            result_context = _build_inspection_result_context(created_result_items)
+            custom_report_content = ""
+            if _actions_contain_custom_report_placeholder(notify_actions):
+                custom_report_content = await _generate_custom_report_content(schedule, request, tenant_id, builtin_replacements, result_context)
+            notify_replacements = {**builtin_replacements, CUSTOM_REPORT_PLACEHOLDER: custom_report_content}
 
             for action in notify_actions:
-                data = {}
-                for input_data in action.get("input", []):
-                    value = input_data.get("value", "")
-                    # 替换内置变量
-                    if "${巡检结果}" in value:
-                        value = value.replace("${巡检结果}", excel_download_url)
-                    if "${巡检报告}" in value:
-                        value = value.replace("${巡检报告}", doc_download_url)
-                    data[input_data.get("key")] = value
+                data = _build_action_input(action, notify_replacements, result_context)
 
                 params = {
                     "resource": action.get("resource", ""),
@@ -2279,9 +2649,9 @@ async def add_result(request: Request):
                     "app_ver": action.get("version", ""),
                     "main": action.get("tool_main", ""),
                     "action_input": data,
-                    "retry_times": int(action.get("retry_times", 3)),
-                    "timeout": int(action.get("timeout", 300)),
-                    "executor": request.ctx.session.get("account_info").id,
+                    "retry_times": _safe_int(action.get("retry_times"), 3),
+                    "timeout": _safe_int(action.get("timeout"), 300),
+                    "executor": _get_account_id(request.ctx.session.get("account_info")),
                 }
 
                 msg = {"run_type": "action", "run_id": gen_run_id(), "run_args": params, "tenant_id": tenant_id}
