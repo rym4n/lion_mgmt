@@ -92,8 +92,10 @@ async def add_scene(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    if await Scene.filter(name=request.json.get("name"), tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.SCENE_EXISTS_ERROR)
+    scene = await Scene.get_or_none(name=request.json.get("name"), tenant_id=tenant_id).prefetch_related("creator", "updator")
+
+    if scene:
+        return response_ok(scene.json)
     if status == 1:
         await Scene.filter(status=1, tenant_id=tenant_id).update(status=0)
     scene = await Scene.create(

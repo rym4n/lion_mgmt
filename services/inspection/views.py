@@ -32,6 +32,29 @@ inspection_bp = Blueprint("inspection", url_prefix="/inspection")
 __all__ = ["inspection_bp"]
 
 
+def _normalize_action_input(action_input):
+    """
+    规范化巡检项动作输入参数配置。
+    前端可传 JSON 对象，也兼容传入 JSON 字符串；未传时按空配置处理。
+    """
+    if action_input in (None, ""):
+        return {}
+
+    if isinstance(action_input, str):
+        try:
+            action_input = orjson.loads(action_input)
+        except orjson.JSONDecodeError:
+            try:
+                action_input = ast.literal_eval(action_input)
+            except (ValueError, SyntaxError):
+                raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if not isinstance(action_input, dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    return action_input
+
+
 # ==================== Schedule Management ====================
 
 
@@ -811,6 +834,7 @@ async def delete_category(request: Request):
                         "category_id": {"type": "string", "description": "关联巡检类别ID"},
                         "standard": {"type": "string", "description": "巡检标准"},
                         "action_name": {"type": "string", "description": "动作名称"},
+                        "action_input": {"type": "object", "description": "动作输入参数配置"},
                         "enabled": {"type": "boolean", "description": "是否启用"},
                     },
                 },
@@ -836,6 +860,7 @@ async def delete_category(request: Request):
                                         "category_id": {"type": "string"},
                                         "standard": {"type": "string"},
                                         "action_name": {"type": "string"},
+                                        "action_input": {"type": "object"},
                                         "enabled": {"type": "boolean"},
                                         "ctime": {"type": "string"},
                                         "utime": {"type": "string"},
@@ -882,6 +907,7 @@ async def create_target(request: Request):
 
         # 处理可能为字符串的JSON字段
         processed_item = item.copy()
+        processed_item["action_input"] = _normalize_action_input(processed_item.get("action_input"))
         processed_list.append(processed_item)
 
     if not processed_list and data_list:
@@ -898,6 +924,7 @@ async def create_target(request: Request):
             "category_id": target.category_id,
             "standard": target.standard,
             "action_name": target.action_name,
+            "action_input": target.action_input or {},
             "enabled": target.enabled,
             "ctime": target.ctime.isoformat() if target.ctime else None,
             "utime": target.utime.isoformat() if target.utime else None,
@@ -949,6 +976,7 @@ async def create_target(request: Request):
                                                 "category_id": {"type": "string"},
                                                 "standard": {"type": "string"},
                                                 "action_name": {"type": "string"},
+                                                "action_input": {"type": "object"},
                                                 "enabled": {"type": "boolean"},
                                                 "ctime": {"type": "string"},
                                                 "utime": {"type": "string"},
@@ -1020,6 +1048,7 @@ async def list_targets(request: Request):
                                     "app_name": {"type": "string"},
                                     "standard": {"type": "string"},
                                     "action_name": {"type": "string"},
+                                    "action_input": {"type": "object"},
                                     "enabled": {"type": "boolean"},
                                     "ctime": {"type": "string"},
                                     "utime": {"type": "string"},
@@ -1059,6 +1088,7 @@ async def get_target(request: Request):
             "app_name": category_map.get(target.category_id),
             "standard": target.standard,
             "action_name": target.action_name,
+            "action_input": target.action_input or {},
             "enabled": target.enabled,
             "ctime": target.ctime.isoformat() if target.ctime else None,
             "utime": target.utime.isoformat() if target.utime else None,
@@ -1080,6 +1110,7 @@ async def get_target(request: Request):
                     "content": {"type": "string", "description": "巡检内容"},
                     "standard": {"type": "string", "description": "巡检标准"},
                     "action_name": {"type": "string", "description": "动作名称"},
+                    "action_input": {"type": "object", "description": "动作输入参数配置"},
                     "enabled": {"type": "boolean", "description": "是否启用"},
                 },
             }
@@ -1102,6 +1133,7 @@ async def get_target(request: Request):
                                     "category_id": {"type": "string"},
                                     "standard": {"type": "string"},
                                     "action_name": {"type": "string"},
+                                    "action_input": {"type": "object"},
                                     "enabled": {"type": "boolean"},
                                     "ctime": {"type": "string"},
                                     "utime": {"type": "string"},
@@ -1127,6 +1159,9 @@ async def update_target(request: Request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     target_id = data.pop("id")
+    if "action_input" in data:
+        data["action_input"] = _normalize_action_input(data.get("action_input"))
+
     target = await logic.update_target(target_id, data, tenant_id)
     if not target:
         raise CustomError(ErrorCode.NOT_FOUND)
@@ -1138,6 +1173,7 @@ async def update_target(request: Request):
             "category_id": target.category_id,
             "standard": target.standard,
             "action_name": target.action_name,
+            "action_input": target.action_input or {},
             "enabled": target.enabled,
             "ctime": target.ctime.isoformat() if target.ctime else None,
             "utime": target.utime.isoformat() if target.utime else None,
@@ -1238,7 +1274,7 @@ async def delete_target(request: Request):
                                         "resources": {"type": "string"},
                                         "tool_name": {"type": "string"},
                                         "action_name": {"type": "string"},
-                                        "action_input": {"type": "string"},
+                                        "action_input": {"type": "object"},
                                     },
                                 },
                             },

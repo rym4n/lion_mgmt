@@ -364,6 +364,7 @@ async def list_targets(page: int, page_size: int, tenant_id: str, schedule_id: O
                     "app_name": cat.app_name,
                     "standard": None,
                     "action_name": None,
+                    "action_input": None,
                     "enabled": None,
                     "ctime": cat.ctime.isoformat() if hasattr(cat, "ctime") and cat.ctime else None,
                     "utime": cat.utime.isoformat() if hasattr(cat, "utime") and cat.utime else None,
@@ -381,6 +382,7 @@ async def list_targets(page: int, page_size: int, tenant_id: str, schedule_id: O
                         "app_name": cat.app_name,
                         "standard": target.standard,
                         "action_name": target.action_name,
+                        "action_input": target.action_input or {},
                         "enabled": target.enabled,
                         "ctime": target.ctime.isoformat() if target.ctime else None,
                         "utime": target.utime.isoformat() if target.utime else None,
@@ -521,6 +523,7 @@ async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List
             "resources": resources,
             "tool_name": category.app_name,
             "action_name": target.action_name,
+            "action_input": {"params": target.action_input} or {},
             "target_id": target.id,
             "schedule_id": category.schedule_id,
         }

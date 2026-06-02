@@ -698,7 +698,7 @@ async def all_tools(request):
     else:
         condition = Q()
 
-    latest_tools = await Tool.filter(condition, deleted=False, tenant_id=tenant_id).offset((page - 1) * size).limit(size).values()
+    latest_tools = await Tool.filter(condition, deleted=False, tenant_id=tenant_id).order_by("-utime", "-ctime").offset((page - 1) * size).limit(size).values()
     for tool in latest_tools:
         if int(req_json.get("logo", 1)) == 1 and tool["logo_path"]:
             tool["logo"] = tool["logo_path"]
@@ -720,6 +720,20 @@ async def all_tools(request):
             "total_pages": (total_count + size - 1) // size,
         }
     )
+
+
+async def update_latest_tool_utime(tool_name, tenant_id, maintenance_mode=False):
+    latest_tool = await Tool.filter(
+        name=tool_name,
+        deleted=False,
+        maintain=maintenance_mode if maintenance_mode else False,
+        tenant_id=tenant_id,
+    ).order_by("-ctime").first()
+    if not latest_tool:
+        return
+
+    latest_tool.utime = datetime.datetime.now(TZ)
+    await latest_tool.save(update_fields=["utime"])
 
 
 @tools_bp.post("/versions")
@@ -1322,6 +1336,7 @@ async def add_tool_resource(request):
     r = {k: resources[k].get("value") or resources[k].get("default_value", "") for k in resources}
     r[tr.id + "_name"] = name
     await caches.get("redis_chat").set("resource_" + tr.id, r)
+    await update_latest_tool_utime(tool_name, tenant_id, maintenance_mode)
 
     return response_ok({"message": "工具资源新增成功", "id": tr.id})
 
@@ -1471,6 +1486,7 @@ async def update_tool_resource(request):
     if resources:
         update_fields.append("resources")
     await tool_resource.save(update_fields=update_fields)
+    await update_latest_tool_utime(tool_name, tenant_id, maintenance_mode)
     return response_ok({"message": "工具资源更新成功"})
 
 
