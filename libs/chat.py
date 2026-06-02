@@ -9,6 +9,7 @@ import pytz
 
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
+from websockets import ConnectionClosed
 from tortoise.expressions import Q
 from tortoise.functions import Max
 from pathlib import Path
@@ -333,106 +334,175 @@ class ChatManager:
 
     async def disconnect(self, user_id, session_id):
         """处理用户断开连接"""
-        if user_id in self.active_connections:
-            if len(list(self.active_connections[user_id].keys())) == 1:
+        user_sessions = self.active_connections.get(user_id)
+        if user_sessions is not None:
+            # 仅移除匹配的 session，避免误删同一用户的其它存活连接
+            user_sessions.pop(session_id, None)
+            # 该用户已无任何存活连接时，才清理用户条目与在线标记
+            if not user_sessions:
                 self.active_connections.pop(user_id, None)
-            elif session_id in self.active_connections[user_id]:
-                self.active_connections[user_id].pop(session_id, None)
-        await self.cache_client.delete(f"room_online_{user_id}")
+                await self.cache_client.delete(f"room_online_{user_id}")
+        else:
+            # 连接未被追踪（孤儿连接），仍尝试清理在线标记兜底
+            await self.cache_client.delete(f"room_online_{user_id}")
         logger.info(f"用户 {user_id} 断开连接")
         # await self.msg_pub.publish(WR_TOPIC, orjson.dumps({"type": "system", "message": f"{user.username} 离开作战室"}).decode())
 
+    async def _safe_send(self, conn, payload: str) -> bool:
+        """向单个连接发送消息。失败返回 False，由调用方负责清理失效连接。
+
+        同时捕获 sanic 的 WebsocketClosed 与 websockets 原生的 ConnectionClosed，
+        以及其它任何异常，确保单个连接出错不会向上冒泡杀死广播协程。
+        """
+        try:
+            await conn.send(payload)
+            return True
+        except (WebsocketClosed, ConnectionClosed) as e:
+            logger.warning(f"连接已关闭，发送失败: {e}")
+            return False
+        except Exception as e:
+            logger.warning(f"发送消息异常: {e}")
+            return False
+
+    async def _broadcast(self, payload: str, *, room_id=None, user_id=None):
+        """广播消息到活跃连接。
+
+        投递规则（按优先级）：
+        - user_id 指定时：发给该用户的所有连接（私聊/@/AI 回复）
+        - room_id 指定时：发给 current_room 匹配该房间的连接
+        - 两者均为 None：全员广播
+
+        遍历的是连接快照，发送失败的连接在循环结束后统一移除，
+        避免"遍历中修改字典"导致的 RuntimeError 杀死监听器。
+        """
+        # 先做快照，避免遍历期间 active_connections 被并发修改
+        connections = [(uid, sid, info) for uid, sessions in list(self.active_connections.items()) for sid, info in list(sessions.items())]
+        dead = []  # 发送失败、需要清理的 (user_id, session_id)
+        for uid, sid, info in connections:
+            if user_id is not None:
+                should_send = uid == user_id
+            elif room_id is not None:
+                should_send = info.get("current_room") == room_id
+            else:
+                should_send = True
+            if not should_send:
+                continue
+            if await self._safe_send(info["conn"], payload):
+                logger.info("已发送")
+            else:
+                dead.append((uid, sid))
+        for uid, sid in dead:
+            await self.disconnect(uid, sid)
+
     async def msg_listener(self):
-        async with self.cache_client.client.pubsub() as msg_sub:
-            await msg_sub.subscribe(WR_TOPIC)
-            async for message in msg_sub.listen():
-                try:
-                    logger.info(message)
-                    if message.get("type") != "message":
-                        continue
-                    msg = orjson.loads(message["data"])
-                    # 处理待办消息
-                    if "approval" in msg.keys():
-                        for key, values in self.active_connections.items():
-                            if key == msg.get("user"):
-                                for k, v in values.items():
-                                    await v["conn"].send(orjson.dumps(msg.get("approval")).decode())
-                        continue
-                    # 处理@消息
-                    if "mention" in msg.keys():
-                        for key, values in self.active_connections.items():
-                            if key == msg.get("user"):
-                                for k, v in values.items():
-                                    await v["conn"].send(orjson.dumps(msg.get("mention")).decode())
-                        continue
-                    # 处理作战室产生的runlog
-                    if "log" in msg.keys():
-                        if msg["log"].get("type") == "approval-info":
+        """订阅 Redis 频道并广播消息。
+
+        外层 while + try 保证健壮性：
+        - 单条消息处理异常仅跳过该消息，绝不退出监听；
+        - 订阅级异常（如 Redis 断开）会自动重连，实现自愈。
+        """
+        while True:
+            try:
+                async with self.cache_client.client.pubsub() as msg_sub:
+                    await msg_sub.subscribe(WR_TOPIC)
+                    async for message in msg_sub.listen():
+                        try:
+                            await self._dispatch_message(message)
+                        except orjson.JSONDecodeError:
+                            logger.error(f"JSONDecodeError | {message.get('data')}")
+                        except Exception as e:
+                            # 单条消息失败仅跳过，不退出监听
+                            logger.error(f"{e} | {traceback.format_exc()}")
                             continue
-                        message["data"] = orjson.dumps(
-                            await creat_message(
-                                room_id=msg["room_id"],
-                                log=msg["log"],
-                                user=msg["updator"],
-                                redis=self.redis,
-                            )
-                        )
-                    if msg.get("type") == "ai-thinking":
-                        # AI 思考中消息，直接转发给前端，不保存到数据库
-                        thinking_data = {
-                            "type": "ai-thinking",
-                            "content": msg.get("content", ""),
-                            "tool_name": msg.get("tool_name", ""),
-                            "room_id": msg.get("room_id"),
-                            "tenant_id": msg.get("tenant_id"),
-                            "receiver_id": msg.get("receiver_id"),
-                        }
-                        message["data"] = orjson.dumps(thinking_data)
-                    elif msg.get("type") in ["ai-reply-delta", "ai-reply-end"]:
-                        # 流式回复，累积内容并直接转发给前端
-                        buffer_key = f"{msg.get('room_id')}:{msg.get('receiver_id')}"
-                        if buffer_key not in self.ai_stream_buffer:
-                            self.ai_stream_buffer[buffer_key] = {
-                                "content": "",
-                                "room_id": msg.get("room_id"),
-                                "receiver_id": msg.get("receiver_id"),
-                                "tenant_id": msg.get("tenant_id"),
-                                "type": "ai-reply-end",  # 用于 creat_ai_message 识别
-                            }
-                        self.ai_stream_buffer[buffer_key]["content"] += msg.get("content", "")
-                        stream_data = {
-                            "type": msg.get("type"),
-                            "content": msg.get("content", ""),
-                            "room_id": msg.get("room_id"),
-                            "tenant_id": msg.get("tenant_id"),
-                            "receiver_id": msg.get("receiver_id"),
-                        }
-                        message["data"] = orjson.dumps(stream_data)
-                    if msg.get("type") == "ai-reply-end":
-                        buffer_key = f"{msg.get('room_id')}:{msg.get('receiver_id')}"
-                        if buffer_key in self.ai_stream_buffer:
-                            buffer_data = self.ai_stream_buffer.pop(buffer_key)
-                            await creat_ai_message(buffer_data, self.redis)
-                        else:
-                            continue
-                    room_id = msg.get("room_id")
-                    for key, values in self.active_connections.items():
-                        for k, v in values.items():
-                            try:
-                                if room_id and v["current_room"] == room_id:
-                                    await v["conn"].send(message["data"].decode())
-                                elif room_id is None:
-                                    await v["conn"].send(message["data"].decode())
-                                logger.info("已发送")
-                            except WebsocketClosed as e:
-                                logger.warning(f"{e} | 用户 {key} 的 {k} 会话的连接已关闭，正在移除连接")
-                                await self.disconnect(key, k)
-                except orjson.JSONDecodeError:
-                    logger.error(f"JSONDecodeError | {message.get('data')}")
-                except Exception as e:
-                    logger.error(f"{e} | {traceback.format_exc()}")
-                    break
-            await msg_sub.unsubscribe(WR_TOPIC)
+            except asyncio.CancelledError:
+                # 服务关闭时任务被正常取消，向上抛出以结束协程
+                raise
+            except Exception as e:
+                logger.error(f"msg_listener 订阅异常，2 秒后重连: {e} | {traceback.format_exc()}")
+                await asyncio.sleep(2)
+
+    async def _dispatch_message(self, message):
+        """处理单条 Redis 消息并广播给对应连接"""
+        logger.info(message)
+        if message.get("type") != "message":
+            return
+        msg = orjson.loads(message["data"])
+        # 处理待办消息：定向发给指定用户的所有连接
+        if "approval" in msg.keys():
+            if msg.get("user"):
+                await self._broadcast(orjson.dumps(msg.get("approval")).decode(), user_id=msg.get("user"))
+            return
+        # 处理@消息：定向发给指定用户的所有连接
+        if "mention" in msg.keys():
+            if msg.get("user"):
+                await self._broadcast(orjson.dumps(msg.get("mention")).decode(), user_id=msg.get("user"))
+            return
+        # 处理作战室产生的runlog
+        if "log" in msg.keys():
+            if msg["log"].get("type") == "approval-info":
+                return
+            message["data"] = orjson.dumps(
+                await creat_message(
+                    room_id=msg["room_id"],
+                    log=msg["log"],
+                    user=msg["updator"],
+                    redis=self.redis,
+                )
+            )
+        if msg.get("type") == "ai-thinking":
+            # AI 思考中消息，直接转发给前端，不保存到数据库
+            thinking_data = {
+                "type": "ai-thinking",
+                "content": msg.get("content", ""),
+                "tool_name": msg.get("tool_name", ""),
+                "room_id": msg.get("room_id"),
+                "tenant_id": msg.get("tenant_id"),
+                "receiver_id": msg.get("receiver_id"),
+            }
+            message["data"] = orjson.dumps(thinking_data)
+        elif msg.get("type") in ["ai-reply-delta", "ai-reply-end"]:
+            # 流式回复，累积内容并直接转发给前端
+            buffer_key = f"{msg.get('room_id')}:{msg.get('receiver_id')}"
+            if buffer_key not in self.ai_stream_buffer:
+                self.ai_stream_buffer[buffer_key] = {
+                    "content": "",
+                    "room_id": msg.get("room_id"),
+                    "receiver_id": msg.get("receiver_id"),
+                    "tenant_id": msg.get("tenant_id"),
+                    "type": "ai-reply-end",  # 用于 creat_ai_message 识别
+                }
+            self.ai_stream_buffer[buffer_key]["content"] += msg.get("content", "")
+            stream_data = {
+                "type": msg.get("type"),
+                "content": msg.get("content", ""),
+                "room_id": msg.get("room_id"),
+                "tenant_id": msg.get("tenant_id"),
+                "receiver_id": msg.get("receiver_id"),
+            }
+            message["data"] = orjson.dumps(stream_data)
+        if msg.get("type") == "ai-reply-end":
+            buffer_key = f"{msg.get('room_id')}:{msg.get('receiver_id')}"
+            if buffer_key in self.ai_stream_buffer:
+                buffer_data = self.ai_stream_buffer.pop(buffer_key)
+                await creat_ai_message(buffer_data, self.redis)
+            else:
+                return
+        # 投递
+        msg_type = msg.get("type")
+        if msg_type in ("ai-thinking", "ai-reply-delta", "ai-reply-end"):
+            # AI 消息按 receiver_id 投递给该用户的所有连接，不再依赖 current_room
+            receiver_id = msg.get("receiver_id")
+            if receiver_id:
+                await self._broadcast(message["data"].decode(), user_id=receiver_id)
+            else:
+                logger.warning(f"AI 消息缺少 receiver_id，跳过投递: {msg_type}")
+        else:
+            room_id = msg.get("room_id")
+            if room_id:
+                await self._broadcast(message["data"].decode(), room_id=room_id)
+            else:
+                # room_id 为空时全员广播（如用户在线状态等全局消息）
+                await self._broadcast(message["data"].decode())
 
     async def _flush_events(self):
         # 1. 检查是否有数据需要处理
@@ -772,7 +842,7 @@ class ChatManager:
 
             # 构建完整消息：将系统指令、消息上下文和用户消息合并
             full_message = f"""<system_instruction>
-【身份】你是 Lion Management 平台的 AI 助手。
+【身份】你是 AIOE 平台的 AI 助手。
 
 【当前用户信息】
 - 用户名: {sender_name}
@@ -811,7 +881,7 @@ class ChatManager:
 3. 如果不确定类型，优先判断为类型 A（避免不必要的接口调用）
 4. 如果 skill 调用失败，告知用户具体的错误信息
 
-【重要提醒】
+【重要提醒】 
 - 不要问用户"是否需要我调用 skill"，根据问题类型自动决定
 - 不要说"我可以帮你..."，直接做
 - 类型 B 问题必须调用 skill 获取实际数据，不要凭记忆回答
