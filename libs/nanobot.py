@@ -97,7 +97,7 @@ class StreamingHook(AgentHook):
 class RedisStreamingHook(AgentHook):
     """Redis 流式输出 Hook - 将 Nanobot 流式输出桥接到 Redis Pub/Sub"""
 
-    def __init__(self, room_id: str, receiver_id: str, tenant_id: str, redis_pub):
+    def __init__(self, room_id: str, receiver_id: str, tenant_id: str, redis_pub, stream_id: str | None = None):
         """
         初始化 Redis 流式 Hook
 
@@ -106,11 +106,13 @@ class RedisStreamingHook(AgentHook):
             receiver_id: 接收者ID（用户ID）
             tenant_id: 租户ID
             redis_pub: Redis 发布客户端
+            stream_id: 单次 AI 请求的唯一标识，用于避免同一房间/用户的并发回复串流
         """
         self.room_id = room_id
         self.receiver_id = receiver_id
         self.tenant_id = tenant_id
         self.redis_pub = redis_pub
+        self.stream_id = stream_id
         self._has_content = False  # 标记当前流式会话是否有内容
 
     def wants_streaming(self) -> bool:
@@ -128,6 +130,8 @@ class RedisStreamingHook(AgentHook):
             "receiver_id": self.receiver_id,
             "tenant_id": self.tenant_id,
         }
+        if self.stream_id:
+            message_data["stream_id"] = self.stream_id
         try:
             await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
         except Exception as e:
@@ -140,6 +144,12 @@ class RedisStreamingHook(AgentHook):
         Args:
             resuming: True 表示后面还有 tool calls 要执行，False 表示真正结束
         """
+        # Nanobot 的 on_stream_end(resuming=True) 只表示当前文本片段结束，
+        # 后面还会继续执行工具或继续生成；这时不能向前端发送 ai-reply-end，
+        # 否则前端会提前结束展示，ChatManager 也会提前 pop 缓冲并保存半截内容。
+        if resuming:
+            return
+
         # 只有在有内容被发送时才发送结束消息
         # 这样可以确保：
         # 1. 每次 AI 生成文本后都保存消息记录
@@ -155,6 +165,8 @@ class RedisStreamingHook(AgentHook):
                 "receiver_id": self.receiver_id,
                 "tenant_id": self.tenant_id,
             }
+            if self.stream_id:
+                message_data["stream_id"] = self.stream_id
             try:
                 await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
             except Exception as e:
@@ -186,6 +198,8 @@ class RedisStreamingHook(AgentHook):
                 "receiver_id": self.receiver_id,
                 "tenant_id": self.tenant_id,
             }
+            if self.stream_id:
+                message_data["stream_id"] = self.stream_id
             try:
                 await self.redis_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
             except Exception as e:
