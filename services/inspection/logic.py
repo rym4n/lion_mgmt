@@ -70,6 +70,22 @@ async def notify_config(schedule_id: str, notify_enabled: bool, notify_config: D
     return schedule
 
 
+async def custom_report_config(schedule_id: str, custom_report_config: Dict[str, Any], tenant_id: str) -> InspectionSchedule:
+    """
+    巡检自定义报告配置
+    inspection custom report configuration
+    """
+    schedule = await InspectionSchedule.filter(id=schedule_id, deleted=False, tenant_id=tenant_id).first()
+
+    if not schedule:
+        raise CustomError(ErrorCode.SCHEDULE_NOT_FOUND)
+
+    schedule.custom_report_config = custom_report_config
+    await schedule.save()
+
+    return schedule
+
+
 async def get_schedule(tenant_id: str) -> Optional[InspectionSchedule]:
     """
     获取租户的巡检调度配置（返回第一个，用于向后兼容）
@@ -141,6 +157,7 @@ async def list_schedules(page: int, page_size: int, tenant_id: str, enabled: Opt
                 "utime": schedule.utime.isoformat() if schedule.utime else None,
                 "notify_enabled": schedule.notify_enabled,
                 "notify_config": schedule.notify_config,
+                "custom_report_config": schedule.custom_report_config,
             }
             for schedule in items
         ],
