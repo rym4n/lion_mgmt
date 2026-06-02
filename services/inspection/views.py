@@ -226,6 +226,9 @@ def _custom_report_result_to_text(raw_result):
                 return raw_result
 
     if isinstance(parsed_result, dict):
+        if parsed_result.get("code") == 500:
+            return _stringify_action_result(parsed_result)
+
         data = parsed_result.get("data", parsed_result)
         if isinstance(data, dict):
             for key in ("download_link", "url", "file_url", "file_id", "result", "content", "message"):
