@@ -23,6 +23,7 @@ class InspectionSchedule(BaseModel):
     description = fields.TextField(null=True, description="任务描述")
     notify_enabled = fields.BooleanField(default=False, description="是否启用通知")
     notify_config = fields.JSONField(null=True, description="通知动作配置")
+    custom_report_config = fields.JSONField(null=True, description="自定义报告动作配置")
 
     class Meta:
         table = "inspection_schedule"
