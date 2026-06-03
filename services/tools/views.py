@@ -995,7 +995,7 @@ async def tool_actions_filter(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    actions = await ToolAction.filter(tenant_id=tenant_id).values("action", "id", "tool_name", "version_number")
+    actions = await ToolAction.filter(tenant_id=tenant_id, deleted=False).values("action", "id", "tool_name", "version_number")
     action_list = []
     for action in actions:
         act_data = action.get("action")
