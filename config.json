@@ -307,7 +307,7 @@
   },
   "tools": {
     "web": {
-      "enable": true,
+      "enable": false,
       "proxy": null,
       "search": {
         "provider": "duckduckgo",
