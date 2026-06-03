@@ -49,9 +49,11 @@ class SecurityMiddleware(BaseMiddleware):
             "/user/local-auth",
             "/user/iframe-login",
             "/approve/callback",
-            "/system/down-file/<file_id>"
         ]
-        if request.path not in white_urls:
+        white_prefixes = [
+            "/system/down-file/",
+        ]
+        if request.path not in white_urls and not any(request.path.startswith(prefix) for prefix in white_prefixes):
             await authenticate(request)
             if request.path == "/docs" or request.path.startswith("/docs/"):
                 await check_permissions(request, "apidoc:r")
