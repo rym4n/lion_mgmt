@@ -6,6 +6,7 @@ import traceback
 import httpx
 import orjson
 import pytz
+import uuid
 
 from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
@@ -247,8 +248,9 @@ async def creat_ai_message(msg, redis):
     # 流式场景下 type 可能是 ai-reply-end，存入数据库时设为 ai
     msg_type = "ai-reply-delta" if msg.get("type") == "ai-reply-end" else msg.get("type")
 
-    # 构造一个唯一 key（流式场景下使用 room_id 和 receiver_id，不再用 content hash）
-    key = f"{room_id}:{user.id}"
+    # 构造一个唯一 key。优先使用单次 AI 请求的 stream_id，避免同一用户/房间
+    # 连续或并发发起多次 AI 请求时，5 秒锁误命中新请求，导致内容不创建/错绑到上一条。
+    key = msg.get("stream_id") or f"{room_id}:{user.id}:{hashlib.sha1(content.encode()).hexdigest()}"
     lock_key = f"create_ai_message_lock:{key}"
 
     # 尝试获取锁（5 秒自动过期）
@@ -276,6 +278,9 @@ async def creat_ai_message(msg, redis):
             if ai_msg:
                 break
             await asyncio.sleep(0.01 * (i + 1))  # 指数轮询避免数据库压力过大
+        if ai_msg is None:
+            logger.warning(f"AI 回复消息锁已存在但未找到记录，跳过保存: {key}")
+            return None
 
     message_data = {
         "type": msg_type,
@@ -306,6 +311,7 @@ class ChatManager:
         self.active_connections: dict[str, dict] = {}
         self.event_update_buffer = {}
         self.ai_stream_buffer = {}  # 流式消息缓冲区，key 为 room_id:receiver_id
+        self.ai_task_locks: dict[str, asyncio.Lock] = {}  # Nanobot 会话锁，key 为 tenant_id:room_id
 
     async def connect(self, user: Account, ws, session_id):
         """处理用户连接"""
@@ -459,16 +465,20 @@ class ChatManager:
                 "tenant_id": msg.get("tenant_id"),
                 "receiver_id": msg.get("receiver_id"),
             }
+            if msg.get("stream_id"):
+                thinking_data["stream_id"] = msg.get("stream_id")
             message["data"] = orjson.dumps(thinking_data)
         elif msg.get("type") in ["ai-reply-delta", "ai-reply-end"]:
             # 流式回复，累积内容并直接转发给前端
-            buffer_key = f"{msg.get('room_id')}:{msg.get('receiver_id')}"
+            stream_id = msg.get("stream_id")
+            buffer_key = stream_id or f"{msg.get('room_id')}:{msg.get('receiver_id')}"
             if buffer_key not in self.ai_stream_buffer:
                 self.ai_stream_buffer[buffer_key] = {
                     "content": "",
                     "room_id": msg.get("room_id"),
                     "receiver_id": msg.get("receiver_id"),
                     "tenant_id": msg.get("tenant_id"),
+                    "stream_id": stream_id,
                     "type": "ai-reply-end",  # 用于 creat_ai_message 识别
                 }
             self.ai_stream_buffer[buffer_key]["content"] += msg.get("content", "")
@@ -479,9 +489,12 @@ class ChatManager:
                 "tenant_id": msg.get("tenant_id"),
                 "receiver_id": msg.get("receiver_id"),
             }
+            if stream_id:
+                stream_data["stream_id"] = stream_id
             message["data"] = orjson.dumps(stream_data)
         if msg.get("type") == "ai-reply-end":
-            buffer_key = f"{msg.get('room_id')}:{msg.get('receiver_id')}"
+            stream_id = msg.get("stream_id")
+            buffer_key = stream_id or f"{msg.get('room_id')}:{msg.get('receiver_id')}"
             if buffer_key in self.ai_stream_buffer:
                 buffer_data = self.ai_stream_buffer.pop(buffer_key)
                 await creat_ai_message(buffer_data, self.redis)
@@ -826,22 +839,25 @@ class ChatManager:
 
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
-    async def _execute_nanobot_task(self, user_id: str, tenant_id: str, current_room_id: str, content: str, message_data: dict):
+    async def _execute_nanobot_task(self, user_id: str, tenant_id: str, current_room_id: str, content: str, message_data: dict, stream_id: str):
         """在后台执行 nanobot 任务（独立于 websocket 连接）"""
+        lock_key = f"{tenant_id}:{current_room_id}"
+        lock = self.ai_task_locks.setdefault(lock_key, asyncio.Lock())
         try:
-            logger.info(f"开始调用 Nanobot，tenant_id={tenant_id}, room_id={current_room_id}")
-            tenant_workspace = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace"
-            client = NanobotClient(session_id=current_room_id, workspace=tenant_workspace)
+            async with lock:
+                logger.info(f"开始调用 Nanobot，tenant_id={tenant_id}, room_id={current_room_id}")
+                tenant_workspace = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace"
+                client = NanobotClient(session_id=current_room_id, workspace=tenant_workspace)
 
-            # 创建 Redis 流式 Hook
-            hook = RedisStreamingHook(room_id=current_room_id, receiver_id=user_id, tenant_id=tenant_id, redis_pub=self.msg_pub)
-            logger.info(f"RedisStreamingHook 已创建")
+                # 创建 Redis 流式 Hook
+                hook = RedisStreamingHook(room_id=current_room_id, receiver_id=user_id, tenant_id=tenant_id, redis_pub=self.msg_pub, stream_id=stream_id)
+                logger.info(f"RedisStreamingHook 已创建")
 
-            # 从 message_data 中提取用户名
-            sender_name = message_data.get("sender_name", "admin")
+                # 从 message_data 中提取用户名
+                sender_name = message_data.get("sender_name", "admin")
 
-            # 构建完整消息：将系统指令、消息上下文和用户消息合并
-            full_message = f"""<system_instruction>
+                # 构建完整消息：将系统指令、消息上下文和用户消息合并
+                full_message = f"""<system_instruction>
 【身份】你是 AIOE 平台的 AI 助手。
 
 【当前用户信息】
@@ -895,16 +911,16 @@ class ChatManager:
 {content}
 </user_message>"""
 
-            # 调用 nanobot（异步执行）
-            # session_key 已在 NanobotClient 初始化时设置为 room_id
-            logger.info(f"准备调用 client.ask")
-            logger.info(f"消息内容长度: {len(full_message)} 字符")
+                # 调用 nanobot（异步执行）
+                # session_key 已在 NanobotClient 初始化时设置为 room_id
+                logger.info(f"准备调用 client.ask")
+                logger.info(f"消息内容长度: {len(full_message)} 字符")
 
-            result = await client.ask(message=full_message, streaming=True, hooks=[hook])
+                result = await client.ask(message=full_message, streaming=True, hooks=[hook])
 
-            logger.info(f"Nanobot 调用完成，返回结果长度: {len(result) if result else 0} 字符")
-            if not result or len(result.strip()) == 0:
-                logger.warning(f"Nanobot 返回了空结果！tenant_id={tenant_id}, room_id={current_room_id}")
+                logger.info(f"Nanobot 调用完成，返回结果长度: {len(result) if result else 0} 字符")
+                if not result or len(result.strip()) == 0:
+                    logger.warning(f"Nanobot 返回了空结果！tenant_id={tenant_id}, room_id={current_room_id}")
         except Exception as e:
             logger.error(f"Nanobot 调用失败: {e} | {traceback.format_exc()}")
             # 发送错误消息到前端
@@ -914,6 +930,7 @@ class ChatManager:
                 "room_id": current_room_id,
                 "receiver_id": user_id,
                 "tenant_id": tenant_id,
+                "stream_id": stream_id,
             }
             await self.msg_pub.publish(WR_TOPIC, orjson.dumps(error_data).decode())
             # 发送结束消息
@@ -923,6 +940,7 @@ class ChatManager:
                 "room_id": current_room_id,
                 "receiver_id": user_id,
                 "tenant_id": tenant_id,
+                "stream_id": stream_id,
             }
             await self.msg_pub.publish(WR_TOPIC, orjson.dumps(end_data).decode())
 
@@ -955,12 +973,13 @@ class ChatManager:
             "room_id": current_room_id,
             "tenant_id": tenant_id,
         }
+        stream_id = f"ai:{message.id}:{uuid.uuid4().hex}"
 
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
         # 使用后台任务执行 nanobot，避免 websocket 断开时任务被取消
         # 这样即使用户断开连接，nanobot 也会继续执行，结果通过 Redis Pub/Sub 发送
-        asyncio.create_task(self._execute_nanobot_task(user_id=user.id, tenant_id=tenant_id, current_room_id=current_room_id, content=content, message_data=message_data))
+        asyncio.create_task(self._execute_nanobot_task(user_id=user.id, tenant_id=tenant_id, current_room_id=current_room_id, content=content, message_data=message_data, stream_id=stream_id))
         logger.info(f"Nanobot 后台任务已启动，room_id={current_room_id}")
 
     async def _handle_private_message(self, user: Account, data: dict, tenant_id):
