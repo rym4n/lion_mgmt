@@ -19,7 +19,7 @@ from sanic.log import logger
 from libs.utils import upload_to_s3
 from tortoise.expressions import Q
 from litellm import acompletion
-from models import InspectionSchedule, InspectionCategory, InspectionTarget, InspectionResult, Tool, ToolAction, ToolResources, Timed
+from models import InspectionSchedule, InspectionCategory, InspectionTarget, InspectionResult, Tool, ToolAction, Timed
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from settings import RY_AI_MODEL, RY_AI_API_BASE, LLM_KEY
@@ -501,15 +501,6 @@ async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List
         if t.name not in tool_map:
             tool_map[t.name] = t
 
-    # 获取相关的工具资源信息
-    all_resource_ids = set()
-    for c in categories:
-        if c.resource_ids:
-            all_resource_ids.update(c.resource_ids)
-
-    tool_resources = await ToolResources.filter(id__in=list(all_resource_ids), deleted=False, tenant_id=tenant_id).all()
-    resource_map = {r.id: r for r in tool_resources}
-
     results = []
     for target in targets:
         category = category_map.get(target.category_id)
@@ -518,20 +509,8 @@ async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List
 
         tool = tool_map.get(category.app_name)
 
-        # 构造 resources（资源配置）
-        resources_dict = {}
-        if category.resource_ids:
-            for r_id in category.resource_ids:
-                if r_id in resource_map:
-                    res = resource_map[r_id]
-                    res_data = {}
-                    resources = res.resources_json
-                    if isinstance(resources, dict):
-                        for key, value in resources.items():
-                            res_data[key] = value.get("value") if isinstance(value, dict) else value
-                    resources_dict[res.name] = res_data
-
-        resources = orjson.dumps(resources_dict).decode("utf-8")
+        # 构造 resources（资源ID列表），保持执行配置接口只返回资源 id，不展开资源内容。
+        resources = orjson.dumps(category.resource_ids or []).decode("utf-8")
 
         item = {
             "main": tool.main if tool and tool.main else "main.py",
