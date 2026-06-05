@@ -182,7 +182,6 @@ async def get_license(request: Request):
                     if name == "工作空间":
                         valid_modules.add("租户管理")
             valid_modules.update(["许可管理"])
-            logger.info(f"valid_modules: {valid_modules}")
             # 超级权限处理
             if "*:*" not in role.permissions:
                 relo_permissions_model = [p.split(":")[0] for p in role.permissions]
@@ -191,7 +190,6 @@ async def get_license(request: Request):
                 role_permissions = permissions
             perm_models.update([p["model"] for p in role_permissions if p["description"] in valid_modules and p["description"] != "仪表盘"])
 
-        logger.info(f"perm_models: {perm_models}")
         for model in perm_models:
             permission_data = next((p for p in permissions if p["model"] == model), None)
             if not permission_data or not permission_data["url"]:
