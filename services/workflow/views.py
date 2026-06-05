@@ -17,7 +17,7 @@ import orjson
 import pytz
 import time
 from sanic import Blueprint
-from sanic.response import raw
+from sanic.response import ResponseStream, raw
 from sanic_ext import openapi
 from tortoise.expressions import Q
 from tortoise.functions import Count, Max
@@ -2629,7 +2629,34 @@ async def ai_chat(request):
     if not RY_AI_API_BASE or not LLM_KEY:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
+    payload = request.json or {}
+    url = RY_AI_API_BASE + "/chat/completions"
+    headers = {"Authorization": f"Bearer {LLM_KEY}"}
+    timeout = aiohttp.ClientTimeout(total=300)
+
+    if payload.get("stream") is True:
+        async def forward_ai_stream(streaming_response):
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers, timeout=timeout) as ai_resp:
+                    async for chunk in ai_resp.content.iter_any():
+                        if chunk:
+                            await streaming_response.write(chunk)
+
+        return ResponseStream(
+            forward_ai_stream,
+            content_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
+        )
+
     async with aiohttp.ClientSession() as session:
-        async with session.post(RY_AI_API_BASE + "/chat/completions", json=request.json, headers={"Authorization": f"Bearer {LLM_KEY}"}, timeout=aiohttp.ClientTimeout(total=300)) as ai_resp:
-            result = await ai_resp.json()
-            return response_ok(result)
+        async with session.post(url, json=payload, headers=headers, timeout=timeout) as ai_resp:
+            content_type = ai_resp.headers.get("Content-Type", "").lower()
+            if "application/json" in content_type or content_type.endswith("+json"):
+                result = await ai_resp.json()
+                return response_ok(result)
+
+            body = await ai_resp.read()
+            return raw(body, status=ai_resp.status, content_type=content_type or "text/plain")
