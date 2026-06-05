@@ -902,13 +902,20 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
         completion_params["api_key"] = api_key
 
     # 重试逻辑
-    max_retries = 2
+    max_retries = 3
     last_error = None
 
     for attempt in range(max_retries):
         try:
             response = await acompletion(**completion_params)
             ai_response = response.choices[0].message.content
+
+            if not ai_response or not ai_response.strip():
+                last_error = f"AI返回空内容，已重试 {attempt + 1}/{max_retries}"
+                if attempt < max_retries - 1:
+                    continue
+                break
+
             parsed_data = orjson.loads(ai_response)
 
             # 验证和规范化必需字段
