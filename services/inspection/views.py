@@ -2562,7 +2562,7 @@ async def add_result(request: Request):
         if not end_time:
             end_time = datetime.now()
 
-        # Use AI to judge the result
+        # Use Nanobot to judge the result
         status = "failed"
 
         try:
@@ -2576,9 +2576,9 @@ async def add_result(request: Request):
             item["ai_judgment"] = judgment
 
         except Exception as e:
-            logger.warning(f"AI判断巡检结果失败: {str(e)}")
+            logger.warning(f"Nanobot判断巡检结果失败: {str(e)}")
             # Fallback: use status from item if available
-            error_message = f"AI判断失败: {str(e)}"
+            error_message = f"Nanobot判断失败: {str(e)}"
 
         # Create InspectionResult
         try:

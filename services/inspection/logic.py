@@ -14,15 +14,17 @@ import uuid
 
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
+from pathlib import Path
 from docxtpl import DocxTemplate
 from sanic.log import logger
+from libs.nanobot import NanobotClient
 from libs.utils import upload_to_s3
 from tortoise.expressions import Q
 from litellm import acompletion
 from models import InspectionSchedule, InspectionCategory, InspectionTarget, InspectionResult, Tool, ToolAction, Timed
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from settings import RY_AI_MODEL, RY_AI_API_BASE, LLM_KEY
+from settings import RY_AI_MODEL, RY_AI_API_BASE, LLM_KEY, NANOBOT_WORKSPACE_BASE
 
 # ==================== InspectionSchedule Operations ====================
 
@@ -817,6 +819,74 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
 # ==================== AI Judgment Operations ====================
 
 
+def _extract_json_object(text: Any) -> Dict[str, Any]:
+    """
+    从 Nanobot 返回内容中提取 JSON 对象。
+    Nanobot 不像 litellm response_format 那样强制结构化输出，这里兼容纯 JSON、
+    markdown fenced code，以及前后带解释文本的情况。
+    """
+    if isinstance(text, (bytes, bytearray)):
+        text = text.decode()
+    if not isinstance(text, str):
+        raise ValueError("Nanobot response is not text")
+
+    content = text.strip()
+    if not content:
+        raise ValueError("Nanobot response is empty")
+
+    if content.startswith("```"):
+        lines = content.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        content = "\n".join(lines).strip()
+
+    try:
+        parsed = orjson.loads(content)
+    except orjson.JSONDecodeError:
+        start = content.find("{")
+        end = content.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise
+        parsed = orjson.loads(content[start : end + 1])
+
+    if not isinstance(parsed, dict):
+        raise ValueError("Nanobot response JSON is not an object")
+
+    return parsed
+
+
+def _normalize_ai_judgment(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    规范化 AI 巡检裁决结果，保持 /inspection/result/add 下游字段契约不变。
+    """
+    passed = parsed_data.get("passed", False)
+    if isinstance(passed, str):
+        parsed_data["passed"] = passed.strip().lower() in ("true", "1", "yes", "y", "通过", "符合", "pass", "passed")
+    else:
+        parsed_data["passed"] = bool(passed)
+
+    if "reason" not in parsed_data or not parsed_data["reason"]:
+        parsed_data["reason"] = "Nanobot未提供判断理由"
+    elif not isinstance(parsed_data["reason"], str):
+        parsed_data["reason"] = str(parsed_data["reason"])
+
+    if "diagnosis" not in parsed_data:
+        parsed_data["diagnosis"] = ""
+    elif not isinstance(parsed_data["diagnosis"], str):
+        parsed_data["diagnosis"] = str(parsed_data["diagnosis"]) if parsed_data["diagnosis"] else ""
+
+    if "suggestions" not in parsed_data:
+        parsed_data["suggestions"] = []
+    elif isinstance(parsed_data["suggestions"], str):
+        parsed_data["suggestions"] = [parsed_data["suggestions"]]
+    elif not isinstance(parsed_data["suggestions"], list):
+        parsed_data["suggestions"] = []
+
+    return parsed_data
+
+
 async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
     """
     使用AI判断巡检结果是否符合标准
@@ -839,7 +909,7 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
     # 格式化结果数据以便AI更好理解
     result_str = orjson.dumps(result_data, option=orjson.OPT_INDENT_2).decode("utf-8")
 
-    # 准备 prompt - 针对GPT-5.4优化
+    # 准备 prompt，由 Nanobot 完成判断并返回结构化 JSON
     prompt = f"""
 你是一个专业的IT运维巡检专家。请根据以下信息判断巡检结果是否符合标准。
 
@@ -873,85 +943,53 @@ async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], t
 1. 直接返回JSON对象，不要使用markdown代码块
 2. diagnosis字段应该深入分析问题的根本原因，而不是简单重复reason的内容
 3. diagnosis应该包含具体的排查方向，例如：检查哪些配置、查看哪些日志、验证哪些依赖等
+4. 本任务只需要基于给定数据做判断，不要调用任何工具、skill 或外部接口
 """
 
-    # 使用litellm调用AI服务
-    model = RY_AI_MODEL
-    api_base = RY_AI_API_BASE
-    api_key = LLM_KEY
+    tenant_workspace = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace"
+    session_key = f"inspection:judgment:{target_id}:{uuid.uuid4().hex}"
+    client = NanobotClient(session_id=session_key, workspace=tenant_workspace)
 
-    # 如果使用自定义API base且模型名称不包含provider前缀，自动添加
-    if api_base and "/" not in model:
-        model = f"openai/{model}"
+    full_message = f"""<system_instruction>
+【身份】你是 AIOE 平台的巡检结果裁决助手。
 
-    # 构建acompletion参数 - 针对GPT-5.4优化
-    completion_params = {
-        "model": model,
-        "messages": [{"role": "system", "content": "你是一个专业的IT运维巡检专家，擅长分析巡检结果并做出准确的判断。你的判断应该基于数据和标准，而不是主观臆断。"}, {"role": "user", "content": prompt}],
-        "response_format": {"type": "json_object"},
-        "max_tokens": 800,
-    }
+【执行规则】
+1. 只根据用户提供的巡检标准和巡检结果做判断。
+2. 不要调用任何工具、skill 或外部接口。
+3. 只能输出一个 JSON 对象，禁止输出 markdown、代码块或额外解释。
+</system_instruction>
 
-    # GPT-5系列模型只支持temperature=1，其他模型可以使用自定义temperature
-    if "gpt-5" not in model.lower():
-        completion_params["temperature"] = 0.1
+<inspection_judgment_task>
+{prompt}
+</inspection_judgment_task>"""
 
-    if api_base:
-        completion_params["api_base"] = api_base
-    if api_key:
-        completion_params["api_key"] = api_key
-
-    # 重试逻辑
-    max_retries = 3
+    max_retries = 2
     last_error = None
 
     for attempt in range(max_retries):
         try:
-            response = await acompletion(**completion_params)
-            ai_response = response.choices[0].message.content
+            logger.info(f"准备调用 Nanobot 判断巡检结果，target_id={target_id}, tenant_id={tenant_id}")
+            ai_response = await client.ask(message=full_message, streaming=False, session_key=session_key)
 
             if not ai_response or not ai_response.strip():
-                last_error = f"AI返回空内容，已重试 {attempt + 1}/{max_retries}"
+                last_error = f"Nanobot返回空内容，已重试 {attempt + 1}/{max_retries}"
                 if attempt < max_retries - 1:
                     continue
                 break
 
-            parsed_data = orjson.loads(ai_response)
+            return _normalize_ai_judgment(_extract_json_object(ai_response))
 
-            # 验证和规范化必需字段
-            if "passed" not in parsed_data:
-                parsed_data["passed"] = False
-            else:
-                # 确保passed是布尔值
-                parsed_data["passed"] = bool(parsed_data["passed"])
-
-            if "reason" not in parsed_data or not parsed_data["reason"]:
-                parsed_data["reason"] = "AI未提供判断理由"
-
-            if "diagnosis" not in parsed_data:
-                parsed_data["diagnosis"] = ""
-            elif not isinstance(parsed_data["diagnosis"], str):
-                parsed_data["diagnosis"] = str(parsed_data["diagnosis"]) if parsed_data["diagnosis"] else ""
-
-            if "suggestions" not in parsed_data:
-                parsed_data["suggestions"] = []
-            elif not isinstance(parsed_data["suggestions"], list):
-                parsed_data["suggestions"] = []
-
-            # 成功解析，返回结果
-            return parsed_data
-
-        except orjson.JSONDecodeError as e:
+        except (orjson.JSONDecodeError, ValueError) as e:
             last_error = f"JSON解析失败: {str(e)}"
             if attempt < max_retries - 1:
                 continue  # 重试
         except Exception as e:
-            last_error = f"AI服务调用失败: {str(e)}"
+            last_error = f"Nanobot调用失败: {str(e)}"
             if attempt < max_retries - 1:
                 continue  # 重试
 
     # 所有重试都失败，返回保守的失败结果
-    return {"passed": False, "reason": last_error or "AI判断失败，无法确定巡检结果", "diagnosis": "AI服务异常，无法进行根因分析。建议检查AI服务配置和网络连接，或人工复核巡检结果。", "suggestions": ["请检查AI服务配置", "建议人工复核巡检结果"]}
+    return {"passed": False, "reason": last_error or "Nanobot判断失败，无法确定巡检结果", "diagnosis": "Nanobot服务异常，无法进行根因分析。建议检查Nanobot配置和运行状态，或人工复核巡检结果。", "suggestions": ["请检查Nanobot配置", "建议人工复核巡检结果"]}
 
 
 # ==================== Import/Export Operations ====================
