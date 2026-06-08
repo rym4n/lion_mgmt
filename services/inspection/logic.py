@@ -561,7 +561,16 @@ async def create_result(data: Dict[str, Any], tenant_id: str) -> InspectionResul
 
 
 async def list_results(
-    page: int, page_size: int, tenant_id: str, target_id: Optional[str] = None, schedule_id: Optional[str] = None, status: Optional[str] = None, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None, keyword: Optional[str] = None
+    page: int,
+    page_size: int,
+    tenant_id: str,
+    target_id: Optional[str] = None,
+    schedule_id: Optional[str] = None,
+    status: Optional[str] = None,
+    execution_status: Optional[str] = None,
+    start_time: Optional[datetime] = None,
+    end_time: Optional[datetime] = None,
+    keyword: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     获取巡检结果列表（分页）
@@ -576,6 +585,8 @@ async def list_results(
         query = query.filter(schedule_id=schedule_id)
     if status:
         query = query.filter(status=status)
+    if execution_status:
+        query = query.filter(execution_status=execution_status)
     if start_time:
         query = query.filter(start_time__gte=start_time)
     if end_time:
@@ -606,6 +617,7 @@ async def list_results(
                 "start_time": result.start_time.isoformat() if result.start_time else None,
                 "end_time": result.end_time.isoformat() if result.end_time else None,
                 "status": result.status,
+                "execution_status": result.execution_status,
                 "error_message": result.error_message,
                 "duration": result.duration,
                 "target_content": target_map.get(result.target_id).content if target_map.get(result.target_id) else None,
@@ -1468,6 +1480,8 @@ async def export_results_to_excel(schedule_id: str, start_time: Optional[datetim
         "巡检内容": "target_content",
         "巡检标准": "target_standard",
         "巡检状态": "status",
+        "执行结果状态": "status",
+        "执行状态": "execution_status",
         "耗时": "duration",
         "错误信息": "error_message",
         "开始时间": "start_time",
@@ -1537,8 +1551,11 @@ async def export_results_to_excel(schedule_id: str, start_time: Optional[datetim
             elif field_name == "target_standard":
                 value = target.standard if target else ""
             elif field_name == "status":
-                status_map = {"success": "成功", "failed": "失败", "running": "运行中"}
+                status_map = {"success": "通过", "failed": "未通过", "running": "运行中"}
                 value = status_map.get(result.status, result.status)
+            elif field_name == "execution_status":
+                execution_status_map = {"success": "成功", "failed": "失败", "timeout": "超时", "running": "运行中"}
+                value = execution_status_map.get(result.execution_status, result.execution_status)
             elif field_name == "duration":
                 value = f"{result.duration}秒" if result.duration is not None else "0秒"
             elif field_name == "error_message":

@@ -118,6 +118,7 @@ def _build_inspection_result_context(created_result_items):
             "target_id": item.get("target_id"),
             "schedule_id": item.get("schedule_id"),
             "status": item.get("status"),
+            "execution_status": item.get("execution_status"),
             "output": output,
             "result": output,
             "error_message": item.get("error_message"),
@@ -2031,6 +2032,7 @@ async def execute_inspection(request: Request):
                 "start_time": result.start_time.isoformat() if result.start_time else None,
                 "end_time": result.end_time.isoformat() if result.end_time else None,
                 "status": result.status,
+                "execution_status": result.execution_status,
                 "result_data": result.result_data,
                 "error_message": result.error_message,
                 "duration": result.duration,
@@ -2062,7 +2064,8 @@ async def execute_inspection(request: Request):
                     "page_size": {"type": "integer", "description": "每页数量"},
                     "target_id": {"type": "string", "description": "目标ID"},
                     "schedule_id": {"type": "string", "description": "巡检任务ID"},
-                    "status": {"type": "string", "description": "状态"},
+                    "status": {"type": "string", "description": "执行结果状态"},
+                    "execution_status": {"type": "string", "description": "执行状态"},
                     "start_time": {"type": "string", "description": "开始时间"},
                     "end_time": {"type": "string", "description": "结束时间"},
                     "keyword": {"type": "string", "description": "搜索关键词"},
@@ -2094,6 +2097,7 @@ async def execute_inspection(request: Request):
                                                 "start_time": {"type": "string"},
                                                 "end_time": {"type": "string"},
                                                 "status": {"type": "string"},
+                                                "execution_status": {"type": "string"},
                                                 "result_data": {"type": "object"},
                                                 "error_message": {"type": "string"},
                                                 "duration": {"type": "integer"},
@@ -2123,6 +2127,7 @@ async def list_results(request: Request):
     target_id = data.get("target_id")
     schedule_id = data.get("schedule_id")
     status = data.get("status")
+    execution_status = data.get("execution_status")
     keyword = data.get("keyword")
 
     # 解析时间参数
@@ -2140,7 +2145,18 @@ async def list_results(request: Request):
         except (ValueError, TypeError, AttributeError):
             raise CustomError(ErrorCode.PARAM_ERROR)
 
-    result = await logic.list_results(page=page, page_size=page_size, tenant_id=tenant_id, target_id=target_id, schedule_id=schedule_id, status=status, start_time=start_time, end_time=end_time, keyword=keyword)
+    result = await logic.list_results(
+        page=page,
+        page_size=page_size,
+        tenant_id=tenant_id,
+        target_id=target_id,
+        schedule_id=schedule_id,
+        status=status,
+        execution_status=execution_status,
+        start_time=start_time,
+        end_time=end_time,
+        keyword=keyword,
+    )
 
     return response_ok(data=result)
 
@@ -2177,6 +2193,7 @@ async def list_results(request: Request):
                                     "start_time": {"type": "string"},
                                     "end_time": {"type": "string"},
                                     "status": {"type": "string"},
+                                    "execution_status": {"type": "string"},
                                     "result_data": {"type": "object"},
                                     "error_message": {"type": "string"},
                                     "duration": {"type": "integer"},
@@ -2215,6 +2232,7 @@ async def get_result(request: Request):
             "start_time": result.start_time.isoformat() if result.start_time else None,
             "end_time": result.end_time.isoformat() if result.end_time else None,
             "status": result.status,
+            "execution_status": result.execution_status,
             "result_data": result.result_data,
             "error_message": result.error_message,
             "duration": result.duration,
@@ -2311,7 +2329,7 @@ async def get_stats(request: Request):
                     "schedule_id": {"type": "string", "description": "巡检任务ID"},
                     "start_time": {"type": "string", "description": "开始时间 (ISO 8601)"},
                     "end_time": {"type": "string", "description": "结束时间 (ISO 8601)"},
-                    "columns": {"type": "array", "items": {"type": "string"}, "description": "需要导出的列名列表，可选值：巡检内容、巡检标准、巡检状态、耗时、错误信息、开始时间、结束时间、AI裁决结果、执行结果"},
+                    "columns": {"type": "array", "items": {"type": "string"}, "description": "需要导出的列名列表，可选值：巡检内容、巡检标准、巡检状态、执行结果状态、执行状态、耗时、错误信息、开始时间、结束时间、AI裁决结果、执行结果"},
                 },
             }
         }
@@ -2430,7 +2448,7 @@ async def execute_sql(request: Request):
 @inspection_bp.post("/result/add")
 @openapi.definition(
     summary="添加巡检结果",
-    description="批量添加巡检结果记录，自动通过AI判断执行状态",
+    description="批量添加巡检结果记录，自动通过AI判断执行结果状态，并保存动作执行状态",
     body={
         "application/json": {
             "schema": {
@@ -2479,6 +2497,7 @@ async def execute_sql(request: Request):
                                         "id": {"type": "string"},
                                         "target_id": {"type": "string"},
                                         "status": {"type": "string"},
+                                        "execution_status": {"type": "string"},
                                     },
                                 },
                             },
@@ -2549,6 +2568,8 @@ async def add_result(request: Request):
         schedule_id = item.get("schedule_id")
         end_time_str = item.get("end_time")
         execution_time = item.get("execution_time", 0)
+        execution_status = "success"
+        item["execution_status"] = execution_status
 
         # Parse end_time
         end_time = None
@@ -2562,13 +2583,12 @@ async def add_result(request: Request):
         if not end_time:
             end_time = datetime.now()
 
-        # Use Nanobot to judge the result
         status = "failed"
 
         try:
             judgment = await logic.judge_inspection_result(target_id, result, tenant_id)
 
-            # Determine status based on AI judgment
+            # Determine result status based on AI judgment
             status = "success" if judgment.get("passed") else "failed"
             error_message = None if judgment.get("passed") else judgment.get("reason")
 
@@ -2577,22 +2597,33 @@ async def add_result(request: Request):
 
         except Exception as e:
             logger.warning(f"Nanobot判断巡检结果失败: {str(e)}")
-            # Fallback: use status from item if available
             error_message = f"Nanobot判断失败: {str(e)}"
 
         # Create InspectionResult
         try:
             result_obj = await logic.create_result(
-                {"target_id": target_id, "schedule_id": schedule_id, "start_time": start_time, "end_time": end_time, "duration": int(execution_time) if execution_time else 0, "status": status, "result_data": item, "error_message": error_message}, tenant_id
+                {
+                    "target_id": target_id,
+                    "schedule_id": schedule_id,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "duration": int(execution_time) if execution_time else 0,
+                    "status": status,
+                    "execution_status": execution_status,
+                    "result_data": item,
+                    "error_message": error_message,
+                },
+                tenant_id,
             )
 
-            created_results.append({"id": result_obj.id, "target_id": result_obj.target_id, "status": result_obj.status})
+            created_results.append({"id": result_obj.id, "target_id": result_obj.target_id, "status": result_obj.status, "execution_status": result_obj.execution_status})
             created_result_items.append(
                 {
                     "id": result_obj.id,
                     "target_id": result_obj.target_id,
                     "schedule_id": result_obj.schedule_id,
                     "status": result_obj.status,
+                    "execution_status": result_obj.execution_status,
                     "output": result,
                     "error_message": result_obj.error_message,
                     "duration": result_obj.duration,
