@@ -312,6 +312,15 @@ def convert_logo_to_ico(logo_data):
         return logo_data
 
 
+def generate_tool_version(file_hash, tenant_id):
+    """基于文件 hash 和租户 ID 生成租户隔离的版本号。"""
+    version_hasher = hashlib.sha1()
+    version_hasher.update(file_hash.encode())
+    version_hasher.update(b":tenant_id:")
+    version_hasher.update(str(tenant_id or "").encode())
+    return version_hasher.hexdigest()
+
+
 async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
     config_data = None
     tool_name = None
@@ -515,10 +524,12 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                             "工具资源不一致，请新建工具或删除原工具后再次上传",
                         )
 
-            if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id, version=hasher.hexdigest()).exists():
+            file_hash = hasher.hexdigest()
+            version = generate_tool_version(file_hash, tenant_id)
+
+            if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id, version=version).exists():
                 return config_data, version, tool_name, tool_description, "工具已存在"
 
-            version = hasher.hexdigest()
             suffix = logo_name.split(".")[-1]
             save_path = await utils.upload_to_s3(zip_data, "system", f"{tool_name}/{version}.zip", "tools")
             logo_path = await utils.upload_to_s3(logo_data, "user", f"{tool_name}.{suffix}", "tools")
@@ -532,7 +543,7 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                 description=config_data.get("description"),
                 creator=creator,
                 updater=creator,
-                hash_value=hasher.hexdigest(),
+                hash_value=version,
                 internal=config_data.get("internal", False),
                 main=py_file_name,
                 maintain=maintenance_mode if maintenance_mode else False,
