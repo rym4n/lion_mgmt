@@ -3337,23 +3337,8 @@ async def browser_execute(request):
         # 2. 创建 SSE 流式 Hook（传入 session_id）
         hook = SSEStreamingHook(sse_response=resp, workspace_path=workspace_path, session_id=session_id)
 
-        # 3. 构建完整消息：系统指令 + 用户任务
-        full_message = f"""<system_instruction>
-【身份】你是智能任务执行助手，根据用户任务选择合适的 skill 完成工作。
-
-【能力范围】
-- 浏览器自动化：网页操作、数据抓取、表单填写等
-- SSH服务器操作：远程命令执行、文件管理、系统配置等
-- API调用：接口测试、数据查询、文档生成等
-
-【重要规则】
-- 必须提供真实执行结果（截图和输出），禁止伪造，截图必须是真实截图，即使拥有真实数据也不能自己生成图片当作截图
-
-【生成代码】
-用户要求"生成代码"时，回顾会话中的操作历史，必须使用 aioe-app-dev skill 生成，返回 JSON 格式：{{"config": "...", "main": "..."}}
-</system_instruction>
-
-<user_task>
+        # 3. 构建完整消息：静态执行规则由 workspace-template/AGENTS.md、SOUL.md、TOOLS.md 提供
+        full_message = f"""<user_task>
 {task}
 </user_task>"""
 
