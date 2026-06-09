@@ -6,7 +6,7 @@ from tortoise.expressions import Q
 from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
 from settings import TZ
 
-from .dispatcher import choose_agent
+from .dispatcher import choose_agent_with_nanobot
 
 
 TERMINAL_TASK_STATUS = {"completed", "failed", "cancelled"}
@@ -96,9 +96,9 @@ async def record_task_event(
 
 async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> CommandTask:
     previous_agent_key = task.assigned_agent_key
-    await ensure_default_coordinator_agent(task.tenant_id)
+    coordinator = await ensure_default_coordinator_agent(task.tenant_id)
     agents = await CommandAgent.filter(tenant_id=task.tenant_id, deleted=False).all()
-    decision = choose_agent(agents, task.required_capabilities, task.requested_agent_id)
+    decision = await choose_agent_with_nanobot(task, agents, coordinator)
 
     task.dispatch_status = decision.dispatch_status
     task.dispatch_reason = decision.reason
@@ -126,7 +126,7 @@ async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> Co
         if agent.load >= agent.max_concurrent:
             agent.status = "busy"
         await agent.save(update_fields=["load", "current_task_id", "status"])
-        await record_task_event(task, "task_dispatched", decision.reason, operator_id)
+        await record_task_event(task, "task_dispatched", decision.reason, operator_id, {"dispatch_source": "nanobot", "raw_response": decision.raw_response})
     else:
         if previous_agent_key:
             previous_agent = await CommandAgent.get_or_none(tenant_id=task.tenant_id, agent_key=previous_agent_key, deleted=False)
@@ -141,7 +141,7 @@ async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> Co
         task.assigned_agent_key = None
         task.status = "pending_dispatch"
         await task.save()
-        await record_task_event(task, "dispatch_waiting", decision.reason, operator_id)
+        await record_task_event(task, "dispatch_waiting", decision.reason, operator_id, {"dispatch_source": "nanobot", "raw_response": decision.raw_response})
 
     return task
 

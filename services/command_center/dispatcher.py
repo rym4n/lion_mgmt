@@ -1,15 +1,43 @@
 # coding=utf-8
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable, Protocol
+
+import orjson
+from sanic.log import logger
+
+from libs.nanobot import NanobotClient
+from settings import NANOBOT_WORKSPACE_BASE
 
 
 class AgentCandidate(Protocol):
     id: str
     agent_key: str
+    name: str
+    description: str | None
     capabilities: list[str]
     status: str
     load: int
     max_concurrent: int
+    metadata: dict
+    runtime: str
+    is_builtin: bool
+
+
+class DispatchTask(Protocol):
+    id: str
+    tenant_id: str
+    title: str
+    description: str | None
+    source: str
+    priority: int
+    status: str
+    progress: int
+    required_capabilities: list[str]
+    payload: dict
+    requested_agent_id: str | None
+    room_id: str | None
+    creator_id: str | None
 
 
 @dataclass(slots=True)
@@ -18,79 +46,157 @@ class DispatchDecision:
     dispatch_status: str
     reason: str
     requested_agent_id: str | None = None
-
-
-def normalize_capabilities(capabilities: Iterable[str] | None) -> set[str]:
-    return {str(item).strip().lower() for item in (capabilities or []) if str(item).strip()}
+    raw_response: str | None = None
 
 
 def is_agent_available(agent: AgentCandidate) -> bool:
     return agent.status in {"idle", "busy"} and agent.load < agent.max_concurrent
 
 
-def capability_score(agent: AgentCandidate, required_capabilities: Iterable[str] | None) -> tuple[int, int]:
-    required = normalize_capabilities(required_capabilities)
-    agent_capabilities = normalize_capabilities(agent.capabilities)
-    matched = len(required & agent_capabilities)
-    missing = len(required - agent_capabilities)
-    return matched, missing
+def _agent_payload(agent: AgentCandidate) -> dict:
+    return {
+        "id": agent.id,
+        "agent_key": agent.agent_key,
+        "name": agent.name,
+        "description": agent.description,
+        "capabilities": agent.capabilities or [],
+        "status": agent.status,
+        "load": agent.load,
+        "max_concurrent": agent.max_concurrent,
+        "available": is_agent_available(agent),
+        "metadata": agent.metadata or {},
+        "runtime": getattr(agent, "runtime", "nanobot"),
+        "is_builtin": getattr(agent, "is_builtin", False),
+    }
 
 
-def can_handle(agent: AgentCandidate, required_capabilities: Iterable[str] | None) -> bool:
-    return is_agent_available(agent) and capability_score(agent, required_capabilities)[1] == 0
+def _task_payload(task: DispatchTask) -> dict:
+    return {
+        "id": task.id,
+        "tenant_id": task.tenant_id,
+        "title": task.title,
+        "description": task.description,
+        "source": task.source,
+        "priority": task.priority,
+        "status": task.status,
+        "progress": task.progress,
+        "required_capabilities": task.required_capabilities or [],
+        "payload": task.payload or {},
+        "requested_agent_id": task.requested_agent_id,
+        "room_id": task.room_id,
+        "creator_id": task.creator_id,
+    }
 
 
-def choose_agent(
+def _extract_json_object(text: str) -> dict:
+    if not text or not text.strip():
+        raise ValueError("Nanobot returned empty dispatch decision")
+    content = text.strip()
+    if content.startswith("```"):
+        lines = content.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        content = "\n".join(lines).strip()
+    start = content.find("{")
+    end = content.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("Nanobot dispatch decision is not JSON")
+    return orjson.loads(content[start : end + 1])
+
+
+def _find_agent(agents: Iterable[AgentCandidate], agent_id_or_key: str | None) -> AgentCandidate | None:
+    if not agent_id_or_key:
+        return None
+    return next((item for item in agents if item.id == agent_id_or_key or item.agent_key == agent_id_or_key), None)
+
+
+def _normalize_dispatch_status(value: str | None, requested_agent_id: str | None) -> str:
+    allowed = {"user_specified", "corrected", "auto_assigned", "no_candidate"}
+    if value in allowed:
+        return value
+    return "corrected" if requested_agent_id else "auto_assigned"
+
+
+def _build_dispatch_prompt(task: DispatchTask, agents: list[AgentCandidate], coordinator: AgentCandidate | None) -> str:
+    coordinator_instruction = getattr(coordinator, "system_instruction", None) if coordinator else None
+    system_instruction = coordinator_instruction or "你是指挥中心调度智能体，需要为任务选择最合适的可用智能体。"
+    message_context = {
+        "task": _task_payload(task),
+        "candidate_agents": [_agent_payload(agent) for agent in agents],
+        "rules": [
+            "只能从 candidate_agents 中选择一个 available=true 的智能体。",
+            "如果 requested_agent_id 存在且该智能体 available=true，可以优先尊重用户指定。",
+            "如果用户指定的智能体不存在或不可用，可以选择其他 available=true 的智能体。",
+            "如果没有任何 available=true 的智能体，返回 agent_key=null 且 dispatch_status=no_candidate。",
+            "只返回 JSON，不要输出解释性正文。",
+        ],
+        "response_schema": {
+            "agent_key": "string|null，选择的智能体agent_key；没有候选时为null",
+            "dispatch_status": "user_specified|corrected|auto_assigned|no_candidate",
+            "reason": "中文说明，说明为什么这样分配",
+        },
+    }
+    return f"""<system_instruction>
+{system_instruction}
+</system_instruction>
+
+<message_context>
+{orjson.dumps(message_context, option=orjson.OPT_INDENT_2).decode()}
+</message_context>
+
+<user_message>
+请根据任务内容和候选智能体状态，为该任务分配一个最合适的智能体，并严格按 response_schema 返回 JSON。
+</user_message>"""
+
+
+async def choose_agent_with_nanobot(
+    task: DispatchTask,
     agents: Iterable[AgentCandidate],
-    required_capabilities: Iterable[str] | None,
-    requested_agent_id: str | None = None,
+    coordinator: AgentCandidate | None = None,
 ) -> DispatchDecision:
-    """
-    根据能力标签选择智能体。
+    """使用 Nanobot 判断指挥中心任务应该分配给哪个智能体。"""
 
-    - 用户没有指定智能体：自动选择最匹配且负载最低的智能体。
-    - 用户指定正确：尊重用户指定。
-    - 用户指定错误：自动纠正到可处理该任务的智能体。
-    - 当前没有可用智能体：返回 no_candidate，任务保持待调度。
-    """
+    candidates = [agent for agent in agents if not coordinator or agent.id != coordinator.id]
+    requested_agent_id = task.requested_agent_id
+    if not candidates:
+        return DispatchDecision(None, "no_candidate", "当前没有可分配的候选智能体", requested_agent_id=requested_agent_id)
 
-    candidates = list(agents)
-    requested = None
-    if requested_agent_id:
-        requested = next((item for item in candidates if item.id == requested_agent_id or item.agent_key == requested_agent_id), None)
-        if requested and can_handle(requested, required_capabilities):
-            return DispatchDecision(
-                agent=requested,
-                dispatch_status="user_specified",
-                reason="用户指定的智能体可处理该任务，已按指定分配",
-                requested_agent_id=requested_agent_id,
-            )
+    session_key = f"command-center-dispatch:{task.id}"
+    workspace = Path(NANOBOT_WORKSPACE_BASE) / task.tenant_id / "workspace"
+    client = NanobotClient(session_id=session_key, workspace=workspace)
+    prompt = _build_dispatch_prompt(task, candidates, coordinator)
 
-    available = [item for item in candidates if can_handle(item, required_capabilities)]
-    if not available:
-        if requested_agent_id and requested is None:
-            reason = "用户指定的智能体不存在，且当前没有可用候选智能体"
-        elif requested_agent_id:
-            reason = "用户指定的智能体能力或状态不匹配，且当前没有可用候选智能体"
-        else:
-            reason = "当前没有满足任务能力要求的可用智能体"
-        return DispatchDecision(None, "no_candidate", reason, requested_agent_id=requested_agent_id)
+    try:
+        raw_response = await client.ask(message=prompt, streaming=False, session_key=session_key)
+        decision_payload = _extract_json_object(raw_response)
+    except Exception as exc:
+        logger.error(f"Nanobot 调度决策失败: task_id={task.id}, error={exc}")
+        return DispatchDecision(None, "no_candidate", f"Nanobot 调度决策失败: {exc}", requested_agent_id=requested_agent_id)
 
-    def sort_key(agent: AgentCandidate) -> tuple[int, int, str]:
-        matched, _ = capability_score(agent, required_capabilities)
-        return (-matched, agent.load, agent.agent_key)
+    selected_key = decision_payload.get("agent_key") or decision_payload.get("agent_id")
+    selected_agent = _find_agent(candidates, selected_key)
+    reason = decision_payload.get("reason") or "Nanobot 已完成调度判断"
 
-    selected = sorted(available, key=sort_key)[0]
-    if requested_agent_id:
-        if requested is None:
-            reason = f"用户指定的智能体 {requested_agent_id} 不存在，已自动调度到 {selected.agent_key}"
-        else:
-            reason = f"用户指定的智能体 {requested_agent_id} 能力或状态不匹配，已自动纠正到 {selected.agent_key}"
-        return DispatchDecision(selected, "corrected", reason, requested_agent_id=requested_agent_id)
+    if not selected_key:
+        return DispatchDecision(None, "no_candidate", reason, requested_agent_id=requested_agent_id, raw_response=raw_response)
+    if not selected_agent:
+        return DispatchDecision(
+            None,
+            "no_candidate",
+            f"Nanobot 返回的智能体 {selected_key} 不存在于候选列表，无法分配",
+            requested_agent_id=requested_agent_id,
+            raw_response=raw_response,
+        )
+    if not is_agent_available(selected_agent):
+        return DispatchDecision(
+            None,
+            "no_candidate",
+            f"Nanobot 返回的智能体 {selected_agent.agent_key} 当前不可用，无法分配",
+            requested_agent_id=requested_agent_id,
+            raw_response=raw_response,
+        )
 
-    return DispatchDecision(
-        selected,
-        "auto_assigned",
-        f"未指定智能体，已按能力和负载自动调度到 {selected.agent_key}",
-        requested_agent_id=None,
-    )
+    dispatch_status = _normalize_dispatch_status(decision_payload.get("dispatch_status"), requested_agent_id)
+    return DispatchDecision(selected_agent, dispatch_status, reason, requested_agent_id=requested_agent_id, raw_response=raw_response)
