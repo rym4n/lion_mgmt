@@ -21,6 +21,7 @@ from services.event.views import event_bp
 from services.event_ingestion.views import event_ingestion_bp
 from services.inspection.views import inspection_bp
 import services.large_screen.views  # noqa: F401
+from services.command_center.views import command_bp
 from services.license.views import license_bp
 from services.log_view.views import logs_bp
 from services.mcp.views import mcp_bp
@@ -78,8 +79,8 @@ def register_blueprints(app: Sanic):
             "ai_bp": ai_bp,
             "agent_bp": agent_bp,
             "mcp_bp": mcp_bp,
+            "command_bp": command_bp
         }
-
         license_data = load_license()
         if license_data and "moduleList" in license_data:
             for item in license_data["moduleList"]:

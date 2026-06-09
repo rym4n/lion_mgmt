@@ -22,6 +22,10 @@ class CommandAgent(BaseModel):
     current_task_id = fields.CharField(max_length=36, null=True, description="当前主任务ID")
     heartbeat_at = fields.DatetimeField(null=True, description="最近心跳时间")
     metadata = fields.JSONField(default=dict, description="扩展元数据")
+    runtime = fields.CharField(max_length=30, default="nanobot", description="运行时类型: nanobot等")
+    system_instruction = fields.TextField(null=True, description="调用Nanobot时使用的system_instruction提示词")
+    prompt_config = fields.JSONField(default=dict, description="提示词扩展配置")
+    is_builtin = fields.BooleanField(default=False, description="是否为内置智能体")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -42,6 +46,10 @@ class CommandAgent(BaseModel):
             "current_task_id": self.current_task_id,
             "heartbeat_at": strip_timezone_to_seconds(self.heartbeat_at),
             "metadata": self.metadata,
+            "runtime": self.runtime,
+            "system_instruction": self.system_instruction,
+            "prompt_config": self.prompt_config,
+            "is_builtin": self.is_builtin,
         }
 
     class Meta:

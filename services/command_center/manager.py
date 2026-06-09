@@ -10,6 +10,68 @@ from .dispatcher import choose_agent
 
 
 TERMINAL_TASK_STATUS = {"completed", "failed", "cancelled"}
+DEFAULT_COORDINATOR_AGENT_KEY = "command_center_coordinator"
+DEFAULT_COORDINATOR_AGENT_NAME = "指挥部分工协调智能体"
+DEFAULT_COORDINATOR_CAPABILITIES = ["command_center", "coordination", "dispatch", "task_planning"]
+DEFAULT_COORDINATOR_SYSTEM_INSTRUCTION = """你是 AIOE 指挥中心的内置分工协调智能体。
+你的职责是理解用户任务、拆解执行步骤、匹配合适的智能体能力，并给出清晰的调度建议。
+调用 Nanobot 执行时，优先遵循当前任务 payload、能力标签和作战室上下文。"""
+
+
+async def ensure_default_coordinator_agent(tenant_id: str) -> CommandAgent:
+    """确保每个租户至少有一个默认的指挥部分工协调智能体。"""
+    agent, _ = await CommandAgent.get_or_create(
+        tenant_id=tenant_id,
+        agent_key=DEFAULT_COORDINATOR_AGENT_KEY,
+        defaults={
+            "name": DEFAULT_COORDINATOR_AGENT_NAME,
+            "description": "默认创建的指挥部分工协调智能体，负责理解任务、拆解分工并给出调度建议。",
+            "capabilities": DEFAULT_COORDINATOR_CAPABILITIES,
+            "status": "idle",
+            "max_concurrent": 8,
+            "metadata": {"runtime": "nanobot", "role": "coordinator", "default": True},
+            "runtime": "nanobot",
+            "system_instruction": DEFAULT_COORDINATOR_SYSTEM_INSTRUCTION,
+            "prompt_config": {"source": "builtin", "instruction_format": "system_instruction"},
+            "is_builtin": True,
+        },
+    )
+    changed = False
+    if agent.deleted:
+        agent.deleted = False
+        changed = True
+    if agent.name != DEFAULT_COORDINATOR_AGENT_NAME:
+        agent.name = DEFAULT_COORDINATOR_AGENT_NAME
+        changed = True
+    if agent.status in {"offline", "error"}:
+        agent.status = "idle"
+        changed = True
+    merged_capabilities = sorted(set(agent.capabilities or []) | set(DEFAULT_COORDINATOR_CAPABILITIES))
+    if agent.capabilities != merged_capabilities:
+        agent.capabilities = merged_capabilities
+        changed = True
+    metadata = dict(agent.metadata or {})
+    metadata.update({"runtime": "nanobot", "role": "coordinator", "default": True})
+    if agent.metadata != metadata:
+        agent.metadata = metadata
+        changed = True
+    if agent.runtime != "nanobot":
+        agent.runtime = "nanobot"
+        changed = True
+    if not agent.system_instruction:
+        agent.system_instruction = DEFAULT_COORDINATOR_SYSTEM_INSTRUCTION
+        changed = True
+    prompt_config = dict(agent.prompt_config or {})
+    prompt_config.update({"source": "builtin", "instruction_format": "system_instruction"})
+    if agent.prompt_config != prompt_config:
+        agent.prompt_config = prompt_config
+        changed = True
+    if not agent.is_builtin:
+        agent.is_builtin = True
+        changed = True
+    if changed:
+        await agent.save()
+    return agent
 
 
 async def record_task_event(
@@ -34,6 +96,7 @@ async def record_task_event(
 
 async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> CommandTask:
     previous_agent_key = task.assigned_agent_key
+    await ensure_default_coordinator_agent(task.tenant_id)
     agents = await CommandAgent.filter(tenant_id=task.tenant_id, deleted=False).all()
     decision = choose_agent(agents, task.required_capabilities, task.requested_agent_id)
 

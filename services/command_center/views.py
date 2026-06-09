@@ -13,8 +13,8 @@ from settings import TZ
 
 from .manager import create_command_task, dispatch_task, list_tasks, update_task_progress
 
-command_center_bp = Blueprint("command_center", url_prefix="/command_center")
-__all__ = ["command_center_bp"]
+command_bp = Blueprint("command_center", url_prefix="/command_center")
+__all__ = ["command_bp"]
 
 ERROR_RESPONSE_SCHEMA = {
     "type": "object",
@@ -49,6 +49,10 @@ AGENT_SCHEMA = {
         "current_task_id": {"type": "string", "nullable": True, "description": "当前主任务ID"},
         "heartbeat_at": {"type": "string", "nullable": True, "description": "最近心跳时间"},
         "metadata": {"type": "object", "description": "扩展元数据"},
+        "runtime": {"type": "string", "description": "运行时类型，默认nanobot"},
+        "system_instruction": {"type": "string", "nullable": True, "description": "调用Nanobot时使用的system_instruction提示词"},
+        "prompt_config": {"type": "object", "description": "提示词扩展配置"},
+        "is_builtin": {"type": "boolean", "description": "是否为内置智能体"},
     },
 }
 
@@ -146,7 +150,7 @@ def _require_json(request: Request) -> dict:
     return request.json or {}
 
 
-@command_center_bp.post("/agents/register")
+@command_bp.post("/agents/register")
 @openapi.definition(
     summary="登记或更新指挥部智能体画像",
     description="登记新的指挥部智能体，或按tenant_id + agent_key更新已有智能体画像、能力标签、状态和心跳时间。需要command_center:u权限。",
@@ -171,6 +175,10 @@ def _require_json(request: Request) -> dict:
                 },
                 "max_concurrent": {"type": "integer", "description": "最大并发任务数", "minimum": 1, "default": 1},
                 "metadata": {"type": "object", "description": "扩展元数据"},
+                "runtime": {"type": "string", "description": "运行时类型，默认nanobot"},
+                "system_instruction": {"type": "string", "description": "调用Nanobot时使用的system_instruction提示词"},
+                "prompt_config": {"type": "object", "description": "提示词扩展配置"},
+                "is_builtin": {"type": "boolean", "description": "是否为内置智能体"},
             },
         }
     ),
@@ -195,9 +203,13 @@ async def register_agent(request: Request):
             "status": data.get("status", "idle"),
             "max_concurrent": data.get("max_concurrent", 1),
             "metadata": data.get("metadata", {}),
+            "runtime": data.get("runtime", "nanobot"),
+            "system_instruction": data.get("system_instruction"),
+            "prompt_config": data.get("prompt_config", {}),
+            "is_builtin": data.get("is_builtin", False),
         },
     )
-    for field in ["name", "description", "capabilities", "status", "max_concurrent", "metadata"]:
+    for field in ["name", "description", "capabilities", "status", "max_concurrent", "metadata", "runtime", "system_instruction", "prompt_config", "is_builtin"]:
         if field in data:
             setattr(agent, field, data[field])
     agent.deleted = False
@@ -206,7 +218,7 @@ async def register_agent(request: Request):
     return response_ok(agent.json)
 
 
-@command_center_bp.post("/agents/list")
+@command_bp.post("/agents/list")
 @openapi.definition(
     summary="查看智能体工作状态",
     description="按租户查询未删除的指挥部智能体，可按状态过滤，并按status、load、agent_key排序。需要command_center:r权限。",
@@ -243,7 +255,7 @@ async def list_agents(request: Request):
     return response_ok({"agents": [item.json for item in agents]})
 
 
-@command_center_bp.post("/agents/status")
+@command_bp.post("/agents/status")
 @openapi.definition(
     summary="更新智能体工作状态",
     description="按id或agent_key定位智能体，更新状态、负载、并发上限、当前任务或元数据，并刷新心跳时间。需要command_center:u权限。",
@@ -263,6 +275,10 @@ async def list_agents(request: Request):
                 "max_concurrent": {"type": "integer", "description": "最大并发任务数", "minimum": 1},
                 "current_task_id": {"type": "string", "nullable": True, "description": "当前主任务ID"},
                 "metadata": {"type": "object", "description": "扩展元数据"},
+                "runtime": {"type": "string", "description": "运行时类型"},
+                "system_instruction": {"type": "string", "description": "调用Nanobot时使用的system_instruction提示词"},
+                "prompt_config": {"type": "object", "description": "提示词扩展配置"},
+                "is_builtin": {"type": "boolean", "description": "是否为内置智能体"},
             },
         }
     ),
@@ -283,7 +299,7 @@ async def update_agent_status(request: Request):
     if not agent:
         raise CustomError(ErrorCode.NOT_FOUND)
 
-    for field in ["status", "load", "max_concurrent", "current_task_id", "metadata"]:
+    for field in ["status", "load", "max_concurrent", "current_task_id", "metadata", "runtime", "system_instruction", "prompt_config", "is_builtin"]:
         if field in data:
             setattr(agent, field, data[field])
     agent.heartbeat_at = datetime.now(TZ)
@@ -291,7 +307,7 @@ async def update_agent_status(request: Request):
     return response_ok(agent.json)
 
 
-@command_center_bp.post("/tasks/create")
+@command_bp.post("/tasks/create")
 @openapi.definition(
     summary="创建指挥部任务并触发调度",
     description="创建指挥部任务后立即按required_capabilities触发调度；如指定agent_id但能力或状态不匹配，会自动纠正到可用智能体。需要command_center:c权限。",
@@ -329,7 +345,7 @@ async def create_task(request: Request):
     return response_ok(task.json)
 
 
-@command_center_bp.post("/tasks/list")
+@command_bp.post("/tasks/list")
 @openapi.definition(
     summary="查看任务列表与进展",
     description="分页查询指挥部任务，可按任务状态、实际分配智能体和关键字过滤。需要command_center:r权限。",
@@ -377,7 +393,7 @@ async def query_tasks(request: Request):
     )
 
 
-@command_center_bp.post("/tasks/detail")
+@command_bp.post("/tasks/detail")
 @openapi.definition(
     summary="查看任务详情和事件流",
     description="查询单个任务详情，并按创建时间返回任务事件流，用于展示调度历史和进度变化。需要command_center:r权限。",
@@ -416,7 +432,7 @@ async def task_detail(request: Request):
     return response_ok({"task": task.json, "events": [event.json for event in events]})
 
 
-@command_center_bp.post("/tasks/progress")
+@command_bp.post("/tasks/progress")
 @openapi.definition(
     summary="更新任务进度或状态",
     description="更新任务进度、状态或后续执行系统run_id，并记录任务事件；任务完成、失败或取消时会释放智能体负载。需要command_center:u权限。",
@@ -455,7 +471,7 @@ async def task_progress(request: Request):
     return response_ok(task.json)
 
 
-@command_center_bp.post("/tasks/dispatch")
+@command_bp.post("/tasks/dispatch")
 @openapi.definition(
     summary="重新触发任务调度",
     description="对已有任务重新执行调度；可传agent_id更新用户指定智能体，调度器仍会按能力、状态和负载校验并自动纠正。需要command_center:u权限。",

@@ -1,6 +1,5 @@
 # coding=utf-8
 
-from .agent import *
 from .approvement import *
 from .config import *
 from .event import *

@@ -1,748 +1,362 @@
 # coding=utf-8
 from datetime import datetime
 
-import orjson
-from sanic import Blueprint
-from sanic.log import logger
+from sanic import Blueprint, Request
 from sanic_ext import openapi
+from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
 from core.response import response_ok
-from libs.embedding import get_embedding
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models import Account, Room
-from models.agent import ArchivalKnowledge, UserPreference
-from services.agent.gateway import AgentGateway
+from models.command_center import CommandAgent
 from settings import TZ
 
 agent_bp = Blueprint("agent", url_prefix="/agent")
-__all__ = ["agent_bp"]
+
+AGENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string", "description": "智能体ID"},
+        "ctime": {"type": "string", "description": "创建时间"},
+        "utime": {"type": "string", "description": "更新时间"},
+        "agent_key": {"type": "string", "description": "智能体逻辑标识"},
+        "name": {"type": "string", "description": "智能体名称"},
+        "description": {"type": "string", "nullable": True, "description": "智能体说明"},
+        "capabilities": {"type": "array", "items": {"type": "string"}, "description": "能力标签列表"},
+        "status": {"type": "string", "description": "状态: idle,busy,offline,error"},
+        "load": {"type": "integer", "description": "当前任务负载"},
+        "max_concurrent": {"type": "integer", "description": "最大并发任务数"},
+        "current_task_id": {"type": "string", "nullable": True, "description": "当前主任务ID"},
+        "heartbeat_at": {"type": "string", "nullable": True, "description": "最近心跳时间"},
+        "metadata": {"type": "object", "description": "扩展元数据"},
+        "runtime": {"type": "string", "description": "运行时类型，默认nanobot"},
+        "system_instruction": {"type": "string", "nullable": True, "description": "调用Nanobot时使用的system_instruction提示词"},
+        "prompt_config": {"type": "object", "description": "提示词扩展配置"},
+        "is_builtin": {"type": "boolean", "description": "是否为内置智能体"},
+    },
+}
+
+ERROR_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "code": {"type": "integer", "description": "错误码"},
+        "message": {"type": "string", "description": "错误信息"},
+        "data": {"type": "object", "nullable": True, "description": "错误详情"},
+    },
+}
 
 
-async def _build_user_info(user: Account, tenant_id: str) -> dict:
-    """构建用户信息 (用于 Agent 识别)"""
-    roles = await user.roles.filter(tenant_id=tenant_id).all()
-    role_names = [r.name for r in roles]
+def _json_body(schema: dict) -> dict:
+    return {"application/json": {"schema": schema}}
 
-    # 聚合权限
-    permissions = set()
-    for role in roles:
-        if role.permissions:
-            permissions.update(role.permissions)
 
-    # 获取用户偏好
-    pref = await UserPreference.get_or_none(account_id=user.id)
-
-    return {
-        "id": user.id,
-        "display_name": user.display_name,
-        "role": role_names[0] if role_names else "User",
-        "permissions": list(permissions),
-        "skills": pref.skill_tags if pref else [],
-        "preference": {"notify": pref.notify_channel if pref else "in_app", "report_lang": pref.report_language if pref else "zh-CN"} if pref else {},
+def _response(description: str, data_schema: dict, errors: dict[str, str] | None = None) -> dict:
+    response = {
+        "200": {
+            "description": description,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer", "description": "业务状态码"},
+                            "message": {"type": "string", "description": "响应信息"},
+                            "data": data_schema,
+                        },
+                    }
+                }
+            },
+        }
     }
+    for status, error_description in (errors or {}).items():
+        response[str(status)] = {
+            "description": error_description,
+            "content": {"application/json": {"schema": ERROR_RESPONSE_SCHEMA}},
+        }
+    return response
 
 
-async def _get_warroom_members(warroom: Room, tenant_id: str) -> list[dict]:
-    """获取作战室成员列表"""
-    members = await warroom.users.all()
+def _require_json(request: Request) -> dict:
+    return request.json or {}
+
+
+def _session_user_id(request: Request) -> str | None:
+    account_info = request.ctx.session.get("account_info")
+    if isinstance(account_info, dict):
+        return account_info.get("id")
+    return getattr(account_info, "id", None)
+
+
+def _normalize_string_list(value, field_name: str) -> list[str]:
+    if value in (None, ""):
+        return []
+    if not isinstance(value, list):
+        raise CustomError(ErrorCode.PARAM_ERROR)
     result = []
-    for member in members:
-        result.append(await _build_user_info(member, tenant_id))
+    for item in value:
+        normalized = str(item).strip()
+        if normalized:
+            result.append(normalized)
     return result
 
 
-async def _generate_embedding(text: str) -> list[float]:
-    """生成文本 Embedding"""
-    return await get_embedding(text)
-
-
-# ============ 对话接口 ============
-
-
-@agent_bp.post("/chat")
-@openapi.definition(
-    summary="与 Agent 对话",
-    description="在作战室中与 Agent 智能体对话",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "warroom_id": {"type": "string", "description": "作战室 ID"},
-                    "content": {"type": "string", "description": "消息内容"},
-                },
-                "required": ["warroom_id", "content"],
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer", "default": 0},
-                            "msg": {"type": "string", "default": "success"},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "response": {"type": "string", "description": "Agent回复内容"},
-                                    "l1_state": {"type": "object", "description": "L1记忆状态"},
-                                    "tool_calls": {
-                                        "type": "array",
-                                        "items": {"type": "object"},
-                                        "description": "工具调用列表",
-                                    },
-                                },
-                            },
-                        },
-                    }
-                }
-            },
-        }
-    },
-)
-@requires_permission("warroom:r")
-async def chat(request):
-    """
-    发送消息到 SecOpsExpert
-    返回: Agent 回复 + 更新后的 L1 状态
-    """
-    warroom_id = request.json.get("warroom_id")
-    content = request.json.get("content")
-
-    if not warroom_id or not content:
+def _normalize_dict(value, field_name: str) -> dict:
+    if value in (None, ""):
+        return {}
+    if not isinstance(value, dict):
         raise CustomError(ErrorCode.PARAM_ERROR)
-
-    tenant_id = request.ctx.session.get("tenant_id")
-    user = request.ctx.session["account_info"]
-
-    # 获取用户角色和权限
-    user_info = await _build_user_info(user, tenant_id)
-
-    gateway: AgentGateway = request.app.ctx.agent_gateway
-
-    # 确保 Agent 存在
-    warroom = await Room.get_or_none(id=warroom_id, tenant_id=tenant_id, deleted=False)
-    if not warroom:
-        raise CustomError(ErrorCode.NOT_FOUND)
-
-    members = await _get_warroom_members(warroom, tenant_id)
-    await gateway.get_or_create_agent(warroom_id, tenant_id, members)
-
-    # 发送消息
-    result = await gateway.send_message(warroom_id=warroom_id, user=user_info, content=content)
-
-    return response_ok(result)
+    return value
 
 
-@agent_bp.post("/chat/stream")
+async def _get_agent(tenant_id: str, agent_id: str | None = None, agent_key: str | None = None) -> CommandAgent | None:
+    if agent_id:
+        return await CommandAgent.get_or_none(id=agent_id, tenant_id=tenant_id, deleted=False)
+    if agent_key:
+        return await CommandAgent.get_or_none(agent_key=agent_key, tenant_id=tenant_id, deleted=False)
+    return None
+
+
+async def disable_command_agent(agent: CommandAgent) -> None:
+    agent.status = "offline"
+    agent.load = 0
+    agent.current_task_id = None
+    agent.heartbeat_at = datetime.now(TZ)
+    await agent.save(update_fields=["status", "load", "current_task_id", "heartbeat_at", "utime"])
+
+
+def _agent_payload(data: dict, *, partial: bool = False) -> dict:
+    payload = {}
+    string_fields = ["name", "description", "status", "runtime", "system_instruction"]
+    for field in string_fields:
+        if field in data:
+            payload[field] = data[field]
+
+    if "capabilities" in data:
+        payload["capabilities"] = _normalize_string_list(data.get("capabilities"), "capabilities")
+    elif not partial:
+        payload["capabilities"] = []
+
+    if "metadata" in data:
+        payload["metadata"] = _normalize_dict(data.get("metadata"), "metadata")
+    elif not partial:
+        payload["metadata"] = {}
+
+    if "prompt_config" in data:
+        payload["prompt_config"] = _normalize_dict(data.get("prompt_config"), "prompt_config")
+    elif not partial:
+        payload["prompt_config"] = {}
+
+    if "max_concurrent" in data:
+        payload["max_concurrent"] = max(1, int(data.get("max_concurrent") or 1))
+    elif not partial:
+        payload["max_concurrent"] = 1
+
+    if "is_builtin" in data:
+        payload["is_builtin"] = bool(data.get("is_builtin"))
+    elif not partial:
+        payload["is_builtin"] = False
+
+    if not partial:
+        payload.setdefault("status", "idle")
+        payload.setdefault("runtime", "nanobot")
+
+    return payload
+
+
+CREATE_AGENT_BODY = {
+    "type": "object",
+    "required": ["agent_key", "name"],
+    "properties": {
+        "agent_key": {"type": "string", "description": "智能体逻辑标识，同一租户内唯一"},
+        "name": {"type": "string", "description": "智能体名称"},
+        "description": {"type": "string", "description": "智能体说明"},
+        "capabilities": {"type": "array", "items": {"type": "string"}, "description": "能力标签列表，指挥中心按此调度"},
+        "system_instruction": {"type": "string", "description": "调用Nanobot时注入的system_instruction提示词"},
+        "prompt_config": {"type": "object", "description": "提示词扩展配置，如变量、模板来源等"},
+        "is_builtin": {"type": "boolean", "description": "是否为内置智能体，默认false"},
+        "runtime": {"type": "string", "description": "运行时类型，默认nanobot"},
+        "metadata": {"type": "object", "description": "扩展元数据"},
+        "status": {"type": "string", "description": "状态: idle,busy,offline,error", "default": "idle"},
+        "max_concurrent": {"type": "integer", "minimum": 1, "description": "最大并发任务数"},
+    },
+}
+
+
+@agent_bp.post("/create")
 @openapi.definition(
-    summary="与 Agent 对话 (流式)",
-    description="流式返回 Agent 回复，适合长回复场景",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "warroom_id": {"type": "string", "description": "作战室 ID"},
-                    "content": {"type": "string", "description": "消息内容"},
-                },
-                "required": ["warroom_id", "content"],
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "SSE 流式响应",
-            "content": {
-                "text/event-stream": {
-                    "schema": {
-                        "type": "string",
-                        "description": "Event Stream: event: message/tool_call/l1_update/done",
-                    }
-                }
-            },
-        }
-    },
-)
-@requires_permission("warroom:r")
-async def chat_stream(request):
-    """
-    流式对话接口
-    返回格式: SSE (Server-Sent Events)
-    """
-    warroom_id = request.json.get("warroom_id")
-    content = request.json.get("content")
-
-    if not warroom_id or not content:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    tenant_id = request.ctx.session.get("tenant_id")
-    user = request.ctx.session["account_info"]
-    user_info = await _build_user_info(user, tenant_id)
-
-    gateway: AgentGateway = request.app.ctx.agent_gateway
-
-    # 确保 Agent 存在
-    warroom = await Room.get_or_none(id=warroom_id, tenant_id=tenant_id, deleted=False)
-    if not warroom:
-        raise CustomError(ErrorCode.NOT_FOUND)
-
-    members = await _get_warroom_members(warroom, tenant_id)
-    await gateway.get_or_create_agent(warroom_id, tenant_id, members)
-
-    # 创建 SSE 响应
-    response = await request.respond(
-        content_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
-    )
-
-    try:
-        # 流式发送消息
-        async for chunk in gateway.send_message_stream(warroom_id=warroom_id, user=user_info, content=content):
-            # event_type = chunk["type"]
-            logger.info(chunk)
-            data = chunk["data"]
-
-            # SSE 格式
-            # await response.send(f"event: {event_type}\n")
-            await response.send(f"data: {orjson.dumps(data).decode()}\n\n")
-
-        # 发送结束事件
-        await response.send("event: done\ndata: {}\n\n")
-    except Exception as e:
-        logger.error(f"Stream error: {e}")
-        await response.send(f"data: {orjson.dumps({'error': str(e)}).decode()}\n\n")
-    finally:
-        await response.eof()
-
-
-@agent_bp.post("/state")
-@openapi.definition(
-    summary="获取 Agent L1 状态",
-    description="获取当前 Agent 的 Core Memory 状态 (用于前端渲染)",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "warroom_id": {"type": "string", "description": "作战室 ID"},
-                },
-                "required": ["warroom_id"],
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer", "default": 0},
-                            "msg": {"type": "string", "default": "success"},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "status": {"type": "string", "description": "active|no_agent"},
-                                    "l1_state": {"type": "object", "description": "L1记忆状态"},
-                                },
-                            },
-                        },
-                    }
-                }
-            },
-        }
-    },
-)
-@requires_permission("warroom:r")
-async def get_state(request):
-    """
-    获取 Agent 当前 L1 状态 (不发送消息)
-    用于: 前端轮询刷新、页面初始化
-    """
-    warroom_id = request.json.get("warroom_id")
-    # tenant_id = request.ctx.session.get("tenant_id") # Unused
-
-    gateway: AgentGateway = request.app.ctx.agent_gateway
-
-    agent_id = await gateway._get_agent_id(warroom_id)
-    if not agent_id:
-        return response_ok({"status": "no_agent", "l1_state": None})
-
-    l1_state = await gateway.get_agent_l1_state(agent_id)
-
-    return response_ok({"status": "active", "l1_state": l1_state})
-
-
-@agent_bp.post("/init")
-@openapi.definition(
-    summary="初始化作战室 Agent",
-    description="手动初始化作战室的 Agent (通常自动触发)",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "warroom_id": {"type": "string", "description": "作战室 ID"},
-                },
-                "required": ["warroom_id"],
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer", "default": 0},
-                            "msg": {"type": "string", "default": "success"},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "agent_id": {"type": "string"},
-                                    "status": {"type": "string"},
-                                },
-                            },
-                        },
-                    }
-                }
-            },
-        }
-    },
-)
-@requires_permission("warroom:c")
-async def init_agent(request):
-    """
-    手动初始化 Agent (通常由 Warroom 创建时自动触发)
-    """
-    warroom_id = request.json.get("warroom_id")
-    tenant_id = request.ctx.session.get("tenant_id")
-
-    warroom = await Room.get_or_none(id=warroom_id, tenant_id=tenant_id, deleted=False)
-    if not warroom:
-        raise CustomError(ErrorCode.NOT_FOUND)
-
-    gateway: AgentGateway = request.app.ctx.agent_gateway
-    members = await _get_warroom_members(warroom, tenant_id)
-
-    agent_id = await gateway.get_or_create_agent(warroom_id, tenant_id, members)
-
-    return response_ok({"agent_id": agent_id, "status": "initialized"})
-
-
-@agent_bp.post("/archive")
-@openapi.definition(
-    summary="归档作战室 Agent",
-    description="触发 Agent 反思并归档 (通常由作战室归档时自动触发)",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "warroom_id": {"type": "string", "description": "作战室 ID"},
-                    "skip_reflection": {"type": "boolean", "description": "跳过反思", "default": False},
-                },
-                "required": ["warroom_id"],
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer", "default": 0},
-                            "msg": {"type": "string", "default": "success"},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "status": {"type": "string"},
-                                    "reflection": {"type": "object"},
-                                },
-                            },
-                        },
-                    }
-                }
-            },
-        }
-    },
-)
-@requires_permission("warroom:u")
-async def archive_agent(request):
-    """
-    归档 Agent - 触发反思 + 销毁
-    """
-    warroom_id = request.json.get("warroom_id")
-    skip_reflection = request.json.get("skip_reflection", False)
-
-    gateway: AgentGateway = request.app.ctx.agent_gateway
-
-    result = await gateway.archive_agent(warroom_id=warroom_id, trigger_reflection=not skip_reflection)
-
-    return response_ok(result)
-
-
-@agent_bp.post("/knowledge/list")
-@openapi.definition(
-    summary="查询 L5 知识库",
-    description="分页查询租户的知识库内容",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "page": {"type": "integer", "description": "页码", "default": 1},
-                    "size": {"type": "integer", "description": "每页数量", "default": 20},
-                    "knowledge_type": {"type": "string", "description": "知识类型"},
-                    "review_status": {"type": "string", "description": "审核状态"},
-                },
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer", "default": 0},
-                            "msg": {"type": "string", "default": "success"},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "data": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "object",
-                                            "properties": {
-                                                "id": {"type": "string"},
-                                                "content": {"type": "string"},
-                                                "knowledge_type": {"type": "string"},
-                                                "attack_type": {"type": "string"},
-                                                "tags": {"type": "array", "items": {"type": "string"}},
-                                                "review_status": {"type": "string"},
-                                                "ctime": {"type": "string"},
-                                            },
-                                        },
-                                    },
-                                    "total": {"type": "integer"},
-                                    "page": {"type": "integer"},
-                                    "size": {"type": "integer"},
-                                },
-                            },
-                        },
-                    }
-                }
-            },
-        }
-    },
-)
-@requires_permission("agent:r")
-async def list_knowledge(request):
-    """查询知识库 (管理用途)"""
-    tenant_id = request.ctx.session.get("tenant_id")
-    page = request.json.get("page", 1)
-    size = request.json.get("size", 20)
-    knowledge_type = request.json.get("knowledge_type")
-    review_status = request.json.get("review_status")
-
-    filters = {"tenant_id": tenant_id, "deleted": False}
-    if knowledge_type:
-        filters["knowledge_type"] = knowledge_type
-    if review_status:
-        filters["review_status"] = review_status
-
-    offset = (page - 1) * size
-    items = await ArchivalKnowledge.filter(**filters).offset(offset).limit(size).all()
-    total = await ArchivalKnowledge.filter(**filters).count()
-
-    # Simple JSON serialization for items
-    data = []
-    for item in items:
-        # Avoid including large embedding vector in list view if not needed
-        item_dict = {
-            "id": item.id,
-            "content": item.content[:200] + "..." if len(item.content) > 200 else item.content,
-            "knowledge_type": item.knowledge_type,
-            "attack_type": item.attack_type,
-            "tags": item.tags,
-            "review_status": item.review_status,
-            "ctime": str(item.ctime),
-        }
-        data.append(item_dict)
-
-    return response_ok({"data": data, "total": total, "page": page, "size": size})
-
-
-@agent_bp.post("/knowledge/review")
-@openapi.definition(
-    summary="审核知识条目",
-    description="审核 Agent 提交的案例学习",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string", "description": "知识ID"},
-                    "action": {"type": "string", "description": "approve | reject"},
-                },
-                "required": ["id", "action"],
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer", "default": 0},
-                            "msg": {"type": "string", "default": "success"},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "status": {"type": "string", "description": "approved|rejected"},
-                                },
-                            },
-                        },
-                    }
-                }
-            },
-        }
-    },
-)
-@requires_permission("agent:u")
-async def review_knowledge(request):
-    """审核知识条目"""
-    knowledge_id = request.json.get("id")
-    action = request.json.get("action")  # approve / reject
-
-    if action not in ("approve", "reject"):
-        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
-
-    tenant_id = request.ctx.session.get("tenant_id")
-    user = request.ctx.session["account_info"]
-
-    knowledge = await ArchivalKnowledge.get_or_none(id=knowledge_id, tenant_id=tenant_id, deleted=False)
-    if not knowledge:
-        raise CustomError(ErrorCode.NOT_FOUND)
-
-    knowledge.review_status = "approved" if action == "approve" else "rejected"
-    knowledge.reviewed_by = user
-    knowledge.reviewed_at = datetime.now(TZ)
-    await knowledge.save()
-
-    return response_ok({"status": knowledge.review_status})
-
-
-@agent_bp.post("/knowledge/upload")
-@openapi.definition(
-    summary="上传 SOP 文档",
-    description="管理员上传 SOP/知识文档到 L5",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "content": {"type": "string", "description": "文档内容"},
-                    "knowledge_type": {"type": "string", "description": "类型", "default": "sop"},
-                    "tags": {"type": "array", "items": {"type": "string"}},
-                },
-                "required": ["content"],
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer", "default": 0},
-                            "msg": {"type": "string", "default": "success"},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "id": {"type": "string"},
-                                },
-                            },
-                        },
-                    }
-                }
-            },
-        }
-    },
+    summary="创建智能体",
+    description="创建一个可被指挥中心调度的Nanobot智能体配置。数据落在command_center_agent表。需要agent:c权限。",
+    body=_json_body(CREATE_AGENT_BODY),
+    response=_response("创建成功", AGENT_SCHEMA, {"400": "参数错误", "409": "智能体已存在"}),
 )
 @requires_permission("agent:c")
-async def upload_knowledge(request):
-    """上传 SOP 文档"""
-    content = request.json.get("content")
-    knowledge_type = request.json.get("knowledge_type", "sop")
-    tags = request.json.get("tags", [])
-
-    if not content:
+async def create_agent(request: Request):
+    data = _require_json(request)
+    agent_key = str(data.get("agent_key") or "").strip()
+    name = str(data.get("name") or "").strip()
+    if not agent_key or not name:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
-    user = request.ctx.session["account_info"]
+    exists = await CommandAgent.get_or_none(tenant_id=tenant_id, agent_key=agent_key, deleted=False)
+    if exists:
+        raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
 
-    # 生成 Embedding
-    embedding = await _generate_embedding(content)
-
-    knowledge = await ArchivalKnowledge.create(tenant_id=tenant_id, content=content, embedding=embedding, knowledge_type=knowledge_type, tags=tags, submitted_by=user.id, review_status="approved")  # 管理员上传直接通过
-
-    return response_ok({"id": knowledge.id})
-
-
-# ============ 用户偏好接口 ============
+    payload = _agent_payload(data)
+    payload["agent_key"] = agent_key
+    payload["name"] = name
+    agent = await CommandAgent.create(tenant_id=tenant_id, **payload)
+    return response_ok(agent.json)
 
 
-@agent_bp.post("/preference/get")
+@agent_bp.post("/list")
 @openapi.definition(
-    summary="获取当前用户的 Agent 偏好",
-    description="获取当前用户的 Agent 偏好设置",
-    response={
-        "200": {
-            "description": "成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer", "default": 0},
-                            "msg": {"type": "string", "default": "success"},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "notify_channel": {"type": "string"},
-                                    "notify_config": {"type": "object"},
-                                    "report_language": {"type": "string"},
-                                    "response_verbosity": {"type": "string"},
-                                    "skill_tags": {"type": "array", "items": {"type": "string"}},
-                                },
-                            },
-                        },
-                    }
-                }
+    summary="查询智能体列表",
+    description="分页查询智能体配置，可按状态、内置标识、运行时和关键字过滤。需要agent:r权限。",
+    body=_json_body(
+        {
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer", "minimum": 1, "default": 1},
+                "size": {"type": "integer", "minimum": 1, "default": 15},
+                "status": {"type": "string", "description": "状态过滤"},
+                "runtime": {"type": "string", "description": "运行时过滤"},
+                "is_builtin": {"type": "boolean", "description": "是否内置过滤"},
+                "keyword": {"type": "string", "description": "按名称、标识、说明模糊搜索"},
             },
         }
-    },
+    ),
+    response=_response(
+        "查询成功",
+        {
+            "type": "object",
+            "properties": {
+                "total": {"type": "integer"},
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+                "data": {"type": "array", "items": AGENT_SCHEMA},
+            },
+        },
+    ),
 )
 @requires_permission("agent:r")
-async def get_preference(request):
-    """获取当前用户的 Agent 偏好"""
-    user = request.ctx.session["account_info"]
+async def list_agents(request: Request):
+    data = _require_json(request)
+    tenant_id = request.ctx.session.get("tenant_id")
+    page = max(1, int(data.get("page", 1) or 1))
+    size = max(1, min(int(data.get("size", 15) or 15), 100))
 
-    pref = await UserPreference.get_or_none(account_id=user.id)
-    if not pref:
-        return response_ok(None)
+    condition = Q(tenant_id=tenant_id, deleted=False)
+    if data.get("status"):
+        condition &= Q(status=data["status"])
+    if data.get("runtime"):
+        condition &= Q(runtime=data["runtime"])
+    if "is_builtin" in data:
+        condition &= Q(is_builtin=bool(data.get("is_builtin")))
+    if data.get("keyword"):
+        keyword = data["keyword"]
+        condition &= Q(agent_key__icontains=keyword) | Q(name__icontains=keyword) | Q(description__icontains=keyword)
 
-    # Simple serialization
-    return response_ok(
-        {
-            "notify_channel": pref.notify_channel,
-            "notify_config": pref.notify_config,
-            "report_language": pref.report_language,
-            "response_verbosity": pref.response_verbosity,
-            "skill_tags": pref.skill_tags,
-        }
-    )
+    queryset = CommandAgent.filter(condition)
+    total = await queryset.count()
+    agents = await queryset.order_by("-is_builtin", "status", "agent_key").offset((page - 1) * size).limit(size).all()
+    return response_ok({"total": total, "page": page, "size": size, "data": [item.json for item in agents]})
 
 
-@agent_bp.post("/preference/update")
+@agent_bp.post("/detail")
 @openapi.definition(
-    summary="更新用户偏好",
-    description="更新当前用户的 Agent 偏好设置",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "notify_channel": {"type": "string", "description": "通知渠道"},
-                    "notify_config": {"type": "object", "description": "通知配置"},
-                    "report_language": {"type": "string", "description": "报告语言"},
-                    "response_verbosity": {"type": "string", "description": "回复详细程度"},
-                    "skill_tags": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "技能标签",
-                    },
-                },
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer", "default": 0},
-                            "msg": {"type": "string", "default": "success"},
-                            "data": {
-                                "type": "object",
-                                "properties": {
-                                    "notify_channel": {"type": "string"},
-                                    "notify_config": {"type": "object"},
-                                    "report_language": {"type": "string"},
-                                    "response_verbosity": {"type": "string"},
-                                    "skill_tags": {"type": "array", "items": {"type": "string"}},
-                                },
-                            },
-                        },
-                    }
-                }
+    summary="查询智能体详情",
+    description="按id或agent_key查询智能体详情。需要agent:r权限。",
+    body=_json_body(
+        {
+            "type": "object",
+            "oneOf": [{"required": ["id"]}, {"required": ["agent_key"]}],
+            "properties": {
+                "id": {"type": "string", "description": "智能体ID"},
+                "agent_key": {"type": "string", "description": "智能体逻辑标识"},
             },
         }
-    },
+    ),
+    response=_response("查询成功", AGENT_SCHEMA, {"400": "参数错误", "404": "智能体不存在"}),
+)
+@requires_permission("agent:r")
+async def detail_agent(request: Request):
+    data = _require_json(request)
+    tenant_id = request.ctx.session.get("tenant_id")
+    agent = await _get_agent(tenant_id, data.get("id"), data.get("agent_key"))
+    if not agent:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    return response_ok(agent.json)
+
+
+@agent_bp.post("/update")
+@openapi.definition(
+    summary="更新智能体",
+    description="更新智能体基础信息、能力标签、Nanobot system_instruction和提示词配置。内置智能体不可改为非内置。需要agent:u权限。",
+    body=_json_body(
+        {
+            "type": "object",
+            "oneOf": [{"required": ["id"]}, {"required": ["agent_key"]}],
+            "properties": {**CREATE_AGENT_BODY["properties"], "id": {"type": "string", "description": "智能体ID"}},
+        }
+    ),
+    response=_response("更新成功", AGENT_SCHEMA, {"400": "参数错误", "404": "智能体不存在"}),
 )
 @requires_permission("agent:u")
-async def agent_update_preference(request):
-    """更新用户偏好"""
-    user = request.ctx.session["account_info"]
+async def update_agent(request: Request):
+    data = _require_json(request)
     tenant_id = request.ctx.session.get("tenant_id")
+    agent = await _get_agent(tenant_id, data.get("id"), data.get("agent_key"))
+    if not agent:
+        raise CustomError(ErrorCode.NOT_FOUND)
 
-    pref, created = await UserPreference.get_or_create(account_id=user.id, defaults={"tenant_id": tenant_id})
+    payload = _agent_payload(data, partial=True)
+    if agent.is_builtin and payload.get("is_builtin") is False:
+        raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
+    if "agent_key" in data and data.get("agent_key") and data.get("agent_key") != agent.agent_key:
+        new_key = str(data["agent_key"]).strip()
+        exists = await CommandAgent.get_or_none(tenant_id=tenant_id, agent_key=new_key, deleted=False)
+        if exists and exists.id != agent.id:
+            raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
+        payload["agent_key"] = new_key
 
-    update_fields = []
-    for field in ["notify_channel", "notify_config", "report_language", "response_verbosity", "skill_tags"]:
-        if field in request.json:
-            setattr(pref, field, request.json[field])
-            update_fields.append(field)
+    for field, value in payload.items():
+        setattr(agent, field, value)
+    await agent.save()
+    return response_ok(agent.json)
 
-    if update_fields:
-        await pref.save(update_fields=update_fields)
 
-    return response_ok(
+@agent_bp.post("/delete")
+@openapi.definition(
+    summary="删除智能体",
+    description="软删除人工创建的智能体，并同步将指挥中心调度状态置为offline。内置智能体禁止删除。需要agent:d权限。",
+    body=_json_body(
         {
-            "notify_channel": pref.notify_channel,
-            "notify_config": pref.notify_config,
-            "report_language": pref.report_language,
-            "response_verbosity": pref.response_verbosity,
-            "skill_tags": pref.skill_tags,
+            "type": "object",
+            "oneOf": [{"required": ["id"]}, {"required": ["agent_key"]}],
+            "properties": {
+                "id": {"type": "string", "description": "智能体ID"},
+                "agent_key": {"type": "string", "description": "智能体逻辑标识"},
+            },
         }
-    )
+    ),
+    response=_response("删除成功", {"type": "object"}, {"400": "参数错误", "404": "智能体不存在"}),
+)
+@requires_permission("agent:d")
+async def delete_agent(request: Request):
+    data = _require_json(request)
+    tenant_id = request.ctx.session.get("tenant_id")
+    agent = await _get_agent(tenant_id, data.get("id"), data.get("agent_key"))
+    if not agent:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    if agent.is_builtin:
+        raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
+
+    await disable_command_agent(agent)
+    agent.deleted = True
+    await agent.save(update_fields=["deleted", "utime"])
+    return response_ok({"id": agent.id, "deleted": True})
+
+
+__all__ = ["agent_bp"]
