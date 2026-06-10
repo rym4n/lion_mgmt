@@ -22,6 +22,8 @@ class ReportDocument(BaseModel):
     name = fields.CharField(max_length=255, description="文件名")
     template_key = fields.CharField(max_length=128, null=True, description="来源模板标识，null 表示空白文档")
     file_path = fields.CharField(max_length=512, description="服务器端相对路径（相对于 REPORT_USER_BASE）")
+    notify_enabled = fields.BooleanField(default=False, description="是否启用通知")
+    notify_config = fields.JSONField(null=True, description="通知动作配置，结构同巡检通知配置")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -36,6 +38,8 @@ class ReportDocument(BaseModel):
             "name": self.name,
             "template_key": self.template_key,
             "file_path": self.file_path,
+            "notify_enabled": self.notify_enabled,
+            "notify_config": self.notify_config,
         }
 
     class Meta:

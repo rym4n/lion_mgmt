@@ -83,3 +83,11 @@ RUN chmod +x docker-entrypoint.sh
 RUN aerich init -t settings.TORTOISE || true
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
+
+# 安装 LibreOffice Writer 和中文字体，用于docx转pdf使用
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+      libreoffice-writer \
+      fonts-noto-cjk && \
+  apt-get clean && \
+  rm -rf /var/lib/apt/lists/*

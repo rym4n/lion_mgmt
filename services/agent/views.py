@@ -2,6 +2,9 @@
 import asyncio
 import base64
 import os
+import subprocess
+import tempfile
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -14,10 +17,11 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.nanobot import NanobotClient
 from libs.security.authorization import requires_permission
-from libs.utils import gen_run_id
+from libs.utils import gen_run_id, upload_to_s3
+from libs.kafka import aproduce
 from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
 from models.report import ReportDocument
-from settings import NANOBOT_WORKSPACE_BASE, REPORT_TEMPLATE_BASE, REPORT_USER_BASE, TZ
+from settings import NANOBOT_WORKSPACE_BASE, REPORT_TEMPLATE_BASE, REPORT_USER_BASE, TASK_TOPIC, TZ
 
 agent_bp = Blueprint("agent", url_prefix="/agent")
 
@@ -811,4 +815,239 @@ async def report_polish(request: Request):
 
     return response_ok({"result": result})
 
+
+# ---------------------------------------------------------------------------
+# 报告导出 & 通知接口
+# ---------------------------------------------------------------------------
+
+async def _docx_to_pdf(docx_path: Path) -> bytes:
+    """调用 libreoffice 将 docx 转换为 pdf，返回 pdf 字节。"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        proc = await asyncio.create_subprocess_exec(
+            "libreoffice", "--headless", "--convert-to", "pdf",
+            "--outdir", tmpdir, str(docx_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"libreoffice 转换失败: {stderr.decode()}")
+        pdf_path = Path(tmpdir) / (docx_path.stem + ".pdf")
+        if not pdf_path.exists():
+            raise RuntimeError("libreoffice 未生成 pdf 文件")
+        return pdf_path.read_bytes()
+
+
+@agent_bp.post("/report/export")
+@openapi.definition(
+    summary="导出报告文件并上传 S3 返回下载链接",
+    description="将用户保存的报告导出为 docx 或 pdf，上传到对象存储后返回下载链接。pdf 转换依赖服务器端 libreoffice。需要 agent:r 权限。",
+    body=_json_body({
+        "type": "object",
+        "required": ["doc_id", "format"],
+        "properties": {
+            "doc_id": {"type": "string", "description": "文档ID"},
+            "format": {"type": "string", "enum": ["docx", "pdf"], "description": "导出格式"},
+        },
+    }),
+    response=_response("导出成功", {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "文件下载链接"},
+            "format": {"type": "string"},
+            "name": {"type": "string"},
+        },
+    }, {"400": "参数错误", "404": "文档不存在", "500": "pdf 转换失败"}),
+)
+@requires_permission("agent:r")
+async def report_export(request: Request):
+    data = _require_json(request)
+    doc_id = str(data.get("doc_id") or "").strip()
+    fmt = str(data.get("format") or "docx").strip().lower()
+    if not doc_id or fmt not in ("docx", "pdf"):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False)
+    if not doc:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    user_dir = _user_report_dir(tenant_id, user_id)
+    docx_path = user_dir / doc.file_path
+    if not docx_path.exists():
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    from settings import RY_USER_BUCKET
+    export_name = Path(doc.name).stem
+
+    if fmt == "docx":
+        file_bytes = docx_path.read_bytes()
+        content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        s3_name = f"{uuid.uuid4()}.docx"
+    else:
+        try:
+            file_bytes = await _docx_to_pdf(docx_path)
+        except Exception as exc:
+            raise CustomError(ErrorCode.INTERNAL_ERROR)
+        content_type = "application/pdf"
+        s3_name = f"{uuid.uuid4()}.pdf"
+
+    url = await upload_to_s3(
+        file_bytes,
+        RY_USER_BUCKET,
+        s3_name,
+        prefix=f"reports/{tenant_id}",
+        content_type=content_type,
+    )
+    return response_ok({"url": url, "format": fmt, "name": f"{export_name}.{fmt}"})
+
+
+@agent_bp.post("/report/notify/save")
+@openapi.definition(
+    summary="保存报告通知配置",
+    description="为报告文档配置通知动作（覆盖式）。notify_config 结构同巡检通知配置。需要 agent:u 权限。",
+    body=_json_body({
+        "type": "object",
+        "required": ["doc_id", "notify_enabled", "notify_config"],
+        "properties": {
+            "doc_id": {"type": "string", "description": "文档ID"},
+            "notify_enabled": {"type": "boolean", "description": "是否启用通知"},
+            "notify_config": {"type": "object", "description": "通知动作配置"},
+        },
+    }),
+    response=_response("保存成功", REPORT_DOC_SCHEMA, {"404": "文档不存在"}),
+)
+@requires_permission("agent:u")
+async def report_notify_save(request: Request):
+    data = _require_json(request)
+    doc_id = str(data.get("doc_id") or "").strip()
+    notify_enabled = data.get("notify_enabled")
+    notify_config = data.get("notify_config")
+    if not doc_id or notify_enabled is None or notify_config is None:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False)
+    if not doc:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    doc.notify_enabled = bool(notify_enabled)
+    doc.notify_config = notify_config
+    await doc.save(update_fields=["notify_enabled", "notify_config", "utime"])
+    return response_ok(doc.json)
+
+
+def _extract_report_notify_actions(config) -> list:
+    """兼容多种通知配置结构，提取动作列表。"""
+    if not config:
+        return []
+    if isinstance(config, list):
+        return [item for item in config if isinstance(item, dict)]
+    if isinstance(config, dict):
+        actions = config.get("callback_data") or config.get("actions")
+        if isinstance(actions, list):
+            return [item for item in actions if isinstance(item, dict)]
+        if any(k in config for k in ("func", "action", "tool_name", "app_name")):
+            return [config]
+    return []
+
+
+@agent_bp.post("/report/notify/send")
+@openapi.definition(
+    summary="发送报告通知",
+    description="将报告文件上传 S3 后，按通知配置发送 Kafka 动作消息。支持指定导出格式，默认 docx。需要 agent:u 权限。",
+    body=_json_body({
+        "type": "object",
+        "required": ["doc_id"],
+        "properties": {
+            "doc_id": {"type": "string", "description": "文档ID"},
+            "format": {"type": "string", "enum": ["docx", "pdf"], "description": "上传格式，默认 docx"},
+        },
+    }),
+    response=_response("发送成功", {
+        "type": "object",
+        "properties": {
+            "sent_count": {"type": "integer", "description": "已发送通知动作数量"},
+            "url": {"type": "string", "description": "上传后的文件下载链接"},
+        },
+    }, {"400": "未启用通知或配置为空", "404": "文档不存在"}),
+)
+@requires_permission("agent:u")
+async def report_notify_send(request: Request):
+    data = _require_json(request)
+    doc_id = str(data.get("doc_id") or "").strip()
+    fmt = str(data.get("format") or "docx").strip().lower()
+    if not doc_id or fmt not in ("docx", "pdf"):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False)
+    if not doc:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    if not doc.notify_enabled or not doc.notify_config:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 上传文件到 S3
+    user_dir = _user_report_dir(tenant_id, user_id)
+    docx_path = user_dir / doc.file_path
+    if not docx_path.exists():
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    from settings import RY_USER_BUCKET
+    if fmt == "docx":
+        file_bytes = docx_path.read_bytes()
+        content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        s3_name = f"{uuid.uuid4()}.docx"
+    else:
+        try:
+            file_bytes = await _docx_to_pdf(docx_path)
+        except Exception:
+            raise CustomError(ErrorCode.INTERNAL_ERROR)
+        content_type = "application/pdf"
+        s3_name = f"{uuid.uuid4()}.pdf"
+
+    url = await upload_to_s3(
+        file_bytes,
+        RY_USER_BUCKET,
+        s3_name,
+        prefix=f"reports/{tenant_id}",
+        content_type=content_type,
+    )
+    download_url = f"{request.scheme}://{request.host}{url}" if url else ""
+
+    # 发送通知动作
+    notify_actions = _extract_report_notify_actions(doc.notify_config)
+    operator_id = _session_user_id(request)
+    sent_count = 0
+
+    for action in notify_actions:
+        # 将报告下载链接注入 action_input
+        action_input = action.get("action_input") or {}
+        if isinstance(action_input, dict):
+            action_input = {**action_input, "report_url": download_url}
+        else:
+            action_input = {"report_url": download_url}
+
+        params = {
+            "resource": action.get("resource", ""),
+            "node_name": action.get("node_name") or action.get("description", ""),
+            "action": action.get("action") or action.get("func", ""),
+            "action_name": action.get("action_name") or action.get("name", ""),
+            "app_name": action.get("app_name") or action.get("tool_name", ""),
+            "name": action.get("name") or action.get("description", ""),
+            "app_ver": action.get("app_ver") or action.get("version", ""),
+            "main": action.get("main") or action.get("tool_main", ""),
+            "action_input": action_input,
+            "retry_times": int(action.get("retry_times") or 3),
+            "timeout": int(action.get("timeout") or 300),
+            "executor": operator_id,
+        }
+        run_id = gen_run_id()
+        await aproduce(TASK_TOPIC, {"run_type": "action", "run_id": run_id, "run_args": params, "tenant_id": tenant_id})
+        sent_count += 1
+
+    return response_ok({"sent_count": sent_count, "url": url})
 
