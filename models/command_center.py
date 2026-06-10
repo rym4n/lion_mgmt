@@ -88,6 +88,7 @@ class CommandTask(BaseModel):
     dispatch_reason = fields.TextField(null=True, description="调度原因")
 
     run_id = fields.CharField(max_length=36, null=True, description="后续执行系统run_id")
+    result = fields.TextField(null=True, description="执行结果")
     room = fields.ForeignKeyField(
         "models.Room",
         null=True,
@@ -128,6 +129,7 @@ class CommandTask(BaseModel):
             "dispatch_status": self.dispatch_status,
             "dispatch_reason": self.dispatch_reason,
             "run_id": self.run_id,
+            "result": self.result,
             "room_id": self.room_id,
             "creator_id": self.creator_id,
             "started_at": strip_timezone_to_seconds(self.started_at),
