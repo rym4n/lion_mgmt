@@ -16,3 +16,4 @@ from .variables import *
 from .warroom import *
 from .webhook import *
 from .command_center import *
+from .report import *

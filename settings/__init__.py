@@ -27,6 +27,14 @@ os.makedirs(LICENSE_DIR, exist_ok=True)
 NANOBOT_WORKSPACE_BASE = os.path.join(BASE_DIR, "data/workspaces")
 os.makedirs(NANOBOT_WORKSPACE_BASE, exist_ok=True)
 
+# 报告模板目录（内置模板 .docx 文件存放位置）
+REPORT_TEMPLATE_BASE = os.path.join(BASE_DIR, "workspace-templates/reports")
+os.makedirs(REPORT_TEMPLATE_BASE, exist_ok=True)
+
+# 用户报告文件存储目录
+REPORT_USER_BASE = os.path.join(BASE_DIR, "data/user-reports")
+os.makedirs(REPORT_USER_BASE, exist_ok=True)
+
 if os.environ.get("RY_ENV") == "DEV":
     try:
         from dotenv import load_dotenv
