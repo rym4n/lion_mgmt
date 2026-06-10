@@ -158,7 +158,37 @@ async def create_workflow(request):
     flow_json_list = data.get("flow_json_list") or []
     creator = request.ctx.session["account_info"]
     admin = await Role.get(id="111111")
-    tenant_admin = await Role.get(name="空间管理员", deleted=False, tenant_id=tenant_id)
+    tenant_admin = await Role.get_or_none(name="租户管理员", deleted=False, tenant_id=tenant_id)
+    if not tenant_admin:
+        tenant_admin = await Role.create(
+            name="租户管理员",
+            description="租户管理员",
+            permissions=[
+                "dashboard:r",
+                "logs:r,d",
+                "status:r",
+                "sso:r,u",
+                "audit:r",
+                "ingestion:c,d,u,r",
+                "warroom:c,u,r",
+                "lic:c,r",
+                "timed:c,d,u,r",
+                "scene:c,d,u,r",
+                "system:c,d,u,r",
+                "inspection:c,d,u,r",
+                "large_screen:c,d,u,r",
+                "tenant:c,d,u,r",
+                "secure:c,d,u,r",
+                "workflow:c,d,u,r",
+                "tool:c,d,u,r",
+                "approve:u,r",
+                "var:c,d,u,r",
+                "event:c,d,u,r",
+                "role:c,d,u,r",
+                "user:c,d,u,r",
+            ],
+            tenant_id=tenant_id,
+        )
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     async with in_transaction():
         playbook = await Playbook.create(

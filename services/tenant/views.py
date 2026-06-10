@@ -125,8 +125,8 @@ async def add_tenant(request):
         await tenant.member.add(creator)
 
         role = await Role.create(
-            name="空间管理员",
-            description="空间管理员",
+            name="租户管理员",
+            description="租户管理员",
             permissions=[
                 "dashboard:r",
                 "logs:r,d",
