@@ -1204,7 +1204,7 @@ async def execute_action(request):
                     break
                 if message.get("type") == "code":
                     break
-                if any(log.status in [-1, 2] for log in logs):
+                if any(log.status in [-1, 3] for log in logs):
                     break
             await asyncio.sleep(1)
 

@@ -24,6 +24,7 @@ class ReportDocument(BaseModel):
     file_path = fields.CharField(max_length=512, description="服务器端相对路径（相对于 REPORT_USER_BASE）")
     notify_enabled = fields.BooleanField(default=False, description="是否启用通知")
     notify_config = fields.JSONField(null=True, description="通知动作配置，结构同巡检通知配置")
+    fetch_config = fields.JSONField(null=True, description="取数动作配置，key为占位符前缀，value为动作配置")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -40,6 +41,7 @@ class ReportDocument(BaseModel):
             "file_path": self.file_path,
             "notify_enabled": self.notify_enabled,
             "notify_config": self.notify_config,
+            "fetch_config": self.fetch_config,
         }
 
     class Meta:

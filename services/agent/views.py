@@ -1,14 +1,19 @@
 # coding=utf-8
 import asyncio
 import base64
+import io
 import os
+import re
 import subprocess
 import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
 
+import orjson
+from docx import Document
 from sanic import Blueprint, Request
+from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.expressions import Q
 
@@ -21,6 +26,7 @@ from libs.utils import gen_run_id, upload_to_s3
 from libs.kafka import aproduce
 from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
 from models.report import ReportDocument
+from models.runlog import Runlog
 from settings import NANOBOT_WORKSPACE_BASE, REPORT_TEMPLATE_BASE, REPORT_USER_BASE, TASK_TOPIC, TZ
 
 agent_bp = Blueprint("agent", url_prefix="/agent")
@@ -838,6 +844,17 @@ async def _docx_to_pdf(docx_path: Path) -> bytes:
         return pdf_path.read_bytes()
 
 
+async def _docx_to_pdf_bytes(docx_bytes: bytes) -> bytes:
+    """将 docx 字节写入临时文件后调用 _docx_to_pdf 转换，返回 pdf 字节。"""
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+        tmp.write(docx_bytes)
+        tmp_path = Path(tmp.name)
+    try:
+        return await _docx_to_pdf(tmp_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 @agent_bp.post("/report/export")
 @openapi.definition(
     summary="导出报告文件并上传 S3 返回下载链接",
@@ -882,12 +899,17 @@ async def report_export(request: Request):
     export_name = Path(doc.name).stem
 
     if fmt == "docx":
-        file_bytes = docx_path.read_bytes()
+        file_bytes = await _resolve_fetch_placeholders(
+            docx_path.read_bytes(), doc.fetch_config or {}, tenant_id, user_id
+        )
         content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         s3_name = f"{uuid.uuid4()}.docx"
     else:
         try:
-            file_bytes = await _docx_to_pdf(docx_path)
+            resolved_bytes = await _resolve_fetch_placeholders(
+                docx_path.read_bytes(), doc.fetch_config or {}, tenant_id, user_id
+            )
+            file_bytes = await _docx_to_pdf_bytes(resolved_bytes)
         except Exception as exc:
             raise CustomError(ErrorCode.INTERNAL_ERROR)
         content_type = "application/pdf"
@@ -998,12 +1020,17 @@ async def report_notify_send(request: Request):
 
     from settings import RY_USER_BUCKET
     if fmt == "docx":
-        file_bytes = docx_path.read_bytes()
+        file_bytes = await _resolve_fetch_placeholders(
+            docx_path.read_bytes(), doc.fetch_config or {}, tenant_id, user_id
+        )
         content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         s3_name = f"{uuid.uuid4()}.docx"
     else:
         try:
-            file_bytes = await _docx_to_pdf(docx_path)
+            resolved_bytes = await _resolve_fetch_placeholders(
+                docx_path.read_bytes(), doc.fetch_config or {}, tenant_id, user_id
+            )
+            file_bytes = await _docx_to_pdf_bytes(resolved_bytes)
         except Exception:
             raise CustomError(ErrorCode.INTERNAL_ERROR)
         content_type = "application/pdf"
@@ -1050,4 +1077,225 @@ async def report_notify_send(request: Request):
         sent_count += 1
 
     return response_ok({"sent_count": sent_count, "url": url})
+
+
+# ---------------------------------------------------------------------------
+# 取数占位符功能
+# ---------------------------------------------------------------------------
+
+# 占位符格式: {action_key.field.path}，如 {a.data.userate}
+_FETCH_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)(\.[^}]+)?\}")
+
+
+def _get_fetch_value_by_path(data, path: str):
+    if not path:
+        return data
+    for part in path.lstrip(".").split("."):
+        if isinstance(data, dict):
+            data = data.get(part)
+        elif isinstance(data, list):
+            try:
+                data = data[int(part)]
+            except (ValueError, IndexError):
+                return None
+        else:
+            return None
+    return data
+
+
+def _stringify_fetch(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return orjson.dumps(value).decode()
+    return str(value)
+
+
+async def _execute_fetch_action(action_cfg: dict, tenant_id: str, operator_id) -> str:
+    params = {
+        "resource": action_cfg.get("resource", ""),
+        "node_name": action_cfg.get("node_name") or action_cfg.get("description", ""),
+        "action": action_cfg.get("action") or action_cfg.get("func", ""),
+        "action_name": action_cfg.get("action_name") or action_cfg.get("name", ""),
+        "app_name": action_cfg.get("app_name") or action_cfg.get("tool_name", ""),
+        "name": action_cfg.get("name") or action_cfg.get("description", ""),
+        "app_ver": action_cfg.get("app_ver") or action_cfg.get("version", ""),
+        "main": action_cfg.get("main") or action_cfg.get("tool_main", ""),
+        "action_input": action_cfg.get("action_input") or {},
+        "retry_times": int(action_cfg.get("retry_times") or 3),
+        "timeout": int(action_cfg.get("timeout") or 300),
+        "executor": operator_id,
+    }
+    run_id = gen_run_id()
+    await aproduce(TASK_TOPIC, {"run_type": "action", "run_id": run_id, "run_args": params, "tenant_id": tenant_id})
+
+    wait_seconds = max(1, min(int(action_cfg.get("timeout") or 300), 300))
+    for _ in range(wait_seconds):
+        log = await Runlog.filter(run_id=run_id, deleted=False).order_by("-utime").first()
+        if log and log.result and log.result != "执行中":
+            return log.result or ""
+        if log and log.status in (-1, 2):
+            return log.result or ""
+        await asyncio.sleep(1)
+
+    logger.warning(f"取数动作执行超时 run_id={run_id}")
+    return ""
+
+
+def _parse_fetch_result(raw: str):
+    if not raw:
+        return raw
+    try:
+        parsed = orjson.loads(raw)
+        if isinstance(parsed, dict) and "data" in parsed:
+            return parsed["data"]
+        return parsed
+    except Exception:
+        return raw
+
+
+async def _resolve_fetch_placeholders(docx_bytes: bytes, fetch_config: dict, tenant_id: str, operator_id) -> bytes:
+    """扫描 docx 中所有 {action_key.field.path} 占位符，并发执行取数动作后替换。"""
+    if not fetch_config:
+        return docx_bytes
+
+    doc = Document(io.BytesIO(docx_bytes))
+
+    def _iter_paragraphs():
+        yield from doc.paragraphs
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    yield from cell.paragraphs
+
+    all_text = " ".join("".join(r.text for r in p.runs) for p in _iter_paragraphs())
+    active_keys = {m.group(1) for m in _FETCH_PLACEHOLDER_RE.finditer(all_text)} & set(fetch_config.keys())
+
+    if not active_keys:
+        return docx_bytes
+
+    coros = {key: _execute_fetch_action(fetch_config[key], tenant_id, operator_id) for key in active_keys}
+    fetched = await asyncio.gather(*coros.values(), return_exceptions=True)
+    results: dict = {}
+    for key, raw in zip(coros.keys(), fetched):
+        if isinstance(raw, Exception):
+            logger.warning(f"取数动作 {key} 执行异常: {raw}")
+            results[key] = None
+        else:
+            results[key] = _parse_fetch_result(raw)
+
+    def _replace_text(text: str) -> str:
+        def replacer(m: re.Match) -> str:
+            key = m.group(1)
+            path = m.group(2) or ""
+            if key not in results:
+                return m.group(0)
+            return _stringify_fetch(_get_fetch_value_by_path(results[key], path))
+        return _FETCH_PLACEHOLDER_RE.sub(replacer, text)
+
+    def _replace_paragraph(para):
+        full = "".join(r.text for r in para.runs)
+        if not _FETCH_PLACEHOLDER_RE.search(full):
+            return
+        replaced = _replace_text(full)
+        for i, run in enumerate(para.runs):
+            run.text = replaced if i == 0 else ""
+
+    for para in _iter_paragraphs():
+        _replace_paragraph(para)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+@agent_bp.post("/report/fetch/save")
+@openapi.definition(
+    summary="保存取数动作配置",
+    description=(
+        "为报告文档配置取数占位符对应的动作（覆盖式）。"
+        "fetch_config 格式：{\"a\": {动作配置}}，"
+        "文档中用 {a.data.userate} 形式引用。需要 agent:u 权限。"
+    ),
+    body=_json_body({
+        "type": "object",
+        "required": ["doc_id", "fetch_config"],
+        "properties": {
+            "doc_id": {"type": "string", "description": "文档ID"},
+            "fetch_config": {
+                "type": "object",
+                "description": "key 为占位符前缀，value 为动作配置",
+            },
+        },
+    }),
+    response=_response("保存成功", REPORT_DOC_SCHEMA, {"404": "文档不存在"}),
+)
+@requires_permission("agent:u")
+async def report_fetch_save(request: Request):
+    data = _require_json(request)
+    doc_id = str(data.get("doc_id") or "").strip()
+    fetch_config = data.get("fetch_config")
+    if not doc_id or not isinstance(fetch_config, dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False)
+    if not doc:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    doc.fetch_config = fetch_config
+    await doc.save(update_fields=["fetch_config", "utime"])
+    return response_ok(doc.json)
+
+
+@agent_bp.post("/report/fetch/run")
+@openapi.definition(
+    summary="手动触发取数替换",
+    description=(
+        "执行文档中所有取数占位符对应的动作，将结果替换后以 base64 返回。"
+        "不修改服务器文件，仅返回替换结果供前端预览/另存。需要 agent:u 权限。"
+    ),
+    body=_json_body({
+        "type": "object",
+        "required": ["doc_id"],
+        "properties": {
+            "doc_id": {"type": "string", "description": "文档ID"},
+        },
+    }),
+    response=_response("执行成功", {
+        "type": "object",
+        "properties": {
+            "doc_id": {"type": "string"},
+            "name": {"type": "string"},
+            "content": {"type": "string", "description": "替换后的 docx base64 内容"},
+        },
+    }, {"404": "文档不存在"}),
+)
+@requires_permission("agent:u")
+async def report_fetch_run(request: Request):
+    data = _require_json(request)
+    doc_id = str(data.get("doc_id") or "").strip()
+    if not doc_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False)
+    if not doc:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    user_dir = _user_report_dir(tenant_id, user_id)
+    docx_path = user_dir / doc.file_path
+    if not docx_path.exists():
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    resolved = await _resolve_fetch_placeholders(
+        docx_path.read_bytes(), doc.fetch_config or {}, tenant_id, _session_user_id(request)
+    )
+    return response_ok({
+        "doc_id": str(doc.id),
+        "name": doc.name,
+        "content": base64.b64encode(resolved).decode("utf-8"),
+    })
 
