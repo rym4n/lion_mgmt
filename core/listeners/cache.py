@@ -27,39 +27,6 @@ class CacheListener(BaseListener):
         except Exception as e:
             logger.error(f"Cache initialization failed: {e} | {traceback.format_exc()}")
 
-    async def _ensure_builtin_agents(self) -> None:
-        """确保内置智能体存在（按 agent_key 幂等 upsert）"""
-        builtin_agents = [
-            {
-                "agent_key": "report_assistant",
-                "name": "汇报助手",
-                "description": "根据报告中的批注内容对报告段落进行润色和重写",
-                "capabilities": ["report_polish", "text_rewrite"],
-                "runtime": "nanobot",
-                "is_builtin": True,
-                "system_instruction": (
-                    "你是一个专业的报告润色助手。"
-                    "用户会提供报告原文段落和对应的批注修改意见。"
-                    "请根据批注意见对相应段落进行重写和润色，"
-                    "保持原有格式和专业风格，仅修改被批注的部分，"
-                    "直接输出润色后的完整段落，不要添加额外说明。"
-                ),
-            }
-        ]
-        try:
-            # 获取所有租户
-            from models.user import Tenant
-            tenants = await Tenant.filter(deleted=False).values_list("id", flat=True)
-            for tenant_id in tenants:
-                for agent_data in builtin_agents:
-                    existing = await CommandAgent.get_or_none(
-                        agent_key=agent_data["agent_key"],
-                        tenant_id=tenant_id,
-                    )
-                    if not existing:
-                        await CommandAgent.create(tenant_id=tenant_id, **agent_data)
-        except Exception as e:
-            logger.warning(f"内置智能体初始化失败: {e}")
 
     async def after_server_start(self, app: Sanic, loop: BaseEventLoop) -> None:
         """app绑定内存/Redis"""
@@ -92,7 +59,6 @@ class CacheListener(BaseListener):
         except Exception as e:
             logger.error(f"OAuth initialization failed: {e} | {traceback.format_exc()}")
 
-        await self._ensure_builtin_agents()
         app.add_task(chat_manager.msg_listener, name="chat_msg_listener")
         app.add_task(chat_manager.log_listener, name="run_log_listener")
         app.add_task(chat_manager.periodic_flush_task, name="periodic_flush_task")
