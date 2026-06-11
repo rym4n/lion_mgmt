@@ -3,6 +3,7 @@
 import time
 
 from aiocache import caches
+from oslash.util.numerals import false
 from sanic import Blueprint
 from sanic_ext import openapi
 
@@ -150,7 +151,7 @@ async def all_variables(request):
     size = max(1, min(int(req_json.get("size", 15) or 15), 100))
     offset = (page - 1) * size
     tenant_id = request.ctx.session.get("tenant_id")
-    qs = Variables.filter(type="global", tenant_id=tenant_id)
+    qs = Variables.filter(type="global", tenant_id=tenant_id, deleted=False)
 
     name = (req_json.get("name") or "").strip()
     if name:
@@ -200,7 +201,7 @@ async def all_variables(request):
 @requires_permission("var:d")
 async def delelte_variable(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    var = await Variables.get_or_none(name=request.json.get("name"), type="global", tenant_id=tenant_id)
+    var = await Variables.get_or_none(name=request.json.get("name"), type="global", tenant_id=tenant_id, deleted=False)
     if not var:
         raise CustomError(ErrorCode.NOT_FOUND)
     await caches.get("redis_chat").delete(f"global_{var.name}")
@@ -249,7 +250,7 @@ async def update_variable(request):
     if not name or not value:
         raise CustomError(ErrorCode.PARAM_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
-    var = await Variables.get(name=name, type="global", tenant_id=tenant_id)
+    var = await Variables.get(name=name, type="global", tenant_id=tenant_id, deleted=False)
     if not var:
         raise CustomError(ErrorCode.NOT_FOUND)
 

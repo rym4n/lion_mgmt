@@ -28,8 +28,8 @@ class Variables(BaseModel):
             "name": self.name,
             "value": self.value,
             "updator": {
-                "username": self.updator.username,
-                "display_name": self.updator.display_name,
+                "username": self.updator.username if self.updator.type == "user" else "API账户",
+                "display_name": self.updator.display_name if self.updator.type == "user" else self.updator.username,
             },
         }
 
