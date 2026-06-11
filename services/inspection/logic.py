@@ -46,9 +46,6 @@ async def save_schedule(data: Dict[str, Any], tenant_id: str) -> InspectionSched
         # 更新字段（排除id）
         update_data = {k: v for k, v in data.items() if k != "id"}
         for key, value in update_data.items():
-            if key == "schedule_cron":
-                timed_name = f"inspection_{schedule_id}"
-                await Timed.filter(name=timed_name, deleted=False, tenant_id=tenant_id).update(tactics=value)
             setattr(schedule, key, value)
         await schedule.save()
     else:
