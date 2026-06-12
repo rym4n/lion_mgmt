@@ -69,6 +69,43 @@ ACTION_TYPE_MAP = {
 
 connected_clients = {}
 
+APP_DEV_DOCS_DIR = "docs"
+MAX_APP_DEV_DOC_SIZE = 20 * 1024 * 1024
+APP_DEV_DOC_EXTENSIONS = {
+    ".csv",
+    ".doc",
+    ".docx",
+    ".json",
+    ".md",
+    ".pdf",
+    ".txt",
+    ".xls",
+    ".xlsx",
+    ".yaml",
+    ".yml",
+}
+
+
+def _safe_app_dev_doc_filename(filename):
+    """清理上传文档文件名，避免目录穿越和非法路径字符。"""
+    filename = Path(filename or "").name.strip()
+    filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", filename)
+    filename = filename.strip(" .")
+    if not filename:
+        filename = f"{uuid.uuid4().hex}.md"
+    return filename
+
+
+def _ensure_path_inside_base(path: Path, base: Path):
+    """确保目标路径仍在指定目录内。"""
+    resolved_path = path.resolve()
+    resolved_base = base.resolve()
+    try:
+        resolved_path.relative_to(resolved_base)
+    except ValueError:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    return resolved_path
+
 
 def check_file_size(file_obj, max_size_kb=5):
     current_pos = file_obj.tell()
@@ -3233,6 +3270,103 @@ class SSEStreamingHook(AgentHook):
                 logger.warning(f"[SSEStreamingHook] 删除截图文件失败: {del_error}")
         except Exception as e:
             logger.error(f"[SSEStreamingHook] 发送截图失败: {e}")
+
+
+@tools_bp.post("/browser/document/upload")
+@openapi.definition(
+    summary="上传应用开发文档",
+    description="上传文档到当前租户的 workspace-template/docs，并同步到当前 workspace/docs 供 Nanobot 在应用开发时阅读（需要工具创建权限）",
+    body={
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "文档文件，支持 md/txt/pdf/doc/docx/xls/xlsx/csv/json/yaml",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "上传成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string"},
+                                    "files": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "filename": {"type": "string"},
+                                                "size": {"type": "integer"},
+                                                "workspace_path": {"type": "string"},
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("tool:c")
+async def upload_browser_document(request):
+    """
+    上传应用开发文档到当前租户的 Nanobot 文档目录。
+
+    保存位置：
+    1. data/workspaces/{tenant_id}/workspace/docs：当前 Nanobot workspace 可直接读取的目录
+    """
+    if not request.files or "file" not in request.files:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    if not tenant_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_root = Path(NANOBOT_WORKSPACE_BASE) / str(tenant_id)
+    workspace_docs_dir = tenant_root / "workspace" / APP_DEV_DOCS_DIR
+    workspace_docs_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_files = []
+    for uploaded_file in request.files.getlist("file"):
+        original_name = getattr(uploaded_file, "name", None) or getattr(uploaded_file, "filename", None) or ""
+        filename = _safe_app_dev_doc_filename(original_name)
+        suffix = Path(filename).suffix.lower()
+        if suffix not in APP_DEV_DOC_EXTENSIONS:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+        file_body = uploaded_file.body or b""
+        if not file_body or len(file_body) > MAX_APP_DEV_DOC_SIZE:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+        workspace_path = _ensure_path_inside_base(workspace_docs_dir / filename, workspace_docs_dir)
+        workspace_path.write_bytes(file_body)
+
+        saved_files.append(
+            {
+                "filename": filename,
+                "size": len(file_body),
+                "workspace_path": str(workspace_path.relative_to(tenant_root)).replace("\\", "/"),
+            }
+        )
+
+    return response_ok({"message": "文档上传成功", "files": saved_files})
 
 
 @tools_bp.post("/browser/execute")

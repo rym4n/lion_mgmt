@@ -28,7 +28,7 @@ NANOBOT_WORKSPACE_BASE = os.path.join(BASE_DIR, "data/workspaces")
 os.makedirs(NANOBOT_WORKSPACE_BASE, exist_ok=True)
 
 # 报告模板目录（内置模板 .docx 文件存放位置）
-REPORT_TEMPLATE_BASE = os.path.join(BASE_DIR, "workspace-templates/reports")
+REPORT_TEMPLATE_BASE = os.path.join(BASE_DIR, "workspace-template/reports")
 os.makedirs(REPORT_TEMPLATE_BASE, exist_ok=True)
 
 # 用户报告文件存储目录
