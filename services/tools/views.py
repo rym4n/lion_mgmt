@@ -739,10 +739,10 @@ async def all_tools(request):
         if not subquery_results:
             return response_ok({"tools": [], "total": 0, "page": page, "size": size, "total_pages": 0})
 
-    # 使用 reduce 避免循环中的深度嵌套
+    # 使用扁平 OR 条件，避免 reduce(operator.or_, ...) 构造左深 Q 树导致递归深度超限
     if subquery_results:
         conditions = [Q(name=pair["name"], ctime=pair["latest_ctime"]) for pair in subquery_results]
-        condition = reduce(operator.or_, conditions)
+        condition = Q(*conditions, join_type=Q.OR)
     else:
         condition = Q()
 
