@@ -38,6 +38,7 @@ class InspectionCategory(BaseModel):
     name = fields.CharField(max_length=255, description="类别名称")
     schedule_id = fields.CharField(max_length=36, description="关联巡检任务ID")
     app_name = fields.CharField(max_length=100, description="应用名称")
+    category_type = fields.CharField(max_length=20, default="action", description="类别类型: action动作/playbook剧本")
     resource_ids = fields.JSONField(description="资源ID列表(数组格式)")
     enabled = fields.BooleanField(default=True, description="是否启用")
 
@@ -55,6 +56,7 @@ class InspectionTarget(BaseModel):
     category_id = fields.CharField(max_length=36, description="关联巡检类别ID")
     standard = fields.TextField(description="巡检标准")
     action_name = fields.CharField(max_length=100, description="巡检动作名称")
+    version = fields.CharField(max_length=50, null=True, description="巡检动作或剧本版本，空则使用最新版本")
     action_input = fields.JSONField(null=True, description="巡检动作输入参数配置")
     enabled = fields.BooleanField(default=True, description="是否启用")
 

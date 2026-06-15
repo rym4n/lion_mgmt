@@ -177,3 +177,4 @@ class ErrorCode(BaseErrorCode):
     READ_FAILED_TO_INSPECTION = ErrorData(4139, "模板文件读取失败，请联系管理员")
     SCHEDULE_NOT_FOUND = ErrorData(4140, "巡检任务不存在，请检查后重新上传")
     INTERNAL_ERROR = ErrorData(4141, "润色失败，请稍后再试")
+    CATEGORY_NOT_FOUND = ErrorData(4142, "当前巡检类别不存在，请检查后重新上传")

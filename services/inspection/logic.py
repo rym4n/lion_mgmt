@@ -21,10 +21,181 @@ from libs.nanobot import NanobotClient
 from libs.utils import upload_to_s3
 from tortoise.expressions import Q
 from litellm import acompletion
-from models import InspectionSchedule, InspectionCategory, InspectionTarget, InspectionResult, Tool, ToolAction, Timed
+from models import InspectionSchedule, InspectionCategory, InspectionTarget, InspectionResult, Tool, ToolAction, Timed, Playbook, PlaybookVersion
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from settings import RY_AI_MODEL, RY_AI_API_BASE, LLM_KEY, NANOBOT_WORKSPACE_BASE
+
+INSPECTION_CATEGORY_TYPE_ACTION = "action"
+INSPECTION_CATEGORY_TYPE_PLAYBOOK = "playbook"
+INSPECTION_CATEGORY_TYPES = {INSPECTION_CATEGORY_TYPE_ACTION, INSPECTION_CATEGORY_TYPE_PLAYBOOK}
+
+
+def normalize_category_type(value: Any = None) -> str:
+    """规范化巡检类别类型，兼容字符串和定时任务里的 0/1 类型。"""
+    if value is None or value == "":
+        return INSPECTION_CATEGORY_TYPE_ACTION
+
+    if isinstance(value, bool):
+        return INSPECTION_CATEGORY_TYPE_ACTION if value else INSPECTION_CATEGORY_TYPE_PLAYBOOK
+
+    if isinstance(value, int):
+        return INSPECTION_CATEGORY_TYPE_PLAYBOOK if value == 0 else INSPECTION_CATEGORY_TYPE_ACTION
+
+    value_str = str(value).strip().lower()
+    if value_str in ("playbook", "flow", "剧本", "0"):
+        return INSPECTION_CATEGORY_TYPE_PLAYBOOK
+    if value_str in ("action", "tool", "动作", "1"):
+        return INSPECTION_CATEGORY_TYPE_ACTION
+
+    raise CustomError(ErrorCode.PARAM_ERROR)
+
+
+def _normalize_resource_ids(resource_ids: Any, category_type: str) -> List[str]:
+    """剧本类别不需要资源；动作类别继续返回资源 ID 列表。"""
+    if category_type == INSPECTION_CATEGORY_TYPE_PLAYBOOK:
+        return []
+
+    if resource_ids in (None, ""):
+        return []
+
+    if isinstance(resource_ids, str):
+        try:
+            parsed = orjson.loads(resource_ids)
+        except orjson.JSONDecodeError:
+            parsed = [rid.strip() for rid in resource_ids.split(",") if rid.strip()]
+        resource_ids = parsed
+
+    if not isinstance(resource_ids, list):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    return [str(rid).strip() for rid in resource_ids if str(rid).strip()]
+
+
+def _normalize_version(value: Any) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    return str(value).strip() or None
+
+
+def _normalize_category_data(data: Dict[str, Any], partial: bool = False) -> Dict[str, Any]:
+    normalized = data.copy()
+    if "type" in normalized:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    type_provided = "category_type" in normalized
+    raw_category_type = normalized.get("category_type")
+    category_type = normalize_category_type(raw_category_type) if (type_provided or not partial) else None
+
+    if category_type:
+        normalized["category_type"] = category_type
+
+    if not partial or "resource_ids" in normalized or category_type == INSPECTION_CATEGORY_TYPE_PLAYBOOK:
+        normalized["resource_ids"] = _normalize_resource_ids(normalized.get("resource_ids"), category_type or INSPECTION_CATEGORY_TYPE_ACTION)
+
+    if category_type == INSPECTION_CATEGORY_TYPE_PLAYBOOK and not normalized.get("app_name"):
+        normalized["app_name"] = ""
+    return normalized
+
+
+def _normalize_target_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = data.copy()
+    if "version" in normalized:
+        normalized["version"] = _normalize_version(normalized.get("version"))
+    return normalized
+
+
+def _get_category_type(category: InspectionCategory) -> str:
+    return normalize_category_type(getattr(category, "category_type", None))
+
+
+def _build_action_config(category: InspectionCategory, target: InspectionTarget, tool: Optional[Tool]) -> Dict[str, Any]:
+    """构造动作巡检执行配置，保留旧字段并补充标准动作执行字段。"""
+    resolved_version = tool.version if tool and tool.version else (target.version or "")
+    resources = orjson.dumps(category.resource_ids or []).decode("utf-8")
+    action_input = {"params": target.action_input} or {}
+
+    return {
+        "type": INSPECTION_CATEGORY_TYPE_ACTION,
+        "category_type": INSPECTION_CATEGORY_TYPE_ACTION,
+        "main": tool.main if tool and tool.main else "main.py",
+        "timeout": "300",
+        "version": resolved_version,
+        "app_ver": resolved_version,
+        "resources": resources,
+        "resource": resources,
+        "tool_name": category.app_name,
+        "app_name": category.app_name,
+        "name": category.app_name,
+        "action_name": target.action_name,
+        "action": target.action_name,
+        "node_name": target.content,
+        "action_input": action_input,
+        "target_id": target.id,
+        "schedule_id": category.schedule_id,
+    }
+
+
+async def _resolve_playbook(category: InspectionCategory, tenant_id: str) -> Optional[Playbook]:
+    """通过巡检类别 app_name 兼容剧本 ID 或剧本名称。"""
+    playbook_key = (category.app_name or "").strip()
+    if not playbook_key:
+        return None
+
+    return await Playbook.filter(Q(id=playbook_key) | Q(name=playbook_key), deleted=False, tenant_id=tenant_id).first()
+
+
+async def _resolve_playbook_version(playbook: Playbook, version: Optional[str], tenant_id: str) -> Optional[PlaybookVersion]:
+    """通过版本 ID/版本号解析剧本版本；未指定版本时使用最新已发布版本。"""
+    if version:
+        return (
+            await PlaybookVersion.filter(
+                Q(id=version) | Q(version=version),
+                playbook_id=playbook.id,
+                deleted=False,
+                tenant_id=tenant_id,
+            )
+            .order_by("-utime")
+            .first()
+        )
+
+    return (
+        await PlaybookVersion.filter(
+            playbook_id=playbook.id,
+            status=1,
+            deleted=False,
+            tenant_id=tenant_id,
+        )
+        .order_by("-utime")
+        .first()
+    )
+
+
+def _build_playbook_config(category: InspectionCategory, target: InspectionTarget, playbook: Playbook, playbook_version: PlaybookVersion, tenant_id: str) -> Dict[str, Any]:
+    """构造剧本巡检执行配置。"""
+    flow_input = target.action_input.copy() if isinstance(target.action_input, dict) else {}
+    flow_input.setdefault("schedule_id", category.schedule_id)
+    flow_input.setdefault("target_id", target.id)
+    flow_input.setdefault("tenant_id", tenant_id)
+
+    return {
+        "type": "flow",
+        "category_type": INSPECTION_CATEGORY_TYPE_PLAYBOOK,
+        "flow_id": playbook_version.id,
+        "flow_input": flow_input,
+        "version": playbook_version.version,
+        "resources": "[]",
+        "tool_name": category.app_name,
+        "app_name": category.app_name,
+        "playbook_id": playbook.id,
+        "playbook_name": playbook.name,
+        "playbook_version_id": playbook_version.id,
+        "action_name": target.action_name,
+        "action_input": target.action_input or {},
+        "target_id": target.id,
+        "schedule_id": category.schedule_id,
+        "timeout": str(getattr(playbook_version, "flow_timeout", 300) or 300),
+    }
+
 
 # ==================== InspectionSchedule Operations ====================
 
@@ -206,6 +377,7 @@ async def create_category(data: Dict[str, Any], tenant_id: str) -> InspectionCat
     创建巡检类别
     Create inspection category
     """
+    data = _normalize_category_data(data)
     category = await InspectionCategory.create(**data, tenant_id=tenant_id)
     return category
 
@@ -249,6 +421,7 @@ async def list_categories(page: int, page_size: int, tenant_id: str, schedule_id
                 "name": category.name,
                 "schedule_id": category.schedule_id,
                 "app_name": category.app_name,
+                "category_type": normalize_category_type(getattr(category, "category_type", None)),
                 "resource_ids": category.resource_ids,
                 "enabled": category.enabled,
                 "ctime": category.ctime.isoformat() if category.ctime else None,
@@ -275,6 +448,10 @@ async def update_category(category_id: str, data: Dict[str, Any], tenant_id: str
     category = await get_category(category_id, tenant_id)
     if not category:
         return None
+
+    if "category_type" not in data and "resource_ids" in data:
+        data["category_type"] = _get_category_type(category)
+    data = _normalize_category_data(data, partial=True)
 
     # 更新字段
     for key, value in data.items():
@@ -311,6 +488,7 @@ async def create_target(data: Dict[str, Any], tenant_id: str) -> InspectionTarge
     创建巡检目标
     Create inspection target
     """
+    data = _normalize_target_data(data)
     target = await InspectionTarget.create(**data, tenant_id=tenant_id)
     return target
 
@@ -381,8 +559,10 @@ async def list_targets(page: int, page_size: int, tenant_id: str, schedule_id: O
                     "category_name": cat.name,
                     "category_enabled": cat.enabled,
                     "app_name": cat.app_name,
+                    "category_type": normalize_category_type(getattr(cat, "category_type", None)),
                     "standard": None,
                     "action_name": None,
+                    "version": None,
                     "action_input": None,
                     "enabled": None,
                     "ctime": cat.ctime.isoformat() if hasattr(cat, "ctime") and cat.ctime else None,
@@ -399,8 +579,10 @@ async def list_targets(page: int, page_size: int, tenant_id: str, schedule_id: O
                         "category_name": cat.name,
                         "category_enabled": cat.enabled,
                         "app_name": cat.app_name,
+                        "category_type": normalize_category_type(getattr(cat, "category_type", None)),
                         "standard": target.standard,
                         "action_name": target.action_name,
+                        "version": target.version,
                         "action_input": target.action_input or {},
                         "enabled": target.enabled,
                         "ctime": target.ctime.isoformat() if target.ctime else None,
@@ -433,6 +615,8 @@ async def update_target(target_id: str, data: Dict[str, Any], tenant_id: str) ->
     target = await get_target(target_id, tenant_id)
     if not target:
         return None
+
+    data = _normalize_target_data(data)
 
     # 更新字段
     for key, value in data.items():
@@ -492,16 +676,30 @@ async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List
     if not targets:
         return []
 
-    # 获取相关的工具信息
-    app_names = list(set(c.app_name for c in categories))
-    # 按更新时间倒序查询，确保最新的在前面
-    tools = await Tool.filter(name__in=app_names, tenant_id=tenant_id, maintain=False, deleted=False).order_by("-utime").all()
+    # 获取相关的工具信息。空版本沿用最新版本；指定版本时优先命中对应版本。
+    action_app_names = list(
+        {
+            c.app_name
+            for c in categories
+            if _get_category_type(c) == INSPECTION_CATEGORY_TYPE_ACTION and c.app_name
+        }
+    )
+    tools = []
+    if action_app_names:
+        tools = await Tool.filter(
+            name__in=action_app_names,
+            tenant_id=tenant_id,
+            maintain=False,
+            deleted=False,
+        ).order_by("-utime").all()
 
-    # 去重，只保留最新的
-    tool_map = {}
-    for t in tools:
-        if t.name not in tool_map:
-            tool_map[t.name] = t
+    latest_tool_map = {}
+    version_tool_map = {}
+    for tool in tools:
+        if tool.name not in latest_tool_map:
+            latest_tool_map[tool.name] = tool
+        if tool.version and (tool.name, tool.version) not in version_tool_map:
+            version_tool_map[(tool.name, tool.version)] = tool
 
     results = []
     for target in targets:
@@ -509,23 +707,22 @@ async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List
         if not category:
             continue
 
-        tool = tool_map.get(category.app_name)
+        category_type = _get_category_type(category)
 
-        # 构造 resources（资源ID列表），保持执行配置接口只返回资源 id，不展开资源内容。
-        resources = orjson.dumps(category.resource_ids or []).decode("utf-8")
+        if category_type == INSPECTION_CATEGORY_TYPE_PLAYBOOK:
+            playbook = await _resolve_playbook(category, tenant_id)
+            if not playbook:
+                raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
 
-        item = {
-            "main": tool.main if tool and tool.main else "main.py",
-            "timeout": "300",
-            "version": tool.version if tool else "",
-            "resources": resources,
-            "tool_name": category.app_name,
-            "action_name": target.action_name,
-            "action_input": {"params": target.action_input} or {},
-            "target_id": target.id,
-            "schedule_id": category.schedule_id,
-        }
-        results.append(item)
+            playbook_version = await _resolve_playbook_version(playbook, target.version, tenant_id)
+            if not playbook_version:
+                raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
+
+            results.append(_build_playbook_config(category, target, playbook, playbook_version, tenant_id))
+            continue
+
+        tool = version_tool_map.get((category.app_name, target.version)) if target.version else latest_tool_map.get(category.app_name)
+        results.append(_build_action_config(category, target, tool))
 
     return results
 
@@ -702,7 +899,7 @@ INSPECTION_PARSE_PROMPT = """
 """
 
 
-async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> Dict[str, Any]:
+async def parse_inspection_content(app_name: str, text: str, tenant_id: str, category_type: str = INSPECTION_CATEGORY_TYPE_ACTION, version: Optional[str] = None) -> Dict[str, Any]:
     """
     使用AI解析巡检内容
     Parse inspection content using AI
@@ -715,8 +912,35 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str) -> 
     Returns:
         解析后的结构化数据
     """
-    # 查询工具信息
-    tool = await Tool.filter(name=app_name, deleted=False, tenant_id=tenant_id).first()
+    category_type = normalize_category_type(category_type)
+    version = _normalize_version(version)
+
+    if category_type == INSPECTION_CATEGORY_TYPE_PLAYBOOK:
+        playbook = await Playbook.filter(Q(id=app_name) | Q(name=app_name), deleted=False, tenant_id=tenant_id).first()
+        if not playbook:
+            raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
+
+        playbook_version = await _resolve_playbook_version(playbook, version, tenant_id)
+        if not playbook_version:
+            raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
+
+        return {
+            "standard": None,
+            "action_name": playbook.name,
+            "confidence": 1,
+            "suggestions": ["当前类别为剧本类型，无需选择资源或工具动作"],
+            "category_type": INSPECTION_CATEGORY_TYPE_PLAYBOOK,
+            "playbook_id": playbook.id,
+            "playbook_name": playbook.name,
+            "flow_id": playbook_version.id,
+            "version": playbook_version.version,
+        }
+
+    # 查询工具信息。未指定版本时沿用最新版本。
+    tool_query = Tool.filter(name=app_name, deleted=False, tenant_id=tenant_id)
+    if version:
+        tool_query = tool_query.filter(version=version)
+    tool = await tool_query.order_by("-utime").first()
 
     if not tool:
         raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
@@ -1070,7 +1294,7 @@ async def export_targets_to_excel(target_ids: List[str], tenant_id: str) -> byte
     thin_border = Border(left=Side(style="thin"), right=Side(style="thin"), top=Side(style="thin"), bottom=Side(style="thin"))
 
     # 设置表头
-    headers = ["任务名称", "Cron表达式", "负责人", "任务描述", "类别名称", "应用名称", "资源ID列表", "巡检内容", "巡检标准", "动作名称"]
+    headers = ["任务名称", "Cron表达式", "负责人", "任务描述", "类别名称", "类别类型", "应用名称", "资源ID列表", "巡检内容", "巡检标准", "动作/剧本名称", "版本"]
     ws.append(headers)
 
     # 应用表头样式
@@ -1087,17 +1311,19 @@ async def export_targets_to_excel(target_ids: List[str], tenant_id: str) -> byte
 • 任务名称：巡检任务的名称，相同任务名称的行会归属到同一个任务下
 • Cron表达式：定时执行规则，如 '0 9 * * *' 表示每天9点执行
 • 类别名称：巡检类别名称，相同任务下的相同类别会归属到一起
-• 应用名称：执行巡检的工具应用名称
+• 类别类型：action 表示执行动作，playbook 表示执行剧本；为空默认 action
+• 应用名称：action 类型填写工具应用名称，playbook 类型填写剧本名称或剧本ID
 • 巡检内容：具体要检查的内容描述
-• 动作名称：执行巡检的具体动作名称
+• 动作/剧本名称：action 类型填写动作名称，playbook 类型可填写剧本显示名称
 【选填字段】
 • 负责人：负责该巡检任务的人员
 • 任务描述：任务的详细说明
-• 资源ID列表：多个资源ID用英文逗号分隔
+• 资源ID列表：多个资源ID用英文逗号分隔，playbook 类型无需填写
 • 巡检标准：判断巡检是否通过的标准
+• 版本：工具版本或剧本版本/剧本版本ID，空则执行最新版本
 【填写技巧】
 1. 同一个任务的多个巡检项，任务信息（前4列）可以合并或重复填写
-2. 同一个类别的多个巡检项，类别信息（第5-7列）可以合并或重复填写
+2. 同一个类别的多个巡检项，类别信息（第5-8列）可以合并或重复填写
 3. 每一行代表一个巡检项，可以复制行来快速添加相似的巡检项
 4. 导入时会自动去重，相同名称的任务/类别会合并
 5. 所有导入的数据默认为禁用状态，需要在系统中手动启用
@@ -1106,15 +1332,15 @@ async def export_targets_to_excel(target_ids: List[str], tenant_id: str) -> byte
 
     # 添加22行空行（第2-23行）
     for i in range(23):
-        ws.append(["", "", "", "", "", "", "", "", "", ""])
+        ws.append(["", "", "", "", "", "", "", "", "", "", "", ""])
 
     # 合并第2-23行的所有列
-    ws.merge_cells("A2:J24")
+    ws.merge_cells("A2:L24")
     ws["A2"] = instructions_text
     ws["A2"].alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
     ws["A2"].border = thin_border
 
-    ws.merge_cells(f"A{ws.max_row}:J{ws.max_row}")
+    ws.merge_cells(f"A{ws.max_row}:L{ws.max_row}")
 
     current_row = ws.max_row + 1
 
@@ -1127,28 +1353,30 @@ async def export_targets_to_excel(target_ids: List[str], tenant_id: str) -> byte
             category_start_row = current_row
             targets_list = data_structure[schedule_id][category_id]
 
+            category_type = _get_category_type(category)
             resource_ids_str = ",".join(category.resource_ids) if category.resource_ids else ""
 
             for target in targets_list:
-                ws.append([schedule.name, schedule.schedule_cron, schedule.owner or "", schedule.description or "", category.name, category.app_name, resource_ids_str, target.content, target.standard or "", target.action_name])
+                ws.append([schedule.name, schedule.schedule_cron, schedule.owner or "", schedule.description or "", category.name, category_type, category.app_name, resource_ids_str, target.content, target.standard or "", target.action_name, target.version or ""])
 
                 # 应用边框和对齐
-                for col in range(1, 11):
+                for col in range(1, 13):
                     cell = ws.cell(current_row, col)
                     cell.border = thin_border
-                    if col <= 7:
+                    if col <= 8:
                         cell.alignment = center_alignment
                     else:
                         cell.alignment = left_alignment
 
                 current_row += 1
 
-            # 合并类别单元格（列E-G）
+            # 合并类别单元格（列E-H）
             if len(targets_list) > 1:
                 category_end_row = current_row - 1
                 ws.merge_cells(f"E{category_start_row}:E{category_end_row}")
                 ws.merge_cells(f"F{category_start_row}:F{category_end_row}")
                 ws.merge_cells(f"G{category_start_row}:G{category_end_row}")
+                ws.merge_cells(f"H{category_start_row}:H{category_end_row}")
 
         # 合并任务单元格（列A-D）
         schedule_end_row = current_row - 1
@@ -1164,11 +1392,13 @@ async def export_targets_to_excel(target_ids: List[str], tenant_id: str) -> byte
     ws.column_dimensions["C"].width = 12  # 负责人
     ws.column_dimensions["D"].width = 25  # 任务描述
     ws.column_dimensions["E"].width = 20  # 类别名称
-    ws.column_dimensions["F"].width = 15  # 应用名称
-    ws.column_dimensions["G"].width = 25  # 资源ID列表
-    ws.column_dimensions["H"].width = 30  # 巡检内容
-    ws.column_dimensions["I"].width = 30  # 巡检标准
-    ws.column_dimensions["J"].width = 15  # 动作名称
+    ws.column_dimensions["F"].width = 12  # 类别类型
+    ws.column_dimensions["G"].width = 15  # 应用名称/剧本
+    ws.column_dimensions["H"].width = 25  # 资源ID列表
+    ws.column_dimensions["I"].width = 30  # 巡检内容
+    ws.column_dimensions["J"].width = 30  # 巡检标准
+    ws.column_dimensions["K"].width = 18  # 动作/剧本名称
+    ws.column_dimensions["L"].width = 18  # 版本
 
     # 设置行高
     ws.row_dimensions[1].height = 30  # 表头行高
@@ -1209,11 +1439,30 @@ async def import_targets_from_excel(file_content: bytes, tenant_id: str) -> Dict
 
     # 缓存映射表
     schedule_cache = {}  # name -> schedule object
-    category_cache = {}  # (schedule_name, category_name) -> category object
+    category_cache = {}  # (schedule_name, category_name, category_type) -> category object
 
     created_schedules = []
     created_categories = []
     created_targets = []
+
+    header_values = [str(cell.value).strip() if cell.value else "" for cell in ws[1]]
+    header_index = {name: idx for idx, name in enumerate(header_values) if name}
+    has_new_format = "类别类型" in header_index or "版本" in header_index
+
+    def _row_text(row, idx: int) -> str:
+        if idx < 0 or idx >= len(row) or row[idx] is None:
+            return ""
+        return str(row[idx]).strip()
+
+    def _value_by_header(row, header: str, fallback_idx: int) -> str:
+        return _row_text(row, header_index.get(header, fallback_idx))
+
+    def _first_value_by_header(row, headers: List[str], fallback_idx: int) -> str:
+        for header in headers:
+            value = _value_by_header(row, header, -1)
+            if value:
+                return value
+        return _row_text(row, fallback_idx)
 
     # 跳过表头和说明行，从第2行开始读取
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
@@ -1228,23 +1477,38 @@ async def import_targets_from_excel(file_content: bytes, tenant_id: str) -> Dict
 
         # 解析列数据
         try:
-            schedule_name = str(row[0]).strip() if row[0] else ""
-            schedule_cron = str(row[1]).strip() if row[1] else ""
-            owner = str(row[2]).strip() if row[2] else ""
-            schedule_desc = str(row[3]).strip() if row[3] else ""
-            category_name = str(row[4]).strip() if row[4] else ""
-            app_name = str(row[5]).strip() if row[5] else ""
-            resource_ids_str = str(row[6]).strip() if row[6] else ""
-            target_content = str(row[7]).strip() if row[7] else ""
-            target_standard = str(row[8]).strip() if row[8] else ""
-            action_name = str(row[9]).strip() if row[9] else ""
+            schedule_name = _value_by_header(row, "任务名称", 0)
+            schedule_cron = _value_by_header(row, "Cron表达式", 1)
+            owner = _value_by_header(row, "负责人", 2)
+            schedule_desc = _value_by_header(row, "任务描述", 3)
+            category_name = _value_by_header(row, "类别名称", 4)
+            if has_new_format:
+                category_type = normalize_category_type(_value_by_header(row, "类别类型", 5))
+                app_name = _value_by_header(row, "应用名称", 6)
+                resource_ids_str = _value_by_header(row, "资源ID列表", 7)
+                target_content = _value_by_header(row, "巡检内容", 8)
+                target_standard = _value_by_header(row, "巡检标准", 9)
+                action_name = _first_value_by_header(row, ["动作/剧本名称", "动作名称"], 10)
+                version = _value_by_header(row, "版本", 11)
+            else:
+                category_type = INSPECTION_CATEGORY_TYPE_ACTION
+                app_name = _row_text(row, 5)
+                resource_ids_str = _row_text(row, 6)
+                target_content = _row_text(row, 7)
+                target_standard = _row_text(row, 8)
+                action_name = _row_text(row, 9)
+                version = ""
         except IndexError:
             # 行数据不完整，跳过
             continue
 
         # 验证必填字段
-        if not schedule_name or not schedule_cron or not category_name or not app_name or not target_content or not action_name:
+        if not schedule_name or not schedule_cron or not category_name or not app_name or not target_content:
             continue
+        if category_type == INSPECTION_CATEGORY_TYPE_ACTION and not action_name:
+            continue
+        if category_type == INSPECTION_CATEGORY_TYPE_PLAYBOOK and not action_name:
+            action_name = app_name
 
         # ===== 1. 处理巡检任务 =====
         if schedule_name not in schedule_cache:
@@ -1262,19 +1526,29 @@ async def import_targets_from_excel(file_content: bytes, tenant_id: str) -> Dict
         schedule = schedule_cache[schedule_name]
 
         # ===== 2. 处理巡检类别 =====
-        category_key = (schedule_name, category_name)
+        category_key = (schedule_name, category_name, category_type)
         if category_key not in category_cache:
             # 先从数据库查找
-            existing_category = await InspectionCategory.filter(name=category_name, schedule_id=schedule.id, deleted=False, tenant_id=tenant_id).first()
+            existing_category = await InspectionCategory.filter(name=category_name, schedule_id=schedule.id, category_type=category_type, deleted=False, tenant_id=tenant_id).first()
 
             if existing_category:
                 category_cache[category_key] = existing_category
             else:
                 # 解析资源ID列表
-                resource_ids = [rid.strip() for rid in resource_ids_str.split(",") if rid.strip()] if resource_ids_str else []
+                resource_ids = _normalize_resource_ids(resource_ids_str, category_type)
 
                 # 创建新类别
-                new_category = await InspectionCategory.create(name=category_name, schedule_id=schedule.id, app_name=app_name, resource_ids=resource_ids, enabled=False, tenant_id=tenant_id)
+                new_category = await create_category(
+                    {
+                        "name": category_name,
+                        "schedule_id": schedule.id,
+                        "app_name": app_name,
+                        "category_type": category_type,
+                        "resource_ids": resource_ids,
+                        "enabled": False,
+                    },
+                    tenant_id,
+                )
                 category_cache[category_key] = new_category
                 created_categories.append(new_category)
 
@@ -1289,7 +1563,17 @@ async def import_targets_from_excel(file_content: bytes, tenant_id: str) -> Dict
             continue
 
         # 创建新巡检项
-        new_target = await InspectionTarget.create(content=target_content, category_id=category.id, standard=target_standard, action_name=action_name, enabled=False, tenant_id=tenant_id)
+        new_target = await create_target(
+            {
+                "content": target_content,
+                "category_id": category.id,
+                "standard": target_standard,
+                "action_name": action_name,
+                "version": version,
+                "enabled": False,
+            },
+            tenant_id,
+        )
         created_targets.append(new_target)
 
     return {

@@ -36,6 +36,42 @@ CUSTOM_REPORT_PLACEHOLDER = "${自定义报告}"
 INSPECTION_RESULT_ALL_OUTPUT_REFS = ("all", "全部", "所有", "全部巡检项", "所有巡检项", "*")
 
 
+def _serialize_category(category):
+    category_type = logic.normalize_category_type(getattr(category, "category_type", None))
+    return {
+        "id": category.id,
+        "name": category.name,
+        "schedule_id": category.schedule_id,
+        "app_name": category.app_name,
+        "category_type": category_type,
+        "resource_ids": category.resource_ids,
+        "enabled": category.enabled,
+        "ctime": category.ctime.isoformat() if category.ctime else None,
+        "utime": category.utime.isoformat() if category.utime else None,
+    }
+
+
+def _serialize_target(target, app_name=None, category_type=None):
+    data = {
+        "id": target.id,
+        "content": target.content,
+        "category_id": target.category_id,
+        "standard": target.standard,
+        "action_name": target.action_name,
+        "version": target.version,
+        "action_input": target.action_input or {},
+        "enabled": target.enabled,
+        "ctime": target.ctime.isoformat() if target.ctime else None,
+        "utime": target.utime.isoformat() if target.utime else None,
+    }
+    if app_name is not None:
+        data["app_name"] = app_name
+    if category_type is not None:
+        normalized_type = logic.normalize_category_type(category_type)
+        data["category_type"] = normalized_type
+    return data
+
+
 def _normalize_action_input(action_input):
     """
     规范化巡检项动作输入参数配置。
@@ -793,12 +829,13 @@ async def create_custom_report_config(request: Request):
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "required": ["name", "schedule_id", "app_name", "resource_ids"],
+                    "required": ["name", "schedule_id", "app_name"],
                     "properties": {
                         "name": {"type": "string", "description": "类别名称"},
                         "schedule_id": {"type": "string", "description": "关联巡检任务ID"},
-                        "app_name": {"type": "string", "description": "应用名称"},
-                        "resource_ids": {"type": "array", "items": {"type": "string"}, "description": "资源ID列表"},
+                        "app_name": {"type": "string", "description": "应用名称；类别类型为 playbook 时填写剧本名称或剧本ID"},
+                        "category_type": {"type": "string", "description": "类别类型: action动作/playbook剧本，默认action"},
+                        "resource_ids": {"type": "array", "items": {"type": "string"}, "description": "资源ID列表；action类型必填，playbook类型无需填写"},
                         "enabled": {"type": "boolean", "description": "是否启用"},
                     },
                 },
@@ -823,6 +860,7 @@ async def create_custom_report_config(request: Request):
                                         "name": {"type": "string"},
                                         "schedule_id": {"type": "string"},
                                         "app_name": {"type": "string"},
+                                        "category_type": {"type": "string"},
                                         "resource_ids": {"type": "array", "items": {"type": "string"}},
                                         "enabled": {"type": "boolean"},
                                         "ctime": {"type": "string"},
@@ -855,18 +893,22 @@ async def create_category(request: Request):
 
     data_list = raw_data
 
-    # 验证必需字段
-    required_fields = ["name", "schedule_id", "app_name", "resource_ids"]
+    # 验证必需字段。剧本类别不要求选择资源，app_name 用剧本名称/ID。
+    required_fields = ["name", "schedule_id", "app_name"]
     processed_list = []
 
     for item in data_list:
         if not isinstance(item, dict):
             continue
 
+        category_type = logic.normalize_category_type(item.get("category_type"))
+
         # 验证必需字段
         for field in required_fields:
             if field not in item:
                 raise CustomError(ErrorCode.PARAM_ERROR)
+        if category_type == logic.INSPECTION_CATEGORY_TYPE_ACTION and "resource_ids" not in item:
+            raise CustomError(ErrorCode.PARAM_ERROR)
 
         processed_list.append(item)
 
@@ -877,19 +919,7 @@ async def create_category(request: Request):
 
     categories = await logic.batch_create_categories(processed_list, tenant_id)
 
-    result_data = [
-        {
-            "id": category.id,
-            "name": category.name,
-            "schedule_id": category.schedule_id,
-            "app_name": category.app_name,
-            "resource_ids": category.resource_ids,
-            "enabled": category.enabled,
-            "ctime": category.ctime.isoformat() if category.ctime else None,
-            "utime": category.utime.isoformat() if category.utime else None,
-        }
-        for category in categories
-    ]
+    result_data = [_serialize_category(category) for category in categories]
 
     return response_ok(data=result_data)
 
@@ -933,6 +963,7 @@ async def create_category(request: Request):
                                                 "name": {"type": "string"},
                                                 "schedule_id": {"type": "string"},
                                                 "app_name": {"type": "string"},
+                                                "category_type": {"type": "string"},
                                                 "resource_ids": {"type": "array", "items": {"type": "string"}},
                                                 "enabled": {"type": "boolean"},
                                                 "ctime": {"type": "string"},
@@ -999,9 +1030,9 @@ async def list_categories(request: Request):
                                     "name": {"type": "string"},
                                     "schedule_id": {"type": "string"},
                                     "app_name": {"type": "string"},
-                                    "resource_config": {"type": "object"},
+                                    "category_type": {"type": "string"},
+                                    "resource_ids": {"type": "array", "items": {"type": "string"}},
                                     "enabled": {"type": "boolean"},
-                                    "description": {"type": "string"},
                                     "ctime": {"type": "string"},
                                     "utime": {"type": "string"},
                                 },
@@ -1029,18 +1060,7 @@ async def get_category(request: Request):
     if not category:
         raise CustomError(ErrorCode.NOT_FOUND)
 
-    return response_ok(
-        data={
-            "id": category.id,
-            "name": category.name,
-            "schedule_id": category.schedule_id,
-            "app_name": category.app_name,
-            "resource_ids": category.resource_ids,
-            "enabled": category.enabled,
-            "ctime": category.ctime.isoformat() if category.ctime else None,
-            "utime": category.utime.isoformat() if category.utime else None,
-        }
-    )
+    return response_ok(data=_serialize_category(category))
 
 
 @inspection_bp.post("/category/update")
@@ -1055,8 +1075,9 @@ async def get_category(request: Request):
                 "properties": {
                     "id": {"type": "string", "description": "类别ID"},
                     "name": {"type": "string", "description": "类别名称"},
-                    "app_name": {"type": "string", "description": "应用名称"},
-                    "resource_ids": {"type": "array", "items": {"type": "string"}, "description": "资源ID列表"},
+                    "app_name": {"type": "string", "description": "应用名称；类别类型为 playbook 时填写剧本名称或剧本ID"},
+                    "category_type": {"type": "string", "description": "类别类型: action动作/playbook剧本"},
+                    "resource_ids": {"type": "array", "items": {"type": "string"}, "description": "资源ID列表；action类型使用，playbook类型会保存为空列表"},
                     "enabled": {"type": "boolean", "description": "是否启用"},
                 },
             }
@@ -1078,9 +1099,9 @@ async def get_category(request: Request):
                                     "name": {"type": "string"},
                                     "schedule_id": {"type": "string"},
                                     "app_name": {"type": "string"},
-                                    "resource_config": {"type": "object"},
+                                    "category_type": {"type": "string"},
+                                    "resource_ids": {"type": "array", "items": {"type": "string"}},
                                     "enabled": {"type": "boolean"},
-                                    "description": {"type": "string"},
                                     "ctime": {"type": "string"},
                                     "utime": {"type": "string"},
                                 },
@@ -1105,22 +1126,21 @@ async def update_category(request: Request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     category_id = data.pop("id")
-    category = await logic.update_category(category_id, data, tenant_id)
-    if not category:
-        raise CustomError(ErrorCode.NOT_FOUND)
+    current_category = await logic.get_category(category_id, tenant_id)
+    if not current_category:
+        raise CustomError(ErrorCode.CATEGORY_NOT_FOUND)
 
-    return response_ok(
-        data={
-            "id": category.id,
-            "name": category.name,
-            "schedule_id": category.schedule_id,
-            "app_name": category.app_name,
-            "resource_ids": category.resource_ids,
-            "enabled": category.enabled,
-            "ctime": category.ctime.isoformat() if category.ctime else None,
-            "utime": category.utime.isoformat() if category.utime else None,
-        }
-    )
+    type_provided = "category_type" in data
+    requested_type = logic.normalize_category_type(data.get("category_type", getattr(current_category, "category_type", None)))
+    current_type = logic.normalize_category_type(getattr(current_category, "category_type", None))
+    if requested_type == logic.INSPECTION_CATEGORY_TYPE_ACTION and (
+        type_provided and current_type == logic.INSPECTION_CATEGORY_TYPE_PLAYBOOK and "resource_ids" not in data
+    ):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    category = await logic.update_category(category_id, data, tenant_id)
+
+    return response_ok(data=_serialize_category(category))
 
 
 @inspection_bp.post("/category/delete")
@@ -1192,13 +1212,14 @@ async def delete_category(request: Request):
                 "type": "array",
                 "items": {
                     "type": "object",
-                    "required": ["content", "category_id", "standard", "action_name"],
+                    "required": ["content", "category_id", "standard"],
                     "properties": {
                         "content": {"type": "string", "description": "巡检内容"},
                         "category_id": {"type": "string", "description": "关联巡检类别ID"},
                         "standard": {"type": "string", "description": "巡检标准"},
-                        "action_name": {"type": "string", "description": "动作名称"},
-                        "action_input": {"type": "object", "description": "动作输入参数配置"},
+                        "action_name": {"type": "string", "description": "动作名称；playbook类别未传时默认使用剧本名称/ID"},
+                        "version": {"type": "string", "description": "动作或剧本版本；为空使用最新版本"},
+                        "action_input": {"type": "object", "description": "动作输入参数或剧本 flow_input 扩展参数"},
                         "enabled": {"type": "boolean", "description": "是否启用"},
                     },
                 },
@@ -1224,6 +1245,9 @@ async def delete_category(request: Request):
                                         "category_id": {"type": "string"},
                                         "standard": {"type": "string"},
                                         "action_name": {"type": "string"},
+                                        "version": {"type": "string"},
+                                        "category_type": {"type": "string"},
+                                        "app_name": {"type": "string"},
                                         "action_input": {"type": "object"},
                                         "enabled": {"type": "boolean"},
                                         "ctime": {"type": "string"},
@@ -1256,21 +1280,34 @@ async def create_target(request: Request):
 
     data_list = raw_data
 
-    # 验证必需字段并处理JSON字符串
-    required_fields = ["content", "category_id", "standard", "action_name"]
+    # 验证必需字段并处理JSON字符串。剧本类别不要求动作名，默认使用类别 app_name。
+    base_required_fields = ["content", "category_id", "standard"]
+    category_ids = list({item.get("category_id") for item in data_list if isinstance(item, dict) and item.get("category_id")})
+    categories = await InspectionCategory.filter(id__in=category_ids, deleted=False, tenant_id=tenant_id).all()
+    category_map = {cat.id: cat for cat in categories}
     processed_list = []
 
     for item in data_list:
         if not isinstance(item, dict):
             continue
 
-        # 验证必需字段
-        for field in required_fields:
+        # 先验证基础必填字段，再按类别类型决定是否需要动作名。
+        for field in base_required_fields:
             if field not in item:
                 raise CustomError(ErrorCode.PARAM_ERROR)
 
+        category = category_map.get(item.get("category_id"))
+        if not category:
+            raise CustomError(ErrorCode.NOT_FOUND)
+
+        category_type = logic.normalize_category_type(getattr(category, "category_type", None))
+        if category_type == logic.INSPECTION_CATEGORY_TYPE_ACTION and "action_name" not in item:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
         # 处理可能为字符串的JSON字段
         processed_item = item.copy()
+        if category_type == logic.INSPECTION_CATEGORY_TYPE_PLAYBOOK and not processed_item.get("action_name"):
+            processed_item["action_name"] = category.app_name
         processed_item["action_input"] = _normalize_action_input(processed_item.get("action_input"))
         processed_list.append(processed_item)
 
@@ -1282,17 +1319,11 @@ async def create_target(request: Request):
     targets = await logic.batch_create_targets(processed_list, tenant_id)
 
     result_data = [
-        {
-            "id": target.id,
-            "content": target.content,
-            "category_id": target.category_id,
-            "standard": target.standard,
-            "action_name": target.action_name,
-            "action_input": target.action_input or {},
-            "enabled": target.enabled,
-            "ctime": target.ctime.isoformat() if target.ctime else None,
-            "utime": target.utime.isoformat() if target.utime else None,
-        }
+        _serialize_target(
+            target,
+            app_name=category_map.get(target.category_id).app_name if category_map.get(target.category_id) else None,
+            category_type=getattr(category_map.get(target.category_id), "category_type", None) if category_map.get(target.category_id) else None,
+        )
         for target in targets
     ]
 
@@ -1338,8 +1369,11 @@ async def create_target(request: Request):
                                                 "id": {"type": "string"},
                                                 "content": {"type": "string"},
                                                 "category_id": {"type": "string"},
+                                                "category_type": {"type": "string"},
+                                                "app_name": {"type": "string"},
                                                 "standard": {"type": "string"},
                                                 "action_name": {"type": "string"},
+                                                "version": {"type": "string"},
                                                 "action_input": {"type": "object"},
                                                 "enabled": {"type": "boolean"},
                                                 "ctime": {"type": "string"},
@@ -1410,8 +1444,10 @@ async def list_targets(request: Request):
                                     "content": {"type": "string"},
                                     "category_id": {"type": "string"},
                                     "app_name": {"type": "string"},
+                                    "category_type": {"type": "string"},
                                     "standard": {"type": "string"},
                                     "action_name": {"type": "string"},
+                                    "version": {"type": "string"},
                                     "action_input": {"type": "object"},
                                     "enabled": {"type": "boolean"},
                                     "ctime": {"type": "string"},
@@ -1441,22 +1477,14 @@ async def get_target(request: Request):
     if not target:
         raise CustomError(ErrorCode.NOT_FOUND)
 
-    categories = await InspectionCategory.filter(id__in=[target.category_id], deleted=False, tenant_id=tenant_id).all()
-    category_map = {cat.id: cat.app_name for cat in categories}
+    category = await InspectionCategory.filter(id=target.category_id, deleted=False, tenant_id=tenant_id).first()
 
     return response_ok(
-        data={
-            "id": target.id,
-            "content": target.content,
-            "category_id": target.category_id,
-            "app_name": category_map.get(target.category_id),
-            "standard": target.standard,
-            "action_name": target.action_name,
-            "action_input": target.action_input or {},
-            "enabled": target.enabled,
-            "ctime": target.ctime.isoformat() if target.ctime else None,
-            "utime": target.utime.isoformat() if target.utime else None,
-        }
+        data=_serialize_target(
+            target,
+            app_name=category.app_name if category else None,
+            category_type=getattr(category, "category_type", None) if category else None,
+        )
     )
 
 
@@ -1473,8 +1501,9 @@ async def get_target(request: Request):
                     "id": {"type": "string", "description": "巡检项ID"},
                     "content": {"type": "string", "description": "巡检内容"},
                     "standard": {"type": "string", "description": "巡检标准"},
-                    "action_name": {"type": "string", "description": "动作名称"},
-                    "action_input": {"type": "object", "description": "动作输入参数配置"},
+                    "action_name": {"type": "string", "description": "动作名称；playbook类别可填写剧本显示名称"},
+                    "version": {"type": "string", "description": "动作或剧本版本；空则使用最新版本"},
+                    "action_input": {"type": "object", "description": "动作输入参数或剧本 flow_input 扩展参数"},
                     "enabled": {"type": "boolean", "description": "是否启用"},
                 },
             }
@@ -1497,6 +1526,9 @@ async def get_target(request: Request):
                                     "category_id": {"type": "string"},
                                     "standard": {"type": "string"},
                                     "action_name": {"type": "string"},
+                                    "version": {"type": "string"},
+                                    "category_type": {"type": "string"},
+                                    "app_name": {"type": "string"},
                                     "action_input": {"type": "object"},
                                     "enabled": {"type": "boolean"},
                                     "ctime": {"type": "string"},
@@ -1530,18 +1562,14 @@ async def update_target(request: Request):
     if not target:
         raise CustomError(ErrorCode.NOT_FOUND)
 
+    category = await InspectionCategory.filter(id=target.category_id, deleted=False, tenant_id=tenant_id).first()
+
     return response_ok(
-        data={
-            "id": target.id,
-            "content": target.content,
-            "category_id": target.category_id,
-            "standard": target.standard,
-            "action_name": target.action_name,
-            "action_input": target.action_input or {},
-            "enabled": target.enabled,
-            "ctime": target.ctime.isoformat() if target.ctime else None,
-            "utime": target.utime.isoformat() if target.utime else None,
-        }
+        data=_serialize_target(
+            target,
+            app_name=category.app_name if category else None,
+            category_type=getattr(category, "category_type", None) if category else None,
+        )
     )
 
 
@@ -1639,6 +1667,13 @@ async def delete_target(request: Request):
                                         "tool_name": {"type": "string"},
                                         "action_name": {"type": "string"},
                                         "action_input": {"type": "object"},
+                                        "type": {"type": "string"},
+                                        "flow_id": {"type": "string"},
+                                        "flow_input": {"type": "object"},
+                                        "playbook_id": {"type": "string"},
+                                        "playbook_name": {"type": "string"},
+                                        "target_id": {"type": "string"},
+                                        "schedule_id": {"type": "string"},
                                     },
                                 },
                             },
@@ -1677,6 +1712,7 @@ async def get_all_configs(request: Request):
                 "properties": {
                     "category_id": {"type": "string", "description": "巡检类别ID"},
                     "text": {"type": "string", "description": "巡检描述文本"},
+                    "version": {"type": "string", "description": "动作或剧本版本；空则使用最新版本"},
                 },
             }
         }
@@ -1697,6 +1733,9 @@ async def get_all_configs(request: Request):
                                     "action_name": {"type": "string"},
                                     "confidence": {"type": "number"},
                                     "suggestions": {"type": "array", "items": {"type": "string"}},
+                                    "category_type": {"type": "string"},
+                                    "flow_id": {"type": "string"},
+                                    "version": {"type": "string"},
                                 },
                             },
                         },
@@ -1726,8 +1765,15 @@ async def parse_inspection(request: Request):
     if not category:
         raise CustomError(ErrorCode.NOT_FOUND)
 
-    result = await logic.parse_inspection_content(category.app_name, text, tenant_id)
+    result = await logic.parse_inspection_content(
+        category.app_name,
+        text,
+        tenant_id,
+        category_type=getattr(category, "category_type", None),
+        version=data.get("version"),
+    )
     result["app_name"] = category.app_name
+    result["category_type"] = logic.normalize_category_type(getattr(category, "category_type", None))
     return response_ok(data=result)
 
 
