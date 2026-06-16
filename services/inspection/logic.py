@@ -140,7 +140,19 @@ async def _resolve_playbook(category: InspectionCategory, tenant_id: str) -> Opt
     if not playbook_key:
         return None
 
-    return await Playbook.filter(Q(id=playbook_key) | Q(name=playbook_key), deleted=False, tenant_id=tenant_id).first()
+    return await _resolve_playbook_by_key(playbook_key, tenant_id)
+
+
+async def _resolve_playbook_by_key(playbook_key: str, tenant_id: str) -> Optional[Playbook]:
+    """通过剧本 ID 或剧本名称解析剧本，避免长名称触发 ID 长度校验。"""
+    playbook_key = (playbook_key or "").strip()
+    if not playbook_key:
+        return None
+
+    playbook_filter = Q(name=playbook_key)
+    if len(playbook_key) <= 36:
+        playbook_filter = Q(id=playbook_key) | playbook_filter
+    return await Playbook.filter(playbook_filter, deleted=False, tenant_id=tenant_id).first()
 
 
 async def _resolve_playbook_version(playbook: Playbook, version: Optional[str], tenant_id: str) -> Optional[PlaybookVersion]:
@@ -914,8 +926,10 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str, cat
     category_type = normalize_category_type(category_type)
     version = _normalize_version(version)
 
+    extra_fields = {}
+
     if category_type == INSPECTION_CATEGORY_TYPE_PLAYBOOK:
-        playbook = await Playbook.filter(Q(id=app_name), deleted=False, tenant_id=tenant_id).first()
+        playbook = await _resolve_playbook_by_key(app_name, tenant_id)
         if not playbook:
             raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
 
@@ -923,47 +937,44 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str, cat
         if not playbook_version:
             raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
 
-        return {
-            "standard": None,
-            "action_name": playbook.name,
-            "confidence": 1,
-            "suggestions": ["当前类别为剧本类型，无需选择资源或工具动作"],
+        available_actions = [{"name": playbook.name}]
+        extra_fields = {
             "category_type": INSPECTION_CATEGORY_TYPE_PLAYBOOK,
             "playbook_id": playbook.id,
             "playbook_name": playbook.name,
             "flow_id": playbook_version.id,
             "version": playbook_version.version,
         }
+    else:
+        # 查询工具信息。未指定版本时沿用最新版本。
+        tool_query = Tool.filter(name=app_name, deleted=False, tenant_id=tenant_id)
+        if version:
+            tool_query = tool_query.filter(version=version)
+        tool = await tool_query.order_by("-utime").first()
 
-    # 查询工具信息。未指定版本时沿用最新版本。
-    tool_query = Tool.filter(name=app_name, deleted=False, tenant_id=tenant_id)
-    if version:
-        tool_query = tool_query.filter(version=version)
-    tool = await tool_query.order_by("-utime").first()
+        if not tool:
+            raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
 
-    if not tool:
-        raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
+        # 查询该工具的所有动作
+        tool_actions = await ToolAction.filter(tool_name=tool.name, version_number=tool.version, deleted=False, tenant_id=tenant_id).all()
 
-    # 查询该工具的所有动作
-    tool_actions = await ToolAction.filter(tool_name=tool.name, version_number=tool.version, deleted=False, tenant_id=tenant_id).all()
+        if not tool_actions:
+            raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
-    if not tool_actions:
-        raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
+        # 提取动作名称和输入定义
+        available_actions = []
+        action_map = {}  # 用于后续查找
+        for action in tool_actions:
+            if action.action:
+                action_name = action.action.get("func")
+                if action_name:
+                    available_actions.append({"name": action_name})
+                    action_map[action_name] = action
 
-    # 提取动作名称和输入定义
-    available_actions = []
-    action_map = {}  # 用于后续查找
-    for action in tool_actions:
-        if action.action:
-            action_name = action.action.get("func")
-            if action_name:
-                available_actions.append({"name": action_name})
-                action_map[action_name] = action
+        if not available_actions:
+            raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
-    if not available_actions:
-        raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
-
-    # 准备prompt参数
+    # 准备prompt参数。剧本类别也走 AI 解析，保留 standard/confidence/suggestions。
     available_actions_str = orjson.dumps(available_actions, option=orjson.OPT_INDENT_2).decode("utf-8")
 
     prompt = INSPECTION_PARSE_PROMPT.format(user_input=text, available_actions=available_actions_str)
@@ -1025,15 +1036,20 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str, cat
             if parsed_data.get("action_name") not in action_names:
                 if not isinstance(parsed_data.get("suggestions"), list):
                     parsed_data["suggestions"] = []
-                parsed_data["suggestions"].append(f"AI推荐的动作 '{parsed_data.get('action_name')}' 不在可用列表中，已自动选择默认动作")
+                if category_type == INSPECTION_CATEGORY_TYPE_PLAYBOOK:
+                    parsed_data["suggestions"].append(f"当前类别为剧本类型，已使用剧本 '{available_actions[0]['name']}'")
+                else:
+                    parsed_data["suggestions"].append(f"AI推荐的动作 '{parsed_data.get('action_name')}' 不在可用列表中，已自动选择默认动作")
+                    parsed_data["confidence"] = max(0, float(parsed_data.get("confidence", 0)) - 0.3)
                 parsed_data["action_name"] = available_actions[0]["name"] if available_actions else None
-                parsed_data["confidence"] = max(0, float(parsed_data.get("confidence", 0)) - 0.3)
 
             # 验证confidence范围
             if isinstance(parsed_data.get("confidence"), (int, float)):
                 parsed_data["confidence"] = max(0.0, min(1.0, float(parsed_data["confidence"])))
             else:
                 parsed_data["confidence"] = 0.5
+
+            parsed_data.update(extra_fields)
 
             # 成功解析，返回结果
             return parsed_data
@@ -1048,7 +1064,9 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str, cat
                 continue  # 重试
 
     # 所有重试都失败，返回默认结构
-    return {"standard": None, "action_name": available_actions[0]["name"] if available_actions else None, "confidence": 0.0, "suggestions": [last_error or "AI解析失败，请手动配置"]}
+    fallback_data = {"standard": None, "action_name": available_actions[0]["name"] if available_actions else None, "confidence": 0.0, "suggestions": [last_error or "AI解析失败，请手动配置"]}
+    fallback_data.update(extra_fields)
+    return fallback_data
 
 
 # ==================== AI Judgment Operations ====================
