@@ -148,7 +148,7 @@ async def _resolve_playbook_version(playbook: Playbook, version: Optional[str], 
     if version:
         return (
             await PlaybookVersion.filter(
-                Q(id=version) | Q(version=version),
+                Q(version=version),
                 playbook_id=playbook.id,
                 deleted=False,
                 tenant_id=tenant_id,
@@ -915,7 +915,7 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str, cat
     version = _normalize_version(version)
 
     if category_type == INSPECTION_CATEGORY_TYPE_PLAYBOOK:
-        playbook = await Playbook.filter(Q(id=app_name) | Q(name=app_name), deleted=False, tenant_id=tenant_id).first()
+        playbook = await Playbook.filter(Q(name=app_name), deleted=False, tenant_id=tenant_id).first()
         if not playbook:
             raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
 
