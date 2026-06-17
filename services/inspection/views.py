@@ -174,6 +174,15 @@ def _get_value_by_path(data, path):
         if part == "":
             continue
 
+        if isinstance(current, str):
+            try:
+                current = orjson.loads(current)
+            except orjson.JSONDecodeError:
+                try:
+                    current = ast.literal_eval(current)
+                except (ValueError, SyntaxError):
+                    return ""
+
         if isinstance(current, dict):
             if part not in current:
                 return ""
@@ -192,6 +201,36 @@ def _get_value_by_path(data, path):
     return current
 
 
+def _parse_inspection_field_path(field_path):
+    if not field_path:
+        return []
+
+    raw_parts = []
+    if isinstance(field_path, str):
+        raw_parts = [part.strip() for part in field_path.split(".") if part.strip()]
+    elif isinstance(field_path, (list, tuple)):
+        for part in field_path:
+            if part in (None, ""):
+                continue
+            if isinstance(part, str):
+                raw_parts.extend(item.strip() for item in part.split(".") if item.strip())
+            else:
+                raw_parts.append(str(part))
+    else:
+        return []
+
+    parsed_parts = []
+    for part in raw_parts:
+        matches = list(re.finditer(r"([^\[\]]+)|\[(\d+)\]", part))
+        if matches and "".join(match.group(0) for match in matches) == part:
+            for match in matches:
+                parsed_parts.append((match.group(1) or match.group(2)).strip())
+        else:
+            parsed_parts.append(part)
+
+    return parsed_parts
+
+
 def _get_inspection_output_reference_value(reference, field_path, result_context, stringify=True):
     if reference in INSPECTION_RESULT_ALL_OUTPUT_REFS:
         if field_path:
@@ -204,7 +243,8 @@ def _get_inspection_output_reference_value(reference, field_path, result_context
         return ""
 
     output = target_result.get("output")
-    value = _get_value_by_path(output, field_path) if field_path else output
+    parsed_field_path = _parse_inspection_field_path(field_path)
+    value = _get_value_by_path(output, parsed_field_path) if parsed_field_path else output
     return _serialize_inspection_result_reference(value) if stringify else value
 
 
@@ -216,10 +256,21 @@ def _replace_inspection_result_placeholders(value, result_context):
 
     def replace_output_ref(match):
         reference = match.group(1).strip()
-        field_path = [part.strip() for part in (match.group(2) or "").split(".") if part.strip()]
+        field_path = _parse_inspection_field_path(match.group(2) or "")
         return _stringify_action_result(_get_inspection_output_reference_value(reference, field_path, result_context, stringify=False))
 
-    return re.sub(output_pattern, replace_output_ref, value)
+    value = re.sub(output_pattern, replace_output_ref, value)
+
+    shorthand_pattern = r"\$\{([^}.]+)\.(?!output(?:\.|}))(.*?)\}"
+
+    def replace_shorthand_ref(match):
+        reference = match.group(1).strip()
+        if reference not in result_context.get("by_target_id", {}):
+            return match.group(0)
+        field_path = _parse_inspection_field_path(match.group(2) or "")
+        return _stringify_action_result(_get_inspection_output_reference_value(reference, field_path, result_context, stringify=False))
+
+    return re.sub(shorthand_pattern, replace_shorthand_ref, value)
 
 
 def _replace_action_input_placeholders(value, replacements, result_context=None):
@@ -305,8 +356,7 @@ def _build_action_input(action, replacements, result_context=None):
         if input_data.get("source") == "inspection_result":
             reference = input_data.get("target_id") or input_data.get("target") or "all"
             field_path = input_data.get("field_path") or input_data.get("path") or []
-            if isinstance(field_path, str):
-                field_path = [part.strip() for part in field_path.split(".") if part.strip()]
+            field_path = _parse_inspection_field_path(field_path)
             data[key] = _get_inspection_output_reference_value(reference, field_path, result_context or {}, stringify=False)
             continue
 
