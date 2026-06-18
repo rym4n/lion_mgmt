@@ -1269,7 +1269,14 @@ async def get_playbook_input(playbook_id, tenant_id):
         input_id = nodes[0]["id"]
         start_params = nodes[0]["properties"]["start_params"]
 
-        param_map = {param["name"]: {"type": param["type"], "description": param["desc"]} for param in start_params}
+        param_map = {
+            param["name"]: {
+                "type": param["type"],
+                "description": param["desc"],
+                "default": param.get("default"),
+            }
+            for param in start_params
+        }
 
         pattern = rf"{re.escape(input_id)}\.output\.([a-zA-Z0-9_\u4e00-\u9fff]+)(?=[\)}}])"
 
