@@ -1,145 +1,127 @@
-# lion_mgmt
+# lion_mgmt Agent Guide
 
-> Multi-agent orchestration framework for agentic coding
+<!-- AUTONOMY DIRECTIVE — DO NOT REMOVE -->
+YOU ARE AN AUTONOMOUS CODING AGENT. EXECUTE TASKS TO COMPLETION WITHOUT ASKING FOR PERMISSION.
+DO NOT STOP TO ASK "SHOULD I PROCEED?" — PROCEED. DO NOT WAIT FOR CONFIRMATION ON OBVIOUS NEXT STEPS.
+IF BLOCKED, TRY AN ALTERNATIVE APPROACH. ONLY ASK WHEN TRULY AMBIGUOUS OR DESTRUCTIVE.
+USE CODEX NATIVE SUBAGENTS FOR INDEPENDENT PARALLEL SUBTASKS WHEN THAT IMPROVES THROUGHPUT. THIS IS COMPLEMENTARY TO OMX TEAM MODE.
+<!-- END AUTONOMY DIRECTIVE -->
 
-## Project Overview
+This repository is the AIOE backend management service. It is a Python 3.11 async Sanic application, not a TypeScript/Node project.
 
-A Claude Flow powered project
+Use the fff MCP tools for all file search operations instead of default shell search tools.
 
-**Tech Stack**: TypeScript, Node.js
-**Architecture**: Domain-Driven Design with bounded contexts
+## Product Shape
 
-## Quick Start
+`lion_mgmt` manages the AIOE operational automation platform:
 
-### Installation
+- Management foundation: users, tenants, roles, RBAC permissions, security policy, OAuth/JWT settings, platform config, license.
+- Tool/application layer: ZIP tool package upload, tool versions, actions, resource templates, encrypted resource instances, action permissions.
+- Automation layer: scenes, tags, playbooks, playbook versions, playbook permissions, scheduled execution, run logs, approvals.
+- Event and observability layer: event ingestion, Vector config generation, Kafka/Syslog source handling, VictoriaLogs query, event linkage to playbooks.
+- Collaboration layer: warrooms, WebSocket chat, run-log broadcast, AI replies, private/public rooms.
+- Agent layer: Nanobot client, command center agent registry, task dispatch, task progress event stream, MCP SSE/messages endpoints.
+- Inspection/reporting layer: inspection schedules, categories, targets, results, custom reports, dashboards and large-screen configuration.
+
+## Technical Architecture
+
+Runtime path:
+
+```text
+server.py
+  -> services.create_app()
+  -> core listeners / Tortoise / middleware / exception handlers / blueprints
+  -> services/<module>/views.py
+  -> libs/* and models/*
+  -> PostgreSQL / Redis / Kafka / S3-MinIO / Vector / VictoriaLogs / LLM providers
+```
+
+Important entry points:
+
+- `server.py` starts Sanic on `0.0.0.0:8000`.
+- `services/__init__.py` owns `create_app()` and all blueprint registration.
+- `settings/__init__.py` owns environment loading, logging, Redis cache config, Tortoise config, Kafka topics, object storage, Nanobot and LLM settings.
+- `core/middlewares/security.py` owns authentication and audit-log publishing.
+- `core/listeners/cache.py` initializes Redis/OAuth config and starts `ChatManager` background listeners.
+- `models/base.py` defines `BaseModel`, soft delete, tenant scoping, and encrypted char fields.
+- `libs/nanobot.py` wraps the `nanobot-ai` pip package and bridges streaming output to Redis.
+- `services/command_center/dispatcher.py` uses Nanobot to choose an available agent for command-center tasks.
+
+License-gated blueprints are registered dynamically in `services/__init__.py` from `load_license().moduleList`. When adding a licensed feature, keep the module key, permission menu, blueprint name, and license key aligned.
+
+## Commands
+
+Use these commands from the repository root:
+
 ```bash
-npm install
+uv sync
+python server.py
+aerich migrate
+aerich upgrade
+git diff --check
 ```
 
-### Build
+Container runtime:
+
 ```bash
-npm run build
+docker build -t lion_mgmt .
 ```
 
-### Test
-```bash
-npm test
-```
+The Docker image compiles `core/`, `libs/`, `models/`, and `services/` with Nuitka, copies `workspace-template/`, migrations, settings and report templates, waits for PostgreSQL, runs `aerich upgrade`, then starts the service.
 
-### Development
-```bash
-npm run dev
-```
+## Source Layout
 
-## Agent Coordination
+- `core/`: framework glue, middleware, listeners, exception handlers, response helpers.
+- `libs/`: shared infrastructure helpers for security, Kafka, Nanobot, chat, supervisor, storage and generic utilities.
+- `models/`: Tortoise ORM models. Most models inherit `BaseModel` and include `id`, `ctime`, `utime`, `deleted`, `tenant_id`.
+- `services/`: business modules. Each module usually exposes a Sanic `Blueprint` from `views.py`; complex logic can live in `logic.py`.
+- `workspace-template/`: template copied into Nanobot workspaces under `data/workspaces`.
+- `settings/`: process configuration and environment variable mapping.
+- `migrations/`: Aerich migrations.
 
-### Swarm Configuration
+Do not add new application source files at repository root. Root is for entrypoints, deployment/config files and top-level documentation.
 
-This project uses hierarchical swarm coordination for complex tasks:
+## Coding Rules
 
-| Setting | Value | Purpose |
-|---------|-------|---------|
-| Topology | `hierarchical` | Queen-led coordination (anti-drift) |
-| Max Agents | 8 | Optimal team size |
-| Strategy | `specialized` | Clear role boundaries |
-| Consensus | `raft` | Leader-based consistency |
+- Follow the existing async style. Database, Redis, Kafka, HTTP and file/storage operations are generally async and must be awaited.
+- New APIs should return `response_ok(data)` on success and raise `CustomError(ErrorCode.X)` for business failures.
+- New authenticated APIs should rely on `SecurityMiddleware` for session loading and use `@requires_permission("module:c|r|u|d")` for vertical permissions.
+- Keep tenant isolation explicit. For ordinary business queries, include `tenant_id=request.ctx.session.get("tenant_id")` and `deleted=False` unless the model or endpoint is intentionally global.
+- Use soft delete for `BaseModel` records unless the existing module clearly hard-deletes that entity.
+- Use `in_transaction()` when a request mutates multiple related tables.
+- Store sensitive resource values through `EncryptedCharField`, encrypted JSON helpers, environment variables, or deployment secrets. Do not hardcode credentials.
+- When adding a business module, update `services/__init__.py`, permission definitions, license gating if needed, and migrations.
+- When adding or changing playbook/tool/action execution, preserve `run_id` tracking and Kafka topic contracts.
+- When changing Nanobot behavior, keep `config.json`, `libs/nanobot.py`, and `workspace-template/` responsibilities separated.
 
-### When to Use Swarms
+## Feature Boundaries
 
-**Invoke swarm for:**
-- Multi-file changes (3+ files)
-- New feature implementation
-- Cross-module refactoring
-- API changes with tests
-- Security-related changes
-- Performance optimization
+- User, role, tenant, secure, system config and license are the management foundation.
+- `tools` owns uploaded tool packages, action metadata and resource binding.
+- `workflow` owns playbook lifecycle, versions, publish state and playbook permissions.
+- `timed` owns scheduled execution of playbooks/actions.
+- `event_ingestion` owns source ingestion and Vector/VictoriaLogs configuration; `event` owns incident/event records and handling.
+- `warroom` and `libs/chat.py` own realtime room/message state and WebSocket delivery.
+- `ai`, `agent`, `command_center`, `mcp` and `libs/nanobot.py` own AI-facing and agent-facing workflows.
+- `inspection` owns inspection schedules, categories, targets, results and report generation.
 
-**Skip swarm for:**
-- Single file edits
-- Simple bug fixes (1-2 lines)
-- Documentation updates
-- Configuration changes
+Keep edits inside the owning boundary unless the request truly crosses modules.
 
-### Available Skills
+## Verification
 
-Use `$skill-name` syntax to invoke:
+Before claiming completion:
 
-| Skill | Use Case |
-|-------|----------|
-| `$swarm-orchestration` | Multi-agent task coordination |
-| `$memory-management` | Pattern storage and retrieval |
-| `$sparc-methodology` | Structured development workflow |
-| `$security-audit` | Security scanning and CVE detection |
+- For documentation-only changes, run `git diff --check` and inspect the diff.
+- For Python code changes, run the smallest relevant import/compile check, for example `python -m compileall <changed paths>`, plus targeted runtime checks when external services are not required.
+- For model changes, create and inspect an Aerich migration.
+- For API behavior changes, verify authentication, tenant scoping, permission checks, response format and error paths.
+- For Kafka/WebSocket/Nanobot changes, verify the event path and explain any external-service gap if it cannot run locally.
 
-### Agent Types
+The repository currently does not expose a formal test suite in `tests/`; add focused tests or lightweight checks when changing risky shared behavior.
 
-| Type | Role | Use Case |
-|------|------|----------|
-| `researcher` | Requirements analysis | Understanding scope |
-| `architect` | System design | Planning structure |
-| `coder` | Implementation | Writing code |
-| `tester` | Test creation | Quality assurance |
-| `reviewer` | Code review | Security and quality |
+## Git And Workspace Safety
 
-## Code Standards
-
-### File Organization
-- **NEVER** save to root folder
-- `/src` - Source code files
-- `/tests` - Test files
-- `/docs` - Documentation
-- `/config` - Configuration files
-
-### Quality Rules
-- Files under 500 lines
-- No hardcoded secrets
-- Input validation at boundaries
-- Typed interfaces for public APIs
-- TDD London School (mock-first) preferred
-
-### Commit Messages
-```
-<type>(<scope>): <description>
-
-[optional body]
-
-Co-Authored-By: claude-flow <ruv@ruv.net>
-```
-
-Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`
-
-## Security
-
-### Critical Rules
-- NEVER commit secrets, credentials, or .env files
-- NEVER hardcode API keys
-- Always validate user input
-- Use parameterized queries for SQL
-- Sanitize output to prevent XSS
-
-### Path Security
-- Validate all file paths
-- Prevent directory traversal (../)
-- Use absolute paths internally
-
-## Memory System
-
-### Storing Patterns
-```bash
-npx @claude-flow/cli memory store \
-  --key "pattern-name" \
-  --value "pattern description" \
-  --namespace patterns
-```
-
-### Searching Memory
-```bash
-npx @claude-flow/cli memory search \
-  --query "search terms" \
-  --namespace patterns
-```
-
-## Links
-
-- Documentation: https://github.com/ruvnet/claude-flow
-- Issues: https://github.com/ruvnet/claude-flow/issues
+- The worktree may contain unrelated local files. Do not revert, delete or stage unrelated changes.
+- Do not commit secrets, `.env` files, real license files, runtime data, caches or local OMX state.
+- `.omx/` is locally excluded through `.git/info/exclude`; keep it out of commits.
+- If asked to commit, use the repository's active commit instructions from the current runtime and include tested/not-tested evidence in the message.
