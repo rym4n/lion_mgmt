@@ -1352,7 +1352,7 @@ async def activity(request, activityId):
 async def send_message(request):
     username = request.json.get("username")
     partner = await Account.get(username=username)
-    sender = await Account.get(username="system", type="api")
+    sender = await Account.get(username="system", type="user")
     if partner is None:
         raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
     tenant_id = request.ctx.session.get("tenant_id")
