@@ -1,11 +1,6 @@
 """Nanobot AI 客户端封装
 
-本模块使用项目内置的 nanobot 源码（位于项目根目录的 nanobot/ 目录）。
-不需要安装 nanobot-ai 包，所有依赖已合并到项目的 pyproject.toml 中。
-
-注意：
-- nanobot 源码已修改为兼容 websockets 14.1
-- 导入会自动使用本地的 nanobot 源码，而不是系统安装的包
+通过 pip 包 `nanobot-ai` 引用 nanobot 运行时。
 """
 
 import asyncio
@@ -16,7 +11,6 @@ import orjson
 from pathlib import Path
 from sanic.log import logger
 
-# 从项目内置的 nanobot 源码导入
 from nanobot import Nanobot
 from nanobot.agent import AgentHook, AgentHookContext
 
