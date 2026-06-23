@@ -64,7 +64,6 @@ RUN apt update -y \
 COPY --from=vector /usr/bin/vector /usr/bin/vector
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
-COPY --from=builder /app/nanobot ./nanobot
 COPY --from=builder /opt/chrome-linux64 /root/.agent-browser/browsers/chrome-linux64
 COPY migrations ./migrations
 COPY pyproject.toml ./
