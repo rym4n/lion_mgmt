@@ -55,6 +55,7 @@ class InspectionTarget(BaseModel):
     content = fields.TextField(description="巡检内容")
     category_id = fields.CharField(max_length=36, description="关联巡检类别ID")
     standard = fields.TextField(description="巡检标准")
+    judgment_rule = fields.JSONField(null=True, description="巡检结果判断规则")
     action_name = fields.CharField(max_length=100, description="巡检动作名称")
     version = fields.CharField(max_length=50, null=True, description="巡检动作或剧本版本，空则使用最新版本")
     action_input = fields.JSONField(null=True, description="巡检动作输入参数配置")
