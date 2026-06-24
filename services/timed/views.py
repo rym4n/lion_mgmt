@@ -8,6 +8,7 @@ from sanic import Blueprint
 from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.expressions import Q
+from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -591,6 +592,129 @@ async def get_success_rate(request):
     tenant_id = request.ctx.session.get("tenant_id")
     items = await Timed.filter(id__in=request.json.get("ids"), deleted=False, tenant_id=tenant_id).all()
     return response_ok([await timer_success_rate(item) for item in items])
+
+
+@timed_bp.post("/dashboard/statistics")
+@openapi.definition(
+    summary="获取定时任务仪表盘统计数据",
+    description="获取指定定时任务在指定时间范围内的执行统计数据",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id", "start", "end"],
+                "properties": {
+                    "id": {"type": "string", "description": "定时任务ID"},
+                    "start": {
+                        "type": "string",
+                        "description": "查询开始时间（UTC格式：2025-01-01T00:00:00Z）",
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "查询结束时间（UTC格式：2025-01-01T00:00:00Z）",
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "date": {"type": "string"},
+                                        "total_runs": {"type": "integer"},
+                                        "success_count": {"type": "integer"},
+                                        "fail_count": {"type": "integer"},
+                                        "success_rate": {"type": "string"},
+                                    },
+                                },
+                            },
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("timed:r")
+async def dashboard_statistics(request):
+    data = request.json or {}
+    timed_id = data.get("id") or data.get("timed_id")
+    start = data.get("start")
+    end = data.get("end")
+
+    if not timed_id or not start or not end:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    try:
+        start_dt = datetime.datetime.strptime(start, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+        end_dt = datetime.datetime.strptime(end, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+    except (TypeError, ValueError):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    timed = await Timed.get_or_none(id=timed_id, deleted=False, tenant_id=tenant_id)
+    if not timed:
+        raise CustomError(ErrorCode.TIMED_NOT_FOUND)
+
+    sql = """
+        SELECT
+            TO_CHAR(t.run_end, 'YYYY-MM-DD') as date,
+            COUNT(t.run_id) as total_runs,
+            SUM(CASE WHEN t.is_fail = 0 THEN 1 ELSE 0 END) as success_count,
+            SUM(CASE WHEN t.is_fail = 1 THEN 1 ELSE 0 END) as fail_count
+        FROM (
+            SELECT
+                run_id,
+                MAX(end_time) as run_end,
+                MAX(CASE WHEN status NOT IN (0, 1) THEN 1 ELSE 0 END) as is_fail
+            FROM runlog
+            WHERE timer_id = $1
+              AND start_time BETWEEN $2 AND $3
+              AND tenant_id = $4
+              AND deleted = FALSE
+            GROUP BY run_id
+        ) as t
+        WHERE t.run_end IS NOT NULL
+        GROUP BY date
+        ORDER BY date ASC;
+    """
+
+    async with in_transaction() as conn:
+        results = await conn.execute_query_dict(sql, [timed_id, start_dt, end_dt, tenant_id])
+
+    final_result = []
+    for row in results:
+        total = row["total_runs"]
+        success_count = int(row["success_count"])
+        fail = int(row["fail_count"])
+        day = row["date"]
+
+        rate_val = round(success_count / total, 2) if total else 0
+        success_rate = str(rate_val * 100) + "%"
+
+        final_result.append(
+            {
+                "date": day,
+                "total_runs": total,
+                "success_count": success_count,
+                "fail_count": fail,
+                "success_rate": success_rate,
+            }
+        )
+
+    return response_ok(final_result)
 
 
 @timed_bp.post("/detail")
