@@ -34,6 +34,179 @@ from settings import KAFKA_SERVERS, SUPERVISOR_PATH, VECTOR_CFG, VL_HOST
 event_ingestion_bp = Blueprint("event_ingestion", url_prefix="/event-ingestion")
 _all__ = ["event_ingestion_bp"]
 
+SUPPORTED_EVENT_SOURCE_TYPES = ("syslog", "kafka", "http_server")
+HTTP_SERVER_REQUEST_KEYS = {
+    "http_server_address",
+    "http_server_port",
+    "http_server_method",
+    "http_server_path",
+    "http_server_strict_path",
+    "http_server_encoding",
+    "http_server_headers",
+    "http_server_query_parameters",
+    "http_server_response_code",
+    "http_server_host_key",
+    "http_server_path_key",
+}
+
+
+def _normalize_list(value):
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _normalize_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "y", "on")
+    return bool(value)
+
+
+def _build_syslog_source(payload, current_source=None):
+    current_source = current_source or {}
+    syslog_port = payload.get("syslog_port")
+    communication_type = payload.get("communication_type") or current_source.get("mode")
+    max_length = payload.get("max_length")
+
+    address = current_source.get("address")
+    if syslog_port:
+        address = f"0.0.0.0:{syslog_port}"
+
+    if max_length is None:
+        max_length_bytes = current_source.get("max_length", 100 * 1024)
+    else:
+        max_length_bytes = int(max_length) * 1024
+
+    source = {
+        "type": "socket",
+        "address": address,
+        "max_length": max_length_bytes,
+        "mode": communication_type,
+    }
+
+    syslog_config = None
+    if address and communication_type:
+        syslog_config = communication_type + address.rsplit(":", 1)[-1]
+
+    return source, syslog_config
+
+
+def _build_kafka_source(payload, current_source=None):
+    current_source = current_source or {}
+    event_source_address = _normalize_list(payload.get("event_source_address"))
+    kafka_topic = _normalize_list(payload.get("kafka_topic")) if "kafka_topic" in payload else None
+    sasl_mechanism = payload.get("sasl_mechanism")
+    sasl_username = payload.get("sasl_username")
+    sasl_password = payload.get("sasl_password")
+
+    source = {
+        "type": "kafka",
+        "bootstrap_servers": (
+            ",".join(event_source_address)
+            if event_source_address
+            else current_source.get("bootstrap_servers", "")
+        ),
+        "group_id": payload.get("kafka_group_id") or current_source.get("group_id") or "Aioe_lion_ship",
+        "topics": kafka_topic if kafka_topic is not None else current_source.get("topics", []),
+    }
+
+    current_sasl = current_source.get("sasl") or {}
+    if sasl_mechanism or current_sasl:
+        source["sasl"] = {
+            "enabled": True,
+            "mechanism": sasl_mechanism or current_sasl.get("mechanism"),
+            "username": sasl_username or current_sasl.get("username"),
+            "password": urllib.parse.quote(sasl_password) if sasl_password else current_sasl.get("password"),
+        }
+
+    return source, None
+
+
+def _build_http_server_source(payload, current_source=None):
+    current_source = current_source or {}
+    source = {}
+
+    http_server_port = payload.get("http_server_port") or payload.get("syslog_port")
+    address = payload.get("http_server_address") or current_source.get("address")
+    if http_server_port:
+        address = f"0.0.0.0:{http_server_port}"
+
+    source["type"] = "http_server"
+    source["address"] = address or "0.0.0.0:80"
+    source["encoding"] = (
+        payload.get("http_server_encoding")
+        or current_source.get("encoding")
+        or "binary"
+    )
+    source["method"] = str(
+        payload.get("http_server_method")
+        or current_source.get("method")
+        or "POST"
+    ).upper()
+    source["path"] = (
+        payload.get("http_server_path")
+        or current_source.get("path")
+        or "/"
+    )
+    source["strict_path"] = _normalize_bool(
+        payload.get(
+            "http_server_strict_path",
+            current_source.get("strict_path", True),
+        ),
+        True,
+    )
+    source["response_code"] = int(
+        payload.get("http_server_response_code")
+        or current_source.get("response_code")
+        or 200
+    )
+
+    headers = _normalize_list(
+        payload.get("http_server_headers")
+        or current_source.get("headers")
+    )
+    if headers:
+        source["headers"] = headers
+
+    query_parameters = _normalize_list(
+        payload.get("http_server_query_parameters")
+        or current_source.get("query_parameters")
+    )
+    if query_parameters:
+        source["query_parameters"] = query_parameters
+
+    host_key = (
+        payload.get("http_server_host_key")
+        or current_source.get("host_key")
+    )
+    if host_key:
+        source["host_key"] = host_key
+
+    path_key = (
+        payload.get("http_server_path_key")
+        or current_source.get("path_key")
+    )
+    if path_key:
+        source["path_key"] = path_key
+
+    return source, f"http_server:{source['address']}"
+
+
+def _build_source_config(event_source_type, payload, current_source=None):
+    if event_source_type == "syslog":
+        return _build_syslog_source(payload, current_source)
+    if event_source_type == "kafka":
+        return _build_kafka_source(payload, current_source)
+    if event_source_type == "http_server":
+        return _build_http_server_source(payload, current_source)
+    raise CustomError(ErrorCode.PARAM_ERROR)
+
 
 def get_conditional_statements(conditions):
     conditional_statements = ""
@@ -142,7 +315,7 @@ async def gen_vector_config(sources, topic, project_id):
                     "event_describe": {"type": "string", "description": "事件描述"},
                     "event_source_type": {
                         "type": "string",
-                        "description": "事件来源类型 目前支持kafka、syslog",
+                        "description": "事件来源类型 目前支持kafka、syslog、http_server",
                     },
                     "syslog_port": {
                         "type": "integer",
@@ -156,6 +329,52 @@ async def gen_vector_config(sources, topic, project_id):
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "事件来源地址 事件来源类型为kafka时才传 默认为None",
+                    },
+                    "http_server_address": {
+                        "type": "string",
+                        "description": "HTTP Server监听地址，事件来源类型为http_server时可传，默认0.0.0.0:<http_server_port|syslog_port|80>",
+                    },
+                    "http_server_port": {
+                        "type": "integer",
+                        "description": "HTTP Server监听端口，事件来源类型为http_server时可传",
+                    },
+                    "http_server_method": {
+                        "type": "string",
+                        "description": "HTTP Server请求方法，事件来源类型为http_server时可传，默认POST",
+                    },
+                    "http_server_path": {
+                        "type": "string",
+                        "description": "HTTP Server请求路径，事件来源类型为http_server时可传，默认/",
+                    },
+                    "http_server_strict_path": {
+                        "type": "boolean",
+                        "description": "HTTP Server是否严格匹配path，事件来源类型为http_server时可传，默认true",
+                    },
+                    "http_server_encoding": {
+                        "type": "string",
+                        "description": "HTTP Server编码类型，事件来源类型为http_server时可传，默认binary",
+                    },
+                    "http_server_headers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "HTTP Server需要保留到事件中的请求头名称列表，事件来源类型为http_server时可传",
+                    },
+                    "http_server_query_parameters": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "HTTP Server需要保留到事件中的查询参数名称列表，事件来源类型为http_server时可传",
+                    },
+                    "http_server_response_code": {
+                        "type": "integer",
+                        "description": "HTTP Server响应状态码，事件来源类型为http_server时可传，默认200",
+                    },
+                    "http_server_host_key": {
+                        "type": "string",
+                        "description": "HTTP Server写入host字段名，事件来源类型为http_server时可传",
+                    },
+                    "http_server_path_key": {
+                        "type": "string",
+                        "description": "HTTP Server写入path字段名，事件来源类型为http_server时可传",
                     },
                     "communication_type": {
                         "type": "string",
@@ -222,25 +441,12 @@ async def event_ingestion(request):
     event_name = data.get("event_name")
     event_describe = data.get("event_describe")
     event_source_type = data.get("event_source_type")
-    syslog_port = data.get("syslog_port")
-    event_source_address = data.get("event_source_address") or []
-    communication_type = data.get("communication_type")
-    kafka_group_id = data.get("kafka_group_id", "Aioe_lion_ship")
-    kafka_topic = data.get("kafka_topic") or []
-    sasl_mechanism = data.get("sasl_mechanism")
-    sasl_username = data.get("sasl_username")
-    sasl_password = data.get("sasl_password")
     enabled_status = 0
     linked_execution = int(data.get("linked_execution", 0))
     retention_days = int(data.get("retention_days", 7))
-    max_length = int(data.get("max_length", 100))
 
-    if event_source_type not in ["syslog", "kafka"]:
+    if event_source_type not in SUPPORTED_EVENT_SOURCE_TYPES:
         raise CustomError(ErrorCode.PARAM_ERROR)
-
-    syslog_config = None
-    if syslog_port and communication_type:
-        syslog_config = communication_type + str(syslog_port)
 
     vector_name = "".join(random.choices(string.ascii_letters, k=12))
 
@@ -252,44 +458,9 @@ async def event_ingestion(request):
     # await setup_ilm_policy(f"logs_retention_policy-{event_name}", f"{retention_days}d")
     # await setup_logs_template(f"logs-{event_name}", f"logs_retention_policy-{event_name}")
 
-    vector_config = None
-
-    if event_source_type == "syslog":
-        sources = {
-            vector_name: {
-                "type": "socket",
-                "address": f"0.0.0.0:{syslog_port}",
-                "max_length": max_length * 1024,
-                "mode": communication_type,
-            }
-        }
-        vector_config = await gen_vector_config(sources, vector_name, project_id)
-    elif event_source_type == "kafka":
-        if sasl_mechanism:
-            sources = {
-                vector_name: {
-                    "type": "kafka",
-                    "bootstrap_servers": ",".join(event_source_address),
-                    "group_id": kafka_group_id,
-                    "topics": kafka_topic,
-                    "sasl": {
-                        "enabled": True,
-                        "mechanism": sasl_mechanism,
-                        "username": sasl_username,
-                        "password": urllib.parse.quote(sasl_password),
-                    },
-                }
-            }
-        else:
-            sources = {
-                vector_name: {
-                    "type": "kafka",
-                    "bootstrap_servers": ",".join(event_source_address),
-                    "group_id": kafka_group_id,
-                    "topics": kafka_topic,
-                }
-            }
-        vector_config = await gen_vector_config(sources, vector_name, project_id)
+    source_config, syslog_config = _build_source_config(event_source_type, data)
+    sources = {vector_name: source_config}
+    vector_config = await gen_vector_config(sources, vector_name, project_id)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -467,6 +638,52 @@ async def delete_event_ingestion(request):
                         "items": {"type": "string"},
                         "description": "事件来源地址 事件来源类型为kafka时才传 非必填",
                     },
+                    "http_server_address": {
+                        "type": "string",
+                        "description": "HTTP Server监听地址，事件来源类型为http_server时可传，默认0.0.0.0:<http_server_port|syslog_port|80>",
+                    },
+                    "http_server_port": {
+                        "type": "integer",
+                        "description": "HTTP Server监听端口，事件来源类型为http_server时可传",
+                    },
+                    "http_server_method": {
+                        "type": "string",
+                        "description": "HTTP Server请求方法，事件来源类型为http_server时可传，默认POST",
+                    },
+                    "http_server_path": {
+                        "type": "string",
+                        "description": "HTTP Server请求路径，事件来源类型为http_server时可传，默认/",
+                    },
+                    "http_server_strict_path": {
+                        "type": "boolean",
+                        "description": "HTTP Server是否严格匹配path，事件来源类型为http_server时可传，默认true",
+                    },
+                    "http_server_encoding": {
+                        "type": "string",
+                        "description": "HTTP Server编码类型，事件来源类型为http_server时可传，默认binary",
+                    },
+                    "http_server_headers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "HTTP Server需要保留到事件中的请求头名称列表，事件来源类型为http_server时可传",
+                    },
+                    "http_server_query_parameters": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "HTTP Server需要保留到事件中的查询参数名称列表，事件来源类型为http_server时可传",
+                    },
+                    "http_server_response_code": {
+                        "type": "integer",
+                        "description": "HTTP Server响应状态码，事件来源类型为http_server时可传，默认200",
+                    },
+                    "http_server_host_key": {
+                        "type": "string",
+                        "description": "HTTP Server写入host字段名，事件来源类型为http_server时可传",
+                    },
+                    "http_server_path_key": {
+                        "type": "string",
+                        "description": "HTTP Server写入path字段名，事件来源类型为http_server时可传",
+                    },
                     "max_length": {
                         "type": "integer",
                         "description": "单条消息的最大长度，单位为KB，默认100KB",
@@ -518,7 +735,7 @@ async def delete_event_ingestion(request):
                     },
                     "event_source_type": {
                         "type": "string",
-                        "description": "事件来源类型 目前支持kafka、syslog",
+                        "description": "事件来源类型 目前支持kafka、syslog、http_server",
                     },
                     "enabled_status": {
                         "type": "integer",
@@ -553,28 +770,22 @@ async def delete_event_ingestion(request):
 @requires_permission("ingestion:u")
 async def update_event_ingestion(request):
     data = request.json  # 只解析一次
+    payload = data
     event_id = data.get("id")
     event_describe = data.get("event_describe")
-    syslog_port = data.get("syslog_port")
-    event_source_address = data.get("event_source_address", [])
-    communication_type = data.get("communication_type")
-    kafka_group_id = data.get("kafka_group_id")
     transforms_type = data.get("transforms_type")
     transformsconfig = data.get("transforms_config")
-    sasl_mechanism = data.get("sasl_mechanism")
-    sasl_username = data.get("sasl_username")
-    sasl_password = data.get("sasl_password")
     enabled_status = data.get("enabled_status")
     retention_days = data.get("retention_days")
     key_delimiter_value = data.get("key_delimiter_value")
     key_value_delimiter = data.get("key_value_delimiter")
-    kafka_topic = data.get("kafka_topic", [])
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     event = await EventsIngestion.get(id=event_id, tenant_id=tenant_id)
-    max_length = int(data.get("max_length", 100))
     event_source_type = data.get("event_source_type")
+    if event_source_type and event_source_type not in SUPPORTED_EVENT_SOURCE_TYPES:
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
     if enabled_status == 0:
         if os.path.exists(event.file_path):
@@ -583,34 +794,26 @@ async def update_event_ingestion(request):
         await event.save()
         return response_ok("禁用成功")
     elif enabled_status == 1:
-        if await EventsIngestion.filter(syslog_config=event.syslog_config, enabled_status=1).exists():
-            raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
         event.enabled_status = enabled_status
         event.enabled_health_status = "healthy"
 
     data = event.vector_config_raw if event_source_type or transforms_type else event.vector_config
+    source_config_updated = False
 
     if event_source_type:
-        if event_source_type == "syslog":
-            data["sources"][event.vector_name]["type"] = "socket"
-            data["sources"][event.vector_name].pop("bootstrap_servers", None)
-            data["sources"][event.vector_name].pop("group_id", None)
-            data["sources"][event.vector_name].pop("topics", None)
-            data["sources"][event.vector_name].pop("sasl", None)
-        elif event_source_type == "kafka":
-            data["sources"][event.vector_name]["type"] = "kafka"
-            data["sources"][event.vector_name].pop("address", None)
-            data["sources"][event.vector_name].pop("mode", None)
-            data["sources"][event.vector_name].pop("max_length", None)
-    if kafka_topic and event_source_type == "kafka":
-        data["sources"][event.vector_name]["topics"] = kafka_topic
-    if event_source_address and event_source_type == "kafka":
-        data["sources"][event.vector_name]["bootstrap_servers"] = ",".join(event_source_address)
-    if communication_type and event_source_type == "syslog":
-        data["sources"][event.vector_name]["mode"] = communication_type
-        event.syslog_config = communication_type + event.syslog_config[3:]
-    if kafka_group_id and event_source_type == "kafka":
-        data["sources"][event.vector_name]["group_id"] = kafka_group_id
+        current_source = data.get("sources", {}).get(event.vector_name, {})
+        source_config, syslog_config = _build_source_config(event_source_type, payload, current_source)
+        data.setdefault("sources", {})[event.vector_name] = source_config
+        event.syslog_config = syslog_config
+        event.event_source_type = event_source_type
+        source_config_updated = True
+    elif event.event_source_type == "http_server" and any(key in payload for key in HTTP_SERVER_REQUEST_KEYS):
+        current_source = data.get("sources", {}).get(event.vector_name, {})
+        source_config, syslog_config = _build_source_config("http_server", payload, current_source)
+        data.setdefault("sources", {})[event.vector_name] = source_config
+        event.syslog_config = syslog_config
+        source_config_updated = True
+
     if transforms_type:
         first_transform = f"{event.vector_name}_transforms"
         # data["sinks"][f"{event.vector_name}_sample_sinks"]["inputs"] = [first_transform]
@@ -634,19 +837,6 @@ async def update_event_ingestion(request):
         data["transforms"][first_transform]["source"] = value
         event.config_info = {transforms_type: args}
 
-    if syslog_port and event_source_type == "syslog":
-        data["sources"][event.vector_name]["address"] = f"0.0.0.0:{syslog_port}"
-        event.syslog_config = event.syslog_config[:3] + str(syslog_port)
-    if max_length and event_source_type == "syslog":
-        data["sources"][event.vector_name]["max_length"] = max_length * 1024
-    if sasl_mechanism and event_source_type == "kafka":
-        data["sources"][event.vector_name].setdefault("sasl", {})["enabled"] = True
-        data["sources"][event.vector_name]["sasl"]["mechanism"] = sasl_mechanism
-    if sasl_username and event_source_type == "kafka":
-        data["sources"][event.vector_name]["sasl"]["username"] = sasl_username
-    if sasl_password and event_source_type == "kafka":
-        data["sources"][event.vector_name]["sasl"]["password"] = urllib.parse.quote(sasl_password)
-
     # 更新事件接入sinks部分，将旧版本的es转换成vl
     if event.project_id:
         project_id = event.project_id
@@ -666,6 +856,16 @@ async def update_event_ingestion(request):
     data["sinks"][f"{event.vector_name}_sample_sinks"]["healthcheck"] = {"enabled": False}
     data["sinks"][f"{event.vector_name}_sample_sinks"].pop("auth", None)
     data["sinks"][f"{event.vector_name}_sample_sinks"].pop("bulk", None)
+
+    if event.enabled_status == 1 and event.syslog_config:
+        enabled_ids = await EventsIngestion.filter(
+            syslog_config=event.syslog_config,
+            enabled_status=1,
+            deleted=False,
+            tenant_id=tenant_id,
+        ).values_list("id", flat=True)
+        if any(enabled_id != event.id for enabled_id in enabled_ids):
+            raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
 
     result = check_vector_config(data)
     if not result:
@@ -687,7 +887,7 @@ async def update_event_ingestion(request):
 
     event.vector_config = data
 
-    if event_source_type or transforms_type:
+    if event_source_type or transforms_type or source_config_updated:
         event.vector_config_raw = data 
 
     await event.save()
