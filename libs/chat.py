@@ -13,6 +13,7 @@ from sanic.log import logger
 from websockets import ConnectionClosed
 from tortoise.expressions import Q
 from tortoise.functions import Max
+from tortoise.transactions import in_transaction
 from pathlib import Path
 from aiocache import caches
 from datetime import datetime
@@ -598,6 +599,143 @@ class ChatManager:
             await asyncio.sleep(2)
             await self._flush_events()
 
+    @staticmethod
+    def _runlog_unique_key(item):
+        return (item.run_id, item.node_id, item.node_name, item.resource_name)
+
+    @staticmethod
+    def _jsonb_param(value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            try:
+                orjson.loads(value)
+                return value
+            except orjson.JSONDecodeError:
+                return orjson.dumps(value).decode()
+        return orjson.dumps(value).decode()
+
+    @staticmethod
+    def _datetime_param(value):
+        if value in (None, ""):
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value)
+
+    def _dedupe_runlogs(self, runlogs):
+        """
+        同一批消息内按 runlog 唯一键去重：
+        - status=0 代表最终成功状态，优先级最高；
+        - 已经出现 status=0 时，不再让后续非 0 状态覆盖；
+        - 非 0 状态之间仍保留后到的最新状态。
+        """
+        deduped = {}
+        for item in runlogs:
+            key = self._runlog_unique_key(item)
+            previous = deduped.get(key)
+            if previous is None:
+                deduped[key] = item
+                continue
+            if previous.status == 0 and item.status != 0:
+                continue
+            if item.status == 0 or previous.status != 0:
+                deduped[key] = item
+        return list(deduped.values())
+
+    async def _bulk_upsert_runlogs(self, runlogs):
+        """
+        批量写入 runlog，并在数据库层防止已有 status=0 被非 0 状态覆盖。
+
+        Tortoise bulk_create(on_conflict=...) 无法表达条件更新，因此这里使用
+        PostgreSQL 原生 ON CONFLICT ... DO UPDATE ... WHERE：
+        - 已有记录 status != 0：允许新状态更新；
+        - 新记录 status = 0：允许覆盖为最终成功状态；
+        - 已有记录 status = 0 且新记录 status != 0：跳过更新。
+        """
+        if not runlogs:
+            return
+
+        columns = [
+            "id",
+            "tenant_id",
+            "run_id",
+            "event_id",
+            "node_id",
+            "node_name",
+            "node_type",
+            "tool_name",
+            "tool_version",
+            "tool_display_name",
+            "action_name",
+            "action_display_name",
+            "status",
+            "args",
+            "result",
+            "start_time",
+            "end_time",
+            "executor",
+            "resource_name",
+            "playbook_name",
+            "playbook_version_id",
+            "timer_id",
+        ]
+
+        params = []
+        value_rows = []
+        for item in runlogs:
+            values = [
+                getattr(item, "id", None) or str(uuid.uuid4()),
+                item.tenant_id,
+                item.run_id,
+                item.event_id,
+                item.node_id,
+                item.node_name,
+                item.node_type,
+                item.tool_name,
+                item.tool_version,
+                item.tool_display_name,
+                item.action_name,
+                item.action_display_name,
+                item.status,
+                self._jsonb_param(item.args),
+                item.result,
+                self._datetime_param(item.start_time),
+                self._datetime_param(item.end_time),
+                item.executor,
+                item.resource_name,
+                item.playbook_name,
+                getattr(item, "playbook_version_id", None),
+                getattr(item, "timer_id", None),
+            ]
+
+            placeholders = []
+            for column, value in zip(columns, values):
+                params.append(value)
+                placeholder = f"${len(params)}"
+                if column == "args":
+                    placeholder = f"CAST({placeholder} AS TEXT)::JSONB"
+                elif column in ("start_time", "end_time"):
+                    placeholder = f"CAST({placeholder} AS TEXT)::TIMESTAMPTZ"
+                placeholders.append(placeholder)
+            value_rows.append(f"({', '.join(placeholders)})")
+
+        quoted_columns = ", ".join(f'"{column}"' for column in columns)
+        sql = f"""
+            INSERT INTO "runlog" ({quoted_columns})
+            VALUES {", ".join(value_rows)}
+            ON CONFLICT ("run_id", "node_id", "node_name", "resource_name")
+            DO UPDATE SET
+                "status" = EXCLUDED."status",
+                "end_time" = EXCLUDED."end_time",
+                "result" = EXCLUDED."result",
+                "utime" = CURRENT_TIMESTAMP
+            WHERE "runlog"."status" != 0 OR EXCLUDED."status" = 0
+        """
+
+        async with in_transaction() as conn:
+            await conn.execute_query(sql, params)
+
     async def log_listener(self):
         logger.info("启动runlog消费任务")
         await aconsume(RUNLOG_TOPIC, "lion_mgmt_listener", self.handle_runlog, 500)
@@ -607,6 +745,7 @@ class ChatManager:
         专门处理 runlog
         """
         to_insert = []
+        filtered_insert = []
         for msg in logs:
             log = msg.value
             logger.info(log)
@@ -701,13 +840,11 @@ class ChatManager:
                             await self._flush_events()
                 to_insert.append(Runlog(**log))
         try:
-            await Runlog.bulk_create(
-                to_insert,
-                update_fields=["status", "end_time", "result", "utime", "id"],
-                on_conflict=["run_id", "node_id", "node_name", "resource_name"],
-            )
+            deduped_insert = self._dedupe_runlogs(to_insert)
+            filtered_insert.extend(deduped_insert)
+            await self._bulk_upsert_runlogs(filtered_insert)
         except Exception as e:
-            logger.info(f"runlog消息：{to_insert}")
+            logger.info(f"runlog消息：{filtered_insert}")
             logger.error(f"{e} | {traceback.format_exc()}")
 
     async def handle_message(self, user: Account, ws, data: dict, session_id, tenant_id):

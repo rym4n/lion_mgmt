@@ -10,6 +10,7 @@ import orjson
 import ast
 import io
 import os
+import re
 import uuid
 
 from typing import Dict, Any, Optional, List, Union
@@ -101,6 +102,20 @@ def _normalize_target_data(data: Dict[str, Any]) -> Dict[str, Any]:
     normalized = data.copy()
     if "version" in normalized:
         normalized["version"] = _normalize_version(normalized.get("version"))
+    if "judgment_rule" in normalized:
+        judgment_rule = normalized.get("judgment_rule")
+        if judgment_rule in (None, "", {}):
+            normalized["judgment_rule"] = None
+        elif isinstance(judgment_rule, str):
+            try:
+                normalized["judgment_rule"] = orjson.loads(judgment_rule)
+            except orjson.JSONDecodeError:
+                raise CustomError(ErrorCode.PARAM_ERROR)
+        elif not isinstance(judgment_rule, dict):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+    elif any(key in normalized for key in ("standard", "action_name", "version", "action_input")):
+        # 判断规则由巡检标准和结果结构生成，相关配置变更后需要下次结果重新生成。
+        normalized["judgment_rule"] = None
     return normalized
 
 
@@ -572,6 +587,7 @@ async def list_targets(page: int, page_size: int, tenant_id: str, schedule_id: O
                     "app_name": cat.app_name,
                     "category_type": normalize_category_type(getattr(cat, "category_type", None)),
                     "standard": None,
+                    "judgment_rule": None,
                     "action_name": None,
                     "version": None,
                     "action_input": None,
@@ -592,6 +608,7 @@ async def list_targets(page: int, page_size: int, tenant_id: str, schedule_id: O
                         "app_name": cat.app_name,
                         "category_type": normalize_category_type(getattr(cat, "category_type", None)),
                         "standard": target.standard,
+                        "judgment_rule": target.judgment_rule,
                         "action_name": target.action_name,
                         "version": target.version,
                         "action_input": target.action_input or {},
@@ -1069,7 +1086,7 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str, cat
     return fallback_data
 
 
-# ==================== AI Judgment Operations ====================
+# ==================== Judgment Rule Operations ====================
 
 
 def _extract_json_object(text: Any) -> Dict[str, Any]:
@@ -1140,109 +1157,598 @@ def _normalize_ai_judgment(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
     return parsed_data
 
 
-async def judge_inspection_result(target_id: str, result_data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
-    """
-    使用AI判断巡检结果是否符合标准
-    Judge inspection result using AI
+_RULE_VALUE_MISSING = object()
+JUDGMENT_RULE_VERSION = 1
+JUDGMENT_RULE_OPERATOR_ALIASES = {
+    "eq": "==",
+    "equals": "==",
+    "equal": "==",
+    "is": "==",
+    "=": "==",
+    "ne": "!=",
+    "not_equals": "!=",
+    "not_equal": "!=",
+    "<>": "!=",
+    "gt": ">",
+    "greater_than": ">",
+    "gte": ">=",
+    "ge": ">=",
+    "greater_than_or_equal": ">=",
+    "lt": "<",
+    "less_than": "<",
+    "lte": "<=",
+    "le": "<=",
+    "less_than_or_equal": "<=",
+    "include": "contains",
+    "includes": "contains",
+    "not_include": "not_contains",
+    "not_includes": "not_contains",
+    "exist": "exists",
+    "not_exist": "not_exists",
+    "is_true": "truthy",
+    "true": "truthy",
+    "is_false": "falsy",
+    "false": "falsy",
+    "matches": "regex",
+    "not_matches": "not_regex",
+}
 
-    Args:
-        target_id: 巡检目标ID
-        result_data: 执行完成的动作结果
-        tenant_id: 租户ID
 
-    Returns:
-        判断结果，包含 passed, reason, suggestions
-    """
-    # 查询 InspectionTarget 获取 standard
-    target = await InspectionTarget.filter(id=target_id, deleted=False, tenant_id=tenant_id).first()
+def _json_text(value: Any) -> str:
+    try:
+        return orjson.dumps(value, option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS).decode("utf-8")
+    except Exception:
+        return str(value)
 
-    if not target:
-        raise CustomError(ErrorCode.NOT_FOUND)
 
-    # 格式化结果数据以便AI更好理解
-    result_str = orjson.dumps(result_data, option=orjson.OPT_INDENT_2).decode("utf-8")
+def _value_text(value: Any, max_length: int = 300) -> str:
+    if value is _RULE_VALUE_MISSING:
+        return "未找到"
+    if isinstance(value, (dict, list)):
+        text = _json_text(value)
+    else:
+        text = "" if value is None else str(value)
+    return text if len(text) <= max_length else f"{text[:max_length]}..."
 
-    # 准备 prompt，由 Nanobot 完成判断并返回结构化 JSON
+
+def _normalize_rule_operator(operator: Any) -> str:
+    operator = str(operator or "==").strip().lower()
+    return JUDGMENT_RULE_OPERATOR_ALIASES.get(operator, operator)
+
+
+def _get_condition_expected_value(condition: Dict[str, Any]) -> Any:
+    for key in ("value", "expected", "expected_value", "threshold"):
+        if key in condition:
+            return condition[key]
+    return None
+
+
+def _normalize_rule_suggestions(value: Any) -> List[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(item) for item in value if item not in (None, "")]
+    return []
+
+
+def _normalize_judgment_rule(rule_data: Any) -> Dict[str, Any]:
+    """规范化可复用的巡检判断规则，供本地规则引擎执行。"""
+    if isinstance(rule_data, str):
+        try:
+            rule_data = orjson.loads(rule_data)
+        except orjson.JSONDecodeError:
+            raise ValueError("判断规则不是有效 JSON")
+
+    if not isinstance(rule_data, dict):
+        raise ValueError("判断规则必须是 JSON 对象")
+
+    if isinstance(rule_data.get("judgment_rule"), dict):
+        rule_data = rule_data["judgment_rule"]
+
+    conditions = rule_data.get("conditions") or rule_data.get("rules") or rule_data.get("checks")
+    if not conditions and any(key in rule_data for key in ("path", "field", "field_path", "key")):
+        conditions = [rule_data]
+    if isinstance(conditions, dict):
+        conditions = [conditions]
+    if not isinstance(conditions, list):
+        raise ValueError("判断规则缺少 conditions")
+
+    normalized_conditions = []
+    for condition in conditions:
+        if not isinstance(condition, dict):
+            continue
+
+        path = condition.get("path")
+        if path in (None, ""):
+            path = condition.get("field_path")
+        if path in (None, ""):
+            path = condition.get("field")
+        if path in (None, ""):
+            path = condition.get("key")
+
+        operator = _normalize_rule_operator(condition.get("operator") or condition.get("op"))
+        expected_value = _get_condition_expected_value(condition)
+        description = condition.get("description") or condition.get("name") or condition.get("label") or ""
+
+        normalized_condition = {
+            "path": path if path is not None else "",
+            "operator": operator,
+            "value": expected_value,
+            "value_type": str(condition.get("value_type") or condition.get("type") or "").strip().lower(),
+            "description": str(description),
+            "case_sensitive": bool(condition.get("case_sensitive", False)),
+        }
+        if condition.get("value_path") not in (None, ""):
+            normalized_condition["value_path"] = condition.get("value_path")
+        normalized_conditions.append(normalized_condition)
+
+    if not normalized_conditions:
+        raise ValueError("判断规则没有可执行条件")
+
+    logic = str(rule_data.get("logic") or rule_data.get("condition_logic") or "all").strip().lower()
+    if logic in ("or", "any_of", "任一"):
+        logic = "any"
+    elif logic not in ("all", "any"):
+        logic = "all"
+
+    return {
+        "version": rule_data.get("version") or JUDGMENT_RULE_VERSION,
+        "logic": logic,
+        "conditions": normalized_conditions,
+        "description": str(rule_data.get("description") or ""),
+        "success_reason": str(rule_data.get("success_reason") or ""),
+        "failure_reason": str(rule_data.get("failure_reason") or ""),
+        "failure_diagnosis": str(rule_data.get("failure_diagnosis") or rule_data.get("diagnosis") or ""),
+        "failure_suggestions": _normalize_rule_suggestions(rule_data.get("failure_suggestions") or rule_data.get("suggestions")),
+        "source_standard": rule_data.get("source_standard"),
+        "generated_by": rule_data.get("generated_by"),
+    }
+
+
+def _parse_rule_path(path: Any) -> List[str]:
+    if path in (None, ""):
+        return []
+
+    raw_parts = []
+    if isinstance(path, (list, tuple)):
+        for part in path:
+            if part in (None, ""):
+                continue
+            raw_parts.extend(str(part).split("."))
+    else:
+        path_str = str(path).strip()
+        for prefix in ("$.", "result_data.", "result."):
+            if path_str.startswith(prefix):
+                path_str = path_str[len(prefix) :]
+        raw_parts = path_str.split(".")
+
+    parsed_parts = []
+    part_pattern = r"([^\[\]]+)|\[(?:'([^']+)'|\"([^\"]+)\"|(\d+))\]"
+    for raw_part in raw_parts:
+        part = raw_part.strip()
+        if not part:
+            continue
+        matches = list(re.finditer(part_pattern, part))
+        if matches and "".join(match.group(0) for match in matches) == part:
+            for match in matches:
+                parsed_parts.append(next(group for group in match.groups() if group is not None).strip())
+        else:
+            parsed_parts.append(part)
+
+    return parsed_parts
+
+
+def _maybe_parse_nested_json(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode()
+    if not isinstance(value, str):
+        return value
+
+    stripped = value.strip()
+    if not stripped or stripped[0] not in ("{", "["):
+        return value
+
+    try:
+        return orjson.loads(stripped)
+    except orjson.JSONDecodeError:
+        try:
+            return ast.literal_eval(stripped)
+        except (ValueError, SyntaxError):
+            return value
+
+
+def _dict_get_case_insensitive(data: Dict[str, Any], key: str) -> Any:
+    if key in data:
+        return data[key]
+
+    key_lower = str(key).lower()
+    for item_key, item_value in data.items():
+        if str(item_key).lower() == key_lower:
+            return item_value
+
+    return _RULE_VALUE_MISSING
+
+
+def _find_value_by_key(data: Any, key: str) -> Any:
+    data = _maybe_parse_nested_json(data)
+    if isinstance(data, dict):
+        value = _dict_get_case_insensitive(data, key)
+        if value is not _RULE_VALUE_MISSING:
+            return value
+        for item_value in data.values():
+            nested_value = _find_value_by_key(item_value, key)
+            if nested_value is not _RULE_VALUE_MISSING:
+                return nested_value
+    elif isinstance(data, list):
+        for item in data:
+            nested_value = _find_value_by_key(item, key)
+            if nested_value is not _RULE_VALUE_MISSING:
+                return nested_value
+    return _RULE_VALUE_MISSING
+
+
+def _get_rule_path_value(data: Any, path: Any) -> Any:
+    parts = _parse_rule_path(path)
+    if not parts:
+        return data
+
+    current = data
+    for part in parts:
+        current = _maybe_parse_nested_json(current)
+        if isinstance(current, dict):
+            current = _dict_get_case_insensitive(current, part)
+            if current is _RULE_VALUE_MISSING:
+                return _find_value_by_key(data, parts[-1])
+            continue
+
+        if isinstance(current, list):
+            try:
+                current = current[int(part)]
+            except (ValueError, IndexError):
+                return _find_value_by_key(data, parts[-1])
+            continue
+
+        return _find_value_by_key(data, parts[-1])
+
+    return current
+
+
+def _to_number(value: Any) -> Optional[float]:
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        match = re.search(r"-?\d+(?:\.\d+)?", value.replace(",", ""))
+        if match:
+            return float(match.group(0))
+    return None
+
+
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        value = value.strip().lower()
+        if value in ("false", "0", "no", "n", "否", "不", "失败", "failed", "fail"):
+            return False
+        if value in ("true", "1", "yes", "y", "是", "成功", "success", "pass", "passed"):
+            return True
+    return bool(value)
+
+
+def _values_equal(actual: Any, expected: Any, case_sensitive: bool = False) -> bool:
+    actual_number = _to_number(actual)
+    expected_number = _to_number(expected)
+    if actual_number is not None and expected_number is not None:
+        return actual_number == expected_number
+
+    if isinstance(actual, str) or isinstance(expected, str):
+        actual_text = "" if actual is None else str(actual)
+        expected_text = "" if expected is None else str(expected)
+        if not case_sensitive:
+            actual_text = actual_text.lower()
+            expected_text = expected_text.lower()
+        return actual_text == expected_text
+
+    return actual == expected
+
+
+def _contains_value(actual: Any, expected: Any, case_sensitive: bool = False) -> bool:
+    if isinstance(actual, dict):
+        return any(_values_equal(key, expected, case_sensitive) for key in actual.keys()) or any(_values_equal(value, expected, case_sensitive) for value in actual.values())
+    if isinstance(actual, list):
+        return any(_values_equal(item, expected, case_sensitive) for item in actual)
+
+    actual_text = "" if actual is None else str(actual)
+    expected_text = "" if expected is None else str(expected)
+    if not case_sensitive:
+        actual_text = actual_text.lower()
+        expected_text = expected_text.lower()
+    return expected_text in actual_text
+
+
+def _evaluate_rule_condition(condition: Dict[str, Any], result_data: Any) -> tuple[bool, str]:
+    path = condition.get("path")
+    operator = _normalize_rule_operator(condition.get("operator"))
+    value_type = condition.get("value_type")
+    case_sensitive = bool(condition.get("case_sensitive", False))
+    actual_value = _get_rule_path_value(result_data, path)
+    exists = actual_value is not _RULE_VALUE_MISSING and actual_value is not None
+    expected_value = condition.get("value")
+
+    if condition.get("value_path") not in (None, ""):
+        expected_value = _get_rule_path_value(result_data, condition.get("value_path"))
+        if expected_value is _RULE_VALUE_MISSING:
+            return False, f"{condition.get('description') or path}: 未找到对比字段 {condition.get('value_path')}"
+
+    description = condition.get("description") or f"{path or '结果'} {operator} {_value_text(expected_value)}"
+
+    if operator == "exists":
+        return exists, f"{description}: 字段{'存在' if exists else '不存在'}"
+    if operator == "not_exists":
+        return not exists, f"{description}: 字段{'不存在' if not exists else '存在'}"
+    if operator == "not_empty":
+        passed = exists and actual_value not in ("", [], {}, ())
+        return passed, f"{description}: 实际值 {_value_text(actual_value)}"
+    if operator == "is_empty":
+        passed = (not exists) or actual_value in ("", [], {}, ())
+        return passed, f"{description}: 实际值 {_value_text(actual_value)}"
+
+    if not exists:
+        return False, f"{description}: 结果中未找到字段 {path}"
+
+    if operator in (">", ">=", "<", "<="):
+        actual_number = _to_number(actual_value)
+        expected_number = _to_number(expected_value)
+        if actual_number is None or expected_number is None:
+            return False, f"{description}: 数值转换失败，实际值 {_value_text(actual_value)}，期望值 {_value_text(expected_value)}"
+        if operator == ">":
+            passed = actual_number > expected_number
+        elif operator == ">=":
+            passed = actual_number >= expected_number
+        elif operator == "<":
+            passed = actual_number < expected_number
+        elif operator == "<=":
+            passed = actual_number <= expected_number
+        else:
+            passed = actual_number == expected_number
+        return passed, f"{description}: 实际值 {_value_text(actual_value)}，期望 {operator} {_value_text(expected_value)}"
+
+    if operator in ("between", "range"):
+        if not isinstance(expected_value, (list, tuple)) or len(expected_value) != 2:
+            return False, f"{description}: between 规则需要两个边界值"
+        actual_number = _to_number(actual_value)
+        lower_number = _to_number(expected_value[0])
+        upper_number = _to_number(expected_value[1])
+        if actual_number is None or lower_number is None or upper_number is None:
+            return False, f"{description}: 数值转换失败，实际值 {_value_text(actual_value)}，期望范围 {_value_text(expected_value)}"
+        passed = lower_number <= actual_number <= upper_number
+        return passed, f"{description}: 实际值 {_value_text(actual_value)}，期望范围 [{_value_text(expected_value[0])}, {_value_text(expected_value[1])}]"
+
+    if operator in ("==", "!="):
+        passed = _values_equal(actual_value, expected_value, case_sensitive)
+        if operator == "!=":
+            passed = not passed
+        return passed, f"{description}: 实际值 {_value_text(actual_value)}，期望 {operator} {_value_text(expected_value)}"
+
+    if operator in ("contains", "not_contains"):
+        passed = _contains_value(actual_value, expected_value, case_sensitive)
+        if operator == "not_contains":
+            passed = not passed
+        return passed, f"{description}: 实际值 {_value_text(actual_value)}，期望 {operator} {_value_text(expected_value)}"
+
+    if operator in ("in", "not_in"):
+        expected_values = expected_value if isinstance(expected_value, list) else [expected_value]
+        passed = any(_values_equal(actual_value, item, case_sensitive) for item in expected_values)
+        if operator == "not_in":
+            passed = not passed
+        return passed, f"{description}: 实际值 {_value_text(actual_value)}，期望 {operator} {_value_text(expected_values)}"
+
+    if operator in ("regex", "not_regex"):
+        flags = 0 if case_sensitive else re.IGNORECASE
+        passed = re.search(str(expected_value), str(actual_value), flags=flags) is not None
+        if operator == "not_regex":
+            passed = not passed
+        return passed, f"{description}: 实际值 {_value_text(actual_value)}，正则 {_value_text(expected_value)}"
+
+    if operator in ("truthy", "falsy"):
+        passed = _to_bool(actual_value)
+        if operator == "falsy":
+            passed = not passed
+        return passed, f"{description}: 实际值 {_value_text(actual_value)}"
+
+    passed = _values_equal(actual_value, expected_value, case_sensitive)
+    return passed, f"{description}: 实际值 {_value_text(actual_value)}，期望 == {_value_text(expected_value)}"
+
+
+def _judge_result_by_rule(rule: Dict[str, Any], result_data: Any, rule_generated: bool = False) -> Dict[str, Any]:
+    normalized_rule = _normalize_judgment_rule(rule)
+    evaluations = [_evaluate_rule_condition(condition, result_data) for condition in normalized_rule["conditions"]]
+    logic = normalized_rule.get("logic") or "all"
+    passed = any(item[0] for item in evaluations) if logic == "any" else all(item[0] for item in evaluations)
+    matched_details = [detail for is_passed, detail in evaluations if is_passed]
+    failed_details = [detail for is_passed, detail in evaluations if not is_passed]
+
+    if passed:
+        detail = "; ".join(matched_details)[:1000]
+        reason = normalized_rule.get("success_reason") or "巡检结果符合判断规则"
+        if detail:
+            reason = f"{reason}: {detail}"
+        diagnosis = ""
+        suggestions = []
+    else:
+        details = failed_details if logic == "all" else [detail for _, detail in evaluations]
+        detail = "; ".join(details)[:1000]
+        reason = normalized_rule.get("failure_reason") or "巡检结果不符合判断规则"
+        if detail:
+            reason = f"{reason}: {detail}"
+        diagnosis = normalized_rule.get("failure_diagnosis") or "请根据未满足的判断规则检查对应巡检指标和业务配置。"
+        suggestions = normalized_rule.get("failure_suggestions") or []
+
+    return _normalize_ai_judgment(
+        {
+            "passed": passed,
+            "reason": reason,
+            "diagnosis": diagnosis,
+            "suggestions": suggestions,
+            "judgment_source": "rule",
+            "rule_generated": rule_generated,
+            "rule_version": normalized_rule.get("version"),
+            "rule_description": normalized_rule.get("description") or "",
+        }
+    )
+
+
+async def _generate_inspection_judgment_rule(target: InspectionTarget, result_data: Any, tenant_id: str) -> Dict[str, Any]:
+    """首次巡检结果到达时由 Nanobot 生成可复用判断规则。"""
+    result_str = _json_text(result_data)
     prompt = f"""
-你是一个专业的IT运维巡检专家。请根据以下信息判断巡检结果是否符合标准。
+你是一个专业的IT运维巡检规则生成助手。请根据巡检标准生成可复用的本地判断规则。
+
+## 巡检项
+
+{target.content}
 
 ## 巡检标准
 
 {target.standard}
 
-## 巡检结果
+## 本次巡检结果样例
 
 {result_str}
 
 ## 任务要求
 
-请仔细分析巡检结果，判断是否符合上述标准，并返回JSON格式的判断结果。
+1. 只生成用于后续本地判断的规则，不要直接判断本次结果是否通过。
+2. 判断条件必须来源于巡检标准；本次巡检结果样例只用于识别字段路径和数据类型。
+3. 字段路径必须能从巡检结果样例中读取，支持点路径和数组下标，例如 data.cpu_usage、items[0].status。
+4. 如果标准包含多个条件，用 conditions 表达，并设置 logic 为 all 或 any。
+5. 不要调用任何工具、skill 或外部接口。
 
-判断时需要考虑：
-1. 结果数据中的关键指标是否满足标准要求
-2. 是否存在错误或异常信息
-3. 数值型指标是否在合理范围内
-4. 状态型指标是否符合预期
+## 可用 operator
+
+==、!=、>、>=、<、<=、between、contains、not_contains、in、not_in、exists、not_exists、regex、not_regex、truthy、falsy。
 
 ## 输出要求
 
-返回一个JSON对象，包含以下字段：
-- passed (boolean): true表示符合标准，false表示不符合标准
-- reason (string): 判断理由，简洁说明为什么通过或不通过，引用具体的数据点
-- diagnosis (string): 诊断分析，说明导致巡检失败的根本原因和建议的排查方向。如果通过则为空字符串，如果不通过则提供详细的根因分析和排查建议
-- suggestions (array): 改进建议列表，如果通过则为空数组，如果不通过则提供具体的改进建议
-
-注意：
-1. 直接返回JSON对象，不要使用markdown代码块
-2. diagnosis字段应该深入分析问题的根本原因，而不是简单重复reason的内容
-3. diagnosis应该包含具体的排查方向，例如：检查哪些配置、查看哪些日志、验证哪些依赖等
-4. 本任务只需要基于给定数据做判断，不要调用任何工具、skill 或外部接口
+只能返回一个 JSON 对象，不要使用 markdown 代码块。格式如下：
+{{
+  "logic": "all",
+  "description": "规则说明",
+  "conditions": [
+    {{
+      "path": "巡检结果中的字段路径",
+      "operator": "<=",
+      "value": 80,
+      "value_type": "number",
+      "description": "CPU 使用率需要小于等于 80%"
+    }}
+  ],
+  "success_reason": "巡检结果符合判断规则",
+  "failure_reason": "巡检结果不符合判断规则",
+  "failure_diagnosis": "失败时的排查方向",
+  "failure_suggestions": ["失败时的处理建议"]
+}}
 """
 
     tenant_workspace = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace"
-    session_key = f"inspection:judgment:{target_id}:{uuid.uuid4().hex}"
+    session_key = f"inspection:judgment_rule:{target.id}:{uuid.uuid4().hex}"
     client = NanobotClient(session_id=session_key, workspace=tenant_workspace)
-
     full_message = f"""<system_instruction>
-【身份】你是 AIOE 平台的巡检结果裁决助手。
+【身份】你是 AIOE 平台的巡检判断规则生成助手。
 
 【执行规则】
-1. 只根据用户提供的巡检标准和巡检结果做判断。
-2. 不要调用任何工具、skill 或外部接口。
-3. 只能输出一个 JSON 对象，禁止输出 markdown、代码块或额外解释。
+1. 只根据用户提供的巡检标准生成结构化规则。
+2. 本次巡检结果样例只用于定位字段路径，不允许为了适配当前结果而放宽标准。
+3. 不要调用任何工具、skill 或外部接口。
+4. 只能输出一个 JSON 对象，禁止输出 markdown、代码块或额外解释。
 </system_instruction>
 
-<inspection_judgment_task>
+<inspection_judgment_rule_task>
 {prompt}
-</inspection_judgment_task>"""
+</inspection_judgment_rule_task>"""
 
-    max_retries = 2
+    max_retries = 3
     last_error = None
 
     for attempt in range(max_retries):
         try:
-            logger.info(f"准备调用 Nanobot 判断巡检结果，target_id={target_id}, tenant_id={tenant_id}")
+            logger.info(f"准备调用 Nanobot 生成巡检判断规则，target_id={target.id}, tenant_id={tenant_id}")
             ai_response = await client.ask(message=full_message, streaming=False, session_key=session_key)
 
             if not ai_response or not ai_response.strip():
-                last_error = f"Nanobot返回空内容，已重试 {attempt + 1}/{max_retries}"
+                last_error = f"Nanobot返回空规则内容，已重试 {attempt + 1}/{max_retries}"
                 if attempt < max_retries - 1:
                     continue
                 break
 
-            return _normalize_ai_judgment(_extract_json_object(ai_response))
-
+            judgment_rule = _normalize_judgment_rule(_extract_json_object(ai_response))
+            judgment_rule["source_standard"] = target.standard
+            judgment_rule["generated_by"] = "nanobot"
+            return judgment_rule
         except (orjson.JSONDecodeError, ValueError) as e:
-            last_error = f"JSON解析失败: {str(e)}"
+            last_error = f"判断规则解析失败: {str(e)}"
             if attempt < max_retries - 1:
-                continue  # 重试
+                continue
         except Exception as e:
-            last_error = f"Nanobot调用失败: {str(e)}"
+            last_error = f"Nanobot生成判断规则失败: {str(e)}"
             if attempt < max_retries - 1:
-                continue  # 重试
+                continue
 
-    # 所有重试都失败，返回保守的失败结果
-    return {"passed": False, "reason": last_error or "Nanobot判断失败，无法确定巡检结果", "diagnosis": "Nanobot服务异常，无法进行根因分析。建议检查Nanobot配置和运行状态，或人工复核巡检结果。", "suggestions": ["请检查Nanobot配置", "建议人工复核巡检结果"]}
+    raise ValueError(last_error or "Nanobot生成判断规则失败")
+
+
+async def judge_inspection_result(target_id: str, result_data: Any, tenant_id: str) -> Dict[str, Any]:
+    """
+    使用巡检项上的判断规则判断巡检结果。
+    首次没有规则时由 Nanobot 根据巡检标准生成规则并持久化，后续直接本地判断。
+    """
+    target = await InspectionTarget.filter(id=target_id, deleted=False, tenant_id=tenant_id).first()
+
+    if not target:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    rule_generated = False
+    judgment_rule = target.judgment_rule
+
+    if not judgment_rule:
+        try:
+            judgment_rule = await _generate_inspection_judgment_rule(target, result_data, tenant_id)
+            target.judgment_rule = judgment_rule
+            await target.save()
+            rule_generated = True
+        except Exception as e:
+            logger.warning(f"生成巡检判断规则失败: target_id={target_id}, error={e}")
+            return _normalize_ai_judgment(
+                {
+                    "passed": False,
+                    "reason": f"生成巡检判断规则失败: {str(e)}",
+                    "diagnosis": "Nanobot未能生成可执行判断规则，无法进行本地规则判断。建议检查巡检标准是否明确，或人工配置判断规则。",
+                    "suggestions": ["请检查巡检标准是否可量化", "请人工复核巡检结果或补充判断规则"],
+                    "judgment_source": "rule_generation_failed",
+                    "rule_generated": False,
+                }
+            )
+
+    try:
+        return _judge_result_by_rule(judgment_rule, result_data, rule_generated=rule_generated)
+    except Exception as e:
+        logger.warning(f"巡检判断规则执行失败: target_id={target_id}, error={e}")
+        return _normalize_ai_judgment(
+            {
+                "passed": False,
+                "reason": f"巡检判断规则执行失败: {str(e)}",
+                "diagnosis": "已存在的巡检判断规则无法执行。建议清空判断规则后重新生成，或人工修正规则字段路径和操作符。",
+                "suggestions": ["请检查判断规则字段路径是否匹配当前结果结构", "如巡检标准或动作输出已变化，请清空判断规则后重新生成"],
+                "judgment_source": "rule_execution_failed",
+                "rule_generated": rule_generated,
+            }
+        )
 
 
 # ==================== Import/Export Operations ====================

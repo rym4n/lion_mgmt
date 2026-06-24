@@ -57,6 +57,7 @@ def _serialize_target(target, app_name=None, category_type=None):
         "content": target.content,
         "category_id": target.category_id,
         "standard": target.standard,
+        "judgment_rule": target.judgment_rule,
         "action_name": target.action_name,
         "version": target.version,
         "action_input": target.action_input or {},
@@ -1267,6 +1268,7 @@ async def delete_category(request: Request):
                         "content": {"type": "string", "description": "巡检内容"},
                         "category_id": {"type": "string", "description": "关联巡检类别ID"},
                         "standard": {"type": "string", "description": "巡检标准"},
+                        "judgment_rule": {"type": "object", "description": "巡检判断规则；为空时首次添加结果自动生成"},
                         "action_name": {"type": "string", "description": "动作名称；playbook类别未传时默认使用剧本名称/ID"},
                         "version": {"type": "string", "description": "动作或剧本版本；为空使用最新版本"},
                         "action_input": {"type": "object", "description": "动作输入参数或剧本 flow_input 扩展参数"},
@@ -1294,6 +1296,7 @@ async def delete_category(request: Request):
                                         "content": {"type": "string"},
                                         "category_id": {"type": "string"},
                                         "standard": {"type": "string"},
+                                        "judgment_rule": {"type": "object"},
                                         "action_name": {"type": "string"},
                                         "version": {"type": "string"},
                                         "category_type": {"type": "string"},
@@ -1422,6 +1425,7 @@ async def create_target(request: Request):
                                                 "category_type": {"type": "string"},
                                                 "app_name": {"type": "string"},
                                                 "standard": {"type": "string"},
+                                                "judgment_rule": {"type": "object"},
                                                 "action_name": {"type": "string"},
                                                 "version": {"type": "string"},
                                                 "action_input": {"type": "object"},
@@ -1496,6 +1500,7 @@ async def list_targets(request: Request):
                                     "app_name": {"type": "string"},
                                     "category_type": {"type": "string"},
                                     "standard": {"type": "string"},
+                                    "judgment_rule": {"type": "object"},
                                     "action_name": {"type": "string"},
                                     "version": {"type": "string"},
                                     "action_input": {"type": "object"},
@@ -1551,6 +1556,7 @@ async def get_target(request: Request):
                     "id": {"type": "string", "description": "巡检项ID"},
                     "content": {"type": "string", "description": "巡检内容"},
                     "standard": {"type": "string", "description": "巡检标准"},
+                    "judgment_rule": {"type": "object", "description": "巡检判断规则；传 null 可清空并在下次添加结果时自动生成"},
                     "action_name": {"type": "string", "description": "动作名称；playbook类别可填写剧本显示名称"},
                     "version": {"type": "string", "description": "动作或剧本版本；空则使用最新版本"},
                     "action_input": {"type": "object", "description": "动作输入参数或剧本 flow_input 扩展参数"},
@@ -1575,6 +1581,7 @@ async def get_target(request: Request):
                                     "content": {"type": "string"},
                                     "category_id": {"type": "string"},
                                     "standard": {"type": "string"},
+                                    "judgment_rule": {"type": "object"},
                                     "action_name": {"type": "string"},
                                     "version": {"type": "string"},
                                     "category_type": {"type": "string"},
@@ -2544,7 +2551,7 @@ async def execute_sql(request: Request):
 @inspection_bp.post("/result/add")
 @openapi.definition(
     summary="添加巡检结果",
-    description="批量添加巡检结果记录，自动通过AI判断执行结果状态，并保存动作执行状态",
+    description="批量添加巡检结果记录，首次自动生成判断规则，后续根据判断规则判断执行结果状态，并保存动作执行状态",
     body={
         "application/json": {
             "schema": {
@@ -2684,16 +2691,16 @@ async def add_result(request: Request):
         try:
             judgment = await logic.judge_inspection_result(target_id, result, tenant_id)
 
-            # Determine result status based on AI judgment
+            # Determine result status based on persisted judgment rule
             status = "success" if judgment.get("passed") else "failed"
             error_message = None if judgment.get("passed") else judgment.get("reason")
 
-            # Add AI judgment to the item
+            # 兼容下游报告/导出字段，仍写入 ai_judgment
             item["ai_judgment"] = judgment
 
         except Exception as e:
-            logger.warning(f"Nanobot判断巡检结果失败: {str(e)}")
-            error_message = f"Nanobot判断失败: {str(e)}"
+            logger.warning(f"巡检结果规则判断失败: {str(e)}")
+            error_message = f"巡检结果规则判断失败: {str(e)}"
 
         # Create InspectionResult
         try:
