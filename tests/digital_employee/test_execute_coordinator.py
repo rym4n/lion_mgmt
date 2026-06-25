@@ -167,6 +167,7 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
     assert payload["message"] == "prompt:task-1:employee-1"
     assert payload["cognee"]["endpoint"] == "http://lion-memory"
     assert payload["cognee"]["jwt"] == "jwt-tenant-1"
+    assert payload["cognee"]["tenant_id"] == "tenant-1"
     assert payload["cognee"]["dataset_name"] == "employee-1"
     assert payload["cognee"]["role_key"] == "ops"
 

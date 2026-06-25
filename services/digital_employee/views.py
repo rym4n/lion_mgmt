@@ -405,10 +405,14 @@ async def package_delete(request: Request):
     data = _json(request)
     if data.get("role_key"):
         role = await get_visible_role(_tenant_id(request), data["role_key"])
+        if await CommandAgent.filter(tenant_id=_tenant_id(request), role_key=role.role_key, deleted=False).count():
+            raise CustomError(ErrorCode.ROLE_IN_USE_BY_EMPLOYEES)
         role.deleted = True
         await role.save(update_fields=["deleted", "utime"])
     elif data.get("skill_key"):
         skills = await get_visible_skills(_tenant_id(request), [data["skill_key"]])
+        if await CommandAgent.filter(tenant_id=_tenant_id(request), skill_keys__contains=[skills[0].skill_key], deleted=False).count():
+            raise CustomError(ErrorCode.SKILL_IN_USE_BY_EMPLOYEES)
         skills[0].deleted = True
         await skills[0].save(update_fields=["deleted", "utime"])
     else:

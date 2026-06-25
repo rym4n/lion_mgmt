@@ -112,6 +112,7 @@ async def run(task: CommandTask, employee: CommandAgent, operator_id: str | None
         "cognee": {
             "endpoint": LION_MEMORY_ENDPOINT,
             "jwt": jwt,
+            "tenant_id": task.tenant_id,
             "dataset_name": employee.id,
             "role_key": employee.role_key,
             "task_id": task.id,
