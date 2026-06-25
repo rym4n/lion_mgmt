@@ -14,12 +14,10 @@ from websockets import ConnectionClosed
 from tortoise.expressions import Q
 from tortoise.functions import Max
 from tortoise.transactions import in_transaction
-from pathlib import Path
 from aiocache import caches
 from datetime import datetime
 
 from libs.kafka import aconsume, aproduce
-from libs.nanobot import NanobotClient, RedisStreamingHook
 from models import (
     Approvement,
     Events,
@@ -32,10 +30,10 @@ from models import (
 )
 from models.user import Account
 from models.warroom import Message, MessageAccount, Room
+from services.digital_employee.lion_agent_adapter import stream_prompt_events, workspace_id_for
 from settings import (
     AUTHENTICATION_SESSION_EXPIRATION,
     CACHE,
-    NANOBOT_WORKSPACE_BASE,
     RUNLOG_TOPIC,
     RY_SERVICE_URL,
     TZ,
@@ -312,7 +310,7 @@ class ChatManager:
         self.active_connections: dict[str, dict] = {}
         self.event_update_buffer = {}
         self.ai_stream_buffer = {}  # 流式消息缓冲区，key 为 room_id:receiver_id
-        self.ai_task_locks: dict[str, asyncio.Lock] = {}  # Nanobot 会话锁，key 为 tenant_id:room_id
+        self.ai_task_locks: dict[str, asyncio.Lock] = {}  # lion_agent 会话锁，key 为 tenant_id:room_id
 
     async def connect(self, user: Account, ws, session_id):
         """处理用户连接"""
@@ -976,22 +974,75 @@ class ChatManager:
 
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
-    async def _execute_nanobot_task(self, user_id: str, tenant_id: str, current_room_id: str, content: str, message_data: dict, stream_id: str):
-        """在后台执行 nanobot 任务（独立于 websocket 连接）"""
+    async def _publish_ai_stream_event(self, event_type: str, payload: dict, user_id: str, tenant_id: str, current_room_id: str, stream_id: str) -> bool:
+        has_content = False
+        if event_type == "delta":
+            content = str(payload.get("content") or payload.get("delta") or "")
+            if not content:
+                return False
+            has_content = True
+            message_data = {
+                "type": "ai-reply-delta",
+                "content": content,
+                "room_id": current_room_id,
+                "receiver_id": user_id,
+                "tenant_id": tenant_id,
+                "stream_id": stream_id,
+            }
+            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+        elif event_type == "thinking":
+            content = str(payload.get("content") or "")
+            if content:
+                message_data = {
+                    "type": "ai-thinking",
+                    "content": content,
+                    "room_id": current_room_id,
+                    "receiver_id": user_id,
+                    "tenant_id": tenant_id,
+                    "stream_id": stream_id,
+                }
+                await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+        elif event_type == "tool_call":
+            data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+            tool_name = data.get("name") or data.get("tool_name") or data.get("tool") or "tool"
+            status = payload.get("status") or data.get("status") or "started"
+            message_data = {
+                "type": "ai-thinking",
+                "content": f"正在执行 {tool_name}" if status == "started" else f"{tool_name} 执行完成",
+                "tool_name": tool_name,
+                "room_id": current_room_id,
+                "receiver_id": user_id,
+                "tenant_id": tenant_id,
+                "stream_id": stream_id,
+            }
+            await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+        elif event_type == "end":
+            content = str(payload.get("content") or "")
+            if content:
+                has_content = True
+                message_data = {
+                    "type": "ai-reply-delta",
+                    "content": content,
+                    "room_id": current_room_id,
+                    "receiver_id": user_id,
+                    "tenant_id": tenant_id,
+                    "stream_id": stream_id,
+                }
+                await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
+        elif event_type == "error":
+            raise RuntimeError(payload.get("message") or payload)
+        return has_content
+
+    async def _execute_lion_agent_task(self, user_id: str, tenant_id: str, current_room_id: str, content: str, message_data: dict, stream_id: str):
+        """在后台执行 AI 任务（独立于 websocket 连接）"""
         lock_key = f"{tenant_id}:{current_room_id}"
         lock = self.ai_task_locks.setdefault(lock_key, asyncio.Lock())
         try:
             async with lock:
-                logger.info(f"开始调用 Nanobot，tenant_id={tenant_id}, room_id={current_room_id}")
-                tenant_workspace = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace"
-                client = NanobotClient(session_id=current_room_id, workspace=tenant_workspace)
-
-                # 创建 Redis 流式 Hook
-                hook = RedisStreamingHook(room_id=current_room_id, receiver_id=user_id, tenant_id=tenant_id, redis_pub=self.msg_pub, stream_id=stream_id)
-                logger.info(f"RedisStreamingHook 已创建")
+                logger.info(f"开始调用 lion_agent，tenant_id={tenant_id}, room_id={current_room_id}")
 
                 # 静态指令由 workspace-template/AGENTS.md、SOUL.md、TOOLS.md 承载；
-                # 当前调用只传入本次会话的动态上下文和用户消息，避免每次覆盖 Nanobot 的系统提示。
+                # 当前调用只传入本次会话的动态上下文和用户消息，避免每次覆盖 lion_agent 的系统提示。
                 full_message = f"""<message_context>
 {orjson.dumps(message_data).decode()}
 </message_context>
@@ -1000,18 +1051,33 @@ class ChatManager:
 {content}
 </user_message>"""
 
-                # 调用 nanobot（异步执行）
-                # session_key 已在 NanobotClient 初始化时设置为 room_id
-                logger.info(f"准备调用 client.ask")
+                logger.info("准备调用 lion_agent stream")
                 logger.info(f"消息内容长度: {len(full_message)} 字符")
 
-                result = await client.ask(message=full_message, streaming=True, hooks=[hook])
+                has_content = False
+                async for event_type, payload in stream_prompt_events(
+                    workspace_id=workspace_id_for(tenant_id, "warroom"),
+                    session_id=current_room_id,
+                    request_id=stream_id,
+                    message=full_message,
+                ):
+                    has_content = await self._publish_ai_stream_event(event_type, payload, user_id, tenant_id, current_room_id, stream_id) or has_content
 
-                logger.info(f"Nanobot 调用完成，返回结果长度: {len(result) if result else 0} 字符")
-                if not result or len(result.strip()) == 0:
-                    logger.warning(f"Nanobot 返回了空结果！tenant_id={tenant_id}, room_id={current_room_id}")
+                logger.info(f"lion_agent 调用完成，has_content={has_content}")
+                if not has_content:
+                    logger.warning(f"lion_agent 返回了空结果！tenant_id={tenant_id}, room_id={current_room_id}")
+                else:
+                    end_data = {
+                        "type": "ai-reply-end",
+                        "content": "",
+                        "room_id": current_room_id,
+                        "receiver_id": user_id,
+                        "tenant_id": tenant_id,
+                        "stream_id": stream_id,
+                    }
+                    await self.msg_pub.publish(WR_TOPIC, orjson.dumps(end_data).decode())
         except Exception as e:
-            logger.error(f"Nanobot 调用失败: {e} | {traceback.format_exc()}")
+            logger.error(f"lion_agent 调用失败: {e} | {traceback.format_exc()}")
             # 发送错误消息到前端
             error_data = {
                 "type": "ai-reply-delta",
@@ -1066,10 +1132,10 @@ class ChatManager:
 
         await self.msg_pub.publish(WR_TOPIC, orjson.dumps(message_data).decode())
 
-        # 使用后台任务执行 nanobot，避免 websocket 断开时任务被取消
-        # 这样即使用户断开连接，nanobot 也会继续执行，结果通过 Redis Pub/Sub 发送
-        asyncio.create_task(self._execute_nanobot_task(user_id=user.id, tenant_id=tenant_id, current_room_id=current_room_id, content=content, message_data=message_data, stream_id=stream_id))
-        logger.info(f"Nanobot 后台任务已启动，room_id={current_room_id}")
+        # 使用后台任务执行 lion_agent，避免 websocket 断开时任务被取消
+        # 这样即使用户断开连接，lion_agent 也会继续执行，结果通过 Redis Pub/Sub 发送
+        asyncio.create_task(self._execute_lion_agent_task(user_id=user.id, tenant_id=tenant_id, current_room_id=current_room_id, content=content, message_data=message_data, stream_id=stream_id))
+        logger.info(f"lion_agent 后台任务已启动，room_id={current_room_id}")
 
     async def _handle_private_message(self, user: Account, data: dict, tenant_id):
         """处理发送私聊消息"""

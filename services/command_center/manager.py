@@ -1,4 +1,5 @@
 # coding=utf-8
+import asyncio
 from datetime import datetime
 
 from tortoise.expressions import Q
@@ -6,7 +7,7 @@ from tortoise.expressions import Q
 from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
 from settings import TZ
 
-from .dispatcher import choose_agent_with_nanobot
+from .dispatcher import choose_agent_with_lion_agent
 
 
 TERMINAL_TASK_STATUS = {"completed", "failed", "cancelled"}
@@ -15,7 +16,7 @@ DEFAULT_COORDINATOR_AGENT_NAME = "指挥部分工协调智能体"
 DEFAULT_COORDINATOR_CAPABILITIES = ["command_center", "coordination", "dispatch", "task_planning"]
 DEFAULT_COORDINATOR_SYSTEM_INSTRUCTION = """你是 AIOE 指挥中心的内置分工协调智能体。
 你的职责是理解用户任务、拆解执行步骤、匹配合适的智能体能力，并给出清晰的调度建议。
-调用 Nanobot 执行时，优先遵循当前任务 payload、能力标签和作战室上下文。"""
+调用 lion_agent 执行时，优先遵循当前任务 payload、能力标签和作战室上下文。"""
 
 
 async def ensure_default_coordinator_agent(tenant_id: str) -> CommandAgent:
@@ -29,8 +30,8 @@ async def ensure_default_coordinator_agent(tenant_id: str) -> CommandAgent:
             "capabilities": DEFAULT_COORDINATOR_CAPABILITIES,
             "status": "idle",
             "max_concurrent": 8,
-            "metadata": {"runtime": "nanobot", "role": "coordinator", "default": True},
-            "runtime": "nanobot",
+            "metadata": {"runtime": "lion_agent", "role": "coordinator", "default": True},
+            "runtime": "lion_agent",
             "system_instruction": DEFAULT_COORDINATOR_SYSTEM_INSTRUCTION,
             "prompt_config": {"source": "builtin", "instruction_format": "system_instruction"},
             "is_builtin": True,
@@ -51,12 +52,12 @@ async def ensure_default_coordinator_agent(tenant_id: str) -> CommandAgent:
         agent.capabilities = merged_capabilities
         changed = True
     metadata = dict(agent.metadata or {})
-    metadata.update({"runtime": "nanobot", "role": "coordinator", "default": True})
+    metadata.update({"runtime": "lion_agent", "role": "coordinator", "default": True})
     if agent.metadata != metadata:
         agent.metadata = metadata
         changed = True
-    if agent.runtime != "nanobot":
-        agent.runtime = "nanobot"
+    if agent.runtime != "lion_agent":
+        agent.runtime = "lion_agent"
         changed = True
     if not agent.system_instruction:
         agent.system_instruction = DEFAULT_COORDINATOR_SYSTEM_INSTRUCTION
@@ -98,7 +99,7 @@ async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> Co
     previous_agent_key = task.assigned_agent_key
     coordinator = await ensure_default_coordinator_agent(task.tenant_id)
     agents = await CommandAgent.filter(tenant_id=task.tenant_id, deleted=False).all()
-    decision = await choose_agent_with_nanobot(task, agents, coordinator)
+    decision = await choose_agent_with_lion_agent(task, agents, coordinator)
 
     task.dispatch_status = decision.dispatch_status
     task.dispatch_reason = decision.reason
@@ -126,7 +127,9 @@ async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> Co
         if agent.load >= agent.max_concurrent:
             agent.status = "busy"
         await agent.save(update_fields=["load", "current_task_id", "status"])
-        await record_task_event(task, "task_dispatched", decision.reason, operator_id, {"dispatch_source": "nanobot", "raw_response": decision.raw_response})
+        await record_task_event(task, "task_dispatched", decision.reason, operator_id, {"dispatch_source": "lion_agent", "raw_response": decision.raw_response})
+        if _should_auto_execute(agent):
+            _schedule_lion_agent_execution(task, agent, operator_id)
     else:
         if previous_agent_key:
             previous_agent = await CommandAgent.get_or_none(tenant_id=task.tenant_id, agent_key=previous_agent_key, deleted=False)
@@ -141,9 +144,41 @@ async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> Co
         task.assigned_agent_key = None
         task.status = "pending_dispatch"
         await task.save()
-        await record_task_event(task, "dispatch_waiting", decision.reason, operator_id, {"dispatch_source": "nanobot", "raw_response": decision.raw_response})
+        await record_task_event(task, "dispatch_waiting", decision.reason, operator_id, {"dispatch_source": "lion_agent", "raw_response": decision.raw_response})
 
     return task
+
+
+def _should_auto_execute(agent: CommandAgent) -> bool:
+    return agent.runtime == "lion_agent" and bool(agent.role_key)
+
+
+def _schedule_lion_agent_execution(task: CommandTask, employee: CommandAgent, operator_id: str | None = None) -> None:
+    async def _runner() -> None:
+        current_task = await CommandTask.get_or_none(id=task.id, tenant_id=task.tenant_id, deleted=False)
+        current_employee = await CommandAgent.get_or_none(id=employee.id, tenant_id=employee.tenant_id, deleted=False)
+        if not current_task or not current_employee:
+            return
+        try:
+            from services.digital_employee.execute_coordinator import run
+
+            await run(current_task, current_employee, operator_id=operator_id)
+        except Exception as exc:
+            failed_task = await CommandTask.get_or_none(id=task.id, tenant_id=task.tenant_id, deleted=False)
+            if failed_task and failed_task.status not in TERMINAL_TASK_STATUS:
+                failed_task.result = str(exc)
+                await failed_task.save(update_fields=["result", "utime"])
+                await update_task_progress(
+                    failed_task,
+                    {
+                        "status": "failed",
+                        "message": f"数字员工执行失败: {exc}",
+                        "metadata": {"error": str(exc)},
+                    },
+                    operator_id,
+                )
+
+    asyncio.create_task(_runner())
 
 
 async def create_command_task(tenant_id: str, creator, data: dict) -> CommandTask:
@@ -193,6 +228,14 @@ async def update_task_progress(task: CommandTask, data: dict, operator_id: str |
             if agent.status == "busy" and agent.load < agent.max_concurrent:
                 agent.status = "idle"
             await agent.save(update_fields=["load", "current_task_id", "status"])
+
+    if task.status in TERMINAL_TASK_STATUS and task.assigned_agent_key:
+        try:
+            from services.digital_employee.employee_report import compose
+
+            asyncio.create_task(compose(task, (data.get("metadata") or {}).get("actions")))
+        except Exception:
+            pass
 
     return task
 

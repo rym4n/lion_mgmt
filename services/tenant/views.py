@@ -1,9 +1,7 @@
 # coding=utf-8
 
-import shutil
-from pathlib import Path
-
 from sanic import Blueprint
+from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.expressions import Q
 from tortoise.functions import Count
@@ -16,17 +14,16 @@ from libs.security.authentication import refresh_token
 from libs.security.authorization import requires_permission
 from libs.utils import get_expiration_date
 from models import Account, Role, Scene, Tenant
+from services.digital_employee.cognee_credential_manager import register_tenant_user
 from settings import (
     AUTHENTICATION_SESSION_EXPIRATION,
-    BASE_DIR,
-    NANOBOT_WORKSPACE_BASE,
     SESSION_HTTPONLY,
     SESSION_SAMESITE,
     SESSION_SECURE,
 )
 
 tenant_bp = Blueprint("tenant", url_prefix="/tenant")
-_all__ = ["tenant_bp"]
+__all__ = ["tenant_bp"]
 
 
 @tenant_bp.post("/list")
@@ -158,11 +155,10 @@ async def add_tenant(request):
         # 创建默认场景"日常运营"
         await Scene.create(name="日常运营", remark="默认场景", status=1, creator=creator, updator=creator, tenant_id=tenant.id)
 
-    # 复制 workspace-template 到租户目录
-    template_path = Path(BASE_DIR) / "workspace-template"
-    workspace_path = Path(NANOBOT_WORKSPACE_BASE) / str(tenant.id) / "workspace"
-    if template_path.exists():
-        shutil.copytree(template_path, workspace_path, dirs_exist_ok=True)
+    try:
+        await register_tenant_user(tenant.id)
+    except Exception as exc:
+        logger.warning(f"预注册租户 Cognee 用户失败，将在数字员工首次运行时重试: tenant_id={tenant.id}, error={exc}")
 
     return response_ok(tenant.json)
 

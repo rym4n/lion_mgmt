@@ -20,14 +20,14 @@ from tortoise.expressions import Q
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.nanobot import NanobotClient
 from libs.security.authorization import requires_permission
 from libs.utils import gen_run_id, upload_to_s3
 from libs.kafka import aproduce
 from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
 from models.report import ReportDocument
 from models.runlog import Runlog
-from settings import NANOBOT_WORKSPACE_BASE, REPORT_TEMPLATE_BASE, REPORT_USER_BASE, TASK_TOPIC, TZ
+from services.digital_employee.lion_agent_adapter import execute_prompt, workspace_id_for
+from settings import REPORT_TEMPLATE_BASE, REPORT_USER_BASE, TASK_TOPIC, TZ
 
 agent_bp = Blueprint("agent", url_prefix="/agent")
 
@@ -50,8 +50,8 @@ AGENT_SCHEMA = {
         "current_task_id": {"type": "string", "nullable": True, "description": "当前主任务ID"},
         "heartbeat_at": {"type": "string", "nullable": True, "description": "最近心跳时间"},
         "metadata": {"type": "object", "description": "扩展元数据"},
-        "runtime": {"type": "string", "description": "运行时类型，默认nanobot"},
-        "system_instruction": {"type": "string", "nullable": True, "description": "调用Nanobot时使用的system_instruction提示词"},
+        "runtime": {"type": "string", "description": "运行时类型，默认 lion_agent"},
+        "system_instruction": {"type": "string", "nullable": True, "description": "调用 lion_agent 时使用的 system_instruction 提示词"},
         "prompt_config": {"type": "object", "description": "提示词扩展配置"},
         "is_builtin": {"type": "boolean", "description": "是否为内置智能体"},
     },
@@ -193,7 +193,7 @@ def _agent_payload(data: dict, *, partial: bool = False) -> dict:
 
     if not partial:
         payload.setdefault("status", "idle")
-        payload.setdefault("runtime", "nanobot")
+        payload.setdefault("runtime", "lion_agent")
 
     return payload
 
@@ -206,10 +206,10 @@ CREATE_AGENT_BODY = {
         "name": {"type": "string", "description": "智能体名称"},
         "description": {"type": "string", "description": "智能体说明"},
         "capabilities": {"type": "array", "items": {"type": "string"}, "description": "能力标签列表，指挥中心按此调度"},
-        "system_instruction": {"type": "string", "description": "调用Nanobot时注入的system_instruction提示词"},
+        "system_instruction": {"type": "string", "description": "调用 lion_agent 时注入的 system_instruction 提示词"},
         "prompt_config": {"type": "object", "description": "提示词扩展配置，如变量、模板来源等"},
         "is_builtin": {"type": "boolean", "description": "是否为内置智能体，默认false"},
-        "runtime": {"type": "string", "description": "运行时类型，默认nanobot"},
+        "runtime": {"type": "string", "description": "运行时类型，默认 lion_agent"},
         "metadata": {"type": "object", "description": "扩展元数据"},
         "status": {"type": "string", "description": "状态: idle,busy,offline,error", "default": "idle"},
         "max_concurrent": {"type": "integer", "minimum": 1, "description": "最大并发任务数"},
@@ -220,7 +220,7 @@ CREATE_AGENT_BODY = {
 @agent_bp.post("/create")
 @openapi.definition(
     summary="创建智能体",
-    description="创建一个可被指挥中心调度的Nanobot智能体配置。数据落在command_center_agent表。需要agent:c权限。",
+    description="创建一个可被指挥中心调度的智能体配置。数据落在command_center_agent表。需要agent:c权限。",
     body=_json_body(CREATE_AGENT_BODY),
     response=_response("创建成功", AGENT_SCHEMA, {"400": "参数错误", "409": "智能体已存在"}),
 )
@@ -330,7 +330,7 @@ async def detail_agent(request: Request):
 @agent_bp.post("/update")
 @openapi.definition(
     summary="更新智能体",
-    description="更新智能体基础信息、能力标签、Nanobot system_instruction和提示词配置。内置智能体不可改为非内置。需要agent:u权限。",
+    description="更新智能体基础信息、能力标签、lion_agent system_instruction 和提示词配置。内置智能体不可改为非内置。需要agent:u权限。",
     body=_json_body(
         {
             "type": "object",
@@ -397,16 +397,18 @@ async def delete_agent(request: Request):
 
 
 async def _run_agent_task(task_id: str, tenant_id: str, agent: CommandAgent, prompt: str, run_id: str, operator_id: str) -> None:
-    """后台异步执行 Nanobot 任务，结果写回 CommandTask"""
+    """后台异步执行智能体任务，结果写回 CommandTask"""
     task = await CommandTask.get_or_none(id=task_id, tenant_id=tenant_id, deleted=False)
     if not task:
         return
 
-    workspace = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / agent.agent_key / run_id
-    client = NanobotClient(session_id=run_id, workspace=workspace)
-
     try:
-        result = await client.ask(message=prompt, streaming=False, session_key=run_id)
+        result = await execute_prompt(
+            workspace_id=workspace_id_for(tenant_id, agent.agent_key),
+            session_id=run_id,
+            request_id=task_id,
+            message=prompt,
+        )
         task.status = "completed"
         task.progress = 100
         task.result = result
@@ -442,7 +444,7 @@ async def _run_agent_task(task_id: str, tenant_id: str, agent: CommandAgent, pro
 @agent_bp.post("/execute")
 @openapi.definition(
     summary="向智能体下发执行任务",
-    description="指定智能体和任务内容，后台异步创建 Nanobot 实例执行任务，立即返回 run_id 和 task_id 用于后续查询结果。需要 agent:u 权限。",
+    description="指定智能体和任务内容，后台异步调用 lion_agent 执行任务，立即返回 run_id 和 task_id 用于后续查询结果。需要 agent:u 权限。",
     body=_json_body(
         {
             "type": "object",
@@ -811,11 +813,14 @@ async def report_polish(request: Request):
         raise CustomError(ErrorCode.NOT_FOUND)
 
     run_id = gen_run_id()
-    workspace = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / agent.agent_key / run_id
-    client = NanobotClient(session_id=run_id, workspace=workspace)
 
     try:
-        result = await client.ask(message=prompt, streaming=False, session_key=run_id)
+        result = await execute_prompt(
+            workspace_id=workspace_id_for(tenant_id, agent.agent_key),
+            session_id=run_id,
+            request_id=f"report-polish:{run_id}",
+            message=prompt,
+        )
     except Exception as exc:
         raise CustomError(ErrorCode.INTERNAL_ERROR)
 
@@ -1298,4 +1303,3 @@ async def report_fetch_run(request: Request):
         "name": doc.name,
         "content": base64.b64encode(resolved).decode("utf-8"),
     })
-

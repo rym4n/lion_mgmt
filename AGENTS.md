@@ -40,12 +40,12 @@ Important entry points:
 
 - `server.py` starts Sanic on `0.0.0.0:8000`.
 - `services/__init__.py` owns `create_app()` and all blueprint registration.
-- `settings/__init__.py` owns environment loading, logging, Redis cache config, Tortoise config, Kafka topics, object storage, Nanobot and LLM settings.
+- `settings/__init__.py` owns environment loading, logging, Redis cache config, Tortoise config, Kafka topics, object storage, lion_agent endpoints and LLM settings.
 - `core/middlewares/security.py` owns authentication and audit-log publishing.
 - `core/listeners/cache.py` initializes Redis/OAuth config and starts `ChatManager` background listeners.
 - `models/base.py` defines `BaseModel`, soft delete, tenant scoping, and encrypted char fields.
-- `libs/nanobot.py` wraps the `nanobot-ai` pip package and bridges streaming output to Redis.
-- `services/command_center/dispatcher.py` uses Nanobot to choose an available agent for command-center tasks.
+- `services/digital_employee/lion_agent_client.py` wraps internal HTTP calls to lion_agent for agent execution and streaming.
+- `services/command_center/dispatcher.py` uses lion_agent to choose an available agent for command-center tasks.
 
 License-gated blueprints are registered dynamically in `services/__init__.py` from `load_license().moduleList`. When adding a licensed feature, keep the module key, permission menu, blueprint name, and license key aligned.
 
@@ -92,7 +92,7 @@ Do not add new application source files at repository root. Root is for entrypoi
 - Store sensitive resource values through `EncryptedCharField`, encrypted JSON helpers, environment variables, or deployment secrets. Do not hardcode credentials.
 - When adding a business module, update `services/__init__.py`, permission definitions, license gating if needed, and migrations.
 - When adding or changing playbook/tool/action execution, preserve `run_id` tracking and Kafka topic contracts.
-- When changing Nanobot behavior, keep `config.json`, `libs/nanobot.py`, and `workspace-template/` responsibilities separated.
+- When changing agent runtime behavior, keep nanobot runtime code inside `lion_agent`; lion_mgmt should call it through `services/digital_employee/lion_agent_client.py`.
 
 ## Feature Boundaries
 
@@ -102,7 +102,7 @@ Do not add new application source files at repository root. Root is for entrypoi
 - `timed` owns scheduled execution of playbooks/actions.
 - `event_ingestion` owns source ingestion and Vector/VictoriaLogs configuration; `event` owns incident/event records and handling.
 - `warroom` and `libs/chat.py` own realtime room/message state and WebSocket delivery.
-- `ai`, `agent`, `command_center`, `mcp` and `libs/nanobot.py` own AI-facing and agent-facing workflows.
+- `ai`, `agent`, `command_center`, `mcp` and `services/digital_employee/lion_agent_client.py` own AI-facing and agent-facing workflows.
 - `inspection` owns inspection schedules, categories, targets, results and report generation.
 
 Keep edits inside the owning boundary unless the request truly crosses modules.

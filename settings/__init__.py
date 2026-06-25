@@ -23,10 +23,6 @@ os.makedirs(SUPERVISOR_PATH, exist_ok=True)
 LICENSE_DIR = os.path.join(BASE_DIR, "data/license")
 os.makedirs(LICENSE_DIR, exist_ok=True)
 
-# Nanobot workspace 基础路径
-NANOBOT_WORKSPACE_BASE = os.path.join(BASE_DIR, "data/workspaces")
-os.makedirs(NANOBOT_WORKSPACE_BASE, exist_ok=True)
-
 # 报告模板目录（内置模板 .docx 文件存放位置）
 REPORT_TEMPLATE_BASE = os.path.join(BASE_DIR, "workspace-template/reports")
 os.makedirs(REPORT_TEMPLATE_BASE, exist_ok=True)
@@ -34,6 +30,10 @@ os.makedirs(REPORT_TEMPLATE_BASE, exist_ok=True)
 # 用户报告文件存储目录
 REPORT_USER_BASE = os.path.join(BASE_DIR, "data/user-reports")
 os.makedirs(REPORT_USER_BASE, exist_ok=True)
+
+# 数字员工资源目录
+DIGITAL_EMPLOYEE_RESOURCES = os.environ.get("RY_DIGITAL_EMPLOYEE_RESOURCES") or os.path.join(BASE_DIR, "data/digital-employee")
+os.makedirs(DIGITAL_EMPLOYEE_RESOURCES, exist_ok=True)
 
 if os.environ.get("RY_ENV") == "DEV":
     try:
@@ -259,6 +259,15 @@ CACHE = {
 
 # Agent Server 配置
 RY_AGENT_SERVER = os.environ.get("RY_AGENT_SERVER", "http://192.168.12.254:8283")
+
+# 数字员工运行时服务
+LION_AGENT_ENDPOINT = os.environ.get("RY_LION_AGENT_ENDPOINT", "http://lion-agent:8000")
+LION_AGENT_INTERNAL_TOKEN = os.environ.get("RY_LION_AGENT_INTERNAL_TOKEN", "")
+
+# 数字员工长期记忆服务
+LION_MEMORY_ENDPOINT = os.environ.get("RY_LION_MEMORY_ENDPOINT", "http://lion-memory:8000")
+LION_MEMORY_ADMIN_EMAIL = os.environ.get("RY_LION_MEMORY_ADMIN_EMAIL", "admin@aioe.internal")
+LION_MEMORY_ADMIN_PASSWORD = os.environ.get("RY_LION_MEMORY_ADMIN_PASSWORD", "")
 
 # 服务基础 URL（用于构造回调地址）
 RY_SERVICE_URL = os.environ.get("RY_SERVICE_URL", "http://localhost:8000")

@@ -1,13 +1,11 @@
 # coding=utf-8
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Iterable, Protocol
 
 import orjson
 from sanic.log import logger
 
-from libs.nanobot import NanobotClient
-from settings import NANOBOT_WORKSPACE_BASE
+from services.digital_employee.lion_agent_adapter import execute_prompt, workspace_id_for
 
 
 class AgentCandidate(Protocol):
@@ -65,7 +63,7 @@ def _agent_payload(agent: AgentCandidate) -> dict:
         "max_concurrent": agent.max_concurrent,
         "available": is_agent_available(agent),
         "metadata": agent.metadata or {},
-        "runtime": getattr(agent, "runtime", "nanobot"),
+        "runtime": getattr(agent, "runtime", "lion_agent"),
         "is_builtin": getattr(agent, "is_builtin", False),
     }
 
@@ -90,7 +88,7 @@ def _task_payload(task: DispatchTask) -> dict:
 
 def _extract_json_object(text: str) -> dict:
     if not text or not text.strip():
-        raise ValueError("Nanobot returned empty dispatch decision")
+        raise ValueError("lion_agent returned empty dispatch decision")
     content = text.strip()
     if content.startswith("```"):
         lines = content.splitlines()
@@ -102,7 +100,7 @@ def _extract_json_object(text: str) -> dict:
     start = content.find("{")
     end = content.rfind("}")
     if start == -1 or end == -1 or end < start:
-        raise ValueError("Nanobot dispatch decision is not JSON")
+        raise ValueError("lion_agent dispatch decision is not JSON")
     return orjson.loads(content[start : end + 1])
 
 
@@ -151,12 +149,12 @@ def _build_dispatch_prompt(task: DispatchTask, agents: list[AgentCandidate], coo
 </user_message>"""
 
 
-async def choose_agent_with_nanobot(
+async def choose_agent_with_lion_agent(
     task: DispatchTask,
     agents: Iterable[AgentCandidate],
     coordinator: AgentCandidate | None = None,
 ) -> DispatchDecision:
-    """使用 Nanobot 判断指挥中心任务应该分配给哪个智能体。"""
+    """使用 lion_agent 判断指挥中心任务应该分配给哪个智能体。"""
 
     candidates = [agent for agent in agents if not coordinator or agent.id != coordinator.id]
     requested_agent_id = task.requested_agent_id
@@ -164,20 +162,23 @@ async def choose_agent_with_nanobot(
         return DispatchDecision(None, "no_candidate", "当前没有可分配的候选智能体", requested_agent_id=requested_agent_id)
 
     session_key = f"command-center-dispatch:{task.id}"
-    workspace = Path(NANOBOT_WORKSPACE_BASE) / task.tenant_id / "workspace"
-    client = NanobotClient(session_id=session_key, workspace=workspace)
     prompt = _build_dispatch_prompt(task, candidates, coordinator)
 
     try:
-        raw_response = await client.ask(message=prompt, streaming=False, session_key=session_key)
+        raw_response = await execute_prompt(
+            workspace_id=workspace_id_for(task.tenant_id, "command-center"),
+            session_id=session_key,
+            request_id=str(task.id),
+            message=prompt,
+        )
         decision_payload = _extract_json_object(raw_response)
     except Exception as exc:
-        logger.error(f"Nanobot 调度决策失败: task_id={task.id}, error={exc}")
-        return DispatchDecision(None, "no_candidate", f"Nanobot 调度决策失败: {exc}", requested_agent_id=requested_agent_id)
+        logger.error(f"lion_agent 调度决策失败: task_id={task.id}, error={exc}")
+        return DispatchDecision(None, "no_candidate", f"lion_agent 调度决策失败: {exc}", requested_agent_id=requested_agent_id)
 
     selected_key = decision_payload.get("agent_key") or decision_payload.get("agent_id")
     selected_agent = _find_agent(candidates, selected_key)
-    reason = decision_payload.get("reason") or "Nanobot 已完成调度判断"
+    reason = decision_payload.get("reason") or "lion_agent 已完成调度判断"
 
     if not selected_key:
         return DispatchDecision(None, "no_candidate", reason, requested_agent_id=requested_agent_id, raw_response=raw_response)
@@ -185,7 +186,7 @@ async def choose_agent_with_nanobot(
         return DispatchDecision(
             None,
             "no_candidate",
-            f"Nanobot 返回的智能体 {selected_key} 不存在于候选列表，无法分配",
+            f"lion_agent 返回的智能体 {selected_key} 不存在于候选列表，无法分配",
             requested_agent_id=requested_agent_id,
             raw_response=raw_response,
         )
@@ -193,7 +194,7 @@ async def choose_agent_with_nanobot(
         return DispatchDecision(
             None,
             "no_candidate",
-            f"Nanobot 返回的智能体 {selected_agent.agent_key} 当前不可用，无法分配",
+            f"lion_agent 返回的智能体 {selected_agent.agent_key} 当前不可用，无法分配",
             requested_agent_id=requested_agent_id,
             raw_response=raw_response,
         )

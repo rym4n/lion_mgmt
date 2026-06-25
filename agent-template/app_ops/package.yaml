@@ -1,0 +1,11 @@
+type: role
+role_key: app_ops
+bundle_key: aioe-digital-employees-builtin-app-ops
+version: 1
+vendor: aioe
+license_required: false
+is_builtin: true
+default_skill_keys:
+  - app_troubleshoot
+  - app_audit_review
+  - app_runtime_health

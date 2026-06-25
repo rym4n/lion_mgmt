@@ -1,0 +1,12 @@
+type: role
+role_key: monitor
+bundle_key: aioe-digital-employees-builtin-monitor
+version: 1
+vendor: aioe
+license_required: false
+is_builtin: true
+default_skill_keys:
+  - alert_triage
+  - asset_health_inspect
+  - incident_drill_down
+  - shift_report_compose

@@ -17,3 +17,5 @@ from .warroom import *
 from .webhook import *
 from .command_center import *
 from .report import *
+from .digital_employee import *
+from .employee_report import *

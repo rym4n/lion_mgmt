@@ -15,17 +15,16 @@ import uuid
 
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
-from pathlib import Path
 from docxtpl import DocxTemplate
 from sanic.log import logger
-from libs.nanobot import NanobotClient
 from libs.utils import upload_to_s3
 from tortoise.expressions import Q
 from litellm import acompletion
 from models import InspectionSchedule, InspectionCategory, InspectionTarget, InspectionResult, Tool, ToolAction, Timed, Playbook, PlaybookVersion
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from settings import RY_AI_MODEL, RY_AI_API_BASE, LLM_KEY, NANOBOT_WORKSPACE_BASE
+from services.digital_employee.lion_agent_adapter import execute_prompt, workspace_id_for
+from settings import RY_AI_MODEL, RY_AI_API_BASE, LLM_KEY
 
 INSPECTION_CATEGORY_TYPE_ACTION = "action"
 INSPECTION_CATEGORY_TYPE_PLAYBOOK = "playbook"
@@ -1091,18 +1090,17 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str, cat
 
 def _extract_json_object(text: Any) -> Dict[str, Any]:
     """
-    从 Nanobot 返回内容中提取 JSON 对象。
-    Nanobot 不像 litellm response_format 那样强制结构化输出，这里兼容纯 JSON、
-    markdown fenced code，以及前后带解释文本的情况。
+    从 AI 返回内容中提取 JSON 对象，兼容纯 JSON、markdown fenced code、
+    以及前后带解释文本的情况。
     """
     if isinstance(text, (bytes, bytearray)):
         text = text.decode()
     if not isinstance(text, str):
-        raise ValueError("Nanobot response is not text")
+        raise ValueError("AI response is not text")
 
     content = text.strip()
     if not content:
-        raise ValueError("Nanobot response is empty")
+        raise ValueError("AI response is empty")
 
     if content.startswith("```"):
         lines = content.splitlines()
@@ -1122,7 +1120,7 @@ def _extract_json_object(text: Any) -> Dict[str, Any]:
         parsed = orjson.loads(content[start : end + 1])
 
     if not isinstance(parsed, dict):
-        raise ValueError("Nanobot response JSON is not an object")
+        raise ValueError("AI response JSON is not an object")
 
     return parsed
 
@@ -1138,7 +1136,7 @@ def _normalize_ai_judgment(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
         parsed_data["passed"] = bool(passed)
 
     if "reason" not in parsed_data or not parsed_data["reason"]:
-        parsed_data["reason"] = "Nanobot未提供判断理由"
+        parsed_data["reason"] = "AI未提供判断理由"
     elif not isinstance(parsed_data["reason"], str):
         parsed_data["reason"] = str(parsed_data["reason"])
 
@@ -1605,7 +1603,7 @@ def _judge_result_by_rule(rule: Dict[str, Any], result_data: Any, rule_generated
 
 
 async def _generate_inspection_judgment_rule(target: InspectionTarget, result_data: Any, tenant_id: str) -> Dict[str, Any]:
-    """首次巡检结果到达时由 Nanobot 生成可复用判断规则。"""
+    """首次巡检结果到达时由 lion_agent 生成可复用判断规则。"""
     result_str = _json_text(result_data)
     prompt = f"""
 你是一个专业的IT运维巡检规则生成助手。请根据巡检标准生成可复用的本地判断规则。
@@ -1656,9 +1654,7 @@ async def _generate_inspection_judgment_rule(target: InspectionTarget, result_da
 }}
 """
 
-    tenant_workspace = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace"
     session_key = f"inspection:judgment_rule:{target.id}:{uuid.uuid4().hex}"
-    client = NanobotClient(session_id=session_key, workspace=tenant_workspace)
     full_message = f"""<system_instruction>
 【身份】你是 AIOE 平台的巡检判断规则生成助手。
 
@@ -1678,35 +1674,40 @@ async def _generate_inspection_judgment_rule(target: InspectionTarget, result_da
 
     for attempt in range(max_retries):
         try:
-            logger.info(f"准备调用 Nanobot 生成巡检判断规则，target_id={target.id}, tenant_id={tenant_id}")
-            ai_response = await client.ask(message=full_message, streaming=False, session_key=session_key)
+            logger.info(f"准备调用 lion_agent 生成巡检判断规则，target_id={target.id}, tenant_id={tenant_id}")
+            ai_response = await execute_prompt(
+                workspace_id=workspace_id_for(tenant_id, "inspection"),
+                session_id=session_key,
+                request_id=f"inspection:judgment_rule:{target.id}",
+                message=full_message,
+            )
 
             if not ai_response or not ai_response.strip():
-                last_error = f"Nanobot返回空规则内容，已重试 {attempt + 1}/{max_retries}"
+                last_error = f"lion_agent返回空规则内容，已重试 {attempt + 1}/{max_retries}"
                 if attempt < max_retries - 1:
                     continue
                 break
 
             judgment_rule = _normalize_judgment_rule(_extract_json_object(ai_response))
             judgment_rule["source_standard"] = target.standard
-            judgment_rule["generated_by"] = "nanobot"
+            judgment_rule["generated_by"] = "lion_agent"
             return judgment_rule
         except (orjson.JSONDecodeError, ValueError) as e:
             last_error = f"判断规则解析失败: {str(e)}"
             if attempt < max_retries - 1:
                 continue
         except Exception as e:
-            last_error = f"Nanobot生成判断规则失败: {str(e)}"
+            last_error = f"lion_agent生成判断规则失败: {str(e)}"
             if attempt < max_retries - 1:
                 continue
 
-    raise ValueError(last_error or "Nanobot生成判断规则失败")
+    raise ValueError(last_error or "lion_agent生成判断规则失败")
 
 
 async def judge_inspection_result(target_id: str, result_data: Any, tenant_id: str) -> Dict[str, Any]:
     """
     使用巡检项上的判断规则判断巡检结果。
-    首次没有规则时由 Nanobot 根据巡检标准生成规则并持久化，后续直接本地判断。
+    首次没有规则时由 lion_agent 根据巡检标准生成规则并持久化，后续直接本地判断。
     """
     target = await InspectionTarget.filter(id=target_id, deleted=False, tenant_id=tenant_id).first()
 
@@ -1728,7 +1729,7 @@ async def judge_inspection_result(target_id: str, result_data: Any, tenant_id: s
                 {
                     "passed": False,
                     "reason": f"生成巡检判断规则失败: {str(e)}",
-                    "diagnosis": "Nanobot未能生成可执行判断规则，无法进行本地规则判断。建议检查巡检标准是否明确，或人工配置判断规则。",
+                    "diagnosis": "lion_agent未能生成可执行判断规则，无法进行本地规则判断。建议检查巡检标准是否明确，或人工配置判断规则。",
                     "suggestions": ["请检查巡检标准是否可量化", "请人工复核巡检结果或补充判断规则"],
                     "judgment_source": "rule_generation_failed",
                     "rule_generated": False,

@@ -1,0 +1,12 @@
+type: role
+role_key: network_ops
+bundle_key: aioe-digital-employees-builtin-network-ops
+version: 1
+vendor: aioe
+license_required: false
+is_builtin: true
+default_skill_keys:
+  - network_inspect
+  - network_traffic_optimize
+  - network_troubleshoot
+  - device_config_backup

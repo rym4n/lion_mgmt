@@ -68,7 +68,7 @@ API 创建剧本/动作执行请求
 | 作战室 | `services/warroom/views.py`, `models/warroom.py` | 公共/私聊房间、邀请、加入、收藏、消息列表。 |
 | 实时消息 | `warroom_bp.websocket("/ws")`, `libs/chat.py` | WebSocket 连接管理，Redis/Kafka 消息消费与广播。 |
 | AI 问答 | `services/ai/views.py`, `libs/chat.py` | 对话补全、AI 消息创建/发布、工具和剧本推荐词。 |
-| Nanobot 流式输出 | `libs/nanobot.py` | 将 Nanobot 的流式文本、工具调用状态桥接到 Redis Pub/Sub。 |
+| Agent 流式输出 | `services/digital_employee/lion_agent_client.py`, `libs/chat.py` | 经 lion_agent 执行并将流式文本、工具调用状态桥接到 Redis Pub/Sub。 |
 
 作战室是运行日志、AI 回复、协同讨论和事件处置的实时界面后端。
 
@@ -78,11 +78,11 @@ API 创建剧本/动作执行请求
 | --- | --- | --- |
 | 智能体画像 | `services/agent/views.py`, `models/command_center.py` | 智能体创建、列表、详情、更新、删除、执行与报告。 |
 | 指挥中心调度 | `services/command_center` | 智能体登记、状态心跳、任务创建、进度更新、重新调度。 |
-| Nanobot 调度决策 | `services/command_center/dispatcher.py` | 使用内置协调智能体和候选能力标签选择可用智能体。 |
+| Agent 调度决策 | `services/command_center/dispatcher.py` | 通过 lion_agent 的协调提示词和候选能力标签选择可用智能体。 |
 | MCP 接入 | `services/mcp/views.py`, `services/mcp/server.py` | SSE 与 message 端点，向模型工具生态暴露服务能力。 |
-| Workspace 模板 | `workspace-template`, `settings.NANOBOT_WORKSPACE_BASE` | 为每个租户/会话复制工作区模板，承载技能、提示词和会话文件。 |
+| Workspace 同步 | `services/digital_employee/prompt_builder.py`, `services/digital_employee/lion_agent_client.py` | 渲染员工工作区文件并同步到 lion_agent 运行时。 |
 
-`config.json` 定义 Nanobot 默认模型、Provider、Channel、工具开关、MCP Server 和 SSRF 白名单等运行配置。
+lion_mgmt 不再内置 nanobot SDK；旧智能体执行、作战室问答、巡检判断、调度决策和报告润色统一经 lion_agent 内部接口完成。
 
 ### 7. 巡检、报告、看板
 

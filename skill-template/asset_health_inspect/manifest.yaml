@@ -1,0 +1,13 @@
+key: asset_health_inspect
+name: 资产健康检查
+description: 汇总告警关联资产的基础健康状态和近期异常。
+trigger_instruction: 当任务给出资产、主机、服务或 IP 时，检查资产健康上下文。
+usage_notes: 只读查询优先；缺少数据源时明确说明缺口。
+bindings:
+  playbook_ids: []
+  action_keys: []
+  mcp_tools: []
+  nanobot_skills: []
+require_approval: false
+enabled: true
+version: 1

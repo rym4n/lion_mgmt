@@ -1,0 +1,11 @@
+type: role
+role_key: cloud_ops
+bundle_key: aioe-digital-employees-builtin-cloud-ops
+version: 1
+vendor: aioe
+license_required: false
+is_builtin: true
+default_skill_keys:
+  - cloud_config_audit
+  - cloud_capacity_plan
+  - cloud_cost_review

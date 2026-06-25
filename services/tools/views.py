@@ -28,10 +28,8 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.nanobot import NanobotClient
 from libs.security.authorization import load_license, requires_permission
 from libs.utils import gen_run_id
-from nanobot.agent import AgentHook, AgentHookContext
 from models import (
     ActionPermissions,
     Config,
@@ -45,7 +43,9 @@ from models import (
     ToolResources,
     ToolResourcesModel,
 )
-from settings import NANOBOT_WORKSPACE_BASE, TASK_TOPIC, TZ
+from services.digital_employee.lion_agent_adapter import stream_prompt_events, workspace_id_for
+from services.digital_employee.lion_agent_client import LionAgentClient
+from settings import TASK_TOPIC, TZ
 
 from PIL import Image
 
@@ -274,7 +274,13 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
         configuration.resources = config_data.get("resource")
         await configuration.save()
 
-    return {"tool": zip_filename, "msg": msg, "tool_name": tool_description}
+    return {
+        "tool": zip_filename,
+        "msg": msg,
+        "tool_name": tool_description,
+        "name": tool_name,
+        "version": version,
+    }
 
 
 def open_zip(zip_buffer):
@@ -3051,231 +3057,59 @@ async def sync_health_status(request):
     )
 
 
-class SSEStreamingHook(AgentHook):
-    """SSE 流式输出 Hook - 将 Nanobot 流式输出通过 SSE 发送"""
-
-    def __init__(self, sse_response, workspace_path: Path, session_id: str):
-        """
-        初始化 SSE 流式 Hook
-
-        Args:
-            sse_response: Sanic SSE 响应对象
-            workspace_path: nanobot workspace 路径，用于检测截图文件
-            session_id: 会话ID，用于创建会话专属的截图文件夹
-        """
-        self.sse_response = sse_response
-        self.workspace_path = workspace_path
-        self.session_id = session_id
-        self._has_content = False
-        self._screenshot_files = set()  # 记录已发送的截图文件
-        self._accumulated_content = ""  # 累积内容，用于检测代码 JSON
-        self._skip_streaming = False  # 是否跳过流式输出（检测到代码 JSON 时设置）
-
-    def wants_streaming(self) -> bool:
-        return True
-
-    async def on_stream(self, context: AgentHookContext, delta: str) -> None:
-        """流式输出时通过 SSE 发送"""
-        self._has_content = True
-        self._accumulated_content += delta
-
-        # 检测是否包含代码 JSON 特征，如果是则停止流式输出
-        if not self._skip_streaming:
-            # 检测代码 JSON 的开始标志
-            if ('"config"' in self._accumulated_content and '"main"' in self._accumulated_content) or ("```json" in self._accumulated_content and '"config"' in self._accumulated_content):
-                self._skip_streaming = True
-                logger.info("[SSEStreamingHook] 检测到代码 JSON，停止流式输出")
-                return
-
-        # 如果已经检测到代码 JSON，跳过流式输出
-        if self._skip_streaming:
-            return
-
-        try:
-            message = orjson.dumps({"status": "message", "content": delta}).decode()
-            await self.sse_response.send(f"data: {message}\n\n")
-        except Exception as e:
-            logger.error(f"[SSEStreamingHook] 发送流式消息失败: {e}")
-
-    async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
-        """流式输出结束时检测并提取代码 JSON"""
-        # 先检查 workspace 中是否有代码文件（优先从文件读取）
-        code_from_file = await self._extract_code_from_files()
-        if code_from_file:
-            await self._send_code_json(code_from_file)
-            # 恢复流式输出
-            self._skip_streaming = False
-            return
-
-        # 如果文件中没有，再尝试从累积内容中提取
-        await self._extract_and_send_code_json()
-        # 恢复流式输出
-        self._skip_streaming = False
-
-    async def _extract_code_from_files(self):
-        """从 workspace 文件中提取代码"""
-        try:
-            # 查找 config.json 和 main.py
-            config_path = self.workspace_path / "config.json"
-            main_path = self.workspace_path / "main.py"
-
-            if config_path.exists() and main_path.exists():
-                logger.info(f"[SSEStreamingHook] 从文件中提取代码: {config_path}, {main_path}")
-
-                # 读取文件内容
-                config_content = config_path.read_text(encoding="utf-8")
-                main_content = main_path.read_text(encoding="utf-8")
-
-                # 读取完成后删除文件
-                try:
-                    config_path.unlink()
-                    main_path.unlink()
-                    logger.info(f"[SSEStreamingHook] 已删除代码文件: {config_path}, {main_path}")
-                except Exception as e:
-                    logger.warning(f"[SSEStreamingHook] 删除代码文件失败: {e}")
-
-                return {"config": config_content, "main": main_content}
-        except Exception as e:
-            logger.error(f"[SSEStreamingHook] 从文件提取代码失败: {e}")
-
-        return None
-
-    async def _send_code_json(self, code_data):
-        """发送代码 JSON"""
-        try:
-            # 发送代码 JSON
-            message = orjson.dumps({"status": "code", "data": code_data}).decode()
-            await self.sse_response.send(f"data: {message}\n\n")
-            logger.info("[SSEStreamingHook] 已发送代码 JSON")
-        except Exception as e:
-            logger.error(f"[SSEStreamingHook] 发送代码 JSON 失败: {e}")
-
-    async def _extract_and_send_code_json(self):
-        """从累积内容中提取代码 JSON 并发送"""
-        try:
-            json_str = None
-
-            # 方式1: 查找 JSON 代码块（```json ... ```）
-            json_pattern = r"```json\s*\n(.*?)\n```"
-            matches = re.findall(json_pattern, self._accumulated_content, re.DOTALL)
-            if matches:
-                json_str = matches[-1].strip()
-
-            # 方式2: 查找纯 JSON 对象（{"config":...,"main":...}）
-            # 使用更宽松的匹配策略，查找完整的 JSON 对象
-            if not json_str:
-                # 查找所有可能的 JSON 对象起始位置
-                start_positions = [i for i, char in enumerate(self._accumulated_content) if char == "{"]
-
-                for start_pos in reversed(start_positions):  # 从后往前尝试
-                    # 尝试找到匹配的右括号
-                    brace_count = 0
-                    for end_pos in range(start_pos, len(self._accumulated_content)):
-                        if self._accumulated_content[end_pos] == "{":
-                            brace_count += 1
-                        elif self._accumulated_content[end_pos] == "}":
-                            brace_count -= 1
-                            if brace_count == 0:
-                                # 找到完整的 JSON 对象
-                                potential_json = self._accumulated_content[start_pos : end_pos + 1]
-                                try:
-                                    # 尝试解析
-                                    test_data = orjson.loads(potential_json)
-                                    # 检查是否包含 config 和 main 字段
-                                    if "config" in test_data and "main" in test_data:
-                                        json_str = potential_json
-                                        break
-                                except:
-                                    continue
-                    if json_str:
-                        break
-
+def _extract_code_json_from_text(content: str) -> dict | None:
+    json_str = None
+    matches = re.findall(r"```json\s*\n(.*?)\n```", content, re.DOTALL)
+    if matches:
+        json_str = matches[-1].strip()
+    if not json_str:
+        start_positions = [index for index, char in enumerate(content) if char == "{"]
+        for start_pos in reversed(start_positions):
+            brace_count = 0
+            for end_pos in range(start_pos, len(content)):
+                if content[end_pos] == "{":
+                    brace_count += 1
+                elif content[end_pos] == "}":
+                    brace_count -= 1
+                    if brace_count == 0:
+                        potential_json = content[start_pos : end_pos + 1]
+                        try:
+                            parsed = orjson.loads(potential_json)
+                        except orjson.JSONDecodeError:
+                            continue
+                        if isinstance(parsed, dict) and "config" in parsed and "main" in parsed:
+                            json_str = potential_json
+                            break
             if json_str:
-                # 尝试解析 JSON
-                try:
-                    code_data = orjson.loads(json_str)
+                break
+    if not json_str:
+        return None
+    try:
+        code_data = orjson.loads(json_str)
+    except orjson.JSONDecodeError as exc:
+        logger.warning(f"[lion_agent_browser] 解析代码 JSON 失败: {exc}")
+        return None
+    if not isinstance(code_data, dict) or "config" not in code_data or "main" not in code_data:
+        return None
+    for key in ("config", "main"):
+        if isinstance(code_data.get(key), str):
+            code_data[key] = code_data[key].replace("\\n", "\n").replace("\\t", "\t")
+    return code_data
 
-                    # 检查是否包含 config 和 main 字段
-                    if "config" in code_data and "main" in code_data:
-                        # 将转义的换行符转换为真正的换行符
-                        if "config" in code_data and isinstance(code_data["config"], str):
-                            code_data["config"] = code_data["config"].replace("\\n", "\n").replace("\\t", "\t")
-                        if "main" in code_data and isinstance(code_data["main"], str):
-                            code_data["main"] = code_data["main"].replace("\\n", "\n").replace("\\t", "\t")
 
-                        # 发送代码 JSON
-                        await self._send_code_json(code_data)
-                except orjson.JSONDecodeError as e:
-                    logger.warning(f"[SSEStreamingHook] 解析代码 JSON 失败: {e}")
-                    logger.debug(f"[SSEStreamingHook] 失败的 JSON 字符串前100字符: {json_str[:100]}")
-        except Exception as e:
-            logger.error(f"[SSEStreamingHook] 提取代码 JSON 失败: {e}")
+async def _send_browser_sse(resp, payload: dict) -> None:
+    await resp.send(f"data: {orjson.dumps(payload).decode()}\n\n")
 
-    async def before_execute_tools(self, context: AgentHookContext) -> None:
-        """在执行工具前发送工具调用信息"""
-        if not context.tool_calls:
-            return
 
-        for tool_call in context.tool_calls:
-            tool_name = tool_call.name
-            try:
-                # 发送工具执行状态
-                message = orjson.dumps({"status": "executing", "message": f"正在执行 {tool_name}..."}).decode()
-                await self.sse_response.send(f"data: {message}\n\n")
-            except Exception as e:
-                logger.error(f"[SSEStreamingHook] 发送工具调用消息失败: {e}")
-
-    async def after_iteration(self, context: AgentHookContext) -> None:
-        """在每次迭代后检查截图文件并发送"""
-        # 检查 workspace 中的截图文件
-        try:
-            screenshot_patterns = ["*.png", "*.jpg", "*.jpeg", "*.svg"]
-            for pattern in screenshot_patterns:
-                for screenshot_path in self.workspace_path.glob(pattern):
-                    # 只发送新的截图文件
-                    if screenshot_path not in self._screenshot_files:
-                        self._screenshot_files.add(screenshot_path)
-                        await self._send_screenshot(screenshot_path)
-        except Exception as e:
-            logger.error(f"[SSEStreamingHook] 检查截图文件失败: {e}")
-
-        # 如果有错误，发送错误消息
-        if context.error:
-            try:
-                if context.tool_calls:
-                    error_msg = "工具执行失败"
-                else:
-                    error_msg = "AI 调用失败，请稍后重试"
-
-                message = orjson.dumps({"status": "error", "message": error_msg}).decode()
-                await self.sse_response.send(f"data: {message}\n\n")
-            except Exception as e:
-                logger.error(f"[SSEStreamingHook] 发送错误消息失败: {e}")
-
-    async def _send_screenshot(self, screenshot_path: Path):
-        """发送截图文件（base64 编码）并删除文件"""
-        try:
-            with open(screenshot_path, "rb") as f:
-                screenshot_data = base64.b64encode(f.read()).decode()
-
-            message = orjson.dumps({"status": "screenshot", "data": screenshot_data, "filename": screenshot_path.name}).decode()
-            await self.sse_response.send(f"data: {message}\n\n")
-            logger.info(f"[SSEStreamingHook] 已发送截图: {screenshot_path.name}")
-
-            # 发送后立即删除文件，节省磁盘空间
-            try:
-                screenshot_path.unlink()
-                logger.info(f"[SSEStreamingHook] 已删除截图文件: {screenshot_path.name}")
-            except Exception as del_error:
-                logger.warning(f"[SSEStreamingHook] 删除截图文件失败: {del_error}")
-        except Exception as e:
-            logger.error(f"[SSEStreamingHook] 发送截图失败: {e}")
+def _tool_name_from_payload(payload: dict) -> str:
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    return str(data.get("name") or data.get("tool_name") or data.get("tool") or "tool")
 
 
 @tools_bp.post("/browser/document/upload")
 @openapi.definition(
     summary="上传应用开发文档",
-    description="上传文档到当前租户的 workspace-template/docs，并同步到当前 workspace/docs 供 Nanobot 在应用开发时阅读（需要工具创建权限）",
+    description="上传文档并同步到当前租户的 lion_agent browser workspace（需要工具创建权限）",
     body={
         "multipart/form-data": {
             "schema": {
@@ -3327,10 +3161,10 @@ class SSEStreamingHook(AgentHook):
 @requires_permission("tool:c")
 async def upload_browser_document(request):
     """
-    上传应用开发文档到当前租户的 Nanobot 文档目录。
+    上传应用开发文档到当前租户的 lion_agent browser workspace。
 
     保存位置：
-    1. data/workspaces/{tenant_id}/workspace/docs：当前 Nanobot workspace 可直接读取的目录
+    1. lion_agent workspace docs：当前 browser workspace 可直接读取的目录
     """
     if not request.files or "file" not in request.files:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -3339,11 +3173,8 @@ async def upload_browser_document(request):
     if not tenant_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    tenant_root = Path(NANOBOT_WORKSPACE_BASE) / str(tenant_id)
-    workspace_docs_dir = tenant_root / "workspace" / APP_DEV_DOCS_DIR
-    workspace_docs_dir.mkdir(parents=True, exist_ok=True)
-
     saved_files = []
+    extra_files = {}
     for uploaded_file in request.files.getlist("file"):
         original_name = getattr(uploaded_file, "name", None) or getattr(uploaded_file, "filename", None) or ""
         filename = _safe_app_dev_doc_filename(original_name)
@@ -3355,16 +3186,17 @@ async def upload_browser_document(request):
         if not file_body or len(file_body) > MAX_APP_DEV_DOC_SIZE:
             raise CustomError(ErrorCode.PARAM_ERROR)
 
-        workspace_path = _ensure_path_inside_base(workspace_docs_dir / filename, workspace_docs_dir)
-        workspace_path.write_bytes(file_body)
+        rel_path = f"{APP_DEV_DOCS_DIR}/{filename}"
+        extra_files[rel_path] = {"encoding": "base64", "data": base64.b64encode(file_body).decode("ascii")}
 
         saved_files.append(
             {
                 "filename": filename,
                 "size": len(file_body),
-                "workspace_path": str(workspace_path.relative_to(tenant_root)).replace("\\", "/"),
+                "workspace_path": rel_path,
             }
         )
+    await LionAgentClient().sync_workspace(workspace_id_for(tenant_id, "browser"), {"extra": extra_files})
 
     return response_ok({"message": "文档上传成功", "files": saved_files})
 
@@ -3396,21 +3228,20 @@ async def upload_browser_document(request):
 @requires_permission("tool:r")
 async def browser_execute(request):
     """
-    通过 nanobot 执行智能任务
+    通过 lion_agent 执行智能任务
 
     工作流程：
     1. 接收自然语言任务描述
     2. 如果提供 session_id，加载历史上下文
-    3. 调用 nanobot 处理任务
-    4. nanobot 根据任务类型自动调用相应的 skill（浏览器自动化、SSH操作、API调用等）
+    3. 调用 lion_agent 处理任务
+    4. lion_agent 根据任务类型自动调用相应的 skill（浏览器自动化、SSH操作、API调用等）
     5. 实时返回执行进度、结果和截图
 
     SSE 事件类型：
     - status: starting - 开始处理任务
-    - status: processing - nanobot 正在理解任务
+    - status: processing - lion_agent 正在理解任务
     - status: executing - 正在执行工具
     - status: message - 文本消息流式输出
-    - status: screenshot - 截图数据（base64 编码）
     - status: code - 生成的代码（JSON 格式：{"config": "...", "main": "..."}）
     - status: completed - 任务执行完成
     - status: error - 执行出错
@@ -3431,8 +3262,7 @@ async def browser_execute(request):
 
         # 检查请求体是否有效
         if not request.json:
-            error_data = orjson.dumps({"status": "error", "message": "请求体必须是有效的 JSON"}).decode()
-            await resp.send(f"data: {error_data}\n\n")
+            await _send_browser_sse(resp, {"status": "error", "message": "请求体必须是有效的 JSON"})
             await resp.eof()
             return resp
 
@@ -3440,8 +3270,7 @@ async def browser_execute(request):
         session_id = request.json.get("session_id")
 
         if not task:
-            error_data = orjson.dumps({"status": "error", "message": "task 参数不能为空"}).decode()
-            await resp.send(f"data: {error_data}\n\n")
+            await _send_browser_sse(resp, {"status": "error", "message": "task 参数不能为空"})
             await resp.eof()
             return resp
 
@@ -3453,46 +3282,63 @@ async def browser_execute(request):
         tenant_id = request.ctx.session.get("tenant_id")
 
         # 返回 session_id 给客户端，用于后续请求
-        start_data = orjson.dumps({"status": "starting", "message": "开始处理任务...", "session_id": session_id}).decode()
-        await resp.send(f"data: {start_data}\n\n")
+        await _send_browser_sse(resp, {"status": "starting", "message": "开始处理任务...", "session_id": session_id})
 
-        # 1. 初始化 NanobotClient（使用当前租户的 workspace）
-        tenant_workspace = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace"
-        logger.info(f"初始化 NanobotClient，tenant_id={tenant_id}, session_id={session_id}, workspace={tenant_workspace}")
-
-        # 设置环境变量，让 agent-browser 将截图保存到 workspace
-        os.environ["AGENT_BROWSER_SCREENSHOT_DIR"] = str(tenant_workspace)
-
-        client = NanobotClient(session_id=session_id, workspace=tenant_workspace)
-
-        # 获取 workspace 路径用于检测截图
-        workspace_path = tenant_workspace
-
-        # 2. 创建 SSE 流式 Hook（传入 session_id）
-        hook = SSEStreamingHook(sse_response=resp, workspace_path=workspace_path, session_id=session_id)
-
-        # 3. 构建完整消息：静态执行规则由 workspace-template/AGENTS.md、SOUL.md、TOOLS.md 提供
+        # 构建完整消息：静态执行规则由 lion_agent workspace-template 提供
         full_message = f"""<user_task>
 {task}
 </user_task>"""
 
-        # 4. 发送处理状态
-        processing_data = orjson.dumps({"status": "processing", "message": "正在理解任务..."}).decode()
-        await resp.send(f"data: {processing_data}\n\n")
+        await _send_browser_sse(resp, {"status": "processing", "message": "正在理解任务..."})
 
-        # 5. 调用 nanobot（使用 session_id 保持上下文）
         session_key = f"browser:{session_id}"
 
-        logger.info(f"准备调用 nanobot，session_key={session_key}")
+        logger.info(f"准备调用 lion_agent，session_key={session_key}")
         logger.info(f"消息内容长度: {len(full_message)} 字符")
 
-        result = await client.ask(message=full_message, streaming=True, session_key=session_key, hooks=[hook])
+        accumulated_content = ""
+        code_sent = False
+        async for event_type, payload in stream_prompt_events(
+            workspace_id=workspace_id_for(tenant_id, "browser"),
+            session_id=session_key,
+            request_id=session_id,
+            message=full_message,
+        ):
+            if event_type == "delta":
+                content = str(payload.get("content") or payload.get("delta") or "")
+                if not content:
+                    continue
+                accumulated_content += content
+                if not code_sent and (code_data := _extract_code_json_from_text(accumulated_content)):
+                    await _send_browser_sse(resp, {"status": "code", "data": code_data})
+                    code_sent = True
+                    continue
+                if not code_sent:
+                    await _send_browser_sse(resp, {"status": "message", "content": content})
+            elif event_type == "thinking":
+                content = str(payload.get("content") or "")
+                if content:
+                    await _send_browser_sse(resp, {"status": "message", "content": content})
+            elif event_type == "tool_call":
+                await _send_browser_sse(resp, {"status": "executing", "message": f"正在执行 {_tool_name_from_payload(payload)}..."})
+            elif event_type == "progress":
+                screenshot = payload.get("screenshot") or payload.get("screenshots")
+                if screenshot:
+                    await _send_browser_sse(resp, {"status": "screenshot", "data": screenshot})
+            elif event_type == "error":
+                raise RuntimeError(payload.get("message") or payload)
+            elif event_type == "end":
+                content = str(payload.get("content") or "")
+                if content and not accumulated_content:
+                    accumulated_content = content
+                    if not code_sent and (code_data := _extract_code_json_from_text(accumulated_content)):
+                        await _send_browser_sse(resp, {"status": "code", "data": code_data})
+                        code_sent = True
+                    elif not code_sent:
+                        await _send_browser_sse(resp, {"status": "message", "content": content})
 
-        logger.info(f"Nanobot 调用完成，返回结果长度: {len(result) if result else 0} 字符")
-
-        # 6. 返回完成状态
-        completed_data = orjson.dumps({"status": "completed", "message": "任务执行完成"}).decode()
-        await resp.send(f"data: {completed_data}\n\n")
+        logger.info(f"lion_agent 调用完成，返回结果长度: {len(accumulated_content)} 字符")
+        await _send_browser_sse(resp, {"status": "completed", "message": "任务执行完成"})
 
     except Exception as e:
         logger.exception("自动化任务执行失败")
@@ -3517,7 +3363,7 @@ async def browser_execute(request):
 @tools_bp.post("/browser/session/delete")
 @openapi.definition(
     summary="删除应用智能开发会话",
-    description="删除指定会话的截图文件夹和 nanobot 会话历史（需要工具删除权限）",
+    description="删除指定应用智能开发会话（需要工具删除权限）",
     body={
         "application/json": {
             "schema": {
@@ -3557,21 +3403,10 @@ async def delete_browser_session(request):
     """
     删除浏览器自动化会话
 
-    删除内容：
-    1. 应用开发会话
+    lion_agent 持有 workspace 会话状态；当前接口保持兼容响应。
     """
     session_id = request.json.get("session_id")
     if not session_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    tenant_id = request.ctx.session.get("tenant_id")
-
-    sessions_file = Path(NANOBOT_WORKSPACE_BASE) / tenant_id / "workspace/sessions" / f"browser-{session_id}"
-    if sessions_file.exists():
-        try:
-            os.remove(sessions_file)
-            return response_ok({"message": "会话删除成功"})
-        except Exception as e:
-            logger.error(f"删除 workspace 失败: {e}")
-            return response_ok({"message": "会话删除失败"})
 
     return response_ok({"message": "会话删除成功"})

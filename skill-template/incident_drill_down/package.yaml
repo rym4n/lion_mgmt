@@ -1,0 +1,5 @@
+type: skill
+skill_key: incident_drill_down
+version: 1
+vendor: aioe
+is_builtin: true

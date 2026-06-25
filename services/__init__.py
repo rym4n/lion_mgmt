@@ -17,6 +17,7 @@ from services.agent.views import agent_bp
 from services.ai.views import ai_bp
 from services.approvement.views import approve_bp
 from services.dashboard.views import dashboard_bp
+from services.digital_employee.views import digital_employee_bp
 from services.event.views import event_bp
 from services.event_ingestion.views import event_ingestion_bp
 from services.inspection.views import inspection_bp
@@ -79,7 +80,8 @@ def register_blueprints(app: Sanic):
             "ai_bp": ai_bp,
             "agent_bp": agent_bp,
             "mcp_bp": mcp_bp,
-            "command_bp": command_bp
+            "command_bp": command_bp,
+            "digital_employee_bp": digital_employee_bp,
         }
         license_data = load_license()
         if license_data and "moduleList" in license_data:

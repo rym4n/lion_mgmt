@@ -1,0 +1,13 @@
+key: alert_triage
+name: 告警分诊
+description: 判断告警严重性、影响范围、重复噪音和升级路径。
+trigger_instruction: 当任务包含监控、安全或事件告警时，先执行告警分诊。
+usage_notes: 输出必须包含严重性、证据、建议处理岗位和是否需要升级。
+bindings:
+  playbook_ids: []
+  action_keys: []
+  mcp_tools: []
+  nanobot_skills: []
+require_approval: false
+enabled: true
+version: 1

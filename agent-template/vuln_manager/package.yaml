@@ -1,0 +1,12 @@
+type: role
+role_key: vuln_manager
+bundle_key: aioe-digital-employees-builtin-vuln-manager
+version: 1
+vendor: aioe
+license_required: false
+is_builtin: true
+default_skill_keys:
+  - vuln_scan
+  - vuln_track
+  - vuln_verify
+  - vuln_weekly_summary

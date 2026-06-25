@@ -1,0 +1,450 @@
+# coding=utf-8
+import io
+import json
+import shutil
+import tempfile
+import zipfile
+from dataclasses import dataclass, field
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import yaml
+from sanic.log import logger
+from tortoise.transactions import in_transaction
+
+from core.error_code import ErrorCode
+from libs.error_code.exception import CustomError
+from models.digital_employee import DigitalEmployeeRole, DigitalEmployeeSkill
+from models import Tool
+from models.user import Role
+from settings import DIGITAL_EMPLOYEE_RESOURCES
+from .package_format import PackageFormatError, UnsupportedPackageTypeError, inspect_package
+
+
+PACKAGE_SOURCE_ROOT = Path(__file__).resolve().parents[2]
+BUILTIN_AGENT_TEMPLATE_ROOT = PACKAGE_SOURCE_ROOT / "agent-template"
+BUILTIN_SKILL_TEMPLATE_ROOT = PACKAGE_SOURCE_ROOT / "skill-template"
+
+
+@dataclass
+class ImportResult:
+    package_type: str
+    imported: list[dict] = field(default_factory=list)
+    skipped: list[dict] = field(default_factory=list)
+
+    @property
+    def json(self) -> dict:
+        return {"package_type": self.package_type, "imported": self.imported, "skipped": self.skipped}
+
+
+def _read_yaml(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    return data
+
+
+def _read_json(path: Path) -> Any:
+    if not path.exists():
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise CustomError(ErrorCode.PACKAGE_INVALID) from exc
+
+
+def _inspect_or_error(file_bytes: bytes) -> tuple[str, dict]:
+    try:
+        return inspect_package(file_bytes)
+    except UnsupportedPackageTypeError as exc:
+        raise CustomError(ErrorCode.PACKAGE_TYPE_UNSUPPORTED) from exc
+    except PackageFormatError as exc:
+        raise CustomError(ErrorCode.PACKAGE_INVALID) from exc
+
+
+def _safe_extract(archive: zipfile.ZipFile, destination: Path) -> None:
+    root = destination.resolve()
+    for member in archive.infolist():
+        member_path = (destination / member.filename).resolve()
+        if root != member_path and root not in member_path.parents:
+            raise CustomError(ErrorCode.PACKAGE_INVALID)
+    archive.extractall(destination)
+
+
+def _archive_directory(archive: zipfile.ZipFile, source_root: Path, archive_root: str = "") -> None:
+    if not source_root.exists() or not source_root.is_dir():
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    for path in sorted(source_root.rglob("*")):
+        if path.is_dir():
+            continue
+        relative_path = path.relative_to(source_root).as_posix()
+        archive_path = f"{archive_root.rstrip('/')}/{relative_path}" if archive_root else relative_path
+        archive.write(path, archive_path)
+
+
+def _iter_child_dirs(path: Path) -> list[Path]:
+    if not path.exists():
+        return []
+    if not path.is_dir():
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    return sorted(child for child in path.iterdir() if child.is_dir())
+
+
+def _stage_files(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    if not path.is_dir():
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    return sorted(child.relative_to(path).as_posix() for child in path.rglob("*") if child.is_file())
+
+
+def _zip_directory_bytes(source: Path) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        _archive_directory(archive, source)
+    return buffer.getvalue()
+
+
+async def _cleanup_imported_action_artifacts(actions: list[dict]) -> None:
+    if not actions:
+        return
+    from libs import utils
+
+    for action in actions:
+        name = action.get("name")
+        version = action.get("version")
+        if not name or not version:
+            continue
+        try:
+            await utils.delete_from_s3("system", f"{name}/{version}.zip", "tools")
+            logo_path = action.get("logo_path")
+            if isinstance(logo_path, str) and logo_path.startswith("/files/user/tools/"):
+                await utils.delete_from_s3("user", logo_path.removeprefix("/files/user/tools/"), "tools")
+        except Exception as exc:
+            logger.warning("cleanup digital employee action artifact failed name=%s version=%s error=%s", name, version, exc)
+
+
+def _unwrap_route_handler(func):
+    while hasattr(func, "__wrapped__"):
+        func = func.__wrapped__
+    return func
+
+
+def _single_file_request(request, file_name: str, file_bytes: bytes):
+    class FileCollection:
+        def __init__(self, file_obj):
+            self.file_obj = file_obj
+
+        def get(self, key, default=None):
+            return self.file_obj if key == "file" else default
+
+    return SimpleNamespace(
+        files=FileCollection(SimpleNamespace(name=file_name, body=file_bytes)),
+        ctx=request.ctx,
+        app=request.app,
+    )
+
+
+async def _upsert_role(root: Path, package: dict, tenant_id: str, is_builtin: bool) -> DigitalEmployeeRole:
+    role_data = _read_yaml(root / "role.yaml")
+    role_key = str(package.get("role_key") or role_data.get("key") or "").strip()
+    if not role_key:
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    version = int(package.get("version") or role_data.get("version") or 1)
+    existing = await DigitalEmployeeRole.get_or_none(tenant_id=tenant_id, role_key=role_key, deleted=False)
+    if existing and existing.version > version:
+        raise CustomError(ErrorCode.PACKAGE_VERSION_LOWER)
+    defaults = {
+        "name": role_data.get("name") or package.get("name") or role_key,
+        "description": role_data.get("description") or package.get("description"),
+        "template_dir": str(root),
+        "default_skill_keys": role_data.get("default_skills") or role_data.get("default_skill_keys") or [],
+        "default_rbac_role_id": role_data.get("default_rbac_role_id") or role_data.get("default_rbac_role"),
+        "license_required": bool(package.get("license_required") or role_data.get("license_required") or False),
+        "version": version,
+        "is_builtin": is_builtin,
+        "enabled": bool(role_data.get("enabled", True)),
+        "meta": role_data,
+        "deleted": False,
+    }
+    role, _ = await DigitalEmployeeRole.update_or_create(
+        tenant_id=tenant_id,
+        role_key=role_key,
+        defaults=defaults,
+    )
+    return role
+
+
+async def _upsert_skill(root: Path, package: dict, tenant_id: str, is_builtin: bool) -> DigitalEmployeeSkill:
+    manifest = _read_yaml(root / "manifest.yaml")
+    skill_key = str(package.get("skill_key") or manifest.get("key") or "").strip()
+    if not skill_key:
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    version = int(package.get("version") or manifest.get("version") or 1)
+    existing = await DigitalEmployeeSkill.get_or_none(tenant_id=tenant_id, skill_key=skill_key, deleted=False)
+    if existing and existing.version > version:
+        raise CustomError(ErrorCode.PACKAGE_VERSION_LOWER)
+    defaults = {
+        "name": manifest.get("name") or package.get("name") or skill_key,
+        "description": manifest.get("description") or package.get("description"),
+        "skill_dir": str(root),
+        "bindings": manifest.get("bindings") or {},
+        "require_approval": bool(manifest.get("require_approval") or False),
+        "version": version,
+        "is_builtin": is_builtin,
+        "enabled": bool(manifest.get("enabled", True)),
+        "meta": manifest,
+        "deleted": False,
+    }
+    skill, _ = await DigitalEmployeeSkill.update_or_create(
+        tenant_id=tenant_id,
+        skill_key=skill_key,
+        defaults=defaults,
+    )
+    return skill
+
+
+async def _upsert_rbac_roles(root: Path) -> list[dict]:
+    imported: list[dict] = []
+    for role_file in sorted(root.glob("*.json")) + sorted(root.glob("*.yaml")) + sorted(root.glob("*.yml")):
+        data = _read_json(role_file) if role_file.suffix == ".json" else _read_yaml(role_file)
+        role_id = str(data.get("id") or data.get("key") or data.get("name") or "").strip()
+        role_name = str(data.get("name") or role_id).strip()
+        if not role_id or not role_name:
+            raise CustomError(ErrorCode.PACKAGE_INVALID)
+        permissions = data.get("permissions") or data.get("Permissions") or []
+        if not isinstance(permissions, list):
+            raise CustomError(ErrorCode.PACKAGE_INVALID)
+        role, created = await Role.get_or_create(
+            id=role_id,
+            defaults={
+                "name": role_name,
+                "description": data.get("description"),
+                "permissions": permissions,
+                "tenant_id": "__builtin__",
+            },
+        )
+        if not created and role.deleted:
+            role.deleted = False
+            role.name = role_name
+            role.description = data.get("description")
+            role.permissions = permissions
+            await role.save(update_fields=["deleted", "name", "description", "permissions", "utime"])
+        imported.append({"rbac_role_id": role.id, "name": role.name, "created": created})
+    return imported
+
+
+async def _import_bundle_actions(root: Path, tenant_id: str, request, cleanup_actions: list[dict]) -> tuple[list[dict], list[dict]]:
+    staged = _stage_files(root)
+    if not staged:
+        return [], []
+    if request is None:
+        return [], [
+            {
+                "type": "actions",
+                "reason": "action import requires request context; payload is staged in the extracted bundle",
+                "files": staged,
+            }
+        ]
+
+    from libs.security.authorization import load_license
+    from services.tools.views import upload_tool
+
+    lic = load_license()
+    if not lic:
+        raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
+
+    creator = request.ctx.session["account_info"].username
+    archives: list[tuple[str, bytes]] = []
+    archives.extend((item.name, item.read_bytes()) for item in sorted(root.rglob("*.zip")) if item.is_file())
+    if (root / "config.json").exists():
+        archives.append((f"{root.name}.zip", _zip_directory_bytes(root)))
+    else:
+        for child in sorted(item for item in root.iterdir() if item.is_dir() and (item / "config.json").exists()):
+            archives.append((f"{child.name}.zip", _zip_directory_bytes(child)))
+
+    if not archives:
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+
+    imported: list[dict] = []
+    skipped: list[dict] = []
+    for archive_name, archive_bytes in archives:
+        result = await upload_tool(SimpleNamespace(name=archive_name, body=archive_bytes), lic, creator, tenant_id, request)
+        if result and result.get("msg") == "success":
+            tool_name = result.get("name") or result.get("tool_name")
+            version = result.get("version")
+            tool_record = None
+            if tool_name and version:
+                tool_record = await Tool.get_or_none(name=tool_name, version=version, deleted=False, tenant_id=tenant_id)
+            imported.append({"type": "action", "file": archive_name, "tool_name": result.get("tool_name")})
+            if tool_name and version:
+                cleanup_actions.append(
+                    {
+                        "name": tool_name,
+                        "version": version,
+                        "logo_path": getattr(tool_record, "logo_path", None),
+                    }
+                )
+        else:
+            raise CustomError(ErrorCode.PACKAGE_PARTIAL_FAILURE)
+    return imported, skipped
+
+
+async def _import_bundle_playbooks(root: Path, request) -> tuple[list[dict], list[dict]]:
+    staged = _stage_files(root)
+    if not staged:
+        return [], []
+    if request is None:
+        return [], [
+            {
+                "type": "playbooks",
+                "reason": "playbook import requires request context; payload is staged in the extracted bundle",
+                "files": staged,
+            }
+        ]
+
+    from services.workflow.views import import_workflow
+
+    archives: list[tuple[str, bytes]] = []
+    if (root / "workflow.json").exists() or (root / "resources.json").exists():
+        archives.append((f"{root.name}.zip", _zip_directory_bytes(root)))
+    else:
+        archives.extend((item.name, item.read_bytes()) for item in sorted(root.rglob("*.zip")) if item.is_file())
+
+    if not archives:
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+
+    imported: list[dict] = []
+    handler = _unwrap_route_handler(import_workflow)
+    for archive_name, archive_bytes in archives:
+        await handler(_single_file_request(request, archive_name, archive_bytes))
+        imported.append({"type": "playbook", "file": archive_name})
+    return imported, []
+
+
+async def _import_bundle(root: Path, package: dict, tenant_id: str, is_builtin: bool, request=None) -> ImportResult:
+    package_tenant_id = "__builtin__" if is_builtin else tenant_id
+    imported: list[dict] = []
+    skipped: list[dict] = []
+
+    async with in_transaction():
+        for role_root in _iter_child_dirs(root / "roles"):
+            role_package = _read_yaml(role_root / "package.yaml")
+            role = await _upsert_role(role_root, role_package, package_tenant_id, is_builtin)
+            imported.append({"type": "role", "role_key": role.role_key, "id": role.id})
+
+        for skill_root in _iter_child_dirs(root / "skills"):
+            skill_package = _read_yaml(skill_root / "package.yaml")
+            skill = await _upsert_skill(skill_root, skill_package, package_tenant_id, is_builtin)
+            imported.append({"type": "skill", "skill_key": skill.skill_key, "id": skill.id})
+
+        rbac_root = root / "rbac_roles"
+        if rbac_root.exists():
+            for role in await _upsert_rbac_roles(rbac_root):
+                imported.append({"type": "rbac_role", **role})
+
+        imported_action_artifacts: list[dict] = []
+        try:
+            action_imported, action_skipped = await _import_bundle_actions(root / "actions", tenant_id, request, imported_action_artifacts)
+            imported.extend(action_imported)
+            skipped.extend(action_skipped)
+            playbook_imported, playbook_skipped = await _import_bundle_playbooks(root / "playbooks", request)
+            imported.extend(playbook_imported)
+            skipped.extend(playbook_skipped)
+        except Exception:
+            await _cleanup_imported_action_artifacts(imported_action_artifacts)
+            raise
+
+    return ImportResult(
+        package_type=str(package.get("type") or "bundle"),
+        imported=imported,
+        skipped=skipped,
+    )
+
+
+async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = False, operator_id: str | None = None, request=None) -> ImportResult:
+    package_type, package = _inspect_or_error(file_bytes)
+    package_tenant_id = "__builtin__" if is_builtin else tenant_id
+    package_name = package.get("role_key") or package.get("skill_key") or package.get("bundle_key") or "package"
+    target_root = Path(DIGITAL_EMPLOYEE_RESOURCES) / package_type / str(package_name)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_base = Path(tmp_dir)
+        tmp_root = tmp_base / "extract"
+        tmp_root.mkdir()
+        backup_root = tmp_base / "target-backup"
+        try:
+            with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
+                _safe_extract(archive, tmp_root)
+        except zipfile.BadZipFile as exc:
+            raise CustomError(ErrorCode.PACKAGE_INVALID) from exc
+
+        target_root.parent.mkdir(parents=True, exist_ok=True)
+        had_existing_target = target_root.exists()
+        if had_existing_target:
+            shutil.move(str(target_root), str(backup_root))
+
+        try:
+            shutil.copytree(tmp_root, target_root)
+            if package_type == "role":
+                role = await _upsert_role(target_root, package, package_tenant_id, is_builtin)
+                return ImportResult(package_type="role", imported=[{"role_key": role.role_key, "id": role.id}])
+            if package_type == "skill":
+                skill = await _upsert_skill(target_root, package, package_tenant_id, is_builtin)
+                return ImportResult(package_type="skill", imported=[{"skill_key": skill.skill_key, "id": skill.id}])
+            if package_type == "bundle":
+                return await _import_bundle(target_root, package, tenant_id, is_builtin, request=request)
+        except Exception:
+            if target_root.exists():
+                shutil.rmtree(target_root)
+            if had_existing_target and backup_root.exists():
+                shutil.move(str(backup_root), str(target_root))
+            raise
+
+    raise CustomError(ErrorCode.PACKAGE_TYPE_UNSUPPORTED)
+
+
+async def export_package(role_key: str | None = None, skill_key: str | None = None, bundle: bool = False) -> bytes:
+    if not role_key and not skill_key:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if bundle and not role_key:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        if bundle:
+            role_source = BUILTIN_AGENT_TEMPLATE_ROOT / str(role_key)
+            role_package = _read_yaml(role_source / "package.yaml")
+            skill_keys = role_package.get("default_skill_keys") or _read_yaml(role_source / "role.yaml").get("default_skills") or []
+            bundle_key = role_package.get("bundle_key") or role_key
+            archive.writestr(
+                "package.yaml",
+                yaml.safe_dump(
+                    {
+                        "type": "bundle",
+                        "bundle_key": bundle_key,
+                        "role_key": role_key,
+                        "version": role_package.get("version", 1),
+                        "vendor": role_package.get("vendor", "aioe"),
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+            )
+            _archive_directory(archive, role_source, f"roles/{role_key}")
+            for default_skill_key in skill_keys:
+                skill_source = BUILTIN_SKILL_TEMPLATE_ROOT / str(default_skill_key)
+                if not skill_source.exists():
+                    raise CustomError(ErrorCode.PACKAGE_INVALID)
+                _archive_directory(archive, skill_source, f"skills/{default_skill_key}")
+        else:
+            package_type = "role" if role_key else "skill"
+            package_key = role_key or skill_key
+            source_root = (BUILTIN_AGENT_TEMPLATE_ROOT if role_key else BUILTIN_SKILL_TEMPLATE_ROOT) / str(package_key)
+            if source_root.exists():
+                _archive_directory(archive, source_root)
+            else:
+                archive.writestr("package.yaml", yaml.safe_dump({"type": package_type, f"{package_type}_key": package_key}, allow_unicode=True))
+    return buffer.getvalue()

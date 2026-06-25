@@ -22,10 +22,23 @@ class CommandAgent(BaseModel):
     current_task_id = fields.CharField(max_length=36, null=True, description="当前主任务ID")
     heartbeat_at = fields.DatetimeField(null=True, description="最近心跳时间")
     metadata = fields.JSONField(default=dict, description="扩展元数据")
-    runtime = fields.CharField(max_length=30, default="nanobot", description="运行时类型: nanobot等")
-    system_instruction = fields.TextField(null=True, description="调用Nanobot时使用的system_instruction提示词")
+    runtime = fields.CharField(max_length=30, default="lion_agent", description="运行时类型: lion_agent 等")
+    system_instruction = fields.TextField(null=True, description="调用 lion_agent 时使用的 system_instruction 提示词")
     prompt_config = fields.JSONField(default=dict, description="提示词扩展配置")
     is_builtin = fields.BooleanField(default=False, description="是否为内置智能体")
+    role = fields.ForeignKeyField(
+        "models.DigitalEmployeeRole",
+        null=True,
+        related_name="employees",
+        description="数字员工岗位",
+        on_delete=fields.SET_NULL,
+    )
+    role_key = fields.CharField(max_length=64, null=True, description="数字员工岗位逻辑标识")
+    skill_keys = fields.JSONField(default=list, description="启用的数字员工技能 key 列表")
+    rbac_role_id = fields.CharField(max_length=36, null=True, description="员工绑定的 RBAC 角色")
+    resource_scope = fields.JSONField(default=dict, description="员工资源访问范围")
+    workspace_synced_at = fields.DatetimeField(null=True, description="上次同步到 lion_agent 的时间")
+    workspace_etag = fields.CharField(max_length=64, null=True, description="workspace 同步版本指纹")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -50,6 +63,13 @@ class CommandAgent(BaseModel):
             "system_instruction": self.system_instruction,
             "prompt_config": self.prompt_config,
             "is_builtin": self.is_builtin,
+            "role_id": self.role_id,
+            "role_key": self.role_key,
+            "skill_keys": self.skill_keys,
+            "rbac_role_id": self.rbac_role_id,
+            "resource_scope": self.resource_scope,
+            "workspace_synced_at": strip_timezone_to_seconds(self.workspace_synced_at),
+            "workspace_etag": self.workspace_etag,
         }
 
     class Meta:

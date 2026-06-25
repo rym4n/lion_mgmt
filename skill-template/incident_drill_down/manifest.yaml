@@ -1,0 +1,13 @@
+key: incident_drill_down
+name: 事件下钻
+description: 根据告警线索逐层下钻日志、资产、任务和关联事件。
+trigger_instruction: 当分诊结果显示真实异常或影响范围不明时，执行事件下钻。
+usage_notes: 每一步下钻都要记录查询对象、时间窗口和证据摘要。
+bindings:
+  playbook_ids: []
+  action_keys: []
+  mcp_tools: []
+  nanobot_skills: []
+require_approval: false
+enabled: true
+version: 1
