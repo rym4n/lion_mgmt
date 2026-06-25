@@ -160,6 +160,14 @@ async def choose_agent_with_lion_agent(
     requested_agent_id = task.requested_agent_id
     if not candidates:
         return DispatchDecision(None, "no_candidate", "当前没有可分配的候选智能体", requested_agent_id=requested_agent_id)
+    requested_agent = _find_agent(candidates, requested_agent_id)
+    if requested_agent and is_agent_available(requested_agent):
+        return DispatchDecision(
+            requested_agent,
+            "user_specified",
+            f"按用户指定分配给 {requested_agent.name}",
+            requested_agent_id=requested_agent_id,
+        )
 
     session_key = f"command-center-dispatch:{task.id}"
     prompt = _build_dispatch_prompt(task, candidates, coordinator)
