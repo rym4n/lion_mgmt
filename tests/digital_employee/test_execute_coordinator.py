@@ -19,6 +19,8 @@ def _load_module(name: str, relative_path: str):
 
 
 def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
+    sync_calls = []
+
     class CommandAgent:
         pass
 
@@ -68,6 +70,17 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
     digital_employee_pkg = types.ModuleType("services.digital_employee")
     digital_employee_pkg.__path__ = []
     sys.modules["services.digital_employee"] = digital_employee_pkg
+
+    digital_employee_manager = types.ModuleType("services.digital_employee.manager")
+
+    async def sync_employee_workspace(employee):
+        sync_calls.append(employee.id)
+        employee.workspace_synced = True
+        return employee
+
+    digital_employee_manager.sync_employee_workspace = sync_employee_workspace
+    digital_employee_manager.sync_calls = sync_calls
+    sys.modules["services.digital_employee.manager"] = digital_employee_manager
 
     credential_manager = types.ModuleType("services.digital_employee.cognee_credential_manager")
     credential_manager.get_or_refresh_jwt = lambda tenant_id: _async_value(f"jwt-{tenant_id}")
@@ -146,6 +159,7 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
     assert task.saved_update_fields == [["result", "utime"]]
     assert [call[0]["status"] for call in progress_calls] == ["running", "completed"]
     assert [call[1] for call in progress_calls] == ["operator-1", "operator-1"]
+    assert sys.modules["services.digital_employee.manager"].sync_calls == ["employee-1"]
 
     payload = RECORDED_STREAM_PAYLOADS[0]
     assert payload["workspace_id"] == "employee-1"

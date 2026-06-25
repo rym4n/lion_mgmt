@@ -100,7 +100,9 @@ async def _publish_room_end(task: CommandTask, operator_id: str | None) -> None:
 
 async def run(task: CommandTask, employee: CommandAgent, operator_id: str | None = None) -> dict:
     from services.command_center.manager import update_task_progress
+    from services.digital_employee.manager import sync_employee_workspace
 
+    employee = await sync_employee_workspace(employee)
     jwt = await get_or_refresh_jwt(task.tenant_id)
     payload = {
         "workspace_id": employee.id,
