@@ -25,6 +25,7 @@ from .manager import (
     upgrade_role_for_existing_employees,
 )
 from .package_importer import export_package, import_package
+from .runtime_callbacks import fetch_runtime_transcript, save_runtime_report, save_runtime_transcript
 
 digital_employee_bp = Blueprint("digital_employee", url_prefix="/digital_employee")
 __all__ = ["digital_employee_bp"]
@@ -466,7 +467,8 @@ async def report_regenerate(request: Request):
     if not report:
         raise CustomError(ErrorCode.NOT_FOUND)
     task = await report.task
-    report = await compose(task, report.actions)
+    transcript = await fetch_runtime_transcript(report.tenant_id, task.id)
+    report = await compose(task, transcript.get("actions_draft") or transcript.get("actions") or report.actions)
     return response_ok(report.json)
 
 
@@ -507,19 +509,26 @@ async def internal_task_detail(request: Request):
 @digital_employee_bp.post("/runtime/transcript/save")
 async def runtime_transcript_save(request: Request):
     _check_internal(request)
-    return response_ok()
+    data = _json(request)
+    tenant_id = _require_tenant_id(data.get("tenant_id") or _tenant_id(request))
+    return response_ok(await save_runtime_transcript(tenant_id, data))
 
 
 @digital_employee_bp.post("/runtime/transcript/fetch")
 async def runtime_transcript_fetch(request: Request):
     _check_internal(request)
-    return response_ok({"actions": []})
+    data = _json(request)
+    tenant_id = _require_tenant_id(data.get("tenant_id") or _tenant_id(request))
+    return response_ok(await fetch_runtime_transcript(tenant_id, data.get("task_id") or data.get("id")))
 
 
 @digital_employee_bp.post("/runtime/report/save")
 async def runtime_report_save(request: Request):
     _check_internal(request)
-    return response_ok()
+    data = _json(request)
+    tenant_id = _require_tenant_id(data.get("tenant_id") or _tenant_id(request))
+    report = await save_runtime_report(tenant_id, data)
+    return response_ok(report.json)
 
 
 @digital_employee_bp.post("/runtime/cognee/refresh-jwt")

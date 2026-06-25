@@ -26,13 +26,19 @@ def _extract_user_id(body: dict[str, Any], fallback: str) -> str:
     return str(body.get("id") or body.get("user_id") or data.get("id") or data.get("user_id") or fallback)
 
 
+def _memory_url(path: str) -> str:
+    return f"{LION_MEMORY_ENDPOINT.rstrip('/')}{path}"
+
+
 async def _login(client: httpx.AsyncClient, email: str, password: str) -> str:
     last_response: httpx.Response | None = None
-    for path in ("/api/v1/auth/jwt/login", "/api/v1/auth/login"):
-        response = await client.post(
-            f"{LION_MEMORY_ENDPOINT.rstrip('/')}{path}",
-            json={"email": email, "password": password},
-        )
+    attempts = (
+        ("/api/v1/auth/login", {"data": {"username": email, "password": password}}),
+        ("/api/v1/auth/jwt/login", {"json": {"email": email, "password": password}}),
+        ("/api/v1/auth/login", {"json": {"email": email, "password": password}}),
+    )
+    for path, kwargs in attempts:
+        response = await client.post(_memory_url(path), **kwargs)
         last_response = response
         if response.status_code < 400:
             token = _extract_token(response.json())
@@ -51,12 +57,17 @@ async def _login_admin(client: httpx.AsyncClient) -> str:
 
 
 async def _ensure_remote_user(client: httpx.AsyncClient, credential: TenantCogneeCredential) -> str:
-    admin_token = await _login_admin(client)
     response = await client.post(
-        f"{LION_MEMORY_ENDPOINT.rstrip('/')}/api/v1/auth/register",
+        _memory_url("/api/v1/auth/register"),
         json={"email": credential.cognee_user_email, "password": credential.cognee_user_password_enc},
-        headers={"Authorization": f"Bearer {admin_token}"},
     )
+    if response.status_code in {401, 403}:
+        admin_token = await _login_admin(client)
+        response = await client.post(
+            _memory_url("/api/v1/auth/register"),
+            json={"email": credential.cognee_user_email, "password": credential.cognee_user_password_enc},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
     if response.status_code in {200, 201, 202}:
         return _extract_user_id(response.json(), credential.cognee_user_id)
     if response.status_code in {400, 409}:

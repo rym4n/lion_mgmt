@@ -83,6 +83,7 @@ class FakeResponse:
 class FakeAsyncClient:
     calls = []
     tenant_tokens = ["tenant-token"]
+    register_requires_admin = False
 
     def __init__(self, timeout=None):
         self.timeout = timeout
@@ -93,14 +94,17 @@ class FakeAsyncClient:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
-    async def post(self, url, json=None, headers=None):
-        self.calls.append((url, json, headers))
-        if url.endswith("/api/v1/auth/jwt/login") and json["email"] == "admin@aioe.internal":
+    async def post(self, url, json=None, data=None, headers=None):
+        self.calls.append((url, json, data, headers))
+        if url.endswith("/api/v1/auth/login") and data and data["username"] == "admin@aioe.internal":
             return FakeResponse(200, {"access_token": "admin-token"})
         if url.endswith("/api/v1/auth/register"):
-            assert headers == {"Authorization": "Bearer admin-token"}
+            if self.register_requires_admin and headers is None:
+                return FakeResponse(403, {"detail": "forbidden"})
+            if headers is not None:
+                assert headers == {"Authorization": "Bearer admin-token"}
             return FakeResponse(201, {"id": "remote-user-1"})
-        if url.endswith("/api/v1/auth/jwt/login") and json["email"] == "tenant-1@aioe.internal":
+        if url.endswith("/api/v1/auth/login") and data and data["username"] == "tenant-1@aioe.internal":
             token = self.tenant_tokens.pop(0) if self.tenant_tokens else "tenant-token"
             return FakeResponse(200, {"access_token": token})
         return FakeResponse(404, {})
@@ -112,6 +116,7 @@ def _install_stubs():
     FakeCredential.saved = []
     FakeAsyncClient.calls = []
     FakeAsyncClient.tenant_tokens = ["tenant-token"]
+    FakeAsyncClient.register_requires_admin = False
 
     sys.modules.setdefault("core", types.ModuleType("core"))
     core_error_code = types.ModuleType("core.error_code")
@@ -166,10 +171,11 @@ def test_get_or_refresh_jwt_registers_remote_user_and_returns_tenant_token():
     assert credential.cognee_jwt == "tenant-token"
     assert credential.cognee_jwt_expires_at > datetime.now(timezone(timedelta(hours=8)))
     assert [call[0] for call in FakeAsyncClient.calls] == [
-        "http://lion-memory/api/v1/auth/jwt/login",
         "http://lion-memory/api/v1/auth/register",
-        "http://lion-memory/api/v1/auth/jwt/login",
+        "http://lion-memory/api/v1/auth/login",
     ]
+    assert FakeAsyncClient.calls[0][3] is None
+    assert FakeAsyncClient.calls[1][2] == {"username": "tenant-1@aioe.internal", "password": credential.cognee_user_password_enc}
 
 
 def test_get_or_refresh_jwt_force_bypasses_valid_cache():
@@ -195,5 +201,27 @@ def test_get_or_refresh_jwt_force_bypasses_valid_cache():
     assert refreshed == "fresh-token"
     assert FakeCredential.objects["tenant-1"].cognee_jwt == "fresh-token"
     assert [call[0] for call in FakeAsyncClient.calls] == [
-        "http://lion-memory/api/v1/auth/jwt/login",
+        "http://lion-memory/api/v1/auth/login",
     ]
+    assert FakeAsyncClient.calls[0][2] == {"username": "tenant-1@aioe.internal", "password": "tenant-pass"}
+
+
+def test_register_falls_back_to_admin_when_public_registration_is_forbidden():
+    _install_stubs()
+    FakeAsyncClient.register_requires_admin = True
+    module = _load_module(
+        "services.digital_employee.cognee_credential_manager",
+        "services/digital_employee/cognee_credential_manager.py",
+    )
+
+    token = asyncio.run(module.get_or_refresh_jwt("tenant-1"))
+
+    assert token == "tenant-token"
+    assert [call[0] for call in FakeAsyncClient.calls] == [
+        "http://lion-memory/api/v1/auth/register",
+        "http://lion-memory/api/v1/auth/login",
+        "http://lion-memory/api/v1/auth/register",
+        "http://lion-memory/api/v1/auth/login",
+    ]
+    assert FakeAsyncClient.calls[1][2] == {"username": "admin@aioe.internal", "password": "admin-pass"}
+    assert FakeAsyncClient.calls[2][3] == {"Authorization": "Bearer admin-token"}
