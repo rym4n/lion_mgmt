@@ -56,7 +56,7 @@ class DigitalEmployeeSkill(BaseModel):
     name = fields.CharField(max_length=255, description="技能名称")
     description = fields.TextField(null=True, description="技能说明")
     skill_dir = fields.CharField(max_length=512, description="技能目录")
-    bindings = fields.JSONField(default=dict, description="技能绑定的剧本/动作/MCP/nanobot skill")
+    bindings = fields.JSONField(default=dict, description="技能绑定的剧本/动作/MCP/runtime skill")
     require_approval = fields.BooleanField(default=False, description="是否高危需要审批")
     version = fields.IntField(default=1, description="技能版本")
     is_builtin = fields.BooleanField(default=False, description="是否内置")
