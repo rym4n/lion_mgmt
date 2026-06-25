@@ -52,6 +52,8 @@ class SecurityMiddleware(BaseMiddleware):
         ]
         white_prefixes = [
             "/system/down-file/",
+            "/digital_employee/internal/",
+            "/digital_employee/runtime/",
         ]
         if request.path not in white_urls and not any(request.path.startswith(prefix) for prefix in white_prefixes):
             await authenticate(request)
