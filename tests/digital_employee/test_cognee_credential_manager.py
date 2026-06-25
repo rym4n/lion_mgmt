@@ -82,6 +82,7 @@ class FakeResponse:
 
 class FakeAsyncClient:
     calls = []
+    tenant_tokens = ["tenant-token"]
 
     def __init__(self, timeout=None):
         self.timeout = timeout
@@ -100,7 +101,8 @@ class FakeAsyncClient:
             assert headers == {"Authorization": "Bearer admin-token"}
             return FakeResponse(201, {"id": "remote-user-1"})
         if url.endswith("/api/v1/auth/jwt/login") and json["email"] == "tenant-1@aioe.internal":
-            return FakeResponse(200, {"access_token": "tenant-token"})
+            token = self.tenant_tokens.pop(0) if self.tenant_tokens else "tenant-token"
+            return FakeResponse(200, {"access_token": token})
         return FakeResponse(404, {})
 
 
@@ -109,6 +111,7 @@ def _install_stubs():
     FakeCredential.created = []
     FakeCredential.saved = []
     FakeAsyncClient.calls = []
+    FakeAsyncClient.tenant_tokens = ["tenant-token"]
 
     sys.modules.setdefault("core", types.ModuleType("core"))
     core_error_code = types.ModuleType("core.error_code")
@@ -165,5 +168,32 @@ def test_get_or_refresh_jwt_registers_remote_user_and_returns_tenant_token():
     assert [call[0] for call in FakeAsyncClient.calls] == [
         "http://lion-memory/api/v1/auth/jwt/login",
         "http://lion-memory/api/v1/auth/register",
+        "http://lion-memory/api/v1/auth/jwt/login",
+    ]
+
+
+def test_get_or_refresh_jwt_force_bypasses_valid_cache():
+    _install_stubs()
+    module = _load_module(
+        "services.digital_employee.cognee_credential_manager",
+        "services/digital_employee/cognee_credential_manager.py",
+    )
+    FakeCredential.objects["tenant-1"] = FakeCredential(
+        tenant_id="tenant-1",
+        cognee_user_id="remote-user-1",
+        cognee_user_email="tenant-1@aioe.internal",
+        cognee_user_password_enc="tenant-pass",
+        cognee_jwt="cached-token",
+        cognee_jwt_expires_at=datetime.now(timezone(timedelta(hours=8))) + timedelta(hours=1),
+    )
+    FakeAsyncClient.tenant_tokens = ["fresh-token"]
+
+    cached = asyncio.run(module.get_or_refresh_jwt("tenant-1"))
+    refreshed = asyncio.run(module.get_or_refresh_jwt("tenant-1", force=True))
+
+    assert cached == "cached-token"
+    assert refreshed == "fresh-token"
+    assert FakeCredential.objects["tenant-1"].cognee_jwt == "fresh-token"
+    assert [call[0] for call in FakeAsyncClient.calls] == [
         "http://lion-memory/api/v1/auth/jwt/login",
     ]

@@ -526,4 +526,4 @@ async def runtime_report_save(request: Request):
 async def runtime_cognee_refresh_jwt(request: Request):
     _check_internal(request)
     data = _json(request)
-    return response_ok({"jwt": await get_or_refresh_jwt(data.get("tenant_id") or _tenant_id(request) or BUILTIN_TENANT_ID)})
+    return response_ok({"jwt": await get_or_refresh_jwt(data.get("tenant_id") or _tenant_id(request) or BUILTIN_TENANT_ID, force=True)})

@@ -89,10 +89,10 @@ async def register_tenant_user(tenant_id: str) -> TenantCogneeCredential:
     return credential
 
 
-async def get_or_refresh_jwt(tenant_id: str) -> str:
+async def get_or_refresh_jwt(tenant_id: str, force: bool = False) -> str:
     credential = await register_tenant_user(tenant_id)
     now = datetime.now(TZ)
-    if credential.cognee_jwt and credential.cognee_jwt_expires_at and credential.cognee_jwt_expires_at > now + timedelta(minutes=5):
+    if not force and credential.cognee_jwt and credential.cognee_jwt_expires_at and credential.cognee_jwt_expires_at > now + timedelta(minutes=5):
         return credential.cognee_jwt
 
     try:
