@@ -208,22 +208,61 @@ def _build_source_config(event_source_type, payload, current_source=None):
     raise CustomError(ErrorCode.PARAM_ERROR)
 
 
+def _to_vrl_string_literal(value):
+    return orjson.dumps("" if value is None else str(value)).decode("utf-8")
+
+
+def _to_vrl_cidr_literal(value):
+    if value in (None, ""):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if isinstance(value, (list, tuple)):
+        if not value:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        return orjson.dumps([str(item) for item in value]).decode("utf-8")
+
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+        if value.startswith("[") and value.endswith("]"):
+            try:
+                parsed_value = orjson.loads(value)
+            except orjson.JSONDecodeError:
+                parsed_value = None
+            if isinstance(parsed_value, list):
+                if not parsed_value:
+                    raise CustomError(ErrorCode.PARAM_ERROR)
+                return orjson.dumps([str(item) for item in parsed_value]).decode("utf-8")
+
+    return _to_vrl_string_literal(value)
+
+
 def get_conditional_statements(conditions):
     conditional_statements = ""
     for _, condition in enumerate(conditions):
-        if condition["type"] in ["==", "!="]:
-            conditional_statements += f"""to_string!(.log."{condition["name"]}") {condition['type']} "{condition['value']}" """
-        elif condition["type"] in [">", "<", ">=", "<="]:
-            conditional_statements += f"""(to_int(.log."{condition["name"]}") ?? 0) {condition['type']} {int(condition['value'])}"""
-        elif condition["type"] in ["!contains", "contains"]:
-            conditional_statements += f"""{condition['type']}(string!(.log."{condition['name']}"), "{condition['value']}")"""
-        elif condition["type"] in ["includes", "!includes"]:
-            conditional_statements += f"""{condition['type']}({condition['value']}, string!(.log."{condition['name']}"))"""
-        elif condition["type"] in ["exists", "!exists"]:
-            conditional_statements += f"""{condition['type']}(.log."{condition['name']}")"""
-        elif condition["type"] in ["is_empty", "!is_empty"]:
-            conditional_statements += f"""{condition['type']}(to_string!(.log."{condition['name']}"))"""
-        elif condition["type"] == "match":
+        condition_type = str(condition["type"]).strip()
+        if condition_type in ["==", "!="]:
+            conditional_statements += f"""to_string!(.log."{condition["name"]}") {condition_type} "{condition['value']}" """
+        elif condition_type in [">", "<", ">=", "<="]:
+            conditional_statements += f"""(to_int(.log."{condition["name"]}") ?? 0) {condition_type} {int(condition['value'])}"""
+        elif condition_type in ["!contains", "contains"]:
+            conditional_statements += f"""{condition_type}(string!(.log."{condition['name']}"), "{condition['value']}")"""
+        elif condition_type in ["starts_with", "ends_with"]:
+            conditional_statements += f"""{condition_type}(string!(.log."{condition['name']}"), {_to_vrl_string_literal(condition['value'])})"""
+        elif condition_type in ["includes", "!includes"]:
+            conditional_statements += f"""{condition_type}({condition['value']}, string!(.log."{condition['name']}"))"""
+        elif condition_type in ["ip_cidr_contains", "!ip_cidr_contains"]:
+            conditional_statement = f"""(ip_cidr_contains({_to_vrl_cidr_literal(condition['value'])}, string!(.log."{condition['name']}")) ?? false)"""
+            if condition_type == "!ip_cidr_contains":
+                conditional_statement = f"!{conditional_statement}"
+            conditional_statements += conditional_statement
+        elif condition_type in ["exists", "!exists"]:
+            conditional_statements += f"""{condition_type}(.log."{condition['name']}")"""
+        elif condition_type in ["is_empty", "!is_empty"]:
+            conditional_statements += f"""{condition_type}(to_string!(.log."{condition['name']}"))"""
+        elif condition_type == "match":
             conditional_statements += f"""match(string!(.log."{condition['name']}"), r'{condition['value']}')"""
         else:
             raise CustomError(ErrorCode.PARAM_ERROR)
