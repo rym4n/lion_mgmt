@@ -1,6 +1,5 @@
 # coding=utf-8
 
-import time
 import traceback
 
 import orjson
@@ -12,6 +11,7 @@ from tortoise.contrib.sanic import register_tortoise
 from core.exception_handlers import BaseExcHandler, EXC_HDL_TUPLE
 from core.listeners import BaseListener, LISTENER_TUPLE
 from core.middlewares import BaseMiddleware, MIDDLEWARE_TUPLE
+from libs.security.license_modules import is_licensed_module_active
 from libs.security.authorization import load_license
 from services.agent.views import agent_bp
 from services.ai.views import ai_bp
@@ -85,11 +85,14 @@ def register_blueprints(app: Sanic):
         }
         license_data = load_license()
         if license_data and "moduleList" in license_data:
+            registered_modules = set()
             for item in license_data["moduleList"]:
-                if item["auth"] and int(item["expireTime"]) > int(time.time() * 1000):
-                    if item["module"] not in bp_dict:
-                        continue
-                    app.blueprint(bp_dict[item["module"]])
+                module = item.get("module")
+                if not module or module not in bp_dict or module in registered_modules:
+                    continue
+                if is_licensed_module_active(license_data, item):
+                    app.blueprint(bp_dict[module])
+                    registered_modules.add(module)
     except Exception as ex:
         logger.info(f"{ex} | {traceback.format_exc()}")
 
