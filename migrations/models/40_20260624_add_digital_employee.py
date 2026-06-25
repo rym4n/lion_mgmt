@@ -7,8 +7,8 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
     return """
         CREATE TABLE IF NOT EXISTS "digital_employee_role" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
-    "ctime" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "utime" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted" BOOL NOT NULL DEFAULT False,
     "tenant_id" VARCHAR(255) DEFAULT '8bce552d-c27c-41d4-8a1b-8c5bf38dfe18',
     "role_key" VARCHAR(64) NOT NULL,
@@ -27,8 +27,8 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
         CREATE INDEX IF NOT EXISTS "idx_digital_emp_tenant__is_buil_9f57ea" ON "digital_employee_role" ("tenant_id", "is_builtin");
         CREATE TABLE IF NOT EXISTS "digital_employee_skill" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
-    "ctime" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "utime" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted" BOOL NOT NULL DEFAULT False,
     "tenant_id" VARCHAR(255) DEFAULT '8bce552d-c27c-41d4-8a1b-8c5bf38dfe18',
     "skill_key" VARCHAR(64) NOT NULL,
@@ -46,15 +46,15 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
         CREATE INDEX IF NOT EXISTS "idx_digital_emp_tenant__is_buil_d4f3dd" ON "digital_employee_skill" ("tenant_id", "is_builtin");
         CREATE TABLE IF NOT EXISTS "tenant_cognee_credential" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
-    "ctime" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "utime" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted" BOOL NOT NULL DEFAULT False,
     "tenant_id" VARCHAR(255) DEFAULT '8bce552d-c27c-41d4-8a1b-8c5bf38dfe18',
     "cognee_user_id" VARCHAR(64) NOT NULL,
     "cognee_user_email" VARCHAR(255) NOT NULL,
     "cognee_user_password_enc" VARCHAR(255) NOT NULL,
     "cognee_jwt" VARCHAR(2048),
-    "cognee_jwt_expires_at" TIMESTAMP
+    "cognee_jwt_expires_at" TIMESTAMPTZ
 );
         CREATE UNIQUE INDEX IF NOT EXISTS "uid_tenant_cog_tenant__86fc52" ON "tenant_cognee_credential" ("tenant_id");
         ALTER TABLE "command_center_agent" ADD COLUMN IF NOT EXISTS "role_id" VARCHAR(36);
@@ -62,13 +62,13 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
         ALTER TABLE "command_center_agent" ADD COLUMN IF NOT EXISTS "skill_keys" JSONB NOT NULL DEFAULT '[]';
         ALTER TABLE "command_center_agent" ADD COLUMN IF NOT EXISTS "rbac_role_id" VARCHAR(36);
         ALTER TABLE "command_center_agent" ADD COLUMN IF NOT EXISTS "resource_scope" JSONB NOT NULL DEFAULT '{}';
-        ALTER TABLE "command_center_agent" ADD COLUMN IF NOT EXISTS "workspace_synced_at" TIMESTAMP;
+        ALTER TABLE "command_center_agent" ADD COLUMN IF NOT EXISTS "workspace_synced_at" TIMESTAMPTZ;
         ALTER TABLE "command_center_agent" ADD COLUMN IF NOT EXISTS "workspace_etag" VARCHAR(64);
         ALTER TABLE "command_center_agent" ADD CONSTRAINT "fk_command__digital__6b67e20c" FOREIGN KEY ("role_id") REFERENCES "digital_employee_role" ("id") ON DELETE SET NULL;
         CREATE TABLE IF NOT EXISTS "digital_employee_report" (
     "id" VARCHAR(36) NOT NULL PRIMARY KEY,
-    "ctime" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "utime" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "ctime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "utime" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deleted" BOOL NOT NULL DEFAULT False,
     "tenant_id" VARCHAR(255) DEFAULT '8bce552d-c27c-41d4-8a1b-8c5bf38dfe18',
     "role_key" VARCHAR(64) NOT NULL,
