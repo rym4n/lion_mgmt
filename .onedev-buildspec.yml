@@ -10,6 +10,7 @@ jobs:
       commands: |
         NEW_VER=@tag@
         sed -i -E "s#([[:space:]]*image:[[:space:]]*)(reg\-test\.hongcloud\.net|aioe\.pkg)/lion_mgmt:[^[:space:]]+#\1reg-test.hongcloud.net/lion_mgmt:${NEW_VER}#" /opt/lion/docker-compose.yml
+        sed -i -E "s#([[:space:]]*image:[[:space:]]*)(reg\-test\.hongcloud\.net|aioe\.pkg)/lion_agent:([^[:space:]]+)#\1reg-test.hongcloud.net/lion_agent:\3#" /opt/lion/docker-compose.yml
         docker-compose -f /opt/lion/docker-compose.yml --env-file /opt/lion/.env up -d --pull always
     useTTY: true
     condition: SUCCESSFUL
