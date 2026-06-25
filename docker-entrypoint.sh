@@ -9,7 +9,7 @@ MAX_RETRIES=30
 RETRY_COUNT=0
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if python -c "
+    if /app/.venv/bin/python -c "
 import asyncio
 from tortoise import Tortoise
 from settings import TORTOISE
@@ -41,18 +41,14 @@ exit(0 if result else 1)
 done
 
 # 自动执行数据库迁移
-    echo "[Entrypoint] Running database migrations..."
-if aerich upgrade 2>&1; then
-    echo "[Entrypoint] Database migrations completed successfully"
-else
-    echo "[Entrypoint] WARNING: Database migration failed, but continuing startup..."
-    echo "[Entrypoint] This may be expected if migrations were already applied"
-fi
+echo "[Entrypoint] Running database migrations..."
+/app/.venv/bin/aerich upgrade
+echo "[Entrypoint] Database migrations completed successfully"
 
 # 启动应用：透传 compose CMD（默认回退到 python server.py）
 if [ "$#" -eq 0 ]; then
     echo "[Entrypoint] No command provided, falling back to: python server.py"
-    exec python server.py
+    exec /app/.venv/bin/python server.py
 fi
 echo "[Entrypoint] Starting application: $*"
 exec "$@"
