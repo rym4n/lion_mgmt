@@ -53,7 +53,12 @@ def test_workspace_etag_changes_with_skill_version():
 
 
 def test_build_runtime_prompt_contains_payload():
-    task = SimpleNamespace(title="巡检", source="manual", description="检查数据库", payload={"target": "db01"})
+    task = SimpleNamespace(
+        title="巡检",
+        source="manual",
+        description="检查数据库",
+        payload={"target": "db01", "_dispatch_scope": "digital_employee"},
+    )
     employee = SimpleNamespace(name="DBA", agent_key="dba-1")
 
     prompt = build_runtime_prompt(task, employee)
@@ -61,3 +66,4 @@ def test_build_runtime_prompt_contains_payload():
     assert "巡检" in prompt
     assert "dba-1" in prompt
     assert "db01" in prompt
+    assert "_dispatch_scope" not in prompt

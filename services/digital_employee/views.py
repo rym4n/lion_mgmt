@@ -255,6 +255,8 @@ async def _dispatch_employee_task(request: Request, tenant_id: str, account_info
     employee = None
     if employee_key:
         employee = await _employee_or_404(tenant_id, employee_key)
+    task_payload = dict(data.get("payload") or {})
+    task_payload["_dispatch_scope"] = "digital_employee"
     return await create_command_task(
         tenant_id,
         account_info,
@@ -263,7 +265,7 @@ async def _dispatch_employee_task(request: Request, tenant_id: str, account_info
             "description": data.get("description"),
             "source": data.get("source", "manual"),
             "priority": data.get("priority", 3),
-            "payload": data.get("payload") or {},
+            "payload": task_payload,
             "agent_id": employee.agent_key if employee else data.get("agent_id") or data.get("requested_agent_id"),
             "room_id": data.get("room_id"),
             "required_capabilities": data.get("required_capabilities") or (employee.capabilities if employee else []),

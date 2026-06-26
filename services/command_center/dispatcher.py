@@ -20,6 +20,7 @@ class AgentCandidate(Protocol):
     metadata: dict
     runtime: str
     is_builtin: bool
+    role_key: str | None
 
 
 class DispatchTask(Protocol):
@@ -65,6 +66,7 @@ def _agent_payload(agent: AgentCandidate) -> dict:
         "metadata": agent.metadata or {},
         "runtime": getattr(agent, "runtime", "lion_agent"),
         "is_builtin": getattr(agent, "is_builtin", False),
+        "role_key": getattr(agent, "role_key", None),
     }
 
 
@@ -108,6 +110,16 @@ def _find_agent(agents: Iterable[AgentCandidate], agent_id_or_key: str | None) -
     if not agent_id_or_key:
         return None
     return next((item for item in agents if item.id == agent_id_or_key or item.agent_key == agent_id_or_key), None)
+
+
+def _is_digital_employee_candidate(agent: AgentCandidate) -> bool:
+    metadata = getattr(agent, "metadata", {}) or {}
+    return bool(getattr(agent, "role_key", None)) or metadata.get("digital_employee") is True
+
+
+def _requires_digital_employee(task: DispatchTask) -> bool:
+    payload = task.payload or {}
+    return payload.get("_dispatch_scope") == "digital_employee"
 
 
 def _normalize_dispatch_status(value: str | None, requested_agent_id: str | None) -> str:
@@ -157,6 +169,8 @@ async def choose_agent_with_lion_agent(
     """使用 lion_agent 判断指挥中心任务应该分配给哪个智能体。"""
 
     candidates = [agent for agent in agents if not coordinator or agent.id != coordinator.id]
+    if _requires_digital_employee(task):
+        candidates = [agent for agent in candidates if _is_digital_employee_candidate(agent)]
     requested_agent_id = task.requested_agent_id
     if not candidates:
         return DispatchDecision(None, "no_candidate", "当前没有可分配的候选智能体", requested_agent_id=requested_agent_id)

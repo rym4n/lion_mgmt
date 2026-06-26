@@ -8,6 +8,12 @@ def _json_block(value: Any) -> str:
     return json.dumps(value or {}, ensure_ascii=False, indent=2, sort_keys=True)
 
 
+def _public_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: item for key, item in value.items() if not str(key).startswith("_")}
+    return value
+
+
 def workspace_etag(role: Any, skills: list[Any]) -> str:
     payload = {
         "role_key": getattr(role, "role_key", None),
@@ -85,6 +91,6 @@ def build_runtime_prompt(task: Any, employee: Any) -> str:
             getattr(task, "description", "") or "",
             "",
             "任务载荷：",
-            _json_block(getattr(task, "payload", {}) or {}),
+            _json_block(_public_payload(getattr(task, "payload", {}) or {})),
         ]
     )
