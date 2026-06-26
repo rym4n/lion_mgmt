@@ -407,6 +407,45 @@ async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = F
     raise CustomError(ErrorCode.PACKAGE_TYPE_UNSUPPORTED)
 
 
+async def import_builtin_packages(operator_id: str = "system") -> ImportResult:
+    if not BUILTIN_SKILL_TEMPLATE_ROOT.exists() or not BUILTIN_AGENT_TEMPLATE_ROOT.exists():
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+
+    result = ImportResult(package_type="builtin")
+    package_dirs = [
+        *_iter_child_dirs(BUILTIN_SKILL_TEMPLATE_ROOT),
+        *_iter_child_dirs(BUILTIN_AGENT_TEMPLATE_ROOT),
+    ]
+    for package_dir in package_dirs:
+        try:
+            imported = await import_package(
+                _zip_directory_bytes(package_dir),
+                tenant_id="__builtin__",
+                is_builtin=True,
+                operator_id=operator_id,
+            )
+        except CustomError as exc:
+            if exc.enum != ErrorCode.PACKAGE_VERSION_LOWER:
+                raise
+            result.skipped.append(
+                {
+                    "package_key": package_dir.name,
+                    "reason": "existing package version is newer",
+                }
+            )
+            continue
+        package_key = package_dir.name
+        result.imported.append(
+            {
+                "package_key": package_key,
+                "package_type": imported.package_type,
+                "imported": imported.imported,
+                "skipped": imported.skipped,
+            }
+        )
+    return result
+
+
 async def export_package(role_key: str | None = None, skill_key: str | None = None, bundle: bool = False) -> bytes:
     if not role_key and not skill_key:
         raise CustomError(ErrorCode.PARAM_ERROR)

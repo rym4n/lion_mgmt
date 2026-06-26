@@ -45,6 +45,14 @@ echo "[Entrypoint] Running database migrations..."
 /app/.venv/bin/aerich upgrade
 echo "[Entrypoint] Database migrations completed successfully"
 
+if [ "${RY_DIGITAL_EMPLOYEE_BOOTSTRAP_PACKAGES:-true}" != "false" ]; then
+    echo "[Entrypoint] Bootstrapping digital employee builtin packages..."
+    /app/.venv/bin/python -m services.digital_employee.bootstrap
+    echo "[Entrypoint] Digital employee builtin package bootstrap completed"
+else
+    echo "[Entrypoint] Digital employee builtin package bootstrap disabled"
+fi
+
 # 启动应用：透传 compose CMD（默认回退到 python server.py）
 if [ "$#" -eq 0 ]; then
     echo "[Entrypoint] No command provided, falling back to: python server.py"

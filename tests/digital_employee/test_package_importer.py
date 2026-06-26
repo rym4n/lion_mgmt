@@ -142,6 +142,7 @@ export_package = package_importer.export_package
 _stage_files = package_importer._stage_files
 _import_bundle = package_importer._import_bundle
 import_package = package_importer.import_package
+import_builtin_packages = package_importer.import_builtin_packages
 CustomError = sys.modules["libs.error_code.exception"].CustomError
 transaction_events = sys.modules["tortoise.transactions"].transaction_events
 deleted_from_s3 = sys.modules["libs.utils"].deleted_from_s3
@@ -174,6 +175,88 @@ def test_builtin_role_default_skill_templates_exist():
                 missing.append(f"{role_dir.name}:{skill_key}")
 
     assert missing == []
+
+
+def test_import_builtin_packages_imports_skills_before_roles(tmp_path):
+    skill_dir = tmp_path / "skill-template" / "alert_triage"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "package.yaml").write_text(
+        yaml.safe_dump({"type": "skill", "skill_key": "alert_triage", "version": 1}),
+        encoding="utf-8",
+    )
+    (skill_dir / "manifest.yaml").write_text(
+        yaml.safe_dump({"key": "alert_triage", "name": "Alert triage", "version": 1}),
+        encoding="utf-8",
+    )
+    role_dir = tmp_path / "agent-template" / "monitor"
+    role_dir.mkdir(parents=True)
+    (role_dir / "package.yaml").write_text(
+        yaml.safe_dump({"type": "role", "role_key": "monitor", "version": 1}),
+        encoding="utf-8",
+    )
+    (role_dir / "role.yaml").write_text(
+        yaml.safe_dump({"key": "monitor", "name": "Monitor", "version": 1, "default_skills": ["alert_triage"]}),
+        encoding="utf-8",
+    )
+
+    calls = []
+    original_agent_root = package_importer.BUILTIN_AGENT_TEMPLATE_ROOT
+    original_skill_root = package_importer.BUILTIN_SKILL_TEMPLATE_ROOT
+    original_import_package = package_importer.import_package
+
+    async def fake_import_package(file_bytes, tenant_id, is_builtin=False, operator_id=None, request=None):
+        package_type, package = inspect_package(file_bytes)
+        package_key = package.get("skill_key") or package.get("role_key")
+        calls.append((package_type, package_key, tenant_id, is_builtin, operator_id))
+        return package_importer.ImportResult(package_type=package_type, imported=[{"package_key": package_key}])
+
+    package_importer.BUILTIN_AGENT_TEMPLATE_ROOT = tmp_path / "agent-template"
+    package_importer.BUILTIN_SKILL_TEMPLATE_ROOT = tmp_path / "skill-template"
+    package_importer.import_package = fake_import_package
+    try:
+        result = asyncio.run(import_builtin_packages(operator_id="bootstrap"))
+    finally:
+        package_importer.BUILTIN_AGENT_TEMPLATE_ROOT = original_agent_root
+        package_importer.BUILTIN_SKILL_TEMPLATE_ROOT = original_skill_root
+        package_importer.import_package = original_import_package
+
+    assert calls == [
+        ("skill", "alert_triage", "__builtin__", True, "bootstrap"),
+        ("role", "monitor", "__builtin__", True, "bootstrap"),
+    ]
+    assert [item["package_key"] for item in result.imported] == ["alert_triage", "monitor"]
+
+
+def test_import_builtin_packages_skips_existing_newer_version(tmp_path):
+    role_dir = tmp_path / "agent-template" / "monitor"
+    role_dir.mkdir(parents=True)
+    (role_dir / "package.yaml").write_text(
+        yaml.safe_dump({"type": "role", "role_key": "monitor", "version": 1}),
+        encoding="utf-8",
+    )
+    (role_dir / "role.yaml").write_text(yaml.safe_dump({"key": "monitor", "name": "Monitor"}), encoding="utf-8")
+    skill_root = tmp_path / "skill-template"
+    skill_root.mkdir()
+
+    original_agent_root = package_importer.BUILTIN_AGENT_TEMPLATE_ROOT
+    original_skill_root = package_importer.BUILTIN_SKILL_TEMPLATE_ROOT
+    original_import_package = package_importer.import_package
+
+    async def fake_import_package(*args, **kwargs):
+        raise CustomError(package_importer.ErrorCode.PACKAGE_VERSION_LOWER)
+
+    package_importer.BUILTIN_AGENT_TEMPLATE_ROOT = tmp_path / "agent-template"
+    package_importer.BUILTIN_SKILL_TEMPLATE_ROOT = skill_root
+    package_importer.import_package = fake_import_package
+    try:
+        result = asyncio.run(import_builtin_packages())
+    finally:
+        package_importer.BUILTIN_AGENT_TEMPLATE_ROOT = original_agent_root
+        package_importer.BUILTIN_SKILL_TEMPLATE_ROOT = original_skill_root
+        package_importer.import_package = original_import_package
+
+    assert result.imported == []
+    assert result.skipped == [{"package_key": "monitor", "reason": "existing package version is newer"}]
 
 
 def test_inspect_role_package():
