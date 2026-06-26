@@ -2,7 +2,7 @@
 
 from sanic import Sanic
 
-from services import create_app
+from services.app_factory import create_app
 
 app: Sanic = create_app()
 
