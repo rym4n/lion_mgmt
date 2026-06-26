@@ -9,6 +9,7 @@ from libs.security.authorization import check_permissions, requires_permission
 from models.command_center import CommandAgent, CommandTask
 from models.digital_employee import DigitalEmployeeRole, DigitalEmployeeSkill
 from models.employee_report import EmployeeReport
+from models.report import ReportDocument
 from services.command_center.manager import create_command_task
 
 from .cognee_credential_manager import delete_employee_memory_dataset, get_or_refresh_jwt
@@ -75,6 +76,54 @@ async def _employee_or_404(tenant_id: str, employee_id: str) -> CommandAgent:
     return employee
 
 
+def _report_summary(report: EmployeeReport | None) -> dict | None:
+    if not report:
+        return None
+    return {
+        "id": report.id,
+        "ctime": report.json.get("ctime"),
+        "utime": report.json.get("utime"),
+        "title": report.title,
+        "severity": report.severity,
+        "conclusion": report.conclusion,
+        "auto_generated": report.auto_generated,
+    }
+
+
+async def _task_payloads_with_reports(tenant_id: str, tasks: list[CommandTask]) -> list[dict]:
+    payloads = [task.json for task in tasks]
+    if not tasks:
+        return payloads
+    reports = await EmployeeReport.filter(
+        tenant_id=tenant_id,
+        task_id__in=[task.id for task in tasks],
+        deleted=False,
+    ).order_by("-utime").all()
+    report_by_task_id: dict[str, EmployeeReport] = {}
+    for report in reports:
+        report_by_task_id.setdefault(report.task_id, report)
+    for payload in payloads:
+        payload["employee_report"] = _report_summary(report_by_task_id.get(payload["id"]))
+    return payloads
+
+
+async def _report_detail_payload(report: EmployeeReport) -> dict:
+    payload = report.json
+    task = await report.task
+    payload["task"] = task.json if task else None
+    payload["room_id"] = getattr(task, "room_id", None)
+    payload["runtime_transcript"] = await fetch_runtime_transcript(report.tenant_id, report.task_id)
+    payload["report_document"] = None
+    if report.report_document_id:
+        document = await ReportDocument.get_or_none(
+            id=report.report_document_id,
+            tenant_id=report.tenant_id,
+            deleted=False,
+        )
+        payload["report_document"] = document.json if document else None
+    return payload
+
+
 @digital_employee_bp.post("/employee/create")
 @requires_permission("digital_employee:c")
 async def employee_create(request: Request):
@@ -125,7 +174,7 @@ async def employee_detail(request: Request):
         {
             "role": role.json if role else None,
             "skills": [skill.json for skill in skills],
-            "recent_tasks": [task.json for task in tasks],
+            "recent_tasks": await _task_payloads_with_reports(employee.tenant_id, tasks),
         }
     )
     return response_ok(payload)
@@ -234,7 +283,7 @@ async def _employee_tasks_payload(tenant_id: str, data: dict) -> dict:
     queryset = CommandTask.filter(tenant_id=employee.tenant_id, assigned_agent_id=employee.id, deleted=False)
     total = await queryset.count()
     tasks = await queryset.order_by("-ctime").offset(offset).limit(size).all()
-    return {"list": [task.json for task in tasks], "total": total, "page": page, "size": size}
+    return {"list": await _task_payloads_with_reports(employee.tenant_id, tasks), "total": total, "page": page, "size": size}
 
 
 @digital_employee_bp.post("/role/list")
@@ -442,7 +491,7 @@ async def report_detail(request: Request):
     report = await EmployeeReport.get_or_none(id=_json(request).get("report_id"), tenant_id=_tenant_id(request), deleted=False)
     if not report:
         raise CustomError(ErrorCode.NOT_FOUND)
-    return response_ok(report.json)
+    return response_ok(await _report_detail_payload(report))
 
 
 @digital_employee_bp.post("/report/edit")
