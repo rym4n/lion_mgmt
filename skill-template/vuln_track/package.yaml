@@ -1,0 +1,5 @@
+type: skill
+skill_key: vuln_track
+version: 1
+vendor: aioe
+is_builtin: true

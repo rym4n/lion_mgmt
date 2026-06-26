@@ -87,13 +87,17 @@ async def get_prompt_words(prompt_word, tenant_id):
     for tool in tools:
         if tool["tool_name"] not in tool_names:
             tool_names.append(tool["tool_name"])
-    if "lion_mgmt" in tool_names or "lion_ai" in tool_names:
-        tool_names.remove("lion_mgmt")
-        tool_names.remove("lion_ai")
+    for internal_tool_name in ("lion_mgmt", "lion_ai"):
+        if internal_tool_name in tool_names:
+            tool_names.remove(internal_tool_name)
+    if not tool_names:
+        return prompt_word, {}, {}
 
     latest_versions = await ToolAction.filter(deleted=False, tool_name__in=tool_names, tenant_id=tenant_id).annotate(latest_version=Max("version_number")).group_by("tool_name").values("tool_name", "latest_version")
 
     pairs = [(row["tool_name"], row["latest_version"]) for row in latest_versions]
+    if not pairs:
+        return prompt_word, {}, {}
 
     cond = Q()
     for name, ver in pairs:

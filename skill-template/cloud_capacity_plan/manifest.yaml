@@ -1,0 +1,13 @@
+key: cloud_capacity_plan
+name: 云容量规划
+description: 分析云资源容量趋势并提出扩缩容建议。
+trigger_instruction: 待产品方补充触发条件和使用时机。
+usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+bindings:
+  playbook_ids: []
+  action_keys: []
+  mcp_tools: []
+  nanobot_skills: []
+require_approval: false
+enabled: true
+version: 1

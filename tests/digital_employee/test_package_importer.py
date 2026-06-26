@@ -155,6 +155,27 @@ def _zip_with(files: dict[str, str]) -> bytes:
     return buffer.getvalue()
 
 
+def test_builtin_role_default_skill_templates_exist():
+    root = Path(__file__).resolve().parents[2]
+    agent_root = root / "agent-template"
+    skill_root = root / "skill-template"
+    missing = []
+
+    for role_dir in sorted(path for path in agent_root.iterdir() if path.is_dir()):
+        package = yaml.safe_load((role_dir / "package.yaml").read_text(encoding="utf-8")) or {}
+        role = yaml.safe_load((role_dir / "role.yaml").read_text(encoding="utf-8")) or {}
+        package_skills = [str(skill) for skill in package.get("default_skill_keys") or []]
+        role_skills = [str(skill) for skill in role.get("default_skills") or []]
+
+        assert package_skills == role_skills
+        for skill_key in package_skills:
+            skill_dir = skill_root / skill_key
+            if not (skill_dir / "package.yaml").exists() or not (skill_dir / "manifest.yaml").exists():
+                missing.append(f"{role_dir.name}:{skill_key}")
+
+    assert missing == []
+
+
 def test_inspect_role_package():
     package = _zip_with({"package.yaml": yaml.safe_dump({"type": "role", "role_key": "monitor"})})
 

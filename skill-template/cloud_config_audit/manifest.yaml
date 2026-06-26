@@ -1,0 +1,13 @@
+key: cloud_config_audit
+name: 云配置审计
+description: 审计云资源配置、权限和安全基线。
+trigger_instruction: 待产品方补充触发条件和使用时机。
+usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+bindings:
+  playbook_ids: []
+  action_keys: []
+  mcp_tools: []
+  nanobot_skills: []
+require_approval: false
+enabled: true
+version: 1

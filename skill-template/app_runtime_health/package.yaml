@@ -1,0 +1,5 @@
+type: skill
+skill_key: app_runtime_health
+version: 1
+vendor: aioe
+is_builtin: true

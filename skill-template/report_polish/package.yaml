@@ -1,0 +1,5 @@
+type: skill
+skill_key: report_polish
+version: 1
+vendor: aioe
+is_builtin: true

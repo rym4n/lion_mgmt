@@ -149,8 +149,12 @@ async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> Co
     return task
 
 
-def _should_auto_execute(agent: CommandAgent) -> bool:
+def _is_digital_employee_agent(agent: CommandAgent) -> bool:
     return agent.runtime == "lion_agent" and bool(agent.role_key)
+
+
+def _should_auto_execute(agent: CommandAgent) -> bool:
+    return _is_digital_employee_agent(agent)
 
 
 def _schedule_lion_agent_execution(task: CommandTask, employee: CommandAgent, operator_id: str | None = None) -> None:
@@ -231,9 +235,11 @@ async def update_task_progress(task: CommandTask, data: dict, operator_id: str |
 
     if task.status in TERMINAL_TASK_STATUS and task.assigned_agent_key:
         try:
-            from services.digital_employee.employee_report import compose
+            agent = await CommandAgent.get_or_none(tenant_id=task.tenant_id, agent_key=task.assigned_agent_key, deleted=False)
+            if agent and _is_digital_employee_agent(agent):
+                from services.digital_employee.employee_report import compose
 
-            asyncio.create_task(compose(task, (data.get("metadata") or {}).get("actions")))
+                asyncio.create_task(compose(task, (data.get("metadata") or {}).get("actions")))
         except Exception:
             pass
 

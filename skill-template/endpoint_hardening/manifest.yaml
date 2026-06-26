@@ -1,0 +1,13 @@
+key: endpoint_hardening
+name: 终端加固
+description: 给出终端加固建议并跟踪处置进展。
+trigger_instruction: 待产品方补充触发条件和使用时机。
+usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+bindings:
+  playbook_ids: []
+  action_keys: []
+  mcp_tools: []
+  nanobot_skills: []
+require_approval: false
+enabled: true
+version: 1
