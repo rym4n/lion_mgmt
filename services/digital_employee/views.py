@@ -289,7 +289,7 @@ async def _employee_tasks_payload(tenant_id: str, data: dict) -> dict:
 
 
 @digital_employee_bp.post("/role/list")
-@requires_permission("digital_employee:role:r")
+@requires_permission("digital_employee:r")
 async def role_list(request: Request):
     data = _json(request)
     page, size, offset = _page(data)
@@ -304,7 +304,7 @@ async def role_list(request: Request):
 
 
 @digital_employee_bp.post("/role/detail")
-@requires_permission("digital_employee:role:r")
+@requires_permission("digital_employee:r")
 async def role_detail(request: Request):
     role = await get_visible_role(_tenant_id(request), _json(request).get("role_key"))
     return response_ok(role.json)
@@ -318,7 +318,7 @@ async def role_save(request: Request):
     if not role_key or not data.get("name"):
         raise CustomError(ErrorCode.PARAM_ERROR)
     exists = await DigitalEmployeeRole.filter(tenant_id=tenant_id, role_key=role_key, deleted=False).exists()
-    await _require_save_permission(request, exists, "digital_employee:role:c", "digital_employee:role:u")
+    await _require_save_permission(request, exists, "digital_employee:c", "digital_employee:u")
     role, _ = await DigitalEmployeeRole.update_or_create(
         tenant_id=tenant_id,
         role_key=role_key,
@@ -339,7 +339,7 @@ async def role_save(request: Request):
 
 
 @digital_employee_bp.post("/role/delete")
-@requires_permission("digital_employee:role:d")
+@requires_permission("digital_employee:d")
 async def role_delete(request: Request):
     role = await get_visible_role(_tenant_id(request), _json(request).get("role_key"))
     if await CommandAgent.filter(tenant_id=_tenant_id(request), role_key=role.role_key, deleted=False).count():
@@ -350,7 +350,7 @@ async def role_delete(request: Request):
 
 
 @digital_employee_bp.post("/role/upgrade-employees")
-@requires_permission("digital_employee:role:u")
+@requires_permission("digital_employee:u")
 async def role_upgrade_employees(request: Request):
     role = await get_visible_role(_tenant_id(request), _json(request).get("role_key"))
     count = await upgrade_role_for_existing_employees(role)
@@ -358,7 +358,7 @@ async def role_upgrade_employees(request: Request):
 
 
 @digital_employee_bp.post("/skill/list")
-@requires_permission("digital_employee:skill:r")
+@requires_permission("digital_employee:r")
 async def skill_list(request: Request):
     data = _json(request)
     page, size, offset = _page(data)
@@ -373,7 +373,7 @@ async def skill_list(request: Request):
 
 
 @digital_employee_bp.post("/skill/detail")
-@requires_permission("digital_employee:skill:r")
+@requires_permission("digital_employee:r")
 async def skill_detail(request: Request):
     skills = await get_visible_skills(_tenant_id(request), [_json(request).get("skill_key")])
     return response_ok(skills[0].json)
@@ -387,7 +387,7 @@ async def skill_save(request: Request):
     if not skill_key or not data.get("name"):
         raise CustomError(ErrorCode.PARAM_ERROR)
     exists = await DigitalEmployeeSkill.filter(tenant_id=tenant_id, skill_key=skill_key, deleted=False).exists()
-    await _require_save_permission(request, exists, "digital_employee:skill:c", "digital_employee:skill:u")
+    await _require_save_permission(request, exists, "digital_employee:c", "digital_employee:u")
     skill, _ = await DigitalEmployeeSkill.update_or_create(
         tenant_id=tenant_id,
         skill_key=skill_key,
@@ -407,7 +407,7 @@ async def skill_save(request: Request):
 
 
 @digital_employee_bp.post("/skill/delete")
-@requires_permission("digital_employee:skill:d")
+@requires_permission("digital_employee:d")
 async def skill_delete(request: Request):
     skills = await get_visible_skills(_tenant_id(request), [_json(request).get("skill_key")])
     skill = skills[0]
@@ -419,7 +419,7 @@ async def skill_delete(request: Request):
 
 
 @digital_employee_bp.post("/package/import")
-@requires_permission("digital_employee:package:import")
+@requires_permission("digital_employee:c")
 async def package_import(request: Request):
     uploaded = request.files.get("file") if request.files else None
     if uploaded:
@@ -435,7 +435,7 @@ async def package_import(request: Request):
 
 
 @digital_employee_bp.post("/package/export")
-@requires_permission("digital_employee:package:export")
+@requires_permission("digital_employee:r")
 async def package_export(request: Request):
     data = _json(request)
     data_bytes = await export_package(data.get("role_key"), data.get("skill_key"), bool(data.get("bundle", False)))
@@ -443,7 +443,7 @@ async def package_export(request: Request):
 
 
 @digital_employee_bp.post("/package/list")
-@requires_permission("digital_employee:package:r")
+@requires_permission("digital_employee:r")
 async def package_list(request: Request):
     tenant_id = _tenant_id(request)
     roles = await DigitalEmployeeRole.filter(_visible_filter(tenant_id)).all()
@@ -452,7 +452,7 @@ async def package_list(request: Request):
 
 
 @digital_employee_bp.post("/package/delete")
-@requires_permission("digital_employee:package:d")
+@requires_permission("digital_employee:d")
 async def package_delete(request: Request):
     data = _json(request)
     if data.get("role_key"):
@@ -473,7 +473,7 @@ async def package_delete(request: Request):
 
 
 @digital_employee_bp.post("/report/list")
-@requires_permission("digital_employee:report:r")
+@requires_permission("digital_employee:r")
 async def report_list(request: Request):
     data = _json(request)
     page, size, offset = _page(data)
@@ -488,7 +488,7 @@ async def report_list(request: Request):
 
 
 @digital_employee_bp.post("/report/detail")
-@requires_permission("digital_employee:report:r")
+@requires_permission("digital_employee:r")
 async def report_detail(request: Request):
     report = await EmployeeReport.get_or_none(id=_json(request).get("report_id"), tenant_id=_tenant_id(request), deleted=False)
     if not report:
@@ -497,7 +497,7 @@ async def report_detail(request: Request):
 
 
 @digital_employee_bp.post("/report/edit")
-@requires_permission("digital_employee:report:u")
+@requires_permission("digital_employee:u")
 async def report_edit(request: Request):
     data = _json(request)
     report = await EmployeeReport.get_or_none(id=data.get("report_id"), tenant_id=_tenant_id(request), deleted=False)
@@ -512,7 +512,7 @@ async def report_edit(request: Request):
 
 
 @digital_employee_bp.post("/report/regenerate")
-@requires_permission("digital_employee:report:u")
+@requires_permission("digital_employee:u")
 async def report_regenerate(request: Request):
     report = await EmployeeReport.get_or_none(id=_json(request).get("report_id"), tenant_id=_tenant_id(request), deleted=False)
     if not report:
