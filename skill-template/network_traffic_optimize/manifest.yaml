@@ -1,8 +1,8 @@
 key: network_traffic_optimize
 name: 网络流量优化
 description: 分析流量趋势、拥塞和优化策略。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务涉及带宽拥塞、流量异常、链路利用率或流量调优时，执行网络流量优化。
+usage_notes: 输出流量趋势、异常来源、瓶颈链路、优化建议、风险和验证指标。
 bindings:
   playbook_ids: []
   action_keys: []

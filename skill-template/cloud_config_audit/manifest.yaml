@@ -1,8 +1,8 @@
 key: cloud_config_audit
 name: 云配置审计
 description: 审计云资源配置、权限和安全基线。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务要求检查云资源配置、访问权限、暴露面或安全基线时，执行云配置审计。
+usage_notes: 输出不合规项、影响资源、证据、风险等级、建议修复动作和审批注意事项。
 bindings:
   playbook_ids: []
   action_keys: []

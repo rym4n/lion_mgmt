@@ -243,6 +243,16 @@ async def get_license(request: Request):
         "Event List": 0,
         "Event Ingestion": 1,
     }
+    top_menu_order = {
+        "作战室": 10,
+        "作戰室": 10,
+        "War Room": 10,
+        "指挥中心": 15,
+        "指揮中心": 15,
+        "Command Center": 15,
+        "事件管理": 20,
+        "Event Management": 20,
+    }
 
     SPECIAL_TENANT_ID = "8bce552d-c27c-41d4-8a1b-8c5bf38dfe18"
     current_tenant_id = request.ctx.session.get("tenant_id")
@@ -274,6 +284,17 @@ async def get_license(request: Request):
             menu["children"] = sorted(children, key=lambda x: system_dict.get(x["meta"]["title"], 99))
         elif menu["meta"]["title"] in ["事件管理", "Event Management"]:
             menu["children"] = sorted(children, key=lambda x: event_dict.get(x["meta"]["title"], 99))
+        title = menu.get("meta", {}).get("title")
+        if title in top_menu_order:
+            menu["meta"]["rank"] = top_menu_order[title]
+
+    menus = sorted(
+        menus,
+        key=lambda menu: (
+            menu.get("meta", {}).get("rank", 99),
+            menu.get("meta", {}).get("title", ""),
+        ),
+    )
 
     if tenant_type:
         menus.append({"tenant": True})

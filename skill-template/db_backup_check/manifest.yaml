@@ -1,8 +1,8 @@
 key: db_backup_check
 name: 数据库备份检查
 description: 检查数据库备份任务、恢复点和备份有效性。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务涉及数据库备份、恢复点、备份失败或恢复演练时，执行数据库备份检查。
+usage_notes: 输出最近备份时间、状态、覆盖范围、恢复可用性、风险和补救建议。
 bindings:
   playbook_ids: []
   action_keys: []

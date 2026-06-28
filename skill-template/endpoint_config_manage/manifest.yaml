@@ -1,8 +1,8 @@
 key: endpoint_config_manage
 name: 终端配置管理
 description: 核对和维护终端配置策略。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务涉及终端配置策略核对、策略漂移或配置维护时，执行终端配置管理。
+usage_notes: 输出策略来源、目标终端、当前配置、偏差项、风险和变更建议。
 bindings:
   playbook_ids: []
   action_keys: []

@@ -1,8 +1,8 @@
 key: db_troubleshoot
 name: 数据库故障排查
 description: 排查数据库连接、性能、锁等待和异常告警。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务包含数据库连接失败、锁等待、性能下降、错误日志或实例告警时，执行数据库故障排查。
+usage_notes: 输出症状、影响库表、关键指标、根因候选、证据和安全处置建议。
 bindings:
   playbook_ids: []
   action_keys: []

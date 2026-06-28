@@ -1,8 +1,8 @@
 key: endpoint_hardening
 name: 终端加固
 description: 给出终端加固建议并跟踪处置进展。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务涉及终端安全加固、基线提升或高危配置修复时，执行终端加固。
+usage_notes: 输出加固项、适用范围、风险收益、灰度计划、验证方式和回退条件。
 bindings:
   playbook_ids: []
   action_keys: []

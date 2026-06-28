@@ -1,8 +1,8 @@
 key: app_troubleshoot
 name: 应用排障
 description: 定位应用运行异常、错误日志和依赖故障。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务包含应用报错、服务不可用、接口失败或用户访问异常时，执行应用排障。
+usage_notes: 按现象、时间线、依赖、日志、指标和最近变更组织排查结论，并给出处置优先级。
 bindings:
   playbook_ids: []
   action_keys: []

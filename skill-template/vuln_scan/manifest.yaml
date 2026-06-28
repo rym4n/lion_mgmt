@@ -1,8 +1,8 @@
 key: vuln_scan
 name: 漏洞扫描
 description: 执行或跟踪漏洞扫描任务并整理结果。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务涉及漏洞扫描计划、扫描结果整理或新增漏洞发现时，执行漏洞扫描。
+usage_notes: 输出扫描范围、发现数量、严重度分布、关键漏洞、误报线索和后续分派建议。
 bindings:
   playbook_ids: []
   action_keys: []

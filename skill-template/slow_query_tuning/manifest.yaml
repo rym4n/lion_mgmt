@@ -1,8 +1,8 @@
 key: slow_query_tuning
 name: 慢查询分析优化
 description: 分析慢查询、索引和执行计划并给出优化建议。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务包含慢查询、SQL 性能下降、索引建议或执行计划分析时，执行慢查询分析优化。
+usage_notes: 输出 SQL 或模式、执行计划要点、瓶颈、索引/改写建议、影响评估和回滚方式。
 bindings:
   playbook_ids: []
   action_keys: []

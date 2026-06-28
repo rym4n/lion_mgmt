@@ -1,8 +1,8 @@
 key: app_runtime_health
 name: 应用运行健康检查
 description: 检查应用运行状态、接口可用性和资源指标。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务要求检查应用可用性、接口状态、资源指标或运行质量时，执行应用运行健康检查。
+usage_notes: 输出健康状态、异常指标、影响范围、建议观察窗口和下一步处理建议。
 bindings:
   playbook_ids: []
   action_keys: []

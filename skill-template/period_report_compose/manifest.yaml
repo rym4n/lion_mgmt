@@ -1,8 +1,8 @@
 key: period_report_compose
 name: 周期报告生成
 description: 生成周期运营、运维或安全分析报告。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务要求生成日报、周报、月报、运营报告或专题分析报告时，执行周期报告生成。
+usage_notes: 输出报告结构、数据口径、关键趋势、风险事项、建议动作和待确认缺口。
 bindings:
   playbook_ids: []
   action_keys: []

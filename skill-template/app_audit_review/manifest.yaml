@@ -1,8 +1,8 @@
 key: app_audit_review
 name: 应用审核评审
 description: 审核应用配置、发布内容和操作风险。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务涉及应用发布、配置变更、权限调整或操作审计时，执行应用审核评审。
+usage_notes: 输出审计对象、变更摘要、风险等级、证据、放行条件和回滚建议。
 bindings:
   playbook_ids: []
   action_keys: []

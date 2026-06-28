@@ -1,8 +1,8 @@
 key: report_export_notify
 name: 报告导出通知
 description: 导出报告并通知相关人员查看。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当报告需要导出为文档、PDF 或发送给相关人员时，执行报告导出通知。
+usage_notes: 导出前确认文档名称、格式、接收范围和敏感信息；输出通知结果和失败项。
 bindings:
   playbook_ids: []
   action_keys: []

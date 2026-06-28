@@ -1,8 +1,8 @@
 key: patch_dispatch
 name: 补丁派发
 description: 规划和跟踪终端补丁派发任务。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务涉及终端补丁计划、补丁派发、失败跟踪或安装统计时，执行补丁派发。
+usage_notes: 输出补丁范围、适用终端、维护窗口、成功率、失败原因和补救计划。
 bindings:
   playbook_ids: []
   action_keys: []

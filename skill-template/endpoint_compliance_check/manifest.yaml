@@ -1,8 +1,8 @@
 key: endpoint_compliance_check
 name: 终端合规检查
 description: 检查终端合规状态、基线和策略执行结果。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务涉及终端基线、策略执行、违规项或合规统计时，执行终端合规检查。
+usage_notes: 输出终端范围、合规项、违规证据、影响等级、修复建议和复核方式。
 bindings:
   playbook_ids: []
   action_keys: []

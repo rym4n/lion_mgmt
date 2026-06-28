@@ -1,8 +1,8 @@
 key: network_troubleshoot
 name: 网络故障排查
 description: 排查网络中断、丢包、延迟和路由异常。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务包含网络中断、丢包、延迟、路由异常或访问失败时，执行网络故障排查。
+usage_notes: 输出源目路径、时间窗口、关键证据、根因候选、绕行建议和变更风险。
 bindings:
   playbook_ids: []
   action_keys: []

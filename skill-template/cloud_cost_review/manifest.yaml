@@ -1,8 +1,8 @@
 key: cloud_cost_review
 name: 云成本复核
 description: 复核云资源成本、异常费用和优化空间。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务涉及云账单异常、资源浪费、成本优化或预算复核时，执行云成本复核。
+usage_notes: 输出费用变化、异常资源、优化空间、潜在节省、业务风险和保留建议。
 bindings:
   playbook_ids: []
   action_keys: []

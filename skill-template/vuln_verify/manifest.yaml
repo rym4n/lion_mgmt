@@ -1,8 +1,8 @@
 key: vuln_verify
 name: 漏洞复测
 description: 验证漏洞修复效果并记录证据。
-trigger_instruction: 待产品方补充触发条件和使用时机。
-usage_notes: 工程骨架已提供；具体业务流程、授权工具和输出格式待产品方补充。
+trigger_instruction: 当任务涉及漏洞修复复测、关闭确认或修复证据核验时，执行漏洞复测。
+usage_notes: 输出复测范围、验证方法、结果、证据、未通过原因和是否可关闭。
 bindings:
   playbook_ids: []
   action_keys: []
