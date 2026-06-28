@@ -365,6 +365,55 @@ async def _import_bundle(root: Path, package: dict, tenant_id: str, is_builtin: 
     )
 
 
+async def _auto_create_employees(role_keys: list[str], tenant_id: str) -> tuple[list[dict], list[dict]]:
+    """为导入的岗位自动创建完整数字员工。
+
+    符合「导入即得到一名可用员工」的产品设计：同岗位尚无员工时直接新建，
+    已存在员工时自动追加序号重命名后再建，避免界面上出现重名。
+    单个员工创建失败（例如 lion_agent 暂不可用导致 workspace 同步异常）只记入 skipped，
+    不影响岗位/技能本身的导入结果。
+    """
+    if not role_keys or not tenant_id:
+        return [], []
+    from models.command_center import CommandAgent
+    from .manager import create_employee, get_visible_role
+
+    created: list[dict] = []
+    skipped: list[dict] = []
+    for role_key in dict.fromkeys(role_keys):
+        try:
+            role = await get_visible_role(tenant_id, role_key)
+        except CustomError:
+            skipped.append({"type": "employee", "role_key": role_key, "reason": "role not visible or disabled"})
+            continue
+        base_name = role.name or role_key
+        existing = await CommandAgent.filter(tenant_id=tenant_id, role_key=role_key, deleted=False).all()
+        name = base_name
+        if existing:
+            taken = {employee.name for employee in existing}
+            index = len(existing) + 1
+            name = f"{base_name} {index}"
+            while name in taken:
+                index += 1
+                name = f"{base_name} {index}"
+        try:
+            employee = await create_employee(tenant_id=tenant_id, role_key=role_key, name=name)
+        except Exception as exc:
+            logger.warning("auto create digital employee failed role_key=%s error=%s", role_key, exc)
+            skipped.append({"type": "employee", "role_key": role_key, "reason": str(exc)})
+            continue
+        created.append(
+            {
+                "type": "employee",
+                "employee_id": employee.id,
+                "agent_key": employee.agent_key,
+                "role_key": role_key,
+                "name": name,
+            }
+        )
+    return created, skipped
+
+
 async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = False, operator_id: str | None = None, request=None) -> ImportResult:
     package_type, package = _inspect_or_error(file_bytes)
     package_tenant_id = "__builtin__" if is_builtin else tenant_id
@@ -391,12 +440,23 @@ async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = F
             shutil.copytree(tmp_root, target_root)
             if package_type == "role":
                 role = await _upsert_role(target_root, package, package_tenant_id, is_builtin)
-                return ImportResult(package_type="role", imported=[{"role_key": role.role_key, "id": role.id}])
+                result = ImportResult(package_type="role", imported=[{"type": "role", "role_key": role.role_key, "id": role.id}])
+                if not is_builtin:
+                    created, skipped = await _auto_create_employees([role.role_key], tenant_id)
+                    result.imported.extend(created)
+                    result.skipped.extend(skipped)
+                return result
             if package_type == "skill":
                 skill = await _upsert_skill(target_root, package, package_tenant_id, is_builtin)
-                return ImportResult(package_type="skill", imported=[{"skill_key": skill.skill_key, "id": skill.id}])
+                return ImportResult(package_type="skill", imported=[{"type": "skill", "skill_key": skill.skill_key, "id": skill.id}])
             if package_type == "bundle":
-                return await _import_bundle(target_root, package, tenant_id, is_builtin, request=request)
+                result = await _import_bundle(target_root, package, tenant_id, is_builtin, request=request)
+                if not is_builtin:
+                    role_keys = [item["role_key"] for item in result.imported if item.get("type") == "role" and item.get("role_key")]
+                    created, skipped = await _auto_create_employees(role_keys, tenant_id)
+                    result.imported.extend(created)
+                    result.skipped.extend(skipped)
+                return result
         except Exception:
             if target_root.exists():
                 shutil.rmtree(target_root)
