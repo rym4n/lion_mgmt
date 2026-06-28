@@ -23,7 +23,12 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
             '8bce552d-c27c-41d4-8a1b-8c5bf38dfe18',
             'command_center',
             '指挥中心',
-            '["command_center:c","command_center:r","command_center:u","command_center:d"]',
+            '[
+                {"label": "新增指挥中心权限", "value": "c"},
+                {"label": "删除指挥中心权限", "value": "d"},
+                {"label": "修改指挥中心权限", "value": "u"},
+                {"label": "查看指挥中心权限", "value": "r"}
+            ]',
             '[]',
             'command_center_bp'
         )

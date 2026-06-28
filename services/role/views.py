@@ -15,6 +15,128 @@ role_bp = Blueprint("role", url_prefix="/role")
 _all__ = ["role_bp"]
 
 
+LEGACY_PERMISSION_REMAP = {
+    "agent:report:schedule:c": "agent_report_schedule:c",
+    "agent:report:schedule:r": "agent_report_schedule:r",
+    "agent:report:schedule:u": "agent_report_schedule:u",
+    "agent:report:schedule:d": "agent_report_schedule:d",
+    "digital_employee:role:c": "digital_employee:c",
+    "digital_employee:role:r": "digital_employee:r",
+    "digital_employee:role:u": "digital_employee:u",
+    "digital_employee:role:d": "digital_employee:d",
+    "digital_employee:skill:c": "digital_employee:c",
+    "digital_employee:skill:r": "digital_employee:r",
+    "digital_employee:skill:u": "digital_employee:u",
+    "digital_employee:skill:d": "digital_employee:d",
+    "digital_employee:report:r": "digital_employee:r",
+    "digital_employee:report:u": "digital_employee:u",
+    "digital_employee:package:import": "digital_employee:c",
+    "digital_employee:package:export": "digital_employee:r",
+    "digital_employee:package:r": "digital_employee:r",
+    "digital_employee:package:d": "digital_employee:d",
+}
+
+
+def _normalize_permission_value(permission_value: object) -> str | None:
+    if not isinstance(permission_value, str) or ":" not in permission_value:
+        return None
+    if permission_value.startswith("agent:report:schedule:"):
+        return f"agent_report_schedule:{permission_value.removeprefix('agent:report:schedule:')}"
+    return LEGACY_PERMISSION_REMAP.get(permission_value, permission_value)
+
+
+def _normalize_menu_action_value(permission_value: object) -> str | None:
+    if not isinstance(permission_value, str) or not permission_value:
+        return None
+    return permission_value.rsplit(":", 1)[-1]
+
+
+def _normalize_menu_permissions(permissions: object) -> list[dict]:
+    if not isinstance(permissions, list):
+        return []
+
+    normalized_permissions = []
+    for item in permissions:
+        if isinstance(item, dict):
+            value = _normalize_menu_action_value(item.get("value"))
+            label = item.get("label") or value
+        else:
+            value = _normalize_menu_action_value(item)
+            label = value
+        if value:
+            normalized_permissions.append({"value": value, "label": label})
+    return normalized_permissions
+
+
+def _normalize_permission_menu(permission: dict) -> dict:
+    normalized = dict(permission)
+    normalized["Permissions"] = _normalize_menu_permissions(permission.get("Permissions"))
+    return normalized
+
+
+def _build_permission_map(permissions_data: list[dict]) -> dict:
+    permission_map = {}
+    for permission in permissions_data:
+        values = {
+            item["value"]: item["label"]
+            for item in _normalize_menu_permissions(permission.get("Permissions"))
+        }
+        permission_map[permission["model"]] = {
+            "description": permission["description"],
+            "values": values,
+        }
+    return permission_map
+
+
+def _build_structured_permissions(role_permissions: list[str] | None, permissions_data: list[dict]) -> list[dict]:
+    permission_map = _build_permission_map(permissions_data)
+    structured_by_model = {}
+    seen_by_model = {}
+
+    def append_actions(model: str, action_values: list[str]) -> None:
+        perm_info = permission_map.get(model)
+        if not perm_info:
+            return
+        if model not in structured_by_model:
+            structured_by_model[model] = {
+                "model": model,
+                "model_description": perm_info["description"],
+                "sp": [],
+            }
+            seen_by_model[model] = set()
+
+        for action in action_values:
+            if action in seen_by_model[model]:
+                continue
+            label = perm_info["values"].get(action)
+            if label:
+                structured_by_model[model]["sp"].append({action: label})
+                seen_by_model[model].add(action)
+
+    for permission_value in role_permissions or []:
+        normalized = _normalize_permission_value(permission_value)
+        if not normalized:
+            continue
+
+        model, actions = normalized.split(":", 1)
+        if model == "*":
+            action_values = None if actions == "*" else actions.split(",")
+            for wildcard_model, perm_info in permission_map.items():
+                append_actions(
+                    wildcard_model,
+                    list(perm_info["values"].keys()) if action_values is None else action_values,
+                )
+            continue
+
+        perm_info = permission_map.get(model)
+        if not perm_info:
+            continue
+        action_values = list(perm_info["values"].keys()) if actions == "*" else actions.split(",")
+        append_actions(model, action_values)
+
+    return list(structured_by_model.values())
+
+
 @role_bp.post("/add")
 @openapi.definition(
     summary="新建角色",
@@ -225,39 +347,8 @@ async def find_role(request):
 
     permissions_data = await PermissionsMenu.all().values()
 
-    permission_map = {
-        p["model"]: {
-            "description": p["description"],
-            "values": {perm["value"]: perm["label"] for perm in p.get("Permissions", [])},
-        }
-        for p in permissions_data
-    }
-
-    structured_permissions = []
-
-    for perm_str in role.permissions:
-        model, actions = perm_str.split(":")
-
-        perm_info = permission_map.get(model)
-        if not perm_info:
-            continue
-
-        action_labels = []
-        for action in actions:
-            label = perm_info["values"].get(action)
-            if label:
-                action_labels.append({action: label})
-
-        structured_permissions.append(
-            {
-                "model": model,
-                "model_description": perm_info["description"],
-                "sp": action_labels,
-            }
-        )
-
     data = role.json
-    data["permissions"] = structured_permissions
+    data["permissions"] = _build_structured_permissions(role.permissions, permissions_data)
     return response_ok(data)
 
 
@@ -454,7 +545,7 @@ async def all_permission(request):
     permissions = await PermissionsMenu.all().values()
     for permission in permissions:
         if permission["description"] in menu_dict:
-            permission_list.append(permission)
+            permission_list.append(_normalize_permission_menu(permission))
     return response_ok(
         {
             "permissions": permission_list,

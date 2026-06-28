@@ -35,7 +35,12 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
             '8bce552d-c27c-41d4-8a1b-8c5bf38dfe18',
             'agent_report_schedule',
             '汇报任务',
-            '["agent:report:schedule:c","agent:report:schedule:r","agent:report:schedule:u","agent:report:schedule:d"]',
+            '[
+                {"label": "新增汇报任务权限", "value": "c"},
+                {"label": "删除汇报任务权限", "value": "d"},
+                {"label": "修改汇报任务权限", "value": "u"},
+                {"label": "查看汇报任务权限", "value": "r"}
+            ]',
             '[]',
             'agent_bp'
         )

@@ -6,7 +6,12 @@ RUN_IN_TRANSACTION = True
 async def upgrade(db: BaseDBAsyncClient) -> str:
     return """
         UPDATE "permissions_menu"
-        SET "Permissions" = '["digital_employee:c","digital_employee:r","digital_employee:u","digital_employee:d"]'::jsonb
+        SET "Permissions" = '[
+            {"label": "新增数字员工权限", "value": "c"},
+            {"label": "删除数字员工权限", "value": "d"},
+            {"label": "修改数字员工权限", "value": "u"},
+            {"label": "查看数字员工权限", "value": "r"}
+        ]'::jsonb
         WHERE "model" = 'digital_employee';
 
         UPDATE "role"
