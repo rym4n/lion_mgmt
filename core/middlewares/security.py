@@ -52,6 +52,7 @@ class SecurityMiddleware(BaseMiddleware):
         ]
         white_prefixes = [
             "/system/down-file/",
+            "/agent/report/schedule/internal/",
             "/digital_employee/internal/",
             "/digital_employee/runtime/",
         ]

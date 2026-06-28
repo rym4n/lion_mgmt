@@ -48,3 +48,68 @@ class ReportDocument(BaseModel):
         table = "report_document"
         ordering = ["-utime"]
         indexes = (("tenant_id", "owner_id"),)
+
+
+class ReportSchedule(BaseModel):
+    """
+    用户报告定时任务表。
+
+    记录汇报助手文档的周期执行配置，并关联一条内部 Timed 记录用于统一定时任务管理。
+    """
+
+    document = fields.ForeignKeyField(
+        "models.ReportDocument",
+        related_name="schedules",
+        description="关联报告文档",
+        on_delete=fields.CASCADE,
+    )
+    timed = fields.ForeignKeyField(
+        "models.Timed",
+        null=True,
+        related_name="report_schedules",
+        description="关联内部定时任务",
+        on_delete=fields.SET_NULL,
+    )
+    creator = fields.ForeignKeyField(
+        "models.Account",
+        null=True,
+        related_name="report_schedules",
+        description="创建人",
+        on_delete=fields.SET_NULL,
+    )
+    name = fields.CharField(max_length=255, description="任务名称")
+    cron = fields.CharField(max_length=64, description="cron 表达式")
+    export_format = fields.CharField(max_length=8, default="docx", description="导出格式 docx/pdf")
+    enabled = fields.BooleanField(default=True, description="是否启用")
+    last_run_at = fields.DatetimeField(null=True, description="最近执行时间")
+    last_status = fields.CharField(max_length=16, null=True, description="最近执行状态 ok/failed")
+    last_error = fields.TextField(null=True, description="最近执行错误")
+    next_run_at = fields.DatetimeField(null=True, description="下次执行时间")
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
+            "tenant_id": self.tenant_id,
+            "document_id": self.document_id,
+            "timed_id": self.timed_id,
+            "creator_id": self.creator_id,
+            "name": self.name,
+            "cron": self.cron,
+            "export_format": self.export_format,
+            "enabled": self.enabled,
+            "last_run_at": strip_timezone_to_seconds(self.last_run_at) if self.last_run_at else None,
+            "last_status": self.last_status,
+            "last_error": self.last_error,
+            "next_run_at": strip_timezone_to_seconds(self.next_run_at) if self.next_run_at else None,
+        }
+
+    class Meta:
+        table = "report_schedule"
+        ordering = ["-utime"]
+        indexes = (("tenant_id", "document_id"), ("tenant_id", "enabled"))

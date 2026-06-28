@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from croniter import croniter
 import orjson
 from docx import Document
 from sanic import Blueprint, Request
@@ -20,14 +21,16 @@ from tortoise.expressions import Q
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import requires_permission
+from libs.security.authorization import check_permissions, requires_permission
 from libs.utils import gen_run_id, upload_to_s3
 from libs.kafka import aproduce
+from models import Account
 from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
-from models.report import ReportDocument
+from models.report import ReportDocument, ReportSchedule
 from models.runlog import Runlog
+from services.agent.schedule_runner import delete_report_schedule_timer, sync_report_schedule_timer
 from services.digital_employee.lion_agent_adapter import execute_prompt, workspace_id_for
-from settings import REPORT_TEMPLATE_BASE, REPORT_USER_BASE, TASK_TOPIC, TZ
+from settings import REPORT_TEMPLATE_BASE, REPORT_USER_BASE, RY_SERVICE_URL, TASK_TOPIC, TZ
 
 agent_bp = Blueprint("agent", url_prefix="/agent")
 
@@ -860,6 +863,13 @@ async def _docx_to_pdf_bytes(docx_bytes: bytes) -> bytes:
         tmp_path.unlink(missing_ok=True)
 
 
+async def _get_owned_report_document(doc_id: str, tenant_id: str, owner_id: str) -> ReportDocument:
+    doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, owner_id=owner_id, deleted=False)
+    if not doc:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    return doc
+
+
 @agent_bp.post("/report/export")
 @openapi.definition(
     summary="导出报告文件并上传 S3 返回下载链接",
@@ -891,43 +901,8 @@ async def report_export(request: Request):
 
     tenant_id = request.ctx.session.get("tenant_id")
     user_id = str(_session_user_id(request) or "")
-    doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False)
-    if not doc:
-        raise CustomError(ErrorCode.NOT_FOUND)
-
-    user_dir = _user_report_dir(tenant_id, user_id)
-    docx_path = user_dir / doc.file_path
-    if not docx_path.exists():
-        raise CustomError(ErrorCode.NOT_FOUND)
-
-    from settings import RY_USER_BUCKET
-    export_name = Path(doc.name).stem
-
-    if fmt == "docx":
-        file_bytes = await _resolve_fetch_placeholders(
-            docx_path.read_bytes(), doc.fetch_config or {}, tenant_id, user_id
-        )
-        content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        s3_name = f"{uuid.uuid4()}.docx"
-    else:
-        try:
-            resolved_bytes = await _resolve_fetch_placeholders(
-                docx_path.read_bytes(), doc.fetch_config or {}, tenant_id, user_id
-            )
-            file_bytes = await _docx_to_pdf_bytes(resolved_bytes)
-        except Exception as exc:
-            raise CustomError(ErrorCode.INTERNAL_ERROR)
-        content_type = "application/pdf"
-        s3_name = f"{uuid.uuid4()}.pdf"
-
-    url = await upload_to_s3(
-        file_bytes,
-        RY_USER_BUCKET,
-        s3_name,
-        prefix=f"reports/{tenant_id}",
-        content_type=content_type,
-    )
-    return response_ok({"url": url, "format": fmt, "name": f"{export_name}.{fmt}"})
+    doc = await _get_owned_report_document(doc_id, tenant_id, user_id)
+    return response_ok(await export_report_document(doc, tenant_id=tenant_id, owner_id=user_id, operator_id=user_id, fmt=fmt))
 
 
 @agent_bp.post("/report/notify/save")
@@ -1011,77 +986,15 @@ async def report_notify_send(request: Request):
 
     tenant_id = request.ctx.session.get("tenant_id")
     user_id = str(_session_user_id(request) or "")
-    doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False)
-    if not doc:
-        raise CustomError(ErrorCode.NOT_FOUND)
-    if not doc.notify_enabled or not doc.notify_config:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    # 上传文件到 S3
-    user_dir = _user_report_dir(tenant_id, user_id)
-    docx_path = user_dir / doc.file_path
-    if not docx_path.exists():
-        raise CustomError(ErrorCode.NOT_FOUND)
-
-    from settings import RY_USER_BUCKET
-    if fmt == "docx":
-        file_bytes = await _resolve_fetch_placeholders(
-            docx_path.read_bytes(), doc.fetch_config or {}, tenant_id, user_id
-        )
-        content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        s3_name = f"{uuid.uuid4()}.docx"
-    else:
-        try:
-            resolved_bytes = await _resolve_fetch_placeholders(
-                docx_path.read_bytes(), doc.fetch_config or {}, tenant_id, user_id
-            )
-            file_bytes = await _docx_to_pdf_bytes(resolved_bytes)
-        except Exception:
-            raise CustomError(ErrorCode.INTERNAL_ERROR)
-        content_type = "application/pdf"
-        s3_name = f"{uuid.uuid4()}.pdf"
-
-    url = await upload_to_s3(
-        file_bytes,
-        RY_USER_BUCKET,
-        s3_name,
-        prefix=f"reports/{tenant_id}",
-        content_type=content_type,
-    )
-    download_url = f"{request.scheme}://{request.host}{url}" if url else ""
-
-    # 发送通知动作
-    notify_actions = _extract_report_notify_actions(doc.notify_config)
-    operator_id = _session_user_id(request)
-    sent_count = 0
-
-    for action in notify_actions:
-        # 将报告下载链接注入 action_input
-        action_input = action.get("action_input") or {}
-        if isinstance(action_input, dict):
-            action_input = {**action_input, "report_url": download_url}
-        else:
-            action_input = {"report_url": download_url}
-
-        params = {
-            "resource": action.get("resource", ""),
-            "node_name": action.get("node_name") or action.get("description", ""),
-            "action": action.get("action") or action.get("func", ""),
-            "action_name": action.get("action_name") or action.get("name", ""),
-            "app_name": action.get("app_name") or action.get("tool_name", ""),
-            "name": action.get("name") or action.get("description", ""),
-            "app_ver": action.get("app_ver") or action.get("version", ""),
-            "main": action.get("main") or action.get("tool_main", ""),
-            "action_input": action_input,
-            "retry_times": int(action.get("retry_times") or 3),
-            "timeout": int(action.get("timeout") or 300),
-            "executor": operator_id,
-        }
-        run_id = gen_run_id()
-        await aproduce(TASK_TOPIC, {"run_type": "action", "run_id": run_id, "run_args": params, "tenant_id": tenant_id})
-        sent_count += 1
-
-    return response_ok({"sent_count": sent_count, "url": url})
+    doc = await _get_owned_report_document(doc_id, tenant_id, user_id)
+    return response_ok(await send_report_notify_for_document(
+        doc,
+        tenant_id=tenant_id,
+        owner_id=user_id,
+        operator_id=str(_session_user_id(request) or ""),
+        fmt=fmt,
+        base_url=f"{request.scheme}://{request.host}",
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -1302,4 +1215,361 @@ async def report_fetch_run(request: Request):
         "doc_id": str(doc.id),
         "name": doc.name,
         "content": base64.b64encode(resolved).decode("utf-8"),
+    })
+
+
+async def export_report_document(
+    doc: ReportDocument,
+    *,
+    tenant_id: str,
+    owner_id: str,
+    operator_id: str | None,
+    fmt: str = "docx",
+) -> dict:
+    fmt = str(fmt or "docx").strip().lower()
+    if fmt not in ("docx", "pdf"):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    user_dir = _user_report_dir(tenant_id, owner_id)
+    docx_path = user_dir / doc.file_path
+    if not docx_path.exists():
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    from settings import RY_USER_BUCKET
+
+    export_name = Path(doc.name).stem
+    try:
+        resolved_bytes = await _resolve_fetch_placeholders(
+            docx_path.read_bytes(), doc.fetch_config or {}, tenant_id, operator_id or owner_id
+        )
+        if fmt == "docx":
+            file_bytes = resolved_bytes
+            content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        else:
+            file_bytes = await _docx_to_pdf_bytes(resolved_bytes)
+            content_type = "application/pdf"
+    except CustomError:
+        raise
+    except Exception:
+        raise CustomError(ErrorCode.INTERNAL_ERROR)
+
+    s3_name = f"{uuid.uuid4()}.{fmt}"
+    url = await upload_to_s3(
+        file_bytes,
+        RY_USER_BUCKET,
+        s3_name,
+        prefix=f"reports/{tenant_id}",
+        content_type=content_type,
+    )
+    return {"url": url, "format": fmt, "name": f"{export_name}.{fmt}"}
+
+
+def _absolute_report_url(url: str, base_url: str | None = None) -> str:
+    if not url:
+        return ""
+    if url.startswith(("http://", "https://")):
+        return url
+    base = (base_url or RY_SERVICE_URL or "").rstrip("/")
+    return f"{base}{url}" if base else url
+
+
+async def send_report_notify_for_document(
+    doc: ReportDocument,
+    *,
+    tenant_id: str,
+    owner_id: str,
+    operator_id: str | None,
+    fmt: str = "docx",
+    base_url: str | None = None,
+) -> dict:
+    if not doc.notify_enabled or not doc.notify_config:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    export_result = await export_report_document(
+        doc,
+        tenant_id=tenant_id,
+        owner_id=owner_id,
+        operator_id=operator_id,
+        fmt=fmt,
+    )
+    download_url = _absolute_report_url(export_result["url"], base_url)
+    notify_actions = _extract_report_notify_actions(doc.notify_config)
+    sent_count = 0
+
+    for action in notify_actions:
+        action_input = action.get("action_input") or {}
+        if isinstance(action_input, dict):
+            action_input = {**action_input, "report_url": download_url}
+        else:
+            action_input = {"report_url": download_url}
+
+        params = {
+            "resource": action.get("resource", ""),
+            "node_name": action.get("node_name") or action.get("description", ""),
+            "action": action.get("action") or action.get("func", ""),
+            "action_name": action.get("action_name") or action.get("name", ""),
+            "app_name": action.get("app_name") or action.get("tool_name", ""),
+            "name": action.get("name") or action.get("description", ""),
+            "app_ver": action.get("app_ver") or action.get("version", ""),
+            "main": action.get("main") or action.get("tool_main", ""),
+            "action_input": action_input,
+            "retry_times": int(action.get("retry_times") or 3),
+            "timeout": int(action.get("timeout") or 300),
+            "executor": operator_id,
+        }
+        run_id = gen_run_id()
+        await aproduce(TASK_TOPIC, {"run_type": "action", "run_id": run_id, "run_args": params, "tenant_id": tenant_id})
+        sent_count += 1
+
+    return {"sent_count": sent_count, "url": export_result["url"]}
+
+
+def _check_internal_agent_request(request: Request) -> None:
+    from settings import LION_ACTION_INTERNAL_TOKEN, LION_AGENT_INTERNAL_TOKEN
+
+    token = request.headers.get("X-Internal-Token") or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    allowed_tokens = {item for item in [LION_AGENT_INTERNAL_TOKEN, LION_ACTION_INTERNAL_TOKEN] if item}
+    if allowed_tokens and token not in allowed_tokens:
+        raise CustomError(ErrorCode.UNAUTH)
+
+
+@agent_bp.post("/report/schedule/internal/run")
+async def report_schedule_internal_run(request: Request):
+    _check_internal_agent_request(request)
+    data = _require_json(request)
+    schedule_id = str(data.get("schedule_id") or "").strip()
+    tenant_id = str(data.get("tenant_id") or "").strip() or None
+    if not schedule_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    from services.agent.schedule_runner import execute_report_schedule
+
+    return response_ok(await execute_report_schedule(schedule_id, tenant_id))
+
+
+def _normalize_report_schedule_payload(data: dict, *, partial: bool = False) -> dict:
+    payload = {}
+    if "name" in data:
+        name = str(data.get("name") or "").strip()
+        if not name:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        payload["name"] = name
+    elif not partial:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if "cron" in data:
+        cron_expr = str(data.get("cron") or "").strip()
+        if not cron_expr:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        if not croniter.is_valid(cron_expr):
+            raise CustomError(ErrorCode.REPORT_SCHEDULE_CRON_INVALID)
+        payload["cron"] = cron_expr
+    elif not partial:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if "export_format" in data:
+        export_format = str(data.get("export_format") or "docx").strip().lower()
+        if export_format not in ("docx", "pdf"):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        payload["export_format"] = export_format
+    elif not partial:
+        payload["export_format"] = "docx"
+
+    if "enabled" in data:
+        payload["enabled"] = _parse_report_schedule_bool(data.get("enabled"))
+    elif not partial:
+        payload["enabled"] = True
+
+    return payload
+
+
+def _parse_report_schedule_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("true", "1", "yes", "on"):
+            return True
+        if normalized in ("false", "0", "no", "off"):
+            return False
+    raise CustomError(ErrorCode.PARAM_ERROR)
+
+
+async def _get_schedule_doc(doc_id: str, tenant_id: str, owner_id: str) -> ReportDocument:
+    return await _get_owned_report_document(doc_id, tenant_id, owner_id)
+
+
+async def _get_report_schedule(schedule_id: str, tenant_id: str, owner_id: str) -> ReportSchedule:
+    schedule = await ReportSchedule.get_or_none(id=schedule_id, tenant_id=tenant_id, deleted=False)
+    if not schedule:
+        raise CustomError(ErrorCode.REPORT_SCHEDULE_NOT_FOUND)
+    document = await ReportDocument.get_or_none(
+        id=schedule.document_id,
+        tenant_id=tenant_id,
+        owner_id=owner_id,
+        deleted=False,
+    )
+    if not document:
+        raise CustomError(ErrorCode.REPORT_SCHEDULE_NOT_FOUND)
+    return schedule
+
+
+async def _ensure_report_schedule_name_available(
+    *,
+    tenant_id: str,
+    document_id: str,
+    name: str,
+    exclude_id: str | None = None,
+) -> None:
+    query = ReportSchedule.filter(
+        tenant_id=tenant_id,
+        document_id=document_id,
+        name=name,
+        deleted=False,
+    )
+    if exclude_id:
+        query = query.exclude(id=exclude_id)
+    if await query.exists():
+        raise CustomError(ErrorCode.REPORT_SCHEDULE_NAME_EXISTS)
+
+
+@agent_bp.post("/report/schedule/list")
+@requires_permission("agent:report:schedule:r")
+async def report_schedule_list(request: Request):
+    data = _require_json(request)
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    page = max(1, int(data.get("page") or 1))
+    size = max(1, min(int(data.get("size") or 20), 100))
+    doc_id = str(data.get("doc_id") or "").strip()
+
+    condition = Q(tenant_id=tenant_id, deleted=False) & Q(document__tenant_id=tenant_id) & Q(document__owner_id=user_id) & Q(document__deleted=False)
+    if doc_id:
+        condition &= Q(document_id=doc_id)
+
+    query = ReportSchedule.filter(condition).prefetch_related("document", "creator", "timed")
+    total = await query.count()
+    schedules = await query.order_by("-utime").offset((page - 1) * size).limit(size)
+    return response_ok({"list": [item.json for item in schedules], "total": total, "page": page, "size": size})
+
+
+@agent_bp.post("/report/schedule/save")
+@requires_permission("agent:report:schedule:c", "agent:report:schedule:u")
+async def report_schedule_save(request: Request):
+    data = _require_json(request)
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    operator = request.ctx.session.get("account_info")
+    if not isinstance(operator, Account):
+        operator = await Account.get_or_none(id=user_id, deleted=False)
+    if not operator:
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+
+    schedule_id = str(data.get("id") or "").strip()
+    if schedule_id:
+        await check_permissions(request, "agent:report:schedule:u")
+        schedule = await _get_report_schedule(schedule_id, tenant_id, user_id)
+        doc_id = str(data.get("doc_id") or schedule.document_id).strip()
+        if doc_id != str(schedule.document_id):
+            doc = await _get_schedule_doc(doc_id, tenant_id, user_id)
+            schedule.document_id = doc.id
+        payload = _normalize_report_schedule_payload(data, partial=True)
+        if not payload:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        name = payload.get("name", schedule.name)
+        document_id = str(schedule.document_id)
+        await _ensure_report_schedule_name_available(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            name=name,
+            exclude_id=schedule.id,
+        )
+        for field, value in payload.items():
+            setattr(schedule, field, value)
+        await schedule.save()
+    else:
+        await check_permissions(request, "agent:report:schedule:c")
+        doc_id = str(data.get("doc_id") or "").strip()
+        if not doc_id:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        doc = await _get_schedule_doc(doc_id, tenant_id, user_id)
+        payload = _normalize_report_schedule_payload(data)
+        await _ensure_report_schedule_name_available(
+            tenant_id=tenant_id,
+            document_id=doc.id,
+            name=payload["name"],
+        )
+        schedule = await ReportSchedule.create(
+            tenant_id=tenant_id,
+            document_id=doc.id,
+            creator=operator,
+            **payload,
+        )
+
+    sync_result = await sync_report_schedule_timer(schedule, operator)
+    return response_ok({
+        "id": schedule.id,
+        "timed_id": str(sync_result["timed"].id) if sync_result.get("timed") else None,
+        "timer_published": sync_result.get("published", False),
+        "timer_publish_supported": sync_result.get("publish_supported", False),
+    })
+
+
+@agent_bp.post("/report/schedule/toggle")
+@requires_permission("agent:report:schedule:u")
+async def report_schedule_toggle(request: Request):
+    data = _require_json(request)
+    schedule_id = str(data.get("id") or "").strip()
+    if not schedule_id or "enabled" not in data:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    operator = request.ctx.session.get("account_info")
+    if not isinstance(operator, Account):
+        operator = await Account.get_or_none(id=user_id, deleted=False)
+    if not operator:
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+
+    schedule = await _get_report_schedule(schedule_id, tenant_id, user_id)
+    schedule.enabled = _parse_report_schedule_bool(data.get("enabled"))
+    await schedule.save(update_fields=["enabled", "utime"])
+    sync_result = await sync_report_schedule_timer(schedule, operator)
+    return response_ok({
+        "id": schedule.id,
+        "enabled": schedule.enabled,
+        "timed_id": str(sync_result["timed"].id) if sync_result.get("timed") else None,
+        "timer_published": sync_result.get("published", False),
+        "timer_publish_supported": sync_result.get("publish_supported", False),
+    })
+
+
+@agent_bp.post("/report/schedule/delete")
+@requires_permission("agent:report:schedule:d")
+async def report_schedule_delete(request: Request):
+    data = _require_json(request)
+    schedule_id = str(data.get("id") or "").strip()
+    if not schedule_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    operator = request.ctx.session.get("account_info")
+    if not isinstance(operator, Account):
+        operator = await Account.get_or_none(id=user_id, deleted=False)
+    if not operator:
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+
+    schedule = await _get_report_schedule(schedule_id, tenant_id, user_id)
+    delete_result = await delete_report_schedule_timer(schedule, operator)
+    schedule.enabled = False
+    schedule.deleted = True
+    await schedule.save(update_fields=["enabled", "deleted", "utime"])
+    return response_ok({
+        "id": schedule.id,
+        "deleted": True,
+        "timer_published": delete_result.get("published", False),
+        "timer_publish_supported": delete_result.get("publish_supported", False),
     })

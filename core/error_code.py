@@ -191,3 +191,6 @@ class ErrorCode(BaseErrorCode):
     SKILL_IN_USE_BY_EMPLOYEES = ErrorData(4153, "技能仍被数字员工使用")
     COGNEE_AUTH_FAILED = ErrorData(4154, "Cognee 认证失败")
     LION_AGENT_UNAVAILABLE = ErrorData(4155, "lion_agent 服务不可用")
+    REPORT_SCHEDULE_NOT_FOUND = ErrorData(4156, "汇报任务不存在")
+    REPORT_SCHEDULE_CRON_INVALID = ErrorData(4157, "汇报任务 cron 表达式不合法")
+    REPORT_SCHEDULE_NAME_EXISTS = ErrorData(4158, "同一文档下汇报任务名称已存在")

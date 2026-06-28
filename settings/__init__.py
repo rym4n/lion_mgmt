@@ -263,6 +263,7 @@ RY_AGENT_SERVER = os.environ.get("RY_AGENT_SERVER", "http://192.168.12.254:8283"
 # 数字员工运行时服务
 LION_AGENT_ENDPOINT = os.environ.get("RY_LION_AGENT_ENDPOINT", "http://lion-agent:8000")
 LION_AGENT_INTERNAL_TOKEN = os.environ.get("RY_LION_AGENT_INTERNAL_TOKEN", "")
+LION_ACTION_INTERNAL_TOKEN = os.environ.get("RY_INTERNAL_TOKEN") or os.environ.get("RY_LION_ACTION_INTERNAL_TOKEN", "")
 
 # 数字员工长期记忆服务
 LION_MEMORY_ENDPOINT = os.environ.get("RY_LION_MEMORY_ENDPOINT", "http://lion-memory:8000")
