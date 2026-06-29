@@ -4,30 +4,205 @@ import json
 from typing import Any
 
 
+WORKSPACE_TEXT_FILES = ("SOUL.md", "AGENTS.md", "TOOLS.md", "USER.md")
+WORKSPACE_JSON_FILES = ("manifest.json", "policy.json")
+
+
 def _json_block(value: Any) -> str:
     return json.dumps(value or {}, ensure_ascii=False, indent=2, sort_keys=True)
 
 
 def _public_payload(value: Any) -> Any:
     if isinstance(value, dict):
-        return {key: item for key, item in value.items() if not str(key).startswith("_")}
+        return {key: _public_payload(item) for key, item in value.items() if not str(key).startswith("_")}
+    if isinstance(value, list):
+        return [_public_payload(item) for item in value]
     return value
 
 
-def workspace_etag(role: Any, skills: list[Any]) -> str:
-    payload = {
-        "role_key": getattr(role, "role_key", None),
-        "role_version": getattr(role, "version", None),
-        "skills": sorted((getattr(skill, "skill_key", ""), getattr(skill, "version", 0)) for skill in skills),
+def _as_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return sorted(str(item) for item in value if item)
+    if value:
+        return [str(value)]
+    return []
+
+
+def _binding_values(bindings: dict, *keys: str) -> list[str]:
+    values: list[str] = []
+    for key in keys:
+        values.extend(_as_list(bindings.get(key)))
+    return sorted(set(values))
+
+
+def _skill_payload(skill: Any) -> dict:
+    bindings = _public_payload(getattr(skill, "bindings", {}) or {})
+    meta = _public_payload(getattr(skill, "meta", {}) or {})
+    risk_level = getattr(skill, "risk_level", None) or meta.get("risk_level") or bindings.get("risk_level")
+    return {
+        "skill_key": getattr(skill, "skill_key", "skill"),
+        "name": getattr(skill, "name", ""),
+        "description": getattr(skill, "description", ""),
+        "version": getattr(skill, "version", None),
+        "risk_level": risk_level or "medium",
+        "require_approval": bool(getattr(skill, "require_approval", False)),
+        "bindings": bindings,
+        "meta": meta,
     }
-    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:32]
 
 
-def render_workspace_files(employee: Any, role: Any | None = None, skills: list[Any] | None = None) -> dict:
+def _merge_approval_policy(base: Any, skill_entries: list[dict]) -> dict:
+    policy = dict(base) if isinstance(base, dict) else {}
+    skill_policy = dict(policy.get("skills") or {})
+    for skill in skill_entries:
+        skill_policy[skill["skill_key"]] = "approval_required" if skill["require_approval"] else "allow"
+    if "default" not in policy:
+        policy["default"] = "approval_required" if any(skill["require_approval"] for skill in skill_entries) else "allow"
+    policy["skills"] = skill_policy
+    return policy
+
+
+def build_workspace_payload(employee: Any, role: Any | None = None, skills: list[Any] | None = None) -> dict:
     role = role or getattr(employee, "role", None)
     skills = skills or []
+    role_meta = _public_payload(getattr(role, "meta", {}) or {})
+    employee_metadata = _public_payload(getattr(employee, "metadata", {}) or {})
+    resource_scope = _public_payload(getattr(employee, "resource_scope", {}) or {})
+    skill_entries = sorted((_skill_payload(skill) for skill in skills), key=lambda item: item["skill_key"])
+
+    enabled_tool_groups: set[str] = set()
+    enabled_tools: set[str] = set()
+    enabled_actions: set[str] = set()
+    enabled_playbooks: set[str] = set()
+    enabled_mcp_tools: set[str] = set()
+    for skill in skill_entries:
+        bindings = skill["bindings"]
+        enabled_tool_groups.update(_binding_values(bindings, "tool_groups", "tool_group_keys"))
+        enabled_tools.update(_binding_values(bindings, "tools", "tool_keys"))
+        enabled_actions.update(_binding_values(bindings, "action_keys"))
+        enabled_playbooks.update(_binding_values(bindings, "playbook_ids"))
+        enabled_mcp_tools.update(_binding_values(bindings, "mcp_tools"))
+
+    context_config = role_meta.get("context_config") or role_meta.get("context") or employee_metadata.get("context_config") or {}
+    manifest = {
+        "schema_version": 1,
+        "runtime": getattr(employee, "runtime", None) or "lion_agent",
+        "employee": {
+            "id": getattr(employee, "id", None),
+            "tenant_id": getattr(employee, "tenant_id", None),
+            "agent_key": getattr(employee, "agent_key", None),
+            "name": getattr(employee, "name", ""),
+            "description": getattr(employee, "description", ""),
+            "role_key": getattr(employee, "role_key", None) or getattr(role, "role_key", None),
+            "rbac_role_id": getattr(employee, "rbac_role_id", None),
+        },
+        "role": {
+            "role_key": getattr(role, "role_key", None),
+            "name": getattr(role, "name", ""),
+            "version": getattr(role, "version", None),
+            "description": getattr(role, "description", ""),
+            "capabilities": _as_list(role_meta.get("capabilities")),
+        },
+        "skills": skill_entries,
+        "skill_versions": {skill["skill_key"]: skill["version"] for skill in skill_entries},
+        "enabled_tool_groups": sorted(enabled_tool_groups),
+        "enabled_tools": sorted(enabled_tools),
+        "enabled_actions": sorted(enabled_actions),
+        "enabled_playbooks": sorted(enabled_playbooks),
+        "enabled_mcp_tools": sorted(enabled_mcp_tools),
+        "context_config": context_config,
+    }
+
+    policy = {
+        "schema_version": 1,
+        "resource_scope": resource_scope,
+        "filesystem": employee_metadata.get("filesystem_policy") or role_meta.get("filesystem_policy") or {},
+        "approval": _merge_approval_policy(
+            employee_metadata.get("approval_policy") or role_meta.get("approval_policy") or {},
+            skill_entries,
+        ),
+        "tool_permissions": {
+            "enabled_tool_groups": sorted(enabled_tool_groups),
+            "enabled_tools": sorted(enabled_tools),
+            "enabled_actions": sorted(enabled_actions),
+            "enabled_playbooks": sorted(enabled_playbooks),
+            "enabled_mcp_tools": sorted(enabled_mcp_tools),
+            "skills": {skill["skill_key"]: skill["bindings"] for skill in skill_entries},
+            "rules": employee_metadata.get("tool_permission_policy") or role_meta.get("tool_permission_policy") or {},
+        },
+        "budget": employee_metadata.get("budget_policy") or role_meta.get("budget_policy") or {},
+        "timeout": employee_metadata.get("timeout_policy") or role_meta.get("timeout_policy") or {},
+        "human_handoff": employee_metadata.get("human_handoff_policy") or role_meta.get("human_handoff_policy") or {},
+    }
+    return {"manifest": manifest, "policy": policy}
+
+
+def _hashable_file_bytes(rel_path: str, content: Any) -> bytes:
+    if rel_path in WORKSPACE_JSON_FILES:
+        if isinstance(content, str):
+            parsed = json.loads(content)
+        elif isinstance(content, dict):
+            parsed = content
+        else:
+            parsed = {}
+        if rel_path == "manifest.json":
+            parsed = dict(parsed)
+            parsed.pop("workspace_etag", None)
+        return json.dumps(parsed or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return str(content).encode("utf-8")
+
+
+def _flatten_workspace_files(files: dict[str, Any]) -> dict[str, bytes]:
+    flattened: dict[str, bytes] = {}
+    for name in (*WORKSPACE_TEXT_FILES, *WORKSPACE_JSON_FILES):
+        value = files.get(name)
+        if isinstance(value, (str, dict)):
+            flattened[name] = _hashable_file_bytes(name, value)
+    skills = files.get("skills")
+    if isinstance(skills, dict):
+        for skill_key, skill_files in skills.items():
+            if not isinstance(skill_key, str) or not isinstance(skill_files, dict):
+                continue
+            for filename, content in skill_files.items():
+                if isinstance(filename, str) and isinstance(content, str):
+                    flattened[f"skills/{skill_key}/{filename}"] = content.encode("utf-8")
+    return flattened
+
+
+def _workspace_digest(files: dict[str, bytes], role_version: int | None, skill_versions: dict[str, int | None]) -> str:
+    digest = hashlib.sha256()
+    digest.update(str(role_version or "").encode("ascii"))
+    digest.update(json.dumps(skill_versions or {}, sort_keys=True).encode("utf-8"))
+    for rel_path in sorted(files):
+        digest.update(rel_path.encode("utf-8"))
+        digest.update(files[rel_path])
+    return digest.hexdigest()[:32]
+
+
+def workspace_etag(role: Any, skills: list[Any], employee: Any | None = None) -> str:
+    payload = build_workspace_payload(employee, role, skills)
+    files = _render_workspace_files(employee, role, skills, payload)
+    skill_versions = {getattr(skill, "skill_key", "skill"): getattr(skill, "version", None) for skill in skills or []}
+    return _workspace_digest(_flatten_workspace_files(files), getattr(role, "version", None), skill_versions)
+
+
+def build_workspace_snapshots(employee: Any, role: Any | None = None, skills: list[Any] | None = None) -> dict:
+    payload = build_workspace_payload(employee, role, skills)
+    etag = workspace_etag(role, skills or [], employee)
+    manifest = dict(payload["manifest"])
+    manifest["workspace_etag"] = etag
+    return {
+        "workspace_etag": etag,
+        "manifest_snapshot": manifest,
+        "policy_snapshot": payload["policy"],
+    }
+
+
+def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], payload: dict) -> dict:
     role_meta = getattr(role, "meta", {}) or {}
-    resource_scope = getattr(employee, "resource_scope", {}) or {}
+    resource_scope = payload["policy"]["resource_scope"]
 
     soul = [
         f"# {getattr(employee, 'name', '')}",
@@ -52,6 +227,17 @@ def render_workspace_files(employee: Any, role: Any | None = None, skills: list[
         agents.extend(["", "## Safety", str(role_meta["safety_rules"])])
 
     tools = ["# Tools", "", role_meta.get("tools_notes") or "仅使用平台授权的剧本、动作、MCP 工具和数据资源。"]
+    user = [
+        "# User Context",
+        "",
+        f"Tenant ID: {getattr(employee, 'tenant_id', '') or ''}",
+        f"Employee ID: {getattr(employee, 'id', '') or ''}",
+        f"Agent Key: {getattr(employee, 'agent_key', '') or ''}",
+        "",
+        "## Resource Scope",
+        _json_block(resource_scope),
+        "",
+    ]
     rendered_skills = {}
     for skill in skills:
         bindings = getattr(skill, "bindings", {}) or {}
@@ -76,8 +262,22 @@ def render_workspace_files(employee: Any, role: Any | None = None, skills: list[
         "SOUL.md": "\n".join(soul),
         "AGENTS.md": "\n".join(agents) + "\n",
         "TOOLS.md": "\n".join(tools) + "\n",
+        "USER.md": "\n".join(user),
+        "manifest.json": _json_block(payload["manifest"]) + "\n",
+        "policy.json": _json_block(payload["policy"]) + "\n",
         "skills": rendered_skills,
     }
+
+
+def render_workspace_files(employee: Any, role: Any | None = None, skills: list[Any] | None = None) -> dict:
+    role = role or getattr(employee, "role", None)
+    skills = skills or []
+    snapshots = build_workspace_snapshots(employee, role, skills)
+    payload = {
+        "manifest": snapshots["manifest_snapshot"],
+        "policy": snapshots["policy_snapshot"],
+    }
+    return _render_workspace_files(employee, role, skills, payload)
 
 
 def build_runtime_prompt(task: Any, employee: Any) -> str:

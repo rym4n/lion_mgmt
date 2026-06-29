@@ -2,6 +2,7 @@
 import asyncio
 from datetime import datetime
 
+from sanic.log import logger
 from tortoise.expressions import Q
 
 from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
@@ -10,7 +11,7 @@ from settings import TZ
 from .dispatcher import choose_agent_with_lion_agent
 
 
-TERMINAL_TASK_STATUS = {"completed", "failed", "cancelled"}
+TERMINAL_TASK_STATUS = {"completed", "failed", "cancelled", "handed_off"}
 DEFAULT_COORDINATOR_AGENT_KEY = "command_center_coordinator"
 DEFAULT_COORDINATOR_AGENT_NAME = "指挥部分工协调智能体"
 DEFAULT_COORDINATOR_CAPABILITIES = ["command_center", "coordination", "dispatch", "task_planning"]
@@ -164,9 +165,9 @@ def _schedule_lion_agent_execution(task: CommandTask, employee: CommandAgent, op
         if not current_task or not current_employee:
             return
         try:
-            from services.digital_employee.execute_coordinator import run
+            from services.command_center.run_manager import execute_task_run
 
-            await run(current_task, current_employee, operator_id=operator_id)
+            await execute_task_run(current_task, current_employee, operator_id=operator_id)
         except Exception as exc:
             failed_task = await CommandTask.get_or_none(id=task.id, tenant_id=task.tenant_id, deleted=False)
             if failed_task and failed_task.status not in TERMINAL_TASK_STATUS:
@@ -240,8 +241,8 @@ async def update_task_progress(task: CommandTask, data: dict, operator_id: str |
                 from services.digital_employee.employee_report import compose
 
                 asyncio.create_task(compose(task, (data.get("metadata") or {}).get("actions")))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"调度数字员工报告生成失败: task_id={task.id}, error={exc}")
 
     return task
 

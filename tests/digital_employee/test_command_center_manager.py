@@ -7,6 +7,36 @@ from types import SimpleNamespace
 import sys
 import types
 
+import pytest
+
+
+STUB_MODULES = [
+    "models",
+    "models.command_center",
+    "settings",
+    "tortoise",
+    "tortoise.expressions",
+    "services",
+    "services.command_center",
+    "services.command_center.dispatcher",
+    "services.digital_employee",
+    "services.digital_employee.employee_report",
+    "services.command_center.manager_boundary_test",
+]
+_MISSING_MODULE = object()
+
+
+@pytest.fixture(autouse=True)
+def _restore_stubbed_modules():
+    original_modules = {name: sys.modules.get(name, _MISSING_MODULE) for name in STUB_MODULES}
+    yield
+    for name in STUB_MODULES:
+        original = original_modules[name]
+        if original is _MISSING_MODULE:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
+
 
 def _load_manager(agent, scheduled_reports):
     class CommandTask:
@@ -48,19 +78,7 @@ def _load_manager(agent, scheduled_reports):
         coro.close()
         return SimpleNamespace()
 
-    for name in [
-        "models",
-        "models.command_center",
-        "settings",
-        "tortoise",
-        "tortoise.expressions",
-        "services",
-        "services.command_center",
-        "services.command_center.dispatcher",
-        "services.digital_employee",
-        "services.digital_employee.employee_report",
-        "services.command_center.manager_boundary_test",
-    ]:
+    for name in STUB_MODULES:
         sys.modules.pop(name, None)
 
     sys.modules["models"] = types.ModuleType("models")

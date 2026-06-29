@@ -1,6 +1,7 @@
 import orjson
 from aiocache import caches
 from sanic.log import logger
+from typing import Awaitable, Callable
 
 from models.command_center import CommandAgent, CommandTask
 from settings import LION_MEMORY_ENDPOINT, WR_TOPIC
@@ -98,15 +99,37 @@ async def _publish_room_end(task: CommandTask, operator_id: str | None) -> None:
         logger.warning(f"发布数字员工作战室结束消息失败: task_id={task.id}, error={exc}")
 
 
-async def run(task: CommandTask, employee: CommandAgent, operator_id: str | None = None) -> dict:
+RuntimeEventHandler = Callable[[str, dict], Awaitable[dict | None]]
+
+
+async def run(
+    task: CommandTask,
+    employee: CommandAgent,
+    operator_id: str | None = None,
+    command_run=None,
+    on_runtime_event: RuntimeEventHandler | None = None,
+    continuation_workspace: dict | None = None,
+) -> dict:
     from services.command_center.manager import update_task_progress
     from services.digital_employee.manager import sync_employee_workspace
 
-    employee = await sync_employee_workspace(employee)
+    if command_run is None:
+        employee = await sync_employee_workspace(employee)
+    workspace_id = employee.id
+    if continuation_workspace:
+        from services.digital_employee.lion_agent_client import LionAgentClient
+
+        await LionAgentClient().sync_workspace(
+            continuation_workspace["workspace_id"],
+            continuation_workspace["files"],
+            role_version=continuation_workspace.get("role_version"),
+            skill_versions=continuation_workspace.get("skill_versions") or {},
+        )
+        workspace_id = continuation_workspace["workspace_id"]
     jwt = await get_or_refresh_jwt(task.tenant_id)
     payload = {
-        "workspace_id": employee.id,
-        "session_id": task.run_id or task.id,
+        "workspace_id": workspace_id,
+        "session_id": getattr(command_run, "run_id", None) or task.run_id or task.id,
         "request_id": task.id,
         "message": build_runtime_prompt(task, employee),
         "cognee": {
@@ -123,6 +146,16 @@ async def run(task: CommandTask, employee: CommandAgent, operator_id: str | None
     saw_delta = False
     await update_task_progress(task, {"status": "running", "progress": max(task.progress or 0, 1), "message": "数字员工开始执行"}, operator_id)
     async for event_type, event in stream_prompt_events(**payload):
+        runtime_event: dict | None = None
+        if on_runtime_event:
+            runtime_event = await on_runtime_event(event_type, event)
+            if runtime_event and runtime_event.get("event_type") in {"approval_required", "policy_denied"}:
+                return {
+                    "content": "".join(content),
+                    "policy": runtime_event["event_type"],
+                    "run_id": getattr(command_run, "run_id", None) or task.run_id,
+                    "runtime_event": runtime_event,
+                }
         if event_type in {"delta", "end"}:
             value = event.get("content") or event.get("delta")
             if event_type == "delta" and value:

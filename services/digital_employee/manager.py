@@ -98,7 +98,7 @@ async def sync_employee_workspace(
         raise CustomError(ErrorCode.DIGITAL_EMPLOYEE_ROLE_NOT_FOUND)
     if skills is None:
         skills = await get_visible_skills(employee.tenant_id, employee.skill_keys or [])
-    etag = workspace_etag(role, skills)
+    etag = workspace_etag(role, skills, employee)
     if employee.workspace_etag == etag and employee.workspace_synced_at:
         return employee
     files = render_workspace_files(employee, role, skills)

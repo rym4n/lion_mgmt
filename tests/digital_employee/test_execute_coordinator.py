@@ -20,6 +20,7 @@ def _load_module(name: str, relative_path: str):
 
 def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
     sync_calls = []
+    workspace_sync_calls = []
 
     class CommandAgent:
         pass
@@ -94,6 +95,24 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
     adapter.stream_prompt_events = _stream_prompt_events
     sys.modules["services.digital_employee.lion_agent_adapter"] = adapter
 
+    lion_agent_client = types.ModuleType("services.digital_employee.lion_agent_client")
+
+    class LionAgentClient:
+        async def sync_workspace(self, workspace_id, files, role_version=None, skill_versions=None):
+            workspace_sync_calls.append(
+                {
+                    "workspace_id": workspace_id,
+                    "files": files,
+                    "role_version": role_version,
+                    "skill_versions": skill_versions or {},
+                }
+            )
+            return {"workspace_id": workspace_id, "etag": "readonly-etag", "file_count": len(files)}
+
+    lion_agent_client.LionAgentClient = LionAgentClient
+    lion_agent_client.workspace_sync_calls = workspace_sync_calls
+    sys.modules["services.digital_employee.lion_agent_client"] = lion_agent_client
+
 
 async def _async_value(value):
     return value
@@ -109,6 +128,12 @@ async def _stream_prompt_events(**payload):
     yield "delta", {"content": "A"}
     yield "delta", {"delta": "B"}
     yield "end", {"content": "AB"}
+
+
+async def _approval_required_stream(**payload):
+    RECORDED_STREAM_PAYLOADS.append(payload)
+    yield "approval_required", {"tool": "write_file", "risk_level": "high"}
+    yield "end", {"content": "should-not-complete"}
 
 
 class FakeRedis:
@@ -181,3 +206,161 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
     ]
     assert [message.get("content") for message in published if message["type"] == "ai-reply-delta"] == ["A", "B"]
     assert all(message["stream_id"] == "digital-employee:task-1" for message in published)
+
+
+def test_run_uses_command_run_session_and_emits_runtime_callbacks():
+    progress_calls = []
+    _install_stubs(progress_calls)
+    RECORDED_STREAM_PAYLOADS.clear()
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    redis = FakeRedis()
+    execute_coordinator.caches = SimpleNamespace(get=lambda name: SimpleNamespace(client=redis))
+
+    task = FakeTask(
+        id="task-1",
+        tenant_id="tenant-1",
+        run_id=None,
+        room_id=None,
+        creator_id="creator-1",
+        source="manual",
+        progress=0,
+        status="pending",
+        title="巡检",
+        description="检查磁盘",
+        payload={},
+        result=None,
+        saved_update_fields=[],
+    )
+    employee = SimpleNamespace(id="employee-1", role_key="ops", agent_key="ops-1", name="运维员工")
+    command_run = SimpleNamespace(run_id="run-1")
+    runtime_events = []
+
+    async def on_runtime_event(event_type, event):
+        runtime_events.append((event_type, event))
+
+    result = asyncio.run(
+        execute_coordinator.run(
+            task,
+            employee,
+            operator_id="operator-1",
+            command_run=command_run,
+            on_runtime_event=on_runtime_event,
+        )
+    )
+
+    assert result == {"content": "AB"}
+    assert RECORDED_STREAM_PAYLOADS[0]["session_id"] == "run-1"
+    assert [event_type for event_type, _ in runtime_events] == ["thinking", "tool_call", "delta", "delta", "end"]
+    assert sys.modules["services.digital_employee.manager"].sync_calls == []
+
+
+def test_run_syncs_and_uses_continuation_read_only_workspace():
+    progress_calls = []
+    _install_stubs(progress_calls)
+    RECORDED_STREAM_PAYLOADS.clear()
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+
+    task = FakeTask(
+        id="task-1",
+        tenant_id="tenant-1",
+        run_id=None,
+        room_id=None,
+        creator_id="creator-1",
+        source="manual",
+        progress=0,
+        status="pending",
+        title="巡检",
+        description="检查磁盘",
+        payload={},
+        result=None,
+        saved_update_fields=[],
+    )
+    employee = SimpleNamespace(id="employee-1", role_key="ops", agent_key="ops-1", name="运维员工")
+    command_run = SimpleNamespace(run_id="run-2")
+    continuation_workspace = {
+        "workspace_id": "employee-1:approval-approval-1:read-only",
+        "files": {"SOUL.md": "role", "policy.json": {"continuation_mutation": {"mode": "read_only"}}},
+        "role_version": 3,
+        "skill_versions": {"write_file": 1},
+    }
+
+    result = asyncio.run(
+        execute_coordinator.run(
+            task,
+            employee,
+            operator_id="approver-1",
+            command_run=command_run,
+            continuation_workspace=continuation_workspace,
+        )
+    )
+
+    assert result == {"content": "AB"}
+    assert RECORDED_STREAM_PAYLOADS[0]["workspace_id"] == "employee-1:approval-approval-1:read-only"
+    assert RECORDED_STREAM_PAYLOADS[0]["session_id"] == "run-2"
+    workspace_sync_calls = sys.modules["services.digital_employee.lion_agent_client"].workspace_sync_calls
+    assert workspace_sync_calls == [
+        {
+            "workspace_id": "employee-1:approval-approval-1:read-only",
+            "files": {"SOUL.md": "role", "policy.json": {"continuation_mutation": {"mode": "read_only"}}},
+            "role_version": 3,
+            "skill_versions": {"write_file": 1},
+        }
+    ]
+    assert sys.modules["services.digital_employee.manager"].sync_calls == []
+
+
+def test_run_returns_control_event_without_marking_task_completed():
+    progress_calls = []
+    _install_stubs(progress_calls)
+    RECORDED_STREAM_PAYLOADS.clear()
+    sys.modules["services.digital_employee.lion_agent_adapter"].stream_prompt_events = _approval_required_stream
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    execute_coordinator.stream_prompt_events = _approval_required_stream
+    redis = FakeRedis()
+    execute_coordinator.caches = SimpleNamespace(get=lambda name: SimpleNamespace(client=redis))
+
+    task = FakeTask(
+        id="task-1",
+        tenant_id="tenant-1",
+        run_id=None,
+        room_id=None,
+        creator_id="creator-1",
+        source="manual",
+        progress=0,
+        status="pending",
+        title="巡检",
+        description="检查磁盘",
+        payload={},
+        result=None,
+        saved_update_fields=[],
+    )
+    employee = SimpleNamespace(id="employee-1", role_key="ops", agent_key="ops-1", name="运维员工")
+    command_run = SimpleNamespace(run_id="run-1")
+
+    async def on_runtime_event(event_type, event):
+        return {"event_type": event_type, "message": "数字员工请求人工审批"}
+
+    result = asyncio.run(
+        execute_coordinator.run(
+            task,
+            employee,
+            operator_id="operator-1",
+            command_run=command_run,
+            on_runtime_event=on_runtime_event,
+        )
+    )
+
+    assert result["policy"] == "approval_required"
+    assert result["run_id"] == "run-1"
+    assert task.result is None
+    assert task.saved_update_fields == []
+    assert [call[0]["status"] for call in progress_calls] == ["running"]

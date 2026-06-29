@@ -8,9 +8,10 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
+from models.command_center import COMMAND_APPROVAL_STATUS_PENDING, CommandAgent, CommandApproval, CommandTask, CommandTaskEvent, CommandTaskRun
 from settings import TZ
 
+from .approval_service import decide_approval, get_approval, list_approvals, resume_approved_approval
 from .manager import create_command_task, dispatch_task, list_tasks, update_task_progress
 
 command_bp = Blueprint("command_center", url_prefix="/command_center")
@@ -115,6 +116,29 @@ TASK_EVENT_SCHEMA = {
     },
 }
 
+APPROVAL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string", "description": "审批ID"},
+        "task_id": {"type": "string", "description": "任务ID"},
+        "run_id": {"type": "string", "nullable": True, "description": "运行ID"},
+        "employee_id": {"type": "string", "nullable": True, "description": "数字员工ID"},
+        "tenant_id": {"type": "string", "description": "租户ID"},
+        "status": {"type": "string", "description": "审批状态"},
+        "trigger_type": {"type": "string", "description": "触发类型"},
+        "risk_level": {"type": "string", "description": "风险等级"},
+        "policy_snapshot": {"type": "object", "description": "策略快照"},
+        "impacted_resources": {"type": "array", "description": "影响资源"},
+        "requested_action": {"type": "object", "description": "请求动作"},
+        "rollback_plan": {"type": "string", "nullable": True, "description": "回滚计划"},
+        "requester_id": {"type": "string", "nullable": True, "description": "请求人"},
+        "approver_id": {"type": "string", "nullable": True, "description": "审批人"},
+        "decided_at": {"type": "string", "nullable": True, "description": "审批时间"},
+        "decision_comment": {"type": "string", "nullable": True, "description": "审批意见"},
+        "metadata": {"type": "object", "description": "扩展元数据"},
+    },
+}
+
 
 def _json_body(schema: dict) -> dict:
     return {"application/json": {"schema": schema}}
@@ -148,6 +172,181 @@ def _response(description: str, data_schema: dict, errors: dict[str, str] | None
 
 def _require_json(request: Request) -> dict:
     return request.json or {}
+
+
+def _summarize_scope(value) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    summary = {}
+    for key, item in value.items():
+        if isinstance(item, list):
+            summary[key] = {"kind": "list", "count": len(item)}
+        elif isinstance(item, dict):
+            summary[key] = {"kind": "object", "count": len(item)}
+        else:
+            summary[key] = {"kind": "value", "present": item is not None}
+    return summary
+
+
+def _summarize_impacted_resources(resources) -> list:
+    if not isinstance(resources, list):
+        return []
+    summaries = []
+    for resource in resources:
+        if isinstance(resource, dict):
+            scope = resource.get("scope") if isinstance(resource.get("scope"), dict) else resource
+            summaries.append(
+                {
+                    "kind": resource.get("kind") or resource.get("type") or "resource",
+                    "scope": _summarize_scope(scope),
+                }
+            )
+        else:
+            summaries.append({"kind": "resource", "scope": {}})
+    return summaries
+
+
+def _requested_action_summary(action) -> dict:
+    if not isinstance(action, dict):
+        return {}
+    allowed = {
+        "tool",
+        "playbook",
+        "action",
+        "name",
+        "risk_level",
+    }
+    return {key: action[key] for key in allowed if key in action}
+
+
+def _task_event_metadata_summary(metadata) -> dict:
+    if not isinstance(metadata, dict):
+        return {}
+    allowed = {"run_id", "approval_id", "runtime_event", "decision"}
+    return {key: metadata[key] for key in allowed if metadata.get(key) is not None}
+
+
+def _text_summary(value) -> dict:
+    text = "" if value is None else str(value)
+    return {"present": bool(text), "length": len(text)}
+
+
+def _task_detail_json(task: CommandTask) -> dict:
+    raw = task.json
+    allowed = [
+        "id",
+        "ctime",
+        "utime",
+        "title",
+        "description",
+        "source",
+        "priority",
+        "status",
+        "progress",
+        "required_capabilities",
+        "requested_agent_id",
+        "assigned_agent_id",
+        "assigned_agent_key",
+        "dispatch_status",
+        "dispatch_reason",
+        "run_id",
+        "room_id",
+        "creator_id",
+        "started_at",
+        "finished_at",
+    ]
+    return {
+        **{key: raw.get(key) for key in allowed},
+        "payload_summary": _summarize_scope(raw.get("payload")),
+        "result_summary": _text_summary(raw.get("result")),
+    }
+
+
+def _task_run_detail_json(run: CommandTaskRun) -> dict:
+    manifest = run.manifest_snapshot if isinstance(run.manifest_snapshot, dict) else {}
+    policy = run.policy_snapshot if isinstance(run.policy_snapshot, dict) else {}
+    employee = manifest.get("employee") if isinstance(manifest.get("employee"), dict) else {}
+    skills = manifest.get("skills")
+    approval = policy.get("approval") if isinstance(policy.get("approval"), dict) else {}
+    skill_rules = approval.get("skills") if isinstance(approval.get("skills"), dict) else {}
+    resource_scope = policy.get("resource_scope") or manifest.get("resource_scope")
+    return {
+        "id": run.id,
+        "ctime": run.json["ctime"],
+        "utime": run.json["utime"],
+        "task_id": run.json["task_id"],
+        "employee_id": run.json["employee_id"],
+        "run_id": run.run_id,
+        "runtime": run.runtime,
+        "status": run.status,
+        "heartbeat_at": run.json["heartbeat_at"],
+        "workspace_etag": run.workspace_etag,
+        "started_at": run.json["started_at"],
+        "finished_at": run.json["finished_at"],
+        "manifest_summary": {
+            "employee": {
+                "id": employee.get("id"),
+                "name": employee.get("name"),
+                "agent_key": employee.get("agent_key"),
+                "role_key": employee.get("role_key"),
+            },
+            "skills_count": len(skills) if isinstance(skills, list) else 0,
+            "workspace_etag": manifest.get("workspace_etag") or run.workspace_etag,
+        },
+        "policy_summary": {
+            "approval_default": approval.get("default"),
+            "approval_skills": skill_rules,
+            "resource_scope": _summarize_scope(resource_scope),
+        },
+    }
+
+
+def _task_approval_detail_json(approval: CommandApproval) -> dict:
+    metadata = approval.metadata if isinstance(approval.metadata, dict) else {}
+    needs_info = metadata.get("needs_info") if isinstance(metadata.get("needs_info"), dict) else {}
+    return {
+        "id": approval.id,
+        "ctime": approval.json["ctime"],
+        "utime": approval.json["utime"],
+        "task_id": approval.json["task_id"],
+        "run_id": approval.json["run_id"],
+        "employee_id": approval.json["employee_id"],
+        "status": approval.status,
+        "trigger_type": approval.trigger_type,
+        "risk_level": approval.risk_level,
+        "impacted_resources": _summarize_impacted_resources(approval.impacted_resources),
+        "requested_action": _requested_action_summary(approval.requested_action),
+        "rollback_plan": approval.rollback_plan,
+        "requester_id": approval.requester_id,
+        "approver_id": approval.approver_id,
+        "decided_at": approval.json["decided_at"],
+        "expires_at": approval.json["expires_at"],
+        "decision_comment": approval.decision_comment,
+        "needs_info": {
+            key: needs_info.get(key)
+            for key in ("requested", "comment", "requested_by", "requested_at")
+            if needs_info.get(key) is not None
+        },
+        "available_decisions": ["approve", "read_only", "needs_info", "takeover", "reject"]
+        if approval.status == COMMAND_APPROVAL_STATUS_PENDING
+        else [],
+    }
+
+
+def _task_event_detail_json(event: CommandTaskEvent) -> dict:
+    return {
+        "id": event.id,
+        "ctime": event.json["ctime"],
+        "utime": event.json["utime"],
+        "task_id": event.json["task_id"],
+        "event_type": event.event_type,
+        "status": event.status,
+        "progress": event.progress,
+        "agent_key": event.agent_key,
+        "message": event.message,
+        "metadata_summary": _task_event_metadata_summary(event.metadata),
+        "operator_id": event.operator_id,
+    }
 
 
 @command_bp.post("/agents/register")
@@ -388,7 +587,7 @@ async def query_tasks(request: Request):
             "total": total,
             "page": data.get("page", 1),
             "size": data.get("size", 20),
-            "tasks": [task.json for task in tasks],
+            "tasks": [_task_detail_json(task) for task in tasks],
         }
     )
 
@@ -429,7 +628,16 @@ async def task_detail(request: Request):
     if not task:
         raise CustomError(ErrorCode.NOT_FOUND)
     events = await CommandTaskEvent.filter(task_id=task.id, tenant_id=tenant_id, deleted=False).order_by("ctime").all()
-    return response_ok({"task": task.json, "events": [event.json for event in events]})
+    runs = await CommandTaskRun.filter(task_id=task.id, tenant_id=tenant_id, deleted=False).order_by("-ctime").all()
+    approvals = await CommandApproval.filter(task_id=task.id, tenant_id=tenant_id, deleted=False).order_by("-ctime").all()
+    return response_ok(
+        {
+            "task": _task_detail_json(task),
+            "events": [_task_event_detail_json(event) for event in events],
+            "runs": [_task_run_detail_json(run) for run in runs],
+            "approvals": [_task_approval_detail_json(approval) for approval in approvals],
+        }
+    )
 
 
 @command_bp.post("/tasks/progress")
@@ -503,3 +711,61 @@ async def retry_dispatch(request: Request):
     operator = request.ctx.session["account_info"]
     task = await dispatch_task(task, operator.id)
     return response_ok(task.json)
+
+
+@command_bp.post("/approvals/list")
+@requires_permission("command_center:r")
+async def query_approvals(request: Request):
+    data = _require_json(request)
+    tenant_id = request.ctx.session.get("tenant_id")
+    approvals, total = await list_approvals(tenant_id, data)
+    return response_ok(
+        {
+            "total": total,
+            "page": data.get("page", 1),
+            "size": data.get("size", 20),
+            "approvals": [_task_approval_detail_json(approval) for approval in approvals],
+        }
+    )
+
+
+@command_bp.post("/approvals/detail")
+@requires_permission("command_center:r")
+async def approval_detail(request: Request):
+    data = _require_json(request)
+    approval_id = data.get("id")
+    if not approval_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    approval = await get_approval(request.ctx.session.get("tenant_id"), approval_id)
+    return response_ok(_task_approval_detail_json(approval))
+
+
+@command_bp.post("/approvals/decision")
+@requires_permission("command_center:u")
+async def approval_decision(request: Request):
+    data = _require_json(request)
+    approval_id = data.get("id")
+    decision = data.get("decision")
+    if not approval_id or not decision:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    account = request.ctx.session["account_info"]
+    approval = await decide_approval(
+        request.ctx.session.get("tenant_id"),
+        approval_id,
+        decision,
+        account.id,
+        data.get("comment"),
+    )
+    return response_ok(_task_approval_detail_json(approval))
+
+
+@command_bp.post("/approvals/resume")
+@requires_permission("command_center:u")
+async def approval_resume(request: Request):
+    data = _require_json(request)
+    approval_id = data.get("id")
+    if not approval_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    account = request.ctx.session["account_info"]
+    result = await resume_approved_approval(request.ctx.session.get("tenant_id"), approval_id, operator_id=account.id)
+    return response_ok(result)

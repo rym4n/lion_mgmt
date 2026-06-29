@@ -13,6 +13,7 @@ def _load_module(name: str, relative_path: str):
 
 
 prompt_builder = _load_module("prompt_builder", "services/digital_employee/prompt_builder.py")
+build_workspace_snapshots = prompt_builder.build_workspace_snapshots
 build_runtime_prompt = prompt_builder.build_runtime_prompt
 render_workspace_files = prompt_builder.render_workspace_files
 workspace_etag = prompt_builder.workspace_etag
@@ -23,33 +24,93 @@ def test_render_workspace_files_includes_role_skill_and_scope():
         role_key="monitor",
         version=2,
         description="值班",
-        meta={"identity": "监控值班员", "responsibilities": "分诊告警", "tools_notes": "只用授权工具"},
+        meta={
+            "identity": "监控值班员",
+            "responsibilities": "分诊告警",
+            "tools_notes": "只用授权工具",
+            "approval_policy": {"filesystem.write": "approval_required"},
+        },
     )
     skill = SimpleNamespace(
         skill_key="alert_triage",
         version=1,
         name="告警分诊",
         description="判断告警优先级",
-        bindings={"action_keys": ["notify"]},
+        bindings={"action_keys": ["notify"], "mcp_tools": ["metrics.query"]},
         require_approval=False,
     )
-    employee = SimpleNamespace(name="小狮", description="", resource_scope={"assets": ["db01"]})
+    employee = SimpleNamespace(
+        id="employee-1",
+        tenant_id="tenant-1",
+        agent_key="monitor-1",
+        name="小狮",
+        description="",
+        role_key="monitor",
+        runtime="lion_agent",
+        rbac_role_id="role-1",
+        resource_scope={"assets": ["db01"]},
+        metadata={"filesystem_policy": {"write": "deny"}},
+    )
 
     files = render_workspace_files(employee, role, [skill])
 
     assert "监控值班员" in files["SOUL.md"]
     assert "分诊告警" in files["AGENTS.md"]
     assert "只用授权工具" in files["TOOLS.md"]
+    assert "tenant-1" in files["USER.md"]
     assert "alert_triage" in files["skills"]
     assert "notify" in files["skills"]["alert_triage"]["instructions.md"]
+    assert '"agent_key": "monitor-1"' in files["manifest.json"]
+    assert '"workspace_etag":' in files["manifest.json"]
+    assert '"assets": [' in files["policy.json"]
+    assert '"metrics.query"' in files["policy.json"]
 
 
 def test_workspace_etag_changes_with_skill_version():
     role = SimpleNamespace(role_key="monitor", version=1)
+    employee = SimpleNamespace(resource_scope={"assets": ["db01"]}, metadata={}, runtime="lion_agent")
     old_skill = SimpleNamespace(skill_key="alert_triage", version=1)
     new_skill = SimpleNamespace(skill_key="alert_triage", version=2)
 
-    assert workspace_etag(role, [old_skill]) != workspace_etag(role, [new_skill])
+    assert workspace_etag(role, [old_skill], employee) != workspace_etag(role, [new_skill], employee)
+
+
+def test_workspace_etag_changes_with_resource_scope_and_policy():
+    role = SimpleNamespace(role_key="monitor", version=1, meta={})
+    skill = SimpleNamespace(skill_key="alert_triage", version=1, bindings={}, require_approval=False)
+    employee_a = SimpleNamespace(resource_scope={"assets": ["db01"]}, metadata={}, runtime="lion_agent")
+    employee_b = SimpleNamespace(resource_scope={"assets": ["db02"]}, metadata={}, runtime="lion_agent")
+    employee_c = SimpleNamespace(
+        resource_scope={"assets": ["db01"]},
+        metadata={"approval_policy": {"default": "approval_required"}},
+        runtime="lion_agent",
+    )
+
+    assert workspace_etag(role, [skill], employee_a) != workspace_etag(role, [skill], employee_b)
+    assert workspace_etag(role, [skill], employee_a) != workspace_etag(role, [skill], employee_c)
+
+
+def test_workspace_snapshots_match_rendered_files_without_recursive_etag():
+    role = SimpleNamespace(role_key="monitor", version=1, meta={})
+    skill = SimpleNamespace(skill_key="alert_triage", version=1, bindings={}, require_approval=True)
+    employee = SimpleNamespace(
+        id="employee-1",
+        tenant_id="tenant-1",
+        agent_key="monitor-1",
+        role_key="monitor",
+        name="小狮",
+        description="",
+        resource_scope={"assets": ["db01"]},
+        metadata={},
+        runtime="lion_agent",
+    )
+
+    snapshots = build_workspace_snapshots(employee, role, [skill])
+    files = render_workspace_files(employee, role, [skill])
+
+    assert snapshots["manifest_snapshot"]["workspace_etag"] == snapshots["workspace_etag"]
+    assert f'"workspace_etag": "{snapshots["workspace_etag"]}"' in files["manifest.json"]
+    assert snapshots["policy_snapshot"]["approval"]["skills"]["alert_triage"] == "approval_required"
 
 
 def test_build_runtime_prompt_contains_payload():
