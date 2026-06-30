@@ -20,7 +20,7 @@ Use the fff MCP tools for all file search operations instead of default shell se
 - Automation layer: scenes, tags, playbooks, playbook versions, playbook permissions, scheduled execution, run logs, approvals.
 - Event and observability layer: event ingestion, Vector config generation, Kafka/Syslog source handling, VictoriaLogs query, event linkage to playbooks.
 - Collaboration layer: warrooms, WebSocket chat, run-log broadcast, AI replies, private/public rooms.
-- Agent layer: Nanobot client, command center agent registry, task dispatch, task progress event stream, MCP SSE/messages endpoints.
+- Agent layer: lion_agent client, command center agent registry, task dispatch, task progress event stream, MCP SSE/messages endpoints.
 - Inspection/reporting layer: inspection schedules, categories, targets, results, custom reports, dashboards and large-screen configuration.
 
 ## Technical Architecture
@@ -67,15 +67,14 @@ Container runtime:
 docker build -t lion_mgmt .
 ```
 
-The Docker image compiles `core/`, `libs/`, `models/`, and `services/` with Nuitka, copies `workspace-template/`, migrations, settings and report templates, waits for PostgreSQL, runs `aerich upgrade`, then starts the service.
+The Docker image compiles `core/`, `libs/`, `models/`, and `services/` with Nuitka, copies migrations, settings and report templates, waits for PostgreSQL, runs `aerich upgrade`, then starts the service.
 
 ## Source Layout
 
 - `core/`: framework glue, middleware, listeners, exception handlers, response helpers.
-- `libs/`: shared infrastructure helpers for security, Kafka, Nanobot, chat, supervisor, storage and generic utilities.
+- `libs/`: shared infrastructure helpers for security, Kafka, chat, supervisor, storage and generic utilities.
 - `models/`: Tortoise ORM models. Most models inherit `BaseModel` and include `id`, `ctime`, `utime`, `deleted`, `tenant_id`.
 - `services/`: business modules. Each module usually exposes a Sanic `Blueprint` from `views.py`; complex logic can live in `logic.py`.
-- `workspace-template/`: template copied into Nanobot workspaces under `data/workspaces`.
 - `settings/`: process configuration and environment variable mapping.
 - `migrations/`: Aerich migrations.
 
@@ -92,7 +91,7 @@ Do not add new application source files at repository root. Root is for entrypoi
 - Store sensitive resource values through `EncryptedCharField`, encrypted JSON helpers, environment variables, or deployment secrets. Do not hardcode credentials.
 - When adding a business module, update `services/__init__.py`, permission definitions, license gating if needed, and migrations.
 - When adding or changing playbook/tool/action execution, preserve `run_id` tracking and Kafka topic contracts.
-- When changing agent runtime behavior, keep nanobot runtime code inside `lion_agent`; lion_mgmt should call it through `services/digital_employee/lion_agent_client.py`.
+- When changing agent runtime behavior, keep execution inside `lion_agent`; lion_mgmt should call it through `services/digital_employee/lion_agent_client.py`.
 
 ## Feature Boundaries
 
@@ -115,7 +114,7 @@ Before claiming completion:
 - For Python code changes, run the smallest relevant import/compile check, for example `python -m compileall <changed paths>`, plus targeted runtime checks when external services are not required.
 - For model changes, create and inspect an Aerich migration.
 - For API behavior changes, verify authentication, tenant scoping, permission checks, response format and error paths.
-- For Kafka/WebSocket/Nanobot changes, verify the event path and explain any external-service gap if it cannot run locally.
+- For Kafka/WebSocket/lion_agent changes, verify the event path and explain any external-service gap if it cannot run locally.
 
 The repository currently does not expose a formal test suite in `tests/`; add focused tests or lightweight checks when changing risky shared behavior.
 

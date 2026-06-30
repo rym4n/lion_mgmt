@@ -285,7 +285,7 @@ def test_run_syncs_and_uses_continuation_read_only_workspace():
     command_run = SimpleNamespace(run_id="run-2")
     continuation_workspace = {
         "workspace_id": "employee-1:approval-approval-1:read-only",
-        "files": {"SOUL.md": "role", "policy.json": {"continuation_mutation": {"mode": "read_only"}}},
+        "files": {"system_prompt.md": "role", "policy.json": {"continuation_mutation": {"mode": "read_only"}}},
         "role_version": 3,
         "skill_versions": {"write_file": 1},
     }
@@ -307,7 +307,7 @@ def test_run_syncs_and_uses_continuation_read_only_workspace():
     assert workspace_sync_calls == [
         {
             "workspace_id": "employee-1:approval-approval-1:read-only",
-            "files": {"SOUL.md": "role", "policy.json": {"continuation_mutation": {"mode": "read_only"}}},
+            "files": {"system_prompt.md": "role", "policy.json": {"continuation_mutation": {"mode": "read_only"}}},
             "role_version": 3,
             "skill_versions": {"write_file": 1},
         }

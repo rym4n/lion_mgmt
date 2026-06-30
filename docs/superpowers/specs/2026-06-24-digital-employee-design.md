@@ -9,7 +9,7 @@
 
 ## 1. 背景与目标
 
-在现有"指挥中心 + Nanobot 内置助手"基础上，扩展出数字员工产品形态：以 AIOE 为能力底座，通过 AI Agent 实现 7×24 在线、多岗位、可扩展的运维/安全数字员工。
+在现有"指挥中心 + lion_agent 内置助手"基础上，扩展出数字员工产品形态：以 AIOE 为能力底座，通过 AI Agent 实现 7×24 在线、多岗位、可扩展的运维/安全数字员工。
 
 8 个内置岗位：
 
@@ -43,7 +43,7 @@
                │ HTTP（短）/ SSE（长）
                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ lion_agent (FastAPI + nanobot SDK) — 新建                            │
+│ lion_agent (FastAPI + AgentScope) — 新建                              │
 │   /opt/dev/aioe/lion_agent/                                          │
 │   /internal/v1/execute(/stream) + /workspaces/<id>/{sync|delete}     │
 │   workspace 持久化（含 sessions/）+ BotPool + ConcurrencyLimiter      │
@@ -70,7 +70,7 @@
 |---|---|---|
 | `services/digital_employee/`（新） | 岗位/技能/员工 CRUD + 包导入 + 执行协调 + 报告生成 | 本次新建 |
 | `services/command_center/` | 任务调度引擎（`CommandTask` + 事件流 + 调度决策） | `update_task_progress` 末尾追加一行异步 hook，其余不动 |
-| `services/agent/` | 底层 `CommandAgent` CRUD + Nanobot 直接执行 + 报告引擎 | 完全保留；运营分析师岗位的 bindings 引用 agent_bp 的 report 接口 |
+| `services/agent/` | 底层 `CommandAgent` CRUD + lion_agent 执行 + 报告引擎 | 完全保留；运营分析师岗位的 bindings 引用 agent_bp 的 report 接口 |
 | `services/event` / `timed` / `inspection` / `workflow` / `tools` | 事件/定时/巡检/剧本/动作 | 一律不改代码；通过内置动作 `digital_employee.dispatch_task` 把工作派给数字员工 |
 | `models/` | Tortoise ORM | 新增 `digital_employee.py`、`employee_report.py`；扩展 `command_center.py` 中 `CommandAgent` 字段 |
 
@@ -79,13 +79,13 @@
 | 决策点 | 选择 | 理由 |
 |---|---|---|
 | 数据建模层级 | 三层：岗位 + 技能 + 员工 | 岗位/技能可独立扩展、独立授权、独立内置 |
-| 技能形态 | 引用编排（bindings 指向剧本/动作/MCP/nanobot skill） | 复用现有底座，不重新发明执行单元 |
+| 技能形态 | 引用编排（bindings 指向剧本/动作/MCP/AgentScope Toolkit 能力） | 复用现有底座，不重新发明执行单元 |
 | 工作触发 | 事件 / 定时 / 人工 / 巡检 四来源统一汇入 `CommandTask` | 不引入"订阅表"等新概念，复用现有 event-to-playbook、timed、inspection 联动 |
 | 权限 | 复用现有 RBAC：员工绑 Role，最终落到剧本/动作执行；高危走剧本审批节点 | 不发明新权限模型 |
 | 内置 vs 自定义 | 都跨租户内置 + 租户自定义；内置走包导入，与"内置剧本/应用"一致 | 跨租户产品迭代体验 |
-| 岗位定义形态 | yaml 结构化字段为 canonical；UI 引导用户填业务概念，后台渲染成 SOUL/AGENTS/TOOLS.md | 用户不需要懂 Nanobot 文件结构 |
+| 岗位定义形态 | yaml 结构化字段为 canonical；UI 引导用户填业务概念，后台渲染成 `system_prompt.md` 与 `manifest.json`/`policy.json` | 用户不需要懂运行时文件结构 |
 | 任务报告 | 任务级 `EmployeeReport`（新表）+ 周期级 `ReportDocument`（运营分析师产出，复用现有） | 两个粒度对应不同产品场景 |
-| 运行时 | 独立 lion_agent 服务持有 nanobot SDK + 持久 workspace | 解决记忆延续 + lion_mgmt 不被 LLM 拖慢 |
+| 运行时 | 独立 lion_agent 服务持有 AgentScope runtime + 持久 workspace | 解决记忆延续 + lion_mgmt 不被 LLM 拖慢 |
 | 长期记忆 | lion_memory（Cognee 镜像）作为中间件 | 复用 Cognee 原生多租户与 cognify 能力，零代码 |
 
 ## 3. 数据模型
@@ -118,7 +118,7 @@
 | `name` | CharField(255) | 技能名称 |
 | `description` | TextField, null | 技能说明 |
 | `skill_dir` | CharField(512) | manifest.yaml 所在目录绝对路径 |
-| `bindings` | JSONField, default {} | `{playbook_ids:[], action_keys:[], mcp_tools:[], nanobot_skills:[]}` |
+| `bindings` | JSONField, default {} | `{playbook_ids:[], action_keys:[], mcp_tools:[], tool_groups:[], tools:[]}` |
 | `require_approval` | BoolField, default False | 高危标识（仅文档作用，强管控仍走剧本审批节点） |
 | `version` | IntField, default 1 | 技能版本 |
 | `is_builtin` | BoolField, default False | 是否内置 |
@@ -250,7 +250,7 @@ skill-template/                  # 内置技能包源（跨岗位复用）
 
 ### 4.3 结构化字段（API 表单 + UI 引导项）
 
-UI 不暴露 Nanobot 文件概念，引导用户填业务字段；后台渲染成 SOUL/AGENTS/TOOLS.md。
+UI 不暴露运行时文件概念，引导用户填业务字段；后台渲染成 `system_prompt.md` 与 `manifest.json`/`policy.json`。
 
 **岗位 `role.yaml` / `/digital_employee/role/save`**
 
@@ -259,12 +259,12 @@ UI 不暴露 Nanobot 文件概念，引导用户填业务字段；后台渲染�
 | `key` | 岗位标识（英文） | 文件夹名 |
 | `name` | 岗位名称 | DB |
 | `description` | 一句话简介 | DB |
-| `identity` | 岗位身份与定位 | SOUL.md |
-| `principles` | 工作原则 | SOUL.md |
-| `responsibilities` | 岗位职责清单 | AGENTS.md（开头） |
-| `workflows[]` | 典型工作流程：场景 + 步骤 | AGENTS.md（中段） |
-| `safety_rules` | 安全/合规底线 | AGENTS.md（结尾） |
-| `tools_notes` | 工具使用注意事项 | TOOLS.md |
+| `identity` | 岗位身份与定位 | system_prompt.md |
+| `principles` | 工作原则 | system_prompt.md |
+| `responsibilities` | 岗位职责清单 | system_prompt.md |
+| `workflows[]` | 典型工作流程：场景 + 步骤 | system_prompt.md |
+| `safety_rules` | 安全/合规底线 | system_prompt.md |
+| `tools_notes` | 工具使用注意事项 | manifest.json 中的角色元数据；实际工具以 AgentScope Toolkit/平台策略为准 |
 | `default_skills[]` | 默认技能 | DB |
 | `default_rbac_role` | 默认绑定的 RBAC 角色 | DB |
 | `license_required` | 是否需要 license | DB |
@@ -282,11 +282,11 @@ UI 不暴露 Nanobot 文件概念，引导用户填业务字段；后台渲染�
 | `bindings.playbook_ids[]` | 绑定的剧本 | manifest.yaml + DB |
 | `bindings.action_keys[]` | 绑定的动作 | 同上 |
 | `bindings.mcp_tools[]` | 绑定的 MCP 工具 | 同上 |
-| `bindings.nanobot_skills[]` | 绑定的 Nanobot skill | 同上 |
+| `bindings.tool_groups[]` / `bindings.tools[]` | 绑定的 AgentScope 工具组/工具 | 同上 |
 | `require_approval` | 是否高危（仅文档） | manifest.yaml + DB |
 | `version` | 版本号 | DB |
 
-注：原计划的 `heartbeat_tasks[]` 字段移除 —— Nanobot SDK 集成下 HEARTBEAT.md 无触发载体；周期性工作完全靠 `timed` cron 实现。
+注：原计划的 `heartbeat_tasks[]` 字段移除；周期性工作完全靠 `timed` cron 实现。
 
 ### 4.4 内置 8 岗位字段骨架（产品方制作 bundle 时按此填写）
 
@@ -393,7 +393,7 @@ models/
 ```python
 # prompt_builder.py
 def render_workspace_files(employee: CommandAgent) -> dict:
-    """返回 {SOUL.md: ..., AGENTS.md: ..., TOOLS.md: ..., skills: {<key>: {instructions.md: ...}}}"""
+    """返回 {system_prompt.md: ..., skills: {<key>: {instructions.md: ...}}, manifest.json: ..., policy.json: ...}"""
 
 def build_runtime_prompt(task: CommandTask, employee: CommandAgent) -> str: ...
 
@@ -619,13 +619,13 @@ outputs:
 
 ### 7.2 lion_agent 对外契约
 
-`/opt/dev/aioe/lion_agent/`，FastAPI + nanobot SDK。
+`/opt/dev/aioe/lion_agent/`，FastAPI + AgentScope。
 
 | Method | Path | 说明 |
 |---|---|---|
 | POST | `/internal/v1/execute` | 非流式执行；body 同 stream；返回 `{content, usage}` |
 | POST | `/internal/v1/execute/stream` | SSE 执行；body `{workspace_id, session_id, message, request_id, cognee:{endpoint, jwt, dataset_name}}` |
-| POST | `/internal/v1/workspaces/{id}/sync` | 同步 workspace；body `{files: {SOUL.md, AGENTS.md, TOOLS.md, skills:{<key>:{instructions.md}}}, role_version, skill_versions}`；不动 sessions/ |
+| POST | `/internal/v1/workspaces/{id}/sync` | 同步 workspace；body `{files: {system_prompt.md, skills:{<key>:{instructions.md}}, manifest.json, policy.json}, role_version, skill_versions}`；不动 sessions/ |
 | POST | `/internal/v1/workspaces/{id}/delete` | 软删 → mv 到 trash |
 | GET | `/healthz` / `/readyz` | 健康检查 |
 
@@ -635,18 +635,17 @@ outputs:
 
 ```
 /opt/dev/aioe/lion_agent/
-├── pyproject.toml              # fastapi + nanobot-ai + httpx + loguru
+├── pyproject.toml              # fastapi + agentscope + httpx + loguru
 ├── app.py                      # /internal/v1/execute(/stream) + workspaces 接口
-├── nanobot_runtime.py          # 移植 surewin-agent-api 同名文件
-├── bot_pool.py                 # 移植
+├── agentscope_runtime.py       # AgentScope Agent 执行入口
+├── agentscope_bot_pool.py      # workspace 级 Agent 缓存
 ├── concurrency_limiter.py      # 移植
-├── workspace_initializer.py    # 移植 + 加 sync_workspace_files()
+├── workspace_initializer.py    # 创建 workspace 与 .lion_agent 元数据
 ├── workspace_sync_handler.py   # 处理 sync 接口的写盘 + BotPool 失效
 ├── memory/
 │   ├── lion_memory_client.py   # httpx 封装 Cognee REST
-│   └── memory_hook.py          # AgentHook：before_iteration 注入 + on_stream_end 写入
-├── workspace-template/         # base 模板，仅 .nanobot/ 元数据骨架
-├── config.json                 # nanobot config
+│   └── agentscope_memory_middleware.py
+├── config.json                 # runtime metadata
 ├── runtime_support.py          # 移植
 └── Dockerfile
 ```
@@ -658,7 +657,7 @@ outputs:
 | LLM 计算拖慢 lion_mgmt | 计算在 lion_agent；lion_mgmt 仅持 TCP 解析事件 |
 | 高并发内存压力 | 单 SSE KB 级；asyncio 单进程千连接是常态 |
 | Sanic worker 抢占 | 用 `request.respond()` + `asyncio.create_task` 主请求立即释放 |
-| 失联恢复 | SSE 断开 → 任务 failed；lion_agent 端 nanobot session 仍保留，重派可复用 |
+| 失联恢复 | SSE 断开 → 任务 failed；lion_agent 端 workspace/session 上下文仍保留，重派可复用 |
 
 ## 8. 长期记忆：lion_memory（= Cognee 镜像）
 
@@ -931,5 +930,4 @@ dr_lion_memory_call_duration_ms{op}
 - 内置动作 `digital_employee.dispatch_task` 的具体实现
 - 数字员工大屏 / 看板
 - 与 prometheus 的指标接入
-
 

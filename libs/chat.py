@@ -1045,8 +1045,8 @@ class ChatManager:
             async with lock:
                 logger.info(f"开始调用 lion_agent，tenant_id={tenant_id}, room_id={current_room_id}")
 
-                # 静态指令由 workspace-template/AGENTS.md、SOUL.md、TOOLS.md 承载；
-                # 当前调用只传入本次会话的动态上下文和用户消息，避免每次覆盖 lion_agent 的系统提示。
+                # AgentScope 的静态指令由 lion_agent 工作区 system_prompt.md 承载；
+                # 当前调用只传入本次会话的动态上下文和用户消息，避免每次覆盖运行时 system_prompt。
                 full_message = f"""<message_context>
 {orjson.dumps(message_data).decode()}
 </message_context>

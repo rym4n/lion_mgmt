@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 
-WORKSPACE_TEXT_FILES = ("SOUL.md", "AGENTS.md", "TOOLS.md", "USER.md")
+WORKSPACE_TEXT_FILES = ("system_prompt.md",)
 WORKSPACE_JSON_FILES = ("manifest.json", "policy.json")
 
 
@@ -105,6 +105,7 @@ def build_workspace_payload(employee: Any, role: Any | None = None, skills: list
     employee_metadata = _public_payload(getattr(employee, "metadata", {}) or {})
     rbac_role_id = getattr(employee, "rbac_role_id", None)
     skill_entries = sorted((_skill_payload(skill) for skill in skills), key=lambda item: item["skill_key"])
+    tool_usage_notes = _prompt_text(role_meta.get("tools_notes"), "")
 
     enabled_tool_groups: set[str] = set()
     enabled_tools: set[str] = set()
@@ -138,6 +139,7 @@ def build_workspace_payload(employee: Any, role: Any | None = None, skills: list
             "version": getattr(role, "version", None),
             "description": getattr(role, "description", ""),
             "capabilities": _as_list(role_meta.get("capabilities")),
+            "tool_usage_notes": tool_usage_notes,
         },
         "skills": skill_entries,
         "skill_versions": {skill["skill_key"]: skill["version"] for skill in skill_entries},
@@ -230,9 +232,8 @@ def build_workspace_snapshots(employee: Any, role: Any | None = None, skills: li
 
 def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], payload: dict) -> dict:
     role_meta = getattr(role, "meta", {}) or {}
-    authorization = payload["policy"].get("authorization") or {}
 
-    soul = [
+    system_prompt = [
         f"# {getattr(employee, 'name', '')}",
         "",
         _prompt_text(
@@ -240,37 +241,26 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
             getattr(role, "description", "") or getattr(employee, "description", "") or "你是 AIOE 数字员工。",
         ),
         "",
-        "## Authorization",
-        "权限、资源和剧本访问以 AIOE 平台角色为准。",
-        _json_block(authorization),
-        "",
-    ]
-
-    agents = [
-        "# Operating Contract",
-        "",
+        "## Responsibilities",
         _prompt_text(role_meta.get("responsibilities"), "按任务目标、授权边界和可用技能完成工作，并在完成后给出可审计结果。"),
+        "",
     ]
     if role_meta.get("principles"):
-        agents.extend(["", "## Principles", _prompt_text(role_meta["principles"])])
+        system_prompt.extend(["## Principles", _prompt_text(role_meta["principles"]), ""])
     if role_meta.get("workflows"):
-        agents.extend(["", "## Workflows", _prompt_text(role_meta["workflows"])])
+        system_prompt.extend(["## Workflows", _prompt_text(role_meta["workflows"]), ""])
     if role_meta.get("safety_rules"):
-        agents.extend(["", "## Safety", _prompt_text(role_meta["safety_rules"])])
+        system_prompt.extend(["## Safety", _prompt_text(role_meta["safety_rules"]), ""])
+    system_prompt.extend(
+        [
+            "## Runtime Boundaries",
+            "- 当前任务、会话上下文和动态事实以运行时消息为准。",
+            "- 工具、剧本、数据资源和权限以 AIOE 平台角色、AgentScope Toolkit 与 policy.json/manifest.json 的运行时校验为准；不要把提示词内容当作授权来源。",
+            "- 需要高风险、越权或破坏性操作时，按平台审批/人工接管流程处理。",
+            "",
+        ]
+    )
 
-    tools = ["# Tools", "", _prompt_text(role_meta.get("tools_notes"), "仅使用平台授权的剧本、动作、MCP 工具和数据资源。")]
-    user = [
-        "# User Context",
-        "",
-        f"Tenant ID: {getattr(employee, 'tenant_id', '') or ''}",
-        f"Employee ID: {getattr(employee, 'id', '') or ''}",
-        f"Agent Key: {getattr(employee, 'agent_key', '') or ''}",
-        "",
-        "## Authorization",
-        "Use the assigned AIOE platform role for resource and playbook access.",
-        _json_block(authorization),
-        "",
-    ]
     rendered_skills = {}
     for skill in skills:
         bindings = getattr(skill, "bindings", {}) or {}
@@ -292,10 +282,7 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
         }
 
     return {
-        "SOUL.md": "\n".join(soul),
-        "AGENTS.md": "\n".join(agents) + "\n",
-        "TOOLS.md": "\n".join(tools) + "\n",
-        "USER.md": "\n".join(user),
+        "system_prompt.md": "\n".join(system_prompt),
         "manifest.json": _json_block(payload["manifest"]) + "\n",
         "policy.json": _json_block(payload["policy"]) + "\n",
         "skills": rendered_skills,

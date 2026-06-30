@@ -69,8 +69,6 @@ COPY migrations ./migrations
 COPY pyproject.toml ./
 COPY settings ./settings
 COPY server.py ./
-COPY config.json ./
-COPY workspace-template ./workspace-template
 COPY agent-template ./agent-template
 COPY skill-template ./skill-template
 COPY tools/build_packages.py ./tools/build_packages.py

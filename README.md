@@ -1,6 +1,6 @@
 # Lion Management Service
 
-Lion Management Service 是 AIOE 后台管理服务，负责用户与租户管理、工具应用管理、剧本编排、事件接入、作战室协同、巡检报告、AI 智能体调度与 MCP 接入。代码主体是 Python 3.11 + Sanic 的异步 Web 服务，运行时通过 PostgreSQL、Redis、Kafka、对象存储、Vector/VictoriaLogs 和内置 Nanobot 共同完成自动化运维编排。
+Lion Management Service 是 AIOE 后台管理服务，负责用户与租户管理、工具应用管理、剧本编排、事件接入、作战室协同、巡检报告、AI 智能体调度与 MCP 接入。代码主体是 Python 3.11 + Sanic 的异步 Web 服务，运行时通过 PostgreSQL、Redis、Kafka、对象存储、Vector/VictoriaLogs 和 lion_agent 共同完成自动化运维编排。
 
 ## 产品功能架构
 
@@ -24,7 +24,7 @@ Lion Management Service 是 AIOE 后台管理服务，负责用户与租户管�
 | 工具包上传 | `services/tools/views.py` | 接收 ZIP 工具包，解析 `config.json`，导入工具、动作、资源模板和权限。 |
 | 动作管理 | `models/tool_management.py` | `Tool`、`ToolAction`、`ActionPermissions` 描述工具、版本、动作与动作权限。 |
 | 资源管理 | `ToolResourcesModel`, `ToolResources` | 资源模板、资源实例、健康状态；敏感资源通过 `EncryptedCharField` 加密。 |
-| 应用开发辅助 | `services/tools/views.py`, `workspace-template` | 支持文档上传、Nanobot 辅助开发、工具调试和 SSE 流式输出。 |
+| 应用开发辅助 | `services/tools/views.py` | 支持文档上传、工具调试和 SSE 流式输出。 |
 
 工具动作是剧本、定时任务、巡检和 AI 推荐的基础执行单元。涉及外部执行时通常生成 `run_id` 并投递到 Kafka 任务主题。
 
@@ -82,7 +82,7 @@ API 创建剧本/动作执行请求
 | MCP 接入 | `services/mcp/views.py`, `services/mcp/server.py` | SSE 与 message 端点，向模型工具生态暴露服务能力。 |
 | Workspace 同步 | `services/digital_employee/prompt_builder.py`, `services/digital_employee/lion_agent_client.py` | 渲染员工工作区文件并同步到 lion_agent 运行时。 |
 
-lion_mgmt 不再内置 nanobot SDK；旧智能体执行、作战室问答、巡检判断、调度决策和报告润色统一经 lion_agent 内部接口完成。
+lion_mgmt 不再内置本地 Agent SDK；旧智能体执行、作战室问答、巡检判断、调度决策和报告润色统一经 lion_agent 内部接口完成。
 
 ### 7. 巡检、报告、看板
 
@@ -102,7 +102,7 @@ lion_mgmt 不再内置 nanobot SDK；旧智能体执行、作战室问答、巡�
   -> Sanic HTTP / WebSocket / SSE
   -> core: 中间件、异常处理、统一响应、生命周期监听器
   -> services: 业务蓝图与流程编排
-  -> libs: 安全、Kafka、Nanobot、对象存储、工具函数
+  -> libs: 安全、Kafka、对象存储、工具函数
   -> models: Tortoise ORM 数据模型
   -> 外部基础设施: PostgreSQL / Redis / Kafka / S3-MinIO / Vector / VictoriaLogs / LLM Provider / Job Engine
 ```
@@ -129,7 +129,7 @@ lion_mgmt 不再内置 nanobot SDK；旧智能体执行、作战室问答、巡�
 | S3/MinIO | 工具包、图片、报告、系统文件 | `RY_FS_HOST`, `RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY` |
 | Vector | Syslog/Kafka 接入、日志转换和转发 | `VECTOR_CFG`, `SUPERVISOR_PATH` |
 | VictoriaLogs | 日志索引和查询 | `VLOGS_HOST` |
-| LLM Provider | AI 问答、Nanobot、指挥中心调度 | `RY_AI_MODEL`, `LLM_KEY`, `RY_AI_API_BASE`, `config.json` |
+| LLM Provider | AI 问答、指挥中心调度 | `RY_AI_MODEL`, `LLM_KEY`, `RY_AI_API_BASE` |
 
 ### 部署构建
 
@@ -137,7 +137,7 @@ lion_mgmt 不再内置 nanobot SDK；旧智能体执行、作战室问答、巡�
 
 1. Builder 阶段安装 `uv`、`nuitka`、Chrome，执行 `uv sync --frozen --no-install-project --no-dev`。
 2. 使用 Nuitka 将 `core/`、`libs/`、`models/`、`services/` 打包到 `dist/`。
-3. Runtime 阶段复制 Vector、虚拟环境、打包产物、迁移、配置、模板和报告资源。
+3. Runtime 阶段复制 Vector、虚拟环境、打包产物、迁移、配置和报告资源。
 4. 安装浏览器依赖、字体、bubblewrap 和 LibreOffice Writer。
 5. `docker-entrypoint.sh` 等待数据库、执行 `aerich upgrade`，再启动传入命令或回退到 `python server.py`。
 
@@ -238,15 +238,13 @@ python server.py
 ```text
 .
 ├── core/                 # Sanic 框架层：中间件、监听器、异常处理、响应封装
-├── libs/                 # 公共库：安全、Kafka、Nanobot、对象存储、Supervisor、工具函数
+├── libs/                 # 公共库：安全、Kafka、对象存储、Supervisor、工具函数
 ├── models/               # Tortoise ORM 模型和多租户基础模型
 ├── services/             # 业务模块，每个模块通常以 views.py 暴露 Sanic Blueprint
-├── workspace-template/   # Nanobot 工作区模板、技能、提示词、工具模板
 ├── settings/             # 运行配置、环境变量读取、Tortoise/Redis/Kafka/日志配置
 ├── migrations/           # Aerich 数据库迁移
 ├── Dockerfile            # Nuitka + Vector 镜像构建
 ├── docker-entrypoint.sh  # 容器启动前数据库等待与迁移
-├── config.json           # Nanobot provider/channel/tool 配置
 ├── server.py             # 服务入口
 └── pyproject.toml        # uv 项目依赖和 Aerich 配置
 ```
@@ -266,4 +264,4 @@ python server.py
 
 - `README.md` 面向使用者和维护者，描述产品功能、架构和运行方式。
 - `AGENTS.md` 面向后续编码代理，描述真实技术栈、模块边界、开发规则和验证要求。
-- 不要把 `config.json` 中的空密钥示例改成真实密钥；真实凭证应来自环境变量或部署平台 Secret。
+- 不要把示例环境变量改成真实密钥；真实凭证应来自环境变量或部署平台 Secret。

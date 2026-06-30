@@ -6,11 +6,11 @@ RUN_IN_TRANSACTION = True
 async def upgrade(db: BaseDBAsyncClient) -> str:
     return """
         ALTER TABLE "command_center_agent" ADD "system_instruction" TEXT;
-        ALTER TABLE "command_center_agent" ADD "runtime" VARCHAR(30) NOT NULL DEFAULT 'nanobot';
+        ALTER TABLE "command_center_agent" ADD "runtime" VARCHAR(30) NOT NULL DEFAULT 'lion_agent';
         ALTER TABLE "command_center_agent" ADD "prompt_config" JSONB NOT NULL;
         ALTER TABLE "command_center_agent" ADD "is_builtin" BOOL NOT NULL DEFAULT False;
-        COMMENT ON COLUMN "command_center_agent"."system_instruction" IS '调用Nanobot时使用的system_instruction提示词';
-COMMENT ON COLUMN "command_center_agent"."runtime" IS '运行时类型: nanobot等';
+        COMMENT ON COLUMN "command_center_agent"."system_instruction" IS '调用lion_agent时使用的system_instruction提示词';
+COMMENT ON COLUMN "command_center_agent"."runtime" IS '运行时类型: lion_agent 等';
 COMMENT ON COLUMN "command_center_agent"."prompt_config" IS '提示词扩展配置';
 COMMENT ON COLUMN "command_center_agent"."is_builtin" IS '是否为内置智能体';
         DROP TABLE IF EXISTS "agent_mapping";

@@ -600,7 +600,7 @@ def _user_report_dir(tenant_id: str, user_id: str) -> Path:
 @agent_bp.post("/report/templates")
 @openapi.definition(
     summary="获取内置报告模板列表",
-    description="扫描 workspace-template/reports/ 目录，返回所有 .docx 模板。需要 agent:r 权限。",
+    description="扫描 resources/report-templates/ 目录，返回所有 .docx 模板。需要 agent:r 权限。",
     response=_response("模板列表", {"type": "array", "items": REPORT_TEMPLATE_SCHEMA}),
 )
 @requires_permission("agent:r")

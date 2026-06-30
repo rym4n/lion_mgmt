@@ -161,7 +161,7 @@ def _install_stubs():
         "policy_snapshot": {"approval": {"default": "allow"}},
     }
     prompt_builder.render_workspace_files = lambda employee, role, skills: {
-        "SOUL.md": "role",
+        "system_prompt.md": "role",
         "manifest.json": {"employee": {"id": employee.id}, "workspace_etag": "etag-1"},
         "policy.json": {"approval": {"default": "allow", "skills": {"write_file": "allow"}}, "filesystem": {"write": "allow"}},
     }

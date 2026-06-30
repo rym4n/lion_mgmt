@@ -54,10 +54,12 @@ def test_render_workspace_files_includes_role_skill_and_platform_role_authorizat
 
     files = render_workspace_files(employee, role, [skill])
 
-    assert "监控值班员" in files["SOUL.md"]
-    assert "分诊告警" in files["AGENTS.md"]
-    assert "只用授权工具" in files["TOOLS.md"]
-    assert "tenant-1" in files["USER.md"]
+    assert set(files) == {"system_prompt.md", "manifest.json", "policy.json", "skills"}
+    assert "监控值班员" in files["system_prompt.md"]
+    assert "分诊告警" in files["system_prompt.md"]
+    assert "只用授权工具" not in files["system_prompt.md"]
+    assert "AgentScope Toolkit" in files["system_prompt.md"]
+    assert '"tool_usage_notes": "只用授权工具"' in files["manifest.json"]
     assert "alert_triage" in files["skills"]
     assert "notify" in files["skills"]["alert_triage"]["instructions.md"]
     assert '"agent_key": "monitor-1"' in files["manifest.json"]
@@ -102,15 +104,14 @@ def test_render_workspace_files_coerces_legacy_prompt_arrays_to_text():
 
     files = render_workspace_files(employee, role, [])
 
-    assert isinstance(files["SOUL.md"], str)
-    assert isinstance(files["AGENTS.md"], str)
-    assert isinstance(files["TOOLS.md"], str)
-    assert "- 接收告警" in files["AGENTS.md"]
-    assert "## Principles\n- 先确认影响范围" in files["AGENTS.md"]
-    assert "### 告警分诊" in files["AGENTS.md"]
-    assert "- 输出严重性" in files["AGENTS.md"]
-    assert "- 不直接执行破坏性变更" in files["AGENTS.md"]
-    assert "- 只使用授权工具" in files["TOOLS.md"]
+    assert isinstance(files["system_prompt.md"], str)
+    assert set(files) == {"system_prompt.md", "manifest.json", "policy.json", "skills"}
+    assert "- 接收告警" in files["system_prompt.md"]
+    assert "## Principles\n- 先确认影响范围" in files["system_prompt.md"]
+    assert "### 告警分诊" in files["system_prompt.md"]
+    assert "- 输出严重性" in files["system_prompt.md"]
+    assert "- 不直接执行破坏性变更" in files["system_prompt.md"]
+    assert '"tool_usage_notes": "- 只使用授权工具"' in files["manifest.json"]
 
 
 def test_workspace_etag_changes_with_skill_version():

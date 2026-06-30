@@ -7,7 +7,6 @@ bindings:
   playbook_ids: []
   action_keys: []
   mcp_tools: []
-  nanobot_skills: []
 require_approval: false
 enabled: true
 version: 1

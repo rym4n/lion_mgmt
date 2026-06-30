@@ -3284,7 +3284,7 @@ async def browser_execute(request):
         # 返回 session_id 给客户端，用于后续请求
         await _send_browser_sse(resp, {"status": "starting", "message": "开始处理任务...", "session_id": session_id})
 
-        # 构建完整消息：静态执行规则由 lion_agent workspace-template 提供
+        # 构建完整消息：静态执行规则由 lion_agent 工作区 system_prompt.md 提供
         full_message = f"""<user_task>
 {task}
 </user_task>"""
