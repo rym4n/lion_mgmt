@@ -69,7 +69,7 @@ def build_workspace_payload(employee: Any, role: Any | None = None, skills: list
     skills = skills or []
     role_meta = _public_payload(getattr(role, "meta", {}) or {})
     employee_metadata = _public_payload(getattr(employee, "metadata", {}) or {})
-    resource_scope = _public_payload(getattr(employee, "resource_scope", {}) or {})
+    rbac_role_id = getattr(employee, "rbac_role_id", None)
     skill_entries = sorted((_skill_payload(skill) for skill in skills), key=lambda item: item["skill_key"])
 
     enabled_tool_groups: set[str] = set()
@@ -96,7 +96,7 @@ def build_workspace_payload(employee: Any, role: Any | None = None, skills: list
             "name": getattr(employee, "name", ""),
             "description": getattr(employee, "description", ""),
             "role_key": getattr(employee, "role_key", None) or getattr(role, "role_key", None),
-            "rbac_role_id": getattr(employee, "rbac_role_id", None),
+            "rbac_role_id": rbac_role_id,
         },
         "role": {
             "role_key": getattr(role, "role_key", None),
@@ -117,21 +117,15 @@ def build_workspace_payload(employee: Any, role: Any | None = None, skills: list
 
     policy = {
         "schema_version": 1,
-        "resource_scope": resource_scope,
+        "authorization": {
+            "source": "aioe_platform_role",
+            "rbac_role_id": rbac_role_id,
+        },
         "filesystem": employee_metadata.get("filesystem_policy") or role_meta.get("filesystem_policy") or {},
         "approval": _merge_approval_policy(
             employee_metadata.get("approval_policy") or role_meta.get("approval_policy") or {},
             skill_entries,
         ),
-        "tool_permissions": {
-            "enabled_tool_groups": sorted(enabled_tool_groups),
-            "enabled_tools": sorted(enabled_tools),
-            "enabled_actions": sorted(enabled_actions),
-            "enabled_playbooks": sorted(enabled_playbooks),
-            "enabled_mcp_tools": sorted(enabled_mcp_tools),
-            "skills": {skill["skill_key"]: skill["bindings"] for skill in skill_entries},
-            "rules": employee_metadata.get("tool_permission_policy") or role_meta.get("tool_permission_policy") or {},
-        },
         "budget": employee_metadata.get("budget_policy") or role_meta.get("budget_policy") or {},
         "timeout": employee_metadata.get("timeout_policy") or role_meta.get("timeout_policy") or {},
         "human_handoff": employee_metadata.get("human_handoff_policy") or role_meta.get("human_handoff_policy") or {},
@@ -202,15 +196,16 @@ def build_workspace_snapshots(employee: Any, role: Any | None = None, skills: li
 
 def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], payload: dict) -> dict:
     role_meta = getattr(role, "meta", {}) or {}
-    resource_scope = payload["policy"]["resource_scope"]
+    authorization = payload["policy"].get("authorization") or {}
 
     soul = [
         f"# {getattr(employee, 'name', '')}",
         "",
         role_meta.get("identity") or getattr(role, "description", "") or getattr(employee, "description", "") or "你是 AIOE 数字员工。",
         "",
-        "## Resource Scope",
-        _json_block(resource_scope),
+        "## Authorization",
+        "权限、资源和剧本访问以 AIOE 平台角色为准。",
+        _json_block(authorization),
         "",
     ]
 
@@ -234,8 +229,9 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
         f"Employee ID: {getattr(employee, 'id', '') or ''}",
         f"Agent Key: {getattr(employee, 'agent_key', '') or ''}",
         "",
-        "## Resource Scope",
-        _json_block(resource_scope),
+        "## Authorization",
+        "Use the assigned AIOE platform role for resource and playbook access.",
+        _json_block(authorization),
         "",
     ]
     rendered_skills = {}

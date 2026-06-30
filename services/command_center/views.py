@@ -269,7 +269,7 @@ def _task_run_detail_json(run: CommandTaskRun) -> dict:
     skills = manifest.get("skills")
     approval = policy.get("approval") if isinstance(policy.get("approval"), dict) else {}
     skill_rules = approval.get("skills") if isinstance(approval.get("skills"), dict) else {}
-    resource_scope = policy.get("resource_scope") or manifest.get("resource_scope")
+    authorization = policy.get("authorization") if isinstance(policy.get("authorization"), dict) else {}
     return {
         "id": run.id,
         "ctime": run.json["ctime"],
@@ -296,7 +296,11 @@ def _task_run_detail_json(run: CommandTaskRun) -> dict:
         "policy_summary": {
             "approval_default": approval.get("default"),
             "approval_skills": skill_rules,
-            "resource_scope": _summarize_scope(resource_scope),
+            "authorization": {
+                key: authorization.get(key)
+                for key in ("source", "rbac_role_id")
+                if authorization.get(key) is not None
+            },
         },
     }
 

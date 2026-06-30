@@ -74,7 +74,7 @@ def test_task_detail_run_dto_exposes_summaries_without_raw_snapshots():
         },
         policy_snapshot={
             "approval": {"default": "approval_required", "skills": {"write_file": "approval_required"}},
-            "resource_scope": {"assets": ["db01", "db02"], "filesystem": {"paths": ["/tmp/a"]}},
+            "authorization": {"source": "aioe_platform_role", "rbac_role_id": "role-1"},
             "filesystem": {"write": "deny", "paths": ["/tmp/a"]},
         },
     )
@@ -91,9 +91,9 @@ def test_task_detail_run_dto_exposes_summaries_without_raw_snapshots():
     }
     assert out["policy_summary"]["approval_default"] == "approval_required"
     assert out["policy_summary"]["approval_skills"] == {"write_file": "approval_required"}
-    assert out["policy_summary"]["resource_scope"] == {
-        "assets": {"kind": "list", "count": 2},
-        "filesystem": {"kind": "object", "count": 1},
+    assert out["policy_summary"]["authorization"] == {
+        "source": "aioe_platform_role",
+        "rbac_role_id": "role-1",
     }
 
 

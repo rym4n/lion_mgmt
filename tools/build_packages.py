@@ -37,32 +37,33 @@ def write_dir_archive(source: Path, target: Path, prefix: str = "") -> None:
             archive.write(item, archive_name)
 
 
-def build_role(role_dir: Path) -> Path:
+def build_role(role_dir: Path, dist_root: Path = DIST_ROOT) -> Path:
     package = read_yaml(role_dir / "package.yaml")
     role_key = package["role_key"]
     version = package.get("version", 1)
-    target = DIST_ROOT / "agents" / f"{role_key}-v{version}.role.zip"
+    target = dist_root / "agents" / f"{role_key}-v{version}.role.zip"
     write_dir_archive(role_dir, target)
     return target
 
 
-def build_skill(skill_dir: Path) -> Path:
+def build_skill(skill_dir: Path, dist_root: Path = DIST_ROOT) -> Path:
     package = read_yaml(skill_dir / "package.yaml")
     skill_key = package["skill_key"]
     version = package.get("version", 1)
-    target = DIST_ROOT / "skills" / f"{skill_key}-v{version}.skill.zip"
+    target = dist_root / "skills" / f"{skill_key}-v{version}.skill.zip"
     write_dir_archive(skill_dir, target)
     return target
 
 
-def build_bundle(role_dir: Path) -> Path:
+def build_bundle(role_dir: Path, output_root: Path | None = None) -> Path:
     package = read_yaml(role_dir / "package.yaml")
     role_yaml = read_yaml(role_dir / "role.yaml")
     role_key = package["role_key"]
     version = package.get("version", 1)
     bundle_key = package.get("bundle_key") or f"aioe-digital-employees-builtin-{role_key}"
     default_skills = package.get("default_skill_keys") or role_yaml.get("default_skills") or []
-    target = DIST_ROOT / "bundles" / f"{bundle_key}-v{version}.bundle.zip"
+    target_root = output_root or DIST_ROOT / "bundles"
+    target = target_root / f"{bundle_key}-v{version}.bundle.zip"
     target.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(
@@ -92,24 +93,42 @@ def build_bundle(role_dir: Path) -> Path:
     return target
 
 
-def build_all(clean: bool = False) -> list[Path]:
-    if clean and DIST_ROOT.exists():
-        shutil.rmtree(DIST_ROOT)
+def _clean_path(path: Path) -> None:
+    if path.exists():
+        shutil.rmtree(path)
+
+
+def build_all(clean: bool = False, bundles_only: bool = False, bundle_output: Path | None = None) -> list[Path]:
+    if clean:
+        if bundles_only and bundle_output:
+            _clean_path(bundle_output)
+        elif bundles_only:
+            _clean_path(DIST_ROOT / "bundles")
+        else:
+            _clean_path(DIST_ROOT)
     built: list[Path] = []
-    for role_dir in sorted(path for path in AGENT_TEMPLATE_ROOT.iterdir() if path.is_dir()):
-        built.append(build_role(role_dir))
-    for skill_dir in sorted(path for path in SKILL_TEMPLATE_ROOT.iterdir() if path.is_dir()):
-        built.append(build_skill(skill_dir))
-    built.append(build_bundle(AGENT_TEMPLATE_ROOT / "monitor"))
+    role_dirs = sorted(path for path in AGENT_TEMPLATE_ROOT.iterdir() if path.is_dir())
+    if not bundles_only:
+        for role_dir in role_dirs:
+            built.append(build_role(role_dir))
+        for skill_dir in sorted(path for path in SKILL_TEMPLATE_ROOT.iterdir() if path.is_dir()):
+            built.append(build_skill(skill_dir))
+    for role_dir in role_dirs:
+        built.append(build_bundle(role_dir, output_root=bundle_output))
     return built
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build digital employee package zips.")
     parser.add_argument("--clean", action="store_true", help="Remove dist before building")
+    parser.add_argument("--bundles-only", action="store_true", help="Build only role bundles")
+    parser.add_argument("--bundle-output", type=Path, help="Directory for generated bundle zips")
     args = parser.parse_args()
-    for package_path in build_all(clean=args.clean):
-        print(package_path.relative_to(ROOT))
+    for package_path in build_all(clean=args.clean, bundles_only=args.bundles_only, bundle_output=args.bundle_output):
+        try:
+            print(package_path.relative_to(ROOT))
+        except ValueError:
+            print(package_path)
     return 0
 
 

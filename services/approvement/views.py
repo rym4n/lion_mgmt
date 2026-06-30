@@ -21,6 +21,13 @@ approve_bp = Blueprint("approve", url_prefix="/approve")
 _all__ = ["approve_bp"]
 
 
+def _agent_command_approval_id(approve: Approvement) -> str | None:
+    params = approve.params if isinstance(approve.params, dict) else {}
+    if params.get("approval_kind") != "agent":
+        return None
+    return params.get("command_approval_id")
+
+
 @approve_bp.post("/list")
 @openapi.definition(
     summary="获取审批人为当前用户的审批任务信息",
@@ -297,6 +304,19 @@ async def update_approvement(request):
     if approve.status != 0:
         raise CustomError(ErrorCode.APPROVEMENT_STATUS_ERROR)
 
+    command_approval_id = _agent_command_approval_id(approve)
+    if command_approval_id:
+        from services.command_center.approval_service import decide_approval
+
+        await decide_approval(
+            tenant_id,
+            command_approval_id,
+            "approve" if agree else "reject",
+            request.ctx.session["account_info"].id,
+            remark,
+        )
+        return response_ok("success")
+
     if args:
         approve.params = args
     account_info = request.ctx.session["account_info"]
@@ -426,6 +446,19 @@ async def update_approvement_callback(request):
 
     if approve.status != 0:
         raise CustomError(ErrorCode.APPROVEMENT_STATUS_ERROR)
+
+    command_approval_id = _agent_command_approval_id(approve)
+    if command_approval_id:
+        from services.command_center.approval_service import decide_approval
+
+        await decide_approval(
+            approve.tenant_id,
+            command_approval_id,
+            "approve" if agree else "reject",
+            "callback",
+            remark,
+        )
+        return response_ok("success")
 
     if flow_input:
         approve.params = flow_input

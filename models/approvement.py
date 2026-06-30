@@ -12,8 +12,8 @@ class Approvement(BaseModel):
     """
 
     title: str = fields.CharField(max_length=50, index=True, description="审核标题")
-    flow = fields.ForeignKeyField("models.PlaybookVersion", description="关联剧本")
-    run_id = fields.CharField(max_length=20, description="关联运行ID")
+    flow = fields.ForeignKeyField("models.PlaybookVersion", null=True, description="关联剧本")
+    run_id = fields.CharField(max_length=64, description="关联运行ID")
     content = fields.TextField(description="审核描述内容")
     status = fields.IntField(default=0, description="审核状态，0代表待处理，1代表通过，2代表拒绝")
     approve_type = fields.IntField(default=0, description="审核类型，1代表或签，2代表会签")
@@ -28,7 +28,7 @@ class Approvement(BaseModel):
     created_at = fields.DatetimeField(description="审核触发的时间")
     params = fields.JSONField(null=True, description="自定义参数")
     results = fields.JSONField(default={}, description="处理记录")
-    callback_token = fields.CharField(max_length=16, description="外部回调token")
+    callback_token = fields.CharField(max_length=64, description="外部回调token")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -47,6 +47,7 @@ class Approvement(BaseModel):
             "approve_type": self.approve_type,
             "results": self.results,
             "params": self.params,
+            "approval_kind": ((self.params or {}).get("approval_kind") if isinstance(self.params, dict) else None) or "playbook",
         }
 
     # 指定name+type作为唯一性约束

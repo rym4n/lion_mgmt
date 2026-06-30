@@ -13,12 +13,15 @@ import pytest
 RECORDED_EVENTS = []
 UPDATED_PROGRESS = []
 SAVED = []
+CREATED_APPROVEMENTS = []
 STUB_MODULES = [
     "core",
     "core.error_code",
     "libs",
     "libs.error_code",
     "libs.error_code.exception",
+    "libs.security",
+    "libs.security.authorization",
     "models",
     "models.command_center",
     "settings",
@@ -50,6 +53,7 @@ def _install_stubs():
     RECORDED_EVENTS.clear()
     UPDATED_PROGRESS.clear()
     SAVED.clear()
+    CREATED_APPROVEMENTS.clear()
     for name in STUB_MODULES:
         sys.modules.pop(name, None)
 
@@ -71,6 +75,12 @@ def _install_stubs():
 
     exception.CustomError = CustomError
     sys.modules["libs.error_code.exception"] = exception
+    libs_security = types.ModuleType("libs.security")
+    libs_security.__path__ = []
+    sys.modules["libs.security"] = libs_security
+    authorization = types.ModuleType("libs.security.authorization")
+    authorization.check_wildcard = lambda owned, needed: owned in {needed, "*:*"} or owned.endswith(":*") and needed.startswith(owned[:-1])
+    sys.modules["libs.security.authorization"] = authorization
 
     tortoise = types.ModuleType("tortoise")
     transactions = types.ModuleType("tortoise.transactions")
@@ -105,6 +115,9 @@ def _install_stubs():
             return self
 
         def filter(self, **kwargs):
+            return self
+
+        def prefetch_related(self, *args):
             return self
 
         async def first(self):
@@ -169,6 +182,64 @@ def _install_stubs():
             self.save_calls.append(update_fields)
             SAVED.append(("approval", update_fields, self.status))
 
+    class Account(SimpleNamespace):
+        records = None
+
+        @classmethod
+        def filter(cls, **kwargs):
+            return Query(cls.records)
+
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            for account in cls.records or []:
+                if getattr(account, "id", None) == kwargs.get("id"):
+                    return account
+            return None
+
+    class ApproverRelation:
+        def __init__(self, approval):
+            self.approval = approval
+
+        async def add(self, *approvers):
+            self.approval.added_approvers.extend(approvers)
+
+        def __iter__(self):
+            return iter(self.approval.added_approvers)
+
+    class Approvement(SimpleNamespace):
+        records = None
+
+        @classmethod
+        async def create(cls, **kwargs):
+            approvement = cls(**kwargs)
+            approvement.id = kwargs.get("id", f"approvement-{len(CREATED_APPROVEMENTS) + 1}")
+            approvement.results = kwargs.get("results") or {}
+            approvement.added_approvers = []
+            approvement.approvers = ApproverRelation(approvement)
+            approvement.save_calls = []
+            CREATED_APPROVEMENTS.append(approvement)
+            cls.records = [approvement]
+            return approvement
+
+        @classmethod
+        def filter(cls, **kwargs):
+            return Query(cls.records)
+
+        async def save(self, update_fields=None):
+            self.save_calls.append(update_fields)
+            SAVED.append(("approvement", update_fields, self.status))
+
+    Account.records = [
+        Account(
+            id="approver-1",
+            username="approver",
+            display_name="审批员",
+            roles=[SimpleNamespace(permissions=["approve:u"])],
+        )
+    ]
+
+    models.Account = Account
+    models.Approvement = Approvement
     command_center.CommandTask = CommandTask
     command_center.CommandTaskRun = CommandTaskRun
     command_center.CommandApproval = CommandApproval
@@ -268,7 +339,10 @@ def _task_run_approval():
         run_id="run-1",
         session_id=None,
         status="waiting_approval",
-        policy_snapshot={"approval": {"default": "approval_required"}, "resource_scope": {"assets": ["db01"]}},
+        policy_snapshot={
+            "approval": {"default": "approval_required"},
+            "authorization": {"source": "aioe_platform_role", "rbac_role_id": "role-1"},
+        },
         evidence_refs=[],
         metadata={},
         lease_owner="worker-1",
@@ -325,10 +399,44 @@ def test_create_approval_request_updates_run_task_and_event():
     )
 
     assert approval.status == "pending"
-    assert approval.metadata["visible_inbox"] == "approvement_inbox_adapter"
+    assert approval.metadata["visible_inbox"] == "approvement"
+    assert approval.metadata["approval_kind"] == "agent"
+    assert approval.metadata["approvement_id"] == "approvement-1"
+    assert CREATED_APPROVEMENTS[0].params["approval_kind"] == "agent"
+    assert CREATED_APPROVEMENTS[0].params["command_approval_id"] == approval.id
+    assert [approver.id for approver in CREATED_APPROVEMENTS[0].added_approvers] == ["approver-1"]
     assert run.status == "waiting_approval"
     assert task.status == "pending_approval"
     assert RECORDED_EVENTS[-1][0] == "approval_required"
+
+
+def test_decide_approval_updates_linked_approvement_record():
+    service = _load_service()
+    task, run, approval = _task_run_approval()
+    approvement = sys.modules["models"].Approvement(
+        id="approvement-1",
+        tenant_id="tenant-1",
+        deleted=False,
+        status=0,
+        results={},
+        added_approvers=[],
+        save_calls=[],
+    )
+    approvement.approvers = []
+    sys.modules["models"].Approvement.records = [approvement]
+    approval.metadata = {"approvement_id": "approvement-1"}
+    scheduled = []
+    service.schedule_approval_resume = lambda tenant_id, approval_id, operator_id=None: scheduled.append((tenant_id, approval_id, operator_id))
+
+    decided = asyncio.run(service.decide_approval("tenant-1", "approval-1", "approve", "approver-1", "通过"))
+
+    assert decided.status == "approved"
+    assert task.status == "dispatched"
+    assert run.status == "continuation_ready"
+    assert approvement.status == 1
+    assert approvement.results["approver-1"]["agree"] is True
+    assert approvement.results["approver-1"]["remark"] == "通过"
+    assert scheduled == [("tenant-1", "approval-1", "approver-1")]
 
 
 def test_decide_approval_approve_and_reject_are_atomic_state_transitions():

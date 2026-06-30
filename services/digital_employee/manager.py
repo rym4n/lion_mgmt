@@ -56,10 +56,10 @@ async def create_employee(
     role_key: str,
     name: str,
     skill_keys: list[str] | None = None,
-    resource_scope: dict | None = None,
     description: str | None = None,
     max_concurrent: int = 1,
     agent_key: str | None = None,
+    rbac_role_id: str | None = None,
 ) -> CommandAgent:
     role = await get_visible_role(tenant_id, role_key)
     keys = skill_keys if skill_keys is not None else list(role.default_skill_keys or [])
@@ -80,8 +80,8 @@ async def create_employee(
         role=role,
         role_key=role.role_key,
         skill_keys=[skill.skill_key for skill in skills],
-        rbac_role_id=role.default_rbac_role_id,
-        resource_scope=resource_scope or {},
+        rbac_role_id=rbac_role_id or role.default_rbac_role_id,
+        resource_scope={},
     )
     await sync_employee_workspace(employee, role=role, skills=skills)
     return employee

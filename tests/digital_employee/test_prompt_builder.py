@@ -19,7 +19,7 @@ render_workspace_files = prompt_builder.render_workspace_files
 workspace_etag = prompt_builder.workspace_etag
 
 
-def test_render_workspace_files_includes_role_skill_and_scope():
+def test_render_workspace_files_includes_role_skill_and_platform_role_authorization():
     role = SimpleNamespace(
         role_key="monitor",
         version=2,
@@ -62,32 +62,43 @@ def test_render_workspace_files_includes_role_skill_and_scope():
     assert "notify" in files["skills"]["alert_triage"]["instructions.md"]
     assert '"agent_key": "monitor-1"' in files["manifest.json"]
     assert '"workspace_etag":' in files["manifest.json"]
-    assert '"assets": [' in files["policy.json"]
-    assert '"metrics.query"' in files["policy.json"]
+    assert '"metrics.query"' in files["manifest.json"]
+    assert '"source": "aioe_platform_role"' in files["policy.json"]
+    assert '"rbac_role_id": "role-1"' in files["policy.json"]
+    assert '"resource_scope"' not in files["policy.json"]
+    assert '"tool_permissions"' not in files["policy.json"]
 
 
 def test_workspace_etag_changes_with_skill_version():
     role = SimpleNamespace(role_key="monitor", version=1)
-    employee = SimpleNamespace(resource_scope={"assets": ["db01"]}, metadata={}, runtime="lion_agent")
+    employee = SimpleNamespace(resource_scope={"assets": ["db01"]}, metadata={}, runtime="lion_agent", rbac_role_id="role-1")
     old_skill = SimpleNamespace(skill_key="alert_triage", version=1)
     new_skill = SimpleNamespace(skill_key="alert_triage", version=2)
 
     assert workspace_etag(role, [old_skill], employee) != workspace_etag(role, [new_skill], employee)
 
 
-def test_workspace_etag_changes_with_resource_scope_and_policy():
+def test_workspace_etag_ignores_resource_scope_and_tracks_role_policy():
     role = SimpleNamespace(role_key="monitor", version=1, meta={})
     skill = SimpleNamespace(skill_key="alert_triage", version=1, bindings={}, require_approval=False)
-    employee_a = SimpleNamespace(resource_scope={"assets": ["db01"]}, metadata={}, runtime="lion_agent")
-    employee_b = SimpleNamespace(resource_scope={"assets": ["db02"]}, metadata={}, runtime="lion_agent")
+    employee_a = SimpleNamespace(resource_scope={"assets": ["db01"]}, metadata={}, runtime="lion_agent", rbac_role_id="role-1")
+    employee_b = SimpleNamespace(resource_scope={"assets": ["db02"]}, metadata={}, runtime="lion_agent", rbac_role_id="role-1")
     employee_c = SimpleNamespace(
         resource_scope={"assets": ["db01"]},
         metadata={"approval_policy": {"default": "approval_required"}},
         runtime="lion_agent",
+        rbac_role_id="role-1",
+    )
+    employee_d = SimpleNamespace(
+        resource_scope={"assets": ["db01"]},
+        metadata={},
+        runtime="lion_agent",
+        rbac_role_id="role-2",
     )
 
-    assert workspace_etag(role, [skill], employee_a) != workspace_etag(role, [skill], employee_b)
+    assert workspace_etag(role, [skill], employee_a) == workspace_etag(role, [skill], employee_b)
     assert workspace_etag(role, [skill], employee_a) != workspace_etag(role, [skill], employee_c)
+    assert workspace_etag(role, [skill], employee_a) != workspace_etag(role, [skill], employee_d)
 
 
 def test_workspace_snapshots_match_rendered_files_without_recursive_etag():
@@ -101,6 +112,7 @@ def test_workspace_snapshots_match_rendered_files_without_recursive_etag():
         name="小狮",
         description="",
         resource_scope={"assets": ["db01"]},
+        rbac_role_id="role-1",
         metadata={},
         runtime="lion_agent",
     )
@@ -110,6 +122,11 @@ def test_workspace_snapshots_match_rendered_files_without_recursive_etag():
 
     assert snapshots["manifest_snapshot"]["workspace_etag"] == snapshots["workspace_etag"]
     assert f'"workspace_etag": "{snapshots["workspace_etag"]}"' in files["manifest.json"]
+    assert snapshots["policy_snapshot"]["authorization"] == {
+        "source": "aioe_platform_role",
+        "rbac_role_id": "role-1",
+    }
+    assert "resource_scope" not in snapshots["policy_snapshot"]
     assert snapshots["policy_snapshot"]["approval"]["skills"]["alert_triage"] == "approval_required"
 
 

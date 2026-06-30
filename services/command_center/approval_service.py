@@ -5,6 +5,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 from sanic.log import logger
 from tortoise.transactions import in_transaction
@@ -46,6 +47,7 @@ DECISION_ALIASES = {
 }
 RESUMABLE_APPROVAL_STATUSES = {COMMAND_APPROVAL_STATUS_APPROVED, COMMAND_APPROVAL_STATUS_APPROVED_READ_ONLY}
 RECOVERY_CLAIM_TTL_SECONDS = 300
+AGENT_APPROVAL_KIND = "agent"
 
 
 @dataclass(slots=True)
@@ -90,6 +92,143 @@ def _impacted_resources(policy_snapshot: dict | None) -> list[dict]:
     if isinstance(resource_scope, list):
         return resource_scope
     return [{"kind": "resource_scope", "scope": resource_scope}]
+
+
+def _approval_title(task: CommandTask) -> str:
+    title = f"Agent 审批：{getattr(task, 'title', None) or task.id}"
+    return title[:50]
+
+
+def _approval_content(task: CommandTask, run: CommandTaskRun, requested_action: dict | None, reason: str | None) -> str:
+    action = requested_action or {}
+    action_name = action.get("tool") or action.get("playbook") or action.get("action") or action.get("name") or "执行动作"
+    lines = [
+        reason or "数字员工任务需要人工审批",
+        f"任务：{getattr(task, 'title', None) or task.id}",
+        f"运行 ID：{run.run_id}",
+        f"动作：{action_name}",
+    ]
+    if getattr(task, "description", None):
+        lines.append(f"描述：{task.description}")
+    return "\n".join(lines)
+
+
+def _command_approval_params(approval: CommandApproval, task: CommandTask, run: CommandTaskRun) -> dict:
+    return {
+        "approval_kind": AGENT_APPROVAL_KIND,
+        "command_approval_id": approval.id,
+        "command_task_id": task.id,
+        "command_run_id": run.run_id,
+    }
+
+
+def _has_approval_permission(account: Any) -> bool:
+    from libs.security.authorization import check_wildcard
+
+    for role in getattr(account, "roles", []) or []:
+        for permission in getattr(role, "permissions", []) or []:
+            if check_wildcard(str(permission), "approve:u"):
+                return True
+    return False
+
+
+async def _agent_approval_approvers(tenant_id: str, operator_id: str | None) -> list[Any]:
+    try:
+        from models import Account
+    except ImportError:
+        return []
+
+    accounts = await Account.filter(deleted=False, disabled=False, type="user", member__id=tenant_id).prefetch_related("roles").all()
+    approvers = [account for account in accounts if _has_approval_permission(account)]
+    if approvers or not operator_id:
+        return approvers
+    requester = await Account.get_or_none(id=operator_id, deleted=False)
+    return [requester] if requester else []
+
+
+async def sync_approvement_for_command_approval(
+    approval: CommandApproval,
+    task: CommandTask,
+    run: CommandTaskRun,
+    *,
+    operator_id: str | None = None,
+    reason: str | None = None,
+) -> None:
+    try:
+        from models import Approvement
+    except ImportError:
+        return
+
+    metadata = dict(approval.metadata or {})
+    if metadata.get("approvement_id"):
+        return
+    now = datetime.now(TZ)
+    approvement = await Approvement.create(
+        tenant_id=task.tenant_id,
+        title=_approval_title(task),
+        flow_id=None,
+        run_id=run.run_id,
+        content=_approval_content(task, run, approval.requested_action, reason),
+        params=_command_approval_params(approval, task, run),
+        status=0,
+        expire_time=getattr(approval, "expires_at", None) or now + timedelta(hours=24),
+        created_at=now,
+        audit_node=approval.id,
+        approve_type=1,
+        callback_token=f"agent-{uuid4().hex}",
+    )
+    approvers = await _agent_approval_approvers(task.tenant_id, operator_id)
+    if approvers:
+        await approvement.approvers.add(*approvers)
+    approval.metadata = {
+        **metadata,
+        "visible_inbox": "approvement",
+        "source": "command_approval",
+        "approval_kind": AGENT_APPROVAL_KIND,
+        "approvement_id": approvement.id,
+    }
+    await approval.save(update_fields=["metadata", "utime"])
+
+
+async def sync_command_approvement_decision(
+    approval: CommandApproval,
+    decision: str,
+    approver_id: str,
+    comment: str | None = None,
+) -> None:
+    try:
+        from models import Account, Approvement
+    except ImportError:
+        return
+
+    approvement_id = (approval.metadata or {}).get("approvement_id")
+    if not approvement_id:
+        return
+    approvement = await Approvement.filter(
+        id=approvement_id,
+        tenant_id=approval.tenant_id,
+        deleted=False,
+    ).prefetch_related("approvers").first()
+    if not approvement:
+        return
+    account = await Account.get_or_none(id=approver_id, deleted=False)
+    agree = decision in {"approve", "approved", "read_only", "takeover"}
+    if decision == "needs_info":
+        status = 0
+    else:
+        status = 1 if agree else 2
+    approvement.status = status
+    approvement.results = {
+        **(approvement.results or {}),
+        approver_id: {
+            "username": getattr(account, "username", approver_id),
+            "display_name": getattr(account, "display_name", None) or getattr(account, "username", approver_id),
+            "agree": agree,
+            "remark": comment or "",
+            "approve_time": datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S"),
+        },
+    }
+    await approvement.save(update_fields=["status", "results", "utime"])
 
 
 def evaluate_policy(policy_snapshot: dict | None, requested_action: dict | None = None, trigger_type: str = "pre_run") -> PolicyDecision:
@@ -152,6 +291,7 @@ async def create_approval_request(
             "run_id": run.run_id,
         },
     )
+    await sync_approvement_for_command_approval(approval, task, run, operator_id=operator_id, reason=reason)
     run.status = "waiting_approval"
     await run.save(update_fields=["status", "utime"])
     task.status = "pending_approval"
@@ -530,5 +670,8 @@ async def decide_approval(
         )
         should_resume = bool(transition.get("next_event_type"))
     if should_resume:
+        await sync_command_approvement_decision(approval, transition_key, approver_id, comment)
         schedule_approval_resume(tenant_id, approval_id, operator_id=approver_id)
+    else:
+        await sync_command_approvement_decision(approval, transition_key, approver_id, comment)
     return approval

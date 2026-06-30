@@ -135,10 +135,10 @@ async def employee_create(request: Request):
         role_key=data.get("role_key"),
         name=data.get("name"),
         skill_keys=data.get("skill_keys"),
-        resource_scope=data.get("resource_scope") or {},
         description=data.get("description"),
         max_concurrent=data.get("max_concurrent", 1),
         agent_key=data.get("agent_key"),
+        rbac_role_id=data.get("rbac_role_id"),
     )
     return response_ok(employee.json)
 
@@ -185,7 +185,7 @@ async def employee_detail(request: Request):
 async def employee_update(request: Request):
     data = _json(request)
     employee = await _employee_or_404(_tenant_id(request), data.get("employee_id"))
-    for field in ["name", "description", "resource_scope"]:
+    for field in ["name", "description", "rbac_role_id"]:
         if field in data:
             setattr(employee, field, data[field])
     if "max_concurrent" in data:
@@ -225,7 +225,7 @@ async def employee_skills_update(request: Request):
 async def employee_scope_update(request: Request):
     data = _json(request)
     employee = await _employee_or_404(_tenant_id(request), data.get("employee_id"))
-    employee.resource_scope = data.get("resource_scope") or {}
+    employee.resource_scope = {}
     employee.workspace_etag = None
     await employee.save(update_fields=["resource_scope", "workspace_etag", "utime"])
     await sync_employee_workspace(employee)

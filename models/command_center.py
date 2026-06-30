@@ -339,7 +339,7 @@ class CommandApproval(BaseModel):
     """
     指挥中心审批记录。
 
-    该表是指挥中心审批状态的来源；已有 Approvement 只能作为展示/收件箱适配层。
+    该表保存 Agent 审批的执行状态；Approvement 承接人工待办、提醒和统一审批入口。
     """
 
     task = fields.ForeignKeyField("models.CommandTask", related_name="approvals", description="业务任务", on_delete=fields.CASCADE)
