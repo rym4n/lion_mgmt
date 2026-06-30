@@ -12,6 +12,7 @@ from settings import TZ
 
 from .lion_agent_client import LionAgentClient
 from .prompt_builder import render_workspace_files, workspace_etag
+from .rbac import require_existing_platform_role
 
 
 BUILTIN_TENANT_ID = "__builtin__"
@@ -62,6 +63,8 @@ async def create_employee(
     rbac_role_id: str | None = None,
 ) -> CommandAgent:
     role = await get_visible_role(tenant_id, role_key)
+    selected_rbac_role_id = rbac_role_id or role.default_rbac_role_id
+    await require_existing_platform_role(selected_rbac_role_id, tenant_id)
     keys = skill_keys if skill_keys is not None else list(role.default_skill_keys or [])
     skills = await get_visible_skills(tenant_id, keys)
     key = agent_key or f"{role_key}-{uuid.uuid4().hex[:8]}"
@@ -80,7 +83,7 @@ async def create_employee(
         role=role,
         role_key=role.role_key,
         skill_keys=[skill.skill_key for skill in skills],
-        rbac_role_id=rbac_role_id or role.default_rbac_role_id,
+        rbac_role_id=selected_rbac_role_id,
         resource_scope={},
     )
     await sync_employee_workspace(employee, role=role, skills=skills)

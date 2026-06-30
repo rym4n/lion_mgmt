@@ -69,6 +69,50 @@ def test_render_workspace_files_includes_role_skill_and_platform_role_authorizat
     assert '"tool_permissions"' not in files["policy.json"]
 
 
+def test_render_workspace_files_coerces_legacy_prompt_arrays_to_text():
+    role = SimpleNamespace(
+        role_key="monitor",
+        version=1,
+        description="",
+        meta={
+            "identity": ["监控值班员"],
+            "responsibilities": ["接收告警", "判断影响范围"],
+            "principles": ["先确认影响范围", "结论必须可追溯"],
+            "workflows": [
+                {
+                    "scene": "告警分诊",
+                    "steps": ["读取告警源", "输出严重性"],
+                }
+            ],
+            "safety_rules": ["不直接执行破坏性变更"],
+            "tools_notes": ["只使用授权工具"],
+        },
+    )
+    employee = SimpleNamespace(
+        id="employee-1",
+        tenant_id="tenant-1",
+        agent_key="monitor-1",
+        name="小狮",
+        description="",
+        role_key="monitor",
+        runtime="lion_agent",
+        rbac_role_id="role-1",
+        metadata={},
+    )
+
+    files = render_workspace_files(employee, role, [])
+
+    assert isinstance(files["SOUL.md"], str)
+    assert isinstance(files["AGENTS.md"], str)
+    assert isinstance(files["TOOLS.md"], str)
+    assert "- 接收告警" in files["AGENTS.md"]
+    assert "## Principles\n- 先确认影响范围" in files["AGENTS.md"]
+    assert "### 告警分诊" in files["AGENTS.md"]
+    assert "- 输出严重性" in files["AGENTS.md"]
+    assert "- 不直接执行破坏性变更" in files["AGENTS.md"]
+    assert "- 只使用授权工具" in files["TOOLS.md"]
+
+
 def test_workspace_etag_changes_with_skill_version():
     role = SimpleNamespace(role_key="monitor", version=1)
     employee = SimpleNamespace(resource_scope={"assets": ["db01"]}, metadata={}, runtime="lion_agent", rbac_role_id="role-1")

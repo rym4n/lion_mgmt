@@ -17,14 +17,15 @@ from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from models.digital_employee import DigitalEmployeeRole, DigitalEmployeeSkill
 from models import Tool
-from models.user import Role
 from settings import DIGITAL_EMPLOYEE_RESOURCES
 from .package_format import PackageFormatError, UnsupportedPackageTypeError, inspect_package
+from .rbac import ensure_platform_role
 
 
 PACKAGE_SOURCE_ROOT = Path(__file__).resolve().parents[2]
 BUILTIN_AGENT_TEMPLATE_ROOT = PACKAGE_SOURCE_ROOT / "agent-template"
 BUILTIN_SKILL_TEMPLATE_ROOT = PACKAGE_SOURCE_ROOT / "skill-template"
+ROLE_PROMPT_TEXT_FIELDS = ("identity", "principles", "responsibilities", "workflows", "safety_rules", "tools_notes")
 
 
 @dataclass
@@ -54,6 +55,46 @@ def _read_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise CustomError(ErrorCode.PACKAGE_INVALID) from exc
+
+
+def _format_prompt_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        lines: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            if isinstance(item, dict):
+                scene = item.get("scene")
+                steps = item.get("steps")
+                if scene:
+                    lines.append(f"### {scene}")
+                if isinstance(steps, (list, tuple)):
+                    lines.extend(f"- {step}" for step in steps if step)
+                elif steps:
+                    lines.append(str(steps))
+                extra = {key: val for key, val in item.items() if key not in {"scene", "steps"}}
+                if extra:
+                    lines.append(json.dumps(extra, ensure_ascii=False, sort_keys=True))
+                if not scene and not steps and not extra:
+                    lines.append(str(item))
+                continue
+            lines.append(f"- {item}")
+        return "\n".join(lines)
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
+    return str(value)
+
+
+def normalize_role_prompt_fields(role_data: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(role_data or {})
+    for field in ROLE_PROMPT_TEXT_FIELDS:
+        if field in normalized:
+            normalized[field] = _format_prompt_text(normalized[field])
+    return normalized
 
 
 def _inspect_or_error(file_bytes: bytes) -> tuple[str, dict]:
@@ -149,7 +190,7 @@ def _single_file_request(request, file_name: str, file_bytes: bytes):
 
 
 async def _upsert_role(root: Path, package: dict, tenant_id: str, is_builtin: bool) -> DigitalEmployeeRole:
-    role_data = _read_yaml(root / "role.yaml")
+    role_data = normalize_role_prompt_fields(_read_yaml(root / "role.yaml"))
     role_key = str(package.get("role_key") or role_data.get("key") or "").strip()
     if not role_key:
         raise CustomError(ErrorCode.PACKAGE_INVALID)
@@ -157,12 +198,14 @@ async def _upsert_role(root: Path, package: dict, tenant_id: str, is_builtin: bo
     existing = await DigitalEmployeeRole.get_or_none(tenant_id=tenant_id, role_key=role_key, deleted=False)
     if existing and existing.version > version:
         raise CustomError(ErrorCode.PACKAGE_VERSION_LOWER)
+    default_rbac_role_id = str(role_data.get("default_rbac_role_id") or role_data.get("default_rbac_role") or "").strip() or None
+    await ensure_platform_role(default_rbac_role_id, role_data, tenant_id)
     defaults = {
         "name": role_data.get("name") or package.get("name") or role_key,
         "description": role_data.get("description") or package.get("description"),
         "template_dir": str(root),
         "default_skill_keys": role_data.get("default_skills") or role_data.get("default_skill_keys") or [],
-        "default_rbac_role_id": role_data.get("default_rbac_role_id") or role_data.get("default_rbac_role"),
+        "default_rbac_role_id": default_rbac_role_id,
         "license_required": bool(package.get("license_required") or role_data.get("license_required") or False),
         "version": version,
         "is_builtin": is_builtin,
@@ -215,25 +258,22 @@ async def _upsert_rbac_roles(root: Path) -> list[dict]:
         role_name = str(data.get("name") or role_id).strip()
         if not role_id or not role_name:
             raise CustomError(ErrorCode.PACKAGE_INVALID)
-        permissions = data.get("permissions") or data.get("Permissions") or []
-        if not isinstance(permissions, list):
-            raise CustomError(ErrorCode.PACKAGE_INVALID)
-        role, created = await Role.get_or_create(
-            id=role_id,
-            defaults={
+        role, created = await ensure_platform_role(
+            role_id,
+            {
                 "name": role_name,
                 "description": data.get("description"),
-                "permissions": permissions,
-                "tenant_id": "__builtin__",
             },
+            "__builtin__",
         )
-        if not created and role.deleted:
-            role.deleted = False
-            role.name = role_name
-            role.description = data.get("description")
-            role.permissions = permissions
-            await role.save(update_fields=["deleted", "name", "description", "permissions", "utime"])
-        imported.append({"rbac_role_id": role.id, "name": role.name, "created": created})
+        imported.append(
+            {
+                "rbac_role_id": role.id,
+                "name": role.name,
+                "created": created,
+                "permissions": role.permissions or [],
+            }
+        )
     return imported
 
 
