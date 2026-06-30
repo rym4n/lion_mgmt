@@ -13,8 +13,8 @@ from libs.security.authorization import requires_permission
 from models.network_topology import NetworkTopology
 from services.network_topology.analyzer import analyze_topology_stream
 
-network_topology_bp = Blueprint("network_topology", url_prefix="/network-topology")
-__all__ = ["network_topology_bp"]
+topology_bp = Blueprint("network_topology", url_prefix="/network-topology")
+__all__ = ["topology_bp"]
 
 _MAX_CONFIG_SIZE = 5 * 1024 * 1024  # 5 MB
 
@@ -23,7 +23,7 @@ def _err(message: str, status: int = 400):
     return sanic_json({"code": 4000, "message": message}, status=status, dumps=orjson.dumps)
 
 
-@network_topology_bp.post("/parse")
+@topology_bp.post("/parse")
 @openapi.definition(
     summary="上传设备配置并流式解析网络拓扑（SSE）",
     description=(
@@ -91,7 +91,7 @@ async def parse_topology(request: Request):
     )
 
 
-@network_topology_bp.post("/save")
+@topology_bp.post("/save")
 @openapi.definition(
     summary="保存拓扑快照",
     body={
@@ -135,7 +135,7 @@ async def save_topology(request: Request):
     return response_ok(topology.json)
 
 
-@network_topology_bp.post("/list")
+@topology_bp.post("/list")
 @openapi.definition(
     summary="获取拓扑快照列表",
     body={
@@ -179,10 +179,28 @@ async def list_topology(request: Request):
     })
 
 
-@network_topology_bp.get("/detail/<topology_id>")
-@openapi.definition(summary="获取拓扑快照详情")
+@topology_bp.post("/detail")
+@openapi.definition(
+    summary="获取拓扑快照详情",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "拓扑快照ID"}
+                },
+            }
+        }
+    },
+)
 @requires_permission("network_topology:r")
-async def get_topology(request: Request, topology_id: str):
+async def get_topology(request: Request):
+    data = request.json or {}
+    topology_id = data.get("id") or data.get("topology_id")
+    if not topology_id:
+        return _err("拓扑ID不能为空")
+
     tenant_id = request.ctx.session.get("tenant_id")
     topology = await NetworkTopology.get_or_none(id=topology_id, deleted=False, tenant_id=tenant_id)
     if not topology:
@@ -190,7 +208,7 @@ async def get_topology(request: Request, topology_id: str):
     return response_ok(topology.json)
 
 
-@network_topology_bp.put("/layout/<topology_id>")
+@topology_bp.post("/layout")
 @openapi.definition(
     summary="更新拓扑节点布局",
     description="前端拖拽节点后，将新布局数据保存到后端",
@@ -198,8 +216,9 @@ async def get_topology(request: Request, topology_id: str):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["layout_json"],
+                "required": ["id", "layout_json"],
                 "properties": {
+                    "id": {"type": "string", "description": "拓扑快照ID"},
                     "layout_json": {"type": "object", "description": "节点坐标布局数据"}
                 },
             }
@@ -207,13 +226,18 @@ async def get_topology(request: Request, topology_id: str):
     },
 )
 @requires_permission("network_topology:w")
-async def update_layout(request: Request, topology_id: str):
+async def update_layout(request: Request):
+    data = request.json or {}
+    topology_id = data.get("id") or data.get("topology_id")
+    if not topology_id:
+        return _err("拓扑ID不能为空")
+
     tenant_id = request.ctx.session.get("tenant_id")
     topology = await NetworkTopology.get_or_none(id=topology_id, deleted=False, tenant_id=tenant_id)
     if not topology:
         return _err("拓扑数据不存在", status=404)
 
-    layout_json = (request.json or {}).get("layout_json")
+    layout_json = data.get("layout_json")
     if layout_json is None:
         return _err("layout_json 不能为空")
 
@@ -222,10 +246,28 @@ async def update_layout(request: Request, topology_id: str):
     return response_ok({"id": topology_id})
 
 
-@network_topology_bp.delete("/delete/<topology_id>")
-@openapi.definition(summary="删除拓扑快照（软删除）")
+@topology_bp.post("/delete")
+@openapi.definition(
+    summary="删除拓扑快照（软删除）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "拓扑快照ID"}
+                },
+            }
+        }
+    },
+)
 @requires_permission("network_topology:w")
-async def delete_topology(request: Request, topology_id: str):
+async def delete_topology(request: Request):
+    data = request.json or {}
+    topology_id = data.get("id") or data.get("topology_id")
+    if not topology_id:
+        return _err("拓扑ID不能为空")
+
     tenant_id = request.ctx.session.get("tenant_id")
     topology = await NetworkTopology.get_or_none(id=topology_id, deleted=False, tenant_id=tenant_id)
     if not topology:
