@@ -12,6 +12,40 @@ def _json_block(value: Any) -> str:
     return json.dumps(value or {}, ensure_ascii=False, indent=2, sort_keys=True)
 
 
+def _prompt_text(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value or default
+    if isinstance(value, (list, tuple)):
+        lines: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            if isinstance(item, dict):
+                scene = item.get("scene")
+                steps = item.get("steps")
+                if scene:
+                    lines.append(f"### {scene}")
+                if isinstance(steps, (list, tuple)):
+                    lines.extend(f"- {step}" for step in steps if step)
+                elif steps:
+                    lines.append(str(steps))
+                extra = {key: val for key, val in item.items() if key not in {"scene", "steps"}}
+                if extra:
+                    lines.append(json.dumps(extra, ensure_ascii=False, sort_keys=True))
+                if not scene and not steps and not extra:
+                    lines.append(str(item))
+                continue
+            lines.append(f"- {item}")
+        return "\n".join(lines) or default
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
+    if value:
+        return str(value)
+    return default
+
+
 def _public_payload(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _public_payload(item) for key, item in value.items() if not str(key).startswith("_")}
@@ -201,7 +235,10 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
     soul = [
         f"# {getattr(employee, 'name', '')}",
         "",
-        role_meta.get("identity") or getattr(role, "description", "") or getattr(employee, "description", "") or "你是 AIOE 数字员工。",
+        _prompt_text(
+            role_meta.get("identity"),
+            getattr(role, "description", "") or getattr(employee, "description", "") or "你是 AIOE 数字员工。",
+        ),
         "",
         "## Authorization",
         "权限、资源和剧本访问以 AIOE 平台角色为准。",
@@ -212,16 +249,16 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
     agents = [
         "# Operating Contract",
         "",
-        role_meta.get("responsibilities") or "按任务目标、授权边界和可用技能完成工作，并在完成后给出可审计结果。",
+        _prompt_text(role_meta.get("responsibilities"), "按任务目标、授权边界和可用技能完成工作，并在完成后给出可审计结果。"),
     ]
     if role_meta.get("principles"):
-        agents.extend(["", "## Principles", str(role_meta["principles"])])
+        agents.extend(["", "## Principles", _prompt_text(role_meta["principles"])])
     if role_meta.get("workflows"):
-        agents.extend(["", "## Workflows", _json_block(role_meta["workflows"])])
+        agents.extend(["", "## Workflows", _prompt_text(role_meta["workflows"])])
     if role_meta.get("safety_rules"):
-        agents.extend(["", "## Safety", str(role_meta["safety_rules"])])
+        agents.extend(["", "## Safety", _prompt_text(role_meta["safety_rules"])])
 
-    tools = ["# Tools", "", role_meta.get("tools_notes") or "仅使用平台授权的剧本、动作、MCP 工具和数据资源。"]
+    tools = ["# Tools", "", _prompt_text(role_meta.get("tools_notes"), "仅使用平台授权的剧本、动作、MCP 工具和数据资源。")]
     user = [
         "# User Context",
         "",

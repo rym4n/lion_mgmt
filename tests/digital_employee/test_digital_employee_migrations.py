@@ -34,3 +34,15 @@ def test_followup_migration_repairs_existing_timestamp_columns() -> None:
         assert f"ARRAY['{table_name}', '{column_name}']" in sql
     assert "data_type = 'timestamp without time zone'" in sql
     assert "TYPE TIMESTAMPTZ" in sql
+
+
+def test_role_prompt_field_migration_normalizes_prompt_fields_to_string() -> None:
+    sql = (
+        ROOT / "migrations/models/49_20260630093000_normalize_digital_employee_role_prompt_fields.py"
+    ).read_text(encoding="utf-8")
+
+    for field in ("identity", "principles", "responsibilities", "workflows", "safety_rules", "tools_notes"):
+        assert f"'{{{field}}}'" in sql
+        assert f"jsonb_typeof(\"meta\"->'{field}') <> 'string'" in sql
+    assert "pg_temp.digital_employee_role_prompt_text" in sql
+    assert '"digital_employee_role"' in sql

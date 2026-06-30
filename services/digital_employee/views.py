@@ -25,7 +25,8 @@ from .manager import (
     update_employee_skills,
     upgrade_role_for_existing_employees,
 )
-from .package_importer import export_package, import_package
+from .package_importer import export_package, import_package, normalize_role_prompt_fields
+from .rbac import require_existing_platform_role
 from .runtime_callbacks import fetch_runtime_transcript, save_runtime_report, save_runtime_transcript
 
 digital_employee_bp = Blueprint("digital_employee", url_prefix="/digital_employee")
@@ -184,7 +185,10 @@ async def employee_detail(request: Request):
 @requires_permission("digital_employee:u")
 async def employee_update(request: Request):
     data = _json(request)
-    employee = await _employee_or_404(_tenant_id(request), data.get("employee_id"))
+    tenant_id = _tenant_id(request)
+    employee = await _employee_or_404(tenant_id, data.get("employee_id"))
+    if "rbac_role_id" in data:
+        await require_existing_platform_role(data.get("rbac_role_id"), tenant_id)
     for field in ["name", "description", "rbac_role_id"]:
         if field in data:
             setattr(employee, field, data[field])
@@ -312,11 +316,13 @@ async def role_detail(request: Request):
 
 @digital_employee_bp.post("/role/save")
 async def role_save(request: Request):
-    data = _json(request)
+    data = normalize_role_prompt_fields(_json(request))
     tenant_id = _tenant_id(request)
     role_key = str(data.get("role_key") or data.get("key") or "").strip()
     if not role_key or not data.get("name"):
         raise CustomError(ErrorCode.PARAM_ERROR)
+    if data.get("default_rbac_role_id"):
+        await require_existing_platform_role(data.get("default_rbac_role_id"), tenant_id)
     exists = await DigitalEmployeeRole.filter(tenant_id=tenant_id, role_key=role_key, deleted=False).exists()
     await _require_save_permission(request, exists, "digital_employee:c", "digital_employee:u")
     role, _ = await DigitalEmployeeRole.update_or_create(

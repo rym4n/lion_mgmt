@@ -38,6 +38,7 @@ def _install_importer_stubs():
         PACKAGE_PARTIAL_FAILURE = "PACKAGE_PARTIAL_FAILURE"
         INVALID_LICENSE_ERROR = "INVALID_LICENSE_ERROR"
         PARAM_ERROR = "PARAM_ERROR"
+        ROLE_NOT_FOUND = "ROLE_NOT_FOUND"
 
     class CustomError(Exception):
         def __init__(self, enum):
@@ -50,7 +51,41 @@ def _install_importer_stubs():
         pass
 
     class Role:
-        pass
+        records = {}
+
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id")
+            self.name = kwargs.get("name")
+            self.description = kwargs.get("description")
+            self.permissions = kwargs.get("permissions")
+            self.tenant_id = kwargs.get("tenant_id")
+            self.deleted = kwargs.get("deleted", False)
+            self.saved_update_fields = []
+
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            role = cls.records.get(kwargs.get("id"))
+            if role and kwargs.get("deleted") is not None and role.deleted != kwargs["deleted"]:
+                return None
+            return role
+
+        @classmethod
+        async def create(cls, **kwargs):
+            role = cls(**kwargs)
+            cls.records[role.id] = role
+            return role
+
+        @classmethod
+        async def get_or_create(cls, id, defaults):
+            if id in cls.records:
+                return cls.records[id], False
+            role = cls(id=id, **defaults)
+            cls.records[id] = role
+            return role, True
+
+        async def save(self, update_fields=None):
+            self.saved_update_fields.append(update_fields)
+            Role.records[self.id] = self
 
     class Tool:
         records = {}
@@ -137,6 +172,7 @@ package_format = _load_module("services.digital_employee.package_format", "servi
 inspect_package = package_format.inspect_package
 
 _install_importer_stubs()
+rbac = _load_module("services.digital_employee.rbac", "services/digital_employee/rbac.py")
 package_importer = _load_module("services.digital_employee.package_importer", "services/digital_employee/package_importer.py")
 export_package = package_importer.export_package
 _stage_files = package_importer._stage_files
@@ -144,6 +180,7 @@ _import_bundle = package_importer._import_bundle
 import_package = package_importer.import_package
 import_builtin_packages = package_importer.import_builtin_packages
 CustomError = sys.modules["libs.error_code.exception"].CustomError
+Role = sys.modules["models.user"].Role
 transaction_events = sys.modules["tortoise.transactions"].transaction_events
 deleted_from_s3 = sys.modules["libs.utils"].deleted_from_s3
 
@@ -175,6 +212,17 @@ def test_builtin_role_default_skill_templates_exist():
                 missing.append(f"{role_dir.name}:{skill_key}")
 
     assert missing == []
+
+
+def test_builtin_role_prompt_fields_are_strings():
+    root = Path(__file__).resolve().parents[2]
+    agent_root = root / "agent-template"
+
+    for role_dir in sorted(path for path in agent_root.iterdir() if path.is_dir()):
+        role = yaml.safe_load((role_dir / "role.yaml").read_text(encoding="utf-8")) or {}
+        for field in package_importer.ROLE_PROMPT_TEXT_FIELDS:
+            if field in role:
+                assert isinstance(role[field], str), f"{role_dir.name}:{field} must be a string"
 
 
 def test_import_builtin_packages_imports_skills_before_roles(tmp_path):
@@ -257,6 +305,242 @@ def test_import_builtin_packages_skips_existing_newer_version(tmp_path):
 
     assert result.imported == []
     assert result.skipped == [{"package_key": "monitor", "reason": "existing package version is newer"}]
+
+
+def test_upsert_role_auto_creates_missing_default_platform_role(tmp_path):
+    role_root = tmp_path / "monitor"
+    role_root.mkdir()
+    (role_root / "role.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "key": "monitor",
+                "name": "AI 监控值班员",
+                "description": "接收监控告警并分诊。",
+                "default_rbac_role": "monitor_dispatcher",
+                "default_skills": [],
+            },
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    package = {"type": "role", "role_key": "monitor", "version": 1}
+    calls = []
+
+    class StubDigitalEmployeeRole:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            return None
+
+        @classmethod
+        async def update_or_create(cls, **kwargs):
+            calls.append(kwargs)
+            defaults = kwargs["defaults"]
+            return types.SimpleNamespace(role_key=kwargs["role_key"], id="role-record-1", **defaults), True
+
+    original_role_model = package_importer.DigitalEmployeeRole
+    package_importer.DigitalEmployeeRole = StubDigitalEmployeeRole
+    Role.records.clear()
+    try:
+        role = asyncio.run(package_importer._upsert_role(role_root, package, "tenant-1", False))
+        created = Role.records.get("monitor_dispatcher")
+    finally:
+        package_importer.DigitalEmployeeRole = original_role_model
+        Role.records.clear()
+
+    platform_role = calls and calls[0]["defaults"]["default_rbac_role_id"]
+    assert role.role_key == "monitor"
+    assert platform_role == "monitor_dispatcher"
+    assert created is not None
+    assert created.permissions == []
+    assert created.tenant_id == "tenant-1"
+
+
+def test_upsert_role_normalizes_prompt_fields_to_strings(tmp_path):
+    role_root = tmp_path / "monitor"
+    role_root.mkdir()
+    (role_root / "role.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "key": "monitor",
+                "name": "AI 监控值班员",
+                "identity": ["监控值班员"],
+                "principles": ["先确认影响范围"],
+                "responsibilities": ["接收告警", "判断影响范围"],
+                "workflows": [
+                    {
+                        "scene": "告警分诊",
+                        "steps": ["读取告警源", "输出严重性"],
+                    }
+                ],
+                "safety_rules": ["不直接执行破坏性变更"],
+                "tools_notes": ["只使用授权工具"],
+                "default_skills": [],
+            },
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    calls = []
+
+    class StubDigitalEmployeeRole:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            return None
+
+        @classmethod
+        async def update_or_create(cls, **kwargs):
+            calls.append(kwargs)
+            defaults = kwargs["defaults"]
+            return types.SimpleNamespace(role_key=kwargs["role_key"], id="role-record-1", **defaults), True
+
+    original_role_model = package_importer.DigitalEmployeeRole
+    package_importer.DigitalEmployeeRole = StubDigitalEmployeeRole
+    try:
+        asyncio.run(package_importer._upsert_role(role_root, {"type": "role", "role_key": "monitor"}, "tenant-1", False))
+    finally:
+        package_importer.DigitalEmployeeRole = original_role_model
+
+    meta = calls[0]["defaults"]["meta"]
+    for field in package_importer.ROLE_PROMPT_TEXT_FIELDS:
+        assert isinstance(meta[field], str)
+    assert "- 接收告警" in meta["responsibilities"]
+    assert "### 告警分诊" in meta["workflows"]
+    assert "- 输出严重性" in meta["workflows"]
+
+
+def test_ensure_platform_role_creates_missing_role_without_granting_permissions():
+    Role.records.clear()
+    try:
+        role, created = asyncio.run(
+            rbac.ensure_platform_role(
+                "monitor_dispatcher",
+                {"name": "AI 监控值班员", "description": "接收监控告警并分诊。"},
+                "tenant-1",
+            )
+        )
+
+        assert created is True
+        assert role.id == "monitor_dispatcher"
+        assert role.tenant_id == "tenant-1"
+        assert role.permissions == []
+        assert role.name == "AI 监控值班员平台角色"
+    finally:
+        Role.records.clear()
+
+
+def test_ensure_platform_role_keeps_existing_permissions():
+    existing = Role(
+        id="monitor_dispatcher",
+        name="人工维护角色",
+        description="keep",
+        permissions=["digital_employee:r"],
+        tenant_id="tenant-1",
+    )
+    Role.records = {"monitor_dispatcher": existing}
+    try:
+        role, created = asyncio.run(
+            rbac.ensure_platform_role(
+                "monitor_dispatcher",
+                {"name": "AI 监控值班员", "description": "接收监控告警并分诊。"},
+                "tenant-1",
+            )
+        )
+
+        assert created is False
+        assert role is existing
+        assert role.name == "人工维护角色"
+        assert role.permissions == ["digital_employee:r"]
+    finally:
+        Role.records.clear()
+
+
+def test_ensure_platform_role_restores_deleted_role_with_empty_permissions():
+    deleted_role = Role(
+        id="monitor_dispatcher",
+        name="旧角色",
+        description="old",
+        permissions=["*:*", "digital_employee:u"],
+        tenant_id="tenant-1",
+        deleted=True,
+    )
+    Role.records = {"monitor_dispatcher": deleted_role}
+    try:
+        role, created = asyncio.run(
+            rbac.ensure_platform_role(
+                "monitor_dispatcher",
+                {"name": "AI 监控值班员", "description": "接收监控告警并分诊。"},
+                "tenant-1",
+            )
+        )
+
+        assert created is False
+        assert role.deleted is False
+        assert role.permissions == []
+        assert role.saved_update_fields == [["deleted", "permissions", "name", "description", "utime"]]
+    finally:
+        Role.records.clear()
+
+
+def test_bundle_rbac_roles_do_not_grant_permissions_from_package(tmp_path):
+    rbac_root = tmp_path / "rbac_roles"
+    rbac_root.mkdir()
+    (rbac_root / "monitor.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "id": "monitor_dispatcher",
+                "name": "AI 监控值班员平台角色",
+                "description": "包内声明权限不应生效",
+                "permissions": ["*:*", "digital_employee:u"],
+            },
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    Role.records.clear()
+    try:
+        imported = asyncio.run(package_importer._upsert_rbac_roles(rbac_root))
+
+        assert imported == [
+            {
+                "rbac_role_id": "monitor_dispatcher",
+                "name": "AI 监控值班员平台角色",
+                "created": True,
+                "permissions": [],
+            }
+        ]
+        assert Role.records["monitor_dispatcher"].permissions == []
+    finally:
+        Role.records.clear()
+
+
+def test_require_existing_platform_role_rejects_missing_role():
+    Role.records.clear()
+    try:
+        try:
+            asyncio.run(rbac.require_existing_platform_role("missing-role", "tenant-1"))
+        except CustomError as exc:
+            assert exc.enum == "ROLE_NOT_FOUND"
+        else:
+            raise AssertionError("expected CustomError")
+    finally:
+        Role.records.clear()
+
+
+def test_require_existing_platform_role_accepts_existing_tenant_role():
+    existing = Role(
+        id="monitor_dispatcher",
+        name="人工维护角色",
+        description="keep",
+        permissions=[],
+        tenant_id="tenant-1",
+    )
+    Role.records = {"monitor_dispatcher": existing}
+    try:
+        role = asyncio.run(rbac.require_existing_platform_role("monitor_dispatcher", "tenant-1"))
+
+        assert role is existing
+    finally:
+        Role.records.clear()
 
 
 def test_inspect_role_package():
