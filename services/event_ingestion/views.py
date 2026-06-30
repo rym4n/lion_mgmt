@@ -1214,7 +1214,7 @@ del(.datetime_str)
                         "type": "remap",
                         "inputs": [f"{topic}_event_transforms"],
                         "source": f"""
-.log.{script_field} = .log.{log_field}
+.log.{script_field} = .log."{log_field}"
 """,
                     }
 
