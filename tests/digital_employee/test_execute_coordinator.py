@@ -74,8 +74,8 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
 
     digital_employee_manager = types.ModuleType("services.digital_employee.manager")
 
-    async def sync_employee_workspace(employee):
-        sync_calls.append(employee.id)
+    async def sync_employee_workspace(employee, force=False):
+        sync_calls.append({"employee_id": employee.id, "force": force})
         employee.workspace_synced = True
         return employee
 
@@ -184,7 +184,7 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
     assert task.saved_update_fields == [["result", "utime"]]
     assert [call[0]["status"] for call in progress_calls] == ["running", "completed"]
     assert [call[1] for call in progress_calls] == ["operator-1", "operator-1"]
-    assert sys.modules["services.digital_employee.manager"].sync_calls == ["employee-1"]
+    assert sys.modules["services.digital_employee.manager"].sync_calls == [{"employee_id": "employee-1", "force": True}]
 
     payload = RECORDED_STREAM_PAYLOADS[0]
     assert payload["workspace_id"] == "employee-1"
@@ -254,7 +254,7 @@ def test_run_uses_command_run_session_and_emits_runtime_callbacks():
     assert result == {"content": "AB"}
     assert RECORDED_STREAM_PAYLOADS[0]["session_id"] == "run-1"
     assert [event_type for event_type, _ in runtime_events] == ["thinking", "tool_call", "delta", "delta", "end"]
-    assert sys.modules["services.digital_employee.manager"].sync_calls == []
+    assert sys.modules["services.digital_employee.manager"].sync_calls == [{"employee_id": "employee-1", "force": True}]
 
 
 def test_run_syncs_and_uses_continuation_read_only_workspace():
@@ -312,7 +312,7 @@ def test_run_syncs_and_uses_continuation_read_only_workspace():
             "skill_versions": {"write_file": 1},
         }
     ]
-    assert sys.modules["services.digital_employee.manager"].sync_calls == []
+    assert sys.modules["services.digital_employee.manager"].sync_calls == [{"employee_id": "employee-1", "force": True}]
 
 
 def test_run_returns_control_event_without_marking_task_completed():

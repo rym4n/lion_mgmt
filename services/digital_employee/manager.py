@@ -94,6 +94,7 @@ async def sync_employee_workspace(
     employee: CommandAgent,
     role: DigitalEmployeeRole | None = None,
     skills: list[DigitalEmployeeSkill] | None = None,
+    force: bool = False,
 ) -> CommandAgent:
     if role is None:
         role = await employee.role
@@ -102,7 +103,7 @@ async def sync_employee_workspace(
     if skills is None:
         skills = await get_visible_skills(employee.tenant_id, employee.skill_keys or [])
     etag = workspace_etag(role, skills, employee)
-    if employee.workspace_etag == etag and employee.workspace_synced_at:
+    if not force and employee.workspace_etag == etag and employee.workspace_synced_at:
         return employee
     files = render_workspace_files(employee, role, skills)
     result = await LionAgentClient().sync_workspace(

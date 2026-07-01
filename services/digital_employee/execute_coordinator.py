@@ -113,8 +113,7 @@ async def run(
     from services.command_center.manager import update_task_progress
     from services.digital_employee.manager import sync_employee_workspace
 
-    if command_run is None:
-        employee = await sync_employee_workspace(employee)
+    employee = await sync_employee_workspace(employee, force=True)
     workspace_id = employee.id
     if continuation_workspace:
         from services.digital_employee.lion_agent_client import LionAgentClient

@@ -239,11 +239,15 @@ async def employee_scope_update(request: Request):
 @digital_employee_bp.post("/employee/repair")
 @requires_permission("digital_employee:u")
 async def employee_repair(request: Request):
-    employee = await _employee_or_404(_tenant_id(request), _json(request).get("employee_id"))
+    raise CustomError(ErrorCode.PARAM_ERROR)
+
+
+async def _repair_employee_workspace(tenant_id: str, employee_id: str):
+    employee = await _employee_or_404(tenant_id, employee_id)
     employee.workspace_etag = None
     await employee.save(update_fields=["workspace_etag", "utime"])
-    await sync_employee_workspace(employee)
-    return response_ok(employee.json)
+    await sync_employee_workspace(employee, force=True)
+    return employee
 
 
 @digital_employee_bp.post("/employee/dispatch")
@@ -550,6 +554,17 @@ async def internal_employee_tasks_list(request: Request):
     _check_internal(request)
     data = _json(request)
     return response_ok(await _employee_tasks_payload(_require_tenant_id(data.get("tenant_id") or _tenant_id(request)), data))
+
+
+@digital_employee_bp.post("/internal/employee/repair")
+async def internal_employee_repair(request: Request):
+    _check_internal(request)
+    data = _json(request)
+    employee = await _repair_employee_workspace(
+        _require_tenant_id(data.get("tenant_id") or _tenant_id(request)),
+        data.get("employee_id"),
+    )
+    return response_ok(employee.json)
 
 
 @digital_employee_bp.post("/internal/task/detail")
