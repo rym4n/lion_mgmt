@@ -127,7 +127,16 @@ async def _stream_prompt_events(**payload):
     yield "tool_call", {"data": {"name": "check_disk"}, "status": "started"}
     yield "delta", {"content": "A"}
     yield "delta", {"delta": "B"}
-    yield "end", {"content": "AB"}
+    yield "end", {
+        "content": "AB",
+        "usage": {
+            "fallback": False,
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "total_tokens": 120,
+            "model_calls": 1,
+        },
+    }
 
 
 async def _approval_required_stream(**payload):
@@ -179,7 +188,9 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
 
     result = asyncio.run(execute_coordinator.run(task, employee, operator_id="operator-1"))
 
-    assert result == {"content": "AB"}
+    assert result["content"] == "AB"
+    assert result["usage"]["total_tokens"] == 120
+    assert result["usage"]["model_calls"] == 1
     assert task.result == "AB"
     assert task.saved_update_fields == [["result", "utime"]]
     assert [call[0]["status"] for call in progress_calls] == ["running", "completed"]
@@ -251,7 +262,8 @@ def test_run_uses_command_run_session_and_emits_runtime_callbacks():
         )
     )
 
-    assert result == {"content": "AB"}
+    assert result["content"] == "AB"
+    assert result["usage"]["input_tokens"] == 100
     assert RECORDED_STREAM_PAYLOADS[0]["session_id"] == "run-1"
     assert [event_type for event_type, _ in runtime_events] == ["thinking", "tool_call", "delta", "delta", "end"]
     assert sys.modules["services.digital_employee.manager"].sync_calls == [{"employee_id": "employee-1", "force": True}]
@@ -300,7 +312,8 @@ def test_run_syncs_and_uses_continuation_read_only_workspace():
         )
     )
 
-    assert result == {"content": "AB"}
+    assert result["content"] == "AB"
+    assert result["usage"]["total_tokens"] == 120
     assert RECORDED_STREAM_PAYLOADS[0]["workspace_id"] == "employee-1:approval-approval-1:read-only"
     assert RECORDED_STREAM_PAYLOADS[0]["session_id"] == "run-2"
     workspace_sync_calls = sys.modules["services.digital_employee.lion_agent_client"].workspace_sync_calls
@@ -361,6 +374,7 @@ def test_run_returns_control_event_without_marking_task_completed():
 
     assert result["policy"] == "approval_required"
     assert result["run_id"] == "run-1"
+    assert result["usage"]["total_tokens"] == 0
     assert task.result is None
     assert task.saved_update_fields == []
     assert [call[0]["status"] for call in progress_calls] == ["running"]

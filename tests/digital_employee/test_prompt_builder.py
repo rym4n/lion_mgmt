@@ -1,5 +1,6 @@
 # coding=utf-8
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,7 +24,6 @@ def test_render_workspace_files_includes_role_skill_and_platform_role_authorizat
     role = SimpleNamespace(
         role_key="monitor",
         version=2,
-        description="值班",
         meta={
             "identity": "监控值班员",
             "responsibilities": "分诊告警",
@@ -44,7 +44,6 @@ def test_render_workspace_files_includes_role_skill_and_platform_role_authorizat
         tenant_id="tenant-1",
         agent_key="monitor-1",
         name="小狮",
-        description="",
         role_key="monitor",
         runtime="lion_agent",
         rbac_role_id="role-1",
@@ -63,6 +62,9 @@ def test_render_workspace_files_includes_role_skill_and_platform_role_authorizat
     assert "alert_triage" in files["skills"]
     assert "notify" in files["skills"]["alert_triage"]["instructions.md"]
     assert '"agent_key": "monitor-1"' in files["manifest.json"]
+    manifest = json.loads(files["manifest.json"])
+    assert "description" not in manifest["employee"]
+    assert "description" not in manifest["role"]
     assert '"workspace_etag":' in files["manifest.json"]
     assert '"metrics.query"' in files["manifest.json"]
     assert '"source": "aioe_platform_role"' in files["policy.json"]
@@ -75,7 +77,6 @@ def test_render_workspace_files_coerces_legacy_prompt_arrays_to_text():
     role = SimpleNamespace(
         role_key="monitor",
         version=1,
-        description="",
         meta={
             "identity": ["监控值班员"],
             "responsibilities": ["接收告警", "判断影响范围"],
@@ -95,7 +96,6 @@ def test_render_workspace_files_coerces_legacy_prompt_arrays_to_text():
         tenant_id="tenant-1",
         agent_key="monitor-1",
         name="小狮",
-        description="",
         role_key="monitor",
         runtime="lion_agent",
         rbac_role_id="role-1",
@@ -112,6 +112,35 @@ def test_render_workspace_files_coerces_legacy_prompt_arrays_to_text():
     assert "- 输出严重性" in files["system_prompt.md"]
     assert "- 不直接执行破坏性变更" in files["system_prompt.md"]
     assert '"tool_usage_notes": "- 只使用授权工具"' in files["manifest.json"]
+
+
+def test_render_workspace_files_does_not_fallback_to_description_fields():
+    role = SimpleNamespace(
+        role_key="monitor",
+        version=1,
+        description="旧岗位描述不应进入提示词",
+        meta={},
+    )
+    employee = SimpleNamespace(
+        id="employee-1",
+        tenant_id="tenant-1",
+        agent_key="monitor-1",
+        name="小狮",
+        description="旧员工描述不应进入提示词",
+        role_key="monitor",
+        runtime="lion_agent",
+        rbac_role_id="role-1",
+        metadata={},
+    )
+
+    files = render_workspace_files(employee, role, [])
+
+    assert "你是 AIOE 数字员工。" not in files["system_prompt.md"]
+    assert "旧岗位描述不应进入提示词" not in files["system_prompt.md"]
+    assert "旧员工描述不应进入提示词" not in files["system_prompt.md"]
+    manifest = json.loads(files["manifest.json"])
+    assert "description" not in manifest["employee"]
+    assert "description" not in manifest["role"]
 
 
 def test_workspace_etag_changes_with_skill_version():
@@ -155,7 +184,6 @@ def test_workspace_snapshots_match_rendered_files_without_recursive_etag():
         agent_key="monitor-1",
         role_key="monitor",
         name="小狮",
-        description="",
         resource_scope={"assets": ["db01"]},
         rbac_role_id="role-1",
         metadata={},

@@ -9,7 +9,6 @@ class DigitalEmployeeRole(BaseModel):
 
     role_key = fields.CharField(max_length=64, description="岗位逻辑标识")
     name = fields.CharField(max_length=255, description="岗位名称")
-    description = fields.TextField(null=True, description="岗位说明")
     template_dir = fields.CharField(max_length=512, description="岗位模板目录")
     default_skill_keys = fields.JSONField(default=list, description="默认技能 key 列表")
     default_rbac_role_id = fields.CharField(max_length=36, null=True, description="默认绑定 RBAC 角色")
@@ -31,7 +30,6 @@ class DigitalEmployeeRole(BaseModel):
             "tenant_id": self.tenant_id,
             "role_key": self.role_key,
             "name": self.name,
-            "description": self.description,
             "template_dir": self.template_dir,
             "default_skill_keys": self.default_skill_keys,
             "default_rbac_role_id": self.default_rbac_role_id,

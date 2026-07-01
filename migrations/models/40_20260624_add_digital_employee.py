@@ -13,7 +13,6 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
     "tenant_id" VARCHAR(255) DEFAULT '8bce552d-c27c-41d4-8a1b-8c5bf38dfe18',
     "role_key" VARCHAR(64) NOT NULL,
     "name" VARCHAR(255) NOT NULL,
-    "description" TEXT,
     "template_dir" VARCHAR(512) NOT NULL,
     "default_skill_keys" JSONB NOT NULL DEFAULT '[]'::jsonb,
     "default_rbac_role_id" VARCHAR(36),

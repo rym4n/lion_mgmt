@@ -42,3 +42,11 @@ def test_internal_employee_repair_keeps_token_gated_repair_path():
 
     assert "_check_internal" in called
     assert "_repair_employee_workspace" in called
+
+
+def test_role_save_requires_identity_before_persisting_role():
+    node = _function("role_save")
+    called = _called_names(node)
+
+    assert "require_role_identity" in called
+    assert "update_or_create" in called

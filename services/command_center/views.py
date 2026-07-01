@@ -1,5 +1,5 @@
 # coding=utf-8
-from datetime import datetime
+from datetime import datetime, time
 
 from sanic import Blueprint, Request
 from sanic_ext import openapi
@@ -13,6 +13,7 @@ from settings import TZ
 
 from .approval_service import decide_approval, get_approval, list_approvals, resume_approved_approval
 from .manager import create_command_task, dispatch_task, list_tasks, update_task_progress
+from .summary import aggregate_usage, build_task_summary, humanize_event, normalize_usage
 
 command_bp = Blueprint("command_center", url_prefix="/command_center")
 __all__ = ["command_bp"]
@@ -283,6 +284,9 @@ def _task_run_detail_json(run: CommandTaskRun) -> dict:
         "workspace_etag": run.workspace_etag,
         "started_at": run.json["started_at"],
         "finished_at": run.json["finished_at"],
+        "usage": normalize_usage(run.usage),
+        "cost": run.cost if isinstance(run.cost, dict) else {},
+        "error": run.error if isinstance(run.error, dict) else {},
         "manifest_summary": {
             "employee": {
                 "id": employee.get("id"),
@@ -344,6 +348,7 @@ def _task_event_detail_json(event: CommandTaskEvent) -> dict:
         "utime": event.json["utime"],
         "task_id": event.json["task_id"],
         "event_type": event.event_type,
+        "phrase": humanize_event(event.event_type),
         "status": event.status,
         "progress": event.progress,
         "agent_key": event.agent_key,
@@ -637,9 +642,45 @@ async def task_detail(request: Request):
     return response_ok(
         {
             "task": _task_detail_json(task),
+            "summary": build_task_summary(task, runs, approvals),
+            "result": task.result,
             "events": [_task_event_detail_json(event) for event in events],
             "runs": [_task_run_detail_json(run) for run in runs],
             "approvals": [_task_approval_detail_json(approval) for approval in approvals],
+        }
+    )
+
+
+@command_bp.post("/tasks/stats")
+@openapi.definition(
+    summary="查看资源消耗和风险概览",
+    description="聚合当前租户今日任务 token 消耗、运行中任务、待审批与失败任务数量。需要command_center:r权限。",
+    body=_json_body({"type": "object", "properties": {}}),
+    response=_response(
+        "查询成功",
+        {
+            "type": "object",
+            "properties": {
+                "token_usage": {"type": "object", "description": "今日 token 消耗聚合"},
+                "tasks": {"type": "object", "description": "任务状态计数"},
+                "risks": {"type": "object", "description": "风险计数"},
+            },
+        },
+    ),
+)
+@requires_permission("command_center:r")
+async def task_stats(request: Request):
+    tenant_id = request.ctx.session.get("tenant_id")
+    today_start = datetime.combine(datetime.now(TZ).date(), time.min, tzinfo=TZ)
+    runs = await CommandTaskRun.filter(tenant_id=tenant_id, deleted=False, ctime__gte=today_start).all()
+    running = await CommandTask.filter(tenant_id=tenant_id, deleted=False, status__in=["running", "dispatched", "pending_approval"]).count()
+    pending_approvals = await CommandApproval.filter(tenant_id=tenant_id, deleted=False, status=COMMAND_APPROVAL_STATUS_PENDING).count()
+    failed_tasks = await CommandTask.filter(tenant_id=tenant_id, deleted=False, status="failed").count()
+    return response_ok(
+        {
+            "token_usage": aggregate_usage(runs),
+            "tasks": {"running": running},
+            "risks": {"pending_approvals": pending_approvals, "failed_tasks": failed_tasks},
         }
     )
 

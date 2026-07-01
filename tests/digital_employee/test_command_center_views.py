@@ -1,4 +1,6 @@
 # coding=utf-8
+import asyncio
+import inspect
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -77,6 +79,9 @@ def test_task_detail_run_dto_exposes_summaries_without_raw_snapshots():
             "authorization": {"source": "aioe_platform_role", "rbac_role_id": "role-1"},
             "filesystem": {"write": "deny", "paths": ["/tmp/a"]},
         },
+        usage={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120, "model_calls": 1},
+        cost={},
+        error={"message": "needs approval"},
     )
 
     out = views._task_run_detail_json(run)
@@ -95,6 +100,9 @@ def test_task_detail_run_dto_exposes_summaries_without_raw_snapshots():
         "source": "aioe_platform_role",
         "rbac_role_id": "role-1",
     }
+    assert out["usage"]["total_tokens"] == 120
+    assert out["cost"] == {}
+    assert out["error"]["message"] == "needs approval"
 
 
 def test_command_center_read_approval_dto_allowlists_operator_fields():
@@ -157,3 +165,67 @@ def test_task_detail_event_dto_exposes_metadata_summary_only():
         "approval_id": "approval-1",
         "runtime_event": "tool_call",
     }
+    assert event_out["phrase"] == "等待人工审批"
+
+
+def test_task_stats_aggregates_tenant_scoped_counts(monkeypatch):
+    class Query:
+        def __init__(self, value):
+            self.value = value
+            self.filters = []
+
+        async def all(self):
+            return self.value
+
+        async def count(self):
+            return self.value
+
+    run_filters = []
+    task_filters = []
+    approval_filters = []
+
+    class RunModel:
+        @classmethod
+        def filter(cls, **kwargs):
+            run_filters.append(kwargs)
+            return Query(
+                [
+                    SimpleNamespace(
+                        usage={
+                            "fallback": False,
+                            "input_tokens": 7,
+                            "output_tokens": 3,
+                            "total_tokens": 10,
+                            "model_calls": 1,
+                        }
+                    )
+                ]
+            )
+
+    class TaskModel:
+        @classmethod
+        def filter(cls, **kwargs):
+            task_filters.append(kwargs)
+            return Query(2 if kwargs.get("status__in") else 1)
+
+    class ApprovalModel:
+        @classmethod
+        def filter(cls, **kwargs):
+            approval_filters.append(kwargs)
+            return Query(3)
+
+    monkeypatch.setattr(views, "CommandTaskRun", RunModel)
+    monkeypatch.setattr(views, "CommandTask", TaskModel)
+    monkeypatch.setattr(views, "CommandApproval", ApprovalModel)
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+
+    request = SimpleNamespace(ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}))
+    out = asyncio.run(inspect.unwrap(views.task_stats)(request))
+
+    assert out["token_usage"]["total_tokens"] == 10
+    assert out["tasks"]["running"] == 2
+    assert out["risks"] == {"pending_approvals": 3, "failed_tasks": 1}
+    assert run_filters[0]["tenant_id"] == "tenant-1"
+    assert run_filters[0]["deleted"] is False
+    assert task_filters[0]["deleted"] is False
+    assert approval_filters[0] == {"tenant_id": "tenant-1", "deleted": False, "status": "pending"}

@@ -25,7 +25,7 @@ from .manager import (
     update_employee_skills,
     upgrade_role_for_existing_employees,
 )
-from .package_importer import export_package, import_package, normalize_role_prompt_fields
+from .package_importer import export_package, import_package, normalize_role_prompt_fields, require_role_identity
 from .rbac import require_existing_platform_role
 from .runtime_callbacks import fetch_runtime_transcript, save_runtime_report, save_runtime_transcript
 
@@ -75,6 +75,12 @@ async def _employee_or_404(tenant_id: str, employee_id: str) -> CommandAgent:
     if not employee or not employee.role_key:
         raise CustomError(ErrorCode.DIGITAL_EMPLOYEE_EMPLOYEE_NOT_FOUND)
     return employee
+
+
+def _employee_payload(employee: CommandAgent) -> dict:
+    payload = employee.json
+    payload.pop("description", None)
+    return payload
 
 
 def _report_summary(report: EmployeeReport | None) -> dict | None:
@@ -136,12 +142,11 @@ async def employee_create(request: Request):
         role_key=data.get("role_key"),
         name=data.get("name"),
         skill_keys=data.get("skill_keys"),
-        description=data.get("description"),
         max_concurrent=data.get("max_concurrent", 1),
         agent_key=data.get("agent_key"),
         rbac_role_id=data.get("rbac_role_id"),
     )
-    return response_ok(employee.json)
+    return response_ok(_employee_payload(employee))
 
 
 @digital_employee_bp.post("/employee/list")
@@ -156,11 +161,11 @@ async def employee_list(request: Request):
         condition &= Q(status=data["status"])
     if data.get("keyword"):
         keyword = data["keyword"]
-        condition &= Q(name__icontains=keyword) | Q(agent_key__icontains=keyword) | Q(description__icontains=keyword)
+        condition &= Q(name__icontains=keyword) | Q(agent_key__icontains=keyword)
     queryset = CommandAgent.filter(condition)
     total = await queryset.count()
     employees = await queryset.order_by("-utime").offset(offset).limit(size).all()
-    return response_ok({"list": [item.json for item in employees], "total": total, "page": page, "size": size})
+    return response_ok({"list": [_employee_payload(item) for item in employees], "total": total, "page": page, "size": size})
 
 
 @digital_employee_bp.post("/employee/detail")
@@ -170,7 +175,7 @@ async def employee_detail(request: Request):
     role = await employee.role
     skills = await get_visible_skills(employee.tenant_id, employee.skill_keys or [])
     tasks = await CommandTask.filter(tenant_id=employee.tenant_id, assigned_agent_id=employee.id, deleted=False).order_by("-ctime").limit(10).all()
-    payload = employee.json
+    payload = _employee_payload(employee)
     payload.update(
         {
             "role": role.json if role else None,
@@ -189,7 +194,7 @@ async def employee_update(request: Request):
     employee = await _employee_or_404(tenant_id, data.get("employee_id"))
     if "rbac_role_id" in data:
         await require_existing_platform_role(data.get("rbac_role_id"), tenant_id)
-    for field in ["name", "description", "rbac_role_id"]:
+    for field in ["name", "rbac_role_id"]:
         if field in data:
             setattr(employee, field, data[field])
     if "max_concurrent" in data:
@@ -197,7 +202,7 @@ async def employee_update(request: Request):
     employee.workspace_etag = None
     await employee.save()
     await sync_employee_workspace(employee)
-    return response_ok(employee.json)
+    return response_ok(_employee_payload(employee))
 
 
 @digital_employee_bp.post("/employee/delete")
@@ -221,7 +226,7 @@ async def employee_skills_update(request: Request):
     data = _json(request)
     employee = await _employee_or_404(_tenant_id(request), data.get("employee_id"))
     employee = await update_employee_skills(employee, data.get("skill_keys") or [])
-    return response_ok(employee.json)
+    return response_ok(_employee_payload(employee))
 
 
 @digital_employee_bp.post("/employee/scope/update")
@@ -233,7 +238,7 @@ async def employee_scope_update(request: Request):
     employee.workspace_etag = None
     await employee.save(update_fields=["resource_scope", "workspace_etag", "utime"])
     await sync_employee_workspace(employee)
-    return response_ok(employee.json)
+    return response_ok(_employee_payload(employee))
 
 
 @digital_employee_bp.post("/employee/repair")
@@ -304,7 +309,7 @@ async def role_list(request: Request):
     condition = _visible_filter(_tenant_id(request))
     if data.get("keyword"):
         keyword = data["keyword"]
-        condition &= Q(name__icontains=keyword) | Q(role_key__icontains=keyword) | Q(description__icontains=keyword)
+        condition &= Q(name__icontains=keyword) | Q(role_key__icontains=keyword)
     queryset = DigitalEmployeeRole.filter(condition)
     total = await queryset.count()
     roles = await queryset.order_by("-is_builtin", "-utime").offset(offset).limit(size).all()
@@ -325,6 +330,7 @@ async def role_save(request: Request):
     role_key = str(data.get("role_key") or data.get("key") or "").strip()
     if not role_key or not data.get("name"):
         raise CustomError(ErrorCode.PARAM_ERROR)
+    require_role_identity(data)
     if data.get("default_rbac_role_id"):
         await require_existing_platform_role(data.get("default_rbac_role_id"), tenant_id)
     exists = await DigitalEmployeeRole.filter(tenant_id=tenant_id, role_key=role_key, deleted=False).exists()
@@ -334,7 +340,6 @@ async def role_save(request: Request):
         role_key=role_key,
         defaults={
             "name": data["name"],
-            "description": data.get("description"),
             "template_dir": data.get("template_dir") or "",
             "default_skill_keys": data.get("default_skill_keys") or data.get("default_skills") or [],
             "default_rbac_role_id": data.get("default_rbac_role_id"),

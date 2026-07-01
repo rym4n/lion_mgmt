@@ -19,6 +19,37 @@ def _receiver_id(task: CommandTask, operator_id: str | None) -> str | None:
     return operator_id or getattr(task, "creator_id", None)
 
 
+def _zero_usage() -> dict:
+    return {
+        "fallback": False,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "model_calls": 0,
+    }
+
+
+def _normalize_usage(value) -> dict:
+    data = value if isinstance(value, dict) else {}
+
+    def _int(key: str) -> int:
+        try:
+            return int(data.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    input_tokens = _int("input_tokens")
+    output_tokens = _int("output_tokens")
+    total_tokens = _int("total_tokens") or input_tokens + output_tokens
+    return {
+        "fallback": bool(data.get("fallback", False)),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "model_calls": _int("model_calls"),
+    }
+
+
 async def _publish_room_event(task: CommandTask, event_type: str, payload: dict, operator_id: str | None) -> bool:
     if not task.room_id:
         return False
@@ -143,6 +174,7 @@ async def run(
     }
     content = []
     saw_delta = False
+    usage = _zero_usage()
     await update_task_progress(task, {"status": "running", "progress": max(task.progress or 0, 1), "message": "数字员工开始执行"}, operator_id)
     async for event_type, event in stream_prompt_events(**payload):
         runtime_event: dict | None = None
@@ -151,6 +183,7 @@ async def run(
             if runtime_event and runtime_event.get("event_type") in {"approval_required", "policy_denied"}:
                 return {
                     "content": "".join(content),
+                    "usage": usage,
                     "policy": runtime_event["event_type"],
                     "run_id": getattr(command_run, "run_id", None) or task.run_id,
                     "runtime_event": runtime_event,
@@ -162,6 +195,7 @@ async def run(
                 content.append(str(value))
                 await _publish_room_event(task, event_type, event, operator_id)
             elif event_type == "end":
+                usage = _normalize_usage(event.get("usage"))
                 if value and not saw_delta:
                     content.append(str(value))
                     await _publish_room_event(task, "delta", {"content": value}, operator_id)
@@ -177,4 +211,4 @@ async def run(
         {"status": "completed", "progress": 100, "message": "数字员工执行完成"},
         operator_id,
     )
-    return {"content": task.result}
+    return {"content": task.result, "usage": usage}

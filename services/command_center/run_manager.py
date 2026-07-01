@@ -331,6 +331,7 @@ async def finalize_run(
     *,
     result: dict | None = None,
     error: dict | None = None,
+    usage: dict | None = None,
     evidence_refs: list[str] | None = None,
 ) -> CommandTaskRun:
     if status not in TERMINAL_RUN_STATUSES:
@@ -342,9 +343,11 @@ async def finalize_run(
         run.metadata = {**(run.metadata or {}), "result": result}
     if error is not None:
         run.error = error
+    if usage is not None:
+        run.usage = usage
     if evidence_refs is not None:
         run.evidence_refs = [*(run.evidence_refs or []), *evidence_refs]
-    await run.save(update_fields=["status", "finished_at", "heartbeat_at", "metadata", "error", "evidence_refs", "utime"])
+    await run.save(update_fields=["status", "finished_at", "heartbeat_at", "metadata", "error", "usage", "evidence_refs", "utime"])
     return run
 
 
@@ -423,7 +426,12 @@ async def execute_task_run(
             return result
         if result.get("policy") == "policy_denied":
             runtime_event = result.get("runtime_event") or {}
-            await finalize_run(run, COMMAND_RUN_STATUS_FAILED, error=runtime_event.get("error") or {"message": "policy denied"})
+            await finalize_run(
+                run,
+                COMMAND_RUN_STATUS_FAILED,
+                error=runtime_event.get("error") or {"message": "policy denied"},
+                usage=result.get("usage"),
+            )
             from services.command_center.manager import update_task_progress
 
             await update_task_progress(
@@ -436,7 +444,7 @@ async def execute_task_run(
                 operator_id,
             )
             return result
-        await finalize_run(run, COMMAND_RUN_STATUS_COMPLETED, result=result)
+        await finalize_run(run, COMMAND_RUN_STATUS_COMPLETED, result=result, usage=result.get("usage"))
         if task.status != COMMAND_TASK_STATUS_COMPLETED:
             from services.command_center.manager import update_task_progress
 

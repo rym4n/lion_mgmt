@@ -91,10 +91,18 @@ def _format_prompt_text(value: Any) -> str:
 
 def normalize_role_prompt_fields(role_data: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(role_data or {})
+    normalized.pop("description", None)
     for field in ROLE_PROMPT_TEXT_FIELDS:
         if field in normalized:
             normalized[field] = _format_prompt_text(normalized[field])
     return normalized
+
+
+def require_role_identity(role_data: dict[str, Any], error_code=ErrorCode.PARAM_ERROR) -> str:
+    identity = str((role_data or {}).get("identity") or "").strip()
+    if not identity:
+        raise CustomError(error_code)
+    return identity
 
 
 def _inspect_or_error(file_bytes: bytes) -> tuple[str, dict]:
@@ -194,6 +202,7 @@ async def _upsert_role(root: Path, package: dict, tenant_id: str, is_builtin: bo
     role_key = str(package.get("role_key") or role_data.get("key") or "").strip()
     if not role_key:
         raise CustomError(ErrorCode.PACKAGE_INVALID)
+    require_role_identity(role_data, ErrorCode.PACKAGE_INVALID)
     version = int(package.get("version") or role_data.get("version") or 1)
     existing = await DigitalEmployeeRole.get_or_none(tenant_id=tenant_id, role_key=role_key, deleted=False)
     if existing and existing.version > version:
@@ -202,7 +211,6 @@ async def _upsert_role(root: Path, package: dict, tenant_id: str, is_builtin: bo
     await ensure_platform_role(default_rbac_role_id, role_data, tenant_id)
     defaults = {
         "name": role_data.get("name") or package.get("name") or role_key,
-        "description": role_data.get("description") or package.get("description"),
         "template_dir": str(root),
         "default_skill_keys": role_data.get("default_skills") or role_data.get("default_skill_keys") or [],
         "default_rbac_role_id": default_rbac_role_id,

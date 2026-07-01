@@ -317,6 +317,19 @@ def test_finalize_and_stale_recovery_mark_terminal_run():
     assert RECORDED_EVENTS[-1][0] == "run_stale_recovered"
 
 
+def test_finalize_run_persists_usage():
+    run_manager = _load_run_manager()
+    task = _task()
+    employee = _employee()
+    run = asyncio.run(run_manager.checkout_run(task, employee))
+    usage = {"fallback": False, "input_tokens": 7, "output_tokens": 3, "total_tokens": 10, "model_calls": 1}
+
+    asyncio.run(run_manager.finalize_run(run, "completed", result={"content": "ok"}, usage=usage))
+
+    assert run.usage == usage
+    assert "usage" in run.saved_update_fields[-1]
+
+
 def test_execute_task_run_stops_when_runtime_requests_approval():
     run_manager = _load_run_manager()
     task = _task()
@@ -345,7 +358,16 @@ def test_execute_task_run_records_real_continuation_start_on_new_run():
     execute_coordinator = types.ModuleType("services.digital_employee.execute_coordinator")
 
     async def run(task_arg, employee_arg, **kwargs):
-        return {"content": "done"}
+        return {
+            "content": "done",
+            "usage": {
+                "fallback": False,
+                "input_tokens": 11,
+                "output_tokens": 4,
+                "total_tokens": 15,
+                "model_calls": 1,
+            },
+        }
 
     execute_coordinator.run = run
     sys.modules["services.digital_employee.execute_coordinator"] = execute_coordinator
@@ -363,6 +385,7 @@ def test_execute_task_run_records_real_continuation_start_on_new_run():
     )
 
     assert result["content"] == "done"
+    assert CREATED_RUNS[-1].usage["total_tokens"] == 15
     assert result["run_id"] == CREATED_RUNS[-1].run_id
     assert CREATED_RUNS[-1].metadata["continuation_approval_id"] == "approval-1"
     assert CREATED_RUNS[-1].metadata["workspace_id"].startswith("employee-1:approval-")

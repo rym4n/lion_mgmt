@@ -315,6 +315,7 @@ def test_upsert_role_auto_creates_missing_default_platform_role(tmp_path):
             {
                 "key": "monitor",
                 "name": "AI 监控值班员",
+                "identity": "你是 AIOE 的 AI 监控值班员。",
                 "description": "接收监控告警并分诊。",
                 "default_rbac_role": "monitor_dispatcher",
                 "default_skills": [],
@@ -350,9 +351,36 @@ def test_upsert_role_auto_creates_missing_default_platform_role(tmp_path):
     platform_role = calls and calls[0]["defaults"]["default_rbac_role_id"]
     assert role.role_key == "monitor"
     assert platform_role == "monitor_dispatcher"
+    assert "description" not in calls[0]["defaults"]
+    assert "description" not in calls[0]["defaults"]["meta"]
     assert created is not None
     assert created.permissions == []
     assert created.tenant_id == "tenant-1"
+
+
+def test_upsert_role_rejects_missing_identity(tmp_path):
+    role_root = tmp_path / "monitor"
+    role_root.mkdir()
+    (role_root / "role.yaml").write_text(
+        yaml.safe_dump({"key": "monitor", "name": "AI 监控值班员", "default_skills": []}, allow_unicode=True),
+        encoding="utf-8",
+    )
+
+    try:
+        asyncio.run(package_importer._upsert_role(role_root, {"type": "role", "role_key": "monitor"}, "tenant-1", False))
+    except CustomError as exc:
+        assert exc.enum == "PACKAGE_INVALID"
+    else:
+        raise AssertionError("missing role identity must be rejected")
+
+
+def test_require_role_identity_rejects_blank_identity():
+    try:
+        package_importer.require_role_identity({"identity": "  "})
+    except CustomError as exc:
+        assert exc.enum == "PARAM_ERROR"
+    else:
+        raise AssertionError("blank role identity must be rejected")
 
 
 def test_upsert_role_normalizes_prompt_fields_to_strings(tmp_path):
