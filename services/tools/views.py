@@ -107,6 +107,57 @@ def _ensure_path_inside_base(path: Path, base: Path):
     return resolved_path
 
 
+def _as_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+    return bool(value)
+
+
+def _normalize_search_text(value):
+    return str(value or "").casefold()
+
+
+def _tool_matches_search_key(tool, key):
+    normalized_key = _normalize_search_text(key)
+    if not normalized_key:
+        return True
+    return normalized_key in _normalize_search_text(tool.get("name")) or normalized_key in _normalize_search_text(
+        tool.get("description")
+    )
+
+
+def _action_matches_search_key(action, key):
+    normalized_key = _normalize_search_text(key)
+    if not normalized_key or not isinstance(action, dict):
+        return False
+    return normalized_key in _normalize_search_text(action.get("func")) or normalized_key in _normalize_search_text(
+        action.get("name")
+    )
+
+
+def _build_latest_tool_condition(tool_pairs):
+    if not tool_pairs:
+        return Q()
+    conditions = [Q(name=pair["name"], ctime=pair["latest_ctime"]) for pair in tool_pairs]
+    return Q(*conditions, join_type=Q.OR)
+
+
+def _filter_latest_tool_pairs_by_search_key(tool_pairs, latest_tools, action_tool_names, key):
+    matched_tool_names = {
+        tool["name"]
+        for tool in latest_tools
+        if _tool_matches_search_key(tool, key)
+    }
+    matched_tool_names.update(action_tool_names)
+    return [pair for pair in tool_pairs if pair["name"] in matched_tool_names]
+
+
 def check_file_size(file_obj, max_size_kb=5):
     current_pos = file_obj.tell()
     file_obj.seek(0, 2)
@@ -679,8 +730,9 @@ async def all_tools(request):
     req_json = request.json or {}
     page = int(req_json.get("page", 1))
     size = int(req_json.get("size", 15))
-    key = req_json.get("key", "").strip()
+    key = str(req_json.get("key", "") or "").strip()
     available_only = req_json.get("available_only", False)
+    search_actions = _as_bool(req_json.get("search_actions"), True)
 
     # if size > 50:
     #     raise CustomError(ErrorCode.REQUEST_TOO_MANY_ERROR)
@@ -690,24 +742,21 @@ async def all_tools(request):
     subquery = Tool.filter(deleted=False, tenant_id=tenant_id).annotate(latest_ctime=Max("ctime")).group_by("name")
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     subquery = subquery.filter(maintain=maintenance_mode if maintenance_mode else False)
-    if key:
-        actions = await ToolAction.filter(deleted=False, tenant_id=tenant_id).values("tool_name", "version_number", "action")
-        tool_names_from_actions = set()
-
-        for act in actions:
-            act_data = act["action"]
-            if isinstance(act_data, dict) and (key.lower() in act_data.get("func", "").lower() or key.lower() in act_data.get("name", "").lower()):
-                tool_names_from_actions.add(act["tool_name"])
-
-        cond = Q(name__icontains=key) | Q(description__icontains=key)
-        # 由于后面使用了 group_by("name")，只需要匹配工具名称即可，不需要精确匹配版本
-        # 这样可以大大简化查询条件，避免递归深度超限，同时保证查询结果完整
-        if tool_names_from_actions:
-            cond |= Q(name__in=list(tool_names_from_actions))
-        subquery = subquery.filter(cond)
     if req_json.get("tag"):
         subquery = subquery.filter(tag__contains=[req_json.get("tag")])
     subquery_results = await subquery.values("name", "latest_ctime")
+    if key and subquery_results:
+        tool_names_from_actions = set()
+
+        if search_actions:
+            actions = await ToolAction.filter(deleted=False, tenant_id=tenant_id).values("tool_name", "version_number", "action")
+            for act in actions:
+                if _action_matches_search_key(act["action"], key):
+                    tool_names_from_actions.add(act["tool_name"])
+
+        latest_tool_condition = _build_latest_tool_condition(subquery_results)
+        latest_tool_rows = await Tool.filter(latest_tool_condition, deleted=False, tenant_id=tenant_id).values("name", "description")
+        subquery_results = _filter_latest_tool_pairs_by_search_key(subquery_results, latest_tool_rows, tool_names_from_actions, key)
     if not subquery_results:
         return response_ok({"tools": [], "total": 0, "page": page, "size": size, "total_pages": 0})
 
@@ -746,11 +795,7 @@ async def all_tools(request):
             return response_ok({"tools": [], "total": 0, "page": page, "size": size, "total_pages": 0})
 
     # 使用扁平 OR 条件，避免 reduce(operator.or_, ...) 构造左深 Q 树导致递归深度超限
-    if subquery_results:
-        conditions = [Q(name=pair["name"], ctime=pair["latest_ctime"]) for pair in subquery_results]
-        condition = Q(*conditions, join_type=Q.OR)
-    else:
-        condition = Q()
+    condition = _build_latest_tool_condition(subquery_results)
 
     latest_tools = await Tool.filter(condition, deleted=False, tenant_id=tenant_id).order_by("-utime", "-ctime").offset((page - 1) * size).limit(size).values()
     for tool in latest_tools:
