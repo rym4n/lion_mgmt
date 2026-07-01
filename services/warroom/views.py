@@ -620,7 +620,22 @@ async def get_private_room(request: Request):
 async def get_star_rooms(request: Request):
     user = request.ctx.session["account_info"]
     tenant_id = request.ctx.session.get("tenant_id")
+    await ensure_default_ai_private_room(request.app.ctx.cache_client, user, tenant_id)
     return response_ok({"star_rooms": [r.json for r in await user.star_rooms.filter(tenant_id=tenant_id).all().prefetch_related("creator", "users")]})
+
+
+async def ensure_default_ai_private_room(cache_client, user: Account, tenant_id):
+    system_user = await Account.get_or_none(username="system", disabled=False)
+    if not system_user or system_user.id == user.id:
+        return
+
+    room_info = await get_or_create_private_chat_room(cache_client, user, system_user, tenant_id)
+    room = await Room.get_or_none(id=room_info["room_id"], tenant_id=tenant_id)
+    if not room:
+        return
+
+    await user.star_rooms.add(room)
+    await system_user.star_rooms.add(room)
 
 
 @warroom_bp.post("/star_room")

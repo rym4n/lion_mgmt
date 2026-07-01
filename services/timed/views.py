@@ -8,6 +8,7 @@ from sanic import Blueprint
 from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.expressions import Q
+from tortoise.functions import Max
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
@@ -39,6 +40,7 @@ EXEC_TYPE_ONCE = 0
 EXEC_TYPE_CRON = 1
 DISABLED = 0
 ENABLED = 1
+SUCCESS_RUNLOG_STATUSES = {0, 1}
 
 
 def build_timer_rule(status, tactics, end_time):
@@ -1226,14 +1228,20 @@ async def get_run_log(request):
 
 
 async def timer_success_rate(timed: Timed):
-    logs = await Runlog.filter(timer_id=timed.id, deleted=False).order_by("-start_time").limit(10)
+    recent_runs = await Runlog.filter(timer_id=timed.id, deleted=False).annotate(latest_start_time=Max("start_time"), latest_ctime=Max("ctime")).group_by("run_id").order_by("-latest_start_time", "-latest_ctime").limit(10).values("run_id")
+    run_ids = [row["run_id"] for row in recent_runs]
+    logs = await Runlog.filter(timer_id=timed.id, run_id__in=run_ids, deleted=False).all() if run_ids else []
 
-    # 计算成功率
+    # 按一次运行聚合成功率。Runlog 是节点级记录，同一次 run_id 下任一节点失败即该次运行失败。
     if logs:
-        success_count = sum(1 for log in logs if log.status == 0)
-        timed.success_rate = f"{round(success_count / len(logs) * 100, 2)}%"
-        # 最近一次执行结果
-        timed.result = "success" if logs[0].status == 0 else "fail"
+        runs = {}
+        for log in logs:
+            runs.setdefault(log.run_id, []).append(log)
+        success_count = sum(1 for run_logs in runs.values() if all(log.status in SUCCESS_RUNLOG_STATUSES for log in run_logs))
+        timed.success_rate = f"{round(success_count / len(runs) * 100, 2)}%"
+        latest_run_id = run_ids[0]
+        latest_logs = runs.get(latest_run_id, [])
+        timed.result = "success" if latest_logs and all(log.status in SUCCESS_RUNLOG_STATUSES for log in latest_logs) else "fail"
     else:
         timed.success_rate = None
         timed.result = None
