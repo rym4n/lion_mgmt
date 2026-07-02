@@ -804,10 +804,14 @@ class ChatManager:
                         for callback_data in callback_datas:
                             data = {}
                             for input_data in callback_data["input"]:
-                                if node["properties"].get("callback") == "on":
-                                    if "{{callback_url}}" in input_data.get("value"):
+                                input_value = input_data.get("value")
+                                if isinstance(input_value, str):
+                                    if node["properties"].get("callback") == "on" and "{{callback_url}}" in input_value:
                                         callback_url = f"{RY_SERVICE_URL}/approve/callback?token={log.get('callback_token', '')}"
-                                        input_data["value"] = input_data["value"].replace("{{callback_url}}", callback_url)
+                                        input_value = input_value.replace("{{callback_url}}", callback_url)
+                                    if "{{content}}" in input_value:
+                                        input_value = input_value.replace("{{content}}", str(log.get("content") or ""))
+                                    input_data["value"] = input_value
                                 data[input_data.get("key")] = input_data["value"]
                             params = {
                                 "resource": callback_data["resource"],
