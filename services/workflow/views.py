@@ -58,6 +58,42 @@ from settings import TASK_TOPIC, TZ, RY_AI_MODEL, RY_AI_API_BASE, LLM_KEY
 workflow_bp = Blueprint("workflow", url_prefix="/playbook")
 _all__ = ["workflow_bp"]
 
+TERMINAL_RUNLOG_STATUSES = {-1, 0, 3}
+IN_PROGRESS_RESULT = "执行中"
+
+
+def _runlog_stream_signature(log):
+    return (
+        getattr(log, "utime", None),
+        getattr(log, "status", None),
+        getattr(log, "result", None),
+        getattr(log, "end_time", None),
+    )
+
+
+def _should_stream_runlog(log, sent_versions):
+    signature = _runlog_stream_signature(log)
+    if sent_versions.get(log.id) == signature:
+        return False
+
+    sent_versions[log.id] = signature
+    return True
+
+
+def _is_terminal_runlog(log):
+    return getattr(log, "status", None) in TERMINAL_RUNLOG_STATUSES and getattr(log, "result", None) != IN_PROGRESS_RESULT
+
+
+def _is_completed_flow_end_log(log, flow_id):
+    if getattr(log, "node_type", None) != "end-node":
+        return False
+
+    playbook_version_id = getattr(log, "playbook_version_id", None)
+    if flow_id and playbook_version_id and playbook_version_id != flow_id:
+        return False
+
+    return _is_terminal_runlog(log)
+
 
 @workflow_bp.post("/new")
 @openapi.definition(
@@ -1189,18 +1225,22 @@ async def execute_action(request):
         message["executor"] = request.ctx.session["account_info"].id
         msg = {"run_type": message["type"], "run_id": run_id, "run_args": message, "tenant_id": tenant_id}
         await aproduce(TASK_TOPIC, msg)
-        sent_id = []
+        sent_versions = {}
         for _ in range(60):
-            logs = await Runlog.filter(run_id=run_id, utime__gte=utime).all()
+            logs = await Runlog.filter(run_id=run_id, deleted=False, tenant_id=tenant_id).order_by("utime", "ctime", "id").all()
             if logs:
-                utime = logs[0].utime
+                utime = max((log.utime for log in logs if log.utime), default=utime)
                 for log in logs:
-                    if log.id not in sent_id:
-                        sent_id.append(log.id)
+                    if _should_stream_runlog(log, sent_versions):
                         await resp.send(f"data: [{orjson.dumps(log.json).decode()}]\n\n")
-                if message.get("type") == "action" and len(sent_id) >= len(message.get("resource", "").split()):
+                expected_action_logs = len((message.get("resource") or "").split())
+                if (
+                    message.get("type") == "action"
+                    and len(logs) >= expected_action_logs
+                    and all(_is_terminal_runlog(log) for log in logs)
+                ):
                     break
-                if message.get("type") == "flow" and any(log.node_type == "end-node" and log.playbook_version_id == message.get("flow_id") for log in logs):
+                if message.get("type") == "flow" and any(_is_completed_flow_end_log(log, message.get("flow_id")) for log in logs):
                     break
                 if message.get("type") == "code":
                     break
