@@ -22,6 +22,18 @@ def test_tool_search_matches_name_and_description_case_insensitively():
     assert _tool_matches_search_key(tool, "lion")
 
 
+def test_tool_search_matches_entrypoint_and_tags():
+    tool = {
+        "name": "feature-app",
+        "description": "功能应用",
+        "main": "aioe_feature.py",
+        "tag": ["自动化", "AIOE"],
+    }
+
+    assert _tool_matches_search_key(tool, "aioe")
+    assert _tool_matches_search_key(tool, "AIOE")
+
+
 def test_tool_search_can_exclude_action_only_matches():
     pairs = [
         {"name": "aioe-docx", "latest_ctime": "2026-07-01T00:00:00"},
@@ -35,6 +47,20 @@ def test_tool_search_can_exclude_action_only_matches():
     filtered = _filter_latest_tool_pairs_by_search_key(pairs, latest_tools, set(), "aioe")
 
     assert filtered == [pairs[0]]
+
+
+def test_tool_search_keeps_latest_pair_when_any_version_matches_key():
+    pairs = [
+        {"name": "renamed-app", "latest_ctime": "2026-07-01T00:00:00"},
+    ]
+    tool_rows = [
+        {"name": "renamed-app", "description": "通用应用"},
+        {"name": "renamed-app", "description": "AIOE 功能应用"},
+    ]
+
+    filtered = _filter_latest_tool_pairs_by_search_key(pairs, tool_rows, set(), "aioe")
+
+    assert filtered == pairs
 
 
 def test_tool_search_preserves_action_matches_when_enabled():
