@@ -12,7 +12,7 @@ from models.command_center import COMMAND_APPROVAL_STATUS_PENDING, CommandAgent,
 from settings import TZ
 
 from .approval_service import decide_approval, get_approval, list_approvals, resume_approved_approval
-from .manager import create_command_task, dispatch_task, list_tasks, update_task_progress
+from .manager import TERMINAL_TASK_STATUS, create_command_task, dispatch_task, list_tasks, update_task_progress
 from .summary import aggregate_usage, build_task_summary, humanize_event, normalize_usage
 
 command_bp = Blueprint("command_center", url_prefix="/command_center")
@@ -52,7 +52,6 @@ AGENT_SCHEMA = {
         "heartbeat_at": {"type": "string", "nullable": True, "description": "最近心跳时间"},
         "metadata": {"type": "object", "description": "扩展元数据"},
         "runtime": {"type": "string", "description": "运行时类型，默认lion_agent"},
-        "system_instruction": {"type": "string", "nullable": True, "description": "调用lion_agent时使用的system_instruction提示词"},
         "prompt_config": {"type": "object", "description": "提示词扩展配置"},
         "is_builtin": {"type": "boolean", "description": "是否为内置智能体"},
     },
@@ -232,7 +231,7 @@ def _text_summary(value) -> dict:
     return {"present": bool(text), "length": len(text)}
 
 
-def _task_detail_json(task: CommandTask) -> dict:
+def _task_detail_json(task: CommandTask, actor: dict | None = None) -> dict:
     raw = task.json
     allowed = [
         "id",
@@ -256,11 +255,54 @@ def _task_detail_json(task: CommandTask) -> dict:
         "started_at",
         "finished_at",
     ]
+    actor = actor or {}
     return {
         **{key: raw.get(key) for key in allowed},
         "payload_summary": _summarize_scope(raw.get("payload")),
         "result_summary": _text_summary(raw.get("result")),
+        "assigned_agent_name": actor.get("assigned_agent_name"),
+        "assigned_agent_role_name": actor.get("assigned_agent_role_name"),
+        "assigned_agent_deleted": actor.get("assigned_agent_deleted", False),
+        "creator_display_name": actor.get("creator_display_name"),
     }
+
+
+async def _resolve_task_actors(tasks: list[CommandTask], tenant_id: str) -> dict[str, dict]:
+    """批量解析任务的执行员工（含软删）与创建人名称，避免前端 join 丢失已删除员工。"""
+    from models.digital_employee import DigitalEmployeeRole
+    from models.user import Account
+
+    agent_ids = {t.json.get("assigned_agent_id") for t in tasks if t.json.get("assigned_agent_id")}
+    creator_ids = {t.json.get("creator_id") for t in tasks if t.json.get("creator_id")}
+
+    agents_by_id: dict[str, CommandAgent] = {}
+    if agent_ids:
+        agents = await CommandAgent.filter(tenant_id=tenant_id, id__in=list(agent_ids)).all()
+        agents_by_id = {agent.id: agent for agent in agents}
+
+    role_names: dict[str, str] = {}
+    role_keys = {a.role_key for a in agents_by_id.values() if a.role_key}
+    if role_keys:
+        roles = await DigitalEmployeeRole.filter(tenant_id=tenant_id, role_key__in=list(role_keys)).all()
+        role_names = {role.role_key: role.name for role in roles}
+
+    creators_by_id: dict[str, Account] = {}
+    if creator_ids:
+        accounts = await Account.filter(id__in=list(creator_ids)).all()
+        creators_by_id = {account.id: account for account in accounts}
+
+    actors: dict[str, dict] = {}
+    for task in tasks:
+        raw = task.json
+        agent = agents_by_id.get(raw.get("assigned_agent_id"))
+        creator = creators_by_id.get(raw.get("creator_id"))
+        actors[task.id] = {
+            "assigned_agent_name": agent.name if agent else None,
+            "assigned_agent_role_name": role_names.get(agent.role_key) if agent and agent.role_key else None,
+            "assigned_agent_deleted": bool(agent.deleted) if agent else False,
+            "creator_display_name": (creator.display_name or creator.username) if creator else None,
+        }
+    return actors
 
 
 def _task_run_detail_json(run: CommandTaskRun) -> dict:
@@ -306,7 +348,44 @@ def _task_run_detail_json(run: CommandTaskRun) -> dict:
                 if authorization.get(key) is not None
             },
         },
+        "tool_calls": _summarize_tool_calls(getattr(run, "tool_calls", None)),
+        "resource_accesses": _summarize_resource_accesses(getattr(run, "resource_accesses", None)),
     }
+
+
+def _summarize_tool_calls(tool_calls) -> list:
+    """把 run 的工具调用记录整理成可读的「调用的动作/剧本」列表。"""
+    if not isinstance(tool_calls, list):
+        return []
+    summaries = []
+    for call in tool_calls:
+        if not isinstance(call, dict):
+            continue
+        data = call.get("data") if isinstance(call.get("data"), dict) else {}
+        summaries.append(
+            {
+                "name": call.get("tool_name") or data.get("action") or data.get("playbook") or data.get("name"),
+                "status": call.get("status"),
+                "kind": "playbook" if data.get("playbook") else ("action" if data.get("action") else "tool"),
+            }
+        )
+    return summaries
+
+
+def _summarize_resource_accesses(resource_accesses) -> list:
+    if not isinstance(resource_accesses, list):
+        return []
+    summaries = []
+    for access in resource_accesses:
+        if isinstance(access, dict):
+            summaries.append(
+                {
+                    "kind": access.get("kind") or access.get("type") or "resource",
+                    "name": access.get("name") or access.get("target"),
+                    "action": access.get("action") or access.get("operation"),
+                }
+            )
+    return summaries
 
 
 def _task_approval_detail_json(approval: CommandApproval) -> dict:
@@ -384,7 +463,6 @@ def _task_event_detail_json(event: CommandTaskEvent) -> dict:
                 "max_concurrent": {"type": "integer", "description": "最大并发任务数", "minimum": 1, "default": 1},
                 "metadata": {"type": "object", "description": "扩展元数据"},
                 "runtime": {"type": "string", "description": "运行时类型，默认lion_agent"},
-                "system_instruction": {"type": "string", "description": "调用lion_agent时使用的system_instruction提示词"},
                 "prompt_config": {"type": "object", "description": "提示词扩展配置"},
                 "is_builtin": {"type": "boolean", "description": "是否为内置智能体"},
             },
@@ -412,12 +490,11 @@ async def register_agent(request: Request):
             "max_concurrent": data.get("max_concurrent", 1),
             "metadata": data.get("metadata", {}),
             "runtime": data.get("runtime", "lion_agent"),
-            "system_instruction": data.get("system_instruction"),
             "prompt_config": data.get("prompt_config", {}),
             "is_builtin": data.get("is_builtin", False),
         },
     )
-    for field in ["name", "description", "capabilities", "status", "max_concurrent", "metadata", "runtime", "system_instruction", "prompt_config", "is_builtin"]:
+    for field in ["name", "description", "capabilities", "status", "max_concurrent", "metadata", "runtime", "prompt_config", "is_builtin"]:
         if field in data:
             setattr(agent, field, data[field])
     agent.deleted = False
@@ -484,7 +561,6 @@ async def list_agents(request: Request):
                 "current_task_id": {"type": "string", "nullable": True, "description": "当前主任务ID"},
                 "metadata": {"type": "object", "description": "扩展元数据"},
                 "runtime": {"type": "string", "description": "运行时类型"},
-                "system_instruction": {"type": "string", "description": "调用lion_agent时使用的system_instruction提示词"},
                 "prompt_config": {"type": "object", "description": "提示词扩展配置"},
                 "is_builtin": {"type": "boolean", "description": "是否为内置智能体"},
             },
@@ -507,7 +583,7 @@ async def update_agent_status(request: Request):
     if not agent:
         raise CustomError(ErrorCode.NOT_FOUND)
 
-    for field in ["status", "load", "max_concurrent", "current_task_id", "metadata", "runtime", "system_instruction", "prompt_config", "is_builtin"]:
+    for field in ["status", "load", "max_concurrent", "current_task_id", "metadata", "runtime", "prompt_config", "is_builtin"]:
         if field in data:
             setattr(agent, field, data[field])
     agent.heartbeat_at = datetime.now(TZ)
@@ -591,12 +667,13 @@ async def query_tasks(request: Request):
     data = _require_json(request)
     tenant_id = request.ctx.session.get("tenant_id")
     tasks, total = await list_tasks(tenant_id, data)
+    actors = await _resolve_task_actors(tasks, tenant_id)
     return response_ok(
         {
             "total": total,
             "page": data.get("page", 1),
             "size": data.get("size", 20),
-            "tasks": [_task_detail_json(task) for task in tasks],
+            "tasks": [_task_detail_json(task, actors.get(task.id)) for task in tasks],
         }
     )
 
@@ -639,9 +716,10 @@ async def task_detail(request: Request):
     events = await CommandTaskEvent.filter(task_id=task.id, tenant_id=tenant_id, deleted=False).order_by("ctime").all()
     runs = await CommandTaskRun.filter(task_id=task.id, tenant_id=tenant_id, deleted=False).order_by("-ctime").all()
     approvals = await CommandApproval.filter(task_id=task.id, tenant_id=tenant_id, deleted=False).order_by("-ctime").all()
+    actors = await _resolve_task_actors([task], tenant_id)
     return response_ok(
         {
-            "task": _task_detail_json(task),
+            "task": _task_detail_json(task, actors.get(task.id)),
             "summary": build_task_summary(task, runs, approvals),
             "result": task.result,
             "events": [_task_event_detail_json(event) for event in events],
@@ -756,6 +834,76 @@ async def retry_dispatch(request: Request):
     operator = request.ctx.session["account_info"]
     task = await dispatch_task(task, operator.id)
     return response_ok(task.json)
+
+
+@command_bp.post("/tasks/cancel")
+@openapi.definition(
+    summary="取消任务",
+    description="取消尚未结束的任务；会释放已分配数字员工的负载并记录事件。已结束的任务不可取消。需要command_center:u权限。",
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+                "id": {"type": "string", "description": "任务ID"},
+                "reason": {"type": "string", "description": "取消原因，可选"},
+            },
+        }
+    ),
+    response=_response("取消成功", TASK_SCHEMA, {"400": "参数错误", "404": "任务不存在", "409": "任务已结束"}),
+)
+@requires_permission("command_center:u")
+async def cancel_task(request: Request):
+    data = _require_json(request)
+    task_id = data.get("id")
+    if not task_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
+    task = await CommandTask.get_or_none(id=task_id, tenant_id=tenant_id, deleted=False)
+    if not task:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    if task.status in TERMINAL_TASK_STATUS:
+        raise CustomError(ErrorCode.COMMAND_TASK_ALREADY_TERMINAL)
+    operator = request.ctx.session["account_info"]
+    reason = (data.get("reason") or "").strip() or "用户取消任务"
+    task = await update_task_progress(
+        task,
+        {"status": "cancelled", "message": reason, "metadata": {"cancelled_by": operator.id}},
+        operator.id,
+    )
+    return response_ok(task.json)
+
+
+@command_bp.post("/tasks/delete")
+@openapi.definition(
+    summary="删除任务",
+    description="软删除已结束的任务（完成/失败/取消/已接管）。未结束的任务需先取消再删除。需要command_center:u权限。",
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+                "id": {"type": "string", "description": "任务ID"},
+            },
+        }
+    ),
+    response=_response("删除成功", {"type": "object", "properties": {"id": {"type": "string"}}}, {"400": "参数错误", "404": "任务不存在", "409": "任务尚未结束"}),
+)
+@requires_permission("command_center:u")
+async def delete_task(request: Request):
+    data = _require_json(request)
+    task_id = data.get("id")
+    if not task_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
+    task = await CommandTask.get_or_none(id=task_id, tenant_id=tenant_id, deleted=False)
+    if not task:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    if task.status not in TERMINAL_TASK_STATUS:
+        raise CustomError(ErrorCode.COMMAND_TASK_NOT_TERMINAL)
+    task.deleted = True
+    await task.save(update_fields=["deleted", "utime"])
+    return response_ok({"id": task.id})
 
 
 @command_bp.post("/approvals/list")

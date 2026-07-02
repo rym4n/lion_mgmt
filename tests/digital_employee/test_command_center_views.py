@@ -82,6 +82,11 @@ def test_task_detail_run_dto_exposes_summaries_without_raw_snapshots():
         usage={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120, "model_calls": 1},
         cost={},
         error={"message": "needs approval"},
+        tool_calls=[
+            {"tool_name": "restart_service", "status": "success", "data": {"action": "restart_service"}},
+            {"tool_name": None, "status": "success", "data": {"playbook": "incident_playbook"}},
+        ],
+        resource_accesses=[{"kind": "host", "name": "web-01", "action": "read"}],
     )
 
     out = views._task_run_detail_json(run)
@@ -103,6 +108,11 @@ def test_task_detail_run_dto_exposes_summaries_without_raw_snapshots():
     assert out["usage"]["total_tokens"] == 120
     assert out["cost"] == {}
     assert out["error"]["message"] == "needs approval"
+    assert out["tool_calls"] == [
+        {"name": "restart_service", "status": "success", "kind": "action"},
+        {"name": "incident_playbook", "status": "success", "kind": "playbook"},
+    ]
+    assert out["resource_accesses"] == [{"kind": "host", "name": "web-01", "action": "read"}]
 
 
 def test_command_center_read_approval_dto_allowlists_operator_fields():

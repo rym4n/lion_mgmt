@@ -40,7 +40,8 @@ EXEC_TYPE_ONCE = 0
 EXEC_TYPE_CRON = 1
 DISABLED = 0
 ENABLED = 1
-SUCCESS_RUNLOG_STATUSES = {0, 1}
+# Only terminal success counts; running/waiting logs must not inflate the rate.
+SUCCESS_RUNLOG_STATUSES = {0}
 
 
 def build_timer_rule(status, tactics, end_time):

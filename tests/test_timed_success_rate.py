@@ -54,9 +54,9 @@ async def test_timer_success_rate_groups_node_logs_by_run_id(monkeypatch):
 
     logs = [
         SimpleNamespace(run_id="run-1", status=0),
-        SimpleNamespace(run_id="run-1", status=1),
+        SimpleNamespace(run_id="run-1", status=0),
         SimpleNamespace(run_id="run-2", status=0),
-        SimpleNamespace(run_id="run-2", status=2),
+        SimpleNamespace(run_id="run-2", status=-1),
     ]
     recent_logs = [
         {"run_id": "run-2"},
@@ -66,6 +66,7 @@ async def test_timer_success_rate_groups_node_logs_by_run_id(monkeypatch):
     class FakeRunlog:
         @staticmethod
         def filter(**kwargs):
+            assert kwargs.get("timer_id") == timed.id
             if "run_id__in" in kwargs:
                 return _FakeQuery(logs)
             return _FakeQuery(recent_logs)
@@ -82,3 +83,47 @@ async def test_timer_success_rate_groups_node_logs_by_run_id(monkeypatch):
     }
     assert timed.result == "fail"
     assert timed.success_rate == "50.0%"
+
+
+@pytest.mark.asyncio
+async def test_timer_success_rate_does_not_count_running_logs_as_success(monkeypatch):
+    timed = SimpleNamespace(id="timer-1", success_rate=None, result=None)
+    saved = {}
+
+    async def save():
+        saved["called"] = True
+
+    timed.save = save
+
+    logs = [
+        SimpleNamespace(run_id="run-3", status=1),
+        SimpleNamespace(run_id="run-3", status=2),
+        SimpleNamespace(run_id="run-2", status=0),
+        SimpleNamespace(run_id="run-1", status=0),
+    ]
+    recent_logs = [
+        {"run_id": "run-3"},
+        {"run_id": "run-2"},
+        {"run_id": "run-1"},
+    ]
+
+    class FakeRunlog:
+        @staticmethod
+        def filter(**kwargs):
+            assert kwargs.get("timer_id") == timed.id
+            if "run_id__in" in kwargs:
+                return _FakeQuery(logs)
+            return _FakeQuery(recent_logs)
+
+    monkeypatch.setattr("services.timed.views.Runlog", FakeRunlog)
+
+    result = await timer_success_rate(timed)
+
+    assert saved["called"] is True
+    assert result == {
+        "id": "timer-1",
+        "result": "fail",
+        "success_rate": "66.67%",
+    }
+    assert timed.result == "fail"
+    assert timed.success_rate == "66.67%"

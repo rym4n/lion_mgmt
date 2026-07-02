@@ -127,9 +127,19 @@ def _tool_matches_search_key(tool, key):
     normalized_key = _normalize_search_text(key)
     if not normalized_key:
         return True
-    return normalized_key in _normalize_search_text(tool.get("name")) or normalized_key in _normalize_search_text(
-        tool.get("description")
-    )
+
+    searchable_values = [
+        tool.get("name"),
+        tool.get("description"),
+        tool.get("main"),
+    ]
+    tags = tool.get("tag") or []
+    if isinstance(tags, (list, tuple, set)):
+        searchable_values.extend(tags)
+    else:
+        searchable_values.append(tags)
+
+    return any(normalized_key in _normalize_search_text(value) for value in searchable_values)
 
 
 def _action_matches_search_key(action, key):
@@ -754,9 +764,15 @@ async def all_tools(request):
                 if _action_matches_search_key(act["action"], key):
                     tool_names_from_actions.add(act["tool_name"])
 
-        latest_tool_condition = _build_latest_tool_condition(subquery_results)
-        latest_tool_rows = await Tool.filter(latest_tool_condition, deleted=False, tenant_id=tenant_id).values("name", "description")
-        subquery_results = _filter_latest_tool_pairs_by_search_key(subquery_results, latest_tool_rows, tool_names_from_actions, key)
+        tool_names = [pair["name"] for pair in subquery_results]
+        tool_rows_query = Tool.filter(name__in=tool_names, deleted=False, tenant_id=tenant_id)
+        tool_rows_query = tool_rows_query.filter(maintain=maintenance_mode if maintenance_mode else False)
+        if req_json.get("tag"):
+            tool_rows_query = tool_rows_query.filter(tag__contains=[req_json.get("tag")])
+        matching_tool_rows = await tool_rows_query.values("name", "description", "main", "tag")
+        subquery_results = _filter_latest_tool_pairs_by_search_key(
+            subquery_results, matching_tool_rows, tool_names_from_actions, key
+        )
     if not subquery_results:
         return response_ok({"tools": [], "total": 0, "page": page, "size": size, "total_pages": 0})
 

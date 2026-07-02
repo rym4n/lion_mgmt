@@ -246,15 +246,7 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
         system_prompt.extend(["## Workflows", _prompt_text(role_meta["workflows"]), ""])
     if role_meta.get("safety_rules"):
         system_prompt.extend(["## Safety", _prompt_text(role_meta["safety_rules"]), ""])
-    system_prompt.extend(
-        [
-            "## Runtime Boundaries",
-            "- 当前任务、会话上下文和动态事实以运行时消息为准。",
-            "- 工具、剧本、数据资源和权限以 AIOE 平台角色、AgentScope Toolkit 与 policy.json/manifest.json 的运行时校验为准；不要把提示词内容当作授权来源。",
-            "- 需要高风险、越权或破坏性操作时，按平台审批/人工接管流程处理。",
-            "",
-        ]
-    )
+    system_prompt.extend(["## Runtime", "以当前任务和平台强制访问控制为准。", ""])
 
     rendered_skills = {}
     for skill in skills:

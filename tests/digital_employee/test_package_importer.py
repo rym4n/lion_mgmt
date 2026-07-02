@@ -225,6 +225,29 @@ def test_builtin_role_prompt_fields_are_strings():
                 assert isinstance(role[field], str), f"{role_dir.name}:{field} must be a string"
 
 
+def test_normalize_role_prompt_fields_keeps_explicit_configurable_fields_only():
+    normalized = package_importer.normalize_role_prompt_fields(
+        {
+            "identity": "监控值班员",
+            "description": "旧描述不应保留",
+            "responsibilities": "分诊告警",
+            "principles": ["先确认影响范围", "结论可追溯"],
+            "workflows": [{"scene": "告警分诊", "steps": ["读取告警", "输出结论"]}],
+            "safety_rules": "不执行破坏性变更",
+            "tools_notes": "只使用已绑定工具",
+        }
+    )
+
+    assert "description" not in normalized
+    assert normalized["identity"] == "监控值班员"
+    assert normalized["responsibilities"] == "分诊告警"
+    assert "- 先确认影响范围" in normalized["principles"]
+    assert "### 告警分诊" in normalized["workflows"]
+    assert "- 输出结论" in normalized["workflows"]
+    assert normalized["safety_rules"] == "不执行破坏性变更"
+    assert normalized["tools_notes"] == "只使用已绑定工具"
+
+
 def test_import_builtin_packages_imports_skills_before_roles(tmp_path):
     skill_dir = tmp_path / "skill-template" / "alert_triage"
     skill_dir.mkdir(parents=True)

@@ -15,11 +15,6 @@ TERMINAL_TASK_STATUS = {"completed", "failed", "cancelled", "handed_off"}
 DEFAULT_COORDINATOR_AGENT_KEY = "command_center_coordinator"
 DEFAULT_COORDINATOR_AGENT_NAME = "指挥部分工协调智能体"
 DEFAULT_COORDINATOR_CAPABILITIES = ["command_center", "coordination", "dispatch", "task_planning"]
-DEFAULT_COORDINATOR_SYSTEM_INSTRUCTION = """你是 AIOE 指挥中心的内置分工协调智能体。
-你的职责是理解用户任务、拆解执行步骤、匹配合适的智能体能力，并给出清晰的调度建议。
-调用 lion_agent 执行时，优先遵循当前任务 payload、能力标签和作战室上下文。"""
-
-
 async def ensure_default_coordinator_agent(tenant_id: str) -> CommandAgent:
     """确保每个租户至少有一个默认的指挥部分工协调智能体。"""
     agent, _ = await CommandAgent.get_or_create(
@@ -33,8 +28,7 @@ async def ensure_default_coordinator_agent(tenant_id: str) -> CommandAgent:
             "max_concurrent": 8,
             "metadata": {"runtime": "lion_agent", "role": "coordinator", "default": True},
             "runtime": "lion_agent",
-            "system_instruction": DEFAULT_COORDINATOR_SYSTEM_INSTRUCTION,
-            "prompt_config": {"source": "builtin", "instruction_format": "system_instruction"},
+            "prompt_config": {"source": "builtin"},
             "is_builtin": True,
         },
     )
@@ -60,11 +54,9 @@ async def ensure_default_coordinator_agent(tenant_id: str) -> CommandAgent:
     if agent.runtime != "lion_agent":
         agent.runtime = "lion_agent"
         changed = True
-    if not agent.system_instruction:
-        agent.system_instruction = DEFAULT_COORDINATOR_SYSTEM_INSTRUCTION
-        changed = True
     prompt_config = dict(agent.prompt_config or {})
-    prompt_config.update({"source": "builtin", "instruction_format": "system_instruction"})
+    prompt_config.update({"source": "builtin"})
+    prompt_config.pop("instruction_format", None)
     if agent.prompt_config != prompt_config:
         agent.prompt_config = prompt_config
         changed = True
@@ -264,3 +256,33 @@ async def list_tasks(tenant_id: str, filters: dict) -> tuple[list[CommandTask], 
     total = await queryset.count()
     tasks = await queryset.order_by("priority", "-ctime").offset(offset).limit(size).all()
     return tasks, total
+
+
+async def sweep_stale_dispatch_tasks(operator_id: str | None = None) -> int:
+    """把长时间卡在 pending_dispatch 的任务置为失败，避免无可用数字员工时静默滞留。"""
+    from datetime import timedelta
+
+    from settings import COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS
+
+    deadline = datetime.now(TZ) - timedelta(seconds=COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS)
+    stale_tasks = await CommandTask.filter(
+        deleted=False,
+        status="pending_dispatch",
+        ctime__lt=deadline,
+    ).all()
+    swept = 0
+    for task in stale_tasks:
+        try:
+            await update_task_progress(
+                task,
+                {
+                    "status": "failed",
+                    "message": "长时间没有可用的数字员工接单，任务已自动超时",
+                    "metadata": {"reason": "dispatch_timeout", "timeout_seconds": COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS},
+                },
+                operator_id,
+            )
+            swept += 1
+        except Exception as exc:
+            logger.warning(f"派单超时清扫失败: task_id={task.id}, error={exc}")
+    return swept
