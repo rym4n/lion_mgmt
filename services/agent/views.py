@@ -54,7 +54,6 @@ AGENT_SCHEMA = {
         "heartbeat_at": {"type": "string", "nullable": True, "description": "最近心跳时间"},
         "metadata": {"type": "object", "description": "扩展元数据"},
         "runtime": {"type": "string", "description": "运行时类型，默认 lion_agent"},
-        "system_instruction": {"type": "string", "nullable": True, "description": "调用 lion_agent 时使用的 system_instruction 提示词"},
         "prompt_config": {"type": "object", "description": "提示词扩展配置"},
         "is_builtin": {"type": "boolean", "description": "是否为内置智能体"},
     },
@@ -164,7 +163,7 @@ async def disable_command_agent(agent: CommandAgent) -> None:
 
 def _agent_payload(data: dict, *, partial: bool = False) -> dict:
     payload = {}
-    string_fields = ["name", "description", "status", "runtime", "system_instruction"]
+    string_fields = ["name", "description", "status", "runtime"]
     for field in string_fields:
         if field in data:
             payload[field] = data[field]
@@ -209,7 +208,6 @@ CREATE_AGENT_BODY = {
         "name": {"type": "string", "description": "智能体名称"},
         "description": {"type": "string", "description": "智能体说明"},
         "capabilities": {"type": "array", "items": {"type": "string"}, "description": "能力标签列表，指挥中心按此调度"},
-        "system_instruction": {"type": "string", "description": "调用 lion_agent 时注入的 system_instruction 提示词"},
         "prompt_config": {"type": "object", "description": "提示词扩展配置，如变量、模板来源等"},
         "is_builtin": {"type": "boolean", "description": "是否为内置智能体，默认false"},
         "runtime": {"type": "string", "description": "运行时类型，默认 lion_agent"},
@@ -333,7 +331,7 @@ async def detail_agent(request: Request):
 @agent_bp.post("/update")
 @openapi.definition(
     summary="更新智能体",
-    description="更新智能体基础信息、能力标签、lion_agent system_instruction 和提示词配置。内置智能体不可改为非内置。需要agent:u权限。",
+    description="更新智能体基础信息、能力标签、lion_agent 运行时和提示词配置。内置智能体不可改为非内置。需要agent:u权限。",
     body=_json_body(
         {
             "type": "object",

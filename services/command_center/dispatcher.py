@@ -130,8 +130,6 @@ def _normalize_dispatch_status(value: str | None, requested_agent_id: str | None
 
 
 def _build_dispatch_prompt(task: DispatchTask, agents: list[AgentCandidate], coordinator: AgentCandidate | None) -> str:
-    coordinator_instruction = getattr(coordinator, "system_instruction", None) if coordinator else None
-    system_instruction = coordinator_instruction or "你是指挥中心调度智能体，需要为任务选择最合适的可用智能体。"
     message_context = {
         "task": _task_payload(task),
         "candidate_agents": [_agent_payload(agent) for agent in agents],
@@ -149,7 +147,7 @@ def _build_dispatch_prompt(task: DispatchTask, agents: list[AgentCandidate], coo
         },
     }
     return f"""<system_instruction>
-{system_instruction}
+你是指挥中心调度智能体，需要为任务选择最合适的可用智能体。
 </system_instruction>
 
 <message_context>

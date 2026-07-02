@@ -76,7 +76,6 @@ class CommandAgent(BaseModel):
     heartbeat_at = fields.DatetimeField(null=True, description="最近心跳时间")
     metadata = fields.JSONField(default=dict, description="扩展元数据")
     runtime = fields.CharField(max_length=30, default="lion_agent", description="运行时类型: lion_agent 等")
-    system_instruction = fields.TextField(null=True, description="调用 lion_agent 时使用的 system_instruction 提示词")
     prompt_config = fields.JSONField(default=dict, description="提示词扩展配置")
     is_builtin = fields.BooleanField(default=False, description="是否为内置智能体")
     role = fields.ForeignKeyField(
@@ -113,7 +112,6 @@ class CommandAgent(BaseModel):
             "heartbeat_at": strip_timezone_to_seconds(self.heartbeat_at),
             "metadata": self.metadata,
             "runtime": self.runtime,
-            "system_instruction": self.system_instruction,
             "prompt_config": self.prompt_config,
             "is_builtin": self.is_builtin,
             "role_id": self.role_id,

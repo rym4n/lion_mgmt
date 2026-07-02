@@ -20,7 +20,7 @@ render_workspace_files = prompt_builder.render_workspace_files
 workspace_etag = prompt_builder.workspace_etag
 
 
-def test_render_workspace_files_includes_role_skill_and_platform_role_authorization():
+def test_render_workspace_files_includes_role_skill_and_minimal_runtime_notice():
     role = SimpleNamespace(
         role_key="monitor",
         version=2,
@@ -57,7 +57,8 @@ def test_render_workspace_files_includes_role_skill_and_platform_role_authorizat
     assert "监控值班员" in files["system_prompt.md"]
     assert "分诊告警" in files["system_prompt.md"]
     assert "只用授权工具" not in files["system_prompt.md"]
-    assert "AgentScope Toolkit" in files["system_prompt.md"]
+    assert "以当前任务和平台强制访问控制为准。" in files["system_prompt.md"]
+    assert "AgentScope Toolkit" not in files["system_prompt.md"]
     assert '"tool_usage_notes": "只用授权工具"' in files["manifest.json"]
     assert "alert_triage" in files["skills"]
     assert "notify" in files["skills"]["alert_triage"]["instructions.md"]

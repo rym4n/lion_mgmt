@@ -60,3 +60,12 @@ def test_role_description_removal_migration_drops_column_and_meta_key() -> None:
     assert 'UPDATE "command_center_agent"' in sql
     assert 'SET "description" = NULL' in sql
     assert 'WHERE "role_key" IS NOT NULL' in sql
+
+
+def test_command_agent_system_instruction_removal_migration_drops_column() -> None:
+    sql = (
+        ROOT / "migrations/models/53_20260702103000_remove_command_agent_system_instruction.py"
+    ).read_text(encoding="utf-8")
+
+    assert 'ALTER TABLE "command_center_agent" DROP COLUMN IF EXISTS "system_instruction"' in sql
+    assert 'ADD COLUMN IF NOT EXISTS "system_instruction"' not in sql
