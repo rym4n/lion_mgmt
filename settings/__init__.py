@@ -265,6 +265,11 @@ LION_AGENT_ENDPOINT = os.environ.get("RY_LION_AGENT_ENDPOINT", "http://lion-agen
 LION_AGENT_INTERNAL_TOKEN = os.environ.get("RY_LION_AGENT_INTERNAL_TOKEN", "")
 LION_ACTION_INTERNAL_TOKEN = os.environ.get("RY_INTERNAL_TOKEN") or os.environ.get("RY_LION_ACTION_INTERNAL_TOKEN", "")
 
+# 指挥中心任务派单超时：pending_dispatch 超过该秒数仍未调度成功则自动置为失败
+COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS = int(os.environ.get("RY_COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS") or 300)
+# 派单超时清扫器的扫描间隔（秒）
+COMMAND_TASK_SWEEP_INTERVAL_SECONDS = int(os.environ.get("RY_COMMAND_TASK_SWEEP_INTERVAL_SECONDS") or 60)
+
 # 数字员工长期记忆服务
 LION_MEMORY_ENDPOINT = os.environ.get("RY_LION_MEMORY_ENDPOINT", "http://lion-memory:8000")
 LION_MEMORY_ADMIN_EMAIL = os.environ.get("RY_LION_MEMORY_ADMIN_EMAIL", "admin@aioe.internal")

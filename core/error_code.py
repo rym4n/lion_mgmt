@@ -194,3 +194,5 @@ class ErrorCode(BaseErrorCode):
     REPORT_SCHEDULE_NOT_FOUND = ErrorData(4156, "汇报任务不存在")
     REPORT_SCHEDULE_CRON_INVALID = ErrorData(4157, "汇报任务 cron 表达式不合法")
     REPORT_SCHEDULE_NAME_EXISTS = ErrorData(4158, "同一文档下汇报任务名称已存在")
+    COMMAND_TASK_ALREADY_TERMINAL = ErrorData(4159, "任务已结束，无法取消")
+    COMMAND_TASK_NOT_TERMINAL = ErrorData(4160, "任务尚未结束，无法删除")
