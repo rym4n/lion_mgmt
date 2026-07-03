@@ -1,5 +1,0 @@
-type: skill
-skill_key: custom_data_fetch
-version: 1
-vendor: aioe
-is_builtin: true

@@ -5,25 +5,18 @@ import asyncio
 import os
 
 from sanic.log import logger
-from tortoise import Tortoise
-
-from settings import TORTOISE
 
 from .package_importer import import_builtin_packages
 
 
 def builtin_package_bootstrap_enabled() -> bool:
-    value = os.environ.get("RY_DIGITAL_EMPLOYEE_BOOTSTRAP_PACKAGES", "true")
+    value = os.environ.get("RY_DIGITAL_EMPLOYEE_BOOTSTRAP_PACKAGES", "false")
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 async def bootstrap_builtin_packages() -> dict:
-    await Tortoise.init(config=TORTOISE)
-    try:
-        result = await import_builtin_packages(operator_id="system")
-        return result.json
-    finally:
-        await Tortoise.close_connections()
+    result = await import_builtin_packages(operator_id="system")
+    return result.json
 
 
 def main() -> int:

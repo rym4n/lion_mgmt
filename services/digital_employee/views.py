@@ -6,7 +6,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import check_permissions, requires_permission
-from models.command_center import CommandAgent, CommandTask
+from models.command_center import CommandAgent, CommandTask, CommandTaskRun
 from models.digital_employee import DigitalEmployeeRole, DigitalEmployeeSkill
 from models.employee_report import EmployeeReport
 from models.report import ReportDocument
@@ -21,11 +21,12 @@ from .manager import (
     ensure_employee_can_delete,
     get_visible_role,
     get_visible_skills,
+    prefer_tenant_records,
     sync_employee_workspace,
     update_employee_skills,
     upgrade_role_for_existing_employees,
 )
-from .package_importer import export_package, import_package, normalize_role_prompt_fields, require_role_identity
+from .package_importer import export_package_for_tenant, import_package, normalize_role_prompt_fields, require_role_identity
 from .rbac import require_existing_platform_role
 from .runtime_callbacks import fetch_runtime_transcript, save_runtime_report, save_runtime_transcript
 
@@ -181,9 +182,18 @@ async def employee_detail(request: Request):
             "role": role.json if role else None,
             "skills": [skill.json for skill in skills],
             "recent_tasks": await _task_payloads_with_reports(employee.tenant_id, tasks),
+            "token_usage": await _employee_token_usage(employee),
         }
     )
     return response_ok(payload)
+
+
+async def _employee_token_usage(employee: CommandAgent) -> dict:
+    """聚合该数字员工累计的大模型 token 消耗。"""
+    from services.command_center.summary import aggregate_usage
+
+    runs = await CommandTaskRun.filter(tenant_id=employee.tenant_id, employee_id=employee.id, deleted=False).all()
+    return aggregate_usage(runs)
 
 
 @digital_employee_bp.post("/employee/update")
@@ -311,8 +321,10 @@ async def role_list(request: Request):
         keyword = data["keyword"]
         condition &= Q(name__icontains=keyword) | Q(role_key__icontains=keyword)
     queryset = DigitalEmployeeRole.filter(condition)
-    total = await queryset.count()
-    roles = await queryset.order_by("-is_builtin", "-utime").offset(offset).limit(size).all()
+    roles = await queryset.order_by("-is_builtin", "-utime").all()
+    roles = prefer_tenant_records(roles, _tenant_id(request), "role_key")
+    total = len(roles)
+    roles = roles[offset : offset + size]
     return response_ok({"list": [role.json for role in roles], "total": total, "page": page, "size": size})
 
 
@@ -382,8 +394,10 @@ async def skill_list(request: Request):
         keyword = data["keyword"]
         condition &= Q(name__icontains=keyword) | Q(skill_key__icontains=keyword) | Q(description__icontains=keyword)
     queryset = DigitalEmployeeSkill.filter(condition)
-    total = await queryset.count()
-    skills = await queryset.order_by("-is_builtin", "-utime").offset(offset).limit(size).all()
+    skills = await queryset.order_by("-is_builtin", "-utime").all()
+    skills = prefer_tenant_records(skills, _tenant_id(request), "skill_key")
+    total = len(skills)
+    skills = skills[offset : offset + size]
     return response_ok({"list": [skill.json for skill in skills], "total": total, "page": page, "size": size})
 
 
@@ -453,7 +467,12 @@ async def package_import(request: Request):
 @requires_permission("digital_employee:r")
 async def package_export(request: Request):
     data = _json(request)
-    data_bytes = await export_package(data.get("role_key"), data.get("skill_key"), bool(data.get("bundle", False)))
+    data_bytes = await export_package_for_tenant(
+        _tenant_id(request),
+        data.get("role_key"),
+        data.get("skill_key"),
+        bool(data.get("bundle", False)),
+    )
     return response.raw(data_bytes, content_type="application/zip")
 
 
@@ -463,6 +482,8 @@ async def package_list(request: Request):
     tenant_id = _tenant_id(request)
     roles = await DigitalEmployeeRole.filter(_visible_filter(tenant_id)).all()
     skills = await DigitalEmployeeSkill.filter(_visible_filter(tenant_id)).all()
+    roles = prefer_tenant_records(roles, tenant_id, "role_key")
+    skills = prefer_tenant_records(skills, tenant_id, "skill_key")
     return response_ok({"roles": [role.json for role in roles], "skills": [skill.json for skill in skills]})
 
 

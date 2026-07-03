@@ -45,7 +45,7 @@ echo "[Entrypoint] Running database migrations..."
 /app/.venv/bin/aerich upgrade
 echo "[Entrypoint] Database migrations completed successfully"
 
-if [ "${RY_DIGITAL_EMPLOYEE_BOOTSTRAP_PACKAGES:-true}" != "false" ]; then
+if [ "${RY_DIGITAL_EMPLOYEE_BOOTSTRAP_PACKAGES:-false}" = "true" ]; then
     echo "[Entrypoint] Bootstrapping digital employee builtin packages..."
     /app/.venv/bin/python -c "from services.digital_employee.bootstrap import main; raise SystemExit(main())"
     echo "[Entrypoint] Digital employee builtin package bootstrap completed"

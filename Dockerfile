@@ -69,9 +69,6 @@ COPY migrations ./migrations
 COPY pyproject.toml ./
 COPY settings ./settings
 COPY server.py ./
-COPY agent-template ./agent-template
-COPY skill-template ./skill-template
-COPY tools/build_packages.py ./tools/build_packages.py
 COPY docker-entrypoint.sh ./
 COPY services/inspection/inspection_report_template.docx ./services/inspection/inspection_report_template.docx
 COPY services/inspection/inspection_template_model.xlsx ./services/inspection/inspection_template_model.xlsx

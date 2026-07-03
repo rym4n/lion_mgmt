@@ -175,6 +175,7 @@ _install_importer_stubs()
 rbac = _load_module("services.digital_employee.rbac", "services/digital_employee/rbac.py")
 package_importer = _load_module("services.digital_employee.package_importer", "services/digital_employee/package_importer.py")
 export_package = package_importer.export_package
+export_package_for_tenant = package_importer.export_package_for_tenant
 _stage_files = package_importer._stage_files
 _import_bundle = package_importer._import_bundle
 import_package = package_importer.import_package
@@ -193,36 +194,10 @@ def _zip_with(files: dict[str, str]) -> bytes:
     return buffer.getvalue()
 
 
-def test_builtin_role_default_skill_templates_exist():
+def test_builtin_templates_are_not_owned_by_lion_mgmt():
     root = Path(__file__).resolve().parents[2]
-    agent_root = root / "agent-template"
-    skill_root = root / "skill-template"
-    missing = []
-
-    for role_dir in sorted(path for path in agent_root.iterdir() if path.is_dir()):
-        package = yaml.safe_load((role_dir / "package.yaml").read_text(encoding="utf-8")) or {}
-        role = yaml.safe_load((role_dir / "role.yaml").read_text(encoding="utf-8")) or {}
-        package_skills = [str(skill) for skill in package.get("default_skill_keys") or []]
-        role_skills = [str(skill) for skill in role.get("default_skills") or []]
-
-        assert package_skills == role_skills
-        for skill_key in package_skills:
-            skill_dir = skill_root / skill_key
-            if not (skill_dir / "package.yaml").exists() or not (skill_dir / "manifest.yaml").exists():
-                missing.append(f"{role_dir.name}:{skill_key}")
-
-    assert missing == []
-
-
-def test_builtin_role_prompt_fields_are_strings():
-    root = Path(__file__).resolve().parents[2]
-    agent_root = root / "agent-template"
-
-    for role_dir in sorted(path for path in agent_root.iterdir() if path.is_dir()):
-        role = yaml.safe_load((role_dir / "role.yaml").read_text(encoding="utf-8")) or {}
-        for field in package_importer.ROLE_PROMPT_TEXT_FIELDS:
-            if field in role:
-                assert isinstance(role[field], str), f"{role_dir.name}:{field} must be a string"
+    assert not (root / "agent-template").exists()
+    assert not (root / "skill-template").exists()
 
 
 def test_normalize_role_prompt_fields_keeps_explicit_configurable_fields_only():
@@ -248,86 +223,17 @@ def test_normalize_role_prompt_fields_keeps_explicit_configurable_fields_only():
     assert normalized["tools_notes"] == "只使用已绑定工具"
 
 
-def test_import_builtin_packages_imports_skills_before_roles(tmp_path):
-    skill_dir = tmp_path / "skill-template" / "alert_triage"
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "package.yaml").write_text(
-        yaml.safe_dump({"type": "skill", "skill_key": "alert_triage", "version": 1}),
-        encoding="utf-8",
-    )
-    (skill_dir / "manifest.yaml").write_text(
-        yaml.safe_dump({"key": "alert_triage", "name": "Alert triage", "version": 1}),
-        encoding="utf-8",
-    )
-    role_dir = tmp_path / "agent-template" / "monitor"
-    role_dir.mkdir(parents=True)
-    (role_dir / "package.yaml").write_text(
-        yaml.safe_dump({"type": "role", "role_key": "monitor", "version": 1}),
-        encoding="utf-8",
-    )
-    (role_dir / "role.yaml").write_text(
-        yaml.safe_dump({"key": "monitor", "name": "Monitor", "version": 1, "default_skills": ["alert_triage"]}),
-        encoding="utf-8",
-    )
+def test_import_builtin_packages_no_longer_reads_lion_mgmt_templates():
+    result = asyncio.run(import_builtin_packages(operator_id="bootstrap"))
 
-    calls = []
-    original_agent_root = package_importer.BUILTIN_AGENT_TEMPLATE_ROOT
-    original_skill_root = package_importer.BUILTIN_SKILL_TEMPLATE_ROOT
-    original_import_package = package_importer.import_package
-
-    async def fake_import_package(file_bytes, tenant_id, is_builtin=False, operator_id=None, request=None):
-        package_type, package = inspect_package(file_bytes)
-        package_key = package.get("skill_key") or package.get("role_key")
-        calls.append((package_type, package_key, tenant_id, is_builtin, operator_id))
-        return package_importer.ImportResult(package_type=package_type, imported=[{"package_key": package_key}])
-
-    package_importer.BUILTIN_AGENT_TEMPLATE_ROOT = tmp_path / "agent-template"
-    package_importer.BUILTIN_SKILL_TEMPLATE_ROOT = tmp_path / "skill-template"
-    package_importer.import_package = fake_import_package
-    try:
-        result = asyncio.run(import_builtin_packages(operator_id="bootstrap"))
-    finally:
-        package_importer.BUILTIN_AGENT_TEMPLATE_ROOT = original_agent_root
-        package_importer.BUILTIN_SKILL_TEMPLATE_ROOT = original_skill_root
-        package_importer.import_package = original_import_package
-
-    assert calls == [
-        ("skill", "alert_triage", "__builtin__", True, "bootstrap"),
-        ("role", "monitor", "__builtin__", True, "bootstrap"),
-    ]
-    assert [item["package_key"] for item in result.imported] == ["alert_triage", "monitor"]
-
-
-def test_import_builtin_packages_skips_existing_newer_version(tmp_path):
-    role_dir = tmp_path / "agent-template" / "monitor"
-    role_dir.mkdir(parents=True)
-    (role_dir / "package.yaml").write_text(
-        yaml.safe_dump({"type": "role", "role_key": "monitor", "version": 1}),
-        encoding="utf-8",
-    )
-    (role_dir / "role.yaml").write_text(yaml.safe_dump({"key": "monitor", "name": "Monitor"}), encoding="utf-8")
-    skill_root = tmp_path / "skill-template"
-    skill_root.mkdir()
-
-    original_agent_root = package_importer.BUILTIN_AGENT_TEMPLATE_ROOT
-    original_skill_root = package_importer.BUILTIN_SKILL_TEMPLATE_ROOT
-    original_import_package = package_importer.import_package
-
-    async def fake_import_package(*args, **kwargs):
-        raise CustomError(package_importer.ErrorCode.PACKAGE_VERSION_LOWER)
-
-    package_importer.BUILTIN_AGENT_TEMPLATE_ROOT = tmp_path / "agent-template"
-    package_importer.BUILTIN_SKILL_TEMPLATE_ROOT = skill_root
-    package_importer.import_package = fake_import_package
-    try:
-        result = asyncio.run(import_builtin_packages())
-    finally:
-        package_importer.BUILTIN_AGENT_TEMPLATE_ROOT = original_agent_root
-        package_importer.BUILTIN_SKILL_TEMPLATE_ROOT = original_skill_root
-        package_importer.import_package = original_import_package
-
+    assert result.package_type == "builtin"
     assert result.imported == []
-    assert result.skipped == [{"package_key": "monitor", "reason": "existing package version is newer"}]
+    assert result.skipped == [
+        {
+            "reason": "builtin packages are managed by aioe_package",
+            "operator_id": "bootstrap",
+        }
+    ]
 
 
 def test_upsert_role_auto_creates_missing_default_platform_role(tmp_path):
@@ -629,8 +535,60 @@ def test_stage_files_lists_nested_payload(tmp_path):
     assert _stage_files(tmp_path / "playbooks") == ["nested/tool.zip", "workflow.json"]
 
 
-def test_export_builtin_monitor_bundle_contains_role_and_skills():
-    package = asyncio.run(export_package(role_key="monitor", bundle=True))
+def test_export_builtin_monitor_bundle_contains_role_and_skills(tmp_path):
+    role_root = tmp_path / "resources" / "bundle" / "monitor" / "roles" / "monitor"
+    alert_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "alert_triage"
+    shift_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "shift_report_compose"
+    role_root.mkdir(parents=True)
+    alert_root.mkdir(parents=True)
+    shift_root.mkdir(parents=True)
+    (role_root / "package.yaml").write_text(
+        yaml.safe_dump({"type": "role", "role_key": "monitor", "default_skill_keys": ["alert_triage", "shift_report_compose"]}),
+        encoding="utf-8",
+    )
+    (role_root / "role.yaml").write_text(
+        yaml.safe_dump({"key": "monitor", "name": "Monitor", "default_skills": ["alert_triage", "shift_report_compose"]}),
+        encoding="utf-8",
+    )
+    for skill_root, skill_key in [(alert_root, "alert_triage"), (shift_root, "shift_report_compose")]:
+        (skill_root / "package.yaml").write_text(
+            yaml.safe_dump({"type": "skill", "skill_key": skill_key, "version": 1}),
+            encoding="utf-8",
+        )
+        (skill_root / "manifest.yaml").write_text(
+            yaml.safe_dump({"key": skill_key, "name": skill_key, "version": 1}),
+            encoding="utf-8",
+        )
+
+    async def fake_get_visible_role(tenant_id, role_key):
+        assert tenant_id == "__builtin__"
+        assert role_key == "monitor"
+        return types.SimpleNamespace(
+            role_key="monitor",
+            template_dir=str(role_root),
+            meta={"default_skills": ["alert_triage", "shift_report_compose"]},
+        )
+
+    async def fake_get_visible_skills(tenant_id, skill_keys):
+        assert tenant_id == "__builtin__"
+        assert skill_keys == ["alert_triage", "shift_report_compose"]
+        return [
+            types.SimpleNamespace(skill_key="alert_triage", skill_dir=str(alert_root)),
+            types.SimpleNamespace(skill_key="shift_report_compose", skill_dir=str(shift_root)),
+        ]
+
+    manager_module = types.ModuleType("services.digital_employee.manager")
+    manager_module.get_visible_role = fake_get_visible_role
+    manager_module.get_visible_skills = fake_get_visible_skills
+    old_manager = sys.modules.get("services.digital_employee.manager")
+    sys.modules["services.digital_employee.manager"] = manager_module
+    try:
+        package = asyncio.run(export_package(role_key="monitor", bundle=True))
+    finally:
+        if old_manager is None:
+            sys.modules.pop("services.digital_employee.manager", None)
+        else:
+            sys.modules["services.digital_employee.manager"] = old_manager
 
     package_type, meta = inspect_package(package)
     with zipfile.ZipFile(io.BytesIO(package)) as archive:
@@ -644,6 +602,74 @@ def test_export_builtin_monitor_bundle_contains_role_and_skills():
     assert "skills/shift_report_compose/manifest.yaml" in names
 
 
+def test_export_tenant_bundle_uses_imported_resource_dirs(tmp_path):
+    role_root = tmp_path / "resources" / "bundle" / "monitor" / "roles" / "monitor"
+    skill_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "alert_triage"
+    role_root.mkdir(parents=True)
+    skill_root.mkdir(parents=True)
+    (role_root / "package.yaml").write_text(
+        yaml.safe_dump({"type": "role", "role_key": "monitor", "default_skill_keys": ["alert_triage"]}),
+        encoding="utf-8",
+    )
+    (role_root / "role.yaml").write_text(
+        yaml.safe_dump({"key": "monitor", "name": "Custom monitor", "default_skills": ["alert_triage"]}),
+        encoding="utf-8",
+    )
+    (skill_root / "package.yaml").write_text(
+        yaml.safe_dump({"type": "skill", "skill_key": "alert_triage", "version": 1}),
+        encoding="utf-8",
+    )
+    (skill_root / "manifest.yaml").write_text(
+        yaml.safe_dump({"key": "alert_triage", "name": "Custom alert triage", "version": 1}),
+        encoding="utf-8",
+    )
+
+    async def fake_get_visible_role(tenant_id, role_key):
+        assert tenant_id == "tenant-1"
+        assert role_key == "monitor"
+        return types.SimpleNamespace(
+            role_key="monitor",
+            template_dir=str(role_root),
+            meta={"default_skills": ["alert_triage"]},
+        )
+
+    async def fake_get_visible_skills(tenant_id, skill_keys):
+        assert tenant_id == "tenant-1"
+        assert skill_keys == ["alert_triage"]
+        return [types.SimpleNamespace(skill_key="alert_triage", skill_dir=str(skill_root))]
+
+    manager_module = types.ModuleType("services.digital_employee.manager")
+    manager_module.get_visible_role = fake_get_visible_role
+    manager_module.get_visible_skills = fake_get_visible_skills
+    old_manager = sys.modules.get("services.digital_employee.manager")
+    sys.modules["services.digital_employee.manager"] = manager_module
+    try:
+        package = asyncio.run(export_package_for_tenant("tenant-1", role_key="monitor", bundle=True))
+    finally:
+        if old_manager is None:
+            sys.modules.pop("services.digital_employee.manager", None)
+        else:
+            sys.modules["services.digital_employee.manager"] = old_manager
+
+    package_type, meta = inspect_package(package)
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        names = set(archive.namelist())
+        role_yaml = yaml.safe_load(archive.read("roles/monitor/role.yaml")) or {}
+        skill_yaml = yaml.safe_load(archive.read("skills/alert_triage/manifest.yaml")) or {}
+
+    assert package_type == "bundle"
+    assert meta["role_key"] == "monitor"
+    assert names == {
+        "package.yaml",
+        "roles/monitor/package.yaml",
+        "roles/monitor/role.yaml",
+        "skills/alert_triage/package.yaml",
+        "skills/alert_triage/manifest.yaml",
+    }
+    assert role_yaml["name"] == "Custom monitor"
+    assert skill_yaml["name"] == "Custom alert triage"
+
+
 def test_export_bundle_requires_role_key():
     try:
         asyncio.run(export_package(skill_key="alert_triage", bundle=True))
@@ -654,23 +680,36 @@ def test_export_bundle_requires_role_key():
 
 
 def test_export_bundle_fails_when_default_skill_template_is_missing(tmp_path):
-    role_root = tmp_path / "agents"
-    skill_root = tmp_path / "skills"
-    monitor_root = role_root / "monitor"
-    monitor_root.mkdir(parents=True)
-    skill_root.mkdir()
-    (monitor_root / "package.yaml").write_text(
+    role_root = tmp_path / "resources" / "bundle" / "monitor" / "roles" / "monitor"
+    role_root.mkdir(parents=True)
+    (role_root / "package.yaml").write_text(
         yaml.safe_dump({"type": "role", "role_key": "monitor", "default_skill_keys": ["missing_skill"]}),
         encoding="utf-8",
     )
-    (monitor_root / "role.yaml").write_text(
+    (role_root / "role.yaml").write_text(
         yaml.safe_dump({"key": "monitor", "name": "Monitor", "default_skills": ["missing_skill"]}),
         encoding="utf-8",
     )
-    old_agent_root = package_importer.BUILTIN_AGENT_TEMPLATE_ROOT
-    old_skill_root = package_importer.BUILTIN_SKILL_TEMPLATE_ROOT
-    package_importer.BUILTIN_AGENT_TEMPLATE_ROOT = role_root
-    package_importer.BUILTIN_SKILL_TEMPLATE_ROOT = skill_root
+
+    async def fake_get_visible_role(tenant_id, role_key):
+        assert tenant_id == "__builtin__"
+        assert role_key == "monitor"
+        return types.SimpleNamespace(
+            role_key="monitor",
+            template_dir=str(role_root),
+            meta={"default_skills": ["missing_skill"]},
+        )
+
+    async def fake_get_visible_skills(tenant_id, skill_keys):
+        assert tenant_id == "__builtin__"
+        assert skill_keys == ["missing_skill"]
+        raise CustomError("PACKAGE_INVALID")
+
+    manager_module = types.ModuleType("services.digital_employee.manager")
+    manager_module.get_visible_role = fake_get_visible_role
+    manager_module.get_visible_skills = fake_get_visible_skills
+    old_manager = sys.modules.get("services.digital_employee.manager")
+    sys.modules["services.digital_employee.manager"] = manager_module
     try:
         try:
             asyncio.run(export_package(role_key="monitor", bundle=True))
@@ -679,8 +718,10 @@ def test_export_bundle_fails_when_default_skill_template_is_missing(tmp_path):
         else:
             raise AssertionError("expected CustomError")
     finally:
-        package_importer.BUILTIN_AGENT_TEMPLATE_ROOT = old_agent_root
-        package_importer.BUILTIN_SKILL_TEMPLATE_ROOT = old_skill_root
+        if old_manager is None:
+            sys.modules.pop("services.digital_employee.manager", None)
+        else:
+            sys.modules["services.digital_employee.manager"] = old_manager
 
 
 def test_bundle_import_stages_playbooks_and_actions_without_request(tmp_path):
@@ -796,7 +837,7 @@ def test_bundle_import_cleans_uploaded_action_artifacts_after_later_failure(tmp_
 def test_import_package_restores_existing_resource_directory_on_failure(tmp_path):
     resources_root = tmp_path / "resources"
     package_importer.DIGITAL_EMPLOYEE_RESOURCES = str(resources_root)
-    target_root = resources_root / "role" / "monitor"
+    target_root = resources_root / "tenant-1" / "role" / "monitor"
     target_root.mkdir(parents=True)
     (target_root / "existing.txt").write_text("old", encoding="utf-8")
     package = _zip_with(
@@ -824,3 +865,35 @@ def test_import_package_restores_existing_resource_directory_on_failure(tmp_path
 
     assert (target_root / "existing.txt").read_text(encoding="utf-8") == "old"
     assert not (target_root / "role.yaml").exists()
+
+
+def test_import_package_separates_builtin_and_tenant_resource_dirs(tmp_path):
+    resources_root = tmp_path / "resources"
+    package_importer.DIGITAL_EMPLOYEE_RESOURCES = str(resources_root)
+    package = _zip_with(
+        {
+            "package.yaml": yaml.safe_dump({"type": "skill", "skill_key": "alert_triage", "version": 1}),
+            "manifest.yaml": yaml.safe_dump({"key": "alert_triage", "name": "Alert triage", "version": 1}),
+        }
+    )
+    original_upsert_skill = package_importer._upsert_skill
+    calls = []
+
+    async def fake_upsert_skill(root_path, package, tenant_id, is_builtin):
+        calls.append((root_path, tenant_id, is_builtin))
+        return types.SimpleNamespace(skill_key=package["skill_key"], id=f"{tenant_id}:{package['skill_key']}")
+
+    package_importer._upsert_skill = fake_upsert_skill
+    try:
+        asyncio.run(import_package(package, tenant_id="tenant-1"))
+        (resources_root / "tenant-1" / "skill" / "alert_triage" / "tenant.txt").write_text("custom", encoding="utf-8")
+        asyncio.run(import_package(package, tenant_id="tenant-1", is_builtin=True))
+    finally:
+        package_importer._upsert_skill = original_upsert_skill
+
+    assert calls == [
+        (resources_root / "tenant-1" / "skill" / "alert_triage", "tenant-1", False),
+        (resources_root / "__builtin__" / "skill" / "alert_triage", "__builtin__", True),
+    ]
+    assert (resources_root / "tenant-1" / "skill" / "alert_triage" / "tenant.txt").read_text(encoding="utf-8") == "custom"
+    assert (resources_root / "__builtin__" / "skill" / "alert_triage" / "manifest.yaml").exists()

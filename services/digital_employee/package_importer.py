@@ -22,9 +22,6 @@ from .package_format import PackageFormatError, UnsupportedPackageTypeError, ins
 from .rbac import ensure_platform_role
 
 
-PACKAGE_SOURCE_ROOT = Path(__file__).resolve().parents[2]
-BUILTIN_AGENT_TEMPLATE_ROOT = PACKAGE_SOURCE_ROOT / "agent-template"
-BUILTIN_SKILL_TEMPLATE_ROOT = PACKAGE_SOURCE_ROOT / "skill-template"
 ROLE_PROMPT_TEXT_FIELDS = ("identity", "principles", "responsibilities", "workflows", "safety_rules", "tools_notes")
 
 
@@ -155,6 +152,11 @@ def _zip_directory_bytes(source: Path) -> bytes:
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         _archive_directory(archive, source)
     return buffer.getvalue()
+
+
+def _package_resource_root(package_type: str, package_name: str, tenant_id: str, is_builtin: bool) -> Path:
+    scope = "__builtin__" if is_builtin else tenant_id
+    return Path(DIGITAL_EMPLOYEE_RESOURCES) / scope / package_type / package_name
 
 
 async def _cleanup_imported_action_artifacts(actions: list[dict]) -> None:
@@ -466,7 +468,7 @@ async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = F
     package_type, package = _inspect_or_error(file_bytes)
     package_tenant_id = "__builtin__" if is_builtin else tenant_id
     package_name = package.get("role_key") or package.get("skill_key") or package.get("bundle_key") or "package"
-    target_root = Path(DIGITAL_EMPLOYEE_RESOURCES) / package_type / str(package_name)
+    target_root = _package_resource_root(package_type, str(package_name), tenant_id, is_builtin)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_base = Path(tmp_dir)
@@ -516,45 +518,32 @@ async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = F
 
 
 async def import_builtin_packages(operator_id: str = "system") -> ImportResult:
-    if not BUILTIN_SKILL_TEMPLATE_ROOT.exists() or not BUILTIN_AGENT_TEMPLATE_ROOT.exists():
-        raise CustomError(ErrorCode.PACKAGE_INVALID)
-
-    result = ImportResult(package_type="builtin")
-    package_dirs = [
-        *_iter_child_dirs(BUILTIN_SKILL_TEMPLATE_ROOT),
-        *_iter_child_dirs(BUILTIN_AGENT_TEMPLATE_ROOT),
-    ]
-    for package_dir in package_dirs:
-        try:
-            imported = await import_package(
-                _zip_directory_bytes(package_dir),
-                tenant_id="__builtin__",
-                is_builtin=True,
-                operator_id=operator_id,
-            )
-        except CustomError as exc:
-            if exc.enum != ErrorCode.PACKAGE_VERSION_LOWER:
-                raise
-            result.skipped.append(
-                {
-                    "package_key": package_dir.name,
-                    "reason": "existing package version is newer",
-                }
-            )
-            continue
-        package_key = package_dir.name
-        result.imported.append(
+    logger.warning(
+        "digital employee builtin package bootstrap is deprecated; "
+        "builtin role and skill packages are managed by aioe_package"
+    )
+    return ImportResult(
+        package_type="builtin",
+        skipped=[
             {
-                "package_key": package_key,
-                "package_type": imported.package_type,
-                "imported": imported.imported,
-                "skipped": imported.skipped,
+                "reason": "builtin packages are managed by aioe_package",
+                "operator_id": operator_id,
             }
-        )
-    return result
+        ],
+    )
 
 
 async def export_package(role_key: str | None = None, skill_key: str | None = None, bundle: bool = False) -> bytes:
+    return await export_package_for_tenant("__builtin__", role_key=role_key, skill_key=skill_key, bundle=bundle)
+
+
+async def export_package_for_tenant(
+    tenant_id: str | None,
+    role_key: str | None = None,
+    skill_key: str | None = None,
+    bundle: bool = False,
+) -> bytes:
+    effective_tenant_id = tenant_id or "__builtin__"
     if not role_key and not skill_key:
         raise CustomError(ErrorCode.PARAM_ERROR)
     if bundle and not role_key:
@@ -562,9 +551,15 @@ async def export_package(role_key: str | None = None, skill_key: str | None = No
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         if bundle:
-            role_source = BUILTIN_AGENT_TEMPLATE_ROOT / str(role_key)
+            from .manager import get_visible_role, get_visible_skills
+
+            role = await get_visible_role(effective_tenant_id, str(role_key))
+            role_source = Path(role.template_dir)
             role_package = _read_yaml(role_source / "package.yaml")
-            skill_keys = role_package.get("default_skill_keys") or _read_yaml(role_source / "role.yaml").get("default_skills") or []
+            skill_keys = role_package.get("default_skill_keys") or (role.meta or {}).get("default_skills") or (role.meta or {}).get("default_skill_keys") or []
+            skills = await get_visible_skills(effective_tenant_id, [str(key) for key in skill_keys])
+            skill_sources = {skill.skill_key: Path(skill.skill_dir) for skill in skills}
+            role_package = _read_yaml(role_source / "package.yaml")
             bundle_key = role_package.get("bundle_key") or role_key
             archive.writestr(
                 "package.yaml",
@@ -582,14 +577,20 @@ async def export_package(role_key: str | None = None, skill_key: str | None = No
             )
             _archive_directory(archive, role_source, f"roles/{role_key}")
             for default_skill_key in skill_keys:
-                skill_source = BUILTIN_SKILL_TEMPLATE_ROOT / str(default_skill_key)
-                if not skill_source.exists():
+                skill_source = skill_sources.get(str(default_skill_key))
+                if not skill_source or not skill_source.exists():
                     raise CustomError(ErrorCode.PACKAGE_INVALID)
                 _archive_directory(archive, skill_source, f"skills/{default_skill_key}")
         else:
             package_type = "role" if role_key else "skill"
             package_key = role_key or skill_key
-            source_root = (BUILTIN_AGENT_TEMPLATE_ROOT if role_key else BUILTIN_SKILL_TEMPLATE_ROOT) / str(package_key)
+            from .manager import get_visible_role, get_visible_skills
+
+            if role_key:
+                source_root = Path((await get_visible_role(effective_tenant_id, str(role_key))).template_dir)
+            else:
+                skills = await get_visible_skills(effective_tenant_id, [str(skill_key)])
+                source_root = Path(skills[0].skill_dir)
             if source_root.exists():
                 _archive_directory(archive, source_root)
             else:

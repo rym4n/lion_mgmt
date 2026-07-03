@@ -23,8 +23,23 @@ def _visible_condition(tenant_id: str):
     return Q(deleted=False) & (Q(tenant_id=tenant_id) | Q(is_builtin=True))
 
 
+def prefer_tenant_records(records: list, tenant_id: str, key_attr: str) -> list:
+    """Prefer tenant-owned package rows over package-provided builtin baselines."""
+    preferred = {}
+    for record in records:
+        key = getattr(record, key_attr, None)
+        if not key:
+            continue
+        current = preferred.get(key)
+        if current is None or (getattr(record, "tenant_id", None) == tenant_id and getattr(current, "tenant_id", None) != tenant_id):
+            preferred[key] = record
+    return list(preferred.values())
+
+
 async def get_visible_role(tenant_id: str, role_key: str) -> DigitalEmployeeRole:
-    role = await DigitalEmployeeRole.filter(_visible_condition(tenant_id), role_key=role_key, enabled=True).first()
+    roles = await DigitalEmployeeRole.filter(_visible_condition(tenant_id), role_key=role_key, enabled=True).all()
+    visible = prefer_tenant_records(roles, tenant_id, "role_key")
+    role = visible[0] if visible else None
     if not role:
         raise CustomError(ErrorCode.DIGITAL_EMPLOYEE_ROLE_NOT_FOUND)
     return role
@@ -33,10 +48,13 @@ async def get_visible_role(tenant_id: str, role_key: str) -> DigitalEmployeeRole
 async def get_visible_skills(tenant_id: str, skill_keys: list[str]) -> list[DigitalEmployeeSkill]:
     if not skill_keys:
         return []
-    skills = await DigitalEmployeeSkill.filter(_visible_condition(tenant_id), skill_key__in=skill_keys, enabled=True).all()
-    if {skill.skill_key for skill in skills} != set(skill_keys):
+    requested_keys = list(dict.fromkeys(skill_keys))
+    skills = await DigitalEmployeeSkill.filter(_visible_condition(tenant_id), skill_key__in=requested_keys, enabled=True).all()
+    preferred = prefer_tenant_records(skills, tenant_id, "skill_key")
+    skills_by_key = {skill.skill_key: skill for skill in preferred}
+    if set(skills_by_key) != set(requested_keys):
         raise CustomError(ErrorCode.DIGITAL_EMPLOYEE_SKILL_NOT_FOUND)
-    return skills
+    return [skills_by_key[key] for key in requested_keys]
 
 
 def derive_capabilities(role: DigitalEmployeeRole, skills: list[DigitalEmployeeSkill]) -> list[str]:

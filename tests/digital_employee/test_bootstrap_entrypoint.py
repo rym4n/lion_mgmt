@@ -10,6 +10,15 @@ def test_entrypoint_invokes_bootstrap_by_import_for_nuitka_runtime():
 
     assert "python -m services.digital_employee.bootstrap" not in entrypoint
     assert "from services.digital_employee.bootstrap import main" in entrypoint
+    assert 'RY_DIGITAL_EMPLOYEE_BOOTSTRAP_PACKAGES:-false' in entrypoint
+
+
+def test_runtime_image_does_not_embed_builtin_package_templates():
+    root = Path(__file__).resolve().parents[2]
+    dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "COPY agent-template" not in dockerfile
+    assert "COPY skill-template" not in dockerfile
 
 
 def test_bootstrap_import_does_not_load_full_app_factory():

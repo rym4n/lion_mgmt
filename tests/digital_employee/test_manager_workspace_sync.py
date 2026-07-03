@@ -209,3 +209,17 @@ def test_sync_employee_workspace_skips_matching_etag_without_force():
         assert employee.saved_update_fields == []
     finally:
         _restore_modules(original_modules)
+
+
+def test_prefer_tenant_records_keeps_tenant_customization_over_builtin_baseline():
+    manager, original_modules = _load_manager([])
+    try:
+        builtin = SimpleNamespace(tenant_id="__builtin__", skill_key="alert_triage", name="builtin")
+        customized = SimpleNamespace(tenant_id="tenant-1", skill_key="alert_triage", name="customized")
+        other_builtin = SimpleNamespace(tenant_id="__builtin__", skill_key="vuln_scan", name="vuln")
+
+        preferred = manager.prefer_tenant_records([builtin, other_builtin, customized], "tenant-1", "skill_key")
+
+        assert preferred == [customized, other_builtin]
+    finally:
+        _restore_modules(original_modules)

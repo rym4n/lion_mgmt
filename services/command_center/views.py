@@ -13,7 +13,7 @@ from settings import TZ
 
 from .approval_service import decide_approval, get_approval, list_approvals, resume_approved_approval
 from .manager import TERMINAL_TASK_STATUS, create_command_task, dispatch_task, list_tasks, update_task_progress
-from .summary import aggregate_usage, build_task_summary, humanize_event, normalize_usage
+from .summary import aggregate_usage, build_task_summary, humanize_event, normalize_usage, zero_usage
 
 command_bp = Blueprint("command_center", url_prefix="/command_center")
 __all__ = ["command_bp"]
@@ -264,6 +264,7 @@ def _task_detail_json(task: CommandTask, actor: dict | None = None) -> dict:
         "assigned_agent_role_name": actor.get("assigned_agent_role_name"),
         "assigned_agent_deleted": actor.get("assigned_agent_deleted", False),
         "creator_display_name": actor.get("creator_display_name"),
+        "token_usage": actor.get("token_usage") or zero_usage(),
     }
 
 
@@ -291,6 +292,17 @@ async def _resolve_task_actors(tasks: list[CommandTask], tenant_id: str) -> dict
         accounts = await Account.filter(id__in=list(creator_ids)).all()
         creators_by_id = {account.id: account for account in accounts}
 
+    # 批量聚合每个任务的 token 消耗，避免前端逐个查详情
+    usage_by_task: dict[str, dict] = {}
+    task_ids = [task.id for task in tasks]
+    if task_ids:
+        runs = await CommandTaskRun.filter(tenant_id=tenant_id, task_id__in=task_ids, deleted=False).all()
+        runs_by_task: dict[str, list] = {}
+        for run in runs:
+            runs_by_task.setdefault(run.task_id, []).append(run)
+        for task_id, task_runs in runs_by_task.items():
+            usage_by_task[task_id] = aggregate_usage(task_runs)
+
     actors: dict[str, dict] = {}
     for task in tasks:
         raw = task.json
@@ -301,6 +313,7 @@ async def _resolve_task_actors(tasks: list[CommandTask], tenant_id: str) -> dict
             "assigned_agent_role_name": role_names.get(agent.role_key) if agent and agent.role_key else None,
             "assigned_agent_deleted": bool(agent.deleted) if agent else False,
             "creator_display_name": (creator.display_name or creator.username) if creator else None,
+            "token_usage": usage_by_task.get(task.id, zero_usage()),
         }
     return actors
 
