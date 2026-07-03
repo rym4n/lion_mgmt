@@ -125,7 +125,7 @@ async def test_timer_success_rate_groups_node_logs_by_run_id(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_timer_success_rate_does_not_count_running_logs_as_success(monkeypatch):
+async def test_timer_success_rate_reports_latest_running_logs(monkeypatch):
     timed = SimpleNamespace(id="timer-1", success_rate=None, result=None)
     saved = {}
 
@@ -161,10 +161,10 @@ async def test_timer_success_rate_does_not_count_running_logs_as_success(monkeyp
     assert saved["called"] is True
     assert result == {
         "id": "timer-1",
-        "result": "fail",
+        "result": "running",
         "success_rate": "66.67%",
     }
-    assert timed.result == "fail"
+    assert timed.result == "running"
     assert timed.success_rate == "66.67%"
 
 

@@ -42,6 +42,7 @@ DISABLED = 0
 ENABLED = 1
 # Only terminal success counts; running/waiting logs must not inflate the rate.
 SUCCESS_RUNLOG_STATUSES = {0}
+RUNNING_RUNLOG_STATUSES = {1, 2}
 
 
 def _current_timed_internal_scope(maintenance_mode):
@@ -1275,7 +1276,12 @@ async def timer_success_rate(timed: Timed):
         timed.success_rate = f"{round(success_count / len(runs) * 100, 2)}%"
         latest_run_id = run_ids[0]
         latest_logs = runs.get(latest_run_id, [])
-        timed.result = "success" if latest_logs and all(log.status in SUCCESS_RUNLOG_STATUSES for log in latest_logs) else "fail"
+        if latest_logs and any(log.status in RUNNING_RUNLOG_STATUSES for log in latest_logs):
+            timed.result = "running"
+        elif latest_logs and all(log.status in SUCCESS_RUNLOG_STATUSES for log in latest_logs):
+            timed.result = "success"
+        else:
+            timed.result = "fail"
     else:
         timed.success_rate = None
         timed.result = None
