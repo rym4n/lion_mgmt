@@ -4,7 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from services.timed.views import _parse_dashboard_datetime_range, _timed_name_filter_kwargs, dashboard_statistics, timer_success_rate
+from services.timed.views import (
+    _parse_dashboard_datetime_range,
+    _timed_internal_scope_from_request,
+    _timed_name_filter_kwargs,
+    dashboard_statistics,
+    timer_success_rate,
+)
 
 
 class _FakeQuery:
@@ -49,6 +55,23 @@ def test_timed_name_filter_scopes_by_visible_internal_state():
         "tenant_id": "tenant-1",
         "internal": False,
     }
+
+
+@pytest.mark.parametrize(
+    ("scope", "maintenance_mode", "expected"),
+    [
+        (0, True, False),
+        ("0", True, False),
+        (1, False, True),
+        ("1", False, True),
+        (2, True, None),
+        ("2", False, None),
+        (None, True, True),
+        (None, False, False),
+    ],
+)
+def test_timed_internal_scope_prefers_request_scope(scope, maintenance_mode, expected):
+    assert _timed_internal_scope_from_request(scope, maintenance_mode) is expected
 
 
 def test_parse_dashboard_datetime_range_includes_end_day_midnight():

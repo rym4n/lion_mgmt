@@ -48,6 +48,16 @@ def _current_timed_internal_scope(maintenance_mode):
     return maintenance_mode if maintenance_mode else False
 
 
+def _timed_internal_scope_from_request(scope, maintenance_mode):
+    if scope in [0, "0"]:
+        return False
+    if scope in [1, "1"]:
+        return True
+    if scope in [2, "2"]:
+        return None
+    return _current_timed_internal_scope(maintenance_mode)
+
+
 def _timed_name_filter_kwargs(name, tenant_id, internal):
     return {"name": name, "deleted": False, "tenant_id": tenant_id, "internal": internal}
 
@@ -55,6 +65,11 @@ def _timed_name_filter_kwargs(name, tenant_id, internal):
 async def get_current_timed_internal_scope(request):
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     return _current_timed_internal_scope(maintenance_mode)
+
+
+async def get_requested_timed_internal_scope(request):
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    return _timed_internal_scope_from_request((request.json or {}).get("scope"), maintenance_mode)
 
 
 def _parse_dashboard_datetime_range(start, end):
@@ -199,7 +214,9 @@ async def add_timed(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
-    internal = await get_current_timed_internal_scope(request)
+    internal = await get_requested_timed_internal_scope(request)
+    if internal is None:
+        internal = await get_current_timed_internal_scope(request)
 
     if await Timed.filter(**_timed_name_filter_kwargs(name, tenant_id, internal)).exists():
         raise CustomError(ErrorCode.TIMED_NAME_EXISTS)
@@ -472,15 +489,7 @@ async def get_all(request):
 
     condition = Q(deleted=False, tenant_id=tenant_id)
 
-    internal = None
-    if scope in [0, "0"]:
-        internal = False
-    elif scope in [1, "1"]:
-        internal = True
-    elif scope in [2, "2"]:
-        internal = None
-    else:
-        internal = maintenance_mode if maintenance_mode else False
+    internal = _timed_internal_scope_from_request(scope, maintenance_mode)
 
     if internal is not None:
         condition &= Q(internal=internal)
@@ -510,7 +519,7 @@ async def get_all(request):
             end_time = datetime.datetime.strptime(end_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
             condition &= Q(utime__lte=end_time)
 
-    all_items = await Timed.filter(condition).prefetch_related("action", "playbook", "creator", "updator")
+    all_items = await Timed.filter(condition).prefetch_related("action", "playbook", "creator", "updator").order_by("-ctime")
 
     if keyword:
         keyword = keyword.lower()
