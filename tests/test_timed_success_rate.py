@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from services.timed.views import timer_success_rate
+from services.timed.views import _parse_dashboard_datetime_range, _timed_name_filter_kwargs, dashboard_statistics, timer_success_rate
 
 
 class _FakeQuery:
@@ -40,6 +40,22 @@ class _FakeQuery:
             return self._value
 
         return _result().__await__()
+
+
+def test_timed_name_filter_scopes_by_visible_internal_state():
+    assert _timed_name_filter_kwargs("test", "tenant-1", False) == {
+        "name": "test",
+        "deleted": False,
+        "tenant_id": "tenant-1",
+        "internal": False,
+    }
+
+
+def test_parse_dashboard_datetime_range_includes_end_day_midnight():
+    start_dt, end_dt = _parse_dashboard_datetime_range("2026-04-01T00:00:00Z", "2026-04-30T00:00:00Z")
+
+    assert start_dt.isoformat() == "2026-04-01T00:00:00+00:00"
+    assert end_dt.isoformat() == "2026-04-30T23:59:59.999999+00:00"
 
 
 @pytest.mark.asyncio
@@ -127,3 +143,70 @@ async def test_timer_success_rate_does_not_count_running_logs_as_success(monkeyp
     }
     assert timed.result == "fail"
     assert timed.success_rate == "66.67%"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_statistics_counts_status_one_as_failure(monkeypatch):
+    captured = {}
+
+    class FakeTimed:
+        @staticmethod
+        async def get_or_none(**kwargs):
+            captured["timed_filter"] = kwargs
+            return SimpleNamespace(id=kwargs["id"])
+
+    class FakeConnection:
+        async def execute_query_dict(self, sql, params):
+            captured["sql"] = sql
+            captured["params"] = params
+            return [
+                {
+                    "date": "2026-04-20",
+                    "total_runs": 21,
+                    "success_count": 15,
+                    "fail_count": 6,
+                }
+            ]
+
+    class FakeTransaction:
+        async def __aenter__(self):
+            return FakeConnection()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    def fake_response_ok(data):
+        return data
+
+    request = SimpleNamespace(
+        json={
+            "id": "timer-1",
+            "start": "2026-04-01T00:00:00Z",
+            "end": "2026-04-30T00:00:00Z",
+        },
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}),
+    )
+
+    monkeypatch.setattr("services.timed.views.Timed", FakeTimed)
+    monkeypatch.setattr("services.timed.views.in_transaction", lambda: FakeTransaction())
+    monkeypatch.setattr("services.timed.views.response_ok", fake_response_ok)
+
+    result = await dashboard_statistics.__wrapped__.__wrapped__(request)
+
+    assert "status NOT IN (0)" in captured["sql"]
+    assert "status NOT IN (0, 1)" not in captured["sql"]
+    assert captured["timed_filter"] == {
+        "id": "timer-1",
+        "deleted": False,
+        "tenant_id": "tenant-1",
+    }
+    assert captured["params"][2].isoformat() == "2026-04-30T23:59:59.999999+00:00"
+    assert result == [
+        {
+            "date": "2026-04-20",
+            "total_runs": 21,
+            "success_count": 15,
+            "fail_count": 6,
+            "success_rate": "71.0%",
+        }
+    ]

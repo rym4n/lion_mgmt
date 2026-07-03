@@ -44,6 +44,31 @@ ENABLED = 1
 SUCCESS_RUNLOG_STATUSES = {0}
 
 
+def _current_timed_internal_scope(maintenance_mode):
+    return maintenance_mode if maintenance_mode else False
+
+
+def _timed_name_filter_kwargs(name, tenant_id, internal):
+    return {"name": name, "deleted": False, "tenant_id": tenant_id, "internal": internal}
+
+
+async def get_current_timed_internal_scope(request):
+    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    return _current_timed_internal_scope(maintenance_mode)
+
+
+def _parse_dashboard_datetime_range(start, end):
+    start_dt = datetime.datetime.strptime(start, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+    end_dt = datetime.datetime.strptime(end, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+    if (
+        end_dt.time() == datetime.time.min
+        and start_dt.date() < end_dt.date()
+        and end_dt.microsecond == 0
+    ):
+        end_dt = end_dt + datetime.timedelta(days=1) - datetime.timedelta(microseconds=1)
+    return start_dt, end_dt
+
+
 def build_timer_rule(status, tactics, end_time):
     if status == EXEC_TYPE_ONCE:
         return {"timer": "once", "timer_rule": {"run_date": tactics}}
@@ -174,8 +199,9 @@ async def add_timed(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    internal = await get_current_timed_internal_scope(request)
 
-    if await Timed.filter(name=request.json.get("name"), deleted=False, tenant_id=tenant_id).exists():
+    if await Timed.filter(**_timed_name_filter_kwargs(name, tenant_id, internal)).exists():
         raise CustomError(ErrorCode.TIMED_NAME_EXISTS)
 
     msg = {}
@@ -238,7 +264,6 @@ async def add_timed(request):
                 logger.info(f"定时任务{name}的执行策略{tactics}不符合crontab格式，创建失败")
                 raise CustomError(ErrorCode.CRON_EXPRESSION_ERROR)
             timer_rule["crontab"] = tactics
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     timed = await Timed.create(
         name=name,
         type=operate_type,
@@ -251,7 +276,7 @@ async def add_timed(request):
         tactics=tactics,
         end_time=end_time,
         enable=1,
-        internal=maintenance_mode if maintenance_mode else False,
+        internal=internal,
         creator=request.ctx.session["account_info"],
         updator=request.ctx.session["account_info"],
         tenant_id=tenant_id,
@@ -661,8 +686,7 @@ async def dashboard_statistics(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     try:
-        start_dt = datetime.datetime.strptime(start, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
-        end_dt = datetime.datetime.strptime(end, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
+        start_dt, end_dt = _parse_dashboard_datetime_range(start, end)
     except (TypeError, ValueError):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
@@ -681,7 +705,7 @@ async def dashboard_statistics(request):
             SELECT
                 run_id,
                 MAX(end_time) as run_end,
-                MAX(CASE WHEN status NOT IN (0, 1) THEN 1 ELSE 0 END) as is_fail
+                MAX(CASE WHEN status NOT IN (0) THEN 1 ELSE 0 END) as is_fail
             FROM runlog
             WHERE timer_id = $1
               AND start_time BETWEEN $2 AND $3
