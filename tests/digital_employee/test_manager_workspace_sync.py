@@ -187,6 +187,46 @@ def test_sync_employee_workspace_force_bypasses_matching_etag_shortcut():
         _restore_modules(original_modules)
 
 
+def test_sync_employee_workspace_resolves_visible_role_by_role_key():
+    sync_calls = []
+    manager, original_modules = _load_manager(sync_calls)
+    try:
+        visible_role = SimpleNamespace(role_key="ops", version=9)
+        stale_role = SimpleNamespace(role_key="ops", version=1)
+        skill = SimpleNamespace(skill_key="triage", version=2)
+        employee = FakeEmployee(
+            id="employee-1",
+            tenant_id="tenant-1",
+            role_key="ops",
+            skill_keys=["triage"],
+            workspace_etag="old-etag",
+            workspace_synced_at=datetime.now(timezone.utc),
+            saved_update_fields=[],
+            role=stale_role,
+        )
+        calls = []
+
+        async def fake_get_visible_role(tenant_id, role_key):
+            calls.append((tenant_id, role_key))
+            return visible_role
+
+        async def fake_get_visible_skills(tenant_id, skill_keys):
+            assert tenant_id == "tenant-1"
+            assert skill_keys == ["triage"]
+            return [skill]
+
+        manager.get_visible_role = fake_get_visible_role
+        manager.get_visible_skills = fake_get_visible_skills
+
+        result = asyncio.run(manager.sync_employee_workspace(employee))
+
+        assert result is employee
+        assert calls == [("tenant-1", "ops")]
+        assert sync_calls[0]["role_version"] == 9
+    finally:
+        _restore_modules(original_modules)
+
+
 def test_sync_employee_workspace_skips_matching_etag_without_force():
     sync_calls = []
     manager, original_modules = _load_manager(sync_calls)

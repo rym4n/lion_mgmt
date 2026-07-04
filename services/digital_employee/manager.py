@@ -113,9 +113,7 @@ async def sync_employee_workspace(
     force: bool = False,
 ) -> CommandAgent:
     if role is None:
-        role = await employee.role
-    if role is None:
-        raise CustomError(ErrorCode.DIGITAL_EMPLOYEE_ROLE_NOT_FOUND)
+        role = await get_visible_role(employee.tenant_id, employee.role_key)
     if skills is None:
         skills = await get_visible_skills(employee.tenant_id, employee.skill_keys or [])
     etag = workspace_etag(role, skills, employee)
@@ -135,9 +133,7 @@ async def sync_employee_workspace(
 
 
 async def update_employee_skills(employee: CommandAgent, skill_keys: list[str]) -> CommandAgent:
-    role = await employee.role
-    if role is None:
-        raise CustomError(ErrorCode.DIGITAL_EMPLOYEE_ROLE_NOT_FOUND)
+    role = await get_visible_role(employee.tenant_id, employee.role_key)
     skills = await get_visible_skills(employee.tenant_id, skill_keys)
     employee.skill_keys = [skill.skill_key for skill in skills]
     employee.capabilities = derive_capabilities(role, skills)

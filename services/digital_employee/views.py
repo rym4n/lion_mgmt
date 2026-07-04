@@ -32,6 +32,7 @@ from .runtime_callbacks import fetch_runtime_transcript, save_runtime_report, sa
 
 digital_employee_bp = Blueprint("digital_employee", url_prefix="/digital_employee")
 __all__ = ["digital_employee_bp"]
+_ROLE_UNSET = object()
 
 
 def _json(request: Request) -> dict:
@@ -78,9 +79,24 @@ async def _employee_or_404(tenant_id: str, employee_id: str) -> CommandAgent:
     return employee
 
 
-def _employee_payload(employee: CommandAgent) -> dict:
+async def _visible_roles_by_key(tenant_id: str, role_keys: list[str]) -> dict[str, DigitalEmployeeRole]:
+    keys = [key for key in dict.fromkeys(role_keys) if key]
+    if not keys:
+        return {}
+    roles = await DigitalEmployeeRole.filter(_visible_filter(tenant_id), role_key__in=keys, enabled=True).all()
+    return {role.role_key: role for role in prefer_tenant_records(roles, tenant_id, "role_key")}
+
+
+async def _employee_payload(employee: CommandAgent, role=_ROLE_UNSET) -> dict:
     payload = employee.json
     payload.pop("description", None)
+    resolved_role = None
+    if role is _ROLE_UNSET:
+        if employee.role_key:
+            resolved_role = await get_visible_role(employee.tenant_id, employee.role_key)
+    else:
+        resolved_role = role
+    payload["role"] = resolved_role.json if resolved_role else None
     return payload
 
 
@@ -147,7 +163,7 @@ async def employee_create(request: Request):
         agent_key=data.get("agent_key"),
         rbac_role_id=data.get("rbac_role_id"),
     )
-    return response_ok(_employee_payload(employee))
+    return response_ok(await _employee_payload(employee))
 
 
 @digital_employee_bp.post("/employee/list")
@@ -166,17 +182,25 @@ async def employee_list(request: Request):
     queryset = CommandAgent.filter(condition)
     total = await queryset.count()
     employees = await queryset.order_by("-utime").offset(offset).limit(size).all()
-    return response_ok({"list": [_employee_payload(item) for item in employees], "total": total, "page": page, "size": size})
+    roles_by_key = await _visible_roles_by_key(_tenant_id(request), [item.role_key for item in employees])
+    return response_ok(
+        {
+            "list": [await _employee_payload(item, role=roles_by_key.get(item.role_key)) for item in employees],
+            "total": total,
+            "page": page,
+            "size": size,
+        }
+    )
 
 
 @digital_employee_bp.post("/employee/detail")
 @requires_permission("digital_employee:r")
 async def employee_detail(request: Request):
     employee = await _employee_or_404(_tenant_id(request), _json(request).get("employee_id"))
-    role = await employee.role
+    role = await get_visible_role(employee.tenant_id, employee.role_key)
     skills = await get_visible_skills(employee.tenant_id, employee.skill_keys or [])
     tasks = await CommandTask.filter(tenant_id=employee.tenant_id, assigned_agent_id=employee.id, deleted=False).order_by("-ctime").limit(10).all()
-    payload = _employee_payload(employee)
+    payload = await _employee_payload(employee, role=role)
     payload.update(
         {
             "role": role.json if role else None,
@@ -212,7 +236,7 @@ async def employee_update(request: Request):
     employee.workspace_etag = None
     await employee.save()
     await sync_employee_workspace(employee)
-    return response_ok(_employee_payload(employee))
+    return response_ok(await _employee_payload(employee))
 
 
 @digital_employee_bp.post("/employee/delete")
@@ -236,7 +260,7 @@ async def employee_skills_update(request: Request):
     data = _json(request)
     employee = await _employee_or_404(_tenant_id(request), data.get("employee_id"))
     employee = await update_employee_skills(employee, data.get("skill_keys") or [])
-    return response_ok(_employee_payload(employee))
+    return response_ok(await _employee_payload(employee))
 
 
 @digital_employee_bp.post("/employee/scope/update")
@@ -248,7 +272,7 @@ async def employee_scope_update(request: Request):
     employee.workspace_etag = None
     await employee.save(update_fields=["resource_scope", "workspace_etag", "utime"])
     await sync_employee_workspace(employee)
-    return response_ok(_employee_payload(employee))
+    return response_ok(await _employee_payload(employee))
 
 
 @digital_employee_bp.post("/employee/repair")
