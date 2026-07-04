@@ -626,7 +626,7 @@ async def create_event(request):
 @openapi.definition(
     summary="获取事件详情",
     description="获取事件详情（需要事件查询权限）",
-    body={"id": "事件id"},
+    body={"id": "事件id", "initialize_room": "是否初始化作战室"},
     response={
         "200": {
             "description": "Success",
@@ -637,6 +637,7 @@ async def create_event(request):
 @requires_permission("event:r")
 async def get_event_detail(request):
     event_id = request.json.get("id")
+    initialize_room = bool(request.json.get("initialize_room"))
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -645,18 +646,23 @@ async def get_event_detail(request):
         raise CustomError(ErrorCode.NOT_FOUND)
     creator = request.ctx.session["account_info"]
     first = False
-    if not event.room:
-        room_name = event.event_name + "_" + gen_random_code(6)
-        if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
-            raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
-        room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id, room_type="public")
-        event.room = room
-        first = True
-    if event.event_process_status == "待处理":
-        event.event_process_status = "处理中"
-    await event.save()
-    await creator.star_rooms.add(event.room)
-    await event.room.users.add(creator)
+    if initialize_room:
+        update_fields = []
+        if not event.room:
+            room_name = event.event_name + "_" + gen_random_code(6)
+            if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
+                raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
+            room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id, room_type="public")
+            event.room = room
+            first = True
+            update_fields.append("room")
+        if event.event_process_status == "待处理":
+            event.event_process_status = "处理中"
+            update_fields.append("event_process_status")
+        if update_fields:
+            await event.save(update_fields=update_fields)
+        await creator.star_rooms.add(event.room)
+        await event.room.users.add(creator)
 
     event_dict = {"created_name": request.ctx.session["account_info"].username}
 
@@ -664,7 +670,7 @@ async def get_event_detail(request):
     run_logs_grouped = await runlog_list(run_logs)
     event_dict["data"] = run_logs_grouped
 
-    event_dict["room_users"] = [user.username if user else "" for user in await event.room.users.all()]
+    event_dict["room_users"] = [user.username if user else "" for user in await event.room.users.all()] if event.room else []
     role_list = []
     user_list = []
     if event.owner:
