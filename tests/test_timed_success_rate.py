@@ -4,13 +4,48 @@ from types import SimpleNamespace
 
 import pytest
 
+from libs.security.authorization import account_has_permission, is_superadmin
 from services.timed.views import (
     _parse_dashboard_datetime_range,
+    _timed_action_permissions,
     _timed_internal_scope_from_request,
     _timed_name_filter_kwargs,
     dashboard_statistics,
     timer_success_rate,
 )
+
+
+def _account(*permission_lists):
+    roles = [SimpleNamespace(permissions=perms) for perms in permission_lists]
+    return SimpleNamespace(roles=roles)
+
+
+def test_account_has_permission_matches_wildcard():
+    superadmin = _account(["*:*"])
+    assert account_has_permission(superadmin, "timed:r") is True
+    assert is_superadmin(superadmin) is True
+
+    tenant_admin = _account(["timed:c,d,u,r", "workflow:c,d,u,r"])
+    assert account_has_permission(tenant_admin, "timed:r") is True
+    assert account_has_permission(tenant_admin, "timed:u") is True
+    assert is_superadmin(tenant_admin) is False
+
+    reader = _account(["timed:r"])
+    assert account_has_permission(reader, "timed:r") is True
+    assert account_has_permission(reader, "timed:u") is False
+
+
+def test_account_has_permission_handles_empty():
+    assert account_has_permission(None, "timed:r") is False
+    assert account_has_permission(SimpleNamespace(roles=[]), "timed:r") is False
+
+
+def test_timed_action_permissions_derives_from_vertical_rights():
+    # 定时任务列表的操作项由 timed 垂直权限推导，与底层剧本/动作的资源权限无关
+    assert _timed_action_permissions(_account(["*:*"])) == ["r", "u", "d"]
+    assert _timed_action_permissions(_account(["timed:c,d,u,r"])) == ["r", "u", "d"]
+    assert _timed_action_permissions(_account(["timed:r"])) == ["r"]
+    assert _timed_action_permissions(_account(["timed:r,u"])) == ["r", "u"]
 
 
 class _FakeQuery:

@@ -58,6 +58,27 @@ def check_wildcard(wildcard: str, pattern: str):
     return all("*" in part for part in wildcard_parts[len(pattern_parts) :])
 
 
+def account_has_permission(account, *required_permissions: str) -> bool:
+    """判断账户是否拥有全部指定的垂直权限（不抛异常，供业务层做条件判断用）。
+
+    与 check_permissions 共用 check_wildcard 匹配规则，但后者是装饰器用途、
+    命中失败即 raise。业务代码需要「有没有权限」的布尔判断时用本函数，
+    避免各接口自行遍历 roles/permissions 或硬编码角色 id/name。
+    """
+    if not account or not getattr(account, "roles", None):
+        return False
+    for role in account.roles:
+        for role_permission in role.permissions or []:
+            if all(check_wildcard(role_permission, pattern) for pattern in required_permissions):
+                return True
+    return False
+
+
+def is_superadmin(account) -> bool:
+    """超管判定：拥有 *:* 通配权限即为超管，而非硬编码角色 id '111111'。"""
+    return account_has_permission(account, "*:*")
+
+
 async def check_roles(request: Request, *required_roles: str) -> bool:
     payload = await token_decode(request)
     account = await request.app.ctx.cache_client.get(f"account_{payload['sub']}")

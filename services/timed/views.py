@@ -15,13 +15,10 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import requires_permission
+from libs.security.authorization import account_has_permission, requires_permission
 from libs.utils import strip_timezone_to_seconds, runlog_list
 from models import (
-    Account,
-    ActionPermissions,
     Playbook,
-    PlaybookPermissions,
     PlaybookVersion,
     Runlog,
     Timed,
@@ -40,6 +37,8 @@ EXEC_TYPE_ONCE = 0
 EXEC_TYPE_CRON = 1
 DISABLED = 0
 ENABLED = 1
+# 列表按 timed 垂直权限映射前端可操作项，替代原先基于资源执行权限的行级过滤
+_TIMED_PERMISSION_MAP = (("r", "timed:r"), ("u", "timed:u"), ("d", "timed:d"))
 # Only terminal success counts; running/waiting logs must not inflate the rate.
 SUCCESS_RUNLOG_STATUSES = {0}
 RUNNING_RUNLOG_STATUSES = {1, 2}
@@ -306,81 +305,14 @@ async def add_timed(request):
     return response_ok(timed.json)
 
 
-async def get_playbook_permissions(pb_id, subject, cache_client, tenant_id, is_user: bool = True):
-    cache_key = (pb_id, subject)
-    data = await cache_client.get(cache_key)
-    filter_kwargs = {"tenant_id": tenant_id}
-    if not data:
-        filter_kwargs["pb_id"] = pb_id
-        if is_user:
-            filter_kwargs["users_id"] = subject
-        else:
-            filter_kwargs["roles_id"] = subject
-        pp = await PlaybookPermissions.get_or_none(**filter_kwargs)
-        if pp:
-            data = pp.permissions
-    return data
+def _timed_action_permissions(account):
+    """按当前账户对 timed 模块的垂直权限，推导前端可操作项(r/u/d)。
 
-
-async def get_timed_permissions(request, filtered_items):
-    result = []
-    timed_permissions = {}
-    user = request.ctx.session["account_info"]
-    user_id = user.id
-    user_roles = set(str(role.id) for role in user.roles)
-    cache_client = request.app.ctx.cache_client
-
-    tenant_id = request.ctx.session.get("tenant_id")
-
-    for item in filtered_items:
-        if item.playbook_id:
-            # 先查用户权限
-            data = await get_playbook_permissions(item.playbook_id, user_id, cache_client, tenant_id, is_user=True)
-            if data and any(perm in data for perm in ("r", "e")):
-                result.append(item)
-                timed_permissions[item.id] = data
-                continue
-
-            # 再查角色权限
-            for role_id in user_roles:
-                data = await get_playbook_permissions(item.playbook_id, role_id, cache_client, tenant_id, is_user=False)
-                if data and any(perm in data for perm in ("r", "e")):
-                    result.append(item)
-                    timed_permissions[item.id] = data
-                    break
-        else:
-            # 动作权限处理
-            permissions = await ActionPermissions.filter(
-                tool_name=item.action_input["app_name"],
-                action_name__in=[item.action_input["action"], "all"],
-                deleted=False,
-                tenant_id=tenant_id,
-            )
-
-            resource = item.action_input["resource"]
-            if not resource:
-                result.append(item)
-                timed_permissions[item.id] = ["r", "e"]
-                continue
-            # 用户权限
-            if "," in resource:
-                resources = resource.split(",")
-            else:
-                resources = [resource]
-            for permission in permissions:
-                for resource in resources:
-                    for res_dict in permission.users or []:
-                        if resource in res_dict and user_id in map(str, res_dict[resource]):
-                            result.append(item)
-                            timed_permissions[item.id] = ["r", "e"]
-                            break
-                    else:  # 只有用户不满足时再检查角色
-                        for res_dict in permission.roles or []:
-                            if resource in res_dict and not user_roles.isdisjoint(map(str, res_dict[resource])):
-                                result.append(item)
-                                timed_permissions[item.id] = ["r", "e"]
-                                break
-    return result, timed_permissions
+    定时任务的可见性与全平台其它模块一致，只由租户隔离 + 垂直权限 timed:r 决定
+    （由 @requires_permission('timed:r') 装饰器守门），不再基于底层剧本/动作的
+    资源级执行权限做行级读过滤——那会导致「有权创建、创建成功却看不到」的错位。
+    """
+    return [flag for flag, perm in _TIMED_PERMISSION_MAP if account_has_permission(account, perm)]
 
 
 @timed_bp.post("/all")
@@ -542,13 +474,13 @@ async def get_all(request):
     else:
         filtered_items = all_items
 
-    # 权限过滤
-    result, permissions = await get_timed_permissions(request, filtered_items)
+    # 可见性 = 租户隔离 + 垂直权限 timed:r（装饰器已守门），不再按资源级执行权限行级过滤。
+    action_permissions = _timed_action_permissions(request.ctx.session["account_info"])
 
-    total = len(result)
+    total = len(filtered_items)
     start = (page - 1) * size
     end = start + size
-    paged_items = result[start:end]
+    paged_items = filtered_items[start:end]
 
     items = [
         {
@@ -572,7 +504,7 @@ async def get_all(request):
                 "username": item.updator.username,
                 "display_name": item.updator.display_name,
             },
-            "permissions": permissions.get(item.id, []),
+            "permissions": action_permissions,
         }
         for item in paged_items
     ]
@@ -976,11 +908,10 @@ async def update_timed(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    timed = await Timed.get(id=timed_id, deleted=False, tenant_id=tenant_id).prefetch_related("action", "playbook", "creator", "updator")
-    result, _ = await get_timed_permissions(request, [timed])
-
-    if not result:
-        raise CustomError(ErrorCode.UNAUTH)
+    # 鉴权由 @requires_permission('timed:u') + 租户隔离守门，与全平台可见性/操作语义一致。
+    timed = await Timed.get_or_none(id=timed_id, deleted=False, tenant_id=tenant_id).prefetch_related("action", "playbook", "creator", "updator")
+    if not timed:
+        raise CustomError(ErrorCode.TIMED_NOT_FOUND)
 
     run_type = int(data.get("type", timed.type))
     if run_type not in [RUN_TYPE_FLOW, RUN_TYPE_ACTION]:
