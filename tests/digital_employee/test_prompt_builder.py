@@ -59,7 +59,7 @@ def test_render_workspace_files_includes_role_skill_and_minimal_runtime_notice()
     assert "只用授权工具" not in files["system_prompt.md"]
     assert "以当前任务和平台强制访问控制为准。" in files["system_prompt.md"]
     assert "AgentScope Toolkit" not in files["system_prompt.md"]
-    assert '"tool_usage_notes": "只用授权工具"' in files["manifest.json"]
+    assert '"tool_usage_notes": "告警分诊: 判断告警优先级 (metrics.query, notify)"' in files["manifest.json"]
     assert "alert_triage" in files["skills"]
     assert "notify" in files["skills"]["alert_triage"]["instructions.md"]
     assert '"agent_key": "monitor-1"' in files["manifest.json"]
@@ -108,10 +108,12 @@ def test_render_workspace_files_coerces_legacy_prompt_arrays_to_text():
     assert isinstance(files["system_prompt.md"], str)
     assert set(files) == {"system_prompt.md", "manifest.json", "policy.json", "skills"}
     assert "- 接收告警" in files["system_prompt.md"]
-    assert "## Principles\n- 先确认影响范围" in files["system_prompt.md"]
+    assert "## Principles" not in files["system_prompt.md"]
+    assert "## Safety" not in files["system_prompt.md"]
+    assert "## Workflows\n### 判断原则\n- 先确认影响范围" in files["system_prompt.md"]
     assert "### 告警分诊" in files["system_prompt.md"]
     assert "- 输出严重性" in files["system_prompt.md"]
-    assert "- 不直接执行破坏性变更" in files["system_prompt.md"]
+    assert "- 不直接执行破坏性变更" not in files["system_prompt.md"]
     assert '"tool_usage_notes": "- 只使用授权工具"' in files["manifest.json"]
 
 

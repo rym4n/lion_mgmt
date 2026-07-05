@@ -46,6 +46,16 @@ def _prompt_text(value: Any, default: str = "") -> str:
     return default
 
 
+def _effective_workflows(role_meta: dict) -> str:
+    principles = _prompt_text(role_meta.get("principles"), "").strip()
+    workflows = _prompt_text(role_meta.get("workflows"), "").strip()
+    if principles and workflows:
+        if principles in workflows:
+            return workflows
+        return f"### 判断原则\n{principles}\n\n{workflows}"
+    return workflows or principles
+
+
 def _public_payload(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _public_payload(item) for key, item in value.items() if not str(key).startswith("_")}
@@ -69,6 +79,29 @@ def _binding_values(bindings: dict, *keys: str) -> list[str]:
     for key in keys:
         values.extend(_as_list(bindings.get(key)))
     return sorted(set(values))
+
+
+def _derived_tool_usage_notes(skill_entries: list[dict]) -> str:
+    lines: list[str] = []
+    for skill in skill_entries:
+        bindings = skill.get("bindings") or {}
+        binding_values = _binding_values(
+            bindings,
+            "tool_groups",
+            "tool_group_keys",
+            "tools",
+            "tool_keys",
+            "action_keys",
+            "playbook_ids",
+            "mcp_tools",
+        )
+        suffix = f" ({', '.join(binding_values)})" if binding_values else ""
+        name = skill.get("name") or skill.get("skill_key") or ""
+        description = skill.get("description") or ""
+        body = ": ".join(item for item in (name, description) if item)
+        if body:
+            lines.append(f"{body}{suffix}")
+    return "\n".join(lines)
 
 
 def _skill_payload(skill: Any) -> dict:
@@ -105,7 +138,7 @@ def build_workspace_payload(employee: Any, role: Any | None = None, skills: list
     employee_metadata = _public_payload(getattr(employee, "metadata", {}) or {})
     rbac_role_id = getattr(employee, "rbac_role_id", None)
     skill_entries = sorted((_skill_payload(skill) for skill in skills), key=lambda item: item["skill_key"])
-    tool_usage_notes = _prompt_text(role_meta.get("tools_notes"), "")
+    tool_usage_notes = _derived_tool_usage_notes(skill_entries) or _prompt_text(role_meta.get("tools_notes"), "")
 
     enabled_tool_groups: set[str] = set()
     enabled_tools: set[str] = set()
@@ -230,6 +263,7 @@ def build_workspace_snapshots(employee: Any, role: Any | None = None, skills: li
 
 def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], payload: dict) -> dict:
     role_meta = getattr(role, "meta", {}) or {}
+    workflows = _effective_workflows(role_meta)
 
     system_prompt = [
         f"# {getattr(employee, 'name', '')}",
@@ -240,12 +274,8 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
         _prompt_text(role_meta.get("responsibilities"), "按任务目标、授权边界和可用技能完成工作，并在完成后给出可审计结果。"),
         "",
     ]
-    if role_meta.get("principles"):
-        system_prompt.extend(["## Principles", _prompt_text(role_meta["principles"]), ""])
-    if role_meta.get("workflows"):
-        system_prompt.extend(["## Workflows", _prompt_text(role_meta["workflows"]), ""])
-    if role_meta.get("safety_rules"):
-        system_prompt.extend(["## Safety", _prompt_text(role_meta["safety_rules"]), ""])
+    if workflows:
+        system_prompt.extend(["## Workflows", workflows, ""])
     system_prompt.extend(["## Runtime", "以当前任务和平台强制访问控制为准。", ""])
 
     rendered_skills = {}

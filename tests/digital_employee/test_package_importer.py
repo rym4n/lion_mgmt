@@ -95,6 +95,12 @@ def _install_importer_stubs():
             key = (kwargs.get("name"), kwargs.get("version"), kwargs.get("tenant_id"))
             return cls.records.get(key)
 
+    sanic_module = types.ModuleType("sanic")
+    sanic_log_module = types.ModuleType("sanic.log")
+    sanic_log_module.logger = types.SimpleNamespace(warning=lambda *args, **kwargs: None)
+    sys.modules["sanic"] = sanic_module
+    sys.modules["sanic.log"] = sanic_log_module
+
     sys.modules.setdefault("core", types.ModuleType("core"))
     core_error_code = types.ModuleType("core.error_code")
     core_error_code.ErrorCode = ErrorCode
@@ -214,12 +220,14 @@ def test_normalize_role_prompt_fields_keeps_explicit_configurable_fields_only():
     )
 
     assert "description" not in normalized
+    assert "principles" not in normalized
+    assert "safety_rules" not in normalized
     assert normalized["identity"] == "监控值班员"
     assert normalized["responsibilities"] == "分诊告警"
-    assert "- 先确认影响范围" in normalized["principles"]
+    assert "### 判断原则" in normalized["workflows"]
+    assert "- 先确认影响范围" in normalized["workflows"]
     assert "### 告警分诊" in normalized["workflows"]
     assert "- 输出结论" in normalized["workflows"]
-    assert normalized["safety_rules"] == "不执行破坏性变更"
     assert normalized["tools_notes"] == "只使用已绑定工具"
 
 
@@ -360,7 +368,11 @@ def test_upsert_role_normalizes_prompt_fields_to_strings(tmp_path):
     meta = calls[0]["defaults"]["meta"]
     for field in package_importer.ROLE_PROMPT_TEXT_FIELDS:
         assert isinstance(meta[field], str)
+    assert "principles" not in meta
+    assert "safety_rules" not in meta
     assert "- 接收告警" in meta["responsibilities"]
+    assert "### 判断原则" in meta["workflows"]
+    assert "- 先确认影响范围" in meta["workflows"]
     assert "### 告警分诊" in meta["workflows"]
     assert "- 输出严重性" in meta["workflows"]
 

@@ -22,7 +22,7 @@ from .package_format import PackageFormatError, UnsupportedPackageTypeError, ins
 from .rbac import ensure_platform_role
 
 
-ROLE_PROMPT_TEXT_FIELDS = ("identity", "principles", "responsibilities", "workflows", "safety_rules", "tools_notes")
+ROLE_PROMPT_TEXT_FIELDS = ("identity", "responsibilities", "workflows", "tools_notes")
 
 
 @dataclass
@@ -86,9 +86,25 @@ def _format_prompt_text(value: Any) -> str:
     return str(value)
 
 
+def _merge_workflow_text(principles: str, workflows: str) -> str:
+    principles = (principles or "").strip()
+    workflows = (workflows or "").strip()
+    if principles and workflows:
+        if principles in workflows:
+            return workflows
+        return f"### 判断原则\n{principles}\n\n{workflows}"
+    return workflows or principles
+
+
 def normalize_role_prompt_fields(role_data: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(role_data or {})
     normalized.pop("description", None)
+    principles = _format_prompt_text(normalized.pop("principles", None))
+    workflows = _format_prompt_text(normalized.get("workflows"))
+    merged_workflows = _merge_workflow_text(principles, workflows)
+    if merged_workflows:
+        normalized["workflows"] = merged_workflows
+    normalized.pop("safety_rules", None)
     for field in ROLE_PROMPT_TEXT_FIELDS:
         if field in normalized:
             normalized[field] = _format_prompt_text(normalized[field])
