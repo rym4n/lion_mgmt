@@ -4,7 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from libs.security.authorization import account_has_permission, is_superadmin
+from libs.security.authorization import (
+    account_has_permission,
+    action_permission_hits,
+    check_action_execute_permission,
+    is_superadmin,
+)
 from services.timed.views import (
     _parse_dashboard_datetime_range,
     _timed_action_permissions,
@@ -268,3 +273,136 @@ async def test_dashboard_statistics_counts_status_one_as_failure(monkeypatch):
             "success_rate": "71.0%",
         }
     ]
+
+
+def _action_perm(users_map, roles_map, action_name="get_events_list"):
+    return SimpleNamespace(
+        action_name=action_name,
+        users=[users_map] if users_map else [],
+        roles=[roles_map] if roles_map else [],
+    )
+
+
+def test_action_permission_hits_by_user_and_role():
+    perm = _action_perm({"res-1": ["user-a"], "res-2": ["user-b"]}, {"res-1": ["role-x"]})
+    # 用户直命中
+    assert action_permission_hits(perm, "res-1", "user-a", set()) is True
+    # 角色命中
+    assert action_permission_hits(perm, "res-1", "user-c", {"role-x"}) is True
+    # 都不命中
+    assert action_permission_hits(perm, "res-1", "user-c", {"role-y"}) is False
+    # 资源未在授权表内
+    assert action_permission_hits(perm, "res-3", "user-a", {"role-x"}) is False
+    # 空 users/roles 结构
+    empty = SimpleNamespace(users=[], roles=[])
+    assert action_permission_hits(empty, "res-1", "user-a", {"role-x"}) is False
+
+
+@pytest.mark.asyncio
+async def test_check_action_execute_permission_superadmin_bypass(monkeypatch):
+    called = {"filter": 0}
+
+    class _Blocker:
+        @staticmethod
+        def filter(**_kwargs):
+            called["filter"] += 1
+            raise AssertionError("超管应豁免，不该查表")
+
+    monkeypatch.setattr("libs.security.authorization.ActionPermissions", _Blocker)
+    account = SimpleNamespace(id="admin-1", roles=[SimpleNamespace(id="r", name="超管", permissions=["*:*"])])
+    assert await check_action_execute_permission(account, "lion_mgmt", "get_events_list", "res-1", "t1") is True
+    assert called["filter"] == 0
+
+
+@pytest.mark.asyncio
+async def test_check_action_execute_permission_empty_resource_pass(monkeypatch):
+    # 无资源约束的动作放行——与旧列表过滤对空 resource 的行为一致
+    account = SimpleNamespace(id="user-1", roles=[SimpleNamespace(id="r1", name="普通", permissions=["timed:r"])])
+    assert await check_action_execute_permission(account, "lion_mgmt", "some_action", "", "t1") is True
+    assert await check_action_execute_permission(account, "lion_mgmt", "some_action", None, "t1") is True
+
+
+@pytest.mark.asyncio
+async def test_check_action_execute_permission_user_granted(monkeypatch):
+    perm = _action_perm({"res-1": ["user-1"]}, {})
+
+    class _Filter:
+        def __init__(self, value):
+            self._value = value
+
+        async def all(self):
+            return self._value
+
+    class _AP:
+        @staticmethod
+        def filter(**kwargs):
+            assert kwargs["tool_name"] == "lion_mgmt"
+            assert set(kwargs["action_name__in"]) == {"get_events_list", "all"}
+            return _Filter([perm])
+
+    monkeypatch.setattr("libs.security.authorization.ActionPermissions", _AP)
+    account = SimpleNamespace(id="user-1", roles=[SimpleNamespace(id="r1", name="普通", permissions=["timed:r"])])
+    ok = await check_action_execute_permission(account, "lion_mgmt", "get_events_list", "res-1", "t1")
+    assert ok is True
+
+
+@pytest.mark.asyncio
+async def test_check_action_execute_permission_denied_when_no_grant(monkeypatch):
+    # 未授权资源应被拒绝——正是本次 bug 里"创建时不校验、看不到"的镜像语义
+    perm = _action_perm({}, {})
+
+    class _Filter:
+        async def all(self):
+            return [perm]
+
+    class _AP:
+        @staticmethod
+        def filter(**_kwargs):
+            return _Filter()
+
+    monkeypatch.setattr("libs.security.authorization.ActionPermissions", _AP)
+    account = SimpleNamespace(id="user-1", roles=[SimpleNamespace(id="r1", name="普通", permissions=["timed:c"])])
+    ok = await check_action_execute_permission(account, "lion_mgmt", "get_events_list", "res-1", "t1")
+    assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_check_action_execute_permission_multi_resource_all_required(monkeypatch):
+    # 逗号分隔的多资源：任一缺权即整体失败
+    perm = _action_perm({"res-1": ["user-1"]}, {})
+
+    class _Filter:
+        async def all(self):
+            return [perm]
+
+    class _AP:
+        @staticmethod
+        def filter(**_kwargs):
+            return _Filter()
+
+    monkeypatch.setattr("libs.security.authorization.ActionPermissions", _AP)
+    account = SimpleNamespace(id="user-1", roles=[])
+    # 只对 res-1 有权，res-2 无权 → 整体拒绝
+    ok = await check_action_execute_permission(account, "lion_mgmt", "get_events_list", "res-1,res-2", "t1")
+    assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_check_action_execute_permission_all_action_grants_any(monkeypatch):
+    # "all" 兜底记录：只要 all 记录里授权了资源就等同于对具体动作授权
+    perm_all = _action_perm({"res-1": ["user-1"]}, {}, action_name="all")
+
+    class _Filter:
+        async def all(self):
+            return [perm_all]
+
+    class _AP:
+        @staticmethod
+        def filter(**kwargs):
+            assert "all" in kwargs["action_name__in"]
+            return _Filter()
+
+    monkeypatch.setattr("libs.security.authorization.ActionPermissions", _AP)
+    account = SimpleNamespace(id="user-1", roles=[])
+    ok = await check_action_execute_permission(account, "lion_mgmt", "some_action", "res-1", "t1")
+    assert ok is True

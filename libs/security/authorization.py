@@ -6,14 +6,21 @@ import os
 
 from sanic.log import logger
 from sanic.request import Request
+from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
 from libs.error_code.enum import ErrorData
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.utils import verify_license
-from models import PermissionsMenu, PlaybookPermissions, PlaybookVersion
+from models import ActionPermissions, PermissionsMenu, PlaybookPermissions, PlaybookVersion, Role
 from settings import LICENSE_DIR
+
+# 超管角色的本质是拥有 *:* 通配权限的那条 Role（见 aioe_package/aioe_install/init.sql 初始化）。
+# 用权限本质而非硬编码角色 id "111111" 定位，避免多环境/多次种子数据下 id 漂移导致的隐性 bug。
+SUPERADMIN_PERMISSION = "*:*"
+# 租户管理员是租户维度的管理角色，各租户内以名称"租户管理员"唯一（见 services/tenant/views.py:125）。
+TENANT_ADMIN_ROLE_NAME = "租户管理员"
 
 
 async def check_permissions(request: Request, *required_permissions: str) -> bool:
@@ -76,7 +83,95 @@ def account_has_permission(account, *required_permissions: str) -> bool:
 
 def is_superadmin(account) -> bool:
     """超管判定：拥有 *:* 通配权限即为超管，而非硬编码角色 id '111111'。"""
-    return account_has_permission(account, "*:*")
+    return account_has_permission(account, SUPERADMIN_PERMISSION)
+
+
+async def get_superadmin_role():
+    """按权限本质取超管 Role 对象，供需要将超管作为 PlaybookPermissions/ActionPermissions
+    授权对象的场景使用。取第一条 permissions 里含 *:* 的角色（种子数据里只有一条）。
+    """
+    return await Role.filter(permissions__contains=[SUPERADMIN_PERMISSION], deleted=False).first()
+
+
+def is_superadmin_role(role) -> bool:
+    """判定给定 Role 是否为超管角色（用其权限本质，不看 id/name）。"""
+    if not role:
+        return False
+    return SUPERADMIN_PERMISSION in (role.permissions or [])
+
+
+async def playbook_ids_for_user(account, tenant_id: str, permission: str = "r") -> set:
+    """返回当前账户在指定租户下、对剧本拥有 `permission` 权限的 pb_id 集合。
+
+    与 PlaybookPermissions 的 users(Account FK)/roles(Role FK) 结构对齐：
+    用户被授权 或 用户所属任一角色被授权，视为授权命中。超管(*:*)不额外调用本函数——
+    调用方应先判断 is_superadmin 走全量分支，本函数只负责普通用户按记录过滤。
+    """
+    user_id = str(account.id) if account and getattr(account, "id", None) else None
+    user_roles = {str(role.id) for role in (account.roles or [])} if account else set()
+    if not user_id:
+        return set()
+    pb_ids = await PlaybookPermissions.filter(
+        Q(users__id=user_id) | Q(roles__id__in=user_roles),
+        permissions__contains=[permission],
+        tenant_id=tenant_id,
+    ).values_list("pb_id", flat=True)
+    return set(pb_ids)
+
+
+def action_permission_hits(permission, resource_id: str, user_id: str, user_role_ids: set) -> bool:
+    """判断当前用户是否命中一条 ActionPermissions 记录里指定 resource 的授权。
+
+    ActionPermissions.users / roles 结构（`services/tools/views.py:1841-1870` 授权处写入）：
+        users = [{ resource_id: [user_id, ...], ... }]   # 长度恒为 1（如为空则可视作 [{}]）
+        roles = [{ resource_id: [role_id, ...], ... }]
+
+    命中条件：用户直接被授权 OR 用户任一角色被授权。传入 None/异常结构时安全返回 False。
+    """
+    def _first_dict(value):
+        if isinstance(value, list) and value and isinstance(value[0], dict):
+            return value[0]
+        return {}
+
+    user_map = _first_dict(permission.users)
+    if user_id in {str(x) for x in user_map.get(resource_id, [])}:
+        return True
+    role_map = _first_dict(permission.roles)
+    granted_roles = {str(x) for x in role_map.get(resource_id, [])}
+    return not user_role_ids.isdisjoint(granted_roles)
+
+
+async def check_action_execute_permission(account, tool_name, action_func, resource, tenant_id) -> bool:
+    """判定账户是否对 (tool, action, resource) 拥有执行权。写侧（add_timed/update_timed
+    等）用它把前端下拉过滤对应的授权关卡落到 API 层——纯前端过滤是 UX，不是安全边界。
+
+    - 超管(*:*)豁免。
+    - resource 空字符串或无值时视为动作无资源约束，直接放行（与旧列表过滤逻辑一致）。
+    - resource 支持逗号分隔多值；要求账户对**每个** resource 都有权，任一缺失即失败。
+    - tool_name / action_func 缺失时直接判定失败——上层应保证参数完备再调用。
+    - 命中条件复用 action_permission_hits：查 action_name 自身 + "all" 兜底两类 ActionPermissions。
+    """
+    if is_superadmin(account):
+        return True
+    if not resource:
+        return True
+    if not tool_name or not action_func:
+        return False
+    user_id = str(account.id) if account and getattr(account, "id", None) else None
+    if not user_id:
+        return False
+    user_role_ids = {str(role.id) for role in (account.roles or [])}
+    permissions = await ActionPermissions.filter(
+        tool_name=tool_name,
+        action_name__in=[action_func, "all"],
+        deleted=False,
+        tenant_id=tenant_id,
+    ).all()
+    resources = [r for r in resource.split(",") if r] if "," in resource else [resource]
+    for r in resources:
+        if not any(action_permission_hits(perm, r, user_id, user_role_ids) for perm in permissions):
+            return False
+    return True
 
 
 async def check_roles(request: Request, *required_roles: str) -> bool:

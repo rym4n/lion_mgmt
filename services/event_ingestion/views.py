@@ -25,7 +25,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs import supervisor
 from libs.error_code.exception import CustomError
-from libs.security.authorization import requires_permission
+from libs.security.authorization import is_superadmin, requires_permission
 from libs.utils import query_vlog, run_linux_command
 from models import Config, Playbook, PlaybookVersion
 from models.event import EventRelatedScript, EventsIngestion
@@ -1953,15 +1953,8 @@ async def transforms_update(request):
         config.type = type_
 
     if shared is not None:
-        account = request.ctx.session.get("account_info")
-        allow = False
-        if account and hasattr(account, "roles"):
-            for role in account.roles:
-                if role.id == "111111":
-                    allow = True
-                    break
-
-        if not allow:
+        # shared 是全局共享位，只有超管（*:*）能设置——按权限本质判定而非硬编码角色 id
+        if not is_superadmin(request.ctx.session.get("account_info")):
             raise CustomError(ErrorCode.FORBIDDEN)
 
         config.shared = shared

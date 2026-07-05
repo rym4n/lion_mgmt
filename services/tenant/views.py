@@ -11,7 +11,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authentication import refresh_token
-from libs.security.authorization import requires_permission
+from libs.security.authorization import TENANT_ADMIN_ROLE_NAME, requires_permission
 from libs.utils import get_expiration_date
 from models import Account, Role, Scene, Tenant
 from services.digital_employee.cognee_credential_manager import register_tenant_user
@@ -122,8 +122,8 @@ async def add_tenant(request):
         await tenant.member.add(creator)
 
         role = await Role.create(
-            name="租户管理员",
-            description="租户管理员",
+            name=TENANT_ADMIN_ROLE_NAME,
+            description=TENANT_ADMIN_ROLE_NAME,
             permissions=[
                 "dashboard:r",
                 "logs:r,d",

@@ -22,7 +22,7 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_fail, response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import load_license, requires_permission
+from libs.security.authorization import get_superadmin_role, load_license, requires_permission
 from libs.utils import get_from_s3, query_vlog, strip_timezone_to_seconds, upload_to_s3
 from models import Config, Playbook, PlaybookPermissions, PlaybookVersion, Role, Tool, ToolResources
 from services.event_ingestion.views import check_vector_config
@@ -1625,7 +1625,7 @@ async def init_data(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
     creator = request.ctx.session["account_info"]
-    admin = await Role.get(id="111111")
+    admin = await get_superadmin_role()
 
     imported = {"playbooks": 0, "tools": 0, "resources": 0, "skipped_versions": 0, "skipped_resources": 0}
 

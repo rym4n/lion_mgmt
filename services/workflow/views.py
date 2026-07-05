@@ -29,8 +29,13 @@ from libs import utils
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import (
+    TENANT_ADMIN_ROLE_NAME,
     check_playbook_permission,
+    get_superadmin_role,
+    is_superadmin,
+    is_superadmin_role,
     load_license,
+    playbook_ids_for_user,
     playbook_permission,
     requires_permission,
 )
@@ -193,12 +198,12 @@ async def create_workflow(request):
 
     flow_json_list = data.get("flow_json_list") or []
     creator = request.ctx.session["account_info"]
-    admin = await Role.get(id="111111")
-    tenant_admin = await Role.get_or_none(name="租户管理员", deleted=False, tenant_id=tenant_id)
+    admin = await get_superadmin_role()
+    tenant_admin = await Role.get_or_none(name=TENANT_ADMIN_ROLE_NAME, deleted=False, tenant_id=tenant_id)
     if not tenant_admin:
         tenant_admin = await Role.create(
-            name="租户管理员",
-            description="租户管理员",
+            name=TENANT_ADMIN_ROLE_NAME,
+            description=TENANT_ADMIN_ROLE_NAME,
             permissions=[
                 "dashboard:r",
                 "logs:r,d",
@@ -311,7 +316,10 @@ async def create_workflow(request):
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "剧本id列表，仅返回这些id对应的剧本",
-                        "example": ["111111", "2222222"],
+                        "example": [
+                            "550e8400-e29b-41d4-a716-446655440000",
+                            "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                        ],
                     },
                 },
             }
@@ -356,14 +364,19 @@ async def list_workflow(request):
     limit = size
 
     tenant_id = request.ctx.session.get("tenant_id")
-
     user = request.ctx.session.get("account_info")
-    user_id = str(user.id)
-    user_roles = set(str(role.id) for role in user.roles)
-    permissions = await PlaybookPermissions.filter(Q(users__id=user_id) | Q(roles__id__in=user_roles), permissions__contains=["r"], tenant_id=tenant_id).values_list("pb_id", flat=True)
-    pb_ids = set(permissions)
 
-    condition = Q(deleted=False, id__in=pb_ids, tenant_id=tenant_id)
+    # permission_filter：'r' 剧本管理列表（默认，向后兼容）；'e' 供定时任务/巡检等场景挑选可执行剧本。
+    # 超管(*:*)豁免——避免"我明明是超管但看不到自己刚导入的剧本"的空档。
+    perm_filter = (request.json.get("permission_filter") or "r").strip()
+    if perm_filter not in ("r", "e"):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if is_superadmin(user):
+        condition = Q(deleted=False, tenant_id=tenant_id)
+    else:
+        pb_ids = await playbook_ids_for_user(user, tenant_id, permission=perm_filter)
+        condition = Q(deleted=False, id__in=pb_ids, tenant_id=tenant_id)
 
     # 分页查询Account，返回总数和数据
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
@@ -1591,9 +1604,11 @@ async def add_permission(request):
         )
         await request.app.ctx.cache_client.set((playbook_id, uid), perms, ttl=2592000)
 
-    # 处理角色权限
+    # 处理角色权限；跳过超管角色，其权限不允许通过此接口被覆盖（保护语义）
+    superadmin_role = await get_superadmin_role()
+    superadmin_id = superadmin_role.id if superadmin_role else None
     for rid, perms in roles.items():
-        if rid != "111111":
+        if rid != superadmin_id:
             await PlaybookPermissions.update_or_create(
                 pb_id=playbook_id,
                 roles_id=rid,
@@ -2146,7 +2161,7 @@ async def import_workflow(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
     creator = request.ctx.session["account_info"]
-    admin = await Role.get(id="111111")
+    admin = await get_superadmin_role()
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
 
     imported = {"playbooks": 0, "tools": 0, "resources": 0, "skipped_versions": 0, "skipped_resources": 0}

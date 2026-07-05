@@ -15,7 +15,12 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import account_has_permission, requires_permission
+from libs.security.authorization import (
+    account_has_permission,
+    check_action_execute_permission,
+    check_playbook_permission,
+    requires_permission,
+)
 from libs.utils import strip_timezone_to_seconds, runlog_list
 from models import (
     Playbook,
@@ -231,6 +236,10 @@ async def add_timed(request):
         playbook_version = await PlaybookVersion.get_or_none(id=playbook_input.get("flow_id"), tenant_id=tenant_id)
         if not playbook:
             raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
+        # 前端下拉已按执行权(e)过滤，API 层做等价校验，避免直调 API 绕过前端约束
+        creator_account = request.ctx.session["account_info"]
+        if not await check_playbook_permission(request, creator_account, playbook_id, ["e"]):
+            raise CustomError(ErrorCode.PLAYBOOK_UNAUTHORIZED)
         msg["run_type"] = "flow"
         playbook_input["executor"] = request.ctx.session.get("account_info").id
         if any(key not in playbook_input.keys() for key in ["flow_id", "flow_input", "executor"]):
@@ -269,6 +278,16 @@ async def add_timed(request):
             ]
         ):
             raise CustomError(ErrorCode.ACTION_INPUT_ERROR)
+        # 前端下拉已按 (tool, action, resource) → 用户/角色 过滤，API 层同步校验；超管豁免
+        creator_account = request.ctx.session["account_info"]
+        if not await check_action_execute_permission(
+            creator_account,
+            action_input.get("app_name"),
+            action_input.get("action"),
+            action_input.get("resource") or "",
+            tenant_id,
+        ):
+            raise CustomError(ErrorCode.UNAUTH)
         msg["run_type"] = "action"
         msg["run_args"] = action_input
         if status == 0:
@@ -939,7 +958,12 @@ async def update_timed(request):
         playbook_version = await PlaybookVersion.get_or_none(id=playbook_input.get("flow_id"), tenant_id=tenant_id)
         timed.playbook_version = playbook_version.version if playbook_version else None
 
-        playbook_input["executor"] = request.ctx.session.get("account_info").id
+        # 与 add 侧一致：写入前校验对目标剧本有执行权(e)，超管豁免
+        editor_account = request.ctx.session["account_info"]
+        if not await check_playbook_permission(request, editor_account, playbook_id, ["e"]):
+            raise CustomError(ErrorCode.PLAYBOOK_UNAUTHORIZED)
+
+        playbook_input["executor"] = editor_account.id
 
         if any(key not in playbook_input.keys() for key in ["flow_id", "flow_input", "executor"]):
             raise CustomError(ErrorCode.PLAYBOOK_INPUT_ERROR)
@@ -958,7 +982,8 @@ async def update_timed(request):
 
         timed.action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
 
-        action_input["executor"] = request.ctx.session.get("account_info").id
+        editor_account = request.ctx.session["account_info"]
+        action_input["executor"] = editor_account.id
         if any(
             key not in action_input
             for key in [
@@ -977,6 +1002,15 @@ async def update_timed(request):
             ]
         ):
             raise CustomError(ErrorCode.ACTION_INPUT_ERROR)
+        # 与 add 侧一致：写入前校验对 (tool, action, resource) 有执行权，超管豁免
+        if not await check_action_execute_permission(
+            editor_account,
+            action_input.get("app_name"),
+            action_input.get("action"),
+            action_input.get("resource") or "",
+            tenant_id,
+        ):
+            raise CustomError(ErrorCode.UNAUTH)
 
         timed.action_input = action_input
         timed.playbook = None

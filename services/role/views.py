@@ -8,7 +8,7 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import load_license, requires_permission
+from libs.security.authorization import is_superadmin_role, load_license, requires_permission
 from models import Account, PermissionsMenu, Role
 
 role_bp = Blueprint("role", url_prefix="/role")
@@ -389,14 +389,18 @@ async def delete_role(request):
     if exists:
         raise CustomError(ErrorCode.ROLE_ALREADY_USED)
 
-    if role_id == "111111":
-        raise CustomError(ErrorCode.ROLE_CANNOT_DELETE)
-
     tenant_id = request.ctx.session.get("tenant_id")
 
     role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
     if not role:
+        # 保留原有跨租户保护：请求命中的若是超管角色（在默认租户里），返回不可删除而非"不存在"
+        cross_tenant = await Role.get_or_none(id=role_id, deleted=False)
+        if cross_tenant and is_superadmin_role(cross_tenant):
+            raise CustomError(ErrorCode.ROLE_CANNOT_DELETE)
         raise CustomError(ErrorCode.ROLE_NOT_FOUND)
+    # 超管角色（拥有 *:* 权限的那条）不允许被删除——按权限本质判定而非硬编码 id
+    if is_superadmin_role(role):
+        raise CustomError(ErrorCode.ROLE_CANNOT_DELETE)
     role.deleted = True
     await role.save()
     return response_ok("角色删除成功")
