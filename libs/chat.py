@@ -146,6 +146,33 @@ async def get_playbook_prompt_words(prompt_word, tenant_id):
 
 
 # 获取或创建私聊作战室
+def _account_identity(account) -> str:
+    return str(getattr(account, "id", "") or "")
+
+
+def _private_room_participant_ids(room) -> set[str]:
+    users = getattr(room, "users", None) or []
+    return {_account_identity(user) for user in users if _account_identity(user)}
+
+
+def _has_private_participants(room, sender: Account, receiver: Account) -> bool:
+    return _private_room_participant_ids(room) == {_account_identity(sender), _account_identity(receiver)}
+
+
+async def _find_private_chat_room(sender: Account, receiver: Account, tenant_id):
+    rooms = (
+        await Room.filter(room_type="private", tenant_id=tenant_id, users__id=sender.id)
+        .filter(users__id=receiver.id)
+        .prefetch_related("users")
+        .order_by("-utime")
+        .all()
+    )
+    for room in rooms:
+        if _has_private_participants(room, sender, receiver):
+            return room
+    return None
+
+
 async def get_or_create_private_chat_room(cache_client, sender: Account, receiver: Account, tenant_id) -> dict:
     # 保证顺序
     key = f"{sender.id}&{receiver.id}"
@@ -154,32 +181,29 @@ async def get_or_create_private_chat_room(cache_client, sender: Account, receive
         key = f"{receiver.id}&{sender.id}"
         private_room_name = f"{receiver.username}({receiver.display_name})_{sender.username}({sender.display_name})"
     user_private_chat_rooms = await cache_client.get(f"user_private_chat_rooms_{tenant_id}") or {}
-    if key not in user_private_chat_rooms:
-        # 作战室名字
-        # room = await Room.get_or_none(name=private_room_name, tenant_id=tenant_id)
-        if sender.id != receiver.id:
-            room = await Room.filter(room_type="private", tenant_id=tenant_id, users__id=sender.id).filter(users__id=receiver.id).first()
-        else:
-            # 只有自己
-            all_rooms = await Room.filter(room_type="private", tenant_id=tenant_id, users__id=sender.id).prefetch_related("users")
-            room = None
-            for r in all_rooms:
-                if len(r.users) == 1 and r.users[0].id == sender.id:
-                    room = r
-                    break
+    cached_room = user_private_chat_rooms.get(key)
+    if cached_room:
+        room = (
+            await Room.filter(id=cached_room.get("room_id"), tenant_id=tenant_id, room_type="private")
+            .prefetch_related("users")
+            .first()
+        )
+        if room and _has_private_participants(room, sender, receiver):
+            return cached_room
+        user_private_chat_rooms.pop(key, None)
 
-        # 先查后创
-        if not room:
-            room = await Room.create(name=private_room_name, creator=sender, tenant_id=tenant_id, room_type="private")
-            await room.users.add(sender)
-            await room.users.add(receiver)
-        data = {"room_id": room.id, "name": room.name}
-        user_private_chat_rooms[key] = data
-        logger.info(user_private_chat_rooms)
-        await cache_client.set(f"user_private_chat_rooms_{tenant_id}", user_private_chat_rooms, 60 * 60 * 24)
-        return data
-    else:
-        return user_private_chat_rooms[key]
+    room = await _find_private_chat_room(sender, receiver, tenant_id)
+
+    # 先查后创
+    if not room:
+        room = await Room.create(name=private_room_name, creator=sender, tenant_id=tenant_id, room_type="private")
+        await room.users.add(sender)
+        await room.users.add(receiver)
+    data = {"room_id": room.id, "name": room.name}
+    user_private_chat_rooms[key] = data
+    logger.info(user_private_chat_rooms)
+    await cache_client.set(f"user_private_chat_rooms_{tenant_id}", user_private_chat_rooms, 60 * 60 * 24)
+    return data
 
 
 # 创建消息

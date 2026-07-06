@@ -577,6 +577,33 @@ async def get_private_room(request: Request):
     return response_ok(room_info)
 
 
+def _account_identity(account) -> str:
+    return str(getattr(account, "id", None) or getattr(account, "username", "") or "")
+
+
+def _private_room_dedupe_key(room):
+    if getattr(room, "room_type", None) != "private":
+        return ("room", str(getattr(room, "id", "")))
+
+    users = getattr(room, "users", None) or []
+    participant_ids = sorted(_account_identity(user) for user in users if _account_identity(user))
+    if not participant_ids:
+        return ("room", str(getattr(room, "id", "")))
+    return ("private", tuple(participant_ids))
+
+
+def _dedupe_star_rooms(rooms):
+    seen = set()
+    result = []
+    for room in rooms:
+        key = _private_room_dedupe_key(room)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(room)
+    return result
+
+
 @warroom_bp.post("/get_star_rooms")
 @openapi.definition(
     summary="获取关注列表",
@@ -621,7 +648,8 @@ async def get_star_rooms(request: Request):
     user = request.ctx.session["account_info"]
     tenant_id = request.ctx.session.get("tenant_id")
     await ensure_default_ai_private_room(request.app.ctx.cache_client, user, tenant_id)
-    return response_ok({"star_rooms": [r.json for r in await user.star_rooms.filter(tenant_id=tenant_id).all().prefetch_related("creator", "users")]})
+    rooms = await user.star_rooms.filter(tenant_id=tenant_id).all().prefetch_related("creator", "users")
+    return response_ok({"star_rooms": [r.json for r in _dedupe_star_rooms(rooms)]})
 
 
 async def ensure_default_ai_private_room(cache_client, user: Account, tenant_id):

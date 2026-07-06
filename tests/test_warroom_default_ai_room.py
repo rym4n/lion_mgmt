@@ -10,7 +10,7 @@ os.environ.setdefault("RY_REDIS_PORT", "6379")
 os.environ.setdefault("RY_REDIS_DB", "0")
 os.environ.setdefault("RY_CHAT_DB", "1")
 
-from services.warroom.views import ensure_default_ai_private_room
+from services.warroom.views import _dedupe_star_rooms, ensure_default_ai_private_room
 
 
 class _StarRooms:
@@ -55,3 +55,43 @@ async def test_ensure_default_ai_private_room_stars_system_private_room(monkeypa
     assert calls["room_query"] == {"id": room.id, "tenant_id": "tenant-1"}
     assert user.star_rooms.added == [room]
     assert system_user.star_rooms.added == [room]
+
+
+def test_dedupe_star_rooms_keeps_one_private_room_per_participant_set():
+    user = SimpleNamespace(id="user-1", username="admin")
+    system = SimpleNamespace(id="system-1", username="system")
+    other = SimpleNamespace(id="user-2", username="alice")
+    duplicate_ai_old = SimpleNamespace(
+        id="room-old",
+        room_type="private",
+        users=[user, system],
+        json={"id": "room-old"},
+    )
+    duplicate_ai_new = SimpleNamespace(
+        id="room-new",
+        room_type="private",
+        users=[system, user],
+        json={"id": "room-new"},
+    )
+    other_private = SimpleNamespace(
+        id="room-other",
+        room_type="private",
+        users=[user, other],
+        json={"id": "room-other"},
+    )
+    public_room = SimpleNamespace(
+        id="room-public",
+        room_type="public",
+        users=[user, system],
+        json={"id": "room-public"},
+    )
+
+    rooms = _dedupe_star_rooms(
+        [duplicate_ai_new, public_room, duplicate_ai_old, other_private]
+    )
+
+    assert [room.id for room in rooms] == [
+        "room-new",
+        "room-public",
+        "room-other",
+    ]
