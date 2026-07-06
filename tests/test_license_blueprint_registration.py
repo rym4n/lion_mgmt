@@ -53,19 +53,58 @@ def test_licensed_module_active_prefers_module_expiry_when_present():
     assert is_licensed_module_active(license_data, item) is True
 
 
-def test_security_management_license_module_matches_menu_description():
+def test_asset_management_license_module_matches_menu_description():
     license_data = {
         "grouplist": {
-            "安全管理": {
+            "资产管理": {
                 "expireTime": int(time.time() * 1000) + 60000,
             }
         }
     }
     item = {
-        "name": "安全管理",
-        "module": "supply_chain_review_bp",
+        "name": "资产模型",
+        "module": "asset_management_bp",
         "auth": True,
-        "group": "安全管理",
+        "group": "资产管理",
+    }
+
+    assert is_licensed_module_active(license_data, item) is True
+
+
+def test_network_topology_license_module_uses_network_management_group():
+    license_data = {
+        "grouplist": {
+            "基础功能": {
+                "expireTime": int(time.time() * 1000) + 60000,
+            },
+            "网络管理": {
+                "expireTime": int(time.time() * 1000) + 60000,
+            },
+        }
+    }
+    item = {
+        "name": "网络拓扑",
+        "module": "topology_bp",
+        "auth": True,
+        "group": "网络管理",
+    }
+
+    assert is_licensed_module_active(license_data, item) is True
+
+
+def test_access_control_license_module_matches_network_management_group():
+    license_data = {
+        "grouplist": {
+            "网络管理": {
+                "expireTime": int(time.time() * 1000) + 60000,
+            }
+        }
+    }
+    item = {
+        "name": "访问控制",
+        "module": "network_access_control_bp",
+        "auth": True,
+        "group": "网络管理",
     }
 
     assert is_licensed_module_active(license_data, item) is True

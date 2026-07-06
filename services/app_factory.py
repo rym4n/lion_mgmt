@@ -23,6 +23,8 @@ from services.event_ingestion.views import event_ingestion_bp
 from services.network_topology.views import topology_bp
 from services.supply_chain_review.views import (
     SUPPLY_CHAIN_REVIEW_BLUEPRINTS,
+    asset_management_bp,
+    network_access_control_module_bp,
     supply_chain_review_action_bp,
     supply_chain_review_attachment_bp,
     supply_chain_review_cmdb_bp,
@@ -75,7 +77,6 @@ def register_blueprints(app: Sanic):
     app.blueprint(approve_bp)
     app.blueprint(tenant_bp)
     app.blueprint(inspection_bp)
-    app.blueprint(topology_bp)
 
     try:
         bp_dict = {
@@ -92,6 +93,9 @@ def register_blueprints(app: Sanic):
             "mcp_bp": mcp_bp,
             "command_bp": command_bp,
             "digital_employee_bp": digital_employee_bp,
+            "asset_management_bp": asset_management_bp,
+            "network_access_control_bp": network_access_control_module_bp,
+            "topology_bp": topology_bp,
             "supply_chain_review_bp": SUPPLY_CHAIN_REVIEW_BLUEPRINTS,
             "supply_chain_review_cmdb_bp": supply_chain_review_cmdb_bp,
             "supply_chain_review_ledger_bp": supply_chain_review_ledger_bp,

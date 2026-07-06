@@ -250,6 +250,12 @@ async def get_license(request: Request):
         "指挥中心": 15,
         "指揮中心": 15,
         "Command Center": 15,
+        "资产管理": 16,
+        "資產管理": 16,
+        "Asset Management": 16,
+        "网络管理": 17,
+        "網絡管理": 17,
+        "Network Management": 17,
         "事件管理": 20,
         "Event Management": 20,
     }

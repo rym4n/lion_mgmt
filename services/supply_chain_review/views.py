@@ -65,26 +65,37 @@ supply_chain_review_ledger_bp = Blueprint("supply_chain_review_ledger", url_pref
 supply_chain_review_process_bp = Blueprint("supply_chain_review_process", url_prefix="/supply-chain-review")
 supply_chain_review_action_bp = Blueprint("supply_chain_review_action", url_prefix="/supply-chain-review")
 supply_chain_review_attachment_bp = Blueprint("supply_chain_review_attachment", url_prefix="/supply-chain-review")
+network_access_control_bp = Blueprint("network_access_control", url_prefix="/supply-chain-review")
 
 SUPPLY_CHAIN_REVIEW_BLUEPRINTS = (
     supply_chain_review_cmdb_bp,
     supply_chain_review_ledger_bp,
     supply_chain_review_process_bp,
+    network_access_control_bp,
     supply_chain_review_action_bp,
     supply_chain_review_attachment_bp,
 )
+ASSET_MANAGEMENT_BLUEPRINTS = (supply_chain_review_cmdb_bp,)
+NETWORK_ACCESS_CONTROL_BLUEPRINTS = (network_access_control_bp,)
 
 # Backward-compatible module handle for existing license/menu metadata.
 supply_chain_review_bp = SUPPLY_CHAIN_REVIEW_BLUEPRINTS
+asset_management_bp = ASSET_MANAGEMENT_BLUEPRINTS
+network_access_control_module_bp = NETWORK_ACCESS_CONTROL_BLUEPRINTS
 
 __all__ = [
     "SUPPLY_CHAIN_REVIEW_BLUEPRINTS",
+    "ASSET_MANAGEMENT_BLUEPRINTS",
+    "NETWORK_ACCESS_CONTROL_BLUEPRINTS",
     "supply_chain_review_bp",
+    "asset_management_bp",
+    "network_access_control_module_bp",
     "supply_chain_review_cmdb_bp",
     "supply_chain_review_ledger_bp",
     "supply_chain_review_process_bp",
     "supply_chain_review_action_bp",
     "supply_chain_review_attachment_bp",
+    "network_access_control_bp",
 ]
 
 
@@ -477,7 +488,13 @@ _register_ledger_routes("boundary-log", "boundary-log", "boundary", "边界安�
 _register_ledger_routes("exception-device-log", "exception-device-log", "exception", "例外设备日志")
 
 
-def _register_process_routes(domain: str, path: str, resource: str, title: str) -> None:
+def _register_process_routes(
+    domain: str,
+    path: str,
+    resource: str,
+    title: str,
+    blueprint: Blueprint = supply_chain_review_process_bp,
+) -> None:
     async def list_view(request: Request, _domain=domain):
         return response_ok(await list_process_records(tenant_id(request), _domain, _json(request)))
 
@@ -496,22 +513,22 @@ def _register_process_routes(domain: str, path: str, resource: str, title: str) 
     detail_view.__name__ = f"{path.replace('-', '_')}_detail"
     save_view.__name__ = f"{path.replace('-', '_')}_save"
     delete_view.__name__ = f"{path.replace('-', '_')}_delete"
-    supply_chain_review_process_bp.add_route(
+    blueprint.add_route(
         requires_permission(f"supply_chain_review:{resource}:r")(openapi.definition(summary=f"{title}列表")(list_view)),
         f"/{path}/list",
         methods=["POST"],
     )
-    supply_chain_review_process_bp.add_route(
+    blueprint.add_route(
         requires_permission(f"supply_chain_review:{resource}:r")(openapi.definition(summary=f"{title}详情")(detail_view)),
         f"/{path}/detail",
         methods=["POST"],
     )
-    supply_chain_review_process_bp.add_route(
+    blueprint.add_route(
         requires_permission(f"supply_chain_review:{resource}:c", f"supply_chain_review:{resource}:u")(openapi.definition(summary=f"保存{title}")(save_view)),
         f"/{path}/save",
         methods=["POST"],
     )
-    supply_chain_review_process_bp.add_route(
+    blueprint.add_route(
         requires_permission(f"supply_chain_review:{resource}:d")(openapi.definition(summary=f"删除{title}")(delete_view)),
         f"/{path}/delete",
         methods=["POST"],
@@ -521,9 +538,9 @@ def _register_process_routes(domain: str, path: str, resource: str, title: str) 
 _register_process_routes("collection-task", "collection-task", "collection", "采集任务")
 _register_process_routes("collection-run", "collection-run", "collection", "采集运行")
 _register_process_routes("parse-template", "parse-template", "collection", "解析映射模板")
-_register_process_routes("preset-policy", "preset-policy", "policy", "预设策略")
-_register_process_routes("actual-policy", "actual-policy", "policy", "实际策略")
-_register_process_routes("policy-change", "policy-change", "policy", "策略变更")
+_register_process_routes("preset-policy", "preset-policy", "policy", "预设策略", network_access_control_bp)
+_register_process_routes("actual-policy", "actual-policy", "policy", "实际策略", network_access_control_bp)
+_register_process_routes("policy-change", "policy-change", "policy", "策略变更", network_access_control_bp)
 _register_process_routes("network-topology", "network-topology", "topology", "网络拓扑")
 _register_process_routes("review-issue", "review-issue", "issue", "审查问题")
 _register_process_routes("remediation-record", "remediation-record", "issue", "整改记录")
@@ -547,21 +564,21 @@ async def collection_run_retry(request: Request):
     return response_ok(await retry_collection_run(tenant_id(request), _json(request).get("id"), operator_name(request)))
 
 
-@supply_chain_review_action_bp.post("/policy-compare/run")
+@network_access_control_bp.post("/policy-compare/run")
 @openapi.definition(summary="运行策略比对")
 @requires_permission("supply_chain_review:policy:u")
 async def policy_compare_run(request: Request):
     return response_ok(await run_policy_compare(tenant_id(request), _json(request), operator_name(request)))
 
 
-@supply_chain_review_process_bp.post("/policy-compare/run-list")
+@network_access_control_bp.post("/policy-compare/run-list")
 @openapi.definition(summary="策略比对运行列表")
 @requires_permission("supply_chain_review:policy:r")
 async def policy_compare_run_list(request: Request):
     return response_ok(await list_process_records(tenant_id(request), "policy-compare-run", _json(request)))
 
 
-@supply_chain_review_process_bp.post("/policy-compare/item-list")
+@network_access_control_bp.post("/policy-compare/item-list")
 @openapi.definition(summary="策略比对明细列表")
 @requires_permission("supply_chain_review:policy:r")
 async def policy_compare_item_list(request: Request):
@@ -577,21 +594,21 @@ async def policy_compare_item_list(request: Request):
     return response_ok({"total": total, "items": [item.json for item in items], "page": page, "size": size})
 
 
-@supply_chain_review_action_bp.post("/policy-compare/item-confirm")
+@network_access_control_bp.post("/policy-compare/item-confirm")
 @openapi.definition(summary="确认策略比对明细")
 @requires_permission("supply_chain_review:policy:u")
 async def policy_compare_item_confirm(request: Request):
     return response_ok(await update_compare_item_status(tenant_id(request), _json(request).get("id"), "confirmed", operator_name(request)))
 
 
-@supply_chain_review_action_bp.post("/policy-compare/item-ignore")
+@network_access_control_bp.post("/policy-compare/item-ignore")
 @openapi.definition(summary="忽略策略比对明细")
 @requires_permission("supply_chain_review:policy:u")
 async def policy_compare_item_ignore(request: Request):
     return response_ok(await update_compare_item_status(tenant_id(request), _json(request).get("id"), "ignored", operator_name(request)))
 
 
-@supply_chain_review_action_bp.post("/policy-change/external-callback")
+@network_access_control_bp.post("/policy-change/external-callback")
 @openapi.definition(summary="策略变更外部审批结果回写")
 @requires_permission("supply_chain_review:policy:u")
 async def policy_change_callback(request: Request):
