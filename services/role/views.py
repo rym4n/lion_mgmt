@@ -8,7 +8,7 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import is_superadmin_role, load_license, requires_permission
+from libs.security.authorization import check_wildcard, is_superadmin_role, load_license, requires_permission
 from models import Account, PermissionsMenu, Role
 
 role_bp = Blueprint("role", url_prefix="/role")
@@ -51,26 +51,33 @@ def _normalize_menu_action_value(permission_value: object) -> str | None:
     return permission_value.rsplit(":", 1)[-1]
 
 
-def _normalize_menu_permissions(permissions: object) -> list[dict]:
+def _normalize_menu_permissions(permissions: object, menu_model: str | None = None) -> list[dict]:
     if not isinstance(permissions, list):
         return []
 
     normalized_permissions = []
     for item in permissions:
         if isinstance(item, dict):
-            value = _normalize_menu_action_value(item.get("value"))
-            label = item.get("label") or value
+            raw_value = item.get("value")
         else:
-            value = _normalize_menu_action_value(item)
-            label = value
+            raw_value = item
+        value = _normalize_menu_action_value(raw_value)
+        label = item.get("label") if isinstance(item, dict) else value
         if value:
-            normalized_permissions.append({"value": value, "label": label})
+            normalized_item = {"value": value, "label": label or value}
+            actual_permission = _normalize_permission_value(raw_value)
+            if actual_permission and menu_model and actual_permission.rsplit(":", 1)[0] != menu_model:
+                normalized_item["permission"] = actual_permission
+            normalized_permissions.append(normalized_item)
     return normalized_permissions
 
 
 def _normalize_permission_menu(permission: dict) -> dict:
     normalized = dict(permission)
-    normalized["Permissions"] = _normalize_menu_permissions(permission.get("Permissions"))
+    normalized["Permissions"] = _normalize_menu_permissions(
+        permission.get("Permissions"),
+        permission.get("model"),
+    )
     return normalized
 
 
@@ -79,7 +86,7 @@ def _build_permission_map(permissions_data: list[dict]) -> dict:
     for permission in permissions_data:
         values = {
             item["value"]: item["label"]
-            for item in _normalize_menu_permissions(permission.get("Permissions"))
+            for item in _normalize_menu_permissions(permission.get("Permissions"), permission.get("model"))
         }
         permission_map[permission["model"]] = {
             "description": permission["description"],
@@ -89,50 +96,36 @@ def _build_permission_map(permissions_data: list[dict]) -> dict:
 
 
 def _build_structured_permissions(role_permissions: list[str] | None, permissions_data: list[dict]) -> list[dict]:
-    permission_map = _build_permission_map(permissions_data)
     structured_by_model = {}
     seen_by_model = {}
 
-    def append_actions(model: str, action_values: list[str]) -> None:
-        perm_info = permission_map.get(model)
-        if not perm_info:
-            return
+    def append_action(model: str, description: str, action_value: str, label: str) -> None:
         if model not in structured_by_model:
             structured_by_model[model] = {
                 "model": model,
-                "model_description": perm_info["description"],
+                "model_description": description,
                 "sp": [],
             }
             seen_by_model[model] = set()
 
-        for action in action_values:
-            if action in seen_by_model[model]:
-                continue
-            label = perm_info["values"].get(action)
-            if label:
-                structured_by_model[model]["sp"].append({action: label})
-                seen_by_model[model].add(action)
+        if action_value not in seen_by_model[model]:
+            structured_by_model[model]["sp"].append({action_value: label})
+            seen_by_model[model].add(action_value)
 
-    for permission_value in role_permissions or []:
-        normalized = _normalize_permission_value(permission_value)
-        if not normalized:
-            continue
+    normalized_role_permissions = [
+        normalized
+        for permission_value in (role_permissions or [])
+        if (normalized := _normalize_permission_value(permission_value))
+    ]
 
-        model, actions = normalized.split(":", 1)
-        if model == "*":
-            action_values = None if actions == "*" else actions.split(",")
-            for wildcard_model, perm_info in permission_map.items():
-                append_actions(
-                    wildcard_model,
-                    list(perm_info["values"].keys()) if action_values is None else action_values,
-                )
-            continue
-
-        perm_info = permission_map.get(model)
-        if not perm_info:
-            continue
-        action_values = list(perm_info["values"].keys()) if actions == "*" else actions.split(",")
-        append_actions(model, action_values)
+    for permission in permissions_data:
+        model = permission["model"]
+        description = permission["description"]
+        for item in _normalize_menu_permissions(permission.get("Permissions"), model):
+            action_value = item.get("permission") or item["value"]
+            actual_permission = item.get("permission") or f"{model}:{item['value']}"
+            if any(check_wildcard(role_permission, actual_permission) for role_permission in normalized_role_permissions):
+                append_action(model, description, action_value, item["label"])
 
     return list(structured_by_model.values())
 

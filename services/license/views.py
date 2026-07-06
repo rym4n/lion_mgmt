@@ -13,7 +13,7 @@ from sanic_ext import openapi
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import get_license_sha256, load_license, requires_permission
+from libs.security.authorization import check_wildcard, get_license_sha256, load_license, requires_permission
 from libs.security.license_modules import is_licensed_module_active
 from libs.utils import verify_license
 from models import Account, PermissionsMenu, Playbook, Tool
@@ -21,6 +21,40 @@ from settings import LICENSE_DIR
 
 license_bp = Blueprint("license", url_prefix="/license")
 _all__ = ["license_bp"]
+
+
+def _permission_values(permissions: object) -> list[str]:
+    if not isinstance(permissions, list):
+        return []
+
+    values = []
+    for item in permissions:
+        if isinstance(item, dict):
+            value = item.get("value")
+        else:
+            value = item
+        if isinstance(value, str) and value:
+            values.append(value)
+    return values
+
+
+def _role_can_open_menu(role_permissions: list[str] | None, menu: dict) -> bool:
+    if not role_permissions:
+        return False
+    if "*:*" in role_permissions:
+        return True
+
+    menu_model = menu.get("model")
+    menu_permission_values = [
+        value if ":" in value else f"{menu_model}:{value}"
+        for value in _permission_values(menu.get("Permissions"))
+        if menu_model or ":" in value
+    ]
+    return any(
+        check_wildcard(role_permission, menu_permission)
+        for role_permission in role_permissions
+        for menu_permission in menu_permission_values
+    )
 
 
 @license_bp.post("/machine-code")
@@ -184,8 +218,11 @@ async def get_license(request: Request):
             valid_modules.update(["许可管理"])
             # 超级权限处理
             if "*:*" not in role.permissions:
-                relo_permissions_model = [p.split(":")[0] for p in role.permissions]
-                role_permissions = await PermissionsMenu.filter(model__in=relo_permissions_model).all().values()
+                role_permissions = [
+                    permission
+                    for permission in permissions
+                    if _role_can_open_menu(role.permissions, permission)
+                ]
             else:
                 role_permissions = permissions
             perm_models.update([p["model"] for p in role_permissions if p["description"] in valid_modules and p["description"] != "仪表盘"])

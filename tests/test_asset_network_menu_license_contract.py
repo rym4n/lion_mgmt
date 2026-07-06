@@ -4,10 +4,15 @@ import importlib
 import re
 from pathlib import Path
 
+from services.license.views import _role_can_open_menu
+
 
 ROOT = Path(__file__).resolve().parents[2]
 split_menus = importlib.import_module(
     "migrations.models.59_20260706150000_split_asset_network_management_menus"
+)
+fix_menus = importlib.import_module(
+    "migrations.models.60_20260706165000_fix_asset_network_menu_permissions"
 )
 
 
@@ -36,6 +41,24 @@ def _assert_module_not_in_group(text: str, name: str, module: str, group: str):
         assert entry not in compact
 
 
+def test_license_menu_permission_matching_supports_split_menu_models():
+    asset_menu = {
+        "model": "asset-management-models",
+        "Permissions": [
+            "supply_chain_review:model:c",
+            "supply_chain_review:model:r",
+        ],
+    }
+    legacy_menu = {
+        "model": "system",
+        "Permissions": [{"label": "查看系统设置权限", "value": "r"}],
+    }
+
+    assert _role_can_open_menu(["supply_chain_review:model:r"], asset_menu) is True
+    assert _role_can_open_menu(["asset-management-models:r"], asset_menu) is False
+    assert _role_can_open_menu(["system:c,d,u,r"], legacy_menu) is True
+
+
 def test_split_menu_migration_replaces_security_management_menu():
     upgrade_sql = asyncio.run(split_menus.upgrade(None))
 
@@ -50,6 +73,28 @@ def test_split_menu_migration_replaces_security_management_menu():
     menu_ids = re.findall(r"VALUES\s*\(\s*'([^']+)'", upgrade_sql)
     assert menu_ids
     assert all(len(menu_id) <= 36 for menu_id in menu_ids)
+    assert '"icon":"ri:database-2-line"' in upgrade_sql
+    assert '"icon":"ri:router-line"' in upgrade_sql
+    assert '"icon":"ri:mind-map"' in upgrade_sql
+    assert '"icon":"ri:shield-keyhole-line"' in upgrade_sql
+
+
+def test_fix_menu_migration_removes_legacy_topology_and_backfills_admin_roles():
+    upgrade_sql = asyncio.run(fix_menus.upgrade(None))
+
+    assert "'network-topology'" in upgrade_sql
+    assert "'/network-topology'" in upgrade_sql
+    assert "'topology'" in upgrade_sql
+    assert "'/topology'" in upgrade_sql
+    assert "'/security-management'" in upgrade_sql
+    assert "supply_chain_review:model:r" in upgrade_sql
+    assert "supply_chain_review:ci:r" in upgrade_sql
+    assert "network_topology:r" in upgrade_sql
+    assert "supply_chain_review:policy:r" in upgrade_sql
+    assert "'*:*'" in upgrade_sql
+    assert "租户管理员" in upgrade_sql
+    assert "空间管理员" in upgrade_sql
+    assert "'role:c,d,u,r'" not in upgrade_sql
 
 
 def test_license_templates_use_asset_and_network_management_groups():

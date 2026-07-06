@@ -13,14 +13,37 @@ from libs.error_code.enum import ErrorData
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.utils import verify_license
-from models import ActionPermissions, PermissionsMenu, PlaybookPermissions, PlaybookVersion, Role
-from settings import LICENSE_DIR
+from models import Account, ActionPermissions, PermissionsMenu, PlaybookPermissions, PlaybookVersion, Role
+from settings import AUTHENTICATION_SESSION_EXPIRATION, LICENSE_DIR
 
 # 超管角色的本质是拥有 *:* 通配权限的那条 Role（见 aioe_package/aioe_install/init.sql 初始化）。
 # 用权限本质而非硬编码角色 id "111111" 定位，避免多环境/多次种子数据下 id 漂移导致的隐性 bug。
 SUPERADMIN_PERMISSION = "*:*"
 # 租户管理员是租户维度的管理角色，各租户内以名称"租户管理员"唯一（见 services/tenant/views.py:125）。
 TENANT_ADMIN_ROLE_NAME = "租户管理员"
+
+
+def _roles_have_any_permission(roles, required_permissions: tuple[str, ...]) -> bool:
+    for role in roles or []:
+        for role_permission in role.permissions or []:
+            for required_permission in required_permissions:
+                if check_wildcard(role_permission, required_permission):
+                    return True
+    return False
+
+
+async def _refresh_session_account(request: Request):
+    account_id = request.ctx.session.get("sub") if hasattr(request.ctx, "session") else None
+    if not account_id:
+        return None
+    account = await Account.get_or_none(id=account_id, deleted=False).prefetch_related("roles")
+    if not account:
+        return None
+    request.ctx.session["account_info"] = account
+    cache_client = getattr(request.app.ctx, "cache_client", None)
+    if cache_client:
+        await cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
+    return account
 
 
 async def check_permissions(request: Request, *required_permissions: str) -> bool:
@@ -31,11 +54,14 @@ async def check_permissions(request: Request, *required_permissions: str) -> boo
     #     raise CustomError(ErrorCode.SESSION_INVALID)
     # request.ctx.session['account_info'] = account
     # roles = await account.roles.filter(deleted=False).all()
-    for role in request.ctx.session["account_info"].roles:
-        for role_permission in role.permissions:
-            for required_permission in required_permissions:
-                if check_wildcard(role_permission, required_permission):
-                    return True
+    account = request.ctx.session["account_info"]
+    if _roles_have_any_permission(account.roles, required_permissions):
+        return True
+
+    refreshed_account = await _refresh_session_account(request)
+    if refreshed_account and _roles_have_any_permission(refreshed_account.roles, required_permissions):
+        return True
+
     pm = await PermissionsMenu.filter(model=request.path.split("/")[1]).first().values("description")
     module = pm.get("description") if pm else request.path.split("/")[1]
     raise CustomError(ErrorData(4004, f"缺少{module}模块的操作权限"))

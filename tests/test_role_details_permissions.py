@@ -75,8 +75,8 @@ def test_role_details_normalizes_legacy_nested_permission_codes():
         {"r": "查看汇报任务权限"},
     ]
     assert _by_model(structured)["digital_employee"]["sp"] == [
-        {"r": "查看数字员工权限"},
         {"c": "新增数字员工权限"},
+        {"r": "查看数字员工权限"},
     ]
 
 
@@ -115,4 +115,61 @@ def test_role_permission_all_normalizes_legacy_string_permissions():
     assert normalized["Permissions"] == [
         {"value": "c", "label": "c"},
         {"value": "r", "label": "查看汇报任务权限"},
+    ]
+
+
+def test_role_permission_all_exposes_actual_nested_permission_code():
+    normalized = _normalize_permission_menu(
+        {
+            "model": "asset-management-models",
+            "description": "资产模型",
+            "Permissions": [
+                {"label": "查看资产模型权限", "value": "supply_chain_review:model:r"},
+                {"label": "新增资产模型权限", "value": "supply_chain_review:model:c"},
+            ],
+        }
+    )
+
+    assert normalized["Permissions"] == [
+        {
+            "value": "r",
+            "label": "查看资产模型权限",
+            "permission": "supply_chain_review:model:r",
+        },
+        {
+            "value": "c",
+            "label": "新增资产模型权限",
+            "permission": "supply_chain_review:model:c",
+        },
+    ]
+
+
+def test_role_details_groups_nested_permissions_under_split_menu_model():
+    structured = _build_structured_permissions(
+        ["supply_chain_review:model:r", "network_topology:r"],
+        [
+            {
+                "model": "asset-management-models",
+                "description": "资产模型",
+                "Permissions": [
+                    {"label": "查看资产模型权限", "value": "supply_chain_review:model:r"},
+                    {"label": "新增资产模型权限", "value": "supply_chain_review:model:c"},
+                ],
+            },
+            {
+                "model": "network-management-topology",
+                "description": "网络拓扑",
+                "Permissions": [
+                    {"label": "查看网络拓扑权限", "value": "network_topology:r"},
+                    {"label": "编辑网络拓扑权限", "value": "network_topology:w"},
+                ],
+            },
+        ],
+    )
+
+    assert _by_model(structured)["asset-management-models"]["sp"] == [
+        {"supply_chain_review:model:r": "查看资产模型权限"}
+    ]
+    assert _by_model(structured)["network-management-topology"]["sp"] == [
+        {"network_topology:r": "查看网络拓扑权限"}
     ]
