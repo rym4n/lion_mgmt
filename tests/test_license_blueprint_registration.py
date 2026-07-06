@@ -51,3 +51,21 @@ def test_licensed_module_active_prefers_module_expiry_when_present():
     }
 
     assert is_licensed_module_active(license_data, item) is True
+
+
+def test_security_management_license_module_matches_menu_description():
+    license_data = {
+        "grouplist": {
+            "安全管理": {
+                "expireTime": int(time.time() * 1000) + 60000,
+            }
+        }
+    }
+    item = {
+        "name": "安全管理",
+        "module": "supply_chain_review_bp",
+        "auth": True,
+        "group": "安全管理",
+    }
+
+    assert is_licensed_module_active(license_data, item) is True

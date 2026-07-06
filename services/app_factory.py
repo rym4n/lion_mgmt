@@ -21,7 +21,14 @@ from services.digital_employee.views import digital_employee_bp
 from services.event.views import event_bp
 from services.event_ingestion.views import event_ingestion_bp
 from services.network_topology.views import topology_bp
-from services.supply_chain_review.views import supply_chain_review_bp
+from services.supply_chain_review.views import (
+    SUPPLY_CHAIN_REVIEW_BLUEPRINTS,
+    supply_chain_review_action_bp,
+    supply_chain_review_attachment_bp,
+    supply_chain_review_cmdb_bp,
+    supply_chain_review_ledger_bp,
+    supply_chain_review_process_bp,
+)
 from services.inspection.views import inspection_bp
 import services.large_screen.views  # noqa: F401
 from services.command_center.views import command_bp
@@ -69,7 +76,6 @@ def register_blueprints(app: Sanic):
     app.blueprint(tenant_bp)
     app.blueprint(inspection_bp)
     app.blueprint(topology_bp)
-    app.blueprint(supply_chain_review_bp)
 
     try:
         bp_dict = {
@@ -86,16 +92,31 @@ def register_blueprints(app: Sanic):
             "mcp_bp": mcp_bp,
             "command_bp": command_bp,
             "digital_employee_bp": digital_employee_bp,
+            "supply_chain_review_bp": SUPPLY_CHAIN_REVIEW_BLUEPRINTS,
+            "supply_chain_review_cmdb_bp": supply_chain_review_cmdb_bp,
+            "supply_chain_review_ledger_bp": supply_chain_review_ledger_bp,
+            "supply_chain_review_process_bp": supply_chain_review_process_bp,
+            "supply_chain_review_action_bp": supply_chain_review_action_bp,
+            "supply_chain_review_attachment_bp": supply_chain_review_attachment_bp,
         }
         license_data = load_license()
         if license_data and "moduleList" in license_data:
             registered_modules = set()
+            registered_blueprint_names = set()
             for item in license_data["moduleList"]:
                 module = item.get("module")
                 if not module or module not in bp_dict or module in registered_modules:
                     continue
                 if is_licensed_module_active(license_data, item):
-                    app.blueprint(bp_dict[module])
+                    blueprints = bp_dict[module]
+                    if not isinstance(blueprints, tuple):
+                        blueprints = (blueprints,)
+                    for blueprint in blueprints:
+                        blueprint_name = getattr(blueprint, "name", None) or id(blueprint)
+                        if blueprint_name in registered_blueprint_names:
+                            continue
+                        app.blueprint(blueprint)
+                        registered_blueprint_names.add(blueprint_name)
                     registered_modules.add(module)
     except Exception as ex:
         logger.info(f"{ex} | {traceback.format_exc()}")

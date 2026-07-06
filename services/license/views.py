@@ -14,6 +14,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import get_license_sha256, load_license, requires_permission
+from libs.security.license_modules import is_licensed_module_active
 from libs.utils import verify_license
 from models import Account, PermissionsMenu, Playbook, Tool
 from settings import LICENSE_DIR
@@ -172,8 +173,7 @@ async def get_license(request: Request):
             valid_modules = set()
             for item in lic["moduleList"]:
                 name = item["name"]
-                group = item["group"]
-                if int(lic["grouplist"][group]["expireTime"]) > int(time.time() * 1000):
+                if is_licensed_module_active(lic, item):
                     if item["module"] == "ai_bp":
                         ai_type += 1
                     if item["module"] == "tenant_bp":

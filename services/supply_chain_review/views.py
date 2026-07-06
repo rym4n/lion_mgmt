@@ -60,8 +60,32 @@ from services.supply_chain_review.manager import (
     transition_review_issue,
 )
 
-supply_chain_review_bp = Blueprint("supply_chain_review", url_prefix="/supply-chain-review")
-__all__ = ["supply_chain_review_bp"]
+supply_chain_review_cmdb_bp = Blueprint("supply_chain_review_cmdb", url_prefix="/supply-chain-review")
+supply_chain_review_ledger_bp = Blueprint("supply_chain_review_ledger", url_prefix="/supply-chain-review")
+supply_chain_review_process_bp = Blueprint("supply_chain_review_process", url_prefix="/supply-chain-review")
+supply_chain_review_action_bp = Blueprint("supply_chain_review_action", url_prefix="/supply-chain-review")
+supply_chain_review_attachment_bp = Blueprint("supply_chain_review_attachment", url_prefix="/supply-chain-review")
+
+SUPPLY_CHAIN_REVIEW_BLUEPRINTS = (
+    supply_chain_review_cmdb_bp,
+    supply_chain_review_ledger_bp,
+    supply_chain_review_process_bp,
+    supply_chain_review_action_bp,
+    supply_chain_review_attachment_bp,
+)
+
+# Backward-compatible module handle for existing license/menu metadata.
+supply_chain_review_bp = SUPPLY_CHAIN_REVIEW_BLUEPRINTS
+
+__all__ = [
+    "SUPPLY_CHAIN_REVIEW_BLUEPRINTS",
+    "supply_chain_review_bp",
+    "supply_chain_review_cmdb_bp",
+    "supply_chain_review_ledger_bp",
+    "supply_chain_review_process_bp",
+    "supply_chain_review_action_bp",
+    "supply_chain_review_attachment_bp",
+]
 
 
 def _json(request: Request) -> dict:
@@ -91,7 +115,7 @@ def _keyword_condition(keyword: str | None):
     return Q(name__icontains=keyword) | Q(key__icontains=keyword)
 
 
-@supply_chain_review_bp.post("/ci-type/list")
+@supply_chain_review_cmdb_bp.post("/ci-type/list")
 @openapi.definition(summary="CMDB模型列表")
 @requires_permission("supply_chain_review:model:r")
 async def ci_type_list(request: Request):
@@ -106,7 +130,7 @@ async def ci_type_list(request: Request):
     return response_ok({"total": total, "items": [item.json for item in items], "page": page, "size": size})
 
 
-@supply_chain_review_bp.post("/ci-type/detail")
+@supply_chain_review_cmdb_bp.post("/ci-type/detail")
 @openapi.definition(summary="CMDB模型详情")
 @requires_permission("supply_chain_review:model:r")
 async def ci_type_detail(request: Request):
@@ -118,7 +142,7 @@ async def ci_type_detail(request: Request):
     return response_ok(payload)
 
 
-@supply_chain_review_bp.post("/ci-type/save")
+@supply_chain_review_cmdb_bp.post("/ci-type/save")
 @openapi.definition(summary="保存CMDB模型")
 @requires_permission("supply_chain_review:model:c", "supply_chain_review:model:u")
 async def ci_type_save(request: Request):
@@ -126,7 +150,7 @@ async def ci_type_save(request: Request):
     return response_ok(item.json)
 
 
-@supply_chain_review_bp.post("/ci-type/delete")
+@supply_chain_review_cmdb_bp.post("/ci-type/delete")
 @openapi.definition(summary="删除CMDB模型")
 @requires_permission("supply_chain_review:model:d")
 async def ci_type_delete(request: Request):
@@ -139,7 +163,7 @@ async def ci_type_delete(request: Request):
     return response_ok({"id": ci_type.id})
 
 
-@supply_chain_review_bp.post("/ci-type/export")
+@supply_chain_review_cmdb_bp.post("/ci-type/export")
 @openapi.definition(summary="导出CMDB模型包")
 @requires_permission("supply_chain_review:model:r")
 async def ci_type_export(request: Request):
@@ -147,7 +171,7 @@ async def ci_type_export(request: Request):
     return response_ok(await export_model_package(tenant_id(request), data.get("ci_type_keys")))
 
 
-@supply_chain_review_bp.post("/ci-type/import")
+@supply_chain_review_cmdb_bp.post("/ci-type/import")
 @openapi.definition(summary="导入CMDB模型包")
 @requires_permission("supply_chain_review:model:c")
 async def ci_type_import(request: Request):
@@ -158,7 +182,7 @@ async def ci_type_import(request: Request):
     return response_ok(await import_model_package(tenant_id(request), package, operator_name(request)))
 
 
-@supply_chain_review_bp.post("/ci-field/list")
+@supply_chain_review_cmdb_bp.post("/ci-field/list")
 @openapi.definition(summary="CMDB字段列表")
 @requires_permission("supply_chain_review:field:r")
 async def ci_field_list(request: Request):
@@ -171,7 +195,7 @@ async def ci_field_list(request: Request):
     return response_ok({"items": [item.json for item in fields], "total": len(fields)})
 
 
-@supply_chain_review_bp.post("/ci-field/save")
+@supply_chain_review_cmdb_bp.post("/ci-field/save")
 @openapi.definition(summary="保存CMDB字段")
 @requires_permission("supply_chain_review:field:c", "supply_chain_review:field:u")
 async def ci_field_save(request: Request):
@@ -179,7 +203,7 @@ async def ci_field_save(request: Request):
     return response_ok(item.json)
 
 
-@supply_chain_review_bp.post("/ci-field/delete")
+@supply_chain_review_cmdb_bp.post("/ci-field/delete")
 @openapi.definition(summary="删除CMDB字段")
 @requires_permission("supply_chain_review:field:d")
 async def ci_field_delete(request: Request):
@@ -195,7 +219,7 @@ async def ci_field_delete(request: Request):
     return response_ok({"id": field.id})
 
 
-@supply_chain_review_bp.post("/relation-type/list")
+@supply_chain_review_cmdb_bp.post("/relation-type/list")
 @openapi.definition(summary="CMDB关系类型列表")
 @requires_permission("supply_chain_review:relation:r")
 async def relation_type_list(request: Request):
@@ -208,7 +232,7 @@ async def relation_type_list(request: Request):
     return response_ok({"total": total, "items": [item.json for item in items], "page": page, "size": size})
 
 
-@supply_chain_review_bp.post("/relation-type/detail")
+@supply_chain_review_cmdb_bp.post("/relation-type/detail")
 @openapi.definition(summary="CMDB关系类型详情")
 @requires_permission("supply_chain_review:relation:r")
 async def relation_type_detail(request: Request):
@@ -217,7 +241,7 @@ async def relation_type_detail(request: Request):
     return response_ok(relation_type.json)
 
 
-@supply_chain_review_bp.post("/relation-type/save")
+@supply_chain_review_cmdb_bp.post("/relation-type/save")
 @openapi.definition(summary="保存CMDB关系类型")
 @requires_permission("supply_chain_review:relation:c", "supply_chain_review:relation:u")
 async def relation_type_save(request: Request):
@@ -225,7 +249,7 @@ async def relation_type_save(request: Request):
     return response_ok(item.json)
 
 
-@supply_chain_review_bp.post("/relation-type/delete")
+@supply_chain_review_cmdb_bp.post("/relation-type/delete")
 @openapi.definition(summary="删除CMDB关系类型")
 @requires_permission("supply_chain_review:relation:d")
 async def relation_type_delete(request: Request):
@@ -237,7 +261,7 @@ async def relation_type_delete(request: Request):
     return response_ok({"id": relation_type.id})
 
 
-@supply_chain_review_bp.post("/ci/list")
+@supply_chain_review_cmdb_bp.post("/ci/list")
 @openapi.definition(summary="CI实例列表")
 @requires_permission("supply_chain_review:ci:r")
 async def ci_list(request: Request):
@@ -255,7 +279,7 @@ async def ci_list(request: Request):
     return response_ok({"total": total, "items": [item.json for item in items], "page": page, "size": size})
 
 
-@supply_chain_review_bp.post("/ci/detail")
+@supply_chain_review_cmdb_bp.post("/ci/detail")
 @openapi.definition(summary="CI实例详情")
 @requires_permission("supply_chain_review:ci:r")
 async def ci_detail(request: Request):
@@ -266,7 +290,7 @@ async def ci_detail(request: Request):
     return response_ok(payload)
 
 
-@supply_chain_review_bp.post("/ci/save")
+@supply_chain_review_cmdb_bp.post("/ci/save")
 @openapi.definition(summary="保存CI实例")
 @requires_permission("supply_chain_review:ci:c", "supply_chain_review:ci:u")
 async def ci_save(request: Request):
@@ -274,7 +298,7 @@ async def ci_save(request: Request):
     return response_ok(item.json)
 
 
-@supply_chain_review_bp.post("/ci/delete")
+@supply_chain_review_cmdb_bp.post("/ci/delete")
 @openapi.definition(summary="删除CI实例")
 @requires_permission("supply_chain_review:ci:d")
 async def ci_delete(request: Request):
@@ -285,7 +309,7 @@ async def ci_delete(request: Request):
     return response_ok({"id": ci.id})
 
 
-@supply_chain_review_bp.post("/ci/import")
+@supply_chain_review_cmdb_bp.post("/ci/import")
 @openapi.definition(summary="批量导入CI实例")
 @requires_permission("supply_chain_review:ci:c")
 async def ci_import(request: Request):
@@ -300,7 +324,7 @@ async def ci_import(request: Request):
     return response_ok({"total": len(imported), "items": imported})
 
 
-@supply_chain_review_bp.post("/ci/import-template")
+@supply_chain_review_cmdb_bp.post("/ci/import-template")
 @openapi.definition(summary="获取CI导入模板")
 @requires_permission("supply_chain_review:ci:r")
 async def ci_import_template(request: Request):
@@ -316,7 +340,7 @@ async def ci_import_template(request: Request):
     return response_ok({"ci_type": ci_type.json, "columns": columns})
 
 
-@supply_chain_review_bp.post("/relation/list")
+@supply_chain_review_cmdb_bp.post("/relation/list")
 @openapi.definition(summary="CI关系列表")
 @requires_permission("supply_chain_review:relation:r")
 async def relation_list(request: Request):
@@ -332,7 +356,7 @@ async def relation_list(request: Request):
     return response_ok({"total": total, "items": [item.json for item in items], "page": page, "size": size})
 
 
-@supply_chain_review_bp.post("/relation/detail")
+@supply_chain_review_cmdb_bp.post("/relation/detail")
 @openapi.definition(summary="CI关系详情")
 @requires_permission("supply_chain_review:relation:r")
 async def relation_detail(request: Request):
@@ -342,7 +366,7 @@ async def relation_detail(request: Request):
     return response_ok(relation.json)
 
 
-@supply_chain_review_bp.post("/relation/save")
+@supply_chain_review_cmdb_bp.post("/relation/save")
 @openapi.definition(summary="保存CI关系")
 @requires_permission("supply_chain_review:relation:c", "supply_chain_review:relation:u")
 async def relation_save(request: Request):
@@ -350,7 +374,7 @@ async def relation_save(request: Request):
     return response_ok(item.json)
 
 
-@supply_chain_review_bp.post("/relation/delete")
+@supply_chain_review_cmdb_bp.post("/relation/delete")
 @openapi.definition(summary="删除CI关系")
 @requires_permission("supply_chain_review:relation:d")
 async def relation_delete(request: Request):
@@ -362,7 +386,7 @@ async def relation_delete(request: Request):
     return response_ok({"id": relation.id})
 
 
-@supply_chain_review_bp.post("/relation/graph")
+@supply_chain_review_cmdb_bp.post("/relation/graph")
 @openapi.definition(summary="CI关系拓扑")
 @requires_permission("supply_chain_review:relation:r")
 async def relation_graph(request: Request):
@@ -370,7 +394,7 @@ async def relation_graph(request: Request):
     return response_ok(await build_relation_graph(tenant_id(request), data.get("ci_id"), data.get("depth", 1)))
 
 
-@supply_chain_review_bp.post("/relation/import")
+@supply_chain_review_cmdb_bp.post("/relation/import")
 @openapi.definition(summary="批量导入CI关系")
 @requires_permission("supply_chain_review:relation:c")
 async def relation_import(request: Request):
@@ -384,21 +408,21 @@ async def relation_import(request: Request):
     return response_ok({"total": len(imported), "items": imported})
 
 
-@supply_chain_review_bp.post("/project-view/tree")
+@supply_chain_review_cmdb_bp.post("/project-view/tree")
 @openapi.definition(summary="安全管理项目视图树")
 @requires_permission("supply_chain_review:project:r")
 async def project_view_tree(request: Request):
     return response_ok(await build_project_tree(tenant_id(request)))
 
 
-@supply_chain_review_bp.post("/overview/summary")
+@supply_chain_review_cmdb_bp.post("/overview/summary")
 @openapi.definition(summary="安全管理概览统计")
 @requires_permission("supply_chain_review:overview:r")
 async def overview_summary_view(request: Request):
     return response_ok(await overview_summary(tenant_id(request), _json(request)))
 
 
-@supply_chain_review_bp.post("/overview/todo")
+@supply_chain_review_cmdb_bp.post("/overview/todo")
 @openapi.definition(summary="安全管理待办统计")
 @requires_permission("supply_chain_review:overview:r")
 async def overview_todo_view(request: Request):
@@ -424,22 +448,22 @@ def _register_ledger_routes(domain: str, path: str, resource: str, title: str) -
     detail_view.__name__ = f"{path.replace('-', '_')}_detail"
     save_view.__name__ = f"{path.replace('-', '_')}_save"
     delete_view.__name__ = f"{path.replace('-', '_')}_delete"
-    supply_chain_review_bp.add_route(
+    supply_chain_review_ledger_bp.add_route(
         requires_permission(f"supply_chain_review:{resource}:r")(openapi.definition(summary=f"{title}列表")(list_view)),
         f"/{path}/list",
         methods=["POST"],
     )
-    supply_chain_review_bp.add_route(
+    supply_chain_review_ledger_bp.add_route(
         requires_permission(f"supply_chain_review:{resource}:r")(openapi.definition(summary=f"{title}详情")(detail_view)),
         f"/{path}/detail",
         methods=["POST"],
     )
-    supply_chain_review_bp.add_route(
+    supply_chain_review_ledger_bp.add_route(
         requires_permission(f"supply_chain_review:{resource}:c", f"supply_chain_review:{resource}:u")(openapi.definition(summary=f"保存{title}")(save_view)),
         f"/{path}/save",
         methods=["POST"],
     )
-    supply_chain_review_bp.add_route(
+    supply_chain_review_ledger_bp.add_route(
         requires_permission(f"supply_chain_review:{resource}:d")(openapi.definition(summary=f"删除{title}")(delete_view)),
         f"/{path}/delete",
         methods=["POST"],
@@ -472,22 +496,22 @@ def _register_process_routes(domain: str, path: str, resource: str, title: str) 
     detail_view.__name__ = f"{path.replace('-', '_')}_detail"
     save_view.__name__ = f"{path.replace('-', '_')}_save"
     delete_view.__name__ = f"{path.replace('-', '_')}_delete"
-    supply_chain_review_bp.add_route(
+    supply_chain_review_process_bp.add_route(
         requires_permission(f"supply_chain_review:{resource}:r")(openapi.definition(summary=f"{title}列表")(list_view)),
         f"/{path}/list",
         methods=["POST"],
     )
-    supply_chain_review_bp.add_route(
+    supply_chain_review_process_bp.add_route(
         requires_permission(f"supply_chain_review:{resource}:r")(openapi.definition(summary=f"{title}详情")(detail_view)),
         f"/{path}/detail",
         methods=["POST"],
     )
-    supply_chain_review_bp.add_route(
+    supply_chain_review_process_bp.add_route(
         requires_permission(f"supply_chain_review:{resource}:c", f"supply_chain_review:{resource}:u")(openapi.definition(summary=f"保存{title}")(save_view)),
         f"/{path}/save",
         methods=["POST"],
     )
-    supply_chain_review_bp.add_route(
+    supply_chain_review_process_bp.add_route(
         requires_permission(f"supply_chain_review:{resource}:d")(openapi.definition(summary=f"删除{title}")(delete_view)),
         f"/{path}/delete",
         methods=["POST"],
@@ -509,35 +533,35 @@ _register_process_routes("attachment-ref", "attachment-ref", "attachment", "附�
 _register_process_routes("notification-event", "notification-event", "notify", "通知事件")
 
 
-@supply_chain_review_bp.post("/collection-task/run")
+@supply_chain_review_action_bp.post("/collection-task/run")
 @openapi.definition(summary="运行采集任务")
 @requires_permission("supply_chain_review:collection:u")
 async def collection_task_run(request: Request):
     return response_ok(await run_collection_task(tenant_id(request), _json(request).get("id") or _json(request).get("task_id"), operator_name(request)))
 
 
-@supply_chain_review_bp.post("/collection-run/retry")
+@supply_chain_review_action_bp.post("/collection-run/retry")
 @openapi.definition(summary="重试采集运行")
 @requires_permission("supply_chain_review:collection:u")
 async def collection_run_retry(request: Request):
     return response_ok(await retry_collection_run(tenant_id(request), _json(request).get("id"), operator_name(request)))
 
 
-@supply_chain_review_bp.post("/policy-compare/run")
+@supply_chain_review_action_bp.post("/policy-compare/run")
 @openapi.definition(summary="运行策略比对")
 @requires_permission("supply_chain_review:policy:u")
 async def policy_compare_run(request: Request):
     return response_ok(await run_policy_compare(tenant_id(request), _json(request), operator_name(request)))
 
 
-@supply_chain_review_bp.post("/policy-compare/run-list")
+@supply_chain_review_process_bp.post("/policy-compare/run-list")
 @openapi.definition(summary="策略比对运行列表")
 @requires_permission("supply_chain_review:policy:r")
 async def policy_compare_run_list(request: Request):
     return response_ok(await list_process_records(tenant_id(request), "policy-compare-run", _json(request)))
 
 
-@supply_chain_review_bp.post("/policy-compare/item-list")
+@supply_chain_review_process_bp.post("/policy-compare/item-list")
 @openapi.definition(summary="策略比对明细列表")
 @requires_permission("supply_chain_review:policy:r")
 async def policy_compare_item_list(request: Request):
@@ -553,77 +577,77 @@ async def policy_compare_item_list(request: Request):
     return response_ok({"total": total, "items": [item.json for item in items], "page": page, "size": size})
 
 
-@supply_chain_review_bp.post("/policy-compare/item-confirm")
+@supply_chain_review_action_bp.post("/policy-compare/item-confirm")
 @openapi.definition(summary="确认策略比对明细")
 @requires_permission("supply_chain_review:policy:u")
 async def policy_compare_item_confirm(request: Request):
     return response_ok(await update_compare_item_status(tenant_id(request), _json(request).get("id"), "confirmed", operator_name(request)))
 
 
-@supply_chain_review_bp.post("/policy-compare/item-ignore")
+@supply_chain_review_action_bp.post("/policy-compare/item-ignore")
 @openapi.definition(summary="忽略策略比对明细")
 @requires_permission("supply_chain_review:policy:u")
 async def policy_compare_item_ignore(request: Request):
     return response_ok(await update_compare_item_status(tenant_id(request), _json(request).get("id"), "ignored", operator_name(request)))
 
 
-@supply_chain_review_bp.post("/policy-change/external-callback")
+@supply_chain_review_action_bp.post("/policy-change/external-callback")
 @openapi.definition(summary="策略变更外部审批结果回写")
 @requires_permission("supply_chain_review:policy:u")
 async def policy_change_callback(request: Request):
     return response_ok(await policy_change_external_callback(tenant_id(request), _json(request), operator_name(request)))
 
 
-@supply_chain_review_bp.post("/unknown-terminal/discover")
+@supply_chain_review_action_bp.post("/unknown-terminal/discover")
 @openapi.definition(summary="网络侧未知终端发现")
 @requires_permission("supply_chain_review:terminal:c")
 async def unknown_terminal_discover(request: Request):
     return response_ok(await discover_unknown_terminals(tenant_id(request), _json(request), operator_name(request)))
 
 
-@supply_chain_review_bp.post("/review-issue/transition")
+@supply_chain_review_action_bp.post("/review-issue/transition")
 @openapi.definition(summary="审查问题状态流转")
 @requires_permission("supply_chain_review:issue:u")
 async def review_issue_transition(request: Request):
     return response_ok(await transition_review_issue(tenant_id(request), _json(request), operator_name(request)))
 
 
-@supply_chain_review_bp.post("/review-issue/from-risk")
+@supply_chain_review_action_bp.post("/review-issue/from-risk")
 @openapi.definition(summary="风险转审查问题")
 @requires_permission("supply_chain_review:issue:c")
 async def review_issue_from_risk(request: Request):
     return response_ok(await risk_to_review_issue(tenant_id(request), _json(request), operator_name(request)))
 
 
-@supply_chain_review_bp.post("/disposal-task/confirm")
+@supply_chain_review_action_bp.post("/disposal-task/confirm")
 @openapi.definition(summary="确认执行处置任务")
 @requires_permission("supply_chain_review:disposal:u")
 async def disposal_task_confirm(request: Request):
     return response_ok(await confirm_disposal_task(tenant_id(request), _json(request), operator_name(request)))
 
 
-@supply_chain_review_bp.post("/disposal-task/retry")
+@supply_chain_review_action_bp.post("/disposal-task/retry")
 @openapi.definition(summary="重试处置任务")
 @requires_permission("supply_chain_review:disposal:u")
 async def disposal_task_retry(request: Request):
     return response_ok(await confirm_disposal_task(tenant_id(request), _json(request), operator_name(request)))
 
 
-@supply_chain_review_bp.post("/disposal-task/cancel")
+@supply_chain_review_action_bp.post("/disposal-task/cancel")
 @openapi.definition(summary="取消处置任务")
 @requires_permission("supply_chain_review:disposal:u")
 async def disposal_task_cancel(request: Request):
     return response_ok(await cancel_disposal_task(tenant_id(request), _json(request), operator_name(request)))
 
 
-@supply_chain_review_bp.post("/notification-event/generate")
+@supply_chain_review_action_bp.post("/notification-event/generate")
 @openapi.definition(summary="生成通知事件负载")
 @requires_permission("supply_chain_review:notify:c")
 async def notification_event_generate(request: Request):
     return response_ok(await create_notification_event(tenant_id(request), _json(request), operator_name(request)))
 
 
-@supply_chain_review_bp.post("/attachment-ref/upload")
+@supply_chain_review_attachment_bp.post("/attachment-ref/upload")
 @openapi.definition(summary="上传安全管理附件")
 @requires_permission("supply_chain_review:attachment:c")
 async def attachment_ref_upload(request: Request):
@@ -642,7 +666,7 @@ async def attachment_ref_upload(request: Request):
     return response_ok(await create_attachment_ref(tenant_id(request), payload, operator_name(request)))
 
 
-@supply_chain_review_bp.post("/attachment-ref/download-url")
+@supply_chain_review_attachment_bp.post("/attachment-ref/download-url")
 @openapi.definition(summary="获取安全管理附件下载链接")
 @requires_permission("supply_chain_review:attachment:r")
 async def attachment_ref_download_url(request: Request):
