@@ -62,7 +62,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
         )}
 
         {_insert_menu_sql(
-            item_id="asset-management-catalog-permissions",
+            item_id="asset-management-catalog-perm",
             model="asset-management-catalog",
             description="资产目录",
             permissions=ASSET_CATALOG_PERMISSIONS,
@@ -71,7 +71,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
         )}
 
         {_insert_menu_sql(
-            item_id="network-management-topology-permissions",
+            item_id="network-management-topology-perm",
             model="network-management-topology",
             description="网络拓扑",
             permissions=NETWORK_TOPOLOGY_PERMISSIONS,
@@ -80,7 +80,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
         )}
 
         {_insert_menu_sql(
-            item_id="network-management-access-control-permissions",
+            item_id="network-management-access-perm",
             model="network-management-access-control",
             description="访问控制",
             permissions=ACCESS_CONTROL_PERMISSIONS,

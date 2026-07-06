@@ -47,6 +47,9 @@ def test_split_menu_migration_replaces_security_management_menu():
     assert "asset_management_bp" in upgrade_sql
     assert "topology_bp" in upgrade_sql
     assert "network_access_control_bp" in upgrade_sql
+    menu_ids = re.findall(r"VALUES\s*\(\s*'([^']+)'", upgrade_sql)
+    assert menu_ids
+    assert all(len(menu_id) <= 36 for menu_id in menu_ids)
 
 
 def test_license_templates_use_asset_and_network_management_groups():
