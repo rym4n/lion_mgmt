@@ -3,8 +3,8 @@ import orjson
 from tortoise import fields
 
 from libs.utils import strip_timezone_to_seconds
-from models import BaseModel, EncryptedCharField
-from models.base import parse_encrypted_json
+from models import BaseModel
+from models.base import EncryptedTextField, parse_encrypted_json
 
 
 class ToolAction(BaseModel):
@@ -120,7 +120,7 @@ class ToolResources(BaseModel):
     tool_name: str = fields.CharField(max_length=255, description="工具名称")
     name: str = fields.CharField(max_length=255, description="资源名称")
     engine: str = fields.CharField(max_length=255, null=True, description="执行引擎")
-    resources = EncryptedCharField(max_length=5000, null=False, description="资源配置")
+    resources = EncryptedTextField(null=False, description="资源配置")
     internal: bool = fields.BooleanField(default=False, description="是否为维护模式资源")
     creator: str = fields.CharField(max_length=255, null=True, description="创建者")
     updater: str = fields.CharField(max_length=255, null=True, description="更新者")

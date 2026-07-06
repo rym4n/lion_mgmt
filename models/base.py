@@ -87,3 +87,21 @@ class EncryptedCharField(fields.CharField):
 
     def to_python_value(self, value):
         return unwrap_encrypted_value(value)
+
+
+class EncryptedTextField(fields.TextField):
+    def to_db_value(self, value, instance):
+        if value is None:
+            return value
+        if isinstance(value, str):
+            if value.startswith(_ENCRYPTED_PREFIX):
+                return value[len(_ENCRYPTED_PREFIX) :]
+            try:
+                decrypt_aes256_gcm(value)
+                return value
+            except ValueError:
+                return encrypt_aes256_gcm(value)
+        return value
+
+    def to_python_value(self, value):
+        return unwrap_encrypted_value(value)

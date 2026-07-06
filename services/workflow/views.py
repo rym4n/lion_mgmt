@@ -742,6 +742,20 @@ async def export_workflow(request):
     )
 
 
+async def _workflow_version_detail_payload(playbook_version: PlaybookVersion) -> dict:
+    payload = playbook_version.json
+    playbook = playbook_version.playbook
+    payload.update(
+        {
+            "id": playbook.id,
+            "tags": [tag.name for tag in await playbook.tags.all()],
+            "scenes": [scene.name for scene in await playbook.scenes.all()],
+            "flow_timeout": playbook_version.flow_timeout,
+        }
+    )
+    return payload
+
+
 @workflow_bp.post("/flow-json")
 @openapi.definition(
     summary="获取剧本版本的flow_json",
@@ -782,11 +796,16 @@ async def get_flow_json(request):
     tenant_id = request.ctx.session.get("tenant_id")
     pv = await PlaybookVersion.get_or_none(id=request.json.get("flow_id"), tenant_id=tenant_id).prefetch_related("playbook", "creator", "updator")
     if pv:
-        data = pv.json
+        data = await _workflow_version_detail_payload(pv)
     else:
-        pv = await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False, tenant_id=tenant_id).order_by("-version").first().prefetch_related("playbook", "creator", "updator")
+        pv = (
+            await PlaybookVersion.filter(playbook__id=request.json.get("playbook_id"), deleted=False, tenant_id=tenant_id)
+            .order_by("-version")
+            .first()
+            .prefetch_related("playbook", "creator", "updator")
+        )
         if pv:
-            data = pv.json
+            data = await _workflow_version_detail_payload(pv)
     return response_ok(data)
 
 
