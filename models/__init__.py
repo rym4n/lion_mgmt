@@ -20,3 +20,4 @@ from .report import *
 from .digital_employee import *
 from .employee_report import *
 from .network_topology import *
+from .supply_chain_review import *

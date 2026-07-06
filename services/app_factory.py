@@ -21,6 +21,7 @@ from services.digital_employee.views import digital_employee_bp
 from services.event.views import event_bp
 from services.event_ingestion.views import event_ingestion_bp
 from services.network_topology.views import topology_bp
+from services.supply_chain_review.views import supply_chain_review_bp
 from services.inspection.views import inspection_bp
 import services.large_screen.views  # noqa: F401
 from services.command_center.views import command_bp
@@ -68,6 +69,7 @@ def register_blueprints(app: Sanic):
     app.blueprint(tenant_bp)
     app.blueprint(inspection_bp)
     app.blueprint(topology_bp)
+    app.blueprint(supply_chain_review_bp)
 
     try:
         bp_dict = {
