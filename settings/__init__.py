@@ -128,6 +128,7 @@ SECURE_CONFIG_DEFAULT = {
 # 健康检查相关
 HEALTH = True
 HEALTH_ENDPOINT = True
+HEALTH_MONITOR = False
 HEALTH_URL_PREFIX = "/health"
 HEALTH_MAX_MISSES = resolve_health_max_misses()
 HEALTH_MISSED_THRESHHOLD = resolve_health_missed_threshold(

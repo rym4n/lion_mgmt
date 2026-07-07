@@ -84,6 +84,7 @@ def test_create_app_ext_uses_resolved_health_monitor_config(monkeypatch):
     assert app.ext_config == {
         "HEALTH_MAX_MISSES": app_factory.HEALTH_MAX_MISSES,
         "HEALTH_MISSED_THRESHHOLD": app_factory.HEALTH_MISSED_THRESHHOLD,
+        "HEALTH_MONITOR": app_factory.HEALTH_MONITOR,
     }
 
 

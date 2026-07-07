@@ -49,7 +49,7 @@ from services.user.views import user_bp
 from services.variables.views import var_bp
 from services.warroom.views import warroom_bp
 from services.workflow.views import workflow_bp
-from settings import BASE_LOGGING, HEALTH_MAX_MISSES, HEALTH_MISSED_THRESHHOLD, TORTOISE
+from settings import BASE_LOGGING, HEALTH_MAX_MISSES, HEALTH_MISSED_THRESHHOLD, HEALTH_MONITOR, TORTOISE
 
 
 def create_app() -> Sanic:
@@ -59,6 +59,7 @@ def create_app() -> Sanic:
         config={
             "HEALTH_MAX_MISSES": HEALTH_MAX_MISSES,
             "HEALTH_MISSED_THRESHHOLD": HEALTH_MISSED_THRESHHOLD,
+            "HEALTH_MONITOR": HEALTH_MONITOR,
         }
     )
     register_listener(app)
