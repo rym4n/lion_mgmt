@@ -1,12 +1,15 @@
 # coding=utf-8
 
-from sanic import Sanic
-
 from libs.sanic_worker import configure_worker_ack_timeout
-from services.app_factory import create_app
 
 
 configure_worker_ack_timeout()
+
+from sanic import Sanic  # noqa: E402
+
+from services.app_factory import create_app
+
+
 app: Sanic = create_app()
 
 if __name__ == "__main__":

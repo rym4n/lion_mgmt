@@ -4,6 +4,8 @@ import os
 
 import pytz
 
+from libs.sanic_worker import resolve_health_max_misses, resolve_health_missed_threshold, resolve_worker_ack_timeout
+
 # 项目根路径
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -127,6 +129,11 @@ SECURE_CONFIG_DEFAULT = {
 HEALTH = True
 HEALTH_ENDPOINT = True
 HEALTH_URL_PREFIX = "/health"
+HEALTH_MAX_MISSES = resolve_health_max_misses()
+HEALTH_MISSED_THRESHHOLD = resolve_health_missed_threshold(
+    timeout_seconds=resolve_worker_ack_timeout(),
+    max_misses=HEALTH_MAX_MISSES,
+)
 
 # 跨域相关
 ENABLE_CORS: bool = bool(os.environ.get("RY_CORS", True))
