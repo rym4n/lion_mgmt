@@ -13,6 +13,7 @@ from settings import TZ
 
 from .approval_service import decide_approval, get_approval, list_approvals, resume_approved_approval
 from .manager import TERMINAL_TASK_STATUS, create_command_task, dispatch_task, has_task_content, list_tasks, update_task_progress
+from .realtime import publish_command_center_update
 from .summary import aggregate_usage, build_task_summary, humanize_event, normalize_usage, zero_usage
 
 command_bp = Blueprint("command_center", url_prefix="/command_center")
@@ -513,6 +514,7 @@ async def register_agent(request: Request):
     agent.deleted = False
     agent.heartbeat_at = datetime.now(TZ)
     await agent.save()
+    await publish_command_center_update(tenant_id, "agent_registered", agent.id)
     return response_ok(agent.json)
 
 
@@ -601,6 +603,7 @@ async def update_agent_status(request: Request):
             setattr(agent, field, data[field])
     agent.heartbeat_at = datetime.now(TZ)
     await agent.save()
+    await publish_command_center_update(tenant_id, "agent_status_updated", agent.id)
     return response_ok(agent.json)
 
 
@@ -915,6 +918,7 @@ async def delete_task(request: Request):
         raise CustomError(ErrorCode.COMMAND_TASK_NOT_TERMINAL)
     task.deleted = True
     await task.save(update_fields=["deleted", "utime"])
+    await publish_command_center_update(tenant_id, "task_deleted", task.id)
     return response_ok({"id": task.id})
 
 
@@ -961,6 +965,7 @@ async def approval_decision(request: Request):
         account.id,
         data.get("comment"),
     )
+    await publish_command_center_update(request.ctx.session.get("tenant_id"), "approval_decided", approval.task_id)
     return response_ok(_task_approval_detail_json(approval))
 
 
@@ -973,4 +978,5 @@ async def approval_resume(request: Request):
         raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     account = request.ctx.session["account_info"]
     result = await resume_approved_approval(request.ctx.session.get("tenant_id"), approval_id, operator_id=account.id)
+    await publish_command_center_update(request.ctx.session.get("tenant_id"), "approval_resumed", result.get("task_id"))
     return response_ok(result)

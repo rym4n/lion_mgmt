@@ -21,6 +21,7 @@ STUB_MODULES = [
     "services",
     "services.command_center",
     "services.command_center.dispatcher",
+    "services.command_center.realtime",
     "services.digital_employee",
     "services.digital_employee.employee_report",
     "services.command_center.manager_boundary_test",
@@ -41,6 +42,8 @@ def _restore_stubbed_modules():
 
 
 def _load_manager(agent, scheduled_reports):
+    realtime_events = []
+
     class CommandTask:
         created = []
 
@@ -134,6 +137,13 @@ def _load_manager(agent, scheduled_reports):
     dispatcher_module = types.ModuleType("services.command_center.dispatcher")
     dispatcher_module.choose_agent_with_lion_agent = lambda task, agents, coordinator: _async_value(SimpleNamespace(agent=None))
     sys.modules["services.command_center.dispatcher"] = dispatcher_module
+    realtime_module = types.ModuleType("services.command_center.realtime")
+
+    async def publish_command_center_update(tenant_id, reason, entity_id=None):
+        realtime_events.append((tenant_id, reason, entity_id))
+
+    realtime_module.publish_command_center_update = publish_command_center_update
+    sys.modules["services.command_center.realtime"] = realtime_module
 
     digital_employee_pkg = types.ModuleType("services.digital_employee")
     digital_employee_pkg.__path__ = []
@@ -148,6 +158,7 @@ def _load_manager(agent, scheduled_reports):
     sys.modules["services.command_center.manager_boundary_test"] = module
     spec.loader.exec_module(module)
     module.asyncio = SimpleNamespace(create_task=create_task)
+    module.realtime_events = realtime_events
     return module
 
 
@@ -218,6 +229,7 @@ def test_update_task_progress_schedules_employee_report_for_digital_employee():
     assert task.progress == 100
     assert task.finished_at is not None
     assert len(scheduled_reports) == 1
+    assert manager.realtime_events == [("tenant-1", "task_progress_updated", "task-1")]
 
 
 def test_update_task_progress_skips_employee_report_for_plain_command_agent():
@@ -230,6 +242,7 @@ def test_update_task_progress_skips_employee_report_for_plain_command_agent():
     assert task.progress == 100
     assert task.finished_at is not None
     assert scheduled_reports == []
+    assert manager.realtime_events == [("tenant-1", "task_progress_updated", "task-1")]
 
 
 def test_create_command_task_derives_title_from_full_description_and_returns_before_dispatch():
@@ -253,3 +266,4 @@ def test_create_command_task_derives_title_from_full_description_and_returns_bef
     assert task.status == "pending_dispatch"
     assert task.assigned_agent_key is None
     assert len(scheduled_tasks) == 1
+    assert manager.realtime_events == [("tenant-1", "task_created", "created-task-1")]

@@ -11,6 +11,7 @@ from models.digital_employee import DigitalEmployeeRole, DigitalEmployeeSkill
 from models.employee_report import EmployeeReport
 from models.report import ReportDocument
 from services.command_center.manager import create_command_task
+from services.command_center.realtime import publish_command_center_update
 
 from .cognee_credential_manager import delete_employee_memory_dataset, get_or_refresh_jwt
 from .employee_report import compose
@@ -164,6 +165,7 @@ async def employee_create(request: Request):
         agent_key=data.get("agent_key"),
         rbac_role_id=data.get("rbac_role_id"),
     )
+    await publish_command_center_update(employee.tenant_id, "employee_created", employee.id)
     return response_ok(await _employee_payload(employee))
 
 
@@ -237,6 +239,7 @@ async def employee_update(request: Request):
     employee.workspace_etag = None
     await employee.save()
     await sync_employee_workspace(employee)
+    await publish_command_center_update(employee.tenant_id, "employee_updated", employee.id)
     return response_ok(await _employee_payload(employee))
 
 
@@ -252,6 +255,7 @@ async def employee_delete(request: Request):
     await employee.save()
     await LionAgentClient().delete_workspace(employee.id)
     await delete_employee_memory_dataset(employee.tenant_id, employee.id)
+    await publish_command_center_update(employee.tenant_id, "employee_deleted", employee.id)
     return response_ok()
 
 
@@ -261,6 +265,7 @@ async def employee_skills_update(request: Request):
     data = _json(request)
     employee = await _employee_or_404(_tenant_id(request), data.get("employee_id"))
     employee = await update_employee_skills(employee, data.get("skill_keys") or [])
+    await publish_command_center_update(employee.tenant_id, "employee_skills_updated", employee.id)
     return response_ok(await _employee_payload(employee))
 
 
@@ -273,6 +278,7 @@ async def employee_scope_update(request: Request):
     employee.workspace_etag = None
     await employee.save(update_fields=["resource_scope", "workspace_etag", "utime"])
     await sync_employee_workspace(employee)
+    await publish_command_center_update(employee.tenant_id, "employee_scope_updated", employee.id)
     return response_ok(await _employee_payload(employee))
 
 
@@ -383,6 +389,7 @@ async def role_save(request: Request):
             "deleted": False,
         },
     )
+    await publish_command_center_update(tenant_id, "role_saved", role.role_key)
     return response_ok(role.json)
 
 
@@ -394,6 +401,7 @@ async def role_delete(request: Request):
         raise CustomError(ErrorCode.ROLE_IN_USE_BY_EMPLOYEES)
     role.deleted = True
     await role.save(update_fields=["deleted", "utime"])
+    await publish_command_center_update(role.tenant_id, "role_deleted", role.role_key)
     return response_ok()
 
 

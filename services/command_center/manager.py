@@ -10,6 +10,7 @@ from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
 from settings import TZ
 
 from .dispatcher import choose_agent_with_lion_agent
+from .realtime import publish_command_center_update
 
 
 TERMINAL_TASK_STATUS = {"completed", "failed", "cancelled", "handed_off"}
@@ -218,6 +219,7 @@ async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> Co
         await task.save()
         await record_task_event(task, "dispatch_waiting", decision.reason, operator_id, {"dispatch_source": "lion_agent", "raw_response": decision.raw_response})
 
+    await publish_command_center_update(task.tenant_id, "task_dispatched", task.id)
     return task
 
 
@@ -296,6 +298,7 @@ async def create_command_task(tenant_id: str, creator, data: dict) -> CommandTas
         creator=creator,
     )
     await record_task_event(task, "task_created", "任务已创建，等待指挥部调度", getattr(creator, "id", None))
+    await publish_command_center_update(task.tenant_id, "task_created", task.id)
     _schedule_task_dispatch(task, getattr(creator, "id", None))
     return task
 
@@ -341,6 +344,7 @@ async def update_task_progress(task: CommandTask, data: dict, operator_id: str |
         except Exception as exc:
             logger.warning(f"调度数字员工报告生成失败: task_id={task.id}, error={exc}")
 
+    await publish_command_center_update(task.tenant_id, "task_progress_updated", task.id)
     return task
 
 
