@@ -59,17 +59,24 @@ def test_render_workspace_files_includes_role_skill_and_minimal_runtime_notice()
     assert "只用授权工具" not in files["system_prompt.md"]
     assert "以当前任务和平台强制访问控制为准。" in files["system_prompt.md"]
     assert "AgentScope Toolkit" not in files["system_prompt.md"]
-    assert '"tool_usage_notes": "告警分诊: 判断告警优先级 (metrics.query, notify)"' in files["manifest.json"]
+    assert "AIOE CLI: 内置 AIOE 平台操作技能" in files["manifest.json"]
+    assert "告警分诊: 判断告警优先级" in files["manifest.json"]
     assert "alert_triage" in files["skills"]
-    assert "notify" in files["skills"]["alert_triage"]["instructions.md"]
+    assert "aioe-cli" in files["skills"]
+    assert "未配置 RBAC 角色时不得调用 AIOE 任何接口" in files["skills"]["aioe-cli"]["instructions.md"].replace("，", "")
+    assert "notify" not in files["skills"]["alert_triage"]["instructions.md"]
     assert '"agent_key": "monitor-1"' in files["manifest.json"]
     manifest = json.loads(files["manifest.json"])
     assert "description" not in manifest["employee"]
     assert "description" not in manifest["role"]
     assert '"workspace_etag":' in files["manifest.json"]
-    assert '"metrics.query"' in files["manifest.json"]
+    assert '"metrics.query"' not in files["manifest.json"]
+    assert '"enabled_tool_groups"' not in files["manifest.json"]
+    assert '"enabled_actions"' not in files["manifest.json"]
+    assert '"enabled_playbooks"' not in files["manifest.json"]
     assert '"source": "aioe_platform_role"' in files["policy.json"]
     assert '"rbac_role_id": "role-1"' in files["policy.json"]
+    assert '"mode": "allow"' in files["policy.json"]
     assert '"resource_scope"' not in files["policy.json"]
     assert '"tool_permissions"' not in files["policy.json"]
 
@@ -114,7 +121,7 @@ def test_render_workspace_files_coerces_legacy_prompt_arrays_to_text():
     assert "### 告警分诊" in files["system_prompt.md"]
     assert "- 输出严重性" in files["system_prompt.md"]
     assert "- 不直接执行破坏性变更" not in files["system_prompt.md"]
-    assert '"tool_usage_notes": "- 只使用授权工具"' in files["manifest.json"]
+    assert "AIOE CLI: 内置 AIOE 平台操作技能" in files["manifest.json"]
 
 
 def test_render_workspace_files_does_not_fallback_to_description_fields():
@@ -144,6 +151,30 @@ def test_render_workspace_files_does_not_fallback_to_description_fields():
     manifest = json.loads(files["manifest.json"])
     assert "description" not in manifest["employee"]
     assert "description" not in manifest["role"]
+
+
+def test_render_workspace_files_denies_aioe_api_without_employee_rbac_role():
+    role = SimpleNamespace(role_key="monitor", version=1, meta={"identity": "监控值班员"})
+    employee = SimpleNamespace(
+        id="employee-1",
+        tenant_id="tenant-1",
+        agent_key="monitor-1",
+        name="小狮",
+        role_key="monitor",
+        runtime="lion_agent",
+        rbac_role_id=None,
+        metadata={},
+    )
+
+    files = render_workspace_files(employee, role, [])
+    manifest = json.loads(files["manifest.json"])
+    policy = json.loads(files["policy.json"])
+
+    assert manifest["skills"][0]["skill_key"] == "aioe-cli"
+    assert manifest["skills"][0]["bindings"]["aioe_api"]["requires_rbac_role"] is True
+    assert policy["authorization"]["rbac_role_id"] is None
+    assert policy["authorization"]["aioe_api"]["mode"] == "deny"
+    assert "未配置平台 RBAC 角色时不得调用 AIOE 任何接口" in files["system_prompt.md"]
 
 
 def test_workspace_etag_changes_with_skill_version():
@@ -201,6 +232,10 @@ def test_workspace_snapshots_match_rendered_files_without_recursive_etag():
     assert snapshots["policy_snapshot"]["authorization"] == {
         "source": "aioe_platform_role",
         "rbac_role_id": "role-1",
+        "aioe_api": {
+            "mode": "allow",
+            "required": True,
+        },
     }
     assert "resource_scope" not in snapshots["policy_snapshot"]
     assert snapshots["policy_snapshot"]["approval"]["skills"]["alert_triage"] == "approval_required"

@@ -244,7 +244,7 @@ def test_import_builtin_packages_no_longer_reads_lion_mgmt_templates():
     ]
 
 
-def test_upsert_role_auto_creates_missing_default_platform_role(tmp_path):
+def test_upsert_role_strips_package_rbac_defaults(tmp_path):
     role_root = tmp_path / "monitor"
     role_root.mkdir()
     (role_root / "role.yaml").write_text(
@@ -255,6 +255,7 @@ def test_upsert_role_auto_creates_missing_default_platform_role(tmp_path):
                 "identity": "你是 AIOE 的 AI 监控值班员。",
                 "description": "接收监控告警并分诊。",
                 "default_rbac_role": "monitor_dispatcher",
+                "default_rbac_role_id": "monitor_dispatcher_id",
                 "default_skills": [],
             },
             allow_unicode=True,
@@ -280,19 +281,18 @@ def test_upsert_role_auto_creates_missing_default_platform_role(tmp_path):
     Role.records.clear()
     try:
         role = asyncio.run(package_importer._upsert_role(role_root, package, "tenant-1", False))
-        created = Role.records.get("monitor_dispatcher")
     finally:
         package_importer.DigitalEmployeeRole = original_role_model
         Role.records.clear()
 
     platform_role = calls and calls[0]["defaults"]["default_rbac_role_id"]
     assert role.role_key == "monitor"
-    assert platform_role == "monitor_dispatcher"
+    assert platform_role is None
     assert "description" not in calls[0]["defaults"]
     assert "description" not in calls[0]["defaults"]["meta"]
-    assert created is not None
-    assert created.permissions == []
-    assert created.tenant_id == "tenant-1"
+    assert "default_rbac_role" not in calls[0]["defaults"]["meta"]
+    assert "default_rbac_role_id" not in calls[0]["defaults"]["meta"]
+    assert Role.records == {}
 
 
 def test_upsert_role_rejects_missing_identity(tmp_path):
@@ -450,7 +450,7 @@ def test_ensure_platform_role_restores_deleted_role_with_empty_permissions():
         Role.records.clear()
 
 
-def test_bundle_rbac_roles_do_not_grant_permissions_from_package(tmp_path):
+def test_bundle_rbac_roles_are_ignored_by_package_import(tmp_path):
     rbac_root = tmp_path / "rbac_roles"
     rbac_root.mkdir()
     (rbac_root / "monitor.yaml").write_text(
@@ -469,15 +469,8 @@ def test_bundle_rbac_roles_do_not_grant_permissions_from_package(tmp_path):
     try:
         imported = asyncio.run(package_importer._upsert_rbac_roles(rbac_root))
 
-        assert imported == [
-            {
-                "rbac_role_id": "monitor_dispatcher",
-                "name": "AI 监控值班员平台角色",
-                "created": True,
-                "permissions": [],
-            }
-        ]
-        assert Role.records["monitor_dispatcher"].permissions == []
+        assert imported == []
+        assert Role.records == {}
     finally:
         Role.records.clear()
 
@@ -551,9 +544,11 @@ def test_export_builtin_monitor_bundle_contains_role_and_skills(tmp_path):
     role_root = tmp_path / "resources" / "bundle" / "monitor" / "roles" / "monitor"
     alert_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "alert_triage"
     shift_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "shift_report_compose"
+    aioe_cli_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "aioe-cli"
     role_root.mkdir(parents=True)
     alert_root.mkdir(parents=True)
     shift_root.mkdir(parents=True)
+    aioe_cli_root.mkdir(parents=True)
     (role_root / "package.yaml").write_text(
         yaml.safe_dump({"type": "role", "role_key": "monitor", "default_skill_keys": ["alert_triage", "shift_report_compose"]}),
         encoding="utf-8",
@@ -571,6 +566,14 @@ def test_export_builtin_monitor_bundle_contains_role_and_skills(tmp_path):
             yaml.safe_dump({"key": skill_key, "name": skill_key, "version": 1}),
             encoding="utf-8",
         )
+    (aioe_cli_root / "package.yaml").write_text(
+        yaml.safe_dump({"type": "skill", "skill_key": "aioe-cli", "version": 1}),
+        encoding="utf-8",
+    )
+    (aioe_cli_root / "manifest.yaml").write_text(
+        yaml.safe_dump({"key": "aioe-cli", "name": "AIOE CLI", "version": 1}),
+        encoding="utf-8",
+    )
 
     async def fake_get_visible_role(tenant_id, role_key):
         assert tenant_id == "__builtin__"
@@ -583,10 +586,11 @@ def test_export_builtin_monitor_bundle_contains_role_and_skills(tmp_path):
 
     async def fake_get_visible_skills(tenant_id, skill_keys):
         assert tenant_id == "__builtin__"
-        assert skill_keys == ["alert_triage", "shift_report_compose"]
+        assert skill_keys == ["alert_triage", "shift_report_compose", "aioe-cli"]
         return [
             types.SimpleNamespace(skill_key="alert_triage", skill_dir=str(alert_root)),
             types.SimpleNamespace(skill_key="shift_report_compose", skill_dir=str(shift_root)),
+            types.SimpleNamespace(skill_key="aioe-cli", skill_dir=str(aioe_cli_root)),
         ]
 
     manager_module = types.ModuleType("services.digital_employee.manager")
@@ -605,6 +609,7 @@ def test_export_builtin_monitor_bundle_contains_role_and_skills(tmp_path):
     package_type, meta = inspect_package(package)
     with zipfile.ZipFile(io.BytesIO(package)) as archive:
         names = set(archive.namelist())
+        role_yaml = yaml.safe_load(archive.read("roles/monitor/role.yaml")) or {}
 
     assert package_type == "bundle"
     assert meta["role_key"] == "monitor"
@@ -612,13 +617,17 @@ def test_export_builtin_monitor_bundle_contains_role_and_skills(tmp_path):
     assert "roles/monitor/role.yaml" in names
     assert "skills/alert_triage/package.yaml" in names
     assert "skills/shift_report_compose/manifest.yaml" in names
+    assert "skills/aioe-cli/manifest.yaml" in names
+    assert "default_rbac_role" not in role_yaml
 
 
 def test_export_tenant_bundle_uses_imported_resource_dirs(tmp_path):
     role_root = tmp_path / "resources" / "bundle" / "monitor" / "roles" / "monitor"
     skill_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "alert_triage"
+    aioe_cli_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "aioe-cli"
     role_root.mkdir(parents=True)
     skill_root.mkdir(parents=True)
+    aioe_cli_root.mkdir(parents=True)
     (role_root / "package.yaml").write_text(
         yaml.safe_dump({"type": "role", "role_key": "monitor", "default_skill_keys": ["alert_triage"]}),
         encoding="utf-8",
@@ -635,6 +644,14 @@ def test_export_tenant_bundle_uses_imported_resource_dirs(tmp_path):
         yaml.safe_dump({"key": "alert_triage", "name": "Custom alert triage", "version": 1}),
         encoding="utf-8",
     )
+    (aioe_cli_root / "package.yaml").write_text(
+        yaml.safe_dump({"type": "skill", "skill_key": "aioe-cli", "version": 1}),
+        encoding="utf-8",
+    )
+    (aioe_cli_root / "manifest.yaml").write_text(
+        yaml.safe_dump({"key": "aioe-cli", "name": "AIOE CLI", "version": 1}),
+        encoding="utf-8",
+    )
 
     async def fake_get_visible_role(tenant_id, role_key):
         assert tenant_id == "tenant-1"
@@ -647,8 +664,11 @@ def test_export_tenant_bundle_uses_imported_resource_dirs(tmp_path):
 
     async def fake_get_visible_skills(tenant_id, skill_keys):
         assert tenant_id == "tenant-1"
-        assert skill_keys == ["alert_triage"]
-        return [types.SimpleNamespace(skill_key="alert_triage", skill_dir=str(skill_root))]
+        assert skill_keys == ["alert_triage", "aioe-cli"]
+        return [
+            types.SimpleNamespace(skill_key="alert_triage", skill_dir=str(skill_root)),
+            types.SimpleNamespace(skill_key="aioe-cli", skill_dir=str(aioe_cli_root)),
+        ]
 
     manager_module = types.ModuleType("services.digital_employee.manager")
     manager_module.get_visible_role = fake_get_visible_role
@@ -671,15 +691,127 @@ def test_export_tenant_bundle_uses_imported_resource_dirs(tmp_path):
 
     assert package_type == "bundle"
     assert meta["role_key"] == "monitor"
-    assert names == {
+    assert {
         "package.yaml",
         "roles/monitor/package.yaml",
         "roles/monitor/role.yaml",
         "skills/alert_triage/package.yaml",
         "skills/alert_triage/manifest.yaml",
-    }
+        "skills/aioe-cli/package.yaml",
+        "skills/aioe-cli/manifest.yaml",
+    }.issubset(names)
     assert role_yaml["name"] == "Custom monitor"
+    assert "default_rbac_role" not in role_yaml
     assert skill_yaml["name"] == "Custom alert triage"
+
+
+def test_export_bundle_writes_builtin_aioe_cli_when_resource_dir_missing(tmp_path):
+    role_root = tmp_path / "resources" / "bundle" / "monitor" / "roles" / "monitor"
+    skill_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "alert_triage"
+    role_root.mkdir(parents=True)
+    skill_root.mkdir(parents=True)
+    (role_root / "package.yaml").write_text(
+        yaml.safe_dump({"type": "role", "role_key": "monitor", "default_skill_keys": ["alert_triage"]}),
+        encoding="utf-8",
+    )
+    (role_root / "role.yaml").write_text(
+        yaml.safe_dump({"key": "monitor", "name": "Custom monitor", "default_skills": ["alert_triage"]}),
+        encoding="utf-8",
+    )
+    (skill_root / "package.yaml").write_text(
+        yaml.safe_dump({"type": "skill", "skill_key": "alert_triage", "version": 1}),
+        encoding="utf-8",
+    )
+    (skill_root / "manifest.yaml").write_text(
+        yaml.safe_dump({"key": "alert_triage", "name": "Custom alert triage", "version": 1}),
+        encoding="utf-8",
+    )
+
+    async def fake_get_visible_role(tenant_id, role_key):
+        return types.SimpleNamespace(
+            role_key="monitor",
+            template_dir=str(role_root),
+            meta={"default_skills": ["alert_triage"]},
+        )
+
+    async def fake_get_visible_skills(tenant_id, skill_keys):
+        assert skill_keys == ["alert_triage", "aioe-cli"]
+        return [
+            types.SimpleNamespace(skill_key="alert_triage", skill_dir=str(skill_root)),
+            types.SimpleNamespace(skill_key="aioe-cli", skill_dir=""),
+        ]
+
+    manager_module = types.ModuleType("services.digital_employee.manager")
+    manager_module.get_visible_role = fake_get_visible_role
+    manager_module.get_visible_skills = fake_get_visible_skills
+    old_manager = sys.modules.get("services.digital_employee.manager")
+    sys.modules["services.digital_employee.manager"] = manager_module
+    try:
+        package = asyncio.run(export_package_for_tenant("tenant-1", role_key="monitor", bundle=True))
+    finally:
+        if old_manager is None:
+            sys.modules.pop("services.digital_employee.manager", None)
+        else:
+            sys.modules["services.digital_employee.manager"] = old_manager
+
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        names = set(archive.namelist())
+        aioe_cli_manifest = yaml.safe_load(archive.read("skills/aioe-cli/manifest.yaml")) or {}
+
+    assert "skills/aioe-cli/package.yaml" in names
+    assert "skills/aioe-cli/manifest.yaml" in names
+    assert "skills/aioe-cli/instructions.md" in names
+    assert aioe_cli_manifest["key"] == "aioe-cli"
+    assert aioe_cli_manifest["bindings"]["aioe_api"]["requires_rbac_role"] is True
+
+
+def test_export_role_package_strips_rbac_fields_and_rbac_roles_dir(tmp_path):
+    role_root = tmp_path / "resources" / "role" / "monitor"
+    (role_root / "rbac_roles").mkdir(parents=True)
+    (role_root / "package.yaml").write_text(
+        yaml.safe_dump({"type": "role", "role_key": "monitor", "default_rbac_role": "monitor_dispatcher"}),
+        encoding="utf-8",
+    )
+    (role_root / "role.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "key": "monitor",
+                "name": "Custom monitor",
+                "identity": "监控值班员",
+                "default_rbac_role": "monitor_dispatcher",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (role_root / "rbac_roles" / "monitor.yaml").write_text("id: monitor_dispatcher\n", encoding="utf-8")
+
+    async def fake_get_visible_role(tenant_id, role_key):
+        return types.SimpleNamespace(role_key="monitor", template_dir=str(role_root), meta={})
+
+    async def fake_get_visible_skills(tenant_id, skill_keys):
+        return []
+
+    manager_module = types.ModuleType("services.digital_employee.manager")
+    manager_module.get_visible_role = fake_get_visible_role
+    manager_module.get_visible_skills = fake_get_visible_skills
+    old_manager = sys.modules.get("services.digital_employee.manager")
+    sys.modules["services.digital_employee.manager"] = manager_module
+    try:
+        package = asyncio.run(export_package_for_tenant("tenant-1", role_key="monitor"))
+    finally:
+        if old_manager is None:
+            sys.modules.pop("services.digital_employee.manager", None)
+        else:
+            sys.modules["services.digital_employee.manager"] = old_manager
+
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        names = set(archive.namelist())
+        package_yaml = yaml.safe_load(archive.read("package.yaml")) or {}
+        role_yaml = yaml.safe_load(archive.read("role.yaml")) or {}
+
+    assert "rbac_roles/monitor.yaml" not in names
+    assert "default_rbac_role" not in package_yaml
+    assert "default_rbac_role" not in role_yaml
 
 
 def test_export_bundle_requires_role_key():
@@ -714,7 +846,7 @@ def test_export_bundle_fails_when_default_skill_template_is_missing(tmp_path):
 
     async def fake_get_visible_skills(tenant_id, skill_keys):
         assert tenant_id == "__builtin__"
-        assert skill_keys == ["missing_skill"]
+        assert skill_keys == ["missing_skill", "aioe-cli"]
         raise CustomError("PACKAGE_INVALID")
 
     manager_module = types.ModuleType("services.digital_employee.manager")
@@ -877,6 +1009,51 @@ def test_import_package_restores_existing_resource_directory_on_failure(tmp_path
 
     assert (target_root / "existing.txt").read_text(encoding="utf-8") == "old"
     assert not (target_root / "role.yaml").exists()
+
+
+def test_import_package_strips_rbac_fields_from_staged_resource_dir(tmp_path):
+    resources_root = tmp_path / "resources"
+    package_importer.DIGITAL_EMPLOYEE_RESOURCES = str(resources_root)
+    package = _zip_with(
+        {
+            "package.yaml": yaml.safe_dump({"type": "role", "role_key": "monitor", "default_rbac_role": "monitor_dispatcher"}),
+            "role.yaml": yaml.safe_dump(
+                {
+                    "key": "monitor",
+                    "name": "Monitor",
+                    "identity": "监控值班员",
+                    "default_rbac_role": "monitor_dispatcher",
+                }
+            ),
+            "rbac_roles/monitor.yaml": "id: monitor_dispatcher\n",
+        }
+    )
+    original_upsert_role = package_importer._upsert_role
+    original_auto_create = package_importer._auto_create_employees
+    staged = []
+
+    async def fake_upsert_role(root_path, package, tenant_id, is_builtin):
+        staged.append(root_path)
+        return types.SimpleNamespace(role_key="monitor", id="role-1")
+
+    package_importer._upsert_role = fake_upsert_role
+    async def fake_auto_create(role_keys, tenant_id):
+        return [], []
+
+    package_importer._auto_create_employees = fake_auto_create
+    try:
+        asyncio.run(import_package(package, tenant_id="tenant-1"))
+    finally:
+        package_importer._upsert_role = original_upsert_role
+        package_importer._auto_create_employees = original_auto_create
+
+    target_root = resources_root / "tenant-1" / "role" / "monitor"
+    package_yaml = yaml.safe_load((target_root / "package.yaml").read_text(encoding="utf-8")) or {}
+    role_yaml = yaml.safe_load((target_root / "role.yaml").read_text(encoding="utf-8")) or {}
+    assert staged == [target_root]
+    assert not (target_root / "rbac_roles").exists()
+    assert "default_rbac_role" not in package_yaml
+    assert "default_rbac_role" not in role_yaml
 
 
 def test_import_package_separates_builtin_and_tenant_resource_dirs(tmp_path):

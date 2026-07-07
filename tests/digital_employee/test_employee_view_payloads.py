@@ -170,7 +170,7 @@ def test_employee_detail_resolves_visible_role_instead_of_employee_foreign_key(m
 
     async def fake_get_visible_skills(tenant_id, skill_keys):
         calls.append(("skills", tenant_id, tuple(skill_keys)))
-        return [skill]
+        return [skill, FakeSkill(skill_key="aioe-cli", name="AIOE CLI", description="内置平台技能", bindings={}, meta={})]
 
     class TaskModel:
         @classmethod
@@ -186,10 +186,11 @@ def test_employee_detail_resolves_visible_role_instead_of_employee_foreign_key(m
 
     out = asyncio.run(inspect.unwrap(views.employee_detail)(_request(body={"employee_id": "employee-1"})))
 
-    assert calls == [("role", "tenant-1", "monitor"), ("skills", "tenant-1", ("alert_triage",))]
+    assert calls == [("role", "tenant-1", "monitor"), ("skills", "tenant-1", ("alert_triage", "aioe-cli"))]
     assert out["role"]["id"] == "role-tenant"
     assert out["role"]["meta"]["responsibilities"] == "tenant expert responsibilities"
     assert out["skills"][0]["description"] == "专家级告警分诊技能"
+    assert out["skills"][1]["skill_key"] == "aioe-cli"
 
 
 async def _async_value(value):

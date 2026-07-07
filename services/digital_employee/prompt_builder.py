@@ -6,6 +6,25 @@ from typing import Any
 
 WORKSPACE_TEXT_FILES = ("system_prompt.md",)
 WORKSPACE_JSON_FILES = ("manifest.json", "policy.json")
+AIOE_CLI_SKILL_KEY = "aioe-cli"
+AIOE_CLI_SKILL_VERSION = 1
+AIOE_CLI_DESCRIPTION = (
+    "内置 AIOE 平台操作技能。负责读取当前员工的 AIOE 平台 RBAC 角色授权，"
+    "按授权调用 AIOE API 完成资产、告警、任务、剧本、报告、应用和系统配置等平台操作；"
+    "未配置 RBAC 角色时不得调用任何 AIOE API。"
+)
+PLATFORM_BINDING_KEYS = {
+    "tool_groups",
+    "tool_group_keys",
+    "tools",
+    "tool_keys",
+    "action_keys",
+    "playbook_ids",
+    "mcp_tools",
+    "aioe_api",
+    "aioe_apps",
+    "rbac_roles",
+}
 
 
 def _json_block(value: Any) -> str:
@@ -84,28 +103,21 @@ def _binding_values(bindings: dict, *keys: str) -> list[str]:
 def _derived_tool_usage_notes(skill_entries: list[dict]) -> str:
     lines: list[str] = []
     for skill in skill_entries:
-        bindings = skill.get("bindings") or {}
-        binding_values = _binding_values(
-            bindings,
-            "tool_groups",
-            "tool_group_keys",
-            "tools",
-            "tool_keys",
-            "action_keys",
-            "playbook_ids",
-            "mcp_tools",
-        )
-        suffix = f" ({', '.join(binding_values)})" if binding_values else ""
         name = skill.get("name") or skill.get("skill_key") or ""
         description = skill.get("description") or ""
         body = ": ".join(item for item in (name, description) if item)
         if body:
-            lines.append(f"{body}{suffix}")
+            lines.append(body)
     return "\n".join(lines)
 
 
 def _skill_payload(skill: Any) -> dict:
-    bindings = _public_payload(getattr(skill, "bindings", {}) or {})
+    raw_bindings = _public_payload(getattr(skill, "bindings", {}) or {})
+    bindings = {
+        key: value
+        for key, value in raw_bindings.items()
+        if key not in PLATFORM_BINDING_KEYS
+    }
     meta = _public_payload(getattr(skill, "meta", {}) or {})
     risk_level = getattr(skill, "risk_level", None) or meta.get("risk_level") or bindings.get("risk_level")
     return {
@@ -118,6 +130,61 @@ def _skill_payload(skill: Any) -> dict:
         "bindings": bindings,
         "meta": meta,
     }
+
+
+def _builtin_aioe_cli_skill_payload(rbac_role_id: str | None) -> dict:
+    return {
+        "skill_key": AIOE_CLI_SKILL_KEY,
+        "name": "AIOE CLI",
+        "description": AIOE_CLI_DESCRIPTION,
+        "version": AIOE_CLI_SKILL_VERSION,
+        "risk_level": "high",
+        "require_approval": False,
+        "bindings": {
+            "runtime_skills": [AIOE_CLI_SKILL_KEY],
+            "aioe_api": {
+                "requires_rbac_role": True,
+                "rbac_role_id": rbac_role_id,
+            },
+        },
+        "meta": {
+            "builtin": True,
+            "authorization_source": "aioe_platform_role",
+            "usage_contract": [
+                "所有 AIOE 平台 API 调用必须通过员工实例绑定的 RBAC 角色授权。",
+                "未配置 RBAC 角色时，不得调用 AIOE 任何接口，只能说明缺少人工授权。",
+                "调用前明确目标接口、参数、影响范围和审计证据；高风险写操作先输出审批建议。",
+            ],
+        },
+    }
+
+
+def _with_builtin_skills(skill_entries: list[dict], rbac_role_id: str | None) -> list[dict]:
+    entries = list(skill_entries)
+    if not any(item.get("skill_key") == AIOE_CLI_SKILL_KEY for item in entries):
+        entries.append(_builtin_aioe_cli_skill_payload(rbac_role_id))
+    return sorted(entries, key=lambda item: item["skill_key"])
+
+
+def _render_skill_instructions(skill: dict) -> str:
+    usage_contract = _prompt_text((skill.get("meta") or {}).get("usage_contract"), "")
+    return "\n".join(
+        [
+            f"# {skill.get('name') or ''}",
+            "",
+            skill.get("description") or "",
+            "",
+            "## Bindings",
+            _json_block(skill.get("bindings") or {}),
+            "",
+            "## Approval",
+            "Required" if skill.get("require_approval") else "Not required",
+            "",
+            "## Usage Contract",
+            usage_contract,
+            "",
+        ]
+    )
 
 
 def _merge_approval_policy(base: Any, skill_entries: list[dict]) -> dict:
@@ -137,21 +204,8 @@ def build_workspace_payload(employee: Any, role: Any | None = None, skills: list
     role_meta = _public_payload(getattr(role, "meta", {}) or {})
     employee_metadata = _public_payload(getattr(employee, "metadata", {}) or {})
     rbac_role_id = getattr(employee, "rbac_role_id", None)
-    skill_entries = sorted((_skill_payload(skill) for skill in skills), key=lambda item: item["skill_key"])
+    skill_entries = _with_builtin_skills([_skill_payload(skill) for skill in skills], rbac_role_id)
     tool_usage_notes = _derived_tool_usage_notes(skill_entries) or _prompt_text(role_meta.get("tools_notes"), "")
-
-    enabled_tool_groups: set[str] = set()
-    enabled_tools: set[str] = set()
-    enabled_actions: set[str] = set()
-    enabled_playbooks: set[str] = set()
-    enabled_mcp_tools: set[str] = set()
-    for skill in skill_entries:
-        bindings = skill["bindings"]
-        enabled_tool_groups.update(_binding_values(bindings, "tool_groups", "tool_group_keys"))
-        enabled_tools.update(_binding_values(bindings, "tools", "tool_keys"))
-        enabled_actions.update(_binding_values(bindings, "action_keys"))
-        enabled_playbooks.update(_binding_values(bindings, "playbook_ids"))
-        enabled_mcp_tools.update(_binding_values(bindings, "mcp_tools"))
 
     context_config = role_meta.get("context_config") or role_meta.get("context") or employee_metadata.get("context_config") or {}
     manifest = {
@@ -174,11 +228,6 @@ def build_workspace_payload(employee: Any, role: Any | None = None, skills: list
         },
         "skills": skill_entries,
         "skill_versions": {skill["skill_key"]: skill["version"] for skill in skill_entries},
-        "enabled_tool_groups": sorted(enabled_tool_groups),
-        "enabled_tools": sorted(enabled_tools),
-        "enabled_actions": sorted(enabled_actions),
-        "enabled_playbooks": sorted(enabled_playbooks),
-        "enabled_mcp_tools": sorted(enabled_mcp_tools),
         "context_config": context_config,
     }
 
@@ -187,6 +236,10 @@ def build_workspace_payload(employee: Any, role: Any | None = None, skills: list
         "authorization": {
             "source": "aioe_platform_role",
             "rbac_role_id": rbac_role_id,
+            "aioe_api": {
+                "mode": "allow" if rbac_role_id else "deny",
+                "required": True,
+            },
         },
         "filesystem": employee_metadata.get("filesystem_policy") or role_meta.get("filesystem_policy") or {},
         "approval": _merge_approval_policy(
@@ -245,7 +298,10 @@ def _workspace_digest(files: dict[str, bytes], role_version: int | None, skill_v
 def workspace_etag(role: Any, skills: list[Any], employee: Any | None = None) -> str:
     payload = build_workspace_payload(employee, role, skills)
     files = _render_workspace_files(employee, role, skills, payload)
-    skill_versions = {getattr(skill, "skill_key", "skill"): getattr(skill, "version", None) for skill in skills or []}
+    skill_versions = {
+        skill["skill_key"]: skill.get("version")
+        for skill in _with_builtin_skills([_skill_payload(skill) for skill in skills or []], getattr(employee, "rbac_role_id", None))
+    }
     return _workspace_digest(_flatten_workspace_files(files), getattr(role, "version", None), skill_versions)
 
 
@@ -276,27 +332,16 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
     ]
     if workflows:
         system_prompt.extend(["## Workflows", workflows, ""])
-    system_prompt.extend(["## Runtime", "以当前任务和平台强制访问控制为准。", ""])
+    runtime_lines = [
+        "以当前任务和平台强制访问控制为准。",
+        f"AIOE 平台操作必须使用内置 `{AIOE_CLI_SKILL_KEY}` skill；未配置平台 RBAC 角色时不得调用 AIOE 任何接口。",
+    ]
+    system_prompt.extend(["## Runtime", "\n".join(runtime_lines), ""])
 
-    rendered_skills = {}
-    for skill in skills:
-        bindings = getattr(skill, "bindings", {}) or {}
-        rendered_skills[getattr(skill, "skill_key", "skill")] = {
-            "instructions.md": "\n".join(
-                [
-                    f"# {getattr(skill, 'name', '')}",
-                    "",
-                    getattr(skill, "description", "") or "",
-                    "",
-                    "## Bindings",
-                    _json_block(bindings),
-                    "",
-                    "## Approval",
-                    "Required" if getattr(skill, "require_approval", False) else "Not required",
-                    "",
-                ]
-            )
-        }
+    rendered_skills = {
+        skill["skill_key"]: {"instructions.md": _render_skill_instructions(skill)}
+        for skill in payload["manifest"].get("skills", [])
+    }
 
     return {
         "system_prompt.md": "\n".join(system_prompt),

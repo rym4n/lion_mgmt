@@ -19,10 +19,22 @@ from models.digital_employee import DigitalEmployeeRole, DigitalEmployeeSkill
 from models import Tool
 from settings import DIGITAL_EMPLOYEE_RESOURCES
 from .package_format import PackageFormatError, UnsupportedPackageTypeError, inspect_package
-from .rbac import ensure_platform_role
-
 
 ROLE_PROMPT_TEXT_FIELDS = ("identity", "responsibilities", "workflows", "tools_notes")
+AIOE_CLI_SKILL_KEY = "aioe-cli"
+AIOE_CLI_SKILL_DESCRIPTION = (
+    "内置 AIOE 平台操作技能。负责读取当前员工的 AIOE 平台 RBAC 角色授权，"
+    "按授权调用 AIOE API 完成资产、告警、任务、剧本、报告、应用和系统配置等平台操作；"
+    "未配置 RBAC 角色时不得调用任何 AIOE API。"
+)
+RBAC_PACKAGE_FIELDS = (
+    "default_rbac_role",
+    "default_rbac_role_id",
+    "default_platform_role",
+    "rbac_role",
+    "rbac_role_id",
+    "rbac_roles",
+)
 
 
 @dataclass
@@ -52,6 +64,13 @@ def _read_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise CustomError(ErrorCode.PACKAGE_INVALID) from exc
+
+
+def _strip_rbac_fields(data: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(data or {})
+    for field in RBAC_PACKAGE_FIELDS:
+        sanitized.pop(field, None)
+    return sanitized
 
 
 def _format_prompt_text(value: Any) -> str:
@@ -97,7 +116,7 @@ def _merge_workflow_text(principles: str, workflows: str) -> str:
 
 
 def normalize_role_prompt_fields(role_data: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(role_data or {})
+    normalized = _strip_rbac_fields(role_data or {})
     normalized.pop("description", None)
     principles = _format_prompt_text(normalized.pop("principles", None))
     workflows = _format_prompt_text(normalized.get("workflows"))
@@ -145,6 +164,98 @@ def _archive_directory(archive: zipfile.ZipFile, source_root: Path, archive_root
         relative_path = path.relative_to(source_root).as_posix()
         archive_path = f"{archive_root.rstrip('/')}/{relative_path}" if archive_root else relative_path
         archive.write(path, archive_path)
+
+
+def _is_rbac_payload_path(relative_path: str) -> bool:
+    return "rbac_roles" in Path(relative_path).parts
+
+
+def _write_sanitized_yaml(archive: zipfile.ZipFile, path: Path, archive_path: str) -> bool:
+    if path.suffix.lower() not in {".yaml", ".yml"} or path.name not in {"package.yaml", "role.yaml"}:
+        return False
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        return False
+    sanitized = _strip_rbac_fields(data)
+    if sanitized == data:
+        return False
+    archive.writestr(archive_path, yaml.safe_dump(sanitized, allow_unicode=True, sort_keys=False))
+    return True
+
+
+def _archive_package_directory(archive: zipfile.ZipFile, source_root: Path, archive_root: str = "") -> None:
+    if not source_root.exists() or not source_root.is_dir():
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    for path in sorted(source_root.rglob("*")):
+        if path.is_dir():
+            continue
+        relative_path = path.relative_to(source_root).as_posix()
+        if _is_rbac_payload_path(relative_path):
+            continue
+        archive_path = f"{archive_root.rstrip('/')}/{relative_path}" if archive_root else relative_path
+        if _write_sanitized_yaml(archive, path, archive_path):
+            continue
+        archive.write(path, archive_path)
+
+
+def _strip_rbac_payload(root: Path) -> None:
+    for path in sorted(root.rglob("rbac_roles"), key=lambda item: len(item.parts), reverse=True):
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
+            path.unlink()
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in {".yaml", ".yml"} or path.name not in {"package.yaml", "role.yaml"}:
+            continue
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        if not isinstance(data, dict):
+            continue
+        sanitized = _strip_rbac_fields(data)
+        if sanitized != data:
+            path.write_text(yaml.safe_dump(sanitized, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
+def _package_skill_keys(skill_keys: list[Any]) -> list[str]:
+    keys = [str(key) for key in skill_keys if key]
+    if AIOE_CLI_SKILL_KEY not in keys:
+        keys.append(AIOE_CLI_SKILL_KEY)
+    return keys
+
+
+def _write_builtin_aioe_cli_skill(archive: zipfile.ZipFile, archive_root: str = "") -> None:
+    root = archive_root.rstrip("/")
+    prefix = f"{root}/" if root else ""
+    package = {"type": "skill", "skill_key": AIOE_CLI_SKILL_KEY, "version": 1, "vendor": "aioe"}
+    manifest = {
+        "key": AIOE_CLI_SKILL_KEY,
+        "name": "AIOE CLI",
+        "description": AIOE_CLI_SKILL_DESCRIPTION,
+        "bindings": {
+            "runtime_skills": [AIOE_CLI_SKILL_KEY],
+            "aioe_api": {"requires_rbac_role": True},
+        },
+        "capabilities": ["aioe_api_operation", "aioe_cli", "platform_workflow"],
+        "risk_level": "high",
+        "require_approval": False,
+        "enabled": True,
+        "version": 1,
+    }
+    instructions = "\n".join(
+        [
+            "# AIOE CLI",
+            "",
+            AIOE_CLI_SKILL_DESCRIPTION,
+            "",
+            "## Usage Contract",
+            "- AIOE API 调用权限只来自员工实例绑定的 RBAC 角色，不来自数字员工角色或其他 skill。",
+            "- 未配置 RBAC 角色时，停止 API 调用并提示需要人工配置平台角色。",
+            "- 不把剧本、应用、平台角色或 AIOE 工具当成数字员工 skill 授权。",
+            "",
+        ]
+    )
+    archive.writestr(f"{prefix}package.yaml", yaml.safe_dump(package, allow_unicode=True, sort_keys=False))
+    archive.writestr(f"{prefix}manifest.yaml", yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False))
+    archive.writestr(f"{prefix}instructions.md", instructions)
 
 
 def _iter_child_dirs(path: Path) -> list[Path]:
@@ -225,13 +336,11 @@ async def _upsert_role(root: Path, package: dict, tenant_id: str, is_builtin: bo
     existing = await DigitalEmployeeRole.get_or_none(tenant_id=tenant_id, role_key=role_key, deleted=False)
     if existing and existing.version > version:
         raise CustomError(ErrorCode.PACKAGE_VERSION_LOWER)
-    default_rbac_role_id = str(role_data.get("default_rbac_role_id") or role_data.get("default_rbac_role") or "").strip() or None
-    await ensure_platform_role(default_rbac_role_id, role_data, tenant_id)
     defaults = {
         "name": role_data.get("name") or package.get("name") or role_key,
         "template_dir": str(root),
         "default_skill_keys": role_data.get("default_skills") or role_data.get("default_skill_keys") or [],
-        "default_rbac_role_id": default_rbac_role_id,
+        "default_rbac_role_id": None,
         "license_required": bool(package.get("license_required") or role_data.get("license_required") or False),
         "version": version,
         "is_builtin": is_builtin,
@@ -277,30 +386,7 @@ async def _upsert_skill(root: Path, package: dict, tenant_id: str, is_builtin: b
 
 
 async def _upsert_rbac_roles(root: Path) -> list[dict]:
-    imported: list[dict] = []
-    for role_file in sorted(root.glob("*.json")) + sorted(root.glob("*.yaml")) + sorted(root.glob("*.yml")):
-        data = _read_json(role_file) if role_file.suffix == ".json" else _read_yaml(role_file)
-        role_id = str(data.get("id") or data.get("key") or data.get("name") or "").strip()
-        role_name = str(data.get("name") or role_id).strip()
-        if not role_id or not role_name:
-            raise CustomError(ErrorCode.PACKAGE_INVALID)
-        role, created = await ensure_platform_role(
-            role_id,
-            {
-                "name": role_name,
-                "description": data.get("description"),
-            },
-            "__builtin__",
-        )
-        imported.append(
-            {
-                "rbac_role_id": role.id,
-                "name": role.name,
-                "created": created,
-                "permissions": role.permissions or [],
-            }
-        )
-    return imported
+    return []
 
 
 async def _import_bundle_actions(root: Path, tenant_id: str, request, cleanup_actions: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -496,6 +582,7 @@ async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = F
                 _safe_extract(archive, tmp_root)
         except zipfile.BadZipFile as exc:
             raise CustomError(ErrorCode.PACKAGE_INVALID) from exc
+        _strip_rbac_payload(tmp_root)
 
         target_root.parent.mkdir(parents=True, exist_ok=True)
         had_existing_target = target_root.exists()
@@ -572,9 +659,18 @@ async def export_package_for_tenant(
             role = await get_visible_role(effective_tenant_id, str(role_key))
             role_source = Path(role.template_dir)
             role_package = _read_yaml(role_source / "package.yaml")
-            skill_keys = role_package.get("default_skill_keys") or (role.meta or {}).get("default_skills") or (role.meta or {}).get("default_skill_keys") or []
+            skill_keys = _package_skill_keys(
+                role_package.get("default_skill_keys")
+                or (role.meta or {}).get("default_skills")
+                or (role.meta or {}).get("default_skill_keys")
+                or []
+            )
             skills = await get_visible_skills(effective_tenant_id, [str(key) for key in skill_keys])
-            skill_sources = {skill.skill_key: Path(skill.skill_dir) for skill in skills}
+            skill_sources = {
+                skill.skill_key: Path(skill.skill_dir)
+                for skill in skills
+                if getattr(skill, "skill_dir", None)
+            }
             role_package = _read_yaml(role_source / "package.yaml")
             bundle_key = role_package.get("bundle_key") or role_key
             archive.writestr(
@@ -591,12 +687,15 @@ async def export_package_for_tenant(
                     sort_keys=False,
                 ),
             )
-            _archive_directory(archive, role_source, f"roles/{role_key}")
+            _archive_package_directory(archive, role_source, f"roles/{role_key}")
             for default_skill_key in skill_keys:
                 skill_source = skill_sources.get(str(default_skill_key))
+                if str(default_skill_key) == AIOE_CLI_SKILL_KEY and (not skill_source or not skill_source.exists()):
+                    _write_builtin_aioe_cli_skill(archive, f"skills/{default_skill_key}")
+                    continue
                 if not skill_source or not skill_source.exists():
                     raise CustomError(ErrorCode.PACKAGE_INVALID)
-                _archive_directory(archive, skill_source, f"skills/{default_skill_key}")
+                _archive_package_directory(archive, skill_source, f"skills/{default_skill_key}")
         else:
             package_type = "role" if role_key else "skill"
             package_key = role_key or skill_key
@@ -608,7 +707,7 @@ async def export_package_for_tenant(
                 skills = await get_visible_skills(effective_tenant_id, [str(skill_key)])
                 source_root = Path(skills[0].skill_dir)
             if source_root.exists():
-                _archive_directory(archive, source_root)
+                _archive_package_directory(archive, source_root)
             else:
                 archive.writestr("package.yaml", yaml.safe_dump({"type": package_type, f"{package_type}_key": package_key}, allow_unicode=True))
     return buffer.getvalue()

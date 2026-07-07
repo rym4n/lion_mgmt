@@ -19,6 +19,7 @@ from .manager import (
     BUILTIN_TENANT_ID,
     create_employee,
     ensure_employee_can_delete,
+    effective_employee_skill_keys,
     get_visible_role,
     get_visible_skills,
     prefer_tenant_records,
@@ -198,7 +199,7 @@ async def employee_list(request: Request):
 async def employee_detail(request: Request):
     employee = await _employee_or_404(_tenant_id(request), _json(request).get("employee_id"))
     role = await get_visible_role(employee.tenant_id, employee.role_key)
-    skills = await get_visible_skills(employee.tenant_id, employee.skill_keys or [])
+    skills = await get_visible_skills(employee.tenant_id, effective_employee_skill_keys(employee.skill_keys or []))
     tasks = await CommandTask.filter(tenant_id=employee.tenant_id, assigned_agent_id=employee.id, deleted=False).order_by("-ctime").limit(10).all()
     payload = await _employee_payload(employee, role=role)
     payload.update(
@@ -365,8 +366,6 @@ async def role_save(request: Request):
     if not role_key or not data.get("name"):
         raise CustomError(ErrorCode.PARAM_ERROR)
     require_role_identity(data)
-    if data.get("default_rbac_role_id"):
-        await require_existing_platform_role(data.get("default_rbac_role_id"), tenant_id)
     exists = await DigitalEmployeeRole.filter(tenant_id=tenant_id, role_key=role_key, deleted=False).exists()
     await _require_save_permission(request, exists, "digital_employee:c", "digital_employee:u")
     role, _ = await DigitalEmployeeRole.update_or_create(
@@ -376,7 +375,7 @@ async def role_save(request: Request):
             "name": data["name"],
             "template_dir": data.get("template_dir") or "",
             "default_skill_keys": data.get("default_skill_keys") or data.get("default_skills") or [],
-            "default_rbac_role_id": data.get("default_rbac_role_id"),
+            "default_rbac_role_id": None,
             "license_required": bool(data.get("license_required", False)),
             "version": int(data.get("version") or 1),
             "enabled": bool(data.get("enabled", True)),
