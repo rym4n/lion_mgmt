@@ -304,20 +304,18 @@ async def _dispatch_employee_task(request: Request, tenant_id: str, account_info
         employee = await _employee_or_404(tenant_id, employee_key)
     task_payload = dict(data.get("payload") or {})
     task_payload["_dispatch_scope"] = "digital_employee"
-    return await create_command_task(
-        tenant_id,
-        account_info,
-        {
-            "title": data.get("title") or (f"{employee.name} 任务" if employee else "数字员工任务"),
-            "description": data.get("description"),
-            "source": data.get("source", "manual"),
-            "priority": data.get("priority", 3),
-            "payload": task_payload,
-            "agent_id": employee.agent_key if employee else data.get("agent_id") or data.get("requested_agent_id"),
-            "room_id": data.get("room_id"),
-            "required_capabilities": data.get("required_capabilities") or (employee.capabilities if employee else []),
-        },
-    )
+    command_task_data = {
+        "description": data.get("description"),
+        "source": data.get("source", "manual"),
+        "priority": data.get("priority", 3),
+        "payload": task_payload,
+        "agent_id": employee.agent_key if employee else data.get("agent_id") or data.get("requested_agent_id"),
+        "room_id": data.get("room_id"),
+        "required_capabilities": data.get("required_capabilities") or (employee.capabilities if employee else []),
+    }
+    if data.get("title"):
+        command_task_data["title"] = data["title"]
+    return await create_command_task(tenant_id, account_info, command_task_data)
 
 
 @digital_employee_bp.post("/employee/tasks/list")

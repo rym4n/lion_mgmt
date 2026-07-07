@@ -1,5 +1,6 @@
 # coding=utf-8
 import asyncio
+import re
 from datetime import datetime
 
 from sanic.log import logger
@@ -15,6 +16,84 @@ TERMINAL_TASK_STATUS = {"completed", "failed", "cancelled", "handed_off"}
 DEFAULT_COORDINATOR_AGENT_KEY = "command_center_coordinator"
 DEFAULT_COORDINATOR_AGENT_NAME = "指挥部分工协调智能体"
 DEFAULT_COORDINATOR_CAPABILITIES = ["command_center", "coordination", "dispatch", "task_planning"]
+DEFAULT_TASK_TITLE = "未命名任务"
+MAX_TASK_TITLE_LENGTH = 32
+
+
+def derive_task_title(data: dict) -> str:
+    explicit_title = str(data.get("title") or "").strip()
+    if explicit_title:
+        return _truncate_title(explicit_title)
+
+    content = _task_content_for_title(data)
+    if not content:
+        return DEFAULT_TASK_TITLE
+
+    sentences = [
+        item.strip(" ，,。.!！?？:：;；")
+        for item in re.split(r"[。.!！?？;；\n\r]+", content)
+        if item.strip(" ，,。.!！?？:：;；")
+    ]
+    candidate = next(
+        (item for item in sentences if not _is_generic_task_intro(item)),
+        sentences[0] if sentences else content,
+    )
+    candidate = _strip_task_intro(candidate)
+    return _truncate_title(candidate or content)
+
+
+def has_task_content(data: dict) -> bool:
+    return bool(str(data.get("title") or "").strip() or _task_content_for_title(data))
+
+
+def _task_content_for_title(data: dict) -> str:
+    parts: list[str] = []
+    for key in ("description", "content", "prompt", "message", "query", "question"):
+        value = data.get(key)
+        if value:
+            parts.append(str(value))
+
+    payload = data.get("payload")
+    if isinstance(payload, dict):
+        for key in ("description", "content", "prompt", "message", "query", "question", "task"):
+            value = payload.get(key)
+            if value:
+                parts.append(str(value))
+
+    normalized = "\n".join(re.sub(r"[ \t]+", " ", part).strip() for part in parts)
+    return re.sub(r"\n{2,}", "\n", normalized).strip()
+
+
+def _is_generic_task_intro(value: str) -> bool:
+    return value.strip(" ，,。.!！?？:：;；") in {
+        "请处理",
+        "帮我处理",
+        "帮忙处理",
+        "请帮我处理",
+        "任务如下",
+        "需求如下",
+        "问题如下",
+    }
+
+
+def _strip_task_intro(value: str) -> str:
+    text = value.strip()
+    for prefix in ("请你", "请帮我", "帮我", "麻烦", "帮忙", "请", "需要", "协助"):
+        if text.startswith(prefix) and len(text) > len(prefix) + 2:
+            text = text[len(prefix) :].lstrip(" ，,。.!！?？:：;；")
+            break
+    return text
+
+
+def _truncate_title(value: str) -> str:
+    title = re.sub(r"\s+", " ", value).strip(" ，,。.!！?？:：;；")
+    if not title:
+        return DEFAULT_TASK_TITLE
+    if len(title) <= MAX_TASK_TITLE_LENGTH:
+        return title
+    return f"{title[:MAX_TASK_TITLE_LENGTH].rstrip()}..."
+
+
 async def ensure_default_coordinator_agent(tenant_id: str) -> CommandAgent:
     """确保每个租户至少有一个默认的指挥部分工协调智能体。"""
     agent, _ = await CommandAgent.get_or_create(
@@ -178,10 +257,35 @@ def _schedule_lion_agent_execution(task: CommandTask, employee: CommandAgent, op
     asyncio.create_task(_runner())
 
 
+def _schedule_task_dispatch(task: CommandTask, operator_id: str | None = None) -> None:
+    async def _runner() -> None:
+        current_task = await CommandTask.get_or_none(id=task.id, tenant_id=task.tenant_id, deleted=False)
+        if not current_task:
+            return
+        try:
+            await dispatch_task(current_task, operator_id)
+        except Exception as exc:
+            logger.exception(f"指挥中心任务调度失败: task_id={task.id}")
+            failed_task = await CommandTask.get_or_none(id=task.id, tenant_id=task.tenant_id, deleted=False)
+            if failed_task and failed_task.status not in TERMINAL_TASK_STATUS:
+                await update_task_progress(
+                    failed_task,
+                    {
+                        "status": "failed",
+                        "message": f"指挥部调度失败: {exc}",
+                        "metadata": {"error": str(exc)},
+                    },
+                    operator_id,
+                )
+
+    asyncio.create_task(_runner())
+
+
 async def create_command_task(tenant_id: str, creator, data: dict) -> CommandTask:
+    title = derive_task_title(data)
     task = await CommandTask.create(
         tenant_id=tenant_id,
-        title=data["title"],
+        title=title,
         description=data.get("description"),
         source=data.get("source", "manual"),
         priority=data.get("priority", 3),
@@ -192,7 +296,8 @@ async def create_command_task(tenant_id: str, creator, data: dict) -> CommandTas
         creator=creator,
     )
     await record_task_event(task, "task_created", "任务已创建，等待指挥部调度", getattr(creator, "id", None))
-    return await dispatch_task(task, getattr(creator, "id", None))
+    _schedule_task_dispatch(task, getattr(creator, "id", None))
+    return task
 
 
 async def update_task_progress(task: CommandTask, data: dict, operator_id: str | None = None) -> CommandTask:

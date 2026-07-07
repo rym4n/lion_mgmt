@@ -13,6 +13,8 @@ import pytest
 STUB_MODULES = [
     "models",
     "models.command_center",
+    "sanic",
+    "sanic.log",
     "settings",
     "tortoise",
     "tortoise.expressions",
@@ -40,7 +42,28 @@ def _restore_stubbed_modules():
 
 def _load_manager(agent, scheduled_reports):
     class CommandTask:
-        pass
+        created = []
+
+        @classmethod
+        async def create(cls, **kwargs):
+            task = FakeTask(
+                id="created-task-1",
+                tenant_id=kwargs["tenant_id"],
+                title=kwargs["title"],
+                description=kwargs.get("description"),
+                source=kwargs.get("source", "manual"),
+                priority=kwargs.get("priority", 3),
+                status="pending_dispatch",
+                progress=0,
+                required_capabilities=kwargs.get("required_capabilities", []),
+                payload=kwargs.get("payload", {}),
+                requested_agent_id=kwargs.get("requested_agent_id"),
+                assigned_agent_key=None,
+                run_id=None,
+                saved=False,
+            )
+            cls.created.append(task)
+            return task
 
     class CommandTaskEvent:
         @classmethod
@@ -88,6 +111,11 @@ def _load_manager(agent, scheduled_reports):
     command_center_module.CommandTaskEvent = CommandTaskEvent
     sys.modules["models.command_center"] = command_center_module
 
+    sys.modules["sanic"] = types.ModuleType("sanic")
+    sanic_log_module = types.ModuleType("sanic.log")
+    sanic_log_module.logger = SimpleNamespace(exception=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
+    sys.modules["sanic.log"] = sanic_log_module
+
     settings_module = types.ModuleType("settings")
     settings_module.TZ = timezone.utc
     sys.modules["settings"] = settings_module
@@ -133,8 +161,25 @@ class FakeAgent(SimpleNamespace):
 
 
 class FakeTask(SimpleNamespace):
-    async def save(self):
+    async def save(self, update_fields=None):
         self.saved = True
+        self.saved_update_fields = getattr(self, "saved_update_fields", [])
+        self.saved_update_fields.append(update_fields)
+
+    @property
+    def json(self):
+        return {
+            "id": self.id,
+            "title": self.title,
+            "description": self.description,
+            "status": self.status,
+            "progress": self.progress,
+            "required_capabilities": self.required_capabilities,
+            "payload": self.payload,
+            "requested_agent_id": self.requested_agent_id,
+            "assigned_agent_key": self.assigned_agent_key,
+            "run_id": self.run_id,
+        }
 
 
 def _task():
@@ -185,3 +230,26 @@ def test_update_task_progress_skips_employee_report_for_plain_command_agent():
     assert task.progress == 100
     assert task.finished_at is not None
     assert scheduled_reports == []
+
+
+def test_create_command_task_derives_title_from_full_description_and_returns_before_dispatch():
+    scheduled_tasks = []
+    manager = _load_manager(_agent("ops"), scheduled_tasks)
+    creator = SimpleNamespace(id="operator-1")
+
+    task = asyncio.run(
+        manager.create_command_task(
+            "tenant-1",
+            creator,
+            {
+                "description": "托管云test1有多少机器\n请查询资源容量并给出结论",
+                "required_capabilities": ["cloud_ops"],
+            },
+        )
+    )
+
+    assert task.title == "托管云test1有多少机器"
+    assert task.description == "托管云test1有多少机器\n请查询资源容量并给出结论"
+    assert task.status == "pending_dispatch"
+    assert task.assigned_agent_key is None
+    assert len(scheduled_tasks) == 1

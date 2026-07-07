@@ -12,7 +12,7 @@ from models.command_center import COMMAND_APPROVAL_STATUS_PENDING, CommandAgent,
 from settings import TZ
 
 from .approval_service import decide_approval, get_approval, list_approvals, resume_approved_approval
-from .manager import TERMINAL_TASK_STATUS, create_command_task, dispatch_task, list_tasks, update_task_progress
+from .manager import TERMINAL_TASK_STATUS, create_command_task, dispatch_task, has_task_content, list_tasks, update_task_progress
 from .summary import aggregate_usage, build_task_summary, humanize_event, normalize_usage, zero_usage
 
 command_bp = Blueprint("command_center", url_prefix="/command_center")
@@ -607,14 +607,13 @@ async def update_agent_status(request: Request):
 @command_bp.post("/tasks/create")
 @openapi.definition(
     summary="创建指挥部任务并触发调度",
-    description="创建指挥部任务后立即按required_capabilities触发调度；如指定agent_id但能力或状态不匹配，会自动纠正到可用智能体。需要command_center:c权限。",
+    description="创建指挥部任务后立即返回创建结果，并在后台按required_capabilities触发调度；如指定agent_id但能力或状态不匹配，会自动纠正到可用智能体。需要command_center:c权限。",
     body=_json_body(
         {
             "type": "object",
-            "required": ["title"],
             "properties": {
-                "title": {"type": "string", "description": "任务标题"},
-                "description": {"type": "string", "description": "任务描述"},
+                "title": {"type": "string", "description": "任务标题；不传时按任务内容自动生成"},
+                "description": {"type": "string", "description": "任务内容"},
                 "source": {"type": "string", "description": "任务来源", "default": "manual"},
                 "priority": {"type": "integer", "description": "优先级，数值越小优先级越高", "default": 3},
                 "required_capabilities": {
@@ -629,12 +628,12 @@ async def update_agent_status(request: Request):
             },
         }
     ),
-    response=_response("创建并调度成功", TASK_SCHEMA, {"400": "参数错误"}),
+    response=_response("创建成功", TASK_SCHEMA, {"400": "参数错误"}),
 )
 @requires_permission("command_center:c")
 async def create_task(request: Request):
     data = _require_json(request)
-    if not data.get("title"):
+    if not has_task_content(data):
         raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
     creator = request.ctx.session["account_info"]
