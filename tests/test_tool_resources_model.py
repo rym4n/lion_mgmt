@@ -11,6 +11,40 @@ import libs.utils as utils
 from models.tool_management import ToolResources
 
 
+def test_tool_resources_json_keeps_empty_password_values_visible():
+    payload = {
+        "username": {
+            "data_type": "string",
+            "description": "login user",
+            "required": True,
+            "value": "yunwei",
+        },
+        "cookie": {
+            "data_type": "password",
+            "description": "optional auth token",
+            "required": False,
+            "value": "",
+        },
+    }
+    resource = ToolResources(tool_name="demo", name="test", resources=orjson.dumps(payload).decode())
+
+    assert resource.json["resources"]["cookie"]["value"] == ""
+
+
+def test_tool_resources_json_masks_non_empty_password_values():
+    payload = {
+        "password": {
+            "data_type": "password",
+            "description": "login password",
+            "required": True,
+            "value": "secret",
+        }
+    }
+    resource = ToolResources(tool_name="demo", name="test", resources=orjson.dumps(payload).decode())
+
+    assert resource.json["resources"]["password"]["value"] == "******"
+
+
 def test_tool_resources_encrypts_large_payload_without_truncation(monkeypatch):
     monkeypatch.setattr(utils, "RY_RES_KEY", "test-resource-key-for-aioe-123456")
     payload = {

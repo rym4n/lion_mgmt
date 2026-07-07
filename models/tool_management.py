@@ -138,7 +138,7 @@ class ToolResources(BaseModel):
         resources_data = self.resources_json.copy()
         if resources_data:
             for value in resources_data.values():
-                if isinstance(value, dict) and value.get("data_type") == "password":
+                if isinstance(value, dict) and value.get("data_type") == "password" and value.get("value"):
                     value["value"] = "******"
 
         return {
