@@ -831,6 +831,16 @@ async def list_results(
     targets = await InspectionTarget.filter(id__in=target_ids, tenant_id=tenant_id, deleted=False).all()
     target_map = {target.id: target for target in targets}
 
+    def get_result_reason(result_data):
+        if not isinstance(result_data, dict):
+            return None
+        ai_judgment = result_data.get("ai_judgment")
+        if not isinstance(ai_judgment, dict):
+            nested_result = result_data.get("result")
+            if isinstance(nested_result, dict):
+                ai_judgment = nested_result.get("ai_judgment")
+        return ai_judgment.get("reason") if isinstance(ai_judgment, dict) else None
+
     return {
         "total": total,
         "items": [
@@ -842,11 +852,12 @@ async def list_results(
                 "end_time": result.end_time.isoformat() if result.end_time else None,
                 "status": result.status,
                 "execution_status": result.execution_status,
+                "result_data": result.result_data,
                 "error_message": result.error_message,
                 "duration": result.duration,
                 "target_content": target_map.get(result.target_id).content if target_map.get(result.target_id) else None,
                 "target_standard": target_map.get(result.target_id).standard if target_map.get(result.target_id) else None,
-                "reason": result.result_data.get("ai_judgment").get("reason") if result.result_data and result.result_data.get("ai_judgment") else None,
+                "reason": get_result_reason(result.result_data),
             }
             for result in items
         ],

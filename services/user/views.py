@@ -299,9 +299,17 @@ async def all_users(request):
 
     if role_terms:
         if len(role_terms) == 1:
-            qs = qs.filter(roles__name__icontains=role_terms[0], deleted=False)
+            qs = qs.filter(
+                roles__name__icontains=role_terms[0],
+                roles__tenant_id__in=tenant_ids,
+                roles__deleted=False,
+            )
         else:
-            qs = qs.filter(roles__name__in=role_terms, deleted=False)
+            qs = qs.filter(
+                roles__name__in=role_terms,
+                roles__tenant_id__in=tenant_ids,
+                roles__deleted=False,
+            )
 
     total = await qs.count()
 
@@ -544,9 +552,17 @@ async def list_api_users(request):
 
     if role_terms:
         if len(role_terms) == 1:
-            qs = qs.filter(roles__name__icontains=role_terms[0], deleted=False)
+            qs = qs.filter(
+                roles__name__icontains=role_terms[0],
+                roles__tenant_id__in=[tenant_id],
+                roles__deleted=False,
+            )
         else:
-            qs = qs.filter(roles__name__in=role_terms, deleted=False)
+            qs = qs.filter(
+                roles__name__in=role_terms,
+                roles__tenant_id__in=[tenant_id],
+                roles__deleted=False,
+            )
 
     total = await qs.count()
     api_users = await qs.offset(offset).limit(size).all().prefetch_related("roles")
