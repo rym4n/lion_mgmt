@@ -58,6 +58,35 @@ def test_resolve_health_max_misses_enforces_positive_value():
     assert resolve_health_max_misses("0") == 1
 
 
+def test_create_app_ext_uses_resolved_health_monitor_config(monkeypatch):
+    import services.app_factory as app_factory
+
+    class StubApp:
+        def __init__(self):
+            self.config = self
+            self.ext_config = None
+
+        def update_config(self, *_):
+            return None
+
+        def extend(self, *, config):
+            self.ext_config = config
+
+    app = StubApp()
+    monkeypatch.setattr(app_factory, "Sanic", lambda *_, **__: app)
+    monkeypatch.setattr(app_factory, "register_listener", lambda *_: None)
+    monkeypatch.setattr(app_factory, "register_tortoise", lambda *_, **__: None)
+    monkeypatch.setattr(app_factory, "register_middleware", lambda *_: None)
+    monkeypatch.setattr(app_factory, "register_exception_handler", lambda *_: None)
+    monkeypatch.setattr(app_factory, "register_blueprints", lambda *_: None)
+
+    assert app_factory.create_app() is app
+    assert app.ext_config == {
+        "HEALTH_MAX_MISSES": app_factory.HEALTH_MAX_MISSES,
+        "HEALTH_MISSED_THRESHHOLD": app_factory.HEALTH_MISSED_THRESHHOLD,
+    }
+
+
 def test_sanic_worker_config_does_not_import_sanic_worker_modules_early():
     code = (
         "import sys; "

@@ -49,12 +49,18 @@ from services.user.views import user_bp
 from services.variables.views import var_bp
 from services.warroom.views import warroom_bp
 from services.workflow.views import workflow_bp
-from settings import BASE_LOGGING, TORTOISE
+from settings import BASE_LOGGING, HEALTH_MAX_MISSES, HEALTH_MISSED_THRESHHOLD, TORTOISE
 
 
 def create_app() -> Sanic:
     app: Sanic = Sanic("services", dumps=orjson.dumps, loads=orjson.loads, log_config=BASE_LOGGING)
     app.config.update_config("settings/__init__.py")
+    app.extend(
+        config={
+            "HEALTH_MAX_MISSES": HEALTH_MAX_MISSES,
+            "HEALTH_MISSED_THRESHHOLD": HEALTH_MISSED_THRESHHOLD,
+        }
+    )
     register_listener(app)
     register_tortoise(app, config=TORTOISE, generate_schemas=False)
     register_middleware(app)
