@@ -19,6 +19,9 @@ split_menus = importlib.import_module(
 fix_menus = importlib.import_module(
     "migrations.models.60_20260706165000_fix_asset_network_menu_permissions"
 )
+route_auth_meta = importlib.import_module(
+    "migrations.models.63_20260708183000_add_asset_network_route_auth_meta"
+)
 
 
 def _compact(text: str) -> str:
@@ -217,6 +220,22 @@ def test_fix_menu_migration_removes_legacy_topology_and_backfills_admin_roles():
     assert "租户管理员" in upgrade_sql
     assert "空间管理员" in upgrade_sql
     assert "'role:c,d,u,r'" not in upgrade_sql
+
+
+def test_asset_network_route_meta_carries_menu_read_permissions():
+    upgrade_sql = asyncio.run(route_auth_meta.upgrade(None))
+    init_sql = (ROOT / "aioe_package/aioe_install/init.sql").read_text()
+
+    for text in (upgrade_sql, init_sql):
+        assert "jsonb_set" in text
+        assert "'permissions'" in text
+        assert "'auths'" in text
+        assert "supply_chain_review:model:r" in text
+        assert "supply_chain_review:field:r" in text
+        assert "supply_chain_review:relation:r" in text
+        assert "supply_chain_review:ci:r" in text
+        assert "network_topology:r" in text
+        assert "supply_chain_review:policy:r" in text
 
 
 def test_license_templates_use_asset_and_network_management_groups():
