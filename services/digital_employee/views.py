@@ -13,6 +13,7 @@ from models.report import ReportDocument
 from services.command_center.manager import create_command_task
 from services.command_center.realtime import publish_command_center_update
 
+from .aioe_credential_manager import delete_employee_api_account
 from .cognee_credential_manager import delete_employee_memory_dataset, get_or_refresh_jwt
 from .employee_report import compose
 from .lion_agent_client import LionAgentClient
@@ -255,6 +256,7 @@ async def employee_delete(request: Request):
     await employee.save()
     await LionAgentClient().delete_workspace(employee.id)
     await delete_employee_memory_dataset(employee.tenant_id, employee.id)
+    await delete_employee_api_account(employee)
     await publish_command_center_update(employee.tenant_id, "employee_deleted", employee.id)
     return response_ok()
 

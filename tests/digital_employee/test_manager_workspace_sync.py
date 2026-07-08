@@ -22,6 +22,7 @@ STUB_MODULES = [
     "tortoise.expressions",
     "services",
     "services.digital_employee",
+    "services.digital_employee.aioe_credential_manager",
     "services.digital_employee.lion_agent_client",
     "services.digital_employee.prompt_builder",
     "services.digital_employee.rbac",
@@ -115,6 +116,10 @@ def _load_manager(sync_calls: list[dict]):
     digital_employee_pkg = types.ModuleType("services.digital_employee")
     digital_employee_pkg.__path__ = []
     sys.modules["services.digital_employee"] = digital_employee_pkg
+
+    aioe_credential_manager = types.ModuleType("services.digital_employee.aioe_credential_manager")
+    aioe_credential_manager.create_employee_api_account = lambda employee: _async_value(None)
+    sys.modules["services.digital_employee.aioe_credential_manager"] = aioe_credential_manager
 
     lion_agent_client_module = types.ModuleType("services.digital_employee.lion_agent_client")
     lion_agent_client_module.LionAgentClient = LionAgentClient

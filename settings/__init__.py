@@ -278,6 +278,9 @@ COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS = int(os.environ.get("RY_COMMAND_TASK_DISP
 # 派单超时清扫器的扫描间隔（秒）
 COMMAND_TASK_SWEEP_INTERVAL_SECONDS = int(os.environ.get("RY_COMMAND_TASK_SWEEP_INTERVAL_SECONDS") or 60)
 
+# lion_agent 的 aioe-cli 工具回调 AIOE OpenAPI 的内部地址（容器网络内可达）
+AIOE_INTERNAL_URL = os.environ.get("RY_AIOE_INTERNAL_URL", "http://lion-mgmt:8000")
+
 # 数字员工长期记忆服务
 LION_MEMORY_ENDPOINT = os.environ.get("RY_LION_MEMORY_ENDPOINT", "http://lion-memory:8000")
 LION_MEMORY_ADMIN_EMAIL = os.environ.get("RY_LION_MEMORY_ADMIN_EMAIL", "admin@aioe.internal")

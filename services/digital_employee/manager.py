@@ -11,6 +11,7 @@ from models.command_center import CommandAgent, CommandTask
 from models.digital_employee import DigitalEmployeeRole, DigitalEmployeeSkill
 from settings import TZ
 
+from .aioe_credential_manager import create_employee_api_account
 from .lion_agent_client import LionAgentClient
 from .prompt_builder import AIOE_CLI_SKILL_KEY, AIOE_CLI_SKILL_VERSION, render_workspace_files, workspace_etag
 from .rbac import require_existing_platform_role
@@ -156,6 +157,7 @@ async def create_employee(
         resource_scope={},
     )
     await sync_employee_workspace(employee, role=role, skills=skills)
+    await create_employee_api_account(employee)
     return employee
 
 

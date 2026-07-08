@@ -19,6 +19,7 @@ async def execute_prompt(
     message: str,
     request_id: str | None = None,
     cognee: dict[str, Any] | None = None,
+    aioe: dict[str, Any] | None = None,
 ) -> str:
     payload = {
         "workspace_id": workspace_id,
@@ -26,6 +27,7 @@ async def execute_prompt(
         "request_id": request_id,
         "message": message,
         "cognee": cognee,
+        "aioe": aioe,
     }
     response = await LionAgentClient().execute(payload)
     if isinstance(response, dict):
@@ -44,6 +46,7 @@ async def stream_prompt_events(
     message: str,
     request_id: str | None = None,
     cognee: dict[str, Any] | None = None,
+    aioe: dict[str, Any] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     payload = {
         "workspace_id": workspace_id,
@@ -51,6 +54,7 @@ async def stream_prompt_events(
         "request_id": request_id,
         "message": message,
         "cognee": cognee,
+        "aioe": aioe,
     }
     event_name = "message"
     async for line in LionAgentClient().stream_execute(payload):

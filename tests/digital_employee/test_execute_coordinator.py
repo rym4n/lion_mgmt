@@ -43,6 +43,7 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
     sys.modules["models.command_center"] = command_center_module
 
     settings_module = types.ModuleType("settings")
+    settings_module.AIOE_INTERNAL_URL = "http://lion-mgmt"
     settings_module.LION_MEMORY_ENDPOINT = "http://lion-memory"
     settings_module.WR_TOPIC = "wr-topic"
     sys.modules["settings"] = settings_module
@@ -86,6 +87,10 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
     credential_manager = types.ModuleType("services.digital_employee.cognee_credential_manager")
     credential_manager.get_or_refresh_jwt = lambda tenant_id: _async_value(f"jwt-{tenant_id}")
     sys.modules["services.digital_employee.cognee_credential_manager"] = credential_manager
+
+    aioe_credential_manager = types.ModuleType("services.digital_employee.aioe_credential_manager")
+    aioe_credential_manager.get_employee_api_token = lambda employee: _async_value(f"api-token-{employee.id}")
+    sys.modules["services.digital_employee.aioe_credential_manager"] = aioe_credential_manager
 
     prompt_builder = types.ModuleType("services.digital_employee.prompt_builder")
     prompt_builder.build_runtime_prompt = lambda task, employee: f"prompt:{task.id}:{employee.id}"
@@ -206,6 +211,11 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
     assert payload["cognee"]["tenant_id"] == "tenant-1"
     assert payload["cognee"]["dataset_name"] == "employee-1"
     assert payload["cognee"]["role_key"] == "ops"
+    assert payload["aioe"] == {
+        "base_url": "http://lion-mgmt",
+        "token": "api-token-employee-1",
+        "tenant_id": "tenant-1",
+    }
 
     published = [message for _, message in redis.messages]
     assert [message["type"] for message in published] == [

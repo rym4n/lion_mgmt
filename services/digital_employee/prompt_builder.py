@@ -7,10 +7,10 @@ from typing import Any
 WORKSPACE_TEXT_FILES = ("system_prompt.md",)
 WORKSPACE_JSON_FILES = ("manifest.json", "policy.json")
 AIOE_CLI_SKILL_KEY = "aioe-cli"
-AIOE_CLI_SKILL_VERSION = 1
+AIOE_CLI_SKILL_VERSION = 2
 AIOE_CLI_DESCRIPTION = (
-    "内置 AIOE 平台操作技能。负责读取当前员工的 AIOE 平台 RBAC 角色授权，"
-    "按授权调用 AIOE API 完成资产、告警、任务、剧本、报告、应用和系统配置等平台操作；"
+    "内置 AIOE 平台操作技能，对应运行时工具 `aioe_cli`。负责按当前员工的 AIOE 平台 RBAC 角色授权，"
+    "调用 AIOE API 完成资产、告警、任务、剧本、报告、应用和系统配置等平台操作；"
     "未配置 RBAC 角色时不得调用任何 AIOE API。"
 )
 PLATFORM_BINDING_KEYS = {
@@ -150,10 +150,13 @@ def _builtin_aioe_cli_skill_payload(rbac_role_id: str | None) -> dict:
         "meta": {
             "builtin": True,
             "authorization_source": "aioe_platform_role",
+            "runtime_tool": "aioe_cli",
             "usage_contract": [
-                "所有 AIOE 平台 API 调用必须通过员工实例绑定的 RBAC 角色授权。",
+                "所有 AIOE 平台 API 调用必须通过运行时工具 `aioe_cli`，凭当前员工绑定的 RBAC 角色授权。",
                 "未配置 RBAC 角色时，不得调用 AIOE 任何接口，只能说明缺少人工授权。",
-                "调用前明确目标接口、参数、影响范围和审计证据；高风险写操作先输出审批建议。",
+                "先用 `aioe_cli` 的 apps/actions/resources 子命令查询确认应用、动作与资源，不要臆造标识。",
+                "执行动作用 `action --app <应用> --action <动作> [--input '<JSON>'] [--resource <id或name>]`；应用有多个资源时必须指定 --resource。",
+                "高风险写操作先输出审批建议，调用前明确目标接口、参数、影响范围和审计证据。",
             ],
         },
     }
@@ -334,7 +337,14 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
         system_prompt.extend(["## Workflows", workflows, ""])
     runtime_lines = [
         "以当前任务和平台强制访问控制为准。",
-        f"AIOE 平台操作必须使用内置 `{AIOE_CLI_SKILL_KEY}` skill；未配置平台 RBAC 角色时不得调用 AIOE 任何接口。",
+        f"AIOE 平台操作必须调用工具 `aioe_cli`（内置 `{AIOE_CLI_SKILL_KEY}` skill）；未配置平台 RBAC 角色时不得调用 AIOE 任何接口。",
+        "`aioe_cli` 的唯一参数 command 是命令行参数字符串，可用子命令：",
+        "- `apps`：列出可见应用；",
+        "- `actions --app <应用英文标识>`：列出应用的动作与入参；",
+        "- `resources --app <应用英文标识>`：列出应用可用资源（id/name）；",
+        "- `action --app <应用英文标识> --action <动作英文标识> [--input '<JSON对象>'] [--resource <id或name>]`：执行动作。",
+        "不要凭空猜测应用/动作/参数名，先用 apps/actions/resources 查询确认，再执行 action。",
+        "例：查询深信服托管云主机清单 → command=\"action --app sangfor_managed_cloud --action GetCloudHostList --input '{}' --resource <资源名>\"。",
     ]
     system_prompt.extend(["## Runtime", "\n".join(runtime_lines), ""])
 

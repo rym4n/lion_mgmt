@@ -4,8 +4,9 @@ from sanic.log import logger
 from typing import Awaitable, Callable
 
 from models.command_center import CommandAgent, CommandTask
-from settings import LION_MEMORY_ENDPOINT, WR_TOPIC
+from settings import AIOE_INTERNAL_URL, LION_MEMORY_ENDPOINT, WR_TOPIC
 
+from .aioe_credential_manager import get_employee_api_token
 from .cognee_credential_manager import get_or_refresh_jwt
 from .lion_agent_adapter import stream_prompt_events
 from .prompt_builder import build_runtime_prompt
@@ -157,6 +158,7 @@ async def run(
         )
         workspace_id = continuation_workspace["workspace_id"]
     jwt = await get_or_refresh_jwt(task.tenant_id)
+    aioe_token = await get_employee_api_token(employee)
     payload = {
         "workspace_id": workspace_id,
         "session_id": getattr(command_run, "run_id", None) or task.run_id or task.id,
@@ -170,6 +172,11 @@ async def run(
             "role_key": employee.role_key,
             "task_id": task.id,
             "source_kind": task.source,
+        },
+        "aioe": {
+            "base_url": AIOE_INTERNAL_URL,
+            "token": aioe_token,
+            "tenant_id": task.tenant_id,
         },
     }
     content = []

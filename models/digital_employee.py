@@ -90,6 +90,37 @@ class DigitalEmployeeSkill(BaseModel):
         indexes = (("tenant_id", "is_builtin"),)
 
 
+class EmployeeApiCredential(BaseModel):
+    """数字员工到 AIOE 平台 API 账号的映射。
+
+    每个数字员工在创建时派生一个 type=api 的 Account，绑定员工的 RBAC 角色，
+    签发长期有效的 token 供 lion_agent 的 aioe-cli 工具回调 AIOE OpenAPI。
+    """
+
+    employee_id = fields.CharField(max_length=36, description="数字员工 CommandAgent ID")
+    account_id = fields.CharField(max_length=36, description="AIOE API 账号 Account ID")
+    api_token = EncryptedCharField(max_length=2048, description="aioe-auth token（account_id:jwt）")
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
+            "tenant_id": self.tenant_id,
+            "employee_id": self.employee_id,
+            "account_id": self.account_id,
+        }
+
+    class Meta:
+        table = "employee_api_credential"
+        ordering = ["-utime"]
+        unique_together = (("employee_id",),)
+
+
 class TenantCogneeCredential(BaseModel):
     """租户到 Cognee 用户的映射。"""
 
