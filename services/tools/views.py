@@ -131,13 +131,7 @@ def _tool_matches_search_key(tool, key):
     searchable_values = [
         tool.get("name"),
         tool.get("description"),
-        tool.get("main"),
     ]
-    tags = tool.get("tag") or []
-    if isinstance(tags, (list, tuple, set)):
-        searchable_values.extend(tags)
-    else:
-        searchable_values.append(tags)
 
     return any(normalized_key in _normalize_search_text(value) for value in searchable_values)
 

@@ -22,7 +22,7 @@ def test_tool_search_matches_name_and_description_case_insensitively():
     assert _tool_matches_search_key(tool, "lion")
 
 
-def test_tool_search_matches_entrypoint_and_tags():
+def test_tool_search_does_not_match_entrypoint_or_tags():
     tool = {
         "name": "feature-app",
         "description": "功能应用",
@@ -30,8 +30,8 @@ def test_tool_search_matches_entrypoint_and_tags():
         "tag": ["自动化", "AIOE"],
     }
 
-    assert _tool_matches_search_key(tool, "aioe")
-    assert _tool_matches_search_key(tool, "AIOE")
+    assert not _tool_matches_search_key(tool, "aioe")
+    assert not _tool_matches_search_key(tool, "AIOE")
 
 
 def test_tool_search_can_exclude_action_only_matches():

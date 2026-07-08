@@ -318,8 +318,8 @@ async def list_schedules(page: int, page_size: int, tenant_id: str, enabled: Opt
     # 计算总数
     total = await query.count()
 
-    # 分页查询
-    items = await query.offset((page - 1) * page_size).limit(page_size).all()
+    # 启用任务优先，其次按最新变更/创建时间倒序，避免新建任务落到最后一页。
+    items = await query.order_by("-enabled", "-utime", "-ctime").offset((page - 1) * page_size).limit(page_size).all()
 
     # 获取所有 schedule_id 对应的巡检结果日期
     schedule_ids = [schedule.id for schedule in items]
