@@ -86,6 +86,15 @@ def test_validator_rejects_ephemeral_only_resume_context():
     assert contract.is_durable_continuation_context(incomplete) is False
 
 
+def test_empty_evidence_refs_are_valid_durable_context():
+    context = _context(evidence_refs=[])
+
+    assert context["evidence_refs"] == []
+    assert contract.durable_context_missing_fields(context) == []
+    assert contract.is_durable_continuation_context(context) is True
+    assert contract.approval_decision_transition("approve", context)["run_id"] == "run-1"
+
+
 def test_decision_transitions_cover_required_approval_actions():
     context = _context()
 

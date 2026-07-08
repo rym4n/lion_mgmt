@@ -53,6 +53,8 @@ DURABLE_CONTINUATION_FIELDS = (
     "evidence_refs",
 )
 
+OPTIONAL_EMPTY_DURABLE_FIELDS = {"evidence_refs"}
+
 EPHEMERAL_CONTEXT_FIELDS = (
     "active_stream",
     "active_stream_id",
@@ -128,7 +130,16 @@ def approval_runtime_decision() -> dict[str, Any]:
 
 
 def durable_context_missing_fields(context: Mapping[str, Any]) -> list[str]:
-    return [field for field in DURABLE_CONTINUATION_FIELDS if context.get(field) in (None, "", [], {})]
+    missing: list[str] = []
+    for field in DURABLE_CONTINUATION_FIELDS:
+        value = context.get(field)
+        if field in OPTIONAL_EMPTY_DURABLE_FIELDS:
+            if value is None:
+                missing.append(field)
+            continue
+        if value in (None, "", [], {}):
+            missing.append(field)
+    return missing
 
 
 def ephemeral_context_fields(context: Mapping[str, Any]) -> list[str]:

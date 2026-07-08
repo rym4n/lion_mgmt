@@ -24,6 +24,8 @@ STUB_MODULES = [
     "libs.security.authorization",
     "models",
     "models.command_center",
+    "sanic",
+    "sanic.log",
     "settings",
     "tortoise",
     "tortoise.transactions",
@@ -81,6 +83,13 @@ def _install_stubs():
     authorization = types.ModuleType("libs.security.authorization")
     authorization.check_wildcard = lambda owned, needed: owned in {needed, "*:*"} or owned.endswith(":*") and needed.startswith(owned[:-1])
     sys.modules["libs.security.authorization"] = authorization
+
+    sanic = types.ModuleType("sanic")
+    sanic.__path__ = []
+    sys.modules["sanic"] = sanic
+    sanic_log = types.ModuleType("sanic.log")
+    sanic_log.logger = SimpleNamespace(warning=lambda *args, **kwargs: None)
+    sys.modules["sanic.log"] = sanic_log
 
     tortoise = types.ModuleType("tortoise")
     transactions = types.ModuleType("tortoise.transactions")
