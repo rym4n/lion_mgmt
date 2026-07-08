@@ -98,7 +98,7 @@ def test_role_details_tolerates_legacy_menu_string_permissions():
         {
             "model": "agent_report_schedule",
             "model_description": "汇报任务",
-            "sp": [{"c": "c"}],
+            "sp": [{"c": "新增汇报任务权限"}],
         }
     ]
 
@@ -113,7 +113,7 @@ def test_role_permission_all_normalizes_legacy_string_permissions():
     )
 
     assert normalized["Permissions"] == [
-        {"value": "c", "label": "c"},
+        {"value": "c", "label": "新增汇报任务权限"},
         {"value": "r", "label": "查看汇报任务权限"},
     ]
 
@@ -140,6 +140,56 @@ def test_role_permission_all_exposes_actual_nested_permission_code():
             "value": "c",
             "label": "新增资产模型权限",
             "permission": "supply_chain_review:model:c",
+        },
+    ]
+
+
+def test_role_permission_all_labels_split_menu_actions_without_collapsing_granularity():
+    normalized = _normalize_permission_menu(
+        {
+            "model": "asset-management-models",
+            "description": "资产模型",
+            "Permissions": [
+                "supply_chain_review:model:c",
+                "supply_chain_review:field:c",
+                "supply_chain_review:relation:c",
+                "supply_chain_review:model:r",
+                "supply_chain_review:field:r",
+                "supply_chain_review:relation:r",
+            ],
+        }
+    )
+
+    assert normalized["Permissions"] == [
+        {
+            "value": "c",
+            "label": "新增资产模型权限",
+            "permission": "supply_chain_review:model:c",
+        },
+        {
+            "value": "c",
+            "label": "新增资产字段权限",
+            "permission": "supply_chain_review:field:c",
+        },
+        {
+            "value": "c",
+            "label": "新增资产关系权限",
+            "permission": "supply_chain_review:relation:c",
+        },
+        {
+            "value": "r",
+            "label": "查看资产模型权限",
+            "permission": "supply_chain_review:model:r",
+        },
+        {
+            "value": "r",
+            "label": "查看资产字段权限",
+            "permission": "supply_chain_review:field:r",
+        },
+        {
+            "value": "r",
+            "label": "查看资产关系权限",
+            "permission": "supply_chain_review:relation:r",
         },
     ]
 

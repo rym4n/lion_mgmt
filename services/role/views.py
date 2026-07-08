@@ -35,6 +35,28 @@ LEGACY_PERMISSION_REMAP = {
     "digital_employee:package:d": "digital_employee:d",
 }
 
+ACTION_LABEL_PREFIXES = {
+    "c": "新增",
+    "r": "查看",
+    "u": "修改",
+    "d": "删除",
+    "w": "编辑",
+}
+
+PERMISSION_RESOURCE_LABELS = {
+    "agent_report_schedule": "汇报任务",
+    "command_center": "作战室",
+    "digital_employee": "数字员工",
+    "network_topology": "网络拓扑",
+    "supply_chain_review:ci": "资产目录",
+    "supply_chain_review:collection": "采集任务",
+    "supply_chain_review:field": "资产字段",
+    "supply_chain_review:model": "资产模型",
+    "supply_chain_review:policy": "访问控制策略",
+    "supply_chain_review:relation": "资产关系",
+    "supply_chain_review:topology": "网络拓扑",
+}
+
 
 def _normalize_permission_value(permission_value: object) -> str | None:
     if not isinstance(permission_value, str) or ":" not in permission_value:
@@ -50,24 +72,70 @@ def _normalize_menu_action_value(permission_value: object) -> str | None:
     return permission_value.rsplit(":", 1)[-1]
 
 
-def _normalize_menu_permissions(permissions: object, menu_model: str | None = None) -> list[dict]:
+def _permission_resource_key(permission_value: object) -> str | None:
+    normalized = _normalize_permission_value(permission_value)
+    if not normalized or ":" not in normalized:
+        return None
+    return normalized.rsplit(":", 1)[0]
+
+
+def _normalize_action_label(
+    label: object,
+    action_value: str,
+    menu_description: str | None,
+    raw_value: object,
+) -> str:
+    label_value = label if isinstance(label, str) else ""
+    if (
+        label_value
+        and label_value != action_value
+        and label_value != raw_value
+        and ":" not in label_value
+    ):
+        return label_value
+
+    prefix = ACTION_LABEL_PREFIXES.get(action_value)
+    resource_label = PERMISSION_RESOURCE_LABELS.get(_permission_resource_key(raw_value)) or menu_description
+    if prefix and resource_label:
+        return f"{prefix}{resource_label}权限"
+    return label_value or action_value
+
+
+def _normalize_menu_permissions(
+    permissions: object,
+    menu_model: str | None = None,
+    menu_description: str | None = None,
+) -> list[dict]:
     if not isinstance(permissions, list):
         return []
 
     normalized_permissions = []
+    seen_permissions = set()
     for item in permissions:
         if isinstance(item, dict):
             raw_value = item.get("value")
         else:
             raw_value = item
         value = _normalize_menu_action_value(raw_value)
-        label = item.get("label") if isinstance(item, dict) else value
-        if value:
-            normalized_item = {"value": value, "label": label or value}
-            actual_permission = _normalize_permission_value(raw_value)
-            if actual_permission and menu_model and actual_permission.rsplit(":", 1)[0] != menu_model:
-                normalized_item["permission"] = actual_permission
-            normalized_permissions.append(normalized_item)
+        if not value:
+            continue
+
+        label = item.get("label") if isinstance(item, dict) else None
+        actual_permission = _normalize_permission_value(raw_value)
+        dedupe_key = actual_permission or (f"{menu_model}:{value}" if menu_model else value)
+        if dedupe_key in seen_permissions:
+            continue
+        seen_permissions.add(dedupe_key)
+
+        normalized_item = {
+            "value": value,
+            "label": _normalize_action_label(label, value, menu_description, raw_value),
+        }
+        default_permission = f"{menu_model}:{value}" if menu_model else None
+        if actual_permission and default_permission and actual_permission != default_permission:
+            normalized_item["permission"] = actual_permission
+        normalized_permissions.append(normalized_item)
+
     return normalized_permissions
 
 
@@ -76,6 +144,7 @@ def _normalize_permission_menu(permission: dict) -> dict:
     normalized["Permissions"] = _normalize_menu_permissions(
         permission.get("Permissions"),
         permission.get("model"),
+        permission.get("description"),
     )
     return normalized
 
@@ -105,7 +174,11 @@ def _build_permission_map(permissions_data: list[dict]) -> dict:
     for permission in permissions_data:
         values = {
             item["value"]: item["label"]
-            for item in _normalize_menu_permissions(permission.get("Permissions"), permission.get("model"))
+            for item in _normalize_menu_permissions(
+                permission.get("Permissions"),
+                permission.get("model"),
+                permission.get("description"),
+            )
         }
         permission_map[permission["model"]] = {
             "description": permission["description"],
@@ -140,10 +213,12 @@ def _build_structured_permissions(role_permissions: list[str] | None, permission
     for permission in permissions_data:
         model = permission["model"]
         description = permission["description"]
-        for item in _normalize_menu_permissions(permission.get("Permissions"), model):
-            action_value = item.get("permission") or item["value"]
+        for item in _normalize_menu_permissions(permission.get("Permissions"), model, description):
             actual_permission = item.get("permission") or f"{model}:{item['value']}"
-            if any(check_wildcard(role_permission, actual_permission) for role_permission in normalized_role_permissions):
+            if any(
+                check_wildcard(role_permission, actual_permission) for role_permission in normalized_role_permissions
+            ):
+                action_value = item.get("permission") or item["value"]
                 append_action(model, description, action_value, item["label"])
 
     return list(structured_by_model.values())

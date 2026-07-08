@@ -89,12 +89,12 @@ def test_role_permission_menu_keeps_full_permission_values_for_split_modules():
     assert normalized["Permissions"] == [
         {
             "value": "c",
-            "label": "c",
+            "label": "新增资产模型权限",
             "permission": "supply_chain_review:model:c",
         },
         {
             "value": "r",
-            "label": "r",
+            "label": "查看资产模型权限",
             "permission": "supply_chain_review:model:r",
         },
     ]
