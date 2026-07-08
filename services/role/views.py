@@ -1,6 +1,4 @@
 # coding=utf-8
-import time
-
 from sanic import Blueprint
 from sanic_ext import openapi
 from tortoise.transactions import in_transaction
@@ -9,6 +7,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import check_wildcard, is_superadmin_role, load_license, requires_permission
+from libs.security.license_modules import is_licensed_module_active
 from models import Account, PermissionsMenu, Role
 
 role_bp = Blueprint("role", url_prefix="/role")
@@ -79,6 +78,26 @@ def _normalize_permission_menu(permission: dict) -> dict:
         permission.get("model"),
     )
     return normalized
+
+
+def _licensed_module_keys(license_data: dict) -> set[str]:
+    valid_modules = {"许可管理", "license_bp"}
+    for item in license_data.get("moduleList", []):
+        if not is_licensed_module_active(license_data, item):
+            continue
+        name = item.get("name")
+        module = item.get("module")
+        if name:
+            valid_modules.add(name)
+            if name == "工作空间":
+                valid_modules.add("租户管理")
+        if module:
+            valid_modules.add(module)
+    return valid_modules
+
+
+def _permission_menu_is_licensed(permission: dict, valid_modules: set[str]) -> bool:
+    return permission.get("description") in valid_modules or permission.get("bp") in valid_modules
 
 
 def _build_permission_map(permissions_data: list[dict]) -> dict:
@@ -524,24 +543,15 @@ async def update_role(request):
 )
 @requires_permission("role:r")
 async def all_permission(request):
-    menu_dict = {}
     lic = load_license()
     if not lic:
         raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
-    for item in lic["moduleList"]:
-        name = item["name"]
-        auth = item["auth"]
-
-        if name not in menu_dict:
-            menu_dict[name] = False
-        if auth and int(lic["grouplist"][item["group"]]["expireTime"]) > int(time.time() * 1000):
-            menu_dict[name] = True
-    menu_dict["许可管理"] = True
+    valid_modules = _licensed_module_keys(lic)
 
     permission_list = []
     permissions = await PermissionsMenu.all().values()
     for permission in permissions:
-        if permission["description"] in menu_dict:
+        if _permission_menu_is_licensed(permission, valid_modules):
             permission_list.append(_normalize_permission_menu(permission))
     return response_ok(
         {

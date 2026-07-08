@@ -57,6 +57,26 @@ def _role_can_open_menu(role_permissions: list[str] | None, menu: dict) -> bool:
     )
 
 
+def _licensed_module_keys(license_data: dict) -> set[str]:
+    valid_modules = {"许可管理", "license_bp"}
+    for item in license_data.get("moduleList", []):
+        if not is_licensed_module_active(license_data, item):
+            continue
+        name = item.get("name")
+        module = item.get("module")
+        if name:
+            valid_modules.add(name)
+            if name == "工作空间":
+                valid_modules.add("租户管理")
+        if module:
+            valid_modules.add(module)
+    return valid_modules
+
+
+def _menu_is_licensed(menu: dict, valid_modules: set[str]) -> bool:
+    return menu.get("description") in valid_modules or menu.get("bp") in valid_modules
+
+
 @license_bp.post("/machine-code")
 @openapi.definition(
     summary="获取当前机器码",
@@ -204,18 +224,13 @@ async def get_license(request: Request):
     for role in user.roles:
         perm_models = set()
         if role.permissions:
-            valid_modules = set()
+            valid_modules = _licensed_module_keys(lic)
             for item in lic["moduleList"]:
-                name = item["name"]
                 if is_licensed_module_active(lic, item):
                     if item["module"] == "ai_bp":
                         ai_type += 1
                     if item["module"] == "tenant_bp":
                         tenant_type = True
-                    valid_modules.add(name)
-                    if name == "工作空间":
-                        valid_modules.add("租户管理")
-            valid_modules.update(["许可管理"])
             # 超级权限处理
             if "*:*" not in role.permissions:
                 role_permissions = [
@@ -225,7 +240,13 @@ async def get_license(request: Request):
                 ]
             else:
                 role_permissions = permissions
-            perm_models.update([p["model"] for p in role_permissions if p["description"] in valid_modules and p["description"] != "仪表盘"])
+            perm_models.update(
+                [
+                    p["model"]
+                    for p in role_permissions
+                    if _menu_is_licensed(p, valid_modules) and p["description"] != "仪表盘"
+                ]
+            )
 
         for model in perm_models:
             permission_data = next((p for p in permissions if p["model"] == model), None)

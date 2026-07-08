@@ -108,3 +108,21 @@ def test_access_control_license_module_matches_network_management_group():
     }
 
     assert is_licensed_module_active(license_data, item) is True
+
+
+def test_command_center_license_module_uses_expert_team_group():
+    license_data = {
+        "grouplist": {
+            "专家团队": {
+                "expireTime": int(time.time() * 1000) + 60000,
+            }
+        }
+    }
+    item = {
+        "name": "指挥中心",
+        "module": "command_bp",
+        "auth": True,
+        "group": "专家团队",
+    }
+
+    assert is_licensed_module_active(license_data, item) is True

@@ -4,7 +4,12 @@ import importlib
 import re
 from pathlib import Path
 
-from services.license.views import _role_can_open_menu
+from services.license.views import _licensed_module_keys, _menu_is_licensed, _role_can_open_menu
+from services.role.views import (
+    _licensed_module_keys as _role_licensed_module_keys,
+    _normalize_permission_menu,
+    _permission_menu_is_licensed,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -57,6 +62,123 @@ def test_license_menu_permission_matching_supports_split_menu_models():
     assert _role_can_open_menu(["supply_chain_review:model:r"], asset_menu) is True
     assert _role_can_open_menu(["asset-management-models:r"], asset_menu) is False
     assert _role_can_open_menu(["system:c,d,u,r"], legacy_menu) is True
+    assert _role_can_open_menu(
+        ["command_center:r"],
+        {
+            "model": "command_center",
+            "Permissions": ["command_center:c", "command_center:r"],
+        },
+    ) is True
+
+
+def test_role_permission_menu_keeps_full_permission_values_for_split_modules():
+    menu = {
+        "model": "asset-management-models",
+        "description": "资产模型",
+        "Permissions": [
+            "supply_chain_review:model:c",
+            "supply_chain_review:model:r",
+        ],
+    }
+
+    normalized = _normalize_permission_menu(menu)
+
+    assert normalized["Permissions"] == [
+        {
+            "value": "c",
+            "label": "c",
+            "permission": "supply_chain_review:model:c",
+        },
+        {
+            "value": "r",
+            "label": "r",
+            "permission": "supply_chain_review:model:r",
+        },
+    ]
+
+
+def test_license_menu_matching_uses_active_license_module_bp_for_split_menus():
+    license_data = {
+        "grouplist": {
+            "资产管理": {"expireTime": 4102444800000},
+            "网络管理": {"expireTime": 4102444800000},
+            "专家团队": {"expireTime": 4102444800000},
+        },
+        "moduleList": [
+            {
+                "name": "资产模型",
+                "module": "asset_management_bp",
+                "auth": True,
+                "group": "资产管理",
+            },
+            {
+                "name": "访问控制",
+                "module": "network_access_control_bp",
+                "auth": True,
+                "group": "网络管理",
+            },
+            {
+                "name": "指挥中心",
+                "module": "command_bp",
+                "auth": True,
+                "group": "专家团队",
+            },
+        ],
+    }
+    valid_modules = _licensed_module_keys(license_data)
+
+    assert _menu_is_licensed(
+        {"description": "资产目录", "bp": "asset_management_bp"}, valid_modules
+    )
+    assert _menu_is_licensed(
+        {"description": "网络拓扑", "bp": "topology_bp"}, valid_modules
+    ) is False
+    assert _menu_is_licensed(
+        {"description": "访问控制", "bp": "network_access_control_bp"}, valid_modules
+    )
+    assert _menu_is_licensed(
+        {"description": "指挥中心", "bp": "command_bp"}, valid_modules
+    )
+
+
+def test_role_permission_list_matching_uses_active_license_module_bp_for_split_menus():
+    license_data = {
+        "grouplist": {
+            "资产管理": {"expireTime": 4102444800000},
+            "网络管理": {"expireTime": 4102444800000},
+        },
+        "moduleList": [
+            {
+                "name": "资产模型",
+                "module": "asset_management_bp",
+                "auth": True,
+                "group": "资产管理",
+            },
+            {
+                "name": "访问控制",
+                "module": "network_access_control_bp",
+                "auth": True,
+                "group": "网络管理",
+            },
+            {
+                "name": "网络拓扑",
+                "module": "topology_bp",
+                "auth": False,
+                "group": "网络管理",
+            },
+        ],
+    }
+    valid_modules = _role_licensed_module_keys(license_data)
+
+    assert _permission_menu_is_licensed(
+        {"description": "资产目录", "bp": "asset_management_bp"}, valid_modules
+    )
+    assert _permission_menu_is_licensed(
+        {"description": "访问控制", "bp": "network_access_control_bp"}, valid_modules
+    )
+    assert _permission_menu_is_licensed(
+        {"description": "网络拓扑", "bp": "topology_bp"}, valid_modules
+    ) is False
 
 
 def test_split_menu_migration_replaces_security_management_menu():
@@ -113,3 +235,21 @@ def test_license_templates_use_asset_and_network_management_groups():
         assert "network_access_control_bp" in text
         _assert_module_group(text, "网络拓扑", "topology_bp", "网络管理")
         _assert_module_not_in_group(text, "网络拓扑", "topology_bp", "基础功能")
+
+
+def test_command_center_migration_splits_expert_team_license_modules():
+    command_menus = importlib.import_module(
+        "migrations.models.62_20260708170000_fix_new_module_license_menu_contract"
+    )
+    upgrade_sql = asyncio.run(command_menus.upgrade(None))
+
+    assert "command_bp" in upgrade_sql
+    assert "digital_employee_bp" in upgrade_sql
+    assert "agent_bp" in upgrade_sql
+    assert "command_center_bp" not in upgrade_sql
+    assert "'指挥中心'" in upgrade_sql
+    assert "'数字员工'" in upgrade_sql
+    assert "'汇报助手'" in upgrade_sql
+    assert "command_center:r" in upgrade_sql
+    assert "digital_employee:r" in upgrade_sql
+    assert "agent:r" in upgrade_sql
