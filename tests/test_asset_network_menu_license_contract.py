@@ -22,6 +22,9 @@ fix_menus = importlib.import_module(
 route_auth_meta = importlib.import_module(
     "migrations.models.63_20260708183000_add_asset_network_route_auth_meta"
 )
+command_role_permissions = importlib.import_module(
+    "migrations.models.64_20260708223000_split_command_role_permissions"
+)
 
 
 def _compact(text: str) -> str:
@@ -272,3 +275,18 @@ def test_command_center_migration_splits_expert_team_license_modules():
     assert "command_center:r" in upgrade_sql
     assert "digital_employee:r" in upgrade_sql
     assert "agent:r" in upgrade_sql
+
+
+def test_command_role_permission_backfill_splits_legacy_aggregate_permissions():
+    upgrade_sql = asyncio.run(command_role_permissions.upgrade(None))
+    init_sql = (ROOT / "aioe_package/aioe_install/init.sql").read_text()
+
+    for text in (upgrade_sql, init_sql):
+        assert "jsonb_array_elements_text" in text
+        assert "command_center:c,d,u,r" in text
+        assert "command_center:c,r,u,d" in text
+        assert "command_center:r" in text
+        assert "digital_employee:r" in text
+        assert "agent:r" in text
+        assert "agent_report_schedule:r" in text
+        assert "agent:report:schedule:c,d,u,r" in text
