@@ -920,21 +920,36 @@ async def save_relation(tenant: str, data: dict, operator: str | None) -> Supply
     return existing
 
 
-async def export_model_package(tenant: str, ci_type_keys: Iterable[str] | None = None) -> dict:
+async def export_model_package(
+    tenant: str,
+    ci_type_keys: Iterable[str] | None = None,
+    include_related: bool = False,
+) -> dict:
+    requested_keys = list(dict.fromkeys(ci_type_keys or []))
+    keys = requested_keys[:]
+    relation_types = await SupplyChainCiRelationType.filter(tenant_id=tenant, deleted=False).order_by("key").all()
+
+    if requested_keys:
+        relation_types = [
+            item for item in relation_types
+            if set(item.source_ci_types or []).intersection(requested_keys)
+            or set(item.target_ci_types or []).intersection(requested_keys)
+        ]
+        if include_related:
+            related_keys = set(requested_keys)
+            for relation_type in relation_types:
+                related_keys.update(relation_type.source_ci_types or [])
+                related_keys.update(relation_type.target_ci_types or [])
+            keys = sorted(related_keys)
+        else:
+            relation_types = []
+
     condition = Q(tenant_id=tenant, deleted=False)
-    if ci_type_keys:
-        condition &= Q(key__in=list(ci_type_keys))
+    if keys:
+        condition &= Q(key__in=keys)
     ci_types = await SupplyChainCiType.filter(condition).order_by("key").all()
     keys = [item.key for item in ci_types]
     fields = await SupplyChainCiFieldDef.filter(tenant_id=tenant, ci_type_key__in=keys, deleted=False).order_by("ci_type_key", "sort").all()
-    relation_types = await SupplyChainCiRelationType.filter(tenant_id=tenant, deleted=False).order_by("key").all()
-    if keys:
-        relation_types = [
-            item for item in relation_types
-            if not ci_type_keys
-            or set(item.source_ci_types or []).intersection(keys)
-            or set(item.target_ci_types or []).intersection(keys)
-        ]
     return {
         "version": 1,
         "ci_types": [item.json for item in ci_types],

@@ -119,7 +119,7 @@ def test_asset_and_network_keys_do_not_duplicate_shared_blueprints(monkeypatch):
                     "group": "资产管理",
                 },
                 {
-                    "name": "资产目录",
+                    "name": "资产数据",
                     "module": "asset_management_bp",
                     "auth": True,
                     "group": "资产管理",

@@ -179,7 +179,13 @@ async def ci_type_delete(request: Request):
 @requires_permission("supply_chain_review:model:r")
 async def ci_type_export(request: Request):
     data = _json(request)
-    return response_ok(await export_model_package(tenant_id(request), data.get("ci_type_keys")))
+    return response_ok(
+        await export_model_package(
+            tenant_id(request),
+            data.get("ci_type_keys"),
+            bool(data.get("include_related", False)),
+        )
+    )
 
 
 @supply_chain_review_cmdb_bp.post("/ci-type/import")

@@ -134,7 +134,7 @@ def test_license_menu_matching_uses_active_license_module_bp_for_split_menus():
     valid_modules = _licensed_module_keys(license_data)
 
     assert _menu_is_licensed(
-        {"description": "资产目录", "bp": "asset_management_bp"}, valid_modules
+        {"description": "资产数据", "bp": "asset_management_bp"}, valid_modules
     )
     assert _menu_is_licensed(
         {"description": "网络拓扑", "bp": "topology_bp"}, valid_modules
@@ -177,7 +177,7 @@ def test_role_permission_list_matching_uses_active_license_module_bp_for_split_m
     valid_modules = _role_licensed_module_keys(license_data)
 
     assert _permission_menu_is_licensed(
-        {"description": "资产目录", "bp": "asset_management_bp"}, valid_modules
+        {"description": "资产数据", "bp": "asset_management_bp"}, valid_modules
     )
     assert _permission_menu_is_licensed(
         {"description": "访问控制", "bp": "network_access_control_bp"}, valid_modules

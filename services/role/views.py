@@ -48,7 +48,7 @@ PERMISSION_RESOURCE_LABELS = {
     "command_center": "作战室",
     "digital_employee": "数字员工",
     "network_topology": "网络拓扑",
-    "supply_chain_review:ci": "资产目录",
+    "supply_chain_review:ci": "资产数据",
     "supply_chain_review:collection": "采集任务",
     "supply_chain_review:field": "资产字段",
     "supply_chain_review:model": "资产模型",
