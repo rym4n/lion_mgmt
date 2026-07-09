@@ -25,6 +25,9 @@ route_auth_meta = importlib.import_module(
 command_role_permissions = importlib.import_module(
     "migrations.models.64_20260708223000_split_command_role_permissions"
 )
+warroom_route_auth_meta = importlib.import_module(
+    "migrations.models.65_20260709113000_add_warroom_route_auth_meta"
+)
 
 
 def _compact(text: str) -> str:
@@ -290,3 +293,15 @@ def test_command_role_permission_backfill_splits_legacy_aggregate_permissions():
         assert "agent:r" in text
         assert "agent_report_schedule:r" in text
         assert "agent:report:schedule:c,d,u,r" in text
+
+
+def test_warroom_route_meta_carries_menu_permissions():
+    upgrade_sql = asyncio.run(warroom_route_auth_meta.upgrade(None))
+    init_sql = (ROOT / "aioe_package/aioe_install/init.sql").read_text()
+
+    for text in (upgrade_sql, init_sql):
+        assert "warroom:c" in text
+        assert "warroom:r" in text
+        assert "warroom:u" in text
+        assert '"permissions"' in text or "'permissions'" in text
+        assert '"auths"' in text or "'auths'" in text
