@@ -21,7 +21,7 @@ from libs.security.authorization import (
     check_playbook_permission,
     requires_permission,
 )
-from libs.utils import strip_timezone_to_seconds, runlog_list
+from libs.utils import strip_timezone_to_seconds, paginated_runlog_groups, runlog_list
 from models import (
     Playbook,
     PlaybookVersion,
@@ -1216,15 +1216,9 @@ async def get_run_log(request):
     if status in [0, 1]:
         condition &= Q(status=int(status))
 
-    total = await Runlog.filter(condition).order_by("-run_id").distinct().values_list("run_id", flat=True)
+    total, run_logs = await paginated_runlog_groups(Runlog, condition, page, size)
 
-    run_ids = await Runlog.filter(condition).distinct().order_by("-run_id").offset((page - 1) * size).limit(size).values_list("run_id", flat=True)
-    run_logs = []
-    if run_ids:
-        all_logs = await Runlog.filter(run_id__in=run_ids, deleted=False).order_by("-ctime").prefetch_related("timer", "playbook_version").all()
-        run_logs = await runlog_list(all_logs)
-
-    return response_ok({"page": page, "size": size, "total": len(total), "data": run_logs})
+    return response_ok({"page": page, "size": size, "total": total, "data": run_logs})
 
 
 async def timer_success_rate(timed: Timed):

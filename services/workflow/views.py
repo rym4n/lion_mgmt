@@ -39,7 +39,7 @@ from libs.security.authorization import (
     playbook_permission,
     requires_permission,
 )
-from libs.utils import gen_run_id, strip_timezone_to_seconds, runlog_list
+from libs.utils import gen_run_id, strip_timezone_to_seconds, paginated_runlog_groups
 from models import (
     Account,
     EventRelatedScript,
@@ -56,6 +56,7 @@ from models import (
     ToolAction,
     ToolResources,
 )
+from services.approvement.views import expire_pending_approvals
 from services.tools.views import upload_tool
 from services.tools.views import tool_action_playbook_delete, tool_action_update
 from settings import TASK_TOPIC, TZ, RY_AI_MODEL, RY_AI_API_BASE, LLM_KEY
@@ -423,6 +424,26 @@ async def list_workflow(request):
     ids = await Playbook.filter(condition).values_list("id", flat=True)
     total = len(set(ids))
 
+    latest_versions = {}
+    playbook_ids = [p.id for p in playbooks]
+    if playbook_ids:
+        version_rows = (
+            await PlaybookVersion.filter(playbook__id__in=playbook_ids, deleted=False, tenant_id=tenant_id)
+            .only("id", "playbook_id", "status", "version", "utime")
+            .order_by("-utime")
+        )
+        for version in version_rows:
+            latest_versions.setdefault(
+                version.playbook_id,
+                {
+                    "playbook_id": version.playbook_id,
+                    "flow_id": version.id,
+                    "status": version.status,
+                    "version": version.version,
+                    "utime": strip_timezone_to_seconds(version.utime),
+                },
+            )
+
     # 组装数据
     data = []
     for p in playbooks:
@@ -431,6 +452,7 @@ async def list_workflow(request):
                 **p.json,
                 "flow_timeout": p.max_flow_timeout or 300,
                 "versions": p.versions,
+                "latest_version": latest_versions.get(p.id),
             }
         )
 
@@ -1259,6 +1281,7 @@ async def execute_action(request):
         await aproduce(TASK_TOPIC, msg)
         sent_versions = {}
         for _ in range(60):
+            await expire_pending_approvals(tenant_id=tenant_id, run_id=run_id)
             logs = await Runlog.filter(run_id=run_id, deleted=False, tenant_id=tenant_id).order_by("utime", "ctime", "id").all()
             if logs:
                 utime = max((log.utime for log in logs if log.utime), default=utime)
@@ -2680,8 +2703,6 @@ async def get_version_runlog(request):
 
     page = int(request.json.get("page", 1)) if request.json.get("page") else 1
     size = int(request.json.get("size", 20)) if request.json.get("size") else 20
-    offset = (page - 1) * size
-
     tenant_id = request.ctx.session.get("tenant_id")
 
     # 验证剧本版本是否存在
@@ -2700,13 +2721,8 @@ async def get_version_runlog(request):
     if not has_access:
         raise CustomError(ErrorCode.PLAYBOOK_UNAUTHORIZED)
 
-    # 查询总数
-    total = await Runlog.filter(playbook_version_id=flow_id, deleted=False, tenant_id=tenant_id).count()
-
-    # 查询日志
-    logs = await Runlog.filter(playbook_version_id=flow_id, deleted=False, tenant_id=tenant_id).order_by("-ctime").offset(offset).limit(size).all()
-
-    run_logs = await runlog_list(logs)
+    condition = Q(playbook_version_id=flow_id, deleted=False, tenant_id=tenant_id)
+    total, run_logs = await paginated_runlog_groups(Runlog, condition, page, size)
 
     return response_ok(
         {

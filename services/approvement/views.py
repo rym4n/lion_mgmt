@@ -14,7 +14,8 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
-from models import Approvement
+from models import Approvement, Runlog
+from models.command_center import COMMAND_APPROVAL_STATUS_EXPIRED, COMMAND_APPROVAL_STATUS_PENDING, CommandApproval
 from settings import TASK_TOPIC
 
 approve_bp = Blueprint("approve", url_prefix="/approve")
@@ -26,6 +27,49 @@ def _agent_command_approval_id(approve: Approvement) -> str | None:
     if params.get("approval_kind") != "agent":
         return None
     return params.get("command_approval_id")
+
+
+async def expire_pending_approvals(*, tenant_id: str | None = None, run_id: str | None = None) -> int:
+    expired_condition = Q(expire_time__lt=datetime.now())
+    if tenant_id:
+        expired_condition &= Q(tenant_id=tenant_id)
+    if run_id:
+        expired_condition &= Q(run_id=run_id)
+
+    expired_approvals = await Approvement.filter(expired_condition, status__in=[0, 3]).all()
+    if not expired_approvals:
+        return 0
+
+    pending_approvals = [approval for approval in expired_approvals if approval.status == 0]
+
+    if pending_approvals:
+        approval_ids = [approval.id for approval in pending_approvals]
+        await Approvement.filter(id__in=approval_ids).update(status=3)
+
+    command_approval_ids = [
+        command_approval_id
+        for approval in pending_approvals
+        if (command_approval_id := _agent_command_approval_id(approval))
+    ]
+    if command_approval_ids:
+        await CommandApproval.filter(
+            id__in=command_approval_ids,
+            status=COMMAND_APPROVAL_STATUS_PENDING,
+            deleted=False,
+        ).update(status=COMMAND_APPROVAL_STATUS_EXPIRED)
+
+    for approval in expired_approvals:
+        runlog_condition = Q(
+            run_id=approval.run_id,
+            node_id=approval.audit_node,
+            node_type="approval-node",
+            status=2,
+        )
+        if tenant_id:
+            runlog_condition &= Q(tenant_id=tenant_id)
+        await Runlog.filter(runlog_condition).update(status=3, result="审核已超时")
+
+    return len(pending_approvals)
 
 
 @approve_bp.post("/list")
@@ -138,7 +182,7 @@ async def all_approvement(request):
     if ctime and len(ctime) == 2:
         condition = condition & Q(ctime__range=[datetime.strptime(t, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC) for t in ctime])
 
-    await Approvement.filter(status=0, expire_time__lt=datetime.now(), tenant_id=tenant_id).update(status=3)
+    await expire_pending_approvals(tenant_id=tenant_id)
     total = await Approvement.filter(condition).count()
     records = []
     if total > 0:
@@ -190,7 +234,7 @@ async def all_approvement(request):
 )
 async def todo_approvement(request):
     # 修改过期任务状态,后端就不做定时任务了
-    await Approvement.filter(status=0, expire_time__lt=datetime.now()).update(status=3)
+    await expire_pending_approvals()
 
     # 将created_at从UTC时间转换为北京时间（UTC+8）
     sql = f"""
@@ -200,20 +244,8 @@ async def todo_approvement(request):
           WHERE a.status = 0 AND NOT a.results ? '{request.ctx.session["sub"]}'
         """
 
-    runlog_sql = """
-        UPDATE runlog r
-        SET status = 3,
-            result = '审核已超时'
-        FROM approvement a
-        WHERE r.run_id = a.run_id
-          AND r.node_id = a.audit_node
-          AND r.node_type = 'approval-node'
-          AND r.status = 2
-          AND a.expire_time < $1
-    """
     async with in_transaction() as conn:
         rows = await conn.execute_query_dict(sql)
-        await conn.execute_query(runlog_sql, [datetime.now()])
         for row in rows:
             row["created_at"] = row["created_at"].astimezone(pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
             row["expire_time"] = row["expire_time"].astimezone(pytz.timezone("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")

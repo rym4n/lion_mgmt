@@ -642,3 +642,48 @@ async def runlog_list(all_logs):
         run_logs.append(data)
 
     return run_logs
+
+
+async def paginated_runlog_groups(model, condition, page: int, size: int):
+    """
+    按一次运行(run_id)分页，并返回该运行下所有节点日志。
+    """
+    from tortoise.functions import Count, Max
+
+    run_id_rows = (
+        await model.filter(condition)
+        .annotate(latest_start_time=Max("start_time"), latest_ctime=Max("ctime"))
+        .group_by("run_id")
+        .order_by("-latest_start_time", "-latest_ctime", "-run_id")
+        .offset((page - 1) * size)
+        .limit(size)
+        .values("run_id")
+    )
+    run_ids = [row["run_id"] for row in run_id_rows]
+    total_rows = await model.filter(condition).annotate(total=Count("run_id", distinct=True)).values("total")
+    total = int(total_rows[0]["total"]) if total_rows else 0
+    if not run_ids:
+        return total, []
+
+    logs = (
+        await model.filter(condition, run_id__in=run_ids)
+        .order_by("-start_time", "-ctime", "node_id", "node_name", "resource_name")
+        .all()
+    )
+    run_logs = await runlog_list(logs)
+    order = {run_id: index for index, run_id in enumerate(run_ids)}
+    run_logs.sort(
+        key=lambda group: order.get(
+            next(
+                (
+                    item.get("run_id")
+                    for node_group in group
+                    for item in node_group
+                    if item.get("run_id")
+                ),
+                "",
+            ),
+            len(order),
+        )
+    )
+    return total, run_logs

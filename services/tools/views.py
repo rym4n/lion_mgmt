@@ -67,7 +67,32 @@ ACTION_TYPE_MAP = {
     "jsonarray": "text",
 }
 
+TERMINAL_RUNLOG_STATUSES = {-1, 0, 3}
+IN_PROGRESS_RESULT = "执行中"
+
 connected_clients = {}
+
+
+def _runlog_stream_signature(log):
+    return (
+        getattr(log, "utime", None),
+        getattr(log, "status", None),
+        getattr(log, "result", None),
+        getattr(log, "end_time", None),
+    )
+
+
+def _should_stream_runlog(log, sent_versions):
+    signature = _runlog_stream_signature(log)
+    if sent_versions.get(log.id) == signature:
+        return False
+
+    sent_versions[log.id] = signature
+    return True
+
+
+def _is_terminal_runlog(log):
+    return getattr(log, "status", None) in TERMINAL_RUNLOG_STATUSES and getattr(log, "result", None) != IN_PROGRESS_RESULT
 
 APP_DEV_DOCS_DIR = "docs"
 MAX_APP_DEV_DOC_SIZE = 20 * 1024 * 1024
@@ -2764,14 +2789,22 @@ async def health_check(request):
         message["executor"] = request.ctx.session["account_info"].id
         msg = {"run_type": message["type"], "run_id": run_id, "run_args": message, "tenant_id": request.ctx.session.get("tenant_id")}
         await aproduce(TASK_TOPIC, msg)
-        sent_id = []
+        sent_versions = {}
+        expected_action_logs = len((message.get("resource") or "").split()) if message.get("type") == "action" else 0
         for _ in range(60):
-            log = await Runlog.get_or_none(run_id=run_id, utime__gte=utime)
-            if log:
-                if log.id not in sent_id:
-                    sent_id.append(log.id)
-                    await resp.send(f"data: {orjson.dumps(log.json).decode()}\n\n")
-                if log.result != "执行中":
+            logs = await Runlog.filter(
+                run_id=run_id,
+                utime__gte=utime,
+                deleted=False,
+                tenant_id=request.ctx.session.get("tenant_id"),
+            ).order_by("utime", "ctime", "id").all()
+            if logs:
+                for log in logs:
+                    if _should_stream_runlog(log, sent_versions):
+                        await resp.send(f"data: {orjson.dumps(log.json).decode()}\n\n")
+                if message.get("type") == "flow" and any(log.node_type == "end-node" and _is_terminal_runlog(log) for log in logs):
+                    break
+                if message.get("type") == "action" and len(logs) >= expected_action_logs and all(_is_terminal_runlog(log) for log in logs):
                     break
             await asyncio.sleep(1)
 
