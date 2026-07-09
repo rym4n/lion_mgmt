@@ -150,6 +150,13 @@ async def _approval_required_stream(**payload):
     yield "end", {"content": "should-not-complete"}
 
 
+async def _tool_call_name_stream(**payload):
+    RECORDED_STREAM_PAYLOADS.append(payload)
+    yield "tool_call", {"data": {"tool_call_name": "aioe_cli"}, "status": "started"}
+    yield "tool_call", {"data": {"tool_call_name": "aioe_cli"}, "status": "completed"}
+    yield "end", {"content": "done"}
+
+
 class FakeRedis:
     def __init__(self):
         self.messages = []
@@ -388,3 +395,42 @@ def test_run_returns_control_event_without_marking_task_completed():
     assert task.result is None
     assert task.saved_update_fields == []
     assert [call[0]["status"] for call in progress_calls] == ["running"]
+
+
+def test_run_room_tool_message_uses_agentscope_tool_call_name():
+    progress_calls = []
+    _install_stubs(progress_calls)
+    RECORDED_STREAM_PAYLOADS.clear()
+    sys.modules["services.digital_employee.lion_agent_adapter"].stream_prompt_events = _tool_call_name_stream
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    execute_coordinator.stream_prompt_events = _tool_call_name_stream
+    redis = FakeRedis()
+    execute_coordinator.caches = SimpleNamespace(get=lambda name: SimpleNamespace(client=redis))
+
+    task = FakeTask(
+        id="task-1",
+        tenant_id="tenant-1",
+        run_id=None,
+        room_id="room-1",
+        creator_id="creator-1",
+        source="manual",
+        progress=0,
+        status="pending",
+        title="巡检",
+        description="检查磁盘",
+        payload={},
+        result=None,
+        saved_update_fields=[],
+    )
+    employee = SimpleNamespace(id="employee-1", role_key="ops", agent_key="ops-1", name="运维员工")
+
+    result = asyncio.run(execute_coordinator.run(task, employee, operator_id="operator-1"))
+
+    assert result["content"] == "done"
+    published = [message for _, message in redis.messages]
+    tool_messages = [message for message in published if message["type"] == "ai-thinking"]
+    assert [message["tool_name"] for message in tool_messages] == ["aioe_cli", "aioe_cli"]
+    assert [message["content"] for message in tool_messages] == ["正在执行 aioe_cli", "aioe_cli 执行完成"]

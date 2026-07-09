@@ -83,7 +83,7 @@ async def _publish_room_event(task: CommandTask, event_type: str, payload: dict,
             }
     elif event_type == "tool_call":
         data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
-        tool_name = data.get("name") or data.get("tool_name") or data.get("tool") or "tool"
+        tool_name = data.get("name") or data.get("tool_name") or data.get("tool") or data.get("tool_call_name") or "tool"
         status = payload.get("status") or data.get("status") or "started"
         message = {
             "type": "ai-thinking",

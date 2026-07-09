@@ -241,6 +241,44 @@ def test_workspace_snapshots_match_rendered_files_without_recursive_etag():
     assert snapshots["policy_snapshot"]["approval"]["skills"]["alert_triage"] == "approval_required"
 
 
+def test_approval_policy_allows_unspecified_tools_but_keeps_explicit_skill_approval():
+    role = SimpleNamespace(role_key="monitor", version=1, meta={})
+    safe_skill = SimpleNamespace(
+        skill_key="capacity_read",
+        version=1,
+        name="容量查询",
+        description="只读查询云主机数量",
+        bindings={},
+        require_approval=False,
+    )
+    risky_skill = SimpleNamespace(
+        skill_key="restart_host",
+        version=1,
+        name="重启主机",
+        description="变更主机运行状态",
+        bindings={},
+        require_approval=True,
+    )
+    employee = SimpleNamespace(
+        id="employee-1",
+        tenant_id="tenant-1",
+        agent_key="monitor-1",
+        role_key="monitor",
+        name="小狮",
+        rbac_role_id="role-1",
+        metadata={},
+        runtime="lion_agent",
+    )
+
+    files = render_workspace_files(employee, role, [safe_skill, risky_skill])
+    policy = json.loads(files["policy.json"])
+
+    assert policy["approval"]["default"] == "allow"
+    assert policy["approval"]["skills"]["capacity_read"] == "allow"
+    assert policy["approval"]["skills"]["aioe-cli"] == "allow"
+    assert policy["approval"]["skills"]["restart_host"] == "approval_required"
+
+
 def test_build_runtime_prompt_contains_payload():
     task = SimpleNamespace(
         title="巡检",

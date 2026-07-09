@@ -41,11 +41,43 @@ def _api_username(employee) -> str:
 async def _bind_rbac_role(account: Account, rbac_role_id: str | None, tenant_id: str) -> None:
     if not rbac_role_id:
         return
-    role = await Role.get_or_none(id=rbac_role_id, deleted=False)
+    role = await Role.get_or_none(id=rbac_role_id, tenant_id=tenant_id, deleted=False)
     if role:
         await account.roles.add(role)
     else:
         logger.warning(f"数字员工 API 账号未找到 RBAC 角色: rbac_role_id={rbac_role_id}, tenant_id={tenant_id}")
+
+
+async def _sync_rbac_role(account: Account, rbac_role_id: str | None, tenant_id: str) -> None:
+    if not rbac_role_id:
+        return
+    await account.fetch_related("roles")
+    if any(str(role.id) == str(rbac_role_id) for role in account.roles or []):
+        return
+    await _bind_rbac_role(account, rbac_role_id, tenant_id)
+
+
+def _encode_api_token(account: Account) -> str:
+    token = token_encode(
+        account.id,
+        account.username,
+        account.display_name,
+        account.mfa_enable,
+        account.tenant_id,
+        str(uuid.uuid4()),
+        API_TOKEN_EXPIRATION_SECONDS,
+        account.password,
+        permit_ip=account.permit_ip,
+    )
+    return f"{account.id}:{token}"
+
+
+async def _warm_account_cache(account: Account) -> None:
+    try:
+        await account.fetch_related("roles")
+        await _cache_client().set(f"account_{account.id}", account, 7 * 24 * 3600)
+    except Exception as exc:
+        logger.warning(f"数字员工 API 账号缓存预热失败(不影响建号): account_id={account.id}, error={exc}")
 
 
 async def create_employee_api_account(employee) -> EmployeeApiCredential:
@@ -55,6 +87,12 @@ async def create_employee_api_account(employee) -> EmployeeApiCredential:
     """
     existing = await EmployeeApiCredential.get_or_none(employee_id=employee.id, deleted=False)
     if existing:
+        account = await Account.get_or_none(id=existing.account_id, deleted=False)
+        if account:
+            await _sync_rbac_role(account, employee.rbac_role_id, employee.tenant_id)
+            existing.api_token = _encode_api_token(account)
+            await existing.save(update_fields=["api_token", "utime"])
+            await _warm_account_cache(account)
         return existing
 
     username = _api_username(employee)
@@ -72,44 +110,24 @@ async def create_employee_api_account(employee) -> EmployeeApiCredential:
                 permit_ip=None,
                 tenant_id=employee.tenant_id,
             )
-        await _bind_rbac_role(account, employee.rbac_role_id, employee.tenant_id)
-
-        token = token_encode(
-            account.id,
-            account.username,
-            account.display_name,
-            account.mfa_enable,
-            account.tenant_id,
-            str(uuid.uuid4()),
-            API_TOKEN_EXPIRATION_SECONDS,
-            account.password,
-            permit_ip=account.permit_ip,
-        )
-        api_token = f"{account.id}:{token}"
+        await _sync_rbac_role(account, employee.rbac_role_id, employee.tenant_id)
 
         credential = await EmployeeApiCredential.create(
             tenant_id=employee.tenant_id,
             employee_id=employee.id,
             account_id=account.id,
-            api_token=api_token,
+            api_token=_encode_api_token(account),
         )
 
     # 预热账号缓存，供鉴权中间件命中；best-effort——缓存不可用不应阻断建号，
     # 鉴权中间件在 cache miss 时会从 DB 自愈回填（见 authentication.token_decode）。
-    try:
-        await account.fetch_related("roles")
-        await _cache_client().set(f"account_{account.id}", account, 7 * 24 * 3600)
-    except Exception as exc:
-        logger.warning(f"数字员工 API 账号缓存预热失败(不影响建号): account_id={account.id}, error={exc}")
+    await _warm_account_cache(account)
 
     return credential
 
 
 async def get_employee_api_token(employee) -> str | None:
     """读取员工的长期 API token；不存在则按需补建（兼容历史员工重新导入前的执行）。"""
-    credential = await EmployeeApiCredential.get_or_none(employee_id=employee.id, deleted=False)
-    if credential:
-        return credential.api_token
     credential = await create_employee_api_account(employee)
     return credential.api_token
 

@@ -378,7 +378,15 @@ def _summarize_tool_calls(tool_calls) -> list:
         data = call.get("data") if isinstance(call.get("data"), dict) else {}
         summaries.append(
             {
-                "name": call.get("tool_name") or data.get("action") or data.get("playbook") or data.get("name"),
+                "name": (
+                    call.get("tool_name")
+                    or data.get("action")
+                    or data.get("playbook")
+                    or data.get("name")
+                    or data.get("tool_name")
+                    or data.get("tool")
+                    or data.get("tool_call_name")
+                ),
                 "status": call.get("status"),
                 "kind": "playbook" if data.get("playbook") else ("action" if data.get("action") else "tool"),
             }

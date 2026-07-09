@@ -85,6 +85,7 @@ def test_task_detail_run_dto_exposes_summaries_without_raw_snapshots():
         tool_calls=[
             {"tool_name": "restart_service", "status": "success", "data": {"action": "restart_service"}},
             {"tool_name": None, "status": "success", "data": {"playbook": "incident_playbook"}},
+            {"tool_name": None, "status": "started", "data": {"tool_call_name": "aioe_cli"}},
         ],
         resource_accesses=[{"kind": "host", "name": "web-01", "action": "read"}],
     )
@@ -111,6 +112,7 @@ def test_task_detail_run_dto_exposes_summaries_without_raw_snapshots():
     assert out["tool_calls"] == [
         {"name": "restart_service", "status": "success", "kind": "action"},
         {"name": "incident_playbook", "status": "success", "kind": "playbook"},
+        {"name": "aioe_cli", "status": "started", "kind": "tool"},
     ]
     assert out["resource_accesses"] == [{"kind": "host", "name": "web-01", "action": "read"}]
 

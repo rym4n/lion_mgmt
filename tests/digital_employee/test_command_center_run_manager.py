@@ -261,6 +261,25 @@ def test_runtime_event_normalization_updates_run_and_approval_wait_state():
     assert approval.requested_action == {"tool": "write_file", "risk_level": "high"}
 
 
+def test_runtime_tool_call_normalization_accepts_agentscope_tool_call_name():
+    run_manager = _load_run_manager()
+
+    normalized = run_manager.normalize_runtime_event(
+        "tool_call",
+        {
+            "status": "started",
+            "data": {
+                "tool_call_name": "aioe_cli",
+                "input": {"argv": ["apps"]},
+            },
+        },
+    )
+
+    assert normalized["event_type"] == "runtime_tool_call"
+    assert normalized["message"] == "aioe_cli started"
+    assert normalized["tool_call"]["tool_name"] == "aioe_cli"
+
+
 def test_runtime_approval_uses_agentscope_requested_action_shape():
     run_manager = _load_run_manager()
     task = _task()

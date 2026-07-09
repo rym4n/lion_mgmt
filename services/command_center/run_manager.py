@@ -63,6 +63,10 @@ def _runtime_control_action(payload: dict) -> dict:
     return action if isinstance(action, dict) else {}
 
 
+def _runtime_tool_name(data: dict) -> str | None:
+    return data.get("name") or data.get("tool_name") or data.get("tool") or data.get("tool_call_name")
+
+
 def normalize_runtime_event(event_type: str, payload: Any) -> dict:
     data = _event_payload(payload)
     if event_type == "delta":
@@ -79,7 +83,7 @@ def normalize_runtime_event(event_type: str, payload: Any) -> dict:
         }
     if event_type == "tool_call":
         tool_data = data.get("data") if isinstance(data.get("data"), dict) else data
-        tool_name = tool_data.get("name") or tool_data.get("tool_name") or tool_data.get("tool")
+        tool_name = _runtime_tool_name(tool_data)
         status = data.get("status") or tool_data.get("status") or "started"
         return {
             "event_type": "runtime_tool_call",

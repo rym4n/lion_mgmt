@@ -196,7 +196,7 @@ def _merge_approval_policy(base: Any, skill_entries: list[dict]) -> dict:
     for skill in skill_entries:
         skill_policy[skill["skill_key"]] = "approval_required" if skill["require_approval"] else "allow"
     if "default" not in policy:
-        policy["default"] = "approval_required" if any(skill["require_approval"] for skill in skill_entries) else "allow"
+        policy["default"] = "allow"
     policy["skills"] = skill_policy
     return policy
 
