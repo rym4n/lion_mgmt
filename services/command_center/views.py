@@ -752,6 +752,82 @@ async def task_detail(request: Request):
     )
 
 
+@command_bp.post("/tasks/runlogs")
+@openapi.definition(
+    summary="查看任务调用的动作/剧本运行日志",
+    description=(
+        "汇总该任务各次运行经数字员工 aioe-cli 调用动作/剧本产生的完整 runlog，"
+        "按 run_id 分组返回（含入参 args、输出 result、动作/剧本名等），"
+        "供任务详情展示完整执行过程。需要command_center:r权限。"
+    ),
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["id"],
+            "properties": {"id": {"type": "string", "description": "任务ID"}},
+        }
+    ),
+    response=_response(
+        "查询成功",
+        {
+            "type": "object",
+            "properties": {
+                "runlogs": {
+                    "type": "array",
+                    "description": "按 run_id 分组的运行日志",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "run_id": {"type": "string", "description": "运行日志 run_id"},
+                            "items": {"type": "array", "description": "该次运行的节点级 runlog 记录"},
+                        },
+                    },
+                }
+            },
+        },
+        {"400": "参数错误", "404": "任务不存在"},
+    ),
+)
+@requires_permission("command_center:r")
+async def task_runlogs(request: Request):
+    from models.runlog import Runlog
+
+    data = _require_json(request)
+    task_id = data.get("id")
+    if not task_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
+    task = await CommandTask.get_or_none(id=task_id, tenant_id=tenant_id, deleted=False)
+    if not task:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    # 汇总该任务各次运行关联的 debug run_id（execute_action 关联写入 metadata.linked_run_ids）。
+    runs = await CommandTaskRun.filter(task_id=task.id, tenant_id=tenant_id, deleted=False).order_by("ctime").all()
+    run_ids: list[str] = []
+    for run in runs:
+        metadata = run.metadata if isinstance(run.metadata, dict) else {}
+        linked = metadata.get("linked_run_ids")
+        if isinstance(linked, list):
+            for rid in linked:
+                if rid and rid not in run_ids:
+                    run_ids.append(str(rid))
+
+    grouped: list[dict] = []
+    if run_ids:
+        logs = (
+            await Runlog.filter(run_id__in=run_ids, tenant_id=tenant_id, deleted=False)
+            .order_by("start_time", "ctime", "node_id", "node_name", "resource_name")
+            .all()
+        )
+        logs_by_run: dict[str, list] = {}
+        for log in logs:
+            logs_by_run.setdefault(log.run_id, []).append(log.json)
+        # 保持 linked_run_ids 的追加顺序（即执行先后）
+        grouped = [{"run_id": rid, "items": logs_by_run[rid]} for rid in run_ids if rid in logs_by_run]
+
+    return response_ok({"runlogs": grouped})
+
+
 @command_bp.post("/tasks/stats")
 @openapi.definition(
     summary="查看资源消耗和风险概览",

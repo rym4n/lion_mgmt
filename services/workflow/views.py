@@ -101,6 +101,28 @@ def _is_completed_flow_end_log(log, flow_id):
     return _is_terminal_runlog(log)
 
 
+async def _link_runlog_to_command_run(agent_run_id: str, debug_run_id: str, tenant_id: str) -> None:
+    """把数字员工经 aioe-cli 执行动作/剧本产生的 debug run_id 关联到其 CommandTaskRun。
+
+    数字员工的 ReAct 循环串行调用工具，故对同一 CommandTaskRun 的 metadata 追加无并发竞态。
+    按 tenant_id 过滤天然隔离越权；关联信息存 metadata（无需迁移），任务详情据此反查 runlog。
+    """
+    from models.command_center import CommandTaskRun
+
+    command_run = await CommandTaskRun.get_or_none(tenant_id=tenant_id, run_id=agent_run_id, deleted=False)
+    if not command_run:
+        return
+    metadata = command_run.metadata if isinstance(command_run.metadata, dict) else {}
+    linked = metadata.get("linked_run_ids")
+    linked = list(linked) if isinstance(linked, list) else []
+    if debug_run_id in linked:
+        return
+    linked.append(debug_run_id)
+    metadata["linked_run_ids"] = linked
+    command_run.metadata = metadata
+    await command_run.save(update_fields=["metadata", "utime"])
+
+
 @workflow_bp.post("/new")
 @openapi.definition(
     summary="新建剧本",
@@ -1236,6 +1258,7 @@ async def stop_workflow(request):
                     },
                     "retry_times": {"type": "integer", "description": "重试次数"},
                     "timeout": {"type": "integer", "description": "超时时间,单位秒"},
+                    "agent_run_id": {"type": "string", "description": "数字员工运行ID，携带时把本次 runlog 关联到该任务运行"},
                 },
             }
         }
@@ -1279,6 +1302,11 @@ async def execute_action(request):
         message["executor"] = request.ctx.session["account_info"].id
         msg = {"run_type": message["type"], "run_id": run_id, "run_args": message, "tenant_id": tenant_id}
         await aproduce(TASK_TOPIC, msg)
+        # 数字员工经 aioe-cli 调用时会带上其运行标识，据此把本次 runlog 关联到任务，
+        # 使指挥中心任务详情能展示完整执行过程（人工调试时无此标识，跳过关联）。
+        agent_run_id = message.get("agent_run_id")
+        if agent_run_id:
+            await _link_runlog_to_command_run(str(agent_run_id), run_id, tenant_id)
         sent_versions = {}
         for _ in range(60):
             await expire_pending_approvals(tenant_id=tenant_id, run_id=run_id)

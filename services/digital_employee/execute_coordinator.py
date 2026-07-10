@@ -177,6 +177,9 @@ async def run(
             "base_url": AIOE_INTERNAL_URL,
             "token": aioe_token,
             "tenant_id": task.tenant_id,
+            # 本次数字员工运行的 run_id，随 aioe_cli 回传到 /playbook/debug，
+            # 用于把动作/剧本产生的 runlog 关联到该 CommandTaskRun（见 execute_action）。
+            "agent_run_id": getattr(command_run, "run_id", None) or task.run_id,
         },
     }
     content = []
