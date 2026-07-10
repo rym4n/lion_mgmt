@@ -20,8 +20,9 @@ from services.timed.views import (
 )
 
 
-def _account(*permission_lists):
-    roles = [SimpleNamespace(permissions=perms) for perms in permission_lists]
+def _account(*permission_lists, tenant_ids=None):
+    tenant_ids = tenant_ids or ["tenant-a"] * len(permission_lists)
+    roles = [SimpleNamespace(permissions=perms, tenant_id=tenant_id) for perms, tenant_id in zip(permission_lists, tenant_ids)]
     return SimpleNamespace(roles=roles)
 
 
@@ -45,12 +46,35 @@ def test_account_has_permission_handles_empty():
     assert account_has_permission(SimpleNamespace(roles=[]), "timed:r") is False
 
 
+def test_account_has_permission_can_scope_roles_by_tenant():
+    account = _account(["warroom:r"], ["event:r"], tenant_ids=["tenant-b", "tenant-a"])
+
+    assert account_has_permission(account, "warroom:r") is True
+    assert account_has_permission(account, "warroom:r", tenant_id="tenant-a") is False
+    assert account_has_permission(account, "event:r", tenant_id="tenant-a") is True
+
+
+def test_is_superadmin_can_scope_roles_by_tenant():
+    account = _account(["*:*"], ["event:r"], tenant_ids=["tenant-b", "tenant-a"])
+
+    assert is_superadmin(account) is True
+    assert is_superadmin(account, tenant_id="tenant-a") is False
+    assert is_superadmin(account, tenant_id="tenant-b") is True
+
+
 def test_timed_action_permissions_derives_from_vertical_rights():
     # 定时任务列表的操作项由 timed 垂直权限推导，与底层剧本/动作的资源权限无关
     assert _timed_action_permissions(_account(["*:*"])) == ["r", "u", "d"]
     assert _timed_action_permissions(_account(["timed:c,d,u,r"])) == ["r", "u", "d"]
     assert _timed_action_permissions(_account(["timed:r"])) == ["r"]
     assert _timed_action_permissions(_account(["timed:r,u"])) == ["r", "u"]
+
+
+def test_timed_action_permissions_respects_tenant_scope():
+    account = _account(["timed:r,u"], ["timed:r"], tenant_ids=["tenant-a", "tenant-b"])
+
+    assert _timed_action_permissions(account, tenant_id="tenant-a") == ["r", "u"]
+    assert _timed_action_permissions(account, tenant_id="tenant-b") == ["r"]
 
 
 class _FakeQuery:
@@ -309,7 +333,7 @@ async def test_check_action_execute_permission_superadmin_bypass(monkeypatch):
             raise AssertionError("超管应豁免，不该查表")
 
     monkeypatch.setattr("libs.security.authorization.ActionPermissions", _Blocker)
-    account = SimpleNamespace(id="admin-1", roles=[SimpleNamespace(id="r", name="超管", permissions=["*:*"])])
+    account = SimpleNamespace(id="admin-1", roles=[SimpleNamespace(id="r", name="超管", permissions=["*:*"], tenant_id="t1")])
     assert await check_action_execute_permission(account, "lion_mgmt", "get_events_list", "res-1", "t1") is True
     assert called["filter"] == 0
 
@@ -317,7 +341,7 @@ async def test_check_action_execute_permission_superadmin_bypass(monkeypatch):
 @pytest.mark.asyncio
 async def test_check_action_execute_permission_empty_resource_pass(monkeypatch):
     # 无资源约束的动作放行——与旧列表过滤对空 resource 的行为一致
-    account = SimpleNamespace(id="user-1", roles=[SimpleNamespace(id="r1", name="普通", permissions=["timed:r"])])
+    account = SimpleNamespace(id="user-1", roles=[SimpleNamespace(id="r1", name="普通", permissions=["timed:r"], tenant_id="t1")])
     assert await check_action_execute_permission(account, "lion_mgmt", "some_action", "", "t1") is True
     assert await check_action_execute_permission(account, "lion_mgmt", "some_action", None, "t1") is True
 
@@ -341,9 +365,33 @@ async def test_check_action_execute_permission_user_granted(monkeypatch):
             return _Filter([perm])
 
     monkeypatch.setattr("libs.security.authorization.ActionPermissions", _AP)
-    account = SimpleNamespace(id="user-1", roles=[SimpleNamespace(id="r1", name="普通", permissions=["timed:r"])])
+    account = SimpleNamespace(id="user-1", roles=[SimpleNamespace(id="r1", name="普通", permissions=["timed:r"], tenant_id="t1")])
     ok = await check_action_execute_permission(account, "lion_mgmt", "get_events_list", "res-1", "t1")
     assert ok is True
+
+
+@pytest.mark.asyncio
+async def test_check_action_execute_permission_ignores_other_tenant_roles(monkeypatch):
+    perm = _action_perm({}, {"res-1": ["role-other"]})
+
+    class _Filter:
+        async def all(self):
+            return [perm]
+
+    class _AP:
+        @staticmethod
+        def filter(**_kwargs):
+            return _Filter()
+
+    monkeypatch.setattr("libs.security.authorization.ActionPermissions", _AP)
+    account = SimpleNamespace(
+        id="user-1",
+        roles=[SimpleNamespace(id="role-other", name="外租户角色", permissions=["timed:r"], tenant_id="tenant-b")],
+    )
+
+    ok = await check_action_execute_permission(account, "lion_mgmt", "get_events_list", "res-1", "tenant-a")
+
+    assert ok is False
 
 
 @pytest.mark.asyncio
@@ -361,7 +409,7 @@ async def test_check_action_execute_permission_denied_when_no_grant(monkeypatch)
             return _Filter()
 
     monkeypatch.setattr("libs.security.authorization.ActionPermissions", _AP)
-    account = SimpleNamespace(id="user-1", roles=[SimpleNamespace(id="r1", name="普通", permissions=["timed:c"])])
+    account = SimpleNamespace(id="user-1", roles=[SimpleNamespace(id="r1", name="普通", permissions=["timed:c"], tenant_id="t1")])
     ok = await check_action_execute_permission(account, "lion_mgmt", "get_events_list", "res-1", "t1")
     assert ok is False
 

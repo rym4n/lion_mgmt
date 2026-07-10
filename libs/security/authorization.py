@@ -32,6 +32,15 @@ def _roles_have_any_permission(roles, required_permissions: tuple[str, ...]) -> 
     return False
 
 
+def _roles_for_tenant(roles, tenant_id: str | None):
+    if roles is None:
+        return []
+    roles_list = list(roles)
+    if tenant_id is None:
+        return roles_list
+    return [role for role in roles_list if getattr(role, "tenant_id", None) == tenant_id]
+
+
 async def _refresh_session_account(request: Request):
     account_id = request.ctx.session.get("sub") if hasattr(request.ctx, "session") else None
     if not account_id:
@@ -55,11 +64,12 @@ async def check_permissions(request: Request, *required_permissions: str) -> boo
     # request.ctx.session['account_info'] = account
     # roles = await account.roles.filter(deleted=False).all()
     account = request.ctx.session["account_info"]
-    if _roles_have_any_permission(account.roles, required_permissions):
+    tenant_id = request.ctx.session.get("tenant_id")
+    if _roles_have_any_permission(_roles_for_tenant(account.roles, tenant_id), required_permissions):
         return True
 
     refreshed_account = await _refresh_session_account(request)
-    if refreshed_account and _roles_have_any_permission(refreshed_account.roles, required_permissions):
+    if refreshed_account and _roles_have_any_permission(_roles_for_tenant(refreshed_account.roles, tenant_id), required_permissions):
         return True
 
     pm = await PermissionsMenu.filter(model=request.path.split("/")[1]).first().values("description")
@@ -91,7 +101,7 @@ def check_wildcard(wildcard: str, pattern: str):
     return all("*" in part for part in wildcard_parts[len(pattern_parts) :])
 
 
-def account_has_permission(account, *required_permissions: str) -> bool:
+def account_has_permission(account, *required_permissions: str, tenant_id: str | None = None) -> bool:
     """判断账户是否拥有全部指定的垂直权限（不抛异常，供业务层做条件判断用）。
 
     与 check_permissions 共用 check_wildcard 匹配规则，但后者是装饰器用途、
@@ -100,16 +110,16 @@ def account_has_permission(account, *required_permissions: str) -> bool:
     """
     if not account or not getattr(account, "roles", None):
         return False
-    for role in account.roles:
+    for role in _roles_for_tenant(account.roles, tenant_id):
         for role_permission in role.permissions or []:
             if all(check_wildcard(role_permission, pattern) for pattern in required_permissions):
                 return True
     return False
 
 
-def is_superadmin(account) -> bool:
+def is_superadmin(account, tenant_id: str | None = None) -> bool:
     """超管判定：拥有 *:* 通配权限即为超管，而非硬编码角色 id '111111'。"""
-    return account_has_permission(account, SUPERADMIN_PERMISSION)
+    return account_has_permission(account, SUPERADMIN_PERMISSION, tenant_id=tenant_id)
 
 
 async def get_superadmin_role():
@@ -177,7 +187,7 @@ async def check_action_execute_permission(account, tool_name, action_func, resou
     - tool_name / action_func 缺失时直接判定失败——上层应保证参数完备再调用。
     - 命中条件复用 action_permission_hits：查 action_name 自身 + "all" 兜底两类 ActionPermissions。
     """
-    if is_superadmin(account):
+    if is_superadmin(account, tenant_id=tenant_id):
         return True
     if not resource:
         return True
@@ -186,7 +196,7 @@ async def check_action_execute_permission(account, tool_name, action_func, resou
     user_id = str(account.id) if account and getattr(account, "id", None) else None
     if not user_id:
         return False
-    user_role_ids = {str(role.id) for role in (account.roles or [])}
+    user_role_ids = {str(role.id) for role in _roles_for_tenant(account.roles, tenant_id)}
     permissions = await ActionPermissions.filter(
         tool_name=tool_name,
         action_name__in=[action_func, "all"],

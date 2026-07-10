@@ -324,14 +324,14 @@ async def add_timed(request):
     return response_ok(timed.json)
 
 
-def _timed_action_permissions(account):
+def _timed_action_permissions(account, tenant_id: str | None = None):
     """按当前账户对 timed 模块的垂直权限，推导前端可操作项(r/u/d)。
 
     定时任务的可见性与全平台其它模块一致，只由租户隔离 + 垂直权限 timed:r 决定
     （由 @requires_permission('timed:r') 装饰器守门），不再基于底层剧本/动作的
     资源级执行权限做行级读过滤——那会导致「有权创建、创建成功却看不到」的错位。
     """
-    return [flag for flag, perm in _TIMED_PERMISSION_MAP if account_has_permission(account, perm)]
+    return [flag for flag, perm in _TIMED_PERMISSION_MAP if account_has_permission(account, perm, tenant_id=tenant_id)]
 
 
 @timed_bp.post("/all")
@@ -494,7 +494,7 @@ async def get_all(request):
         filtered_items = all_items
 
     # 可见性 = 租户隔离 + 垂直权限 timed:r（装饰器已守门），不再按资源级执行权限行级过滤。
-    action_permissions = _timed_action_permissions(request.ctx.session["account_info"])
+    action_permissions = _timed_action_permissions(request.ctx.session["account_info"], tenant_id)
 
     total = len(filtered_items)
     start = (page - 1) * size
