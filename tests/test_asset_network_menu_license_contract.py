@@ -28,6 +28,9 @@ command_role_permissions = importlib.import_module(
 warroom_route_auth_meta = importlib.import_module(
     "migrations.models.65_20260709113000_add_warroom_route_auth_meta"
 )
+large_screen_permissions = importlib.import_module(
+    "migrations.models.67_20260710143000_fix_large_screen_license_permission_contract"
+)
 
 
 def _compact(text: str) -> str:
@@ -78,6 +81,23 @@ def test_license_menu_permission_matching_supports_split_menu_models():
             "Permissions": ["command_center:c", "command_center:r"],
         },
     ) is True
+    assert _role_can_open_menu(
+        ["large_screen:c,d,u,r"],
+        {
+            "model": "large_screen",
+            "Permissions": [
+                {"label": "新增大屏权限", "value": "c"},
+                {"label": "查看大屏权限", "value": "r"},
+            ],
+        },
+    ) is True
+    assert _role_can_open_menu(
+        ["screen:r"],
+        {
+            "model": "large_screen",
+            "Permissions": [{"label": "查看大屏权限", "value": "r"}],
+        },
+    ) is False
 
 
 def test_role_permission_menu_keeps_full_permission_values_for_split_modules():
@@ -259,6 +279,7 @@ def test_license_templates_use_asset_and_network_management_groups():
         assert "asset_management_bp" in text
         assert "network_access_control_bp" in text
         _assert_module_group(text, "网络拓扑", "topology_bp", "网络管理")
+        _assert_module_group(text, "大屏管理", "dashboard_bp", "基础功能")
         _assert_module_not_in_group(text, "网络拓扑", "topology_bp", "基础功能")
 
 
@@ -305,3 +326,25 @@ def test_warroom_route_meta_carries_menu_permissions():
         assert "warroom:u" in text
         assert '"permissions"' in text or "'permissions'" in text
         assert '"auths"' in text or "'auths'" in text
+
+
+def test_large_screen_menu_permission_contract_matches_backend_api():
+    upgrade_sql = asyncio.run(large_screen_permissions.upgrade(None))
+    init_sql = (ROOT / "aioe_package/aioe_install/init.sql").read_text()
+
+    for text in (upgrade_sql, init_sql):
+        assert "大屏管理" in text
+        assert "dashboard_bp" in text
+        assert "large_screen" in text
+        assert "large_screen:r" in text
+        assert "large_screen:c,d,u,r" in text
+        assert '"permissions"' in text or "'permissions'" in text
+        assert '"auths"' in text or "'auths'" in text
+
+    compact_init = _compact(init_sql)
+    assert "'screen','大屏管理'" not in compact_init
+    assert "'large_screen','大屏管理'" in compact_init
+
+    assert "jsonb_array_elements_text" in upgrade_sql
+    assert "screen:c,d,u,r" in upgrade_sql
+    assert "screen:r" in upgrade_sql
