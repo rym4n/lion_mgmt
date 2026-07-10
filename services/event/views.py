@@ -12,7 +12,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import requires_permission
+from libs.security.authorization import check_permissions, requires_permission
 from libs.utils import gen_random_code, gen_run_id, strip_timezone_to_seconds
 from models import Account, Events, EventsIngestion, PlaybookVersion, Role, Room, Runlog, Tool, ToolAction, ToolResources
 from services.timed.views import runlog_list
@@ -647,6 +647,7 @@ async def get_event_detail(request):
     creator = request.ctx.session["account_info"]
     first = False
     if initialize_room:
+        await check_permissions(request, "warroom:r")
         update_fields = []
         if not event.room:
             room_name = event.event_name + "_" + gen_random_code(6)

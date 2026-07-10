@@ -54,3 +54,15 @@ def test_event_detail_requires_explicit_room_initialization_flag():
     assert isinstance(initialize_room_assignment.value.func, ast.Name)
     assert initialize_room_assignment.value.func.id == "bool"
     assert ast.unparse(initialize_room_assignment.value.args[0]) == "request.json.get('initialize_room')"
+
+
+def test_event_detail_checks_warroom_permission_before_initialization():
+    node = _function("get_event_detail")
+
+    initialization_guard = next(
+        statement
+        for statement in node.body
+        if isinstance(statement, ast.If) and _is_initialize_room_guard(statement.test)
+    )
+
+    assert ast.unparse(initialization_guard.body[0]) == "await check_permissions(request, 'warroom:r')"
