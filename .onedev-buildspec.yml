@@ -1,50 +1,21 @@
-version: 52
+version: 40
 jobs:
 - name: cd
   jobExecutor: aioe-test
   steps:
-  - type: CommandStep
+  - !CommandStep
     name: 更新docker-compose配置
     runInContainer: false
-    interpreter:
-      type: PosixInterpreter
-      shell: sh
+    interpreter: !DefaultInterpreter
       commands: |
         NEW_VER=@tag@
         sed -i -E "s#([[:space:]]*image:[[:space:]]*)(reg\-test\.hongcloud\.net|aioe\.pkg)/lion_mgmt:[^[:space:]]+#\1reg-test.hongcloud.net/lion_mgmt:${NEW_VER}#" /opt/lion/docker-compose.yml
         docker-compose -f /opt/lion/docker-compose.yml --env-file /opt/lion/.env up -d --pull always --no-deps lion-mgmt
-    runAs: 0:0
     useTTY: true
     condition: SUCCESSFUL
     optional: false
   triggers:
-  - type: DependencyFinishedTrigger
-    projects: lion_mgmt
-  jobDependencies:
-  - jobName: ci
-    requireSuccessful: true
-    artifacts: '**'
-  retryCondition: never
-  maxRetries: 3
-  retryDelay: 30
-  timeout: 14400
-- name: 同步镜像
-  jobExecutor: tgy-deploy
-  steps:
-  - type: CommandStep
-    name: sync
-    runInContainer: false
-    interpreter:
-      type: PosixInterpreter
-      shell: sh
-      commands: |
-        gcrane copy 10.3.0.41:5000/lion_mgmt:@tag@ 10.3.0.38:5000/lion_mgmt:@tag@ --insecure
-    runAs: 0:0
-    useTTY: true
-    condition: SUCCESSFUL
-    optional: false
-  triggers:
-  - type: DependencyFinishedTrigger
+  - !DependencyFinishedTrigger
     projects: lion_mgmt
   jobDependencies:
   - jobName: ci
@@ -57,27 +28,25 @@ jobs:
 - name: ci
   jobExecutor: aioe-builder
   steps:
-  - type: CheckoutStep
+  - !CheckoutStep
     name: 拉取最新代码
-    cloneCredential:
-      type: DefaultCredential
+    cloneCredential: !DefaultCredential {}
     withLfs: false
     withSubmodules: false
     checkoutPath: '@project_path@'
     condition: SUCCESSFUL
     optional: false
-  - type: BuildImageStep
+  - !BuildImageStep
     name: 构建镜像
     buildPath: '@project_path@'
     dockerfile: '@project_path@/Dockerfile'
-    output:
-      type: RegistryOutput
+    output: !RegistryOutput
       tags: reg-test.hongcloud.net/lion_mgmt:@tag@
     platforms: linux/amd64
     condition: SUCCESSFUL
     optional: false
   triggers:
-  - type: TagCreateTrigger
+  - !TagCreateTrigger
     branches: master
     projects: lion_mgmt
   retryCondition: never
