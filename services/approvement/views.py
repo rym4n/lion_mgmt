@@ -29,6 +29,14 @@ def _agent_command_approval_id(approve: Approvement) -> str | None:
     return params.get("command_approval_id")
 
 
+def _approval_executor(account_info) -> str:
+    return account_info.id
+
+
+def _callback_executor(approve: Approvement) -> str | None:
+    return next((approver.id for approver in approve.approvers), None)
+
+
 async def expire_pending_approvals(*, tenant_id: str | None = None, run_id: str | None = None) -> int:
     expired_condition = Q(expire_time__lt=datetime.now())
     if tenant_id:
@@ -384,7 +392,7 @@ async def update_approvement(request):
             "flow_input": flow_input,
             "approval_node_id": approve.audit_node,
             "approval_status": approve.status,
-            "executor": (",".join([p.id for p in approve.approvers]) if approve.approve_type == 2 else request.ctx.session["account_info"].id),
+            "executor": _approval_executor(account_info),
         },
         "tenant_id": tenant_id,
     }
@@ -523,7 +531,7 @@ async def update_approvement_callback(request):
             "flow_input": flow_input,
             "approval_node_id": approve.audit_node,
             "approval_status": approve.status,
-            "executor": ",".join([p.id for p in approve.approvers]),
+            "executor": _callback_executor(approve),
         },
         "tenant_id": approve.tenant_id,
     }

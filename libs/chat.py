@@ -242,7 +242,7 @@ async def creat_message(room_id, log, user, redis):
                 break
             await asyncio.sleep(0.01 * (i + 1))  # 指数轮询避免数据库压力过大
 
-    creator = await Account.get_or_none(id=log["executor"])
+    creator = await Account.get_or_none(id=log["executor"]) if log.get("executor") else None
     log["creator_username"] = creator.username if creator else None
     log["creator_display_name"] = creator.display_name if creator else None
 
@@ -630,6 +630,26 @@ class ChatManager:
         return (item.run_id, item.node_id, item.node_name, item.resource_name)
 
     @staticmethod
+    def _single_account_id(value):
+        if value in (None, ""):
+            return None
+        value = str(value).strip()
+        if "," in value:
+            value = value.split(",", 1)[0].strip()
+        if not value or len(value) > 36:
+            return None
+        return value
+
+    @classmethod
+    def _normalize_runlog_executor(cls, log):
+        normalized_executor = cls._single_account_id(log.get("executor"))
+        if normalized_executor != log.get("executor"):
+            args = log.get("args")
+            if isinstance(args, dict):
+                args.setdefault("raw_executor", log.get("executor"))
+            log["executor"] = normalized_executor
+
+    @staticmethod
     def _jsonb_param(value):
         if value is None:
             return None
@@ -854,6 +874,7 @@ class ChatManager:
                             msg = {"run_type": "action", "run_id": log["run_id"], "run_args": params, "tenant_id": log["tenant_id"]}
                             await aproduce(TASK_TOPIC, msg)
             else:
+                self._normalize_runlog_executor(log)
                 key = log.get("run_id", "")
 
                 data = await self.redis.get(key)
