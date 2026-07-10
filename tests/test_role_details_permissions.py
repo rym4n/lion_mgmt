@@ -1,12 +1,17 @@
 # coding=utf-8
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.role.views import _build_structured_permissions, _normalize_permission_menu
+from services.role.views import (
+    _build_structured_permissions,
+    _normalize_permission_menu,
+    _preserve_superadmin_permission,
+)
 
 
 PERMISSIONS_DATA = [
@@ -56,6 +61,19 @@ def test_role_details_expands_platform_wildcard_permissions():
         {"u": "修改汇报任务权限"},
         {"r": "查看汇报任务权限"},
     ]
+
+
+def test_role_update_cannot_remove_platform_wildcard_permission():
+    superadmin_role = SimpleNamespace(permissions=["*:*"])
+
+    assert _preserve_superadmin_permission(superadmin_role, ["screen:r"]) == [
+        "screen:r",
+        "*:*",
+    ]
+    assert _preserve_superadmin_permission(superadmin_role, ["*:*"]) == ["*:*"]
+    assert _preserve_superadmin_permission(
+        SimpleNamespace(permissions=["role:r"]), ["screen:r"]
+    ) == ["screen:r"]
 
 
 def test_role_details_normalizes_legacy_nested_permission_codes():

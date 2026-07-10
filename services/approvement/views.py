@@ -36,19 +36,16 @@ async def expire_pending_approvals(*, tenant_id: str | None = None, run_id: str 
     if run_id:
         expired_condition &= Q(run_id=run_id)
 
-    expired_approvals = await Approvement.filter(expired_condition, status__in=[0, 3]).all()
+    expired_approvals = await Approvement.filter(expired_condition, status=0, deleted=False).all()
     if not expired_approvals:
         return 0
 
-    pending_approvals = [approval for approval in expired_approvals if approval.status == 0]
-
-    if pending_approvals:
-        approval_ids = [approval.id for approval in pending_approvals]
-        await Approvement.filter(id__in=approval_ids).update(status=3)
+    approval_ids = [approval.id for approval in expired_approvals]
+    await Approvement.filter(id__in=approval_ids).update(status=3)
 
     command_approval_ids = [
         command_approval_id
-        for approval in pending_approvals
+        for approval in expired_approvals
         if (command_approval_id := _agent_command_approval_id(approval))
     ]
     if command_approval_ids:
@@ -69,7 +66,7 @@ async def expire_pending_approvals(*, tenant_id: str | None = None, run_id: str 
             runlog_condition &= Q(tenant_id=tenant_id)
         await Runlog.filter(runlog_condition).update(status=3, result="审核已超时")
 
-    return len(pending_approvals)
+    return len(expired_approvals)
 
 
 @approve_bp.post("/list")
@@ -234,7 +231,8 @@ async def all_approvement(request):
 )
 async def todo_approvement(request):
     # 修改过期任务状态,后端就不做定时任务了
-    await expire_pending_approvals()
+    tenant_id = request.ctx.session.get("tenant_id")
+    await expire_pending_approvals(tenant_id=tenant_id)
 
     # 将created_at从UTC时间转换为北京时间（UTC+8）
     sql = f"""

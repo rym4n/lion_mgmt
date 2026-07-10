@@ -24,17 +24,21 @@ class _FakeQuery:
 
 class _FakeApprovement:
     records = []
+    filter_calls = []
 
     @classmethod
-    def filter(cls, *_args, **_kwargs):
-        now = datetime.now()
-        return _FakeQuery(
-            [
-                record
-                for record in cls.records
-                if record.expire_time < now and record.status in {0, 3}
-            ]
-        )
+    def filter(cls, *_args, **kwargs):
+        cls.filter_calls.append(kwargs)
+        records = cls.records
+        if "id__in" in kwargs:
+            ids = set(kwargs["id__in"])
+            records = [record for record in records if record.id in ids]
+        else:
+            now = datetime.now()
+            records = [record for record in records if record.expire_time < now]
+        if "status" in kwargs:
+            records = [record for record in records if record.status == kwargs["status"]]
+        return _FakeQuery(records)
 
 
 class _FakeCommandApproval:
@@ -54,9 +58,11 @@ class _FakeCommandApproval:
 
 class _FakeRunlog:
     records = []
+    filter_calls = []
 
     @classmethod
     def filter(cls, *_args, **_kwargs):
+        cls.filter_calls.append((_args, _kwargs))
         return _FakeQuery([record for record in cls.records if record.status == 2])
 
 
@@ -71,11 +77,22 @@ async def test_expire_pending_approvals_updates_approval_inbox_and_runlog(monkey
         expire_time=datetime.now() - timedelta(seconds=1),
         params={"approval_kind": "agent", "command_approval_id": "command-approval-1"},
     )
+    already_expired = SimpleNamespace(
+        id="approval-2",
+        tenant_id="tenant-1",
+        status=3,
+        run_id="run-2",
+        audit_node="node-2",
+        expire_time=datetime.now() - timedelta(days=1),
+        params={},
+    )
     command_approval = SimpleNamespace(id="command-approval-1", status="pending")
     runlog = SimpleNamespace(run_id="run-1", node_id="node-1", status=2, result="待审批")
-    _FakeApprovement.records = [approval]
+    _FakeApprovement.records = [approval, already_expired]
+    _FakeApprovement.filter_calls = []
     _FakeCommandApproval.records = [command_approval]
     _FakeRunlog.records = [runlog]
+    _FakeRunlog.filter_calls = []
 
     monkeypatch.setattr(approve_views, "Approvement", _FakeApprovement)
     monkeypatch.setattr(approve_views, "CommandApproval", _FakeCommandApproval)
@@ -88,3 +105,6 @@ async def test_expire_pending_approvals_updates_approval_inbox_and_runlog(monkey
     assert command_approval.status == "expired"
     assert runlog.status == 3
     assert runlog.result == "审核已超时"
+    assert already_expired.status == 3
+    assert _FakeApprovement.filter_calls[0] == {"status": 0, "deleted": False}
+    assert len(_FakeRunlog.filter_calls) == 1

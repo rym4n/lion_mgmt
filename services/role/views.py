@@ -6,7 +6,7 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import check_wildcard, is_superadmin_role, load_license, requires_permission
+from libs.security.authorization import SUPERADMIN_PERMISSION, check_wildcard, is_superadmin_role, load_license, requires_permission
 from libs.security.license_modules import is_licensed_module_active
 from models import Account, PermissionsMenu, Role
 
@@ -56,6 +56,12 @@ PERMISSION_RESOURCE_LABELS = {
     "supply_chain_review:relation": "资产关系",
     "supply_chain_review:topology": "网络拓扑",
 }
+
+
+def _preserve_superadmin_permission(role, permissions: list[str]) -> list[str]:
+    if permissions and is_superadmin_role(role) and SUPERADMIN_PERMISSION not in permissions:
+        return [*permissions, SUPERADMIN_PERMISSION]
+    return permissions
 
 
 def _normalize_permission_value(permission_value: object) -> str | None:
@@ -562,7 +568,7 @@ async def update_role(request):
     if description:
         role.description = description
     if permissions:
-        role.permissions = permissions
+        role.permissions = _preserve_superadmin_permission(role, permissions)
     await role.save()
     return response_ok(role.json)
 
