@@ -31,6 +31,9 @@ warroom_route_auth_meta = importlib.import_module(
 large_screen_permissions = importlib.import_module(
     "migrations.models.67_20260710143000_fix_large_screen_license_permission_contract"
 )
+skill_management_permissions = importlib.import_module(
+    "migrations.models.68_20260710170000_add_skill_management_license_permission_menu"
+)
 
 
 def _compact(text: str) -> str:
@@ -280,6 +283,7 @@ def test_license_templates_use_asset_and_network_management_groups():
         assert "network_access_control_bp" in text
         _assert_module_group(text, "网络拓扑", "topology_bp", "网络管理")
         _assert_module_group(text, "大屏管理", "dashboard_bp", "基础功能")
+        _assert_module_group(text, "技能管理", "digital_employee_bp", "专家团队")
         _assert_module_not_in_group(text, "网络拓扑", "topology_bp", "基础功能")
 
 
@@ -299,6 +303,22 @@ def test_command_center_migration_splits_expert_team_license_modules():
     assert "command_center:r" in upgrade_sql
     assert "digital_employee:r" in upgrade_sql
     assert "agent:r" in upgrade_sql
+
+
+def test_skill_management_permission_menu_is_split_from_digital_employee():
+    upgrade_sql = asyncio.run(skill_management_permissions.upgrade(None))
+    init_sql = (ROOT / "aioe_package/aioe_install/init.sql").read_text()
+
+    for text in (upgrade_sql, init_sql):
+        assert "digital_employee_skill" in text
+        assert "技能管理" in text
+        assert "/command-center/skills" in text
+        assert "digital_employee_skill:c" in text
+        assert "digital_employee_skill:r" in text
+        assert "digital_employee_skill:u" in text
+        assert "digital_employee_skill:d" in text
+        assert "digital_employee:skill:" not in text
+        assert "jsonb_array_elements_text" in text
 
 
 def test_command_role_permission_backfill_splits_legacy_aggregate_permissions():

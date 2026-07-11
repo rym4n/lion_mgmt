@@ -29,6 +29,7 @@ from .manager import (
     update_employee_skills,
     upgrade_role_for_existing_employees,
 )
+from .package_format import PackageFormatError, UnsupportedPackageTypeError, inspect_package
 from .package_importer import export_package_for_tenant, import_package, normalize_role_prompt_fields, require_role_identity
 from .rbac import require_existing_platform_role
 from .runtime_callbacks import fetch_runtime_transcript, save_runtime_report, save_runtime_transcript
@@ -71,6 +72,31 @@ def _page(data: dict) -> tuple[int, int, int]:
 
 async def _require_save_permission(request: Request, exists: bool, create_permission: str, update_permission: str) -> None:
     await check_permissions(request, update_permission if exists else create_permission)
+
+
+def _package_type_or_error(file_bytes: bytes) -> str:
+    try:
+        package_type, _ = inspect_package(file_bytes)
+    except UnsupportedPackageTypeError as exc:
+        raise CustomError(ErrorCode.PACKAGE_TYPE_UNSUPPORTED) from exc
+    except PackageFormatError as exc:
+        raise CustomError(ErrorCode.PACKAGE_INVALID) from exc
+    return package_type
+
+
+async def _require_package_import_permission(request: Request, file_bytes: bytes) -> None:
+    permission = "digital_employee_skill:c" if _package_type_or_error(file_bytes) == "skill" else "digital_employee:c"
+    await check_permissions(request, permission)
+
+
+async def _require_package_export_permission(request: Request, data: dict) -> None:
+    permission = "digital_employee_skill:r" if data.get("skill_key") and not data.get("role_key") else "digital_employee:r"
+    await check_permissions(request, permission)
+
+
+async def _require_package_delete_permission(request: Request, data: dict) -> None:
+    permission = "digital_employee_skill:d" if data.get("skill_key") and not data.get("role_key") else "digital_employee:d"
+    await check_permissions(request, permission)
 
 
 async def _employee_or_404(tenant_id: str, employee_id: str) -> CommandAgent:
@@ -416,7 +442,7 @@ async def role_upgrade_employees(request: Request):
 
 
 @digital_employee_bp.post("/skill/list")
-@requires_permission("digital_employee:r")
+@requires_permission("digital_employee_skill:r", "digital_employee:r")
 async def skill_list(request: Request):
     data = _json(request)
     page, size, offset = _page(data)
@@ -433,7 +459,7 @@ async def skill_list(request: Request):
 
 
 @digital_employee_bp.post("/skill/detail")
-@requires_permission("digital_employee:r")
+@requires_permission("digital_employee_skill:r")
 async def skill_detail(request: Request):
     skills = await get_visible_skills(_tenant_id(request), [_json(request).get("skill_key")])
     return response_ok(skills[0].json)
@@ -447,7 +473,7 @@ async def skill_save(request: Request):
     if not skill_key or not data.get("name"):
         raise CustomError(ErrorCode.PARAM_ERROR)
     exists = await DigitalEmployeeSkill.filter(tenant_id=tenant_id, skill_key=skill_key, deleted=False).exists()
-    await _require_save_permission(request, exists, "digital_employee:c", "digital_employee:u")
+    await _require_save_permission(request, exists, "digital_employee_skill:c", "digital_employee_skill:u")
     skill, _ = await DigitalEmployeeSkill.update_or_create(
         tenant_id=tenant_id,
         skill_key=skill_key,
@@ -467,7 +493,7 @@ async def skill_save(request: Request):
 
 
 @digital_employee_bp.post("/skill/delete")
-@requires_permission("digital_employee:d")
+@requires_permission("digital_employee_skill:d")
 async def skill_delete(request: Request):
     skills = await get_visible_skills(_tenant_id(request), [_json(request).get("skill_key")])
     skill = skills[0]
@@ -479,7 +505,6 @@ async def skill_delete(request: Request):
 
 
 @digital_employee_bp.post("/package/import")
-@requires_permission("digital_employee:c")
 async def package_import(request: Request):
     uploaded = request.files.get("file") if request.files else None
     if uploaded:
@@ -488,6 +513,7 @@ async def package_import(request: Request):
         file_bytes = request.body
     else:
         raise CustomError(ErrorCode.PACKAGE_INVALID)
+    await _require_package_import_permission(request, file_bytes)
     is_builtin_value = request.form.get("is_builtin") if request.form else False
     is_builtin = str(is_builtin_value).lower() in {"1", "true", "yes", "on"}
     result = await import_package(file_bytes, _tenant_id(request), is_builtin, _operator(request), request=request)
@@ -495,9 +521,9 @@ async def package_import(request: Request):
 
 
 @digital_employee_bp.post("/package/export")
-@requires_permission("digital_employee:r")
 async def package_export(request: Request):
     data = _json(request)
+    await _require_package_export_permission(request, data)
     data_bytes = await export_package_for_tenant(
         _tenant_id(request),
         data.get("role_key"),
@@ -519,9 +545,9 @@ async def package_list(request: Request):
 
 
 @digital_employee_bp.post("/package/delete")
-@requires_permission("digital_employee:d")
 async def package_delete(request: Request):
     data = _json(request)
+    await _require_package_delete_permission(request, data)
     if data.get("role_key"):
         role = await get_visible_role(_tenant_id(request), data["role_key"])
         if await CommandAgent.filter(tenant_id=_tenant_id(request), role_key=role.role_key, deleted=False).count():

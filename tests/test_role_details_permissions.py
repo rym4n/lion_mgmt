@@ -241,3 +241,49 @@ def test_role_details_groups_nested_permissions_under_split_menu_model():
     assert _by_model(structured)["network-management-topology"]["sp"] == [
         {"network_topology:r": "查看网络拓扑权限"}
     ]
+
+
+def test_role_permission_all_exposes_skill_management_permissions():
+    normalized = _normalize_permission_menu(
+        {
+            "model": "digital_employee_skill",
+            "description": "技能管理",
+            "Permissions": [
+                {"label": "新增技能管理权限", "value": "c"},
+                {"label": "删除技能管理权限", "value": "d"},
+                {"label": "修改技能管理权限", "value": "u"},
+                {"label": "查看技能管理权限", "value": "r"},
+            ],
+        }
+    )
+
+    assert normalized["Permissions"] == [
+        {"value": "c", "label": "新增技能管理权限"},
+        {"value": "d", "label": "删除技能管理权限"},
+        {"value": "u", "label": "修改技能管理权限"},
+        {"value": "r", "label": "查看技能管理权限"},
+    ]
+
+
+def test_role_details_groups_skill_permissions_under_skill_management_menu():
+    structured = _build_structured_permissions(
+        ["digital_employee_skill:r"],
+        [
+            {
+                "model": "digital_employee_skill",
+                "description": "技能管理",
+                "Permissions": [
+                    {"label": "查看技能管理权限", "value": "r"},
+                    {"label": "修改技能管理权限", "value": "u"},
+                ],
+            },
+        ],
+    )
+
+    assert structured == [
+        {
+            "model": "digital_employee_skill",
+            "model_description": "技能管理",
+            "sp": [{"r": "查看技能管理权限"}],
+        }
+    ]

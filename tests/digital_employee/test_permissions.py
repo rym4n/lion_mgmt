@@ -22,6 +22,11 @@ def test_digital_employee_routes_use_platform_two_segment_permissions():
         'requires_permission("digital_employee:r")',
         'requires_permission("digital_employee:u")',
         'requires_permission("digital_employee:d")',
+        'requires_permission("digital_employee_skill:r", "digital_employee:r")',
+        'requires_permission("digital_employee_skill:r")',
+        'requires_permission("digital_employee_skill:d")',
+        '"digital_employee_skill:c"',
+        '"digital_employee_skill:u"',
     ):
         assert permission in source
 
@@ -44,7 +49,10 @@ def test_platform_wildcard_matches_flat_digital_employee_permissions():
 
     assert check_wildcard("*:*", "digital_employee:r") is True
     assert check_wildcard("digital_employee:*", "digital_employee:r") is True
+    assert check_wildcard("*:*", "digital_employee_skill:r") is True
+    assert check_wildcard("digital_employee_skill:*", "digital_employee_skill:r") is True
     assert check_wildcard("*:*", "digital_employee:role:r") is False
+    assert check_wildcard("*:*", "digital_employee:skill:r") is False
 
 
 def test_digital_employee_permission_migrations_flatten_existing_data():
