@@ -340,11 +340,13 @@ async def finalize_run(
 ) -> CommandTaskRun:
     if status not in TERMINAL_RUN_STATUSES:
         raise ValueError(f"invalid terminal run status: {status}")
+    await run.refresh_from_db(fields=["metadata"])
     run.status = status
     run.finished_at = _now()
     run.heartbeat_at = run.finished_at
     if result is not None:
-        run.metadata = {**(run.metadata or {}), "result": result}
+        metadata = run.metadata if isinstance(run.metadata, dict) else {}
+        run.metadata = {**metadata, "result": result}
     if error is not None:
         run.error = error
     if usage is not None:

@@ -1,5 +1,6 @@
 # coding=utf-8
 import asyncio
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import importlib.util
 from pathlib import Path
@@ -12,6 +13,7 @@ CREATED_RUNS = []
 RECORDED_EVENTS = []
 UPDATED_PROGRESS = []
 FINALIZED_SAVES = []
+PERSISTED_RUN_METADATA = {}
 
 
 def _install_stubs():
@@ -19,6 +21,7 @@ def _install_stubs():
     RECORDED_EVENTS.clear()
     UPDATED_PROGRESS.clear()
     FINALIZED_SAVES.clear()
+    PERSISTED_RUN_METADATA.clear()
     for name in [
         "models",
         "models.command_center",
@@ -69,11 +72,20 @@ def _install_stubs():
             run.saved_update_fields = []
             if "id" not in kwargs:
                 run.id = f"row-{len(CREATED_RUNS) + 1}"
+            run.refreshed_fields = []
+            PERSISTED_RUN_METADATA[run.id] = deepcopy(run.metadata)
             CREATED_RUNS.append(run)
             return run
 
+        async def refresh_from_db(self, fields=None):
+            self.refreshed_fields.append(fields)
+            if fields is None or "metadata" in fields:
+                self.metadata = deepcopy(PERSISTED_RUN_METADATA[self.id])
+
         async def save(self, update_fields=None):
             self.saved_update_fields.append(update_fields)
+            if update_fields is None or "metadata" in update_fields:
+                PERSISTED_RUN_METADATA[self.id] = deepcopy(self.metadata)
             FINALIZED_SAVES.append((self.status, update_fields))
 
     class CommandApproval(SimpleNamespace):
@@ -347,6 +359,38 @@ def test_finalize_run_persists_usage():
 
     assert run.usage == usage
     assert "usage" in run.saved_update_fields[-1]
+
+
+def test_finalize_run_refreshes_metadata_before_merging_result():
+    run_manager = _load_run_manager()
+    task = _task()
+    employee = _employee()
+    run = asyncio.run(run_manager.checkout_run(task, employee))
+    assert "linked_run_ids" not in run.metadata
+    PERSISTED_RUN_METADATA[run.id] = {**run.metadata, "linked_run_ids": ["debug-run-1"]}
+
+    result = {"content": "ok"}
+    asyncio.run(run_manager.finalize_run(run, "completed", result=result))
+
+    assert run.refreshed_fields == [["metadata"]]
+    assert run.metadata["linked_run_ids"] == ["debug-run-1"]
+    assert run.metadata["result"] == result
+    assert PERSISTED_RUN_METADATA[run.id] == run.metadata
+
+
+def test_finalize_run_without_result_preserves_refreshed_metadata():
+    run_manager = _load_run_manager()
+    task = _task()
+    employee = _employee()
+    run = asyncio.run(run_manager.checkout_run(task, employee))
+    persisted_metadata = {**run.metadata, "linked_run_ids": ["debug-run-1"]}
+    PERSISTED_RUN_METADATA[run.id] = persisted_metadata
+
+    asyncio.run(run_manager.finalize_run(run, "failed", error={"message": "failed"}))
+
+    assert run.refreshed_fields == [["metadata"]]
+    assert run.metadata == persisted_metadata
+    assert PERSISTED_RUN_METADATA[run.id] == persisted_metadata
 
 
 def test_execute_task_run_stops_when_runtime_requests_approval():
