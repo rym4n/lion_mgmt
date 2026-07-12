@@ -22,6 +22,9 @@ fix_menus = importlib.import_module(
 route_auth_meta = importlib.import_module(
     "migrations.models.63_20260708183000_add_asset_network_route_auth_meta"
 )
+asset_data_menu_label = importlib.import_module(
+    "migrations.models.70_20260712181000_rename_asset_catalog_to_asset_data"
+)
 command_role_permissions = importlib.import_module(
     "migrations.models.64_20260708223000_split_command_role_permissions"
 )
@@ -265,6 +268,28 @@ def test_asset_network_route_meta_carries_menu_read_permissions():
         assert "supply_chain_review:ci:r" in text
         assert "network_topology:r" in text
         assert "supply_chain_review:policy:r" in text
+
+
+def test_asset_data_menu_label_migration_repairs_previously_applied_menu():
+    upgrade_sql = asyncio.run(asset_data_menu_label.upgrade(None))
+    downgrade_sql = asyncio.run(asset_data_menu_label.downgrade(None))
+
+    assert "\"description\" = '资产数据'" in upgrade_sql
+    assert "'AssetManagementCatalog'" in upgrade_sql
+    assert "'/asset-management/catalog'" in upgrade_sql
+    assert "资产数据" in upgrade_sql
+    assert "資產數據" in upgrade_sql
+    assert "Asset Data" in upgrade_sql
+    assert 'jsonb_each(menu."url")' in upgrade_sql
+    assert "jsonb_array_elements" in upgrade_sql
+    assert "ELSE child.value" in upgrade_sql
+    assert '"permissions"' not in upgrade_sql
+    assert '"auths"' not in upgrade_sql
+
+    assert "SELECT 1" in downgrade_sql
+    assert "资产目录" not in downgrade_sql
+    assert "資產目錄" not in downgrade_sql
+    assert "Asset Catalog" not in downgrade_sql
 
 
 def test_license_templates_use_asset_and_network_management_groups():
