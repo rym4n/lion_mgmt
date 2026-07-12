@@ -271,6 +271,7 @@ RY_AGENT_SERVER = os.environ.get("RY_AGENT_SERVER", "http://192.168.12.254:8283"
 # 数字员工运行时服务
 LION_AGENT_ENDPOINT = os.environ.get("RY_LION_AGENT_ENDPOINT", "http://lion-agent:8000")
 LION_AGENT_INTERNAL_TOKEN = os.environ.get("RY_LION_AGENT_INTERNAL_TOKEN", "")
+RY_AI_LITE_MODEL = (os.environ.get("RY_AI_LITE_MODEL") or "aioe-lite").strip() or "aioe-lite"
 LION_ACTION_INTERNAL_TOKEN = os.environ.get("RY_INTERNAL_TOKEN") or os.environ.get("RY_LION_ACTION_INTERNAL_TOKEN", "")
 
 # 指挥中心任务派单超时：pending_dispatch 超过该秒数仍未调度成功则自动置为失败

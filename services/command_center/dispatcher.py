@@ -5,6 +5,7 @@ from typing import Iterable, Protocol
 import orjson
 from sanic.log import logger
 
+from settings import RY_AI_LITE_MODEL
 from services.digital_employee.lion_agent_adapter import execute_prompt, workspace_id_for
 
 
@@ -189,6 +190,7 @@ async def choose_agent_with_lion_agent(
             session_id=session_key,
             request_id=str(task.id),
             message=prompt,
+            model=RY_AI_LITE_MODEL,
         )
         decision_payload = _extract_json_object(raw_response)
     except Exception as exc:

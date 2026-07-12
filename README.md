@@ -129,7 +129,7 @@ lion_mgmt 不再内置本地 Agent SDK；旧智能体执行、作战室问答、
 | S3/MinIO | 工具包、图片、报告、系统文件 | `RY_FS_HOST`, `RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY` |
 | Vector | Syslog/Kafka 接入、日志转换和转发 | `VECTOR_CFG`, `SUPERVISOR_PATH` |
 | VictoriaLogs | 日志索引和查询 | `VLOGS_HOST` |
-| LLM Provider | AI 问答、指挥中心调度 | `RY_AI_MODEL`, `LLM_KEY`, `RY_AI_API_BASE` |
+| LLM Provider | AI 问答、指挥中心调度 | `RY_AI_MODEL`, `RY_AI_LITE_MODEL`, `LLM_KEY`, `RY_AI_API_BASE` |
 
 ### 部署构建
 
@@ -207,11 +207,14 @@ VLOGS_HOST=http://lion-vl:9428
 
 RY_SERVICE_URL=http://localhost:8000
 RY_AI_MODEL=aioe
+RY_AI_LITE_MODEL=aioe-lite
 LLM_KEY=your_llm_key
 RY_AI_API_BASE=https://oapi.hongcloud.net/v1
 RY_AGENT_MODEL=openai-proxy/gpt-4o
 RY_AGENT_CONTEXT_WINDOW=8000
 ```
+
+`RY_AI_LITE_MODEL` 仅用于指挥中心自动选择员工，未配置时默认使用 `aioe-lite`；数字员工正式执行仍使用 `RY_AI_MODEL`。
 
 ### 数据库迁移
 

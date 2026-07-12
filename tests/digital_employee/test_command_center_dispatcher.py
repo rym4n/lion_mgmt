@@ -17,6 +17,7 @@ STUB_MODULES = [
     "services.command_center.dispatcher",
     "services.digital_employee",
     "services.digital_employee.lion_agent_adapter",
+    "settings",
 ]
 _MISSING_MODULE = object()
 
@@ -32,7 +33,7 @@ def _restore_stubbed_modules():
             sys.modules[name] = original
 
 
-def _load_dispatcher():
+def _load_dispatcher(lite_model="aioe-lite"):
     for name in STUB_MODULES:
         sys.modules.pop(name, None)
 
@@ -41,6 +42,10 @@ def _load_dispatcher():
     sanic_log_module.logger = SimpleNamespace(error=lambda *args, **kwargs: None)
     sys.modules["sanic"] = sanic_module
     sys.modules["sanic.log"] = sanic_log_module
+
+    settings_module = types.ModuleType("settings")
+    settings_module.RY_AI_LITE_MODEL = lite_model
+    sys.modules["settings"] = settings_module
 
     services_module = types.ModuleType("services")
     services_module.__path__ = []
@@ -135,6 +140,38 @@ def test_dispatch_payload_uses_task_content_without_separate_title():
     assert payload["content"] == "完整任务内容"
     assert "title" not in payload
     assert "description" not in payload
+
+
+def test_automatic_dispatch_uses_configured_lite_model():
+    dispatcher = _load_dispatcher(lite_model="custom-lite")
+    selected = _agent("ops-1")
+    task = SimpleNamespace(
+        id="task-1",
+        tenant_id="tenant-1",
+        title="兼容标题",
+        description="检查磁盘容量",
+        source="manual",
+        priority=3,
+        status="pending_dispatch",
+        progress=0,
+        required_capabilities=[],
+        payload={},
+        requested_agent_id=None,
+        room_id=None,
+        creator_id=None,
+    )
+    captured = {}
+
+    async def execute_prompt(**kwargs):
+        captured.update(kwargs)
+        return '{"agent_key":"ops-1","dispatch_status":"auto_assigned","reason":"能力匹配"}'
+
+    dispatcher.execute_prompt = execute_prompt
+
+    decision = asyncio.run(dispatcher.choose_agent_with_lion_agent(task, [selected], coordinator=None))
+
+    assert decision.agent is selected
+    assert captured["model"] == "custom-lite"
 
 
 def test_digital_employee_scope_ignores_plain_command_agent():

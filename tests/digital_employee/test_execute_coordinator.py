@@ -247,6 +247,7 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
     assert payload["workspace_id"] == "employee-1"
     assert payload["session_id"] == "task-1"
     assert payload["message"] == "prompt:task-1:employee-1"
+    assert "model" not in payload
     assert payload["cognee"]["endpoint"] == "http://lion-memory"
     assert payload["cognee"]["jwt"] == "jwt-tenant-1"
     assert payload["cognee"]["tenant_id"] == "tenant-1"
