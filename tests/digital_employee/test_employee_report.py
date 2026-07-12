@@ -22,6 +22,8 @@ def test_compose_payload_for_completed_task():
     payload = compose_payload(task, [{"description": "查日志", "status": "completed"}])
 
     assert payload["severity"] == "info"
+    assert payload["title"].startswith("处理 CPU 告警")
+    assert "告警处理" not in payload["title"]
     assert payload["conclusion"] == "已确认误报"
     assert payload["actions"][0]["description"] == "查日志"
 

@@ -454,7 +454,7 @@ async def _run_agent_task(task_id: str, tenant_id: str, agent: CommandAgent, pro
                 "agent_id": {"type": "string", "description": "智能体 ID（与 agent_key 二选一）"},
                 "agent_key": {"type": "string", "description": "智能体逻辑标识（与 agent_id 二选一）"},
                 "prompt": {"type": "string", "description": "任务内容/提示词"},
-                "title": {"type": "string", "description": "任务标题，不传则截取 prompt 前 50 字"},
+                "title": {"type": "string", "description": "兼容字段，任务展示统一使用 prompt"},
                 "room_id": {"type": "string", "description": "可选，关联作战室 ID"},
             },
         }
@@ -478,12 +478,12 @@ async def execute_agent(request: Request):
         raise CustomError(ErrorCode.NOT_FOUND)
 
     operator_id = _session_user_id(request)
-    title = str(data.get("title") or prompt[:50]).strip()
     run_id = gen_run_id()
 
     task = await CommandTask.create(
         tenant_id=tenant_id,
-        title=title,
+        title=prompt[:255],
+        description=prompt,
         source="agent_execute",
         status="running",
         progress=0,

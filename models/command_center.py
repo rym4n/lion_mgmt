@@ -136,8 +136,8 @@ class CommandTask(BaseModel):
     支持用户指定智能体或不指定智能体；调度框架会基于能力标签选择或纠正分配。
     """
 
-    title = fields.CharField(max_length=255, description="任务标题")
-    description = fields.TextField(null=True, description="任务描述")
+    title = fields.CharField(max_length=255, description="兼容字段，保存任务内容前255字")
+    description = fields.TextField(null=True, description="完整任务内容")
     source = fields.CharField(max_length=50, default="manual", description="任务来源")
     priority = fields.IntField(default=3, description="优先级，数值越小优先级越高")
     status = fields.CharField(max_length=30, default="pending_dispatch", description="任务状态")

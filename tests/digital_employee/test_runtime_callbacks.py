@@ -106,6 +106,7 @@ def _install_stubs():
         id="task-1",
         tenant_id="tenant-1",
         title="处理告警",
+        description="检查并处理 CPU 告警",
         status="running",
         progress=50,
         run_id="run-1",
@@ -203,3 +204,23 @@ def test_save_runtime_report_upserts_employee_report():
     assert updated.severity == "info"
     assert updated.conclusion == "已恢复"
     assert updated.saved is True
+
+
+def test_save_runtime_report_defaults_title_to_task_content():
+    _install_stubs()
+    module = _load_module(
+        "services.digital_employee.runtime_callbacks",
+        "services/digital_employee/runtime_callbacks.py",
+    )
+
+    report = asyncio.run(
+        module.save_runtime_report(
+            "tenant-1",
+            {
+                "task_id": "task-1",
+                "report": {"severity": "info", "conclusion": "已恢复"},
+            },
+        )
+    )
+
+    assert report.title == "检查并处理 CPU 告警"

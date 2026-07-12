@@ -1,6 +1,5 @@
 # coding=utf-8
 import asyncio
-import re
 from datetime import datetime
 
 from sanic.log import logger
@@ -19,82 +18,25 @@ DISPATCHABLE_TASK_STATUS = {"pending_dispatch"}
 DEFAULT_COORDINATOR_AGENT_KEY = "command_center_coordinator"
 DEFAULT_COORDINATOR_AGENT_NAME = "指挥部分工协调智能体"
 DEFAULT_COORDINATOR_CAPABILITIES = ["command_center", "coordination", "dispatch", "task_planning"]
-DEFAULT_TASK_TITLE = "未命名任务"
-MAX_TASK_TITLE_LENGTH = 32
+DEFAULT_TASK_TITLE = "任务"
+MAX_COMPAT_TASK_TITLE_LENGTH = 255
+TASK_CONTENT_FIELDS = ("description", "content", "prompt", "message", "query", "question", "task")
 
 
-def derive_task_title(data: dict) -> str:
-    explicit_title = str(data.get("title") or "").strip()
-    if explicit_title:
-        return _truncate_title(explicit_title)
-
-    content = _task_content_for_title(data)
-    if not content:
-        return DEFAULT_TASK_TITLE
-
-    sentences = [
-        item.strip(" ，,。.!！?？:：;；")
-        for item in re.split(r"[。.!！?？;；\n\r]+", content)
-        if item.strip(" ，,。.!！?？:：;；")
-    ]
-    candidate = next(
-        (item for item in sentences if not _is_generic_task_intro(item)),
-        sentences[0] if sentences else content,
-    )
-    candidate = _strip_task_intro(candidate)
-    return _truncate_title(candidate or content)
+def task_content_from_data(data: dict) -> str:
+    """Return the original task content without summarizing or rewriting it."""
+    for source in (data, data.get("payload")):
+        if not isinstance(source, dict):
+            continue
+        for key in TASK_CONTENT_FIELDS:
+            value = source.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+    return str(data.get("title") or "").strip()
 
 
 def has_task_content(data: dict) -> bool:
-    return bool(str(data.get("title") or "").strip() or _task_content_for_title(data))
-
-
-def _task_content_for_title(data: dict) -> str:
-    parts: list[str] = []
-    for key in ("description", "content", "prompt", "message", "query", "question"):
-        value = data.get(key)
-        if value:
-            parts.append(str(value))
-
-    payload = data.get("payload")
-    if isinstance(payload, dict):
-        for key in ("description", "content", "prompt", "message", "query", "question", "task"):
-            value = payload.get(key)
-            if value:
-                parts.append(str(value))
-
-    normalized = "\n".join(re.sub(r"[ \t]+", " ", part).strip() for part in parts)
-    return re.sub(r"\n{2,}", "\n", normalized).strip()
-
-
-def _is_generic_task_intro(value: str) -> bool:
-    return value.strip(" ，,。.!！?？:：;；") in {
-        "请处理",
-        "帮我处理",
-        "帮忙处理",
-        "请帮我处理",
-        "任务如下",
-        "需求如下",
-        "问题如下",
-    }
-
-
-def _strip_task_intro(value: str) -> str:
-    text = value.strip()
-    for prefix in ("请你", "请帮我", "帮我", "麻烦", "帮忙", "请", "需要", "协助"):
-        if text.startswith(prefix) and len(text) > len(prefix) + 2:
-            text = text[len(prefix) :].lstrip(" ，,。.!！?？:：;；")
-            break
-    return text
-
-
-def _truncate_title(value: str) -> str:
-    title = re.sub(r"\s+", " ", value).strip(" ，,。.!！?？:：;；")
-    if not title:
-        return DEFAULT_TASK_TITLE
-    if len(title) <= MAX_TASK_TITLE_LENGTH:
-        return title
-    return f"{title[:MAX_TASK_TITLE_LENGTH].rstrip()}..."
+    return bool(task_content_from_data(data))
 
 
 async def ensure_default_coordinator_agent(tenant_id: str) -> CommandAgent:
@@ -356,11 +298,12 @@ def _schedule_task_dispatch(task: CommandTask, operator_id: str | None = None) -
 
 
 async def create_command_task(tenant_id: str, creator, data: dict) -> CommandTask:
-    title = derive_task_title(data)
+    content = task_content_from_data(data)
+    compatibility_title = content[:MAX_COMPAT_TASK_TITLE_LENGTH] or DEFAULT_TASK_TITLE
     task = await CommandTask.create(
         tenant_id=tenant_id,
-        title=title,
-        description=data.get("description"),
+        title=compatibility_title,
+        description=content or None,
         source=data.get("source", "manual"),
         priority=data.get("priority", 3),
         required_capabilities=data.get("required_capabilities", []),

@@ -102,21 +102,22 @@ def _impacted_resources(policy_snapshot: dict | None) -> list[dict]:
 
 
 def _approval_title(task: CommandTask) -> str:
-    title = f"Agent 审批：{getattr(task, 'title', None) or task.id}"
-    return title[:50]
+    content = getattr(task, "description", None) or getattr(task, "title", None) or task.id
+    compact_content = " ".join(str(content).split())
+    title = f"Agent 审批：{compact_content}"
+    return title if len(title) <= 50 else f"{title[:47]}..."
 
 
 def _approval_content(task: CommandTask, run: CommandTaskRun, requested_action: dict | None, reason: str | None) -> str:
     action = requested_action or {}
     action_name = action.get("tool") or action.get("playbook") or action.get("action") or action.get("name") or "执行动作"
+    task_content = getattr(task, "description", None) or getattr(task, "title", None) or task.id
     lines = [
         reason or "数字员工任务需要人工审批",
-        f"任务：{getattr(task, 'title', None) or task.id}",
+        f"任务内容：{task_content}",
         f"运行 ID：{run.run_id}",
         f"动作：{action_name}",
     ]
-    if getattr(task, "description", None):
-        lines.append(f"描述：{task.description}")
     return "\n".join(lines)
 
 

@@ -687,7 +687,7 @@ def test_update_task_progress_skips_employee_report_for_plain_command_agent():
     assert manager.realtime_events == [("tenant-1", "task_progress_updated", "task-1")]
 
 
-def test_create_command_task_derives_title_from_full_description_and_returns_before_dispatch():
+def test_create_command_task_preserves_full_content_and_returns_before_dispatch():
     scheduled_tasks = []
     manager = _load_manager(_agent("ops"), scheduled_tasks)
     creator = SimpleNamespace(id="operator-1")
@@ -703,9 +703,49 @@ def test_create_command_task_derives_title_from_full_description_and_returns_bef
         )
     )
 
-    assert task.title == "托管云test1有多少机器"
+    assert task.title == "托管云test1有多少机器\n请查询资源容量并给出结论"
     assert task.description == "托管云test1有多少机器\n请查询资源容量并给出结论"
     assert task.status == "pending_dispatch"
     assert task.assigned_agent_key is None
     assert len(scheduled_tasks) == 1
     assert manager.realtime_events == [("tenant-1", "task_created", "created-task-1")]
+
+
+def test_create_command_task_keeps_long_content_outside_compatibility_title():
+    scheduled_tasks = []
+    manager = _load_manager(_agent("ops"), scheduled_tasks)
+    creator = SimpleNamespace(id="operator-1")
+    content = "任务正文" * 100
+
+    task = asyncio.run(manager.create_command_task("tenant-1", creator, {"content": content}))
+
+    assert task.description == content
+    assert task.title == content[:255]
+    assert not task.title.endswith("...")
+
+
+def test_create_command_task_uses_payload_content_without_rewriting_it():
+    scheduled_tasks = []
+    manager = _load_manager(_agent("ops"), scheduled_tasks)
+    creator = SimpleNamespace(id="operator-1")
+    content = "请处理\n\n保留原始换行和完整任务内容"
+
+    task = asyncio.run(
+        manager.create_command_task(
+            "tenant-1",
+            creator,
+            {"payload": {"prompt": content}},
+        )
+    )
+
+    assert task.description == content
+    assert task.title == content
+
+
+def test_task_content_prefers_description_and_supports_legacy_title_only_input():
+    manager = _load_manager(_agent("ops"), [])
+
+    assert manager.task_content_from_data(
+        {"title": "旧标题", "description": "完整任务内容"}
+    ) == "完整任务内容"
+    assert manager.task_content_from_data({"title": "旧接口任务内容"}) == "旧接口任务内容"

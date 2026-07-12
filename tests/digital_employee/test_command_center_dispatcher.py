@@ -112,6 +112,31 @@ def test_available_requested_agent_is_selected_without_lion_agent_call():
     assert decision.requested_agent_id == "ops-1"
 
 
+def test_dispatch_payload_uses_task_content_without_separate_title():
+    dispatcher = _load_dispatcher()
+    task = SimpleNamespace(
+        id="task-1",
+        tenant_id="tenant-1",
+        title="旧兼容标题",
+        description="完整任务内容",
+        source="manual",
+        priority=3,
+        status="pending_dispatch",
+        progress=0,
+        required_capabilities=[],
+        payload={},
+        requested_agent_id=None,
+        room_id=None,
+        creator_id=None,
+    )
+
+    payload = dispatcher._task_payload(task)
+
+    assert payload["content"] == "完整任务内容"
+    assert "title" not in payload
+    assert "description" not in payload
+
+
 def test_digital_employee_scope_ignores_plain_command_agent():
     dispatcher = _load_dispatcher()
     plain_agent = _agent("ops-1")

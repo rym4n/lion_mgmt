@@ -281,7 +281,7 @@ def test_approval_policy_allows_unspecified_tools_but_keeps_explicit_skill_appro
 
 def test_build_runtime_prompt_contains_payload():
     task = SimpleNamespace(
-        title="巡检",
+        title="旧兼容标题",
         source="manual",
         description="检查数据库",
         payload={"target": "db01", "_dispatch_scope": "digital_employee"},
@@ -290,7 +290,9 @@ def test_build_runtime_prompt_contains_payload():
 
     prompt = build_runtime_prompt(task, employee)
 
-    assert "巡检" in prompt
+    assert "任务内容：\n检查数据库" in prompt
+    assert "旧兼容标题" not in prompt
+    assert "任务标题" not in prompt
     assert "dba-1" in prompt
     assert "db01" in prompt
     assert "_dispatch_scope" not in prompt

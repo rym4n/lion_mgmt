@@ -64,8 +64,8 @@ TASK_SCHEMA = {
         "id": {"type": "string", "description": "任务ID"},
         "ctime": {"type": "string", "description": "创建时间"},
         "utime": {"type": "string", "description": "更新时间"},
-        "title": {"type": "string", "description": "任务标题"},
-        "description": {"type": "string", "nullable": True, "description": "任务描述"},
+        "title": {"type": "string", "description": "兼容字段；界面应展示description"},
+        "description": {"type": "string", "nullable": True, "description": "完整任务内容"},
         "source": {"type": "string", "description": "任务来源"},
         "priority": {"type": "integer", "description": "优先级，数值越小优先级越高"},
         "status": {
@@ -623,8 +623,8 @@ async def update_agent_status(request: Request):
         {
             "type": "object",
             "properties": {
-                "title": {"type": "string", "description": "任务标题；不传时按任务内容自动生成"},
-                "description": {"type": "string", "description": "任务内容"},
+                "title": {"type": "string", "description": "兼容字段；新调用仅需传description"},
+                "description": {"type": "string", "description": "完整任务内容"},
                 "source": {"type": "string", "description": "任务来源", "default": "manual"},
                 "priority": {"type": "integer", "description": "优先级，数值越小优先级越高", "default": 3},
                 "required_capabilities": {

@@ -373,14 +373,14 @@ def render_workspace_files(employee: Any, role: Any | None = None, skills: list[
 
 
 def build_runtime_prompt(task: Any, employee: Any) -> str:
+    task_content = getattr(task, "description", None) or getattr(task, "title", "")
     return "\n".join(
         [
-            f"任务标题：{getattr(task, 'title', '')}",
             f"任务来源：{getattr(task, 'source', '')}",
             f"执行员工：{getattr(employee, 'name', '')} ({getattr(employee, 'agent_key', '')})",
             "",
-            "任务描述：",
-            getattr(task, "description", "") or "",
+            "任务内容：",
+            task_content,
             "",
             "任务载荷：",
             _json_block(_public_payload(getattr(task, "payload", {}) or {})),

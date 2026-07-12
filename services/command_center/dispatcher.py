@@ -74,8 +74,7 @@ def _task_payload(task: DispatchTask) -> dict:
     return {
         "id": task.id,
         "tenant_id": task.tenant_id,
-        "title": task.title,
-        "description": task.description,
+        "content": task.description or task.title,
         "source": task.source,
         "priority": task.priority,
         "status": task.status,

@@ -395,6 +395,8 @@ def _task_run_approval():
     task = sys.modules["models.command_center"].CommandTask(
         id="task-1",
         tenant_id="tenant-1",
+        title="旧兼容标题",
+        description="完整任务内容",
         status="pending_approval",
         run_id="run-1",
     )
@@ -470,6 +472,9 @@ def test_create_approval_request_updates_run_task_and_event():
     assert approval.metadata["approvement_id"] == "approvement-1"
     assert CREATED_APPROVEMENTS[0].params["approval_kind"] == "agent"
     assert CREATED_APPROVEMENTS[0].params["command_approval_id"] == approval.id
+    assert "完整任务内容" in CREATED_APPROVEMENTS[0].title
+    assert "任务内容：完整任务内容" in CREATED_APPROVEMENTS[0].content
+    assert "旧兼容标题" not in CREATED_APPROVEMENTS[0].content
     assert [approver.id for approver in CREATED_APPROVEMENTS[0].added_approvers] == ["approver-1"]
     assert run.status == "waiting_approval"
     assert task.status == "pending_approval"

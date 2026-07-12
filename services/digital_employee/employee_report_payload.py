@@ -5,7 +5,8 @@ from typing import Any
 def compose_payload(task: Any, actions_draft: list[dict] | None = None) -> dict:
     actions = actions_draft or []
     result = getattr(task, "result", None)
-    title = f"{getattr(task, 'title', '任务')} - 数字员工报告"
+    task_content = getattr(task, "description", None) or getattr(task, "title", "任务")
+    title = f"{' '.join(str(task_content).split())} - 数字员工报告"
     conclusion = result or "任务已结束，暂无额外结论。"
     if getattr(task, "status", None) == "failed":
         severity = "high"
@@ -17,7 +18,7 @@ def compose_payload(task: Any, actions_draft: list[dict] | None = None) -> dict:
         "title": title[:255],
         "severity": severity,
         "observation": observation,
-        "analysis": result or getattr(task, "description", None),
+        "analysis": result or task_content,
         "actions": actions,
         "conclusion": conclusion,
         "evidence_urls": [],

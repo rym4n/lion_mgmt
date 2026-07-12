@@ -87,8 +87,9 @@ async def fetch_runtime_transcript(tenant_id: str, task_id: str | None) -> dict[
 
 def _report_payload(task: CommandTask, data: dict[str, Any]) -> dict[str, Any]:
     report = data.get("report") if isinstance(data.get("report"), dict) else data
+    task_content = task.description or task.title
     return {
-        "title": report.get("title") or task.title,
+        "title": (report.get("title") or task_content)[:255],
         "severity": report.get("severity") or "info",
         "observation": report.get("observation"),
         "analysis": report.get("analysis"),
