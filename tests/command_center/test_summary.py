@@ -72,3 +72,21 @@ def test_build_task_summary_combines_progress_usage_and_issues():
     assert summary["pending_approvals"] == 1
     assert summary["has_error"] is True
     assert summary["issues_count"] == 2
+
+
+def test_build_task_summary_uses_server_clock_for_live_duration():
+    start = datetime(2026, 7, 1, 9, 0, 0, tzinfo=timezone.utc)
+    stale_finish = datetime(2026, 7, 1, 9, 0, 10, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 1, 9, 1, 5, tzinfo=timezone.utc)
+    task = SimpleNamespace(
+        status="running",
+        progress=30,
+        assigned_agent_key="ops",
+        started_at=start,
+        finished_at=stale_finish,
+    )
+
+    summary = build_task_summary(task, [], [], now=now)
+
+    assert summary["is_terminal"] is False
+    assert summary["duration_seconds"] == 65

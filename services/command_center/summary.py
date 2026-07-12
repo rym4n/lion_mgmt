@@ -96,18 +96,29 @@ def _latest_error(runs: list[Any]) -> dict:
     return {}
 
 
-def build_task_summary(task: Any, runs: list[Any], approvals: list[Any]) -> dict[str, Any]:
+def build_task_summary(
+    task: Any,
+    runs: list[Any],
+    approvals: list[Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
     latest_run = runs[0] if runs else None
     pending_approvals = [item for item in approvals if getattr(item, "status", None) == "pending"]
     latest_error = _latest_error(runs)
     started_at = _dt(getattr(task, "started_at", None)) or _dt(getattr(latest_run, "started_at", None))
     finished_at = _dt(getattr(task, "finished_at", None)) or _dt(getattr(latest_run, "finished_at", None))
+    status = getattr(task, "status", None)
+    is_terminal = status in TERMINAL_TASK_STATUSES
+    duration_end = finished_at
+    if started_at and not is_terminal:
+        duration_end = now or datetime.now(tz=started_at.tzinfo)
     return {
-        "status": getattr(task, "status", None),
+        "status": status,
         "progress": _safe_int(getattr(task, "progress", 0)),
         "assigned_agent_key": getattr(task, "assigned_agent_key", None),
-        "is_terminal": getattr(task, "status", None) in TERMINAL_TASK_STATUSES,
-        "duration_seconds": _seconds_between(started_at, finished_at),
+        "is_terminal": is_terminal,
+        "duration_seconds": _seconds_between(started_at, duration_end),
         "token_usage": aggregate_usage(runs),
         "pending_approvals": len(pending_approvals),
         "has_error": bool(latest_error),
