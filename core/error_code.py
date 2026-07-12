@@ -196,3 +196,4 @@ class ErrorCode(BaseErrorCode):
     REPORT_SCHEDULE_NAME_EXISTS = ErrorData(4158, "同一文档下汇报任务名称已存在")
     COMMAND_TASK_ALREADY_TERMINAL = ErrorData(4159, "任务已结束，无法取消")
     COMMAND_TASK_NOT_TERMINAL = ErrorData(4160, "任务尚未结束，无法删除")
+    COMMAND_TASK_NOT_DISPATCHABLE = ErrorData(4161, "任务当前状态无法重新调度")

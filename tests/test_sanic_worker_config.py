@@ -73,14 +73,16 @@ def test_create_app_ext_uses_resolved_health_monitor_config(monkeypatch):
             self.ext_config = config
 
     app = StubApp()
+    registration_order = []
     monkeypatch.setattr(app_factory, "Sanic", lambda *_, **__: app)
-    monkeypatch.setattr(app_factory, "register_listener", lambda *_: None)
-    monkeypatch.setattr(app_factory, "register_tortoise", lambda *_, **__: None)
+    monkeypatch.setattr(app_factory, "register_listener", lambda *_: registration_order.append("listeners"))
+    monkeypatch.setattr(app_factory, "register_tortoise", lambda *_, **__: registration_order.append("tortoise"))
     monkeypatch.setattr(app_factory, "register_middleware", lambda *_: None)
     monkeypatch.setattr(app_factory, "register_exception_handler", lambda *_: None)
     monkeypatch.setattr(app_factory, "register_blueprints", lambda *_: None)
 
     assert app_factory.create_app() is app
+    assert registration_order == ["tortoise", "listeners"]
     assert app.ext_config == {
         "HEALTH_MAX_MISSES": app_factory.HEALTH_MAX_MISSES,
         "HEALTH_MISSED_THRESHHOLD": app_factory.HEALTH_MISSED_THRESHHOLD,

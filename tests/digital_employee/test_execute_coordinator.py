@@ -7,6 +7,40 @@ import sys
 import types
 
 import orjson
+import pytest
+
+
+STUB_MODULES = [
+    "models",
+    "models.command_center",
+    "settings",
+    "aiocache",
+    "sanic",
+    "sanic.log",
+    "services",
+    "services.command_center",
+    "services.command_center.manager",
+    "services.digital_employee",
+    "services.digital_employee.manager",
+    "services.digital_employee.cognee_credential_manager",
+    "services.digital_employee.aioe_credential_manager",
+    "services.digital_employee.prompt_builder",
+    "services.digital_employee.lion_agent_adapter",
+    "services.digital_employee.lion_agent_client",
+    "services.digital_employee.execute_coordinator",
+]
+_MISSING_MODULE = object()
+
+
+@pytest.fixture(autouse=True)
+def _restore_stubbed_modules():
+    original_modules = {name: sys.modules.get(name, _MISSING_MODULE) for name in STUB_MODULES}
+    yield
+    for name, original in original_modules.items():
+        if original is _MISSING_MODULE:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
 
 
 def _load_module(name: str, relative_path: str):
@@ -222,6 +256,7 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
         "base_url": "http://lion-mgmt",
         "token": "api-token-employee-1",
         "tenant_id": "tenant-1",
+        "agent_run_id": None,
     }
 
     published = [message for _, message in redis.messages]
@@ -283,6 +318,9 @@ def test_run_uses_command_run_session_and_emits_runtime_callbacks():
     assert result["usage"]["input_tokens"] == 100
     assert RECORDED_STREAM_PAYLOADS[0]["session_id"] == "run-1"
     assert [event_type for event_type, _ in runtime_events] == ["thinking", "tool_call", "delta", "delta", "end"]
+    assert task.result is None
+    assert task.saved_update_fields == []
+    assert [call[0]["status"] for call in progress_calls] == ["running"]
     assert sys.modules["services.digital_employee.manager"].sync_calls == [{"employee_id": "employee-1", "force": True}]
 
 

@@ -62,8 +62,8 @@ def create_app() -> Sanic:
             "HEALTH_MONITOR": HEALTH_MONITOR,
         }
     )
-    register_listener(app)
     register_tortoise(app, config=TORTOISE, generate_schemas=False)
+    register_listener(app)
     register_middleware(app)
     register_exception_handler(app)
     register_blueprints(app)

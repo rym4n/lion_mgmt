@@ -8,33 +8,53 @@ from types import SimpleNamespace
 import sys
 import types
 
+import pytest
+
 
 CREATED_RUNS = []
+CREATED_TASKS = []
 RECORDED_EVENTS = []
 UPDATED_PROGRESS = []
 FINALIZED_SAVES = []
 PERSISTED_RUN_METADATA = {}
+STUB_MODULES = [
+    "models",
+    "models.command_center",
+    "settings",
+    "services",
+    "services.command_center",
+    "services.command_center.manager",
+    "services.command_center.approval_contract",
+    "services.command_center.approval_service",
+    "services.command_center.run_manager",
+    "services.digital_employee",
+    "services.digital_employee.prompt_builder",
+    "services.digital_employee.execute_coordinator",
+    "tortoise",
+    "tortoise.transactions",
+]
+_MISSING_MODULE = object()
+
+
+@pytest.fixture(autouse=True)
+def _restore_stubbed_modules():
+    original_modules = {name: sys.modules.get(name, _MISSING_MODULE) for name in STUB_MODULES}
+    yield
+    for name, original in original_modules.items():
+        if original is _MISSING_MODULE:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
 
 
 def _install_stubs():
     CREATED_RUNS.clear()
+    CREATED_TASKS.clear()
     RECORDED_EVENTS.clear()
     UPDATED_PROGRESS.clear()
     FINALIZED_SAVES.clear()
     PERSISTED_RUN_METADATA.clear()
-    for name in [
-        "models",
-        "models.command_center",
-        "settings",
-        "services",
-        "services.command_center",
-        "services.command_center.manager",
-        "services.command_center.approval_contract",
-        "services.command_center.approval_service",
-        "services.digital_employee",
-        "services.digital_employee.prompt_builder",
-        "services.digital_employee.execute_coordinator",
-    ]:
+    for name in STUB_MODULES:
         sys.modules.pop(name, None)
 
     models_module = types.ModuleType("models")
@@ -45,11 +65,21 @@ def _install_stubs():
     command_center.COMMAND_RUN_STATUS_CANCELLED = "cancelled"
     command_center.COMMAND_RUN_STATUS_CHECKED_OUT = "checked_out"
     command_center.COMMAND_RUN_STATUS_COMPLETED = "completed"
+    command_center.COMMAND_RUN_STATUS_CONTINUATION_READY = "continuation_ready"
     command_center.COMMAND_RUN_STATUS_FAILED = "failed"
     command_center.COMMAND_RUN_STATUS_HANDED_OFF = "handed_off"
+    command_center.COMMAND_RUN_STATUS_REJECTED = "rejected"
     command_center.COMMAND_RUN_STATUS_RUNNING = "running"
     command_center.COMMAND_RUN_STATUS_STALE = "stale"
     command_center.COMMAND_RUN_STATUS_WAITING_APPROVAL = "waiting_approval"
+    command_center.COMMAND_RUN_TERMINAL_STATUSES = {
+        "completed",
+        "failed",
+        "cancelled",
+        "rejected",
+        "stale",
+        "handed_off",
+    }
     command_center.COMMAND_RUNTIME_LION_AGENT = "lion_agent"
     command_center.COMMAND_TASK_STATUS_CANCELLED = "cancelled"
     command_center.COMMAND_TASK_STATUS_COMPLETED = "completed"
@@ -57,18 +87,107 @@ def _install_stubs():
     command_center.COMMAND_TASK_STATUS_FAILED = "failed"
     command_center.COMMAND_TASK_STATUS_HANDED_OFF = "handed_off"
     command_center.COMMAND_TASK_STATUS_PENDING_APPROVAL = "pending_approval"
+    command_center.COMMAND_TASK_STATUS_RUNNING = "running"
+    command_center.COMMAND_TASK_TERMINAL_STATUSES = {"completed", "failed", "cancelled", "handed_off"}
 
     class CommandAgent(SimpleNamespace):
         pass
 
     class CommandTask(SimpleNamespace):
-        async def save(self, update_fields=None):
+        class Query:
+            def __init__(self, filters):
+                self.filters = filters
+
+            def using_db(self, connection):
+                return self
+
+            def select_for_update(self, **kwargs):
+                return self
+
+            def filter(self, **kwargs):
+                self.filters.update(kwargs)
+                return self
+
+            def _matches(self, task):
+                for key, value in self.filters.items():
+                    if key.endswith("__lt"):
+                        current = getattr(task, key[:-4], None)
+                        matches = current is not None and current < value
+                    else:
+                        current = getattr(task, key, False) if key == "deleted" else getattr(task, key, None)
+                        matches = current == value
+                    if not matches:
+                        return False
+                return True
+
+            async def first(self):
+                return next((task for task in CREATED_TASKS if self._matches(task)), None)
+
+            async def all(self):
+                return [task for task in CREATED_TASKS if self._matches(task)]
+
+        @classmethod
+        def filter(cls, **kwargs):
+            return cls.Query(kwargs)
+
+        async def save(self, using_db=None, update_fields=None):
             self.saved_update_fields.append(update_fields)
 
     class CommandTaskRun(SimpleNamespace):
+        class Query:
+            def __init__(self, filters):
+                self.filters = filters
+
+            def select_for_update(self, **kwargs):
+                return self
+
+            def using_db(self, connection):
+                return self
+
+            def filter(self, **kwargs):
+                self.filters.update(kwargs)
+                return self
+
+            def _matches(self, run):
+                for key, value in self.filters.items():
+                    if key.endswith("__in"):
+                        matches = getattr(run, key[:-4], None) in value
+                    elif key.endswith("__lt"):
+                        current = getattr(run, key[:-4], None)
+                        matches = current is not None and current < value
+                    else:
+                        current = getattr(run, key, False) if key == "deleted" else getattr(run, key, None)
+                        matches = current == value
+                    if not matches:
+                        return False
+                return True
+
+            async def first(self):
+                return next((run for run in CREATED_RUNS if self._matches(run)), None)
+
+            async def all(self):
+                return [run for run in CREATED_RUNS if self._matches(run)]
+
+        @classmethod
+        def filter(cls, **kwargs):
+            return cls.Query(kwargs)
+
         @classmethod
         async def create(cls, **kwargs):
-            run = cls(**kwargs)
+            defaults = {
+                "session_id": None,
+                "tool_calls": [],
+                "resource_accesses": [],
+                "usage": {},
+                "cost": {},
+                "transcript_ref": None,
+                "evidence_refs": [],
+                "error": {},
+                "finished_at": None,
+                "deleted": False,
+            }
+            run = cls(**{**defaults, **kwargs})
+            run.task_id = getattr(kwargs.get("task"), "id", kwargs.get("task_id"))
             run.saved_update_fields = []
             if "id" not in kwargs:
                 run.id = f"row-{len(CREATED_RUNS) + 1}"
@@ -77,12 +196,12 @@ def _install_stubs():
             CREATED_RUNS.append(run)
             return run
 
-        async def refresh_from_db(self, fields=None):
+        async def refresh_from_db(self, fields=None, using_db=None):
             self.refreshed_fields.append(fields)
             if fields is None or "metadata" in fields:
                 self.metadata = deepcopy(PERSISTED_RUN_METADATA[self.id])
 
-        async def save(self, update_fields=None):
+        async def save(self, using_db=None, update_fields=None):
             self.saved_update_fields.append(update_fields)
             if update_fields is None or "metadata" in update_fields:
                 PERSISTED_RUN_METADATA[self.id] = deepcopy(self.metadata)
@@ -90,6 +209,41 @@ def _install_stubs():
 
     class CommandApproval(SimpleNamespace):
         created = []
+        records = []
+
+        class Query:
+            def __init__(self, filters):
+                self.filters = filters
+
+            def using_db(self, connection):
+                return self
+
+            def select_for_update(self, **kwargs):
+                return self
+
+            def order_by(self, *args):
+                return self
+
+            def _matches(self, approval):
+                for key, value in self.filters.items():
+                    if key.endswith("__in"):
+                        matches = getattr(approval, key[:-4], None) in value
+                    else:
+                        current = getattr(approval, key, False) if key == "deleted" else getattr(approval, key, None)
+                        matches = current == value
+                    if not matches:
+                        return False
+                return True
+
+            async def first(self):
+                return next((approval for approval in CommandApproval.records if self._matches(approval)), None)
+
+            async def all(self):
+                return [approval for approval in CommandApproval.records if self._matches(approval)]
+
+        @classmethod
+        def filter(cls, **kwargs):
+            return cls.Query(kwargs)
 
         @classmethod
         async def create(cls, **kwargs):
@@ -103,7 +257,23 @@ def _install_stubs():
     command_center.CommandApproval = CommandApproval
     sys.modules["models.command_center"] = command_center
 
+    tortoise = types.ModuleType("tortoise")
+    tortoise.__path__ = []
+    sys.modules["tortoise"] = tortoise
+    transactions = types.ModuleType("tortoise.transactions")
+
+    class Transaction:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    transactions.in_transaction = Transaction
+    sys.modules["tortoise.transactions"] = transactions
+
     settings = types.ModuleType("settings")
+    settings.COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS = 300
     settings.TZ = timezone.utc
     sys.modules["settings"] = settings
 
@@ -115,17 +285,59 @@ def _install_stubs():
     sys.modules["services.command_center"] = command_center_pkg
     manager = types.ModuleType("services.command_center.manager")
 
-    async def record_task_event(task, event_type, message=None, operator_id=None, metadata=None):
+    async def record_task_event(task, event_type, message=None, operator_id=None, metadata=None, using_db=None):
         RECORDED_EVENTS.append((event_type, message, operator_id, metadata or {}))
         return SimpleNamespace(event_type=event_type, metadata=metadata or {})
 
-    async def update_task_progress(task, data, operator_id=None):
+    async def apply_task_progress_in_transaction(
+        connection,
+        task,
+        data,
+        operator_id=None,
+        *,
+        locked_task=None,
+        expected_run_id=None,
+    ):
+        locked_task = locked_task or next((item for item in CREATED_TASKS if item.id == task.id), None)
+        if locked_task is None or (expected_run_id is not None and locked_task.run_id != expected_run_id):
+            return None
+        old_status = locked_task.status
+        if old_status not in command_center.COMMAND_TASK_TERMINAL_STATUSES:
+            for field in ("progress", "status", "run_id", "result"):
+                if field in data:
+                    setattr(locked_task, field, data[field])
         UPDATED_PROGRESS.append((data, operator_id))
-        if "status" in data:
-            task.status = data["status"]
+        entered_terminal = (
+            old_status not in command_center.COMMAND_TASK_TERMINAL_STATUSES
+            and locked_task.status in command_center.COMMAND_TASK_TERMINAL_STATUSES
+        )
+        terminal_agent = getattr(locked_task, "assigned_agent", None) if entered_terminal else None
+        if terminal_agent:
+            terminal_agent.load = max(0, terminal_agent.load - 1)
+            if terminal_agent.current_task_id == locked_task.id:
+                terminal_agent.current_task_id = None
+            if terminal_agent.status == "busy" and terminal_agent.load < terminal_agent.max_concurrent:
+                terminal_agent.status = "idle"
+        return locked_task, terminal_agent, entered_terminal
+
+    async def complete_task_progress_after_commit(task, transition, data):
+        locked_task = transition[0]
+        if locked_task is not task:
+            for field in ("progress", "status", "run_id", "result"):
+                if hasattr(locked_task, field):
+                    setattr(task, field, getattr(locked_task, field))
+        return locked_task
+
+    async def update_task_progress(task, data, operator_id=None):
+        transition = await apply_task_progress_in_transaction(None, task, data, operator_id)
+        if transition is None:
+            return task
+        await complete_task_progress_after_commit(task, transition, data)
         return task
 
     manager.record_task_event = record_task_event
+    manager.apply_task_progress_in_transaction = apply_task_progress_in_transaction
+    manager.complete_task_progress_after_commit = complete_task_progress_after_commit
     manager.update_task_progress = update_task_progress
     sys.modules["services.command_center.manager"] = manager
 
@@ -154,8 +366,24 @@ def _install_stubs():
     async def enforce_pre_run_policy(task, run, operator_id=None):
         return {"decision": "allow"}
 
+    def approval_resume_claim_is_active(approval, now=None):
+        if approval.status not in {"approved", "approved_read_only"}:
+            return False
+        metadata = approval.metadata if isinstance(approval.metadata, dict) else {}
+        if metadata.get("continuation_run_id"):
+            return False
+        recovery = metadata.get("continuation_recovery")
+        if not isinstance(recovery, dict) or recovery.get("status") != "running":
+            return False
+        try:
+            claimed_at = datetime.fromisoformat(str(recovery.get("claimed_at")))
+        except (TypeError, ValueError):
+            return False
+        return (now or datetime.now(timezone.utc)) - claimed_at < timedelta(minutes=5)
+
     approval_service.create_approval_request = create_approval_request
     approval_service.enforce_pre_run_policy = enforce_pre_run_policy
+    approval_service.approval_resume_claim_is_active = approval_resume_claim_is_active
     sys.modules["services.command_center.approval_service"] = approval_service
 
     digital_employee_pkg = types.ModuleType("services.digital_employee")
@@ -207,14 +435,20 @@ def _async_value(value):
 
 
 def _task():
-    return sys.modules["models.command_center"].CommandTask(
+    task = sys.modules["models.command_center"].CommandTask(
         id="task-1",
         tenant_id="tenant-1",
+        deleted=False,
         status="dispatched",
         progress=0,
         run_id=None,
+        started_at=None,
+        finished_at=None,
+        result=None,
         saved_update_fields=[],
     )
+    CREATED_TASKS.append(task)
+    return task
 
 
 def _employee():
@@ -242,8 +476,28 @@ def test_checkout_run_records_lease_snapshot_and_task_pointer():
     assert run.manifest_snapshot["employee"]["id"] == "employee-1"
     assert run.policy_snapshot["approval"]["default"] == "allow"
     assert task.run_id == run.run_id
-    assert task.saved_update_fields == [["run_id", "utime"]]
+    assert task.status == "running"
+    assert task.started_at is not None
+    assert task.saved_update_fields == [["run_id", "status", "started_at", "utime"]]
     assert RECORDED_EVENTS[0][0] == "run_checked_out"
+
+
+def test_checkout_run_rejects_second_checkout_for_same_task():
+    run_manager = _load_run_manager()
+    task = _task()
+    employee = _employee()
+    first_run = asyncio.run(run_manager.checkout_run(task, employee))
+    initial_events = list(RECORDED_EVENTS)
+    initial_saves = list(task.saved_update_fields)
+
+    with pytest.raises(ValueError, match="task is not dispatchable"):
+        asyncio.run(run_manager.checkout_run(task, employee))
+
+    assert CREATED_RUNS == [first_run]
+    assert task.status == "running"
+    assert task.run_id == first_run.run_id
+    assert task.saved_update_fields == initial_saves
+    assert RECORDED_EVENTS == initial_events
 
 
 def test_runtime_event_normalization_updates_run_and_approval_wait_state():
@@ -252,6 +506,7 @@ def test_runtime_event_normalization_updates_run_and_approval_wait_state():
     employee = _employee()
     run = asyncio.run(run_manager.checkout_run(task, employee))
     run.employee = _async_value(employee)
+    initial_lease_expires_at = run.lease_expires_at
 
     normalized = asyncio.run(
         run_manager.record_runtime_event(
@@ -265,12 +520,80 @@ def test_runtime_event_normalization_updates_run_and_approval_wait_state():
 
     assert normalized["event_type"] == "approval_required"
     assert run.status == "waiting_approval"
+    assert run.lease_expires_at > initial_lease_expires_at
     assert task.status == "pending_approval"
     assert RECORDED_EVENTS[-1][0] == "approval_required"
     approval = sys.modules["models.command_center"].CommandApproval.created[-1]
     assert approval.status == "pending"
     assert approval.policy_snapshot == {"approval": {"default": "allow"}}
     assert approval.requested_action == {"tool": "write_file", "risk_level": "high"}
+
+
+def test_late_approval_event_is_ignored_after_run_is_terminal():
+    run_manager = _load_run_manager()
+    task = _task()
+    employee = _employee()
+    run = asyncio.run(run_manager.checkout_run(task, employee))
+    run.status = "completed"
+    initial_task_state = (task.status, task.run_id, list(task.saved_update_fields))
+    initial_events = list(RECORDED_EVENTS)
+
+    normalized = asyncio.run(
+        run_manager.record_runtime_event(
+            task,
+            run,
+            "approval_required",
+            {"tool": "write_file", "risk_level": "high"},
+        )
+    )
+
+    assert normalized is None
+    assert (task.status, task.run_id, task.saved_update_fields) == initial_task_state
+    assert RECORDED_EVENTS == initial_events
+    assert sys.modules["models.command_center"].CommandApproval.created == []
+
+
+def test_runtime_event_from_old_run_is_ignored_after_task_points_to_new_run():
+    run_manager = _load_run_manager()
+    task = _task()
+    employee = _employee()
+    run = asyncio.run(run_manager.checkout_run(task, employee))
+    task.status = "running"
+    task.run_id = "new-run-id"
+    initial_heartbeat = run.heartbeat_at
+    initial_events = list(RECORDED_EVENTS)
+
+    normalized = asyncio.run(run_manager.record_runtime_event(task, run, "delta", {"content": "late"}))
+
+    assert normalized is None
+    assert task.status == "running"
+    assert task.run_id == "new-run-id"
+    assert run.heartbeat_at == initial_heartbeat
+    assert run.saved_update_fields == []
+    assert RECORDED_EVENTS == initial_events
+
+
+def test_runtime_error_finalizes_task_through_progress_manager():
+    run_manager = _load_run_manager()
+    task = _task()
+    employee = _employee()
+    run = asyncio.run(run_manager.checkout_run(task, employee))
+
+    normalized = asyncio.run(
+        run_manager.record_runtime_event(
+            task,
+            run,
+            "error",
+            {"message": "runtime failed"},
+            operator_id="operator-1",
+        )
+    )
+
+    assert normalized["event_type"] == "runtime_error"
+    assert task.status == "failed"
+    assert UPDATED_PROGRESS[-1][0]["status"] == "failed"
+    assert UPDATED_PROGRESS[-1][0]["metadata"]["run_id"] == run.run_id
+    assert RECORDED_EVENTS[-1][0] == "runtime_error"
 
 
 def test_runtime_tool_call_normalization_accepts_agentscope_tool_call_name():
@@ -330,9 +653,61 @@ def test_finalize_and_stale_recovery_mark_terminal_run():
     run.task = _async_value(task)
     run.lease_expires_at = datetime.now(timezone.utc) - timedelta(minutes=10)
 
+    query_filters = {}
+
     class Query:
         def filter(self, **kwargs):
             return self
+
+        def using_db(self, connection):
+            return self
+
+        def select_for_update(self, **kwargs):
+            return self
+
+        async def first(self):
+            return run
+
+        async def all(self):
+            return [run]
+
+    def filter_runs(cls, **kwargs):
+        query_filters.update(kwargs)
+        return Query()
+
+    sys.modules["models.command_center"].CommandTaskRun.filter = classmethod(filter_runs)
+
+    recovered = asyncio.run(run_manager.recover_stale_runs(now=datetime.now(timezone.utc)))
+
+    assert recovered == [run]
+    assert run.status == "stale"
+    assert run.error["message"] == "run lease expired"
+    assert "waiting_approval" not in query_filters["status__in"]
+    assert UPDATED_PROGRESS[-1][0]["status"] == "failed"
+    assert RECORDED_EVENTS[-1][0] == "run_stale_recovered"
+
+
+def test_stale_recovery_does_not_overwrite_terminal_task():
+    run_manager = _load_run_manager()
+    task = _task()
+    employee = _employee()
+    run = asyncio.run(run_manager.checkout_run(task, employee))
+    task.status = "completed"
+    run.task = _async_value(task)
+    run.lease_expires_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+
+    class Query:
+        def filter(self, **kwargs):
+            return self
+
+        def using_db(self, connection):
+            return self
+
+        def select_for_update(self, **kwargs):
+            return self
+
+        async def first(self):
+            return run
 
         async def all(self):
             return [run]
@@ -342,10 +717,278 @@ def test_finalize_and_stale_recovery_mark_terminal_run():
     recovered = asyncio.run(run_manager.recover_stale_runs(now=datetime.now(timezone.utc)))
 
     assert recovered == [run]
+    assert task.status == "completed"
+    assert UPDATED_PROGRESS == []
     assert run.status == "stale"
-    assert run.error["message"] == "run lease expired"
-    assert UPDATED_PROGRESS[-1][0]["status"] == "failed"
-    assert RECORDED_EVENTS[-1][0] == "run_stale_recovered"
+
+
+def test_stale_recovery_skips_candidate_renewed_before_lock():
+    run_manager = _load_run_manager()
+    task = _task()
+    employee = _employee()
+    run = asyncio.run(run_manager.checkout_run(task, employee))
+    run.task = _async_value(task)
+    cutoff = datetime.now(timezone.utc)
+    run.lease_expires_at = cutoff - timedelta(minutes=10)
+    lock_options = []
+    lease_renewed = False
+
+    class Query:
+        def __init__(self, filters):
+            self.filters = filters
+
+        def filter(self, **kwargs):
+            self.filters.update(kwargs)
+            return self
+
+        def using_db(self, connection):
+            return self
+
+        def select_for_update(self, **kwargs):
+            lock_options.append(kwargs)
+            return self
+
+        async def first(self):
+            nonlocal lease_renewed
+            lease_renewed = True
+            run.lease_expires_at = cutoff + timedelta(minutes=5)
+            if run.lease_expires_at >= self.filters["lease_expires_at__lt"]:
+                return None
+            return run
+
+        async def all(self):
+            return [run]
+
+    sys.modules["models.command_center"].CommandTaskRun.filter = classmethod(lambda cls, **kwargs: Query(kwargs))
+
+    recovered = asyncio.run(run_manager.recover_stale_runs(now=cutoff))
+
+    assert lease_renewed is True
+    assert lock_options == [{"skip_locked": True}]
+    assert recovered == []
+    assert run.status == "checked_out"
+    assert task.status == "running"
+    assert UPDATED_PROGRESS == []
+    assert RECORDED_EVENTS == [("run_checked_out", "数字员工运行已 checkout", None, {
+        "run_id": run.run_id,
+        "lease_owner": run.lease_owner,
+        "workspace_etag": run.workspace_etag,
+    })]
+
+
+def test_orphaned_dispatched_task_without_run_fails_and_releases_agent_load():
+    run_manager = _load_run_manager()
+    current = datetime.now(timezone.utc)
+    task = _task()
+    task.utime = current - timedelta(minutes=10)
+    task.assigned_agent_key = "agent-1"
+    task.assigned_agent = SimpleNamespace(
+        load=1,
+        max_concurrent=1,
+        current_task_id=task.id,
+        status="busy",
+    )
+
+    recovered = asyncio.run(run_manager.recover_orphaned_dispatched_tasks(now=current))
+
+    assert recovered == [task]
+    assert task.status == "failed"
+    assert task.assigned_agent.load == 0
+    assert task.assigned_agent.current_task_id is None
+    assert task.assigned_agent.status == "idle"
+    assert UPDATED_PROGRESS[-1][0]["metadata"] == {
+        "reason": "orphaned_dispatched_task",
+        "run_id": None,
+        "run_status": None,
+        "timeout_seconds": 300,
+    }
+
+
+@pytest.mark.parametrize(
+    "run_status",
+    ["checked_out", "running", "waiting_approval"],
+)
+def test_orphan_recovery_keeps_dispatched_task_with_current_run(run_status):
+    run_manager = _load_run_manager()
+    current = datetime.now(timezone.utc)
+    task = _task()
+    task.utime = current - timedelta(minutes=10)
+    task.run_id = "run-1"
+    run = sys.modules["models.command_center"].CommandTaskRun(
+        id="run-row-1",
+        tenant_id=task.tenant_id,
+        task_id=task.id,
+        run_id=task.run_id,
+        status=run_status,
+        deleted=False,
+    )
+    CREATED_RUNS.append(run)
+
+    recovered = asyncio.run(run_manager.recover_orphaned_dispatched_tasks(now=current))
+
+    assert recovered == []
+    assert task.status == "dispatched"
+    assert task.run_id == "run-1"
+    assert UPDATED_PROGRESS == []
+
+
+def test_orphan_recovery_fails_timed_out_continuation_ready_task_and_releases_load():
+    run_manager = _load_run_manager()
+    current = datetime.now(timezone.utc)
+    task = _task()
+    task.utime = current - timedelta(minutes=10)
+    task.run_id = "run-1"
+    task.assigned_agent_key = "agent-1"
+    task.assigned_agent = SimpleNamespace(
+        load=1,
+        max_concurrent=1,
+        current_task_id=task.id,
+        status="busy",
+    )
+    run = sys.modules["models.command_center"].CommandTaskRun(
+        id="run-row-1",
+        tenant_id=task.tenant_id,
+        task_id=task.id,
+        run_id=task.run_id,
+        status="continuation_ready",
+        deleted=False,
+        finished_at=None,
+        heartbeat_at=current - timedelta(minutes=10),
+        lease_owner="worker-1",
+        lease_expires_at=current - timedelta(minutes=5),
+        error={},
+        saved_update_fields=[],
+    )
+    CREATED_RUNS.append(run)
+
+    recovered = asyncio.run(run_manager.recover_orphaned_dispatched_tasks(now=current))
+
+    assert recovered == [task]
+    assert task.status == "failed"
+    assert task.assigned_agent.load == 0
+    assert task.assigned_agent.current_task_id is None
+    assert task.assigned_agent.status == "idle"
+    assert UPDATED_PROGRESS[-1][0]["metadata"]["run_status"] == "continuation_ready"
+    assert run.status == "failed"
+    assert run.finished_at == current
+    assert run.heartbeat_at == current
+    assert run.lease_owner is None
+    assert run.lease_expires_at == current
+    assert run.error == {
+        "message": "task did not enter a valid continuation run",
+        "reason": "orphaned_dispatched_task",
+    }
+    assert run.saved_update_fields == [[
+        "status",
+        "finished_at",
+        "heartbeat_at",
+        "lease_owner",
+        "lease_expires_at",
+        "error",
+        "utime",
+    ]]
+
+
+def _continuation_ready_orphan_case(current, recovery):
+    task = _task()
+    task.utime = current - timedelta(minutes=10)
+    task.run_id = "run-1"
+    task.assigned_agent_key = "agent-1"
+    task.assigned_agent = SimpleNamespace(
+        load=1,
+        max_concurrent=1,
+        current_task_id=task.id,
+        status="busy",
+    )
+    run = sys.modules["models.command_center"].CommandTaskRun(
+        id="run-row-1",
+        tenant_id=task.tenant_id,
+        task_id=task.id,
+        run_id=task.run_id,
+        status="continuation_ready",
+        deleted=False,
+        finished_at=None,
+        heartbeat_at=current - timedelta(minutes=10),
+        lease_owner="worker-1",
+        lease_expires_at=current - timedelta(minutes=5),
+        error={},
+        saved_update_fields=[],
+    )
+    approval = sys.modules["models.command_center"].CommandApproval(
+        id="approval-1",
+        tenant_id=task.tenant_id,
+        task_id=task.id,
+        run_id=run.id,
+        status="approved",
+        deleted=False,
+        ctime=current,
+        metadata={"continuation_recovery": recovery},
+    )
+    CREATED_RUNS.append(run)
+    sys.modules["models.command_center"].CommandApproval.records = [approval]
+    return task, run
+
+
+def test_orphan_recovery_keeps_continuation_ready_task_with_active_resume_claim():
+    run_manager = _load_run_manager()
+    current = datetime.now(timezone.utc)
+    task, run = _continuation_ready_orphan_case(
+        current,
+        {"status": "running", "claimed_at": current.isoformat()},
+    )
+
+    recovered = asyncio.run(run_manager.recover_orphaned_dispatched_tasks(now=current))
+
+    assert recovered == []
+    assert task.status == "dispatched"
+    assert task.run_id == run.run_id
+    assert run.status == "continuation_ready"
+    assert run.saved_update_fields == []
+    assert task.assigned_agent.load == 1
+    assert task.assigned_agent.current_task_id == task.id
+    assert task.assigned_agent.status == "busy"
+    assert UPDATED_PROGRESS == []
+
+
+@pytest.mark.parametrize(
+    "recovery",
+    [
+        pytest.param(
+            {"status": "running", "claimed_at": "expired"},
+            id="expired-running-claim",
+        ),
+        pytest.param(
+            {"status": "failed", "claimed_at": "failed"},
+            id="failed-claim",
+        ),
+    ],
+)
+def test_orphan_recovery_terminates_continuation_ready_task_without_active_resume_claim(recovery):
+    run_manager = _load_run_manager()
+    current = datetime.now(timezone.utc)
+    if recovery["status"] == "running":
+        recovery["claimed_at"] = (current - timedelta(minutes=6)).isoformat()
+    else:
+        recovery["claimed_at"] = current.isoformat()
+    task, run = _continuation_ready_orphan_case(current, recovery)
+
+    recovered = asyncio.run(run_manager.recover_orphaned_dispatched_tasks(now=current))
+
+    assert recovered == [task]
+    assert task.status == "failed"
+    assert run.status == "failed"
+    assert run.finished_at == current
+    assert run.heartbeat_at == current
+    assert run.lease_owner is None
+    assert run.lease_expires_at == current
+    assert run.error == {
+        "message": "task did not enter a valid continuation run",
+        "reason": "orphaned_dispatched_task",
+    }
+    assert task.assigned_agent.load == 0
+    assert task.assigned_agent.current_task_id is None
+    assert task.assigned_agent.status == "idle"
+    assert UPDATED_PROGRESS[-1][0]["metadata"]["run_status"] == "continuation_ready"
 
 
 def test_finalize_run_persists_usage():
@@ -359,6 +1002,21 @@ def test_finalize_run_persists_usage():
 
     assert run.usage == usage
     assert "usage" in run.saved_update_fields[-1]
+
+
+def test_finalize_run_does_not_overwrite_rejected_run():
+    run_manager = _load_run_manager()
+    task = _task()
+    employee = _employee()
+    run = asyncio.run(run_manager.checkout_run(task, employee))
+    run.status = "rejected"
+
+    asyncio.run(run_manager.finalize_run(run, "completed", result={"content": "late"}))
+
+    assert run.status == "rejected"
+    assert "result" not in run.metadata
+    assert run.saved_update_fields == []
+    assert FINALIZED_SAVES == []
 
 
 def test_finalize_run_refreshes_metadata_before_merging_result():
@@ -412,6 +1070,58 @@ def test_execute_task_run_stops_when_runtime_requests_approval():
     assert CREATED_RUNS[-1].status == "waiting_approval"
     assert task.status == "pending_approval"
     assert all(save[0] != "completed" for save in FINALIZED_SAVES)
+
+
+def test_execute_task_run_renews_lease_during_silent_execution():
+    run_manager = _load_run_manager()
+    task = _task()
+    employee = _employee()
+    execute_coordinator = types.ModuleType("services.digital_employee.execute_coordinator")
+    heartbeat_observed = False
+
+    async def run(task_arg, employee_arg, **kwargs):
+        nonlocal heartbeat_observed
+        command_run = kwargs["command_run"]
+        for _ in range(20):
+            await asyncio.sleep(0)
+            heartbeat_observed = any(
+                update_fields and "lease_expires_at" in update_fields
+                for update_fields in command_run.saved_update_fields
+            )
+            if heartbeat_observed:
+                break
+        return {"content": "done", "usage": {}}
+
+    execute_coordinator.run = run
+    sys.modules["services.digital_employee.execute_coordinator"] = execute_coordinator
+    run_manager.LEASE_HEARTBEAT_SECONDS = 0
+
+    result = asyncio.run(run_manager.execute_task_run(task, employee))
+
+    assert result["content"] == "done"
+    assert heartbeat_observed is True
+    assert CREATED_RUNS[-1].status == "completed"
+
+
+def test_maintain_run_lease_retries_after_heartbeat_database_error():
+    run_manager = _load_run_manager()
+    run = SimpleNamespace(run_id="run-1", status="running")
+    attempts = []
+
+    async def heartbeat_run(run_arg):
+        attempts.append(run_arg.run_id)
+        if len(attempts) == 1:
+            raise RuntimeError("database unavailable")
+        run_arg.status = "completed"
+        return run_arg
+
+    run_manager.heartbeat_run = heartbeat_run
+    run_manager.LEASE_HEARTBEAT_SECONDS = 0
+
+    asyncio.run(run_manager._maintain_run_lease(run))
+
+    assert attempts == ["run-1", "run-1"]
+    assert run.status == "completed"
 
 
 def test_execute_task_run_records_real_continuation_start_on_new_run():

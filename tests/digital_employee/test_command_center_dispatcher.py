@@ -6,8 +6,36 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+
+STUB_MODULES = [
+    "sanic",
+    "sanic.log",
+    "services",
+    "services.command_center",
+    "services.command_center.dispatcher",
+    "services.digital_employee",
+    "services.digital_employee.lion_agent_adapter",
+]
+_MISSING_MODULE = object()
+
+
+@pytest.fixture(autouse=True)
+def _restore_stubbed_modules():
+    original_modules = {name: sys.modules.get(name, _MISSING_MODULE) for name in STUB_MODULES}
+    yield
+    for name, original in original_modules.items():
+        if original is _MISSING_MODULE:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
+
 
 def _load_dispatcher():
+    for name in STUB_MODULES:
+        sys.modules.pop(name, None)
+
     sanic_module = types.ModuleType("sanic")
     sanic_log_module = types.ModuleType("sanic.log")
     sanic_log_module.logger = SimpleNamespace(error=lambda *args, **kwargs: None)

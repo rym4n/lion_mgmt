@@ -915,7 +915,7 @@ async def task_progress(request: Request):
             },
         }
     ),
-    response=_response("调度完成", TASK_SCHEMA, {"400": "参数错误", "404": "任务不存在"}),
+    response=_response("调度完成", TASK_SCHEMA, {"400": "参数错误", "404": "任务不存在", "409": "任务当前状态不可调度"}),
 )
 @requires_permission("command_center:u")
 async def retry_dispatch(request: Request):
@@ -927,6 +927,8 @@ async def retry_dispatch(request: Request):
     task = await CommandTask.get_or_none(id=task_id, tenant_id=tenant_id, deleted=False)
     if not task:
         raise CustomError(ErrorCode.NOT_FOUND)
+    if task.status != "pending_dispatch":
+        raise CustomError(ErrorCode.COMMAND_TASK_NOT_DISPATCHABLE)
     if "agent_id" in data:
         task.requested_agent_id = data.get("agent_id")
         await task.save(update_fields=["requested_agent_id"])

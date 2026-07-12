@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sanic.log import logger
 from tortoise.expressions import Q
+from tortoise.transactions import in_transaction
 
 from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
 from settings import TZ
@@ -14,6 +15,7 @@ from .realtime import publish_command_center_update
 
 
 TERMINAL_TASK_STATUS = {"completed", "failed", "cancelled", "handed_off"}
+DISPATCHABLE_TASK_STATUS = {"pending_dispatch"}
 DEFAULT_COORDINATOR_AGENT_KEY = "command_center_coordinator"
 DEFAULT_COORDINATOR_AGENT_NAME = "指挥部分工协调智能体"
 DEFAULT_COORDINATOR_CAPABILITIES = ["command_center", "coordination", "dispatch", "task_planning"]
@@ -154,8 +156,11 @@ async def record_task_event(
     message: str | None = None,
     operator_id: str | None = None,
     metadata: dict | None = None,
+    *,
+    using_db=None,
 ) -> CommandTaskEvent:
     return await CommandTaskEvent.create(
+        using_db=using_db,
         tenant_id=task.tenant_id,
         task=task,
         event_type=event_type,
@@ -169,58 +174,123 @@ async def record_task_event(
 
 
 async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> CommandTask:
-    previous_agent_key = task.assigned_agent_key
+    if task.status not in DISPATCHABLE_TASK_STATUS:
+        return task
     coordinator = await ensure_default_coordinator_agent(task.tenant_id)
     agents = await CommandAgent.filter(tenant_id=task.tenant_id, deleted=False).all()
     decision = await choose_agent_with_lion_agent(task, agents, coordinator)
+    selected_agent = None
 
-    task.dispatch_status = decision.dispatch_status
-    task.dispatch_reason = decision.reason
+    async with in_transaction() as connection:
+        locked_task = (
+            await CommandTask.filter(id=task.id, tenant_id=task.tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if not locked_task:
+            return task
+        if locked_task.status not in DISPATCHABLE_TASK_STATUS:
+            return locked_task
 
-    if decision.agent:
-        agent = decision.agent
-        task.assigned_agent = agent
-        task.assigned_agent_key = agent.agent_key
-        task.status = "dispatched"
-        await task.save()
+        previous_agent_key = locked_task.assigned_agent_key
+        candidate_key = decision.agent.agent_key if decision.agent else None
+        agent_keys = sorted({key for key in (previous_agent_key, candidate_key) if key})
+        locked_agents = []
+        if agent_keys:
+            locked_agents = (
+                await CommandAgent.filter(
+                    tenant_id=locked_task.tenant_id,
+                    agent_key__in=agent_keys,
+                    deleted=False,
+                )
+                .using_db(connection)
+                .select_for_update()
+                .order_by("id")
+                .all()
+            )
+        agents_by_key = {agent.agent_key: agent for agent in locked_agents}
+        candidate = agents_by_key.get(candidate_key)
+        same_assignment = bool(candidate and previous_agent_key == candidate.agent_key)
+        candidate_available = bool(
+            candidate
+            and candidate.status not in {"offline", "error"}
+            and (same_assignment or candidate.load < candidate.max_concurrent)
+        )
 
-        if previous_agent_key and previous_agent_key != agent.agent_key:
-            previous_agent = await CommandAgent.get_or_none(tenant_id=task.tenant_id, agent_key=previous_agent_key, deleted=False)
-            if previous_agent:
+        locked_task.dispatch_status = decision.dispatch_status
+        locked_task.dispatch_reason = decision.reason
+        previous_agent = agents_by_key.get(previous_agent_key)
+
+        if candidate_available:
+            selected_agent = candidate
+            locked_task.assigned_agent = candidate
+            locked_task.assigned_agent_key = candidate.agent_key
+            locked_task.status = "dispatched"
+
+            if previous_agent and previous_agent.agent_key != candidate.agent_key:
                 previous_agent.load = max(0, previous_agent.load - 1)
-                if previous_agent.current_task_id == task.id:
+                if previous_agent.current_task_id == locked_task.id:
                     previous_agent.current_task_id = None
                 if previous_agent.status == "busy" and previous_agent.load < previous_agent.max_concurrent:
                     previous_agent.status = "idle"
-                await previous_agent.save(update_fields=["load", "current_task_id", "status"])
+                await previous_agent.save(
+                    using_db=connection,
+                    update_fields=["load", "current_task_id", "status"],
+                )
 
-        if previous_agent_key != agent.agent_key:
-            agent.load = min(agent.max_concurrent, agent.load + 1)
-        agent.current_task_id = task.id
-        if agent.load >= agent.max_concurrent:
-            agent.status = "busy"
-        await agent.save(update_fields=["load", "current_task_id", "status"])
-        await record_task_event(task, "task_dispatched", decision.reason, operator_id, {"dispatch_source": "lion_agent", "raw_response": decision.raw_response})
-        if _should_auto_execute(agent):
-            _schedule_lion_agent_execution(task, agent, operator_id)
-    else:
-        if previous_agent_key:
-            previous_agent = await CommandAgent.get_or_none(tenant_id=task.tenant_id, agent_key=previous_agent_key, deleted=False)
+            if not same_assignment:
+                candidate.load += 1
+            candidate.current_task_id = locked_task.id
+            if candidate.load >= candidate.max_concurrent:
+                candidate.status = "busy"
+            await candidate.save(
+                using_db=connection,
+                update_fields=["load", "current_task_id", "status"],
+            )
+            await locked_task.save(using_db=connection)
+            await record_task_event(
+                locked_task,
+                "task_dispatched",
+                decision.reason,
+                operator_id,
+                {"dispatch_source": "lion_agent", "raw_response": decision.raw_response},
+                using_db=connection,
+            )
+        else:
             if previous_agent:
                 previous_agent.load = max(0, previous_agent.load - 1)
-                if previous_agent.current_task_id == task.id:
+                if previous_agent.current_task_id == locked_task.id:
                     previous_agent.current_task_id = None
                 if previous_agent.status == "busy" and previous_agent.load < previous_agent.max_concurrent:
                     previous_agent.status = "idle"
-                await previous_agent.save(update_fields=["load", "current_task_id", "status"])
-        task.assigned_agent = None
-        task.assigned_agent_key = None
-        task.status = "pending_dispatch"
-        await task.save()
-        await record_task_event(task, "dispatch_waiting", decision.reason, operator_id, {"dispatch_source": "lion_agent", "raw_response": decision.raw_response})
+                await previous_agent.save(
+                    using_db=connection,
+                    update_fields=["load", "current_task_id", "status"],
+                )
+            if decision.agent and not candidate_available:
+                locked_task.dispatch_status = "no_candidate"
+                locked_task.dispatch_reason = "候选员工容量已变化，请重新调度"
+            locked_task.assigned_agent = None
+            locked_task.assigned_agent_key = None
+            locked_task.status = "pending_dispatch"
+            await locked_task.save(using_db=connection)
+            await record_task_event(
+                locked_task,
+                "dispatch_waiting",
+                locked_task.dispatch_reason,
+                operator_id,
+                {"dispatch_source": "lion_agent", "raw_response": decision.raw_response},
+                using_db=connection,
+            )
 
-    await publish_command_center_update(task.tenant_id, "task_dispatched", task.id)
-    return task
+    if locked_task is not task:
+        for field in ("assigned_agent_key", "dispatch_status", "dispatch_reason", "status"):
+            setattr(task, field, getattr(locked_task, field))
+    await publish_command_center_update(locked_task.tenant_id, "task_dispatched", locked_task.id)
+    if selected_agent and _should_auto_execute(selected_agent):
+        _schedule_lion_agent_execution(locked_task, selected_agent, operator_id)
+    return locked_task
 
 
 def _is_digital_employee_agent(agent: CommandAgent) -> bool:
@@ -237,13 +307,15 @@ def _schedule_lion_agent_execution(task: CommandTask, employee: CommandAgent, op
         current_employee = await CommandAgent.get_or_none(id=employee.id, tenant_id=employee.tenant_id, deleted=False)
         if not current_task or not current_employee:
             return
-        try:
-            from services.command_center.run_manager import execute_task_run
+        from services.command_center.run_manager import RunCheckoutConflict, execute_task_run
 
+        try:
             await execute_task_run(current_task, current_employee, operator_id=operator_id)
+        except RunCheckoutConflict:
+            return
         except Exception as exc:
             failed_task = await CommandTask.get_or_none(id=task.id, tenant_id=task.tenant_id, deleted=False)
-            if failed_task and failed_task.status not in TERMINAL_TASK_STATUS:
+            if failed_task and failed_task.status == "dispatched":
                 failed_task.result = str(exc)
                 await failed_task.save(update_fields=["result", "utime"])
                 await update_task_progress(
@@ -269,7 +341,7 @@ def _schedule_task_dispatch(task: CommandTask, operator_id: str | None = None) -
         except Exception as exc:
             logger.exception(f"指挥中心任务调度失败: task_id={task.id}")
             failed_task = await CommandTask.get_or_none(id=task.id, tenant_id=task.tenant_id, deleted=False)
-            if failed_task and failed_task.status not in TERMINAL_TASK_STATUS:
+            if failed_task and failed_task.status == "pending_dispatch":
                 await update_task_progress(
                     failed_task,
                     {
@@ -303,49 +375,165 @@ async def create_command_task(tenant_id: str, creator, data: dict) -> CommandTas
     return task
 
 
-async def update_task_progress(task: CommandTask, data: dict, operator_id: str | None = None) -> CommandTask:
-    old_assigned_agent_key = task.assigned_agent_key
+async def apply_task_progress_in_transaction(
+    connection,
+    task: CommandTask,
+    data: dict,
+    operator_id: str | None = None,
+    *,
+    locked_task: CommandTask | None = None,
+    expected_run_id: str | None = None,
+):
+    """Persist task, event, and agent workload changes on the caller's transaction."""
+    if locked_task is None:
+        locked_task = (
+            await CommandTask.filter(id=task.id, tenant_id=task.tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+    if not locked_task or (expected_run_id is not None and locked_task.run_id != expected_run_id):
+        return None
 
-    if "progress" in data:
-        task.progress = max(0, min(100, int(data["progress"])))
-    if "status" in data:
-        task.status = data["status"]
-    if "run_id" in data:
-        task.run_id = data["run_id"]
+    old_status = locked_task.status
+    old_assigned_agent_key = locked_task.assigned_agent_key
+    if old_status not in TERMINAL_TASK_STATUS:
+        if "progress" in data:
+            locked_task.progress = max(0, min(100, int(data["progress"])))
+        if "status" in data:
+            locked_task.status = data["status"]
+        if "run_id" in data:
+            locked_task.run_id = data["run_id"]
+        if "result" in data:
+            locked_task.result = data["result"]
 
     now = datetime.now(TZ)
-    if task.status == "running" and not task.started_at:
-        task.started_at = now
-    if task.status in TERMINAL_TASK_STATUS:
-        task.finished_at = now
-        if task.status == "completed":
-            task.progress = 100
+    if locked_task.status == "running" and not locked_task.started_at:
+        locked_task.started_at = now
+    if locked_task.status in TERMINAL_TASK_STATUS:
+        if not locked_task.finished_at:
+            locked_task.finished_at = now
+        if locked_task.status == "completed":
+            locked_task.progress = 100
 
-    await task.save()
-    await record_task_event(task, "task_progress_updated", data.get("message"), operator_id, data.get("metadata"))
+    entered_terminal = old_status not in TERMINAL_TASK_STATUS and locked_task.status in TERMINAL_TASK_STATUS
 
-    if task.status in TERMINAL_TASK_STATUS and old_assigned_agent_key:
-        agent = await CommandAgent.get_or_none(tenant_id=task.tenant_id, agent_key=old_assigned_agent_key, deleted=False)
-        if agent:
-            agent.load = max(0, agent.load - 1)
-            if agent.current_task_id == task.id:
-                agent.current_task_id = None
-            if agent.status == "busy" and agent.load < agent.max_concurrent:
-                agent.status = "idle"
-            await agent.save(update_fields=["load", "current_task_id", "status"])
+    await locked_task.save(using_db=connection)
+    await record_task_event(
+        locked_task,
+        "task_progress_updated",
+        data.get("message"),
+        operator_id,
+        data.get("metadata"),
+        using_db=connection,
+    )
 
-    if task.status in TERMINAL_TASK_STATUS and task.assigned_agent_key:
+    terminal_agent = None
+    if entered_terminal and old_assigned_agent_key:
+        terminal_agent = (
+            await CommandAgent.filter(
+                tenant_id=locked_task.tenant_id,
+                agent_key=old_assigned_agent_key,
+                deleted=False,
+            )
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if terminal_agent:
+            terminal_agent.load = max(0, terminal_agent.load - 1)
+            if terminal_agent.current_task_id == locked_task.id:
+                terminal_agent.current_task_id = None
+            if terminal_agent.status == "busy" and terminal_agent.load < terminal_agent.max_concurrent:
+                terminal_agent.status = "idle"
+            await terminal_agent.save(
+                using_db=connection,
+                update_fields=["load", "current_task_id", "status"],
+            )
+
+    return locked_task, terminal_agent, entered_terminal
+
+
+async def complete_task_progress_after_commit(task: CommandTask, transition, data: dict) -> CommandTask:
+    """Run realtime/report side effects only after the owning transaction commits."""
+    locked_task, terminal_agent, entered_terminal = transition
+
+    if locked_task is not task:
+        for field in ("progress", "status", "run_id", "result", "started_at", "finished_at"):
+            setattr(task, field, getattr(locked_task, field))
+
+    if entered_terminal and terminal_agent and _is_digital_employee_agent(terminal_agent):
         try:
-            agent = await CommandAgent.get_or_none(tenant_id=task.tenant_id, agent_key=task.assigned_agent_key, deleted=False)
-            if agent and _is_digital_employee_agent(agent):
-                from services.digital_employee.employee_report import compose
+            from services.digital_employee.employee_report import compose
 
-                asyncio.create_task(compose(task, (data.get("metadata") or {}).get("actions")))
+            asyncio.create_task(compose(locked_task, (data.get("metadata") or {}).get("actions")))
         except Exception as exc:
-            logger.warning(f"调度数字员工报告生成失败: task_id={task.id}, error={exc}")
+            logger.warning(f"调度数字员工报告生成失败: task_id={locked_task.id}, error={exc}")
 
-    await publish_command_center_update(task.tenant_id, "task_progress_updated", task.id)
-    return task
+    await publish_command_center_update(locked_task.tenant_id, "task_progress_updated", locked_task.id)
+    return locked_task
+
+
+async def update_task_progress(task: CommandTask, data: dict, operator_id: str | None = None) -> CommandTask:
+    async with in_transaction() as connection:
+        transition = await apply_task_progress_in_transaction(connection, task, data, operator_id)
+    if transition is None:
+        return task
+    return await complete_task_progress_after_commit(task, transition, data)
+
+
+async def reconcile_agent_workloads(tenant_id: str | None = None) -> int:
+    """按真实活跃任务重建员工负载，修复异常中断留下的状态漂移。"""
+    agent_filters = {"deleted": False}
+    if tenant_id:
+        agent_filters["tenant_id"] = tenant_id
+    agents = await CommandAgent.filter(**agent_filters).all()
+    if not agents:
+        return 0
+
+    reconciled = 0
+    reconciled_tenants: set[str | None] = set()
+    for agent_ref in agents:
+        async with in_transaction():
+            agent = await CommandAgent.filter(id=agent_ref.id, deleted=False).select_for_update().first()
+            if not agent:
+                continue
+            assigned_tasks = (
+                await CommandTask.filter(
+                    tenant_id=agent.tenant_id,
+                    assigned_agent_id=agent.id,
+                    deleted=False,
+                )
+                .exclude(status__in=TERMINAL_TASK_STATUS)
+                .order_by("-ctime")
+                .all()
+            )
+            expected_load = len(assigned_tasks)
+            expected_current_task_id = assigned_tasks[0].id if assigned_tasks else None
+            expected_status = agent.status
+            if agent.status in {"idle", "busy"}:
+                max_concurrent = max(1, int(agent.max_concurrent or 1))
+                expected_status = "busy" if expected_load >= max_concurrent else "idle"
+
+            update_fields = []
+            if agent.load != expected_load:
+                agent.load = expected_load
+                update_fields.append("load")
+            if agent.current_task_id != expected_current_task_id:
+                agent.current_task_id = expected_current_task_id
+                update_fields.append("current_task_id")
+            if agent.status != expected_status:
+                agent.status = expected_status
+                update_fields.append("status")
+            if update_fields:
+                await agent.save(update_fields=update_fields)
+                reconciled += 1
+                reconciled_tenants.add(agent.tenant_id)
+
+    for reconciled_tenant_id in reconciled_tenants:
+        await publish_command_center_update(reconciled_tenant_id, "agent_workloads_reconciled")
+
+    return reconciled
 
 
 async def list_tasks(tenant_id: str, filters: dict) -> tuple[list[CommandTask], int]:
@@ -382,15 +570,36 @@ async def sweep_stale_dispatch_tasks(operator_id: str | None = None) -> int:
     swept = 0
     for task in stale_tasks:
         try:
-            await update_task_progress(
-                task,
-                {
-                    "status": "failed",
-                    "message": "长时间没有可用的数字员工接单，任务已自动超时",
-                    "metadata": {"reason": "dispatch_timeout", "timeout_seconds": COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS},
-                },
-                operator_id,
-            )
+            data = {
+                "status": "failed",
+                "message": "长时间没有可用的数字员工接单，任务已自动超时",
+                "metadata": {"reason": "dispatch_timeout", "timeout_seconds": COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS},
+            }
+            async with in_transaction() as connection:
+                locked_task = (
+                    await CommandTask.filter(
+                        id=task.id,
+                        tenant_id=task.tenant_id,
+                        deleted=False,
+                        status="pending_dispatch",
+                        ctime__lt=deadline,
+                    )
+                    .using_db(connection)
+                    .select_for_update(skip_locked=True)
+                    .first()
+                )
+                if not locked_task:
+                    continue
+                transition = await apply_task_progress_in_transaction(
+                    connection,
+                    locked_task,
+                    data,
+                    operator_id,
+                    locked_task=locked_task,
+                )
+            if transition is None:
+                continue
+            await complete_task_progress_after_commit(task, transition, data)
             swept += 1
         except Exception as exc:
             logger.warning(f"派单超时清扫失败: task_id={task.id}, error={exc}")

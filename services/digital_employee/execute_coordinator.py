@@ -214,11 +214,13 @@ async def run(
             raise RuntimeError(event.get("message") or event)
         else:
             await _publish_room_event(task, event_type, event, operator_id)
-    task.result = "".join(content)
-    await task.save(update_fields=["result", "utime"])
-    await update_task_progress(
-        task,
-        {"status": "completed", "progress": 100, "message": "数字员工执行完成"},
-        operator_id,
-    )
-    return {"content": task.result, "usage": usage}
+    result_content = "".join(content)
+    if command_run is None:
+        task.result = result_content
+        await task.save(update_fields=["result", "utime"])
+        await update_task_progress(
+            task,
+            {"status": "completed", "progress": 100, "message": "数字员工执行完成"},
+            operator_id,
+        )
+    return {"content": result_content, "usage": usage}

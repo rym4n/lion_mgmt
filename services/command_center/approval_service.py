@@ -16,8 +16,15 @@ from models.command_center import (
     COMMAND_APPROVAL_STATUS_APPROVED,
     COMMAND_APPROVAL_STATUS_APPROVED_READ_ONLY,
     COMMAND_APPROVAL_STATUS_PENDING,
+    COMMAND_RUN_STATUS_CHECKED_OUT,
     COMMAND_RUN_STATUS_FAILED,
+    COMMAND_RUN_STATUS_RUNNING,
+    COMMAND_RUN_STATUS_WAITING_APPROVAL,
+    COMMAND_TASK_STATUS_DISPATCHED,
     COMMAND_TASK_STATUS_FAILED,
+    COMMAND_TASK_STATUS_PENDING_APPROVAL,
+    COMMAND_TASK_STATUS_RUNNING,
+    COMMAND_TASK_TERMINAL_STATUSES,
     CommandApproval,
     CommandTask,
     CommandTaskRun,
@@ -271,43 +278,92 @@ async def create_approval_request(
 ) -> CommandApproval:
     from services.command_center.manager import record_task_event
 
-    employee = await run.employee
-    approval = await CommandApproval.create(
-        tenant_id=task.tenant_id,
-        task=task,
-        run=run,
-        employee=employee,
-        status=COMMAND_APPROVAL_STATUS_PENDING,
-        trigger_type=trigger_type,
-        risk_level=risk_level,
-        policy_snapshot=run.policy_snapshot or {},
-        impacted_resources=_impacted_resources(run.policy_snapshot or {}),
-        requested_action=requested_action or {},
-        requester_id=operator_id,
-        metadata={
-            "visible_inbox": APPROVEMENT_PRESENTATION_ADAPTER,
-            "source": "command_approval",
-            "reason": reason,
-            "run_id": run.run_id,
-        },
-    )
-    await sync_approvement_for_command_approval(approval, task, run, operator_id=operator_id, reason=reason)
-    run.status = "waiting_approval"
-    await run.save(update_fields=["status", "utime"])
-    task.status = "pending_approval"
-    await task.save(update_fields=["status", "utime"])
-    await record_task_event(
-        task,
-        "approval_required",
-        reason or "任务需要人工审批",
-        operator_id,
-        {"run_id": run.run_id, "approval_id": approval.id, "trigger_type": trigger_type, "risk_level": risk_level},
-    )
+    async with in_transaction() as connection:
+        locked_run = (
+            await CommandTaskRun.filter(id=run.id, tenant_id=task.tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if not locked_run:
+            raise CustomError(ErrorCode.NOT_FOUND)
+        locked_task = (
+            await CommandTask.filter(id=task.id, tenant_id=task.tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if not locked_task:
+            raise CustomError(ErrorCode.NOT_FOUND)
+        if (
+            locked_run.status
+            not in {
+                COMMAND_RUN_STATUS_CHECKED_OUT,
+                COMMAND_RUN_STATUS_RUNNING,
+                COMMAND_RUN_STATUS_WAITING_APPROVAL,
+            }
+            or locked_task.status
+            not in {
+                COMMAND_TASK_STATUS_DISPATCHED,
+                COMMAND_TASK_STATUS_RUNNING,
+                COMMAND_TASK_STATUS_PENDING_APPROVAL,
+            }
+            or locked_task.run_id != locked_run.run_id
+        ):
+            raise CustomError(ErrorCode.APPROVEMENT_STATUS_ERROR)
+
+        employee = await locked_run.employee
+        approval = await CommandApproval.create(
+            using_db=connection,
+            tenant_id=locked_task.tenant_id,
+            task=locked_task,
+            run=locked_run,
+            employee=employee,
+            status=COMMAND_APPROVAL_STATUS_PENDING,
+            trigger_type=trigger_type,
+            risk_level=risk_level,
+            policy_snapshot=locked_run.policy_snapshot or {},
+            impacted_resources=_impacted_resources(locked_run.policy_snapshot or {}),
+            requested_action=requested_action or {},
+            requester_id=operator_id,
+            metadata={
+                "visible_inbox": APPROVEMENT_PRESENTATION_ADAPTER,
+                "source": "command_approval",
+                "reason": reason,
+                "run_id": locked_run.run_id,
+            },
+        )
+        await sync_approvement_for_command_approval(
+            approval,
+            locked_task,
+            locked_run,
+            operator_id=operator_id,
+            reason=reason,
+        )
+        locked_run.status = COMMAND_RUN_STATUS_WAITING_APPROVAL
+        await locked_run.save(using_db=connection, update_fields=["status", "utime"])
+        locked_task.status = COMMAND_TASK_STATUS_PENDING_APPROVAL
+        await locked_task.save(using_db=connection, update_fields=["status", "utime"])
+        await record_task_event(
+            locked_task,
+            "approval_required",
+            reason or "任务需要人工审批",
+            operator_id,
+            {
+                "run_id": locked_run.run_id,
+                "approval_id": approval.id,
+                "trigger_type": trigger_type,
+                "risk_level": risk_level,
+            },
+            using_db=connection,
+        )
+    run.status = locked_run.status
+    task.status = locked_task.status
     return approval
 
 
 async def enforce_pre_run_policy(task: CommandTask, run: CommandTaskRun, operator_id: str | None = None) -> dict:
-    from services.command_center.manager import record_task_event, update_task_progress
+    from services.command_center.manager import record_task_event
 
     decision = evaluate_policy(
         run.policy_snapshot or {},
@@ -319,13 +375,19 @@ async def enforce_pre_run_policy(task: CommandTask, run: CommandTaskRun, operato
         trigger_type="pre_run",
     )
     if decision.denied:
-        run.status = COMMAND_RUN_STATUS_FAILED
-        run.error = {"message": "policy denied", "reasons": decision.reasons}
-        await run.save(update_fields=["status", "error", "utime"])
-        await update_task_progress(
+        from services.command_center.run_manager import finalize_run_and_task
+
+        await finalize_run_and_task(
+            run,
             task,
-            {"status": COMMAND_TASK_STATUS_FAILED, "message": "策略拒绝任务执行", "metadata": {"run_id": run.run_id, "reasons": decision.reasons}},
-            operator_id,
+            COMMAND_RUN_STATUS_FAILED,
+            {
+                "status": COMMAND_TASK_STATUS_FAILED,
+                "message": "策略拒绝任务执行",
+                "metadata": {"run_id": run.run_id, "reasons": decision.reasons},
+            },
+            operator_id=operator_id,
+            error={"message": "policy denied", "reasons": decision.reasons},
         )
         await record_task_event(task, "policy_denied", "策略拒绝任务执行", operator_id, {"run_id": run.run_id, "reasons": decision.reasons})
         return {"decision": decision.decision, "policy_decision": decision}
@@ -377,8 +439,27 @@ def schedule_approval_resume(tenant_id: str, approval_id: str, operator_id: str 
     asyncio.create_task(_runner())
 
 
+def schedule_approvement_decision_sync(
+    approval: CommandApproval,
+    decision: str,
+    approver_id: str,
+    comment: str | None = None,
+) -> None:
+    async def _runner() -> None:
+        try:
+            await sync_command_approvement_decision(approval, decision, approver_id, comment)
+        except Exception as exc:
+            logger.warning(f"指挥中心审批待办同步失败: approval_id={approval.id}, error={exc}")
+
+    asyncio.create_task(_runner())
+
+
 def _needs_continuation_resume(approval: CommandApproval) -> bool:
-    return not (approval.metadata or {}).get("continuation_run_id")
+    metadata = approval.metadata or {}
+    recovery = metadata.get("continuation_recovery")
+    return not metadata.get("continuation_run_id") and not (
+        isinstance(recovery, dict) and recovery.get("status") == "not_applicable"
+    )
 
 
 def _run_matches_continuation_approval(run: CommandTaskRun, approval_id: str) -> bool:
@@ -404,6 +485,16 @@ def _resume_in_progress_result(approval: CommandApproval, metadata: dict) -> dic
         "approval_id": approval.id,
         "run_id": metadata.get("continuation_run_id"),
         "claimed_at": recovery.get("claimed_at"),
+    }
+
+
+def _resume_not_applicable_result(approval: CommandApproval, metadata: dict) -> dict:
+    recovery = metadata.get("continuation_recovery") if isinstance(metadata.get("continuation_recovery"), dict) else {}
+    return {
+        "policy": "resume_not_applicable",
+        "approval_id": approval.id,
+        "run_id": None,
+        "task_status": recovery.get("task_status"),
     }
 
 
@@ -447,23 +538,75 @@ def _active_recovery_claim(metadata: dict, now: datetime) -> bool:
     return bool(claimed_at and now - claimed_at < timedelta(seconds=RECOVERY_CLAIM_TTL_SECONDS))
 
 
-async def _claim_approval_resume(approval: CommandApproval, operator_id: str | None) -> CommandApproval | None:
-    async with in_transaction():
-        locked = await CommandApproval.filter(id=approval.id, tenant_id=approval.tenant_id, deleted=False).select_for_update().first()
-        if not locked or locked.status not in RESUMABLE_APPROVAL_STATUSES or not _needs_continuation_resume(locked):
-            return None
-        existing_run = await _existing_continuation_run(locked)
-        if existing_run:
-            await _mark_continuation_run(locked, existing_run)
-            return None
-        now = datetime.now(TZ)
+def approval_resume_claim_is_active(approval: CommandApproval, now: datetime | None = None) -> bool:
+    return (
+        approval.status in RESUMABLE_APPROVAL_STATUSES
+        and _needs_continuation_resume(approval)
+        and _active_recovery_claim(approval.metadata or {}, now or datetime.now(TZ))
+    )
+
+
+async def _claim_approval_resume(
+    approval: CommandApproval,
+    operator_id: str | None,
+) -> tuple[CommandApproval | None, dict | None]:
+    """Resolve or claim a continuation while holding its approval row lock."""
+    async with in_transaction() as connection:
+        locked = (
+            await CommandApproval.filter(id=approval.id, tenant_id=approval.tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if not locked or locked.status not in RESUMABLE_APPROVAL_STATUSES:
+            return None, None
         metadata = dict(locked.metadata or {})
+        if metadata.get("continuation_run_id"):
+            return None, {
+                "policy": "already_continued",
+                "run_id": metadata["continuation_run_id"],
+                "approval_id": locked.id,
+            }
+        if not _needs_continuation_resume(locked):
+            return None, _resume_not_applicable_result(locked, metadata)
+
+        task_ref = await locked.task
+        if task_ref is None:
+            return None, None
+        task = (
+            await CommandTask.filter(id=task_ref.id, tenant_id=locked.tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if task is None:
+            return None, None
+        existing_run = await _existing_continuation_run(locked, task)
+        if existing_run:
+            return None, await _mark_continuation_run(locked, existing_run)
+
+        now = datetime.now(TZ)
+        if task.status in COMMAND_TASK_TERMINAL_STATUSES:
+            recovery = metadata.get("continuation_recovery")
+            locked.metadata = {
+                **metadata,
+                "continuation_recovery": {
+                    **(recovery if isinstance(recovery, dict) else {}),
+                    "status": "not_applicable",
+                    "reason": "task_terminal",
+                    "task_status": task.status,
+                    "skipped_at": now.isoformat(),
+                },
+            }
+            await locked.save(using_db=connection, update_fields=["metadata", "utime"])
+            approval.metadata = locked.metadata
+            return None, _resume_not_applicable_result(locked, locked.metadata)
         if _active_recovery_claim(metadata, now):
-            return None
+            return None, _resume_in_progress_result(locked, metadata)
         metadata["continuation_recovery"] = {"status": "running", "claimed_at": now.isoformat(), "operator_id": operator_id}
         locked.metadata = metadata
-        await locked.save(update_fields=["metadata", "utime"])
-        return locked
+        await locked.save(using_db=connection, update_fields=["metadata", "utime"])
+        return locked, None
 
 
 async def recover_pending_approval_resumes(tenant_id: str | None = None, operator_id: str | None = None) -> list[dict]:
@@ -471,27 +614,13 @@ async def recover_pending_approval_resumes(tenant_id: str | None = None, operato
     if tenant_id:
         query = query.filter(tenant_id=tenant_id)
     approvals = await query.all()
-    recovered: list[dict] = []
+    scheduled: list[dict] = []
     for approval in approvals:
-        try:
-            result = await resume_approved_approval(approval.tenant_id, approval.id, operator_id=operator_id)
-            if result.get("policy") in {"already_continued", "resume_in_progress"}:
-                continue
-            recovered.append(result)
-        except Exception as exc:
-            current = await CommandApproval.get_or_none(id=approval.id, tenant_id=approval.tenant_id, deleted=False)
-            target = current or approval
-            metadata = dict(target.metadata or {})
-            metadata["continuation_recovery"] = {
-                **(metadata.get("continuation_recovery") or {}),
-                "status": "failed",
-                "error": str(exc),
-                "failed_at": datetime.now(TZ).isoformat(),
-            }
-            target.metadata = metadata
-            await target.save(update_fields=["metadata", "utime"])
-            logger.warning(f"指挥中心审批恢复继续执行失败: approval_id={approval.id}, error={exc}")
-    return recovered
+        if not _needs_continuation_resume(approval) or approval_resume_claim_is_active(approval):
+            continue
+        schedule_approval_resume(approval.tenant_id, approval.id, operator_id=operator_id)
+        scheduled.append({"policy": "resume_scheduled", "approval_id": approval.id})
+    return scheduled
 
 
 async def resume_approved_approval(tenant_id: str, approval_id: str, operator_id: str | None = None) -> dict:
@@ -504,7 +633,11 @@ async def resume_approved_approval(tenant_id: str, approval_id: str, operator_id
     metadata = dict(approval.metadata or {})
     if metadata.get("continuation_run_id"):
         return {"policy": "already_continued", "run_id": metadata["continuation_run_id"], "approval_id": approval.id}
-    claimed = await _claim_approval_resume(approval, operator_id)
+    if not _needs_continuation_resume(approval):
+        return _resume_not_applicable_result(approval, metadata)
+    claimed, resolved = await _claim_approval_resume(approval, operator_id)
+    if resolved is not None:
+        return resolved
     if not claimed:
         current = await CommandApproval.get_or_none(id=approval_id, tenant_id=tenant_id, deleted=False)
         if not current:
@@ -512,6 +645,8 @@ async def resume_approved_approval(tenant_id: str, approval_id: str, operator_id
         current_metadata = dict(current.metadata or {})
         if current_metadata.get("continuation_run_id"):
             return {"policy": "already_continued", "run_id": current_metadata["continuation_run_id"], "approval_id": current.id}
+        if not _needs_continuation_resume(current):
+            return _resume_not_applicable_result(current, current_metadata)
         existing_run = await _existing_continuation_run(current)
         if existing_run:
             return await _mark_continuation_run(current, existing_run)
@@ -612,23 +747,54 @@ async def decide_approval(
     approver_id: str,
     comment: str | None = None,
 ) -> CommandApproval:
-    from services.command_center.manager import record_task_event, update_task_progress
+    from services.command_center.manager import record_task_event
 
     transition_key = DECISION_ALIASES.get(decision)
     if not transition_key:
         raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
 
+    from services.command_center.manager import (
+        apply_task_progress_in_transaction,
+        complete_task_progress_after_commit,
+    )
+
     should_resume = False
-    async with in_transaction():
-        approval = await CommandApproval.filter(id=approval_id, tenant_id=tenant_id, deleted=False).select_for_update().first()
+    task_transition = None
+    async with in_transaction() as connection:
+        approval = (
+            await CommandApproval.filter(id=approval_id, tenant_id=tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
         if not approval:
             raise CustomError(ErrorCode.NOT_FOUND)
         if approval.status != COMMAND_APPROVAL_STATUS_PENDING:
             raise CustomError(ErrorCode.APPROVEMENT_STATUS_ERROR)
-        task = await approval.task
-        run = await approval.run
-        if run is None:
+        task_ref = await approval.task
+        run_ref = await approval.run
+        if task_ref is None or run_ref is None:
             raise CustomError(ErrorCode.NOT_FOUND)
+        run = (
+            await CommandTaskRun.filter(id=run_ref.id, tenant_id=tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        task = (
+            await CommandTask.filter(id=task_ref.id, tenant_id=tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if not run or not task:
+            raise CustomError(ErrorCode.NOT_FOUND)
+        if (
+            run.status != COMMAND_RUN_STATUS_WAITING_APPROVAL
+            or task.status != COMMAND_TASK_STATUS_PENDING_APPROVAL
+            or task.run_id != run.run_id
+        ):
+            raise CustomError(ErrorCode.APPROVEMENT_STATUS_ERROR)
         context = _approval_context(approval, task, run)
         transition = approval_decision_transition(transition_key, context)
 
@@ -646,20 +812,37 @@ async def decide_approval(
         if transition.get("needs_info"):
             metadata["needs_info"] = {"requested": True, "comment": comment, "requested_by": approver_id, "requested_at": now.isoformat()}
         approval.metadata = metadata
-        await approval.save(update_fields=["status", "approver_id", "decided_at", "decision_comment", "metadata", "utime"])
+        await approval.save(
+            using_db=connection,
+            update_fields=["status", "approver_id", "decided_at", "decision_comment", "metadata", "utime"],
+        )
 
         run.status = transition["run_status"]
         if transition.get("release_lease"):
             run.lease_owner = None
             run.lease_expires_at = now
         run.metadata = {**(run.metadata or {}), "approval_decision": transition}
-        await run.save(update_fields=["status", "lease_owner", "lease_expires_at", "metadata", "utime"])
+        await run.save(
+            using_db=connection,
+            update_fields=["status", "lease_owner", "lease_expires_at", "metadata", "utime"],
+        )
 
         if transition["task_status"] in {"cancelled", "handed_off", "failed"}:
-            await update_task_progress(task, {"status": transition["task_status"], "message": comment or "审批已决策", "metadata": {"approval_id": approval.id, "run_id": run.run_id}}, approver_id)
+            task_transition = await apply_task_progress_in_transaction(
+                connection,
+                task,
+                {
+                    "status": transition["task_status"],
+                    "message": comment or "审批已决策",
+                    "metadata": {"approval_id": approval.id, "run_id": run.run_id},
+                },
+                approver_id,
+                locked_task=task,
+                expected_run_id=run.run_id,
+            )
         else:
             task.status = transition["task_status"]
-            await task.save(update_fields=["status", "utime"])
+            await task.save(using_db=connection, update_fields=["status", "utime"])
 
         await record_task_event(
             task,
@@ -667,11 +850,18 @@ async def decide_approval(
             comment or "审批已决策",
             approver_id,
             {"approval_id": approval.id, "run_id": run.run_id, "decision": transition_key, "transition": transition},
+            using_db=connection,
         )
         should_resume = bool(transition.get("next_event_type"))
+    if task_transition is not None:
+        await complete_task_progress_after_commit(
+            task,
+            task_transition,
+            {"metadata": {"approval_id": approval.id, "run_id": run.run_id}},
+        )
     if should_resume:
-        await sync_command_approvement_decision(approval, transition_key, approver_id, comment)
         schedule_approval_resume(tenant_id, approval_id, operator_id=approver_id)
-    else:
-        await sync_command_approvement_decision(approval, transition_key, approver_id, comment)
+    # Approvement is only a presentation adapter. Keep it off the durable
+    # decision and continuation path so a slow inbox cannot block either one.
+    schedule_approvement_decision_sync(approval, transition_key, approver_id, comment)
     return approval

@@ -111,8 +111,28 @@ def _install_stubs():
     command_center.COMMAND_APPROVAL_STATUS_APPROVED = "approved"
     command_center.COMMAND_APPROVAL_STATUS_APPROVED_READ_ONLY = "approved_read_only"
     command_center.COMMAND_APPROVAL_STATUS_PENDING = "pending"
+    command_center.COMMAND_RUN_STATUS_CHECKED_OUT = "checked_out"
     command_center.COMMAND_RUN_STATUS_FAILED = "failed"
+    command_center.COMMAND_RUN_STATUS_RUNNING = "running"
+    command_center.COMMAND_RUN_STATUS_WAITING_APPROVAL = "waiting_approval"
+    command_center.COMMAND_RUN_TERMINAL_STATUSES = {
+        "completed",
+        "failed",
+        "cancelled",
+        "rejected",
+        "stale",
+        "handed_off",
+    }
     command_center.COMMAND_TASK_STATUS_FAILED = "failed"
+    command_center.COMMAND_TASK_STATUS_DISPATCHED = "dispatched"
+    command_center.COMMAND_TASK_STATUS_PENDING_APPROVAL = "pending_approval"
+    command_center.COMMAND_TASK_STATUS_RUNNING = "running"
+    command_center.COMMAND_TASK_TERMINAL_STATUSES = {
+        "completed",
+        "failed",
+        "cancelled",
+        "handed_off",
+    }
 
     class Query:
         approval = None
@@ -121,6 +141,9 @@ def _install_stubs():
             self.approvals = list(approval) if isinstance(approval, list) else ([approval] if approval is not None else [])
 
         def select_for_update(self):
+            return self
+
+        def using_db(self, connection):
             return self
 
         def filter(self, **kwargs):
@@ -148,7 +171,13 @@ def _install_stubs():
             return self.approvals
 
     class CommandTask(SimpleNamespace):
-        async def save(self, update_fields=None):
+        records = None
+
+        @classmethod
+        def filter(cls, **kwargs):
+            return Query(cls.records)
+
+        async def save(self, using_db=None, update_fields=None):
             SAVED.append(("task", update_fields, self.status))
 
     class CommandTaskRun(SimpleNamespace):
@@ -158,7 +187,7 @@ def _install_stubs():
         def filter(cls, **kwargs):
             return Query(cls.records)
 
-        async def save(self, update_fields=None):
+        async def save(self, using_db=None, update_fields=None):
             SAVED.append(("run", update_fields, self.status))
 
     class CommandApproval(SimpleNamespace):
@@ -187,7 +216,7 @@ def _install_stubs():
                 return None
             return cls.active
 
-        async def save(self, update_fields=None):
+        async def save(self, using_db=None, update_fields=None):
             self.save_calls.append(update_fields)
             SAVED.append(("approval", update_fields, self.status))
 
@@ -266,7 +295,7 @@ def _install_stubs():
     sys.modules["services.command_center"] = command_center_pkg
     manager = types.ModuleType("services.command_center.manager")
 
-    async def record_task_event(task, event_type, message=None, operator_id=None, metadata=None):
+    async def record_task_event(task, event_type, message=None, operator_id=None, metadata=None, using_db=None):
         RECORDED_EVENTS.append((event_type, message, operator_id, metadata or {}))
         return SimpleNamespace(event_type=event_type)
 
@@ -276,8 +305,30 @@ def _install_stubs():
             task.status = data["status"]
         return task
 
+    async def apply_task_progress_in_transaction(
+        connection,
+        task,
+        data,
+        operator_id=None,
+        *,
+        locked_task=None,
+        expected_run_id=None,
+    ):
+        if expected_run_id is not None and task.run_id != expected_run_id:
+            return None
+        old_status = task.status
+        if "status" in data:
+            task.status = data["status"]
+        UPDATED_PROGRESS.append((data, operator_id))
+        return task, None, old_status != task.status
+
+    async def complete_task_progress_after_commit(task, transition, data):
+        return transition[0]
+
     manager.record_task_event = record_task_event
     manager.update_task_progress = update_task_progress
+    manager.apply_task_progress_in_transaction = apply_task_progress_in_transaction
+    manager.complete_task_progress_after_commit = complete_task_progress_after_commit
     sys.modules["services.command_center.manager"] = manager
 
     approval_contract = types.ModuleType("services.command_center.approval_contract")
@@ -341,7 +392,12 @@ def _async_value(value):
 
 
 def _task_run_approval():
-    task = sys.modules["models.command_center"].CommandTask(id="task-1", tenant_id="tenant-1", status="running")
+    task = sys.modules["models.command_center"].CommandTask(
+        id="task-1",
+        tenant_id="tenant-1",
+        status="pending_approval",
+        run_id="run-1",
+    )
     run = sys.modules["models.command_center"].CommandTaskRun(
         id="run-row-1",
         tenant_id="tenant-1",
@@ -377,7 +433,8 @@ def _task_run_approval():
     run.employee = _async_value(employee)
     sys.modules["models.command_center"].CommandApproval.active = approval
     sys.modules["models.command_center"].CommandApproval.records = None
-    sys.modules["models.command_center"].CommandTaskRun.records = None
+    sys.modules["models.command_center"].CommandTask.records = [task]
+    sys.modules["models.command_center"].CommandTaskRun.records = [run]
     return task, run, approval
 
 
@@ -419,6 +476,25 @@ def test_create_approval_request_updates_run_task_and_event():
     assert RECORDED_EVENTS[-1][0] == "approval_required"
 
 
+def test_pre_run_approval_does_not_reopen_cancelled_task():
+    service = _load_service()
+    task, run, _approval = _task_run_approval()
+    task.status = "cancelled"
+    run.status = "checked_out"
+    run.policy_snapshot = {"approval": {"default": "approval_required"}}
+
+    with pytest.raises(service.CustomError) as exc_info:
+        asyncio.run(service.enforce_pre_run_policy(task, run, operator_id="operator-1"))
+
+    assert exc_info.value.args == ("APPROVEMENT_STATUS_ERROR",)
+    assert task.status == "cancelled"
+    assert run.status == "checked_out"
+    assert sys.modules["models.command_center"].CommandApproval.created == []
+    assert CREATED_APPROVEMENTS == []
+    assert SAVED == []
+    assert RECORDED_EVENTS == []
+
+
 def test_decide_approval_updates_linked_approvement_record():
     service = _load_service()
     task, run, approval = _task_run_approval()
@@ -435,17 +511,63 @@ def test_decide_approval_updates_linked_approvement_record():
     sys.modules["models"].Approvement.records = [approvement]
     approval.metadata = {"approvement_id": "approvement-1"}
     scheduled = []
+    inbox_syncs = []
     service.schedule_approval_resume = lambda tenant_id, approval_id, operator_id=None: scheduled.append((tenant_id, approval_id, operator_id))
+    service.schedule_approvement_decision_sync = lambda *args: inbox_syncs.append(args)
 
     decided = asyncio.run(service.decide_approval("tenant-1", "approval-1", "approve", "approver-1", "通过"))
 
     assert decided.status == "approved"
     assert task.status == "dispatched"
     assert run.status == "continuation_ready"
-    assert approvement.status == 1
-    assert approvement.results["approver-1"]["agree"] is True
-    assert approvement.results["approver-1"]["remark"] == "通过"
+    assert approvement.status == 0
+    assert approvement.results == {}
     assert scheduled == [("tenant-1", "approval-1", "approver-1")]
+    assert inbox_syncs == [(approval, "approve", "approver-1", "通过")]
+
+
+def test_decide_approval_schedules_resume_when_approvement_sync_fails(monkeypatch):
+    service = _load_service()
+    task, run, approval = _task_run_approval()
+    schedule_order = []
+    background_coroutines = []
+    sync_calls = []
+
+    async def fail_approvement_sync(*args, **kwargs):
+        sync_calls.append((args, kwargs))
+        raise RuntimeError("approvement unavailable")
+
+    service.sync_command_approvement_decision = fail_approvement_sync
+    service.schedule_approval_resume = lambda *args, **kwargs: schedule_order.append("resume")
+    original_schedule_inbox_sync = service.schedule_approvement_decision_sync
+
+    def schedule_inbox_sync(*args, **kwargs):
+        schedule_order.append("inbox")
+        return original_schedule_inbox_sync(*args, **kwargs)
+
+    service.schedule_approvement_decision_sync = schedule_inbox_sync
+    monkeypatch.setattr(
+        service.asyncio,
+        "create_task",
+        lambda coro: background_coroutines.append(coro) or SimpleNamespace(),
+    )
+
+    decided = asyncio.run(service.decide_approval("tenant-1", "approval-1", "approve", "approver-1", "通过"))
+
+    assert decided is approval
+    assert decided.status == "approved"
+    assert decided.metadata["decision"] == "approve"
+    assert task.status == "dispatched"
+    assert run.status == "continuation_ready"
+    assert run.metadata["approval_decision"]["decision"] == "approve"
+    assert schedule_order == ["resume", "inbox"]
+    assert sync_calls == []
+    assert len(background_coroutines) == 1
+    assert RECORDED_EVENTS[-1][0] == "approval_decided"
+
+    asyncio.run(background_coroutines[0])
+
+    assert len(sync_calls) == 1
 
 
 def test_decide_approval_approve_and_reject_are_atomic_state_transitions():
@@ -487,6 +609,21 @@ def test_needs_info_keeps_approval_pending_and_actionable():
     assert task.status == "pending_approval"
     assert decided.metadata["needs_info"]["comment"] == "补充目标机器"
     asyncio.run(service.decide_approval("tenant-1", "approval-1", "approve", "approver-2", "补充后通过"))
+
+
+def test_decide_approval_rejects_terminal_run_without_mutating_records():
+    service = _load_service()
+    task, run, approval = _task_run_approval()
+    run.status = "rejected"
+
+    with pytest.raises(service.CustomError):
+        asyncio.run(service.decide_approval("tenant-1", "approval-1", "approve", "approver-1", "late"))
+
+    assert approval.status == "pending"
+    assert task.status == "pending_approval"
+    assert run.status == "rejected"
+    assert SAVED == []
+    assert RECORDED_EVENTS == []
 
 
 def test_resume_approved_approval_reconstructs_execution_from_db_records():
@@ -568,38 +705,121 @@ def test_resume_active_claim_does_not_start_duplicate_continuation():
     assert calls == []
 
 
-def test_recover_pending_approval_resumes_restarts_approved_without_continuation_id():
+def test_terminal_task_resume_is_not_applicable_and_recovery_scan_is_idempotent():
     service = _load_service()
-    _task, _run, approval = _task_run_approval()
+    task, _run, approval = _task_run_approval()
     approval.status = "approved"
     approval.metadata = {"transition": {"policy_mutation": None}}
-    skipped = sys.modules["models.command_center"].CommandApproval(
-        id="approval-2",
-        tenant_id="tenant-1",
-        status="approved_read_only",
-        metadata={"continuation_run_id": "run-existing"},
-        save_calls=[],
-    )
-    sys.modules["models.command_center"].CommandApproval.records = [approval, skipped]
-
-    calls = []
+    task.status = "completed"
+    sys.modules["models.command_center"].CommandApproval.records = [approval]
+    execute_calls = []
     run_manager = types.ModuleType("services.command_center.run_manager")
 
-    async def execute_task_run(task_arg, employee_arg, **kwargs):
-        calls.append((task_arg, employee_arg, kwargs))
-        return {"content": "done", "run_id": f"run-{len(calls) + 1}"}
+    async def execute_task_run(*args, **kwargs):
+        execute_calls.append((args, kwargs))
+        return {"content": "unexpected", "run_id": "run-2"}
 
     run_manager.execute_task_run = execute_task_run
     sys.modules["services.command_center.run_manager"] = run_manager
 
+    first = asyncio.run(service.resume_approved_approval("tenant-1", "approval-1", operator_id="approver-1"))
+    save_calls_after_first = list(approval.save_calls)
+    second = asyncio.run(service.resume_approved_approval("tenant-1", "approval-1", operator_id="approver-1"))
+
+    resume_scan_calls = []
+    original_resume = service.resume_approved_approval
+
+    async def tracked_resume(*args, **kwargs):
+        resume_scan_calls.append((args, kwargs))
+        return await original_resume(*args, **kwargs)
+
+    service.resume_approved_approval = tracked_resume
     recovered = asyncio.run(service.recover_pending_approval_resumes("tenant-1", operator_id="system-recover"))
 
-    assert recovered == [{"content": "done", "run_id": "run-2"}]
-    assert len(calls) == 1
-    assert calls[0][2]["continuation_approval_id"] == "approval-1"
-    assert calls[0][2]["skip_pre_run_policy"] is True
-    assert approval.metadata["continuation_recovery"]["operator_id"] == "system-recover"
-    assert approval.metadata["continuation_run_id"] == "run-2"
+    expected = {
+        "policy": "resume_not_applicable",
+        "approval_id": "approval-1",
+        "run_id": None,
+        "task_status": "completed",
+    }
+    assert first == expected
+    assert second == expected
+    assert approval.metadata["continuation_recovery"]["status"] == "not_applicable"
+    assert approval.metadata["continuation_recovery"]["reason"] == "task_terminal"
+    assert approval.metadata["continuation_recovery"]["task_status"] == "completed"
+    assert "error" not in approval.metadata["continuation_recovery"]
+    assert "failed_at" not in approval.metadata["continuation_recovery"]
+    assert approval.save_calls == save_calls_after_first
+    assert recovered == []
+    assert resume_scan_calls == []
+    assert execute_calls == []
+
+
+def test_recover_pending_approval_resumes_schedules_all_eligible_without_awaiting_execution():
+    service = _load_service()
+    _task, _run, approval = _task_run_approval()
+    approval.status = "approved"
+    approval.metadata = {"transition": {"policy_mutation": None}}
+    second = sys.modules["models.command_center"].CommandApproval(
+        id="approval-2",
+        tenant_id="tenant-1",
+        status="approved_read_only",
+        metadata={"transition": {"policy_mutation": "read_only"}},
+        save_calls=[],
+    )
+    active = sys.modules["models.command_center"].CommandApproval(
+        id="approval-active",
+        tenant_id="tenant-1",
+        status="approved",
+        metadata={
+            "continuation_recovery": {
+                "status": "running",
+                "claimed_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+        save_calls=[],
+    )
+    continued = sys.modules["models.command_center"].CommandApproval(
+        id="approval-continued",
+        tenant_id="tenant-1",
+        status="approved",
+        metadata={"continuation_run_id": "run-existing"},
+        save_calls=[],
+    )
+    not_applicable = sys.modules["models.command_center"].CommandApproval(
+        id="approval-not-applicable",
+        tenant_id="tenant-1",
+        status="approved",
+        metadata={"continuation_recovery": {"status": "not_applicable"}},
+        save_calls=[],
+    )
+    sys.modules["models.command_center"].CommandApproval.records = [
+        approval,
+        second,
+        active,
+        continued,
+        not_applicable,
+    ]
+    scheduled = []
+    service.schedule_approval_resume = lambda tenant_id, approval_id, operator_id=None: scheduled.append(
+        (tenant_id, approval_id, operator_id)
+    )
+
+    async def fail_if_execution_is_awaited(*args, **kwargs):
+        raise AssertionError("scan must not await approval execution")
+
+    service.resume_approved_approval = fail_if_execution_is_awaited
+
+    recovered = asyncio.run(service.recover_pending_approval_resumes("tenant-1", operator_id="system-recover"))
+
+    assert recovered == [
+        {"policy": "resume_scheduled", "approval_id": "approval-1"},
+        {"policy": "resume_scheduled", "approval_id": "approval-2"},
+    ]
+    assert scheduled == [
+        ("tenant-1", "approval-1", "system-recover"),
+        ("tenant-1", "approval-2", "system-recover"),
+    ]
 
 
 def test_successful_resume_with_run_id_is_not_recovered_twice():
