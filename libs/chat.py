@@ -87,9 +87,8 @@ async def get_prompt_words(prompt_word, tenant_id):
     for tool in tools:
         if tool["tool_name"] not in tool_names:
             tool_names.append(tool["tool_name"])
-    for internal_tool_name in ("lion_mgmt", "lion_ai"):
-        if internal_tool_name in tool_names:
-            tool_names.remove(internal_tool_name)
+    if "lion_mgmt" in tool_names:
+        tool_names.remove("lion_mgmt")
     if not tool_names:
         return prompt_word, {}, {}
 

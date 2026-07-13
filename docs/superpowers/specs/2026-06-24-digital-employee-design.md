@@ -674,8 +674,8 @@ lion_memory **就是 Cognee**，零代码改动；位于 `/opt/dev/aioe/middlewa
 | 向量后端 | `VECTOR_DB_PROVIDER` | `pgvector`（复用 lion_db） |
 | 向量库连接 | `VECTOR_DB_URL` / `VECTOR_DB_USER` / `VECTOR_DB_PASSWORD` | 指向 lion_db |
 | 关系库 | `DB_PROVIDER` / `DB_HOST` / `DB_PORT` / `DB_USERNAME` / `DB_PASSWORD` | 指向 lion_db（独立 schema：`cognee`） |
-| LLM | `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` | 指向 lion_ai |
-| Embedding | `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | 指向 lion_ai 的 embedding |
+| LLM | `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` | 指向外部 OpenAI 兼容服务 |
+| Embedding | `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | 指向外部 embedding 服务 |
 | 认证 | `JWT_SECRET` / `ADMIN_USER_EMAIL` / `ADMIN_USER_PASSWORD` | 内部固定 |
 
 ### 8.3 多租户隔离模型（Cognee 原生）
@@ -856,7 +856,7 @@ dr_lion_memory_call_duration_ms{op}
 ### 12.1 首次部署
 
 ```
-0. 中间件就绪：lion_db (PG with pgvector) / lion_redis / lion_kafka / lion_ai / lion_memory
+0. 中间件就绪：lion_db (PG with pgvector) / lion_redis / lion_kafka / lion_memory
 1. 启动 lion_memory（拉 Cognee 镜像 + 注入 env，启动 uvicorn cognee.api.client:app）
    验证 ENABLE_BACKEND_ACCESS_CONTROL 实际生效（探测）
    等 /readyz OK
@@ -930,4 +930,3 @@ dr_lion_memory_call_duration_ms{op}
 - 内置动作 `digital_employee.dispatch_task` 的具体实现
 - 数字员工大屏 / 看板
 - 与 prometheus 的指标接入
-
