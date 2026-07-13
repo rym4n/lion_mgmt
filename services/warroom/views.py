@@ -15,7 +15,7 @@ from core.response import response_ok
 from libs.chat import chat_manager, get_or_create_private_chat_room
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import check_wildcard, requires_permission
+from libs.security.authorization import check_action_execute_permission, check_wildcard, requires_permission
 from libs.utils import gen_random_code, gen_run_id
 from models import Events, Runlog, Tool, ToolAction
 from models.user import Account
@@ -1170,6 +1170,14 @@ async def run(request):
     if not params:
         raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
+    if run_type == "action" and not await check_action_execute_permission(
+        user,
+        params.get("app_name"),
+        params.get("action"),
+        params.get("resource"),
+        tenant_id,
+    ):
+        raise CustomError(ErrorCode.UNAUTH)
     params["executor"] = user.id
     msg = {"run_type": run_type, "run_id": gen_run_id(), "run_args": params, "tenant_id": tenant_id}
     room = await Room.get_or_none(id=room_id, tenant_id=tenant_id)
@@ -1255,15 +1263,10 @@ async def execution(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     event = await Events.get_or_none(id=eventId, tenant_id=tenant_id)
-    if not event.room:
-        room_name = event.event_name + "_" + gen_random_code(6)
-        if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
-            raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
-        room = await Room.create(name=room_name, creator=user, tenant_id=tenant_id, room_type="public")
-        event.room = room
-    room_id = event.room_id
+    if not event:
+        raise CustomError(ErrorCode.NOT_FOUND)
     run_type = TYPE_DICT.get(executorInstanceType)
-    if not room_id or not run_type:
+    if not run_type:
         raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     params = {}
     input_data = {}
@@ -1295,6 +1298,23 @@ async def execution(request):
     params["executor"] = user.id
     if executorActionAssetIds and run_type == "action":
         params["resource"] = executorActionAssetIds
+    if run_type == "action" and not await check_action_execute_permission(
+        user,
+        params.get("app_name"),
+        params.get("action"),
+        params.get("resource"),
+        tenant_id,
+    ):
+        raise CustomError(ErrorCode.UNAUTH)
+    if not event.room:
+        room_name = event.event_name + "_" + gen_random_code(6)
+        if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
+            raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
+        room = await Room.create(name=room_name, creator=user, tenant_id=tenant_id, room_type="public")
+        event.room = room
+    room_id = event.room_id
+    if not room_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     run_id = gen_run_id()
     msg = {"run_type": run_type, "run_id": run_id, "run_args": params, "tenant_id": tenant_id}
     room = await Room.get_or_none(id=room_id, tenant_id=tenant_id)

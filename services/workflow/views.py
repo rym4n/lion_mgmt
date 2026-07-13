@@ -30,6 +30,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import (
     TENANT_ADMIN_ROLE_NAME,
+    check_action_execute_permission,
     check_playbook_permission,
     get_superadmin_role,
     is_superadmin,
@@ -1298,6 +1299,16 @@ async def execute_action(request):
                 await resp.send("data: 缺少剧本执行权限，执行失败\n\n")
                 await resp.eof()
                 return resp
+        elif message.get("type") == "action" and not await check_action_execute_permission(
+            request.ctx.session["account_info"],
+            message.get("app_name"),
+            message.get("action"),
+            message.get("resource"),
+            tenant_id,
+        ):
+            await resp.send("data: 缺少动作资源执行权限，执行失败\n\n")
+            await resp.eof()
+            return resp
         run_id = gen_run_id()
         message["executor"] = request.ctx.session["account_info"].id
         msg = {"run_type": message["type"], "run_id": run_id, "run_args": message, "tenant_id": tenant_id}

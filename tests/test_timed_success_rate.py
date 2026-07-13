@@ -339,11 +339,28 @@ async def test_check_action_execute_permission_superadmin_bypass(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_check_action_execute_permission_empty_resource_pass(monkeypatch):
-    # 无资源约束的动作放行——与旧列表过滤对空 resource 的行为一致
+async def test_check_action_execute_permission_empty_resource_follows_model(monkeypatch):
     account = SimpleNamespace(id="user-1", roles=[SimpleNamespace(id="r1", name="普通", permissions=["timed:r"], tenant_id="t1")])
+
+    async def resource_not_required(*_args):
+        return False
+
+    monkeypatch.setattr(
+        "libs.security.authorization.tool_requires_resource",
+        resource_not_required,
+    )
     assert await check_action_execute_permission(account, "lion_mgmt", "some_action", "", "t1") is True
     assert await check_action_execute_permission(account, "lion_mgmt", "some_action", None, "t1") is True
+
+    async def resource_required(*_args):
+        return True
+
+    monkeypatch.setattr(
+        "libs.security.authorization.tool_requires_resource",
+        resource_required,
+    )
+    assert await check_action_execute_permission(account, "lion_mgmt", "some_action", "", "t1") is False
+    assert await check_action_execute_permission(account, "lion_mgmt", "some_action", ", ,", "t1") is False
 
 
 @pytest.mark.asyncio

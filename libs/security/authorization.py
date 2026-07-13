@@ -13,7 +13,15 @@ from libs.error_code.enum import ErrorData
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
 from libs.utils import verify_license
-from models import Account, ActionPermissions, PermissionsMenu, PlaybookPermissions, PlaybookVersion, Role
+from models import (
+    Account,
+    ActionPermissions,
+    PermissionsMenu,
+    PlaybookPermissions,
+    PlaybookVersion,
+    Role,
+    ToolResourcesModel,
+)
 from settings import AUTHENTICATION_SESSION_EXPIRATION, LICENSE_DIR
 
 # 超管角色的本质是拥有 *:* 通配权限的那条 Role（见 aioe_package/aioe_install/init.sql 初始化）。
@@ -177,22 +185,34 @@ def action_permission_hits(permission, resource_id: str, user_id: str, user_role
     return not user_role_ids.isdisjoint(granted_roles)
 
 
+async def tool_requires_resource(tool_name, tenant_id) -> bool:
+    resource_model = await ToolResourcesModel.get_or_none(
+        tool_name=tool_name,
+        deleted=False,
+        tenant_id=tenant_id,
+    )
+    return bool(resource_model and resource_model.status == 1)
+
+
 async def check_action_execute_permission(account, tool_name, action_func, resource, tenant_id) -> bool:
     """判定账户是否对 (tool, action, resource) 拥有执行权。写侧（add_timed/update_timed
     等）用它把前端下拉过滤对应的授权关卡落到 API 层——纯前端过滤是 UX，不是安全边界。
 
     - 超管(*:*)豁免。
-    - resource 空字符串或无值时视为动作无资源约束，直接放行（与旧列表过滤逻辑一致）。
+    - 资源模型要求资源时，空 resource 拒绝；无需资源的工具允许空 resource。
     - resource 支持逗号分隔多值；要求账户对**每个** resource 都有权，任一缺失即失败。
     - tool_name / action_func 缺失时直接判定失败——上层应保证参数完备再调用。
     - 命中条件复用 action_permission_hits：查 action_name 自身 + "all" 兜底两类 ActionPermissions。
     """
     if is_superadmin(account, tenant_id=tenant_id):
         return True
-    if not resource:
-        return True
     if not tool_name or not action_func:
         return False
+    if not isinstance(resource, str):
+        resource = ""
+    resources = [item.strip() for item in resource.split(",") if item.strip()]
+    if not resources:
+        return not await tool_requires_resource(tool_name, tenant_id)
     user_id = str(account.id) if account and getattr(account, "id", None) else None
     if not user_id:
         return False
@@ -203,9 +223,11 @@ async def check_action_execute_permission(account, tool_name, action_func, resou
         deleted=False,
         tenant_id=tenant_id,
     ).all()
-    resources = [r for r in resource.split(",") if r] if "," in resource else [resource]
-    for r in resources:
-        if not any(action_permission_hits(perm, r, user_id, user_role_ids) for perm in permissions):
+    for resource_id in resources:
+        if not any(
+            action_permission_hits(permission, resource_id, user_id, user_role_ids)
+            for permission in permissions
+        ):
             return False
     return True
 

@@ -28,7 +28,14 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
-from libs.security.authorization import action_permission_hits, is_superadmin, load_license, requires_permission
+from libs.security.authorization import (
+    action_permission_hits,
+    check_action_execute_permission,
+    is_superadmin,
+    load_license,
+    requires_permission,
+    tool_requires_resource,
+)
 from libs.utils import gen_run_id
 from models import (
     ActionPermissions,
@@ -71,6 +78,47 @@ TERMINAL_RUNLOG_STATUSES = {-1, 0, 3}
 IN_PROGRESS_RESULT = "执行中"
 
 connected_clients = {}
+
+
+async def _ensure_action_permission(tool_name, action_name, action_description, tenant_id):
+    return await ActionPermissions.get_or_create(
+        tool_name=tool_name,
+        action_name=action_name,
+        deleted=False,
+        tenant_id=tenant_id,
+        defaults={
+            "action_description": action_description,
+            "roles": [],
+            "users": [],
+        },
+    )
+
+
+def _should_reject_tool_version_delete(tool, active_version_count, tool_group_internal):
+    return bool(tool.maintain or (tool_group_internal and active_version_count == 1))
+
+
+async def _apply_tool_group_internal_flags(tools, tenant_id):
+    tool_names = sorted({tool["name"] for tool in tools})
+    if not tool_names:
+        return
+
+    internal_tool_names = set(
+        await Tool.filter(
+            name__in=tool_names,
+            internal=True,
+            tenant_id=tenant_id,
+        ).values_list("name", flat=True)
+    )
+    for tool in tools:
+        tool["internal"] = tool["name"] in internal_tool_names
+
+
+async def _lock_tool_versions(tool_name, tenant_id):
+    return await Tool.filter(
+        name=tool_name,
+        tenant_id=tenant_id,
+    ).select_for_update().order_by("id").all()
 
 
 def _runlog_stream_signature(log):
@@ -315,25 +363,17 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
         if "health_check" == action.get("func"):
             health_check = 1
         await ToolAction.create(tool_name=config_data.get("name"), version_number=version, action=action, tenant_id=tenant_id)
-        actions = await ActionPermissions.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).values("action_name")
-        action_names = {action["action_name"] for action in actions}
-
-        if action["func"] not in action_names:
-            await ActionPermissions.create(
-                tool_name=tool_name,
-                action_name=action["func"],
-                action_description=action.get("name") or "",
-                roles=[],
-                users=[],
-                tenant_id=tenant_id,
-            )
-    await ActionPermissions.create(
-        tool_name=tool_name,
-        action_name="all",
-        action_description="动作全部动作权限",
-        roles=[],
-        users=[],
-        tenant_id=tenant_id,
+        await _ensure_action_permission(
+            tool_name,
+            action["func"],
+            action.get("name") or "",
+            tenant_id,
+        )
+    await _ensure_action_permission(
+        tool_name,
+        "all",
+        "动作全部动作权限",
+        tenant_id,
     )
     configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False, tenant_id=tenant_id)
     if not configuration:
@@ -833,6 +873,7 @@ async def all_tools(request):
     condition = _build_latest_tool_condition(subquery_results)
 
     latest_tools = await Tool.filter(condition, deleted=False, tenant_id=tenant_id).order_by("-utime", "-ctime").offset((page - 1) * size).limit(size).values()
+    await _apply_tool_group_internal_flags(latest_tools, tenant_id)
     for tool in latest_tools:
         if int(req_json.get("logo", 1)) == 1 and tool["logo_path"]:
             tool["logo"] = tool["logo_path"]
@@ -1038,9 +1079,16 @@ async def tool_actions(request):
     permitted_funcs = None
     if filter_by_permission:
         user = request.ctx.session.get("account_info")
-        if not is_superadmin(user):
+        if not is_superadmin(
+            user,
+            tenant_id=tenant_id,
+        ) and await tool_requires_resource(name, tenant_id):
             user_id = str(user.id)
-            user_role_ids = {str(role.id) for role in (user.roles or [])}
+            user_role_ids = {
+                str(role.id)
+                for role in (user.roles or [])
+                if getattr(role, "tenant_id", None) == tenant_id
+            }
             all_action_perms = await ActionPermissions.filter(tool_name=name, deleted=False, tenant_id=tenant_id).all()
             # 收集当前用户至少对一个资源有权的动作名；"all" 记录对该工具所有动作统一授权
             permitted_funcs = set()
@@ -1291,17 +1339,24 @@ async def delete_tool(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     async with in_transaction():
-        tool = await Tool.get(name=name, version=version, deleted=False, tenant_id=tenant_id)
+        tool_versions = await _lock_tool_versions(name, tenant_id)
+        active_tools = [item for item in tool_versions if not item.deleted]
+        tool = next((item for item in active_tools if item.version == version), None)
         if not tool:
             return response_ok({"message": "工具删除成功"})
 
         if tool.status == 1:
             raise CustomError(ErrorCode.TOOL_HAS_SCRIPT_ERROR)
 
-        if tool.maintain:
+        tool_group_internal = any(item.internal for item in tool_versions)
+        if _should_reject_tool_version_delete(
+            tool,
+            len(active_tools),
+            tool_group_internal,
+        ):
             raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
 
-        if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).count() == 1:
+        if len(active_tools) == 1:
             await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
             await ToolResources.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
             await ActionPermissions.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
@@ -1358,14 +1413,16 @@ async def delete_tool_all(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    if await Tool.filter(name=name, deleted=False, maintain=True, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
-
-    if await Tool.filter(name=name, deleted=False, status=1, tenant_id=tenant_id).exists():
-        raise CustomError(ErrorCode.TOOL_HAS_SCRIPT_ERROR)
-
     async with in_transaction():
-        for tool in await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all():
+        tool_versions = await _lock_tool_versions(name, tenant_id)
+        active_tools = [item for item in tool_versions if not item.deleted]
+        tool_group_internal = any(item.internal for item in tool_versions)
+        if tool_group_internal or any(tool.maintain for tool in active_tools):
+            raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
+        if any(tool.status == 1 for tool in active_tools):
+            raise CustomError(ErrorCode.TOOL_HAS_SCRIPT_ERROR)
+
+        for tool in active_tools:
             await utils.delete_from_s3("system", f"{name}/{tool.version}.zip", "tools")
 
         await ToolAction.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
@@ -1590,9 +1647,13 @@ async def tool_resources_detailed(request):
     # 按 (tool, action) 的资源级授权过滤：供定时任务/巡检等挑选可执行资源；超管豁免。
     if filter_by_permission and action_name:
         user = request.ctx.session.get("account_info")
-        if not is_superadmin(user):
+        if not is_superadmin(user, tenant_id=tenant_id):
             user_id = str(user.id)
-            user_role_ids = {str(role.id) for role in (user.roles or [])}
+            user_role_ids = {
+                str(role.id)
+                for role in (user.roles or [])
+                if getattr(role, "tenant_id", None) == tenant_id
+            }
             action_perms = await ActionPermissions.filter(
                 tool_name=tool_name,
                 action_name__in=[action_name, "all"],
@@ -1907,56 +1968,65 @@ async def add_permission(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    if "all" in actions:
-        if not await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False, tenant_id=tenant_id).exists():
-            await ActionPermissions.create(
+    async with in_transaction():
+        if "all" in actions:
+            await _ensure_action_permission(
+                name,
+                "all",
+                "动作全部动作权限",
+                tenant_id,
+            )
+            permission_query = ActionPermissions.filter(
                 tool_name=name,
                 action_name="all",
-                action_description="动作全部动作权限",
-                roles=[],
-                users=[],
+                deleted=False,
                 tenant_id=tenant_id,
             )
-        permissions = await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False, tenant_id=tenant_id).all()
-    else:
-        permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False, tenant_id=tenant_id).all()
+        else:
+            permission_query = ActionPermissions.filter(
+                tool_name=name,
+                action_name__in=actions,
+                deleted=False,
+                tenant_id=tenant_id,
+            )
+        permissions = await permission_query.select_for_update().order_by("id").all()
 
-    if not permissions:
-        raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
+        if not permissions:
+            raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
-    for permission in permissions:
-        user_dict_list = []
-        if isinstance(permission.users, list):
-            user_dict_list = permission.users.copy()
-        elif isinstance(permission.users, str):
-            try:
-                user_dict_list = orjson.loads(permission.users)
-            except orjson.JSONDecodeError:
-                user_dict_list = []
+        for permission in permissions:
+            user_dict_list = []
+            if isinstance(permission.users, list):
+                user_dict_list = permission.users.copy()
+            elif isinstance(permission.users, str):
+                try:
+                    user_dict_list = orjson.loads(permission.users)
+                except orjson.JSONDecodeError:
+                    user_dict_list = []
 
-        if not user_dict_list or not isinstance(user_dict_list[0], dict):
-            user_dict_list = [{}]
+            if not user_dict_list or not isinstance(user_dict_list[0], dict):
+                user_dict_list = [{}]
 
-        user_dict_list[0][resource_id] = users_id
+            user_dict_list[0][resource_id] = users_id
 
-        role_dict_list = []
-        if isinstance(permission.roles, list):
-            role_dict_list = permission.roles.copy()
-        elif isinstance(permission.roles, str):
-            try:
-                role_dict_list = orjson.loads(permission.roles)
-            except orjson.JSONDecodeError:
-                role_dict_list = []
+            role_dict_list = []
+            if isinstance(permission.roles, list):
+                role_dict_list = permission.roles.copy()
+            elif isinstance(permission.roles, str):
+                try:
+                    role_dict_list = orjson.loads(permission.roles)
+                except orjson.JSONDecodeError:
+                    role_dict_list = []
 
-        if not role_dict_list or not isinstance(role_dict_list[0], dict):
-            role_dict_list = [{}]
+            if not role_dict_list or not isinstance(role_dict_list[0], dict):
+                role_dict_list = [{}]
 
-        role_dict_list[0][resource_id] = roles_id
+            role_dict_list[0][resource_id] = roles_id
 
-        permission.users = user_dict_list
-        permission.roles = role_dict_list
+            permission.users = user_dict_list
+            permission.roles = role_dict_list
 
-    await ActionPermissions.bulk_update(permissions, fields=["users", "roles"])
+        await ActionPermissions.bulk_update(permissions, fields=["users", "roles"])
 
     return response_ok({"message": "工具动作权限新增成功"})
 
@@ -2027,15 +2097,12 @@ async def select_permission_all(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     if "all" in actions:
-        if not await ActionPermissions.filter(tool_name=name, action_name="all", deleted=False, tenant_id=tenant_id).exists():
-            await ActionPermissions.create(
-                tool_name=name,
-                action_name="all",
-                action_description="动作全部动作权限",
-                roles=[],
-                users=[],
-                tenant_id=tenant_id,
-            )
+        await _ensure_action_permission(
+            name,
+            "all",
+            "动作全部动作权限",
+            tenant_id,
+        )
         permissions = await ActionPermissions.filter(tool_name=name, deleted=False, tenant_id=tenant_id).all()
     else:
         permissions = await ActionPermissions.filter(tool_name=name, action_name__in=actions, deleted=False, tenant_id=tenant_id).all()
@@ -2785,9 +2852,20 @@ async def health_check(request):
     utime = datetime.datetime.now(TZ)
     message = request.json.get("action_input", {})
     if message.get("type") in ("flow", "action"):
+        tenant_id = request.ctx.session.get("tenant_id")
+        if message.get("type") == "action" and not await check_action_execute_permission(
+            request.ctx.session["account_info"],
+            message.get("app_name"),
+            message.get("action"),
+            message.get("resource"),
+            tenant_id,
+        ):
+            await resp.send("data: 缺少动作资源执行权限，执行失败\n\n")
+            await resp.eof()
+            return resp
         run_id = gen_run_id()
         message["executor"] = request.ctx.session["account_info"].id
-        msg = {"run_type": message["type"], "run_id": run_id, "run_args": message, "tenant_id": request.ctx.session.get("tenant_id")}
+        msg = {"run_type": message["type"], "run_id": run_id, "run_args": message, "tenant_id": tenant_id}
         await aproduce(TASK_TOPIC, msg)
         sent_versions = {}
         expected_action_logs = len((message.get("resource") or "").split()) if message.get("type") == "action" else 0
