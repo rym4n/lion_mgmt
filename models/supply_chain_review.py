@@ -25,7 +25,7 @@ class SupplyChainCiType(BaseModel):
     icon = fields.CharField(max_length=100, null=True, description="图标")
     color = fields.CharField(max_length=32, null=True, description="颜色")
     category = fields.CharField(max_length=30, default="asset", description="asset/master_data/org")
-    primary_field = fields.CharField(max_length=64, default="name", description="主展示字段")
+    primary_field = fields.CharField(max_length=64, default="", description="主展示字段")
     status = fields.CharField(max_length=20, default=CI_TYPE_STATUS_ACTIVE, description="active/disabled")
     is_locked = fields.BooleanField(default=False, description="交付锁定标记")
     creator = fields.CharField(max_length=255, null=True, description="创建人")

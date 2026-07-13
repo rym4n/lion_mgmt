@@ -8,7 +8,7 @@ from tortoise.expressions import Q
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import requires_permission
+from libs.security.authorization import check_permissions, requires_permission
 from libs.utils import get_url_from_s3, upload_to_s3
 from models.supply_chain_review import (
     SupplyChainCi,
@@ -25,6 +25,7 @@ from services.supply_chain_review.manager import (
     confirm_disposal_task,
     create_attachment_ref,
     create_notification_event,
+    delete_field,
     delete_ledger_record,
     delete_process_record,
     discover_unknown_terminals,
@@ -38,6 +39,7 @@ from services.supply_chain_review.manager import (
     import_model_package,
     list_ledger_records,
     list_process_records,
+    normalize_model_package,
     normalize_page,
     operator_name,
     overview_summary,
@@ -55,9 +57,11 @@ from services.supply_chain_review.manager import (
     save_review_issue,
     save_relation,
     save_relation_type,
+    serialize_ci_field,
     tenant_id,
     update_compare_item_status,
     transition_review_issue,
+    validate_key,
 )
 
 supply_chain_review_cmdb_bp = Blueprint("supply_chain_review_cmdb", url_prefix="/supply-chain-review")
@@ -126,6 +130,83 @@ def _keyword_condition(keyword: str | None):
     return Q(name__icontains=keyword) | Q(key__icontains=keyword)
 
 
+async def _require_save_permission(
+    request: Request,
+    exists: bool,
+    create_permission: str,
+    update_permission: str,
+) -> None:
+    await check_permissions(
+        request,
+        update_permission if exists else create_permission,
+    )
+
+
+async def _require_model_package_permissions(
+    request: Request,
+    tenant: str,
+    package: dict,
+) -> tuple[dict, dict[str, set]]:
+    normalized = normalize_model_package(package)
+    model_keys = {validate_key(item.get("key")) for item in normalized["ci_types"]}
+    field_keys = {
+        (
+            validate_key(item.get("ci_type_key"), "ci_type_key"),
+            validate_key(item.get("field_key"), "field_key"),
+        )
+        for item in normalized["fields"]
+    }
+    relation_keys = {
+        validate_key(item.get("key")) for item in normalized["relation_types"]
+    }
+
+    existing_model_keys = set()
+    if model_keys:
+        existing_models = await SupplyChainCiType.filter(
+            tenant_id=tenant,
+            key__in=list(model_keys),
+            deleted=False,
+        ).all()
+        existing_model_keys = {item.key for item in existing_models}
+
+    existing_field_keys = set()
+    if field_keys:
+        existing_fields = await SupplyChainCiFieldDef.filter(
+            tenant_id=tenant,
+            ci_type_key__in=list({item[0] for item in field_keys}),
+            field_key__in=list({item[1] for item in field_keys}),
+            deleted=False,
+        ).all()
+        existing_field_keys = {
+            (item.ci_type_key, item.field_key) for item in existing_fields
+        } & field_keys
+
+    existing_relation_keys = set()
+    if relation_keys:
+        existing_relations = await SupplyChainCiRelationType.filter(
+            tenant_id=tenant,
+            key__in=list(relation_keys),
+            deleted=False,
+        ).all()
+        existing_relation_keys = {item.key for item in existing_relations}
+
+    resources = (
+        ("model", model_keys, existing_model_keys),
+        ("field", field_keys, existing_field_keys),
+        ("relation", relation_keys, existing_relation_keys),
+    )
+    for resource, requested, existing in resources:
+        if requested - existing:
+            await check_permissions(request, f"supply_chain_review:{resource}:c")
+        if requested & existing:
+            await check_permissions(request, f"supply_chain_review:{resource}:u")
+    return normalized, {
+        "ci_types": existing_model_keys,
+        "fields": existing_field_keys,
+        "relation_types": existing_relation_keys,
+    }
+
+
 @supply_chain_review_cmdb_bp.post("/ci-type/list")
 @openapi.definition(summary="CMDB模型列表")
 @requires_permission("supply_chain_review:model:r")
@@ -149,15 +230,45 @@ async def ci_type_detail(request: Request):
     ci_type = await get_ci_type_or_404(tenant_id(request), data.get("id") or data.get("key"))
     fields = await fields_for_type(ci_type.tenant_id, ci_type.key)
     payload = ci_type.json
-    payload["fields"] = [field.json for field in fields]
+    payload["fields"] = [
+        serialize_ci_field(field, ci_type.primary_field) for field in fields
+    ]
     return response_ok(payload)
 
 
 @supply_chain_review_cmdb_bp.post("/ci-type/save")
 @openapi.definition(summary="保存CMDB模型")
-@requires_permission("supply_chain_review:model:c", "supply_chain_review:model:u")
 async def ci_type_save(request: Request):
-    item = await save_ci_type(tenant_id(request), _json(request), operator_name(request))
+    data = _json(request)
+    tenant = tenant_id(request)
+    if data.get("id"):
+        exists = await SupplyChainCiType.filter(
+            id=data["id"],
+            tenant_id=tenant,
+            deleted=False,
+        ).exists()
+    else:
+        key = validate_key(data.get("key")) if data.get("key") else None
+        exists = bool(
+            key
+            and await SupplyChainCiType.filter(
+                key=key,
+                tenant_id=tenant,
+                deleted=False,
+            ).exists()
+        )
+    await _require_save_permission(
+        request,
+        exists,
+        "supply_chain_review:model:c",
+        "supply_chain_review:model:u",
+    )
+    item = await save_ci_type(
+        tenant,
+        data,
+        operator_name(request),
+        expected_exists=exists,
+    )
     return response_ok(item.json)
 
 
@@ -190,13 +301,25 @@ async def ci_type_export(request: Request):
 
 @supply_chain_review_cmdb_bp.post("/ci-type/import")
 @openapi.definition(summary="导入CMDB模型包")
-@requires_permission("supply_chain_review:model:c")
 async def ci_type_import(request: Request):
     data = _json(request)
     package = data.get("package") or data
     if not isinstance(package, dict):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    return response_ok(await import_model_package(tenant_id(request), package, operator_name(request)))
+    tenant = tenant_id(request)
+    normalized, expected_existing = await _require_model_package_permissions(
+        request,
+        tenant,
+        package,
+    )
+    return response_ok(
+        await import_model_package(
+            tenant,
+            normalized,
+            operator_name(request),
+            expected_existing=expected_existing,
+        )
+    )
 
 
 @supply_chain_review_cmdb_bp.post("/ci-field/list")
@@ -207,33 +330,77 @@ async def ci_field_list(request: Request):
     ci_type_key = data.get("ci_type_key")
     if not ci_type_key:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    await get_ci_type_or_404(tenant_id(request), ci_type_key)
-    fields = await fields_for_type(tenant_id(request), ci_type_key)
-    return response_ok({"items": [item.json for item in fields], "total": len(fields)})
+    tenant = tenant_id(request)
+    ci_type = await get_ci_type_or_404(tenant, ci_type_key)
+    fields = await fields_for_type(tenant, ci_type_key)
+    return response_ok(
+        {
+            "items": [
+                serialize_ci_field(item, ci_type.primary_field) for item in fields
+            ],
+            "total": len(fields),
+        }
+    )
 
 
 @supply_chain_review_cmdb_bp.post("/ci-field/save")
 @openapi.definition(summary="保存CMDB字段")
-@requires_permission("supply_chain_review:field:c", "supply_chain_review:field:u")
 async def ci_field_save(request: Request):
-    item = await save_field(tenant_id(request), _json(request), operator_name(request))
-    return response_ok(item.json)
+    data = _json(request)
+    tenant = tenant_id(request)
+    if data.get("id"):
+        exists = await SupplyChainCiFieldDef.filter(
+            id=data["id"],
+            tenant_id=tenant,
+            deleted=False,
+        ).exists()
+    else:
+        ci_type_key = (
+            validate_key(data.get("ci_type_key"), "ci_type_key")
+            if data.get("ci_type_key")
+            else None
+        )
+        field_key = (
+            validate_key(data.get("field_key"), "field_key")
+            if data.get("field_key")
+            else None
+        )
+        exists = bool(
+            ci_type_key
+            and field_key
+            and await SupplyChainCiFieldDef.filter(
+                tenant_id=tenant,
+                ci_type_key=ci_type_key,
+                field_key=field_key,
+                deleted=False,
+            ).exists()
+        )
+    await _require_save_permission(
+        request,
+        exists,
+        "supply_chain_review:field:c",
+        "supply_chain_review:field:u",
+    )
+    item = await save_field(
+        tenant,
+        data,
+        operator_name(request),
+        expected_exists=exists,
+    )
+    ci_type = await get_ci_type_or_404(tenant, item.ci_type_key)
+    return response_ok(serialize_ci_field(item, ci_type.primary_field))
 
 
 @supply_chain_review_cmdb_bp.post("/ci-field/delete")
 @openapi.definition(summary="删除CMDB字段")
 @requires_permission("supply_chain_review:field:d")
 async def ci_field_delete(request: Request):
-    data = _json(request)
-    field = await SupplyChainCiFieldDef.filter(id=data.get("id"), tenant_id=tenant_id(request), deleted=False).first()
-    if not field:
-        raise CustomError(ErrorCode.NOT_FOUND)
-    ci_type = await get_ci_type_or_404(tenant_id(request), field.ci_type_key)
-    if ci_type.is_locked and field.is_locked:
-        raise CustomError(ErrorCode.FORBIDDEN)
-    field.deleted = True
-    await field.save()
-    return response_ok({"id": field.id})
+    return response_ok(
+        await delete_field(
+            tenant_id(request),
+            _json(request).get("id"),
+        )
+    )
 
 
 @supply_chain_review_cmdb_bp.post("/relation-type/list")
