@@ -41,7 +41,7 @@ jobs:
     buildPath: '@project_path@'
     dockerfile: '@project_path@/Dockerfile'
     output: !RegistryOutput
-      tags: reg-test.hongcloud.net/lion_mgmt:@tag@
+      tags: 10.3.0.41:5000/lion_mgmt:@tag@
     platforms: linux/amd64
     condition: SUCCESSFUL
     optional: false
