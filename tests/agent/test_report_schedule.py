@@ -188,3 +188,19 @@ def test_report_schedule_validation_helpers_reject_invalid_cron_and_bool():
     assert "def _parse_report_schedule_bool" in source
     assert "LION_ACTION_INTERNAL_TOKEN" in source
     assert "raise CustomError(ErrorCode.PARAM_ERROR)" in source
+
+
+def test_report_schedule_routes_use_canonical_permissions():
+    views_path = Path(__file__).resolve().parents[2] / "services/agent/views.py"
+    source = views_path.read_text()
+    schedule_routes = source[source.index('@agent_bp.post("/report/schedule/list")') :]
+
+    assert '@requires_permission("agent_report_schedule:r")' in schedule_routes
+    assert (
+        '@requires_permission("agent_report_schedule:c", "agent_report_schedule:u")'
+        in schedule_routes
+    )
+    assert 'check_permissions(request, "agent_report_schedule:c")' in schedule_routes
+    assert 'check_permissions(request, "agent_report_schedule:u")' in schedule_routes
+    assert '@requires_permission("agent_report_schedule:d")' in schedule_routes
+    assert '"agent:report:schedule:' not in schedule_routes

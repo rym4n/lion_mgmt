@@ -1434,7 +1434,7 @@ async def _ensure_report_schedule_name_available(
 
 
 @agent_bp.post("/report/schedule/list")
-@requires_permission("agent:report:schedule:r")
+@requires_permission("agent_report_schedule:r")
 async def report_schedule_list(request: Request):
     data = _require_json(request)
     tenant_id = request.ctx.session.get("tenant_id")
@@ -1454,7 +1454,7 @@ async def report_schedule_list(request: Request):
 
 
 @agent_bp.post("/report/schedule/save")
-@requires_permission("agent:report:schedule:c", "agent:report:schedule:u")
+@requires_permission("agent_report_schedule:c", "agent_report_schedule:u")
 async def report_schedule_save(request: Request):
     data = _require_json(request)
     tenant_id = request.ctx.session.get("tenant_id")
@@ -1467,7 +1467,7 @@ async def report_schedule_save(request: Request):
 
     schedule_id = str(data.get("id") or "").strip()
     if schedule_id:
-        await check_permissions(request, "agent:report:schedule:u")
+        await check_permissions(request, "agent_report_schedule:u")
         schedule = await _get_report_schedule(schedule_id, tenant_id, user_id)
         doc_id = str(data.get("doc_id") or schedule.document_id).strip()
         if doc_id != str(schedule.document_id):
@@ -1488,7 +1488,7 @@ async def report_schedule_save(request: Request):
             setattr(schedule, field, value)
         await schedule.save()
     else:
-        await check_permissions(request, "agent:report:schedule:c")
+        await check_permissions(request, "agent_report_schedule:c")
         doc_id = str(data.get("doc_id") or "").strip()
         if not doc_id:
             raise CustomError(ErrorCode.PARAM_ERROR)
@@ -1516,7 +1516,7 @@ async def report_schedule_save(request: Request):
 
 
 @agent_bp.post("/report/schedule/toggle")
-@requires_permission("agent:report:schedule:u")
+@requires_permission("agent_report_schedule:u")
 async def report_schedule_toggle(request: Request):
     data = _require_json(request)
     schedule_id = str(data.get("id") or "").strip()
@@ -1545,7 +1545,7 @@ async def report_schedule_toggle(request: Request):
 
 
 @agent_bp.post("/report/schedule/delete")
-@requires_permission("agent:report:schedule:d")
+@requires_permission("agent_report_schedule:d")
 async def report_schedule_delete(request: Request):
     data = _require_json(request)
     schedule_id = str(data.get("id") or "").strip()

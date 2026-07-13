@@ -109,3 +109,29 @@ def test_check_permissions_ignores_roles_from_other_tenants(monkeypatch):
 
     with pytest.raises(CustomError):
         asyncio.run(authorization.check_permissions(request, "warroom:r"))
+
+
+@pytest.mark.parametrize(
+    "role_permission",
+    ["agent_report_schedule:c", "agent_report_schedule:c,d,u,r", "*:*"],
+)
+def test_check_permissions_accepts_canonical_report_schedule_permissions(role_permission):
+    account = _account("account-1", [role_permission])
+    request = SimpleNamespace(
+        ctx=SimpleNamespace(
+            session={
+                "sub": "account-1",
+                "account_info": account,
+                "tenant_id": "tenant-a",
+            }
+        ),
+        app=SimpleNamespace(ctx=SimpleNamespace(cache_client=_FakeCache())),
+        path="/agent/report/schedule/save",
+    )
+
+    assert (
+        asyncio.run(
+            authorization.check_permissions(request, "agent_report_schedule:c")
+        )
+        is True
+    )
