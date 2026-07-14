@@ -197,3 +197,6 @@ class ErrorCode(BaseErrorCode):
     COMMAND_TASK_ALREADY_TERMINAL = ErrorData(4159, "任务已结束，无法取消")
     COMMAND_TASK_NOT_TERMINAL = ErrorData(4160, "任务尚未结束，无法删除")
     COMMAND_TASK_NOT_DISPATCHABLE = ErrorData(4161, "任务当前状态无法重新调度")
+    ROOM_NOT_JOINED = ErrorData(4162, "用户尚未加入作战室，无法关注")
+    PRIVATE_ROOM_JOIN_NOT_ALLOWED = ErrorData(4163, "私聊作战室禁止主动加入")
+    DOCX_CONVERSION_BUSY = ErrorData(4164, "文档转换任务繁忙，请稍后重试")

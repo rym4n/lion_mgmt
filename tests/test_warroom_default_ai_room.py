@@ -1,9 +1,8 @@
 # coding=utf-8
 
+import asyncio
 import os
 from types import SimpleNamespace
-
-import pytest
 
 os.environ.setdefault("RY_REDIS_HOST", "127.0.0.1")
 os.environ.setdefault("RY_REDIS_PORT", "6379")
@@ -21,8 +20,7 @@ class _StarRooms:
         self.added.append(room)
 
 
-@pytest.mark.asyncio
-async def test_ensure_default_ai_private_room_stars_system_private_room(monkeypatch):
+def test_ensure_default_ai_private_room_stars_system_private_room(monkeypatch):
     user = SimpleNamespace(id="user-1", star_rooms=_StarRooms())
     system_user = SimpleNamespace(id="system-1", star_rooms=_StarRooms())
     room = SimpleNamespace(id="room-1")
@@ -46,9 +44,11 @@ async def test_ensure_default_ai_private_room_stars_system_private_room(monkeypa
 
     monkeypatch.setattr("services.warroom.views.Account", FakeAccount)
     monkeypatch.setattr("services.warroom.views.Room", FakeRoom)
-    monkeypatch.setattr("services.warroom.views.get_or_create_private_chat_room", fake_get_or_create)
+    monkeypatch.setattr(
+        "services.warroom.views.get_or_create_private_chat_room", fake_get_or_create
+    )
 
-    await ensure_default_ai_private_room("cache", user, "tenant-1")
+    asyncio.run(ensure_default_ai_private_room("cache", user, "tenant-1"))
 
     assert calls["account_query"] == {"username": "system", "disabled": False}
     assert calls["get_or_create"] == ("cache", user, system_user, "tenant-1")

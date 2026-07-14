@@ -288,6 +288,8 @@ async def invite_members(request: Request):
 async def join_room(request: Request):
     tenant_id = request.ctx.session.get("tenant_id")
     room = await Room.get(id=request.json.get("id"), tenant_id=tenant_id)
+    if room.room_type == "private":
+        raise CustomError(ErrorCode.PRIVATE_ROOM_JOIN_NOT_ALLOWED)
     user = request.ctx.session["account_info"]
     # 检查当前用户是否已加入该作战室
     is_member = await room.users.filter(id=user.id).exists()
@@ -444,14 +446,18 @@ async def get_all_rooms(request: Request):
     size = req_json.get("size", 10)
     offset = (page - 1) * size
     tenant_id = request.ctx.session.get("tenant_id")
-    condition = Q(tenant_id=tenant_id)
+    user = request.ctx.session["account_info"]
+    condition = Q(tenant_id=tenant_id) & (
+        ~Q(room_type="private") | Q(users__id=user.id)
+    )
     keyword = req_json.get("keyword")
     if keyword:
         condition = condition & Q(name__icontains=keyword)
 
     # 前端是先获取再查询, 没有使用到这里的查询参数
-    rooms = await Room.filter(condition).offset(offset).limit(size).order_by("-ctime").prefetch_related("creator", "users")
-    total = await Room.filter(condition).count()
+    query = Room.filter(condition).distinct()
+    rooms = await query.offset(offset).limit(size).order_by("-ctime").prefetch_related("creator", "users")
+    total = await query.count()
     return response_ok({"total": total, "rooms": [r.json for r in rooms]})
 
 
@@ -704,7 +710,7 @@ async def star_room(request: Request):
     # 检查当前用户是否已加入该作战室
     is_member = await room.users.filter(id=user.id).exists()
     if not is_member:
-        return response_ok("用户并不在该作战室，无需关注")
+        raise CustomError(ErrorCode.ROOM_NOT_JOINED)
     await user.star_rooms.add(room)
     return response_ok("成功关注")
 

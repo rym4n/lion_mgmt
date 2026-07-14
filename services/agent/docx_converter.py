@@ -1,0 +1,1916 @@
+# coding=utf-8
+from __future__ import annotations
+
+import base64
+import binascii
+import io
+import re
+import time
+import zipfile
+from dataclasses import dataclass, field, replace
+from typing import Callable, Iterable
+from urllib.parse import urlparse
+
+from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_COLOR_INDEX
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.opc.constants import RELATIONSHIP_TYPE as RT
+from docx.shared import Inches, Pt, RGBColor
+from docx.table import Table, _Cell
+from docx.text.hyperlink import Hyperlink
+from docx.text.paragraph import Paragraph
+from docx.text.run import Run
+from lxml import etree, html as lxml_html
+from PIL import Image, UnidentifiedImageError
+
+
+MAX_DOCX_BYTES = 16 * 1024 * 1024
+MAX_DOCX_UNCOMPRESSED_BYTES = 96 * 1024 * 1024
+MAX_DOCX_PARTS = 4096
+MAX_HTML_BYTES = 24 * 1024 * 1024
+MAX_HTML_ELEMENTS = 20_000
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_PIXELS = 40_000_000
+MAX_TABLE_ROWS = 500
+MAX_TABLE_COLUMNS = 100
+MAX_TOTAL_TABLE_CELLS = 10_000
+MAX_CONVERSION_SECONDS = 45.0
+MAX_DOCX_XML_NODES = 100_000
+MAX_DOCX_PARAGRAPHS = 20_000
+MAX_BASE64_CHARS = ((MAX_DOCX_BYTES + 2) // 3) * 4
+
+_INLINE_CODE_STYLE = "AIOE Inline Code"
+_CODE_BLOCK_STYLE = "AIOE Code Block"
+_HORIZONTAL_RULE_STYLE = "AIOE Horizontal Rule"
+_TASK_CHECKED = "\u2611"
+_TASK_UNCHECKED = "\u2610"
+_EXTERNAL_IMAGE_PLACEHOLDER = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAHnOcQAAAAABJRU5ErkJggg=="
+)
+
+_DOCX_REQUIRED_PARTS = {"[Content_Types].xml", "word/document.xml"}
+_BLOCK_TAGS = {
+    "p",
+    "div",
+    "blockquote",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "ul",
+    "ol",
+    "pre",
+    "table",
+    "hr",
+}
+_ALLOWED_TAGS = _BLOCK_TAGS | {
+    "a",
+    "b",
+    "br",
+    "code",
+    "col",
+    "colgroup",
+    "del",
+    "em",
+    "i",
+    "img",
+    "input",
+    "li",
+    "label",
+    "mark",
+    "s",
+    "span",
+    "strike",
+    "strong",
+    "sub",
+    "sup",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "tr",
+    "u",
+}
+_GLOBAL_ATTRIBUTES = {"style"}
+_TAG_ATTRIBUTES = {
+    "a": {"href", "title"},
+    "code": {"class"},
+    "img": {"src", "alt", "title", "width", "height"},
+    "input": {"checked", "type"},
+    "li": {"data-checked", "data-type"},
+    "ol": {"start", "data-type"},
+    "td": {"colspan", "rowspan"},
+    "th": {"colspan", "rowspan"},
+    "ul": {"data-type"},
+}
+_ALLOWED_STYLE_PROPERTIES = {
+    "background-color",
+    "color",
+    "font-family",
+    "font-size",
+    "font-style",
+    "font-weight",
+    "height",
+    "line-height",
+    "text-align",
+    "text-decoration",
+    "text-decoration-line",
+    "vertical-align",
+    "width",
+}
+_DATA_IMAGE_RE = re.compile(
+    r"\Adata:(?P<mime>image/(?:png|jpe?g|gif|bmp|tiff|webp));base64,(?P<data>[A-Za-z0-9+/]*={0,2})\Z",
+    re.IGNORECASE,
+)
+_RGB_RE = re.compile(
+    r"\Argb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)\Z", re.IGNORECASE
+)
+_HEX_COLOR_RE = re.compile(r"\A#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\Z")
+_FONT_NAME_RE = re.compile(r"\A[\w \-.,'\u0080-\uffff]+\Z")
+_LENGTH_RE = re.compile(r"\A(\d+(?:\.\d+)?)(px|pt|in|cm|mm)?\Z", re.IGNORECASE)
+
+_NAMED_COLORS = {
+    "black": "#000000",
+    "blue": "#0000FF",
+    "cyan": "#00FFFF",
+    "gray": "#808080",
+    "green": "#008000",
+    "lime": "#00FF00",
+    "magenta": "#FF00FF",
+    "maroon": "#800000",
+    "navy": "#000080",
+    "olive": "#808000",
+    "orange": "#FFA500",
+    "purple": "#800080",
+    "red": "#FF0000",
+    "silver": "#C0C0C0",
+    "teal": "#008080",
+    "white": "#FFFFFF",
+    "yellow": "#FFFF00",
+}
+_HIGHLIGHT_TO_HEX = {
+    WD_COLOR_INDEX.BLACK: "#000000",
+    WD_COLOR_INDEX.BLUE: "#0000FF",
+    WD_COLOR_INDEX.BRIGHT_GREEN: "#00FF00",
+    WD_COLOR_INDEX.DARK_BLUE: "#000080",
+    WD_COLOR_INDEX.DARK_RED: "#800000",
+    WD_COLOR_INDEX.DARK_YELLOW: "#808000",
+    WD_COLOR_INDEX.GRAY_25: "#C0C0C0",
+    WD_COLOR_INDEX.GRAY_50: "#808080",
+    WD_COLOR_INDEX.GREEN: "#008000",
+    WD_COLOR_INDEX.PINK: "#FF00FF",
+    WD_COLOR_INDEX.RED: "#FF0000",
+    WD_COLOR_INDEX.TEAL: "#008080",
+    WD_COLOR_INDEX.TURQUOISE: "#00FFFF",
+    WD_COLOR_INDEX.VIOLET: "#800080",
+    WD_COLOR_INDEX.WHITE: "#FFFFFF",
+    WD_COLOR_INDEX.YELLOW: "#FFFF00",
+}
+_IMAGE_FORMAT_MIME = {
+    "BMP": "image/bmp",
+    "GIF": "image/gif",
+    "JPEG": "image/jpeg",
+    "PNG": "image/png",
+    "TIFF": "image/tiff",
+    "WEBP": "image/webp",
+}
+
+
+class DocxConversionError(ValueError):
+    """Raised when conversion input is invalid or outside the supported contract."""
+
+
+@dataclass(frozen=True)
+class _InlineStyle:
+    bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    strike: bool = False
+    superscript: bool = False
+    subscript: bool = False
+    font_name: str | None = None
+    font_size_pt: float | None = None
+    color: str | None = None
+    highlight: str | None = None
+    code: bool = False
+
+
+@dataclass(frozen=True)
+class _FontProperties:
+    bold: object = None
+    italic: object = None
+    underline: object = None
+    strike: object = None
+    superscript: object = None
+    subscript: object = None
+    font_name: str | None = None
+    font_size: object = None
+    color: str | None = None
+    highlight: str | None = None
+
+
+@dataclass
+class _ImageBudget:
+    total_bytes: int = 0
+    started_at: float = field(default_factory=time.monotonic)
+    checks: int = 0
+    style_cache: dict[tuple[str, str | None], object] = field(default_factory=dict)
+    style_chain_cache: dict[tuple[object, str], tuple] = field(default_factory=dict)
+    style_font_cache: dict[tuple[object, str], _FontProperties] = field(
+        default_factory=dict
+    )
+    paragraph_font_cache: dict[int, _FontProperties] = field(default_factory=dict)
+
+    def check(self, *, force: bool = False) -> None:
+        self.checks += 1
+        if (force or self.checks % 64 == 0) and (
+            time.monotonic() - self.started_at > MAX_CONVERSION_SECONDS
+        ):
+            raise DocxConversionError("document conversion timed out")
+
+    def add(self, size: int) -> None:
+        self.check()
+        if size > MAX_IMAGE_BYTES or self.total_bytes + size > MAX_TOTAL_IMAGE_BYTES:
+            raise DocxConversionError("embedded image exceeds size limit")
+        self.total_bytes += size
+
+
+@dataclass
+class _ListContext:
+    level: int
+    kind: str
+    element: etree._Element
+    last_item: etree._Element | None = None
+
+
+def _fail(message: str) -> DocxConversionError:
+    return DocxConversionError(message)
+
+
+def decode_docx_base64(content: str, *, _budget: _ImageBudget | None = None) -> bytes:
+    if not isinstance(content, str) or not content or len(content) > MAX_BASE64_CHARS:
+        raise _fail("invalid DOCX base64 content")
+    try:
+        encoded = content.encode("ascii")
+        docx_bytes = base64.b64decode(encoded, validate=True)
+    except (UnicodeEncodeError, binascii.Error, ValueError):
+        raise _fail("invalid DOCX base64 content") from None
+    validate_docx_bytes(docx_bytes, _budget=_budget)
+    return docx_bytes
+
+
+def validate_docx_bytes(
+    docx_bytes: bytes, *, _budget: _ImageBudget | None = None
+) -> None:
+    if (
+        not isinstance(docx_bytes, bytes)
+        or not docx_bytes
+        or len(docx_bytes) > MAX_DOCX_BYTES
+    ):
+        raise _fail("invalid DOCX size")
+    try:
+        with zipfile.ZipFile(io.BytesIO(docx_bytes)) as archive:
+            infos = archive.infolist()
+            names = {info.filename for info in infos}
+            if len(infos) > MAX_DOCX_PARTS or not _DOCX_REQUIRED_PARTS.issubset(names):
+                raise _fail("invalid DOCX package")
+            total_size = 0
+            for info in infos:
+                if _budget:
+                    _budget.check()
+                if info.file_size < 0 or info.file_size > MAX_DOCX_UNCOMPRESSED_BYTES:
+                    raise _fail("invalid DOCX package")
+                total_size += info.file_size
+                if total_size > MAX_DOCX_UNCOMPRESSED_BYTES:
+                    raise _fail("DOCX package exceeds uncompressed size limit")
+            if archive.testzip() is not None:
+                raise _fail("corrupt DOCX package")
+            content_types = archive.read("[Content_Types].xml")
+            parser = etree.XMLParser(
+                resolve_entities=False, no_network=True, recover=False, huge_tree=False
+            )
+            etree.fromstring(content_types, parser=parser)
+            document_xml = archive.read("word/document.xml")
+            if re.search(rb"<!\s*(?:DOCTYPE|ENTITY)", document_xml, re.IGNORECASE):
+                raise _fail("unsafe DOCX document XML")
+            node_count = 0
+            paragraph_count = 0
+            for _, element in etree.iterparse(
+                io.BytesIO(document_xml),
+                events=("end",),
+                resolve_entities=False,
+                no_network=True,
+                recover=False,
+                huge_tree=False,
+            ):
+                node_count += 1
+                if element.tag == qn("w:p"):
+                    paragraph_count += 1
+                if (
+                    node_count > MAX_DOCX_XML_NODES
+                    or paragraph_count > MAX_DOCX_PARAGRAPHS
+                ):
+                    raise _fail("DOCX document structure limit exceeded")
+                if _budget:
+                    _budget.check()
+                element.clear()
+        Document(io.BytesIO(docx_bytes))
+        if _budget:
+            _budget.check(force=True)
+    except DocxConversionError:
+        raise
+    except (zipfile.BadZipFile, KeyError, ValueError, etree.XMLSyntaxError, OSError):
+        raise _fail("invalid DOCX package") from None
+    except Exception:
+        raise _fail("unsupported DOCX package") from None
+
+
+def docx_base64_to_html(content: str) -> str:
+    budget = _ImageBudget()
+    return docx_to_html(
+        decode_docx_base64(content, _budget=budget),
+        _budget=budget,
+        _validated=True,
+    )
+
+
+def html_to_docx_base64(html_content: str) -> str:
+    return base64.b64encode(html_to_docx(html_content)).decode("ascii")
+
+
+def _canonical_color(value: str) -> str | None:
+    value = value.strip()
+    if not value or value.lower() == "transparent":
+        return None
+    named = _NAMED_COLORS.get(value.lower())
+    if named:
+        return named
+    if _HEX_COLOR_RE.fullmatch(value):
+        value = value[1:]
+        if len(value) == 3:
+            value = "".join(char * 2 for char in value)
+        return f"#{value.upper()}"
+    match = _RGB_RE.fullmatch(value)
+    if match:
+        channels = [int(item) for item in match.groups()]
+        if all(0 <= item <= 255 for item in channels):
+            return "#" + "".join(f"{item:02X}" for item in channels)
+    raise _fail("invalid CSS color")
+
+
+def _canonical_font_name(value: str) -> str:
+    value = value.strip().strip("\"'").split(",", 1)[0].strip().strip("\"'")
+    if not value or len(value) > 128 or not _FONT_NAME_RE.fullmatch(value):
+        raise _fail("invalid font family")
+    return value
+
+
+def _length_to_points(
+    value: str, *, minimum: float = 1, maximum: float = 2000
+) -> float:
+    match = _LENGTH_RE.fullmatch(value.strip())
+    if not match:
+        raise _fail("invalid CSS length")
+    amount = float(match.group(1))
+    unit = (match.group(2) or "px").lower()
+    factors = {"px": 0.75, "pt": 1.0, "in": 72.0, "cm": 72.0 / 2.54, "mm": 72.0 / 25.4}
+    points = amount * factors[unit]
+    if not minimum <= points <= maximum:
+        raise _fail("CSS length outside supported range")
+    return points
+
+
+def _canonical_style(style: str) -> str:
+    if not isinstance(style, str) or len(style) > 4096:
+        raise _fail("invalid style attribute")
+    declarations: dict[str, str] = {}
+    for declaration in style.split(";"):
+        if not declaration.strip():
+            continue
+        if ":" not in declaration:
+            raise _fail("invalid style declaration")
+        name, value = declaration.split(":", 1)
+        name = name.strip().lower()
+        value = value.strip()
+        if name not in _ALLOWED_STYLE_PROPERTIES:
+            continue
+        lowered = value.lower()
+        if any(
+            token in lowered
+            for token in ("url(", "expression(", "javascript:", "@import", "var(")
+        ):
+            raise _fail("unsafe style value")
+        if name in {"color", "background-color"}:
+            if lowered in {"inherit", "initial", "unset"}:
+                continue
+            color = _canonical_color(value)
+            if color:
+                declarations[name] = color
+        elif name == "font-family":
+            declarations[name] = _canonical_font_name(value)
+        elif name == "font-size":
+            declarations[name] = (
+                f"{_length_to_points(value, minimum=6, maximum=96):g}pt"
+            )
+        elif name == "font-style":
+            if lowered not in {"normal", "italic", "oblique"}:
+                raise _fail("invalid font style")
+            declarations[name] = lowered
+        elif name == "font-weight":
+            if lowered not in {
+                "normal",
+                "bold",
+                "bolder",
+                "lighter",
+            } and not re.fullmatch(r"[1-9]00", lowered):
+                raise _fail("invalid font weight")
+            declarations[name] = lowered
+        elif name in {"text-decoration", "text-decoration-line"}:
+            tokens = set(lowered.split())
+            if not tokens or not tokens <= {"none", "underline", "line-through"}:
+                raise _fail("invalid text decoration")
+            declarations[name] = " ".join(sorted(tokens))
+        elif name == "vertical-align":
+            if lowered not in {"baseline", "sub", "super"}:
+                raise _fail("invalid vertical alignment")
+            declarations[name] = lowered
+        elif name == "text-align":
+            if lowered not in {"left", "right", "center", "justify", "start", "end"}:
+                raise _fail("invalid text alignment")
+            declarations[name] = {"start": "left", "end": "right"}.get(lowered, lowered)
+        elif name == "line-height":
+            if re.fullmatch(r"\d+(?:\.\d+)?", lowered):
+                amount = float(lowered)
+                if not 0.5 <= amount <= 5:
+                    raise _fail("invalid line height")
+                declarations[name] = f"{amount:g}"
+            elif lowered.endswith("%"):
+                amount = float(lowered[:-1]) / 100
+                if not 0.5 <= amount <= 5:
+                    raise _fail("invalid line height")
+                declarations[name] = f"{amount:g}"
+            else:
+                declarations[name] = (
+                    f"{_length_to_points(value, minimum=6, maximum=240):g}pt"
+                )
+        elif name in {"width", "height"}:
+            declarations[name] = (
+                f"{_length_to_points(value, minimum=1, maximum=2000):g}pt"
+            )
+    return "; ".join(f"{name}: {value}" for name, value in declarations.items())
+
+
+def _safe_network_url(value: str) -> str:
+    value = value.strip()
+    if (
+        not value
+        or len(value) > 2048
+        or any(char.isspace() or char == "\x00" for char in value)
+    ):
+        raise _fail("invalid network URL")
+    if value.startswith("//"):
+        value = f"https:{value}"
+    elif not urlparse(value).scheme:
+        value = f"https://{value}"
+    try:
+        parsed = urlparse(value)
+        hostname = parsed.hostname
+    except ValueError:
+        raise _fail("invalid network URL") from None
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.netloc
+        or not hostname
+    ):
+        raise _fail("unsupported network URL")
+    return value
+
+
+def _safe_href(value: str) -> str:
+    value = value.strip()
+    if not value or len(value) > 2048 or any(char in value for char in "\r\n\x00"):
+        raise _fail("invalid hyperlink")
+    if value.startswith("#"):
+        return value
+    parsed = urlparse(value)
+    if not parsed.scheme or parsed.scheme.lower() in {"http", "https"}:
+        return _safe_network_url(value)
+    if parsed.scheme.lower() not in {"mailto", "tel"} or not parsed.path:
+        raise _fail("unsupported hyperlink scheme")
+    return value
+
+
+def _decode_image_data_uri(
+    src: str, budget: _ImageBudget | None = None
+) -> tuple[bytes, str]:
+    if not isinstance(src, str):
+        raise _fail("invalid embedded image")
+    match = _DATA_IMAGE_RE.fullmatch(src)
+    if not match:
+        raise _fail("only base64 data images are supported")
+    try:
+        image_bytes = base64.b64decode(match.group("data"), validate=True)
+    except (binascii.Error, ValueError):
+        raise _fail("invalid embedded image base64") from None
+    if not image_bytes or len(image_bytes) > MAX_IMAGE_BYTES:
+        raise _fail("embedded image exceeds size limit")
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            image_format = (image.format or "").upper()
+            width, height = image.size
+            image.verify()
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError):
+        raise _fail("invalid embedded image") from None
+    if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
+        raise _fail("embedded image dimensions exceed limit")
+    actual_mime = _IMAGE_FORMAT_MIME.get(image_format)
+    declared_mime = match.group("mime").lower().replace("image/jpg", "image/jpeg")
+    if not actual_mime or declared_mime != actual_mime:
+        raise _fail("embedded image type mismatch")
+    if image_format == "WEBP":
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            converted = io.BytesIO()
+            mode = "RGBA" if "A" in image.getbands() else "RGB"
+            image.convert(mode).save(converted, format="PNG")
+            image_bytes = converted.getvalue()
+            actual_mime = "image/png"
+    if budget:
+        budget.add(len(image_bytes))
+    return image_bytes, actual_mime
+
+
+def _parse_html_fragment(
+    html_content: str, budget: _ImageBudget | None = None
+) -> etree._Element:
+    budget = budget or _ImageBudget()
+    budget.check(force=True)
+    if not isinstance(html_content, str) or not html_content.strip():
+        raise _fail("HTML content is required")
+    try:
+        encoded = html_content.encode("utf-8")
+    except UnicodeEncodeError:
+        raise _fail("invalid HTML encoding") from None
+    if len(encoded) > MAX_HTML_BYTES or re.search(
+        r"<!\s*(?:DOCTYPE|ENTITY)", html_content, re.IGNORECASE
+    ):
+        raise _fail("invalid or oversized HTML content")
+    parser = lxml_html.HTMLParser(
+        encoding="utf-8", recover=False, remove_comments=True, no_network=True
+    )
+    try:
+        root = lxml_html.fragment_fromstring(
+            encoded, create_parent="div", parser=parser
+        )
+    except (etree.ParserError, etree.XMLSyntaxError, ValueError):
+        raise _fail("malformed HTML content") from None
+    elements = list(root.iterdescendants())
+    if len(elements) > MAX_HTML_ELEMENTS:
+        raise _fail("HTML element limit exceeded")
+    for element in elements:
+        budget.check()
+        if not isinstance(element.tag, str) or not element.tag.isascii():
+            raise _fail("unsupported HTML node")
+        tag = element.tag.lower()
+        if tag not in _ALLOWED_TAGS:
+            raise _fail(f"unsupported HTML tag: {tag}")
+        cleaned: dict[str, str] = {}
+        for raw_name, raw_value in element.attrib.items():
+            name = raw_name.lower()
+            if name.startswith("on"):
+                raise _fail("event attributes are not allowed")
+            if name not in _GLOBAL_ATTRIBUTES | _TAG_ATTRIBUTES.get(tag, set()):
+                continue
+            if name == "style":
+                style = _canonical_style(raw_value)
+                if style:
+                    cleaned[name] = style
+            elif name == "href":
+                cleaned[name] = _safe_href(raw_value)
+            elif name == "src":
+                if raw_value.strip().lower().startswith("data:"):
+                    _decode_image_data_uri(raw_value, budget)
+                    cleaned[name] = raw_value
+                else:
+                    cleaned[name] = _safe_network_url(raw_value)
+            elif name in {"colspan", "rowspan", "start"}:
+                try:
+                    number = int(raw_value)
+                except (TypeError, ValueError):
+                    raise _fail(f"invalid {name}") from None
+                maximum = 100_000 if name == "start" else MAX_TABLE_COLUMNS
+                if not 1 <= number <= maximum:
+                    raise _fail(f"invalid {name}")
+                cleaned[name] = str(number)
+            elif name in {"width", "height"}:
+                cleaned[name] = (
+                    f"{_length_to_points(raw_value, minimum=1, maximum=2000):g}pt"
+                )
+            elif name == "class":
+                language_class = next(
+                    (
+                        token
+                        for token in raw_value.split()
+                        if re.fullmatch(r"language-[A-Za-z0-9_+.-]{1,64}", token)
+                    ),
+                    "",
+                )
+                if language_class:
+                    cleaned[name] = language_class
+            elif name == "data-type":
+                expected = "taskList" if tag in {"ul", "ol"} else "taskItem"
+                if raw_value == expected:
+                    cleaned[name] = expected
+            elif name == "data-checked":
+                if raw_value.lower() in {"true", "false"}:
+                    cleaned[name] = raw_value.lower()
+            elif name == "type":
+                if raw_value.lower() != "checkbox":
+                    raise _fail("unsupported input type")
+                cleaned[name] = "checkbox"
+            elif name == "checked":
+                cleaned[name] = "checked"
+            else:
+                cleaned[name] = raw_value[:1024]
+        if tag == "img" and "src" not in cleaned:
+            raise _fail("image source is required")
+        if tag == "input" and cleaned.get("type") != "checkbox":
+            raise _fail("unsupported input type")
+        element.attrib.clear()
+        element.attrib.update(cleaned)
+    _validate_html_tables(root, budget)
+    return root
+
+
+def _style_map(element: etree._Element) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for declaration in element.get("style", "").split(";"):
+        if ":" in declaration:
+            name, value = declaration.split(":", 1)
+            result[name.strip().lower()] = value.strip()
+    return result
+
+
+def _inline_style_for_element(
+    parent: _InlineStyle, element: etree._Element
+) -> _InlineStyle:
+    tag = element.tag.lower()
+    style = _style_map(element)
+    changes: dict = {}
+    if tag in {"b", "strong", "th"}:
+        changes["bold"] = True
+    if tag in {"em", "i"}:
+        changes["italic"] = True
+    if tag == "u":
+        changes["underline"] = True
+    if tag in {"s", "strike", "del"}:
+        changes["strike"] = True
+    if tag == "sup":
+        changes.update(superscript=True, subscript=False)
+    if tag == "sub":
+        changes.update(subscript=True, superscript=False)
+    if tag == "mark":
+        changes["highlight"] = "#FFFF00"
+    if tag == "code":
+        changes.update(code=True, font_name="Consolas")
+
+    weight = style.get("font-weight")
+    if weight:
+        changes["bold"] = weight in {"bold", "bolder"} or (
+            weight.isdigit() and int(weight) >= 600
+        )
+    font_style = style.get("font-style")
+    if font_style:
+        changes["italic"] = font_style in {"italic", "oblique"}
+    decoration = f"{style.get('text-decoration', '')} {style.get('text-decoration-line', '')}".split()
+    if decoration:
+        changes["underline"] = "underline" in decoration
+        changes["strike"] = "line-through" in decoration
+    vertical_align = style.get("vertical-align")
+    if vertical_align == "super":
+        changes.update(superscript=True, subscript=False)
+    elif vertical_align == "sub":
+        changes.update(subscript=True, superscript=False)
+    elif vertical_align == "baseline":
+        changes.update(subscript=False, superscript=False)
+    if "font-family" in style:
+        changes["font_name"] = style["font-family"]
+    if "font-size" in style:
+        changes["font_size_pt"] = _length_to_points(
+            style["font-size"], minimum=6, maximum=96
+        )
+    if "color" in style:
+        changes["color"] = _canonical_color(style["color"])
+    if "background-color" in style:
+        changes["highlight"] = _canonical_color(style["background-color"])
+    return replace(parent, **changes)
+
+
+def _apply_run_style(run: Run, style: _InlineStyle) -> None:
+    if style.code:
+        try:
+            run.style = _INLINE_CODE_STYLE
+        except KeyError:
+            pass
+    run.bold = style.bold
+    run.italic = style.italic
+    run.underline = style.underline
+    run.font.strike = style.strike
+    run.font.superscript = style.superscript
+    run.font.subscript = style.subscript
+    if style.font_name:
+        run.font.name = style.font_name
+        r_fonts = run._r.get_or_add_rPr().get_or_add_rFonts()
+        r_fonts.set(qn("w:eastAsia"), style.font_name)
+    if style.font_size_pt:
+        run.font.size = Pt(style.font_size_pt)
+    if style.color:
+        run.font.color.rgb = RGBColor.from_string(style.color.removeprefix("#"))
+    if style.highlight:
+        r_pr = run._r.get_or_add_rPr()
+        shading = r_pr.find(qn("w:shd"))
+        if shading is None:
+            shading = OxmlElement("w:shd")
+            r_pr.append(shading)
+        shading.set(qn("w:val"), "clear")
+        shading.set(qn("w:color"), "auto")
+        shading.set(qn("w:fill"), style.highlight.removeprefix("#"))
+
+
+def _new_run(
+    paragraph: Paragraph, text: str, parent_xml: etree._Element | None = None
+) -> Run:
+    if parent_xml is None:
+        return paragraph.add_run(text)
+    run_element = OxmlElement("w:r")
+    parent_xml.append(run_element)
+    run = Run(run_element, paragraph)
+    run.text = text
+    return run
+
+
+def _append_text_run(
+    paragraph: Paragraph,
+    text: str | None,
+    style: _InlineStyle,
+    parent_xml: etree._Element | None = None,
+) -> None:
+    if not text:
+        return
+    normalized = re.sub(r"[\t\r\n ]+", " ", text)
+    if not normalized:
+        return
+    run = _new_run(paragraph, normalized, parent_xml)
+    _apply_run_style(run, style)
+
+
+def _image_lengths(element: etree._Element) -> tuple[Pt | None, Pt | None]:
+    style = _style_map(element)
+    width_value = style.get("width") or element.get("width")
+    height_value = style.get("height") or element.get("height")
+    width = Pt(_length_to_points(width_value)) if width_value else None
+    height = Pt(_length_to_points(height_value)) if height_value else None
+    return width, height
+
+
+def _append_image_run(
+    paragraph: Paragraph,
+    element: etree._Element,
+    style: _InlineStyle,
+    budget: _ImageBudget,
+    parent_xml: etree._Element | None = None,
+) -> None:
+    src = element.get("src", "")
+    width, height = _image_lengths(element)
+    run = _new_run(paragraph, "", parent_xml)
+    _apply_run_style(run, style)
+    if src.lower().startswith("data:"):
+        image_bytes, _ = _decode_image_data_uri(src, budget)
+        try:
+            shape = run.add_picture(io.BytesIO(image_bytes), width=width, height=height)
+        except (ValueError, OSError, UnidentifiedImageError):
+            raise _fail("unsupported embedded image") from None
+    else:
+        src = _safe_network_url(src)
+        if width is None and height is None:
+            width, height = Pt(320), Pt(180)
+        elif width is None:
+            width = Pt(height.pt * 16 / 9)
+        elif height is None:
+            height = Pt(width.pt * 9 / 16)
+        try:
+            shape = run.add_picture(
+                io.BytesIO(_EXTERNAL_IMAGE_PLACEHOLDER), width=width, height=height
+            )
+            blip = shape._inline.xpath(".//a:blip")[0]
+            embedded_relationship_id = blip.get(qn("r:embed"))
+            external_relationship_id = paragraph.part.relate_to(
+                src, RT.IMAGE, is_external=True
+            )
+            blip.attrib.pop(qn("r:embed"), None)
+            blip.set(qn("r:link"), external_relationship_id)
+            if embedded_relationship_id:
+                paragraph.part.drop_rel(embedded_relationship_id)
+        except (IndexError, KeyError, ValueError, OSError):
+            raise _fail("unsupported external image") from None
+    alt = (element.get("alt") or "").strip()
+    if alt:
+        shape._inline.docPr.set("descr", alt[:1024])
+
+
+def _ensure_conversion_styles(document) -> None:
+    styles = document.styles
+    try:
+        inline_code = styles[_INLINE_CODE_STYLE]
+    except KeyError:
+        inline_code = styles.add_style(_INLINE_CODE_STYLE, WD_STYLE_TYPE.CHARACTER)
+    inline_code.font.name = "Consolas"
+    inline_code.font.size = Pt(10)
+
+    try:
+        code_block = styles[_CODE_BLOCK_STYLE]
+    except KeyError:
+        code_block = styles.add_style(_CODE_BLOCK_STYLE, WD_STYLE_TYPE.PARAGRAPH)
+    code_block.font.name = "Consolas"
+    code_block.font.size = Pt(10)
+
+    try:
+        horizontal_rule = styles[_HORIZONTAL_RULE_STYLE]
+    except KeyError:
+        horizontal_rule = styles.add_style(
+            _HORIZONTAL_RULE_STYLE, WD_STYLE_TYPE.PARAGRAPH
+        )
+    horizontal_rule.paragraph_format.space_after = Pt(0)
+    horizontal_rule.paragraph_format.space_before = Pt(0)
+
+
+def _append_hyperlink(
+    paragraph: Paragraph,
+    element: etree._Element,
+    parent_style: _InlineStyle,
+    budget: _ImageBudget,
+) -> None:
+    href = _safe_href(element.get("href", ""))
+    hyperlink = OxmlElement("w:hyperlink")
+    if href.startswith("#"):
+        hyperlink.set(qn("w:anchor"), href[1:])
+    else:
+        relationship_id = paragraph.part.relate_to(href, RT.HYPERLINK, is_external=True)
+        hyperlink.set(qn("r:id"), relationship_id)
+    paragraph._p.append(hyperlink)
+    _append_inline_contents(paragraph, element, parent_style, budget, hyperlink)
+
+
+def _append_inline_contents(
+    paragraph: Paragraph,
+    element: etree._Element,
+    parent_style: _InlineStyle,
+    budget: _ImageBudget,
+    parent_xml: etree._Element | None = None,
+) -> None:
+    budget.check()
+    style = _inline_style_for_element(parent_style, element)
+    _append_text_run(paragraph, element.text, style, parent_xml)
+    for child in element:
+        tag = child.tag.lower()
+        if tag == "br":
+            run = _new_run(paragraph, "\n", parent_xml)
+            _apply_run_style(run, style)
+        elif tag == "img":
+            _append_image_run(
+                paragraph,
+                child,
+                _inline_style_for_element(style, child),
+                budget,
+                parent_xml,
+            )
+        elif tag == "a" and parent_xml is None:
+            _append_hyperlink(paragraph, child, style, budget)
+        else:
+            _append_inline_contents(paragraph, child, style, budget, parent_xml)
+        _append_text_run(paragraph, child.tail, style, parent_xml)
+
+
+def _apply_paragraph_style(paragraph: Paragraph, element: etree._Element) -> None:
+    style = _style_map(element)
+    alignment = style.get("text-align")
+    if alignment:
+        paragraph.alignment = {
+            "left": WD_ALIGN_PARAGRAPH.LEFT,
+            "center": WD_ALIGN_PARAGRAPH.CENTER,
+            "right": WD_ALIGN_PARAGRAPH.RIGHT,
+            "justify": WD_ALIGN_PARAGRAPH.JUSTIFY,
+        }[alignment]
+    line_height = style.get("line-height")
+    if line_height:
+        if line_height.endswith("pt"):
+            paragraph.paragraph_format.line_spacing = Pt(float(line_height[:-2]))
+        else:
+            paragraph.paragraph_format.line_spacing = float(line_height)
+    if element.tag.lower() == "blockquote":
+        paragraph.paragraph_format.left_indent = Inches(0.25)
+
+
+def _add_paragraph_from_element(
+    container,
+    element: etree._Element,
+    budget: _ImageBudget,
+    *,
+    style_name: str | None = None,
+) -> Paragraph:
+    paragraph = container.add_paragraph(style=style_name)
+    _apply_paragraph_style(paragraph, element)
+    initial_style = _InlineStyle(bold=element.tag.lower() == "th")
+    _append_inline_contents(paragraph, element, initial_style, budget)
+    _trim_paragraph_spaces(paragraph)
+    return paragraph
+
+
+def _add_text_paragraph(container, text: str, budget: _ImageBudget) -> None:
+    if not text or not text.strip():
+        return
+    paragraph = container.add_paragraph()
+    _append_text_run(paragraph, text, _InlineStyle())
+
+
+def _list_style_name(kind: str, level: int) -> str:
+    base = "List Number" if kind == "ol" else "List Bullet"
+    return base if level <= 0 else f"{base} {min(level + 1, 3)}"
+
+
+def _append_list_item_contents(
+    paragraph: Paragraph,
+    item: etree._Element,
+    budget: _ImageBudget,
+    *,
+    task_checked: bool | None = None,
+) -> None:
+    base_style = _inline_style_for_element(_InlineStyle(), item)
+    if task_checked is not None:
+        _append_text_run(
+            paragraph,
+            f"{_TASK_CHECKED if task_checked else _TASK_UNCHECKED} ",
+            base_style,
+        )
+    _append_text_run(paragraph, item.text, base_style)
+    has_content = bool(item.text and item.text.strip())
+    for child in item:
+        if child.tag.lower() in {"ul", "ol"}:
+            continue
+        if task_checked is not None and child.tag.lower() == "label":
+            continue
+        if child.tag.lower() in {"p", "div", "blockquote"} and has_content:
+            run = paragraph.add_run("\n")
+            _apply_run_style(run, base_style)
+        _append_inline_contents(paragraph, child, base_style, budget)
+        has_content = has_content or bool("".join(child.itertext()).strip())
+        _append_text_run(paragraph, child.tail, base_style)
+    _trim_paragraph_spaces(paragraph)
+
+
+def _add_html_list(
+    container, element: etree._Element, budget: _ImageBudget, level: int = 0
+) -> None:
+    kind = element.tag.lower()
+    is_task_list = element.get("data-type") == "taskList"
+    for item in element:
+        if item.tag.lower() != "li":
+            continue
+        paragraph = container.add_paragraph(style=_list_style_name(kind, level))
+        _apply_paragraph_style(paragraph, item)
+        task_checked = None
+        if is_task_list or item.get("data-type") == "taskItem":
+            checked_value = item.get("data-checked")
+            if checked_value is None:
+                checkbox = next(
+                    iter(item.xpath("./label/input[@type='checkbox']")), None
+                )
+                checked_value = (
+                    "true"
+                    if checkbox is not None and "checked" in checkbox.attrib
+                    else "false"
+                )
+            task_checked = checked_value == "true"
+        _append_list_item_contents(paragraph, item, budget, task_checked=task_checked)
+        for nested in item:
+            if nested.tag.lower() in {"ul", "ol"}:
+                _add_html_list(container, nested, budget, level + 1)
+
+
+def _clear_cell(cell: _Cell) -> None:
+    tc_pr = cell._tc.get_or_add_tcPr()
+    for child in list(cell._tc):
+        if child is not tc_pr:
+            cell._tc.remove(child)
+
+
+def _table_rows(element: etree._Element) -> list[etree._Element]:
+    return list(element.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr"))
+
+
+def _row_cells(element: etree._Element) -> list[etree._Element]:
+    return list(element.xpath("./th|./td"))
+
+
+def _table_layout(element: etree._Element, budget: _ImageBudget | None = None):
+    rows = _table_rows(element)
+    if not rows:
+        raise _fail("table must contain a row")
+    if len(rows) > MAX_TABLE_ROWS:
+        raise _fail("table row limit exceeded")
+
+    occupied: set[tuple[int, int]] = set()
+    placements = []
+    max_column = 0
+    expanded_cells = 0
+    for row_index, row in enumerate(rows):
+        if budget:
+            budget.check()
+        column_index = 0
+        for cell in _row_cells(row):
+            if budget:
+                budget.check()
+            while (row_index, column_index) in occupied:
+                column_index += 1
+            colspan = int(cell.get("colspan", "1"))
+            rowspan = int(cell.get("rowspan", "1"))
+            end_row = row_index + rowspan - 1
+            end_column = column_index + colspan - 1
+            if (
+                end_row >= len(rows)
+                or end_column >= MAX_TABLE_COLUMNS
+                or colspan < 1
+                or rowspan < 1
+            ):
+                raise _fail("table span outside supported grid")
+            coordinates = {
+                (occupied_row, occupied_column)
+                for occupied_row in range(row_index, end_row + 1)
+                for occupied_column in range(column_index, end_column + 1)
+            }
+            if coordinates & occupied:
+                raise _fail("overlapping table span")
+            occupied.update(coordinates)
+            expanded_cells += len(coordinates)
+            if expanded_cells > MAX_TOTAL_TABLE_CELLS:
+                raise _fail("table cell limit exceeded")
+            placements.append((row_index, column_index, end_row, end_column, cell))
+            max_column = max(max_column, end_column + 1)
+            column_index = end_column + 1
+    if max_column <= 0 or max_column > MAX_TABLE_COLUMNS:
+        raise _fail("table column limit exceeded")
+    return rows, placements, max_column, expanded_cells
+
+
+def _validate_html_tables(root: etree._Element, budget: _ImageBudget) -> None:
+    total_cells = 0
+    for table in root.xpath(".//table"):
+        budget.check()
+        _, _, _, expanded_cells = _table_layout(table, budget)
+        total_cells += expanded_cells
+        if total_cells > MAX_TOTAL_TABLE_CELLS:
+            raise _fail("total table cell limit exceeded")
+
+
+def _add_table(container, element: etree._Element, budget: _ImageBudget) -> None:
+    rows, placements, column_count, _ = _table_layout(element, budget)
+    if isinstance(container, _Cell):
+        table = container.add_table(rows=len(rows), cols=column_count, width=Inches(6))
+    else:
+        table = container.add_table(rows=len(rows), cols=column_count)
+    try:
+        table.style = "Table Grid"
+    except KeyError:
+        pass
+
+    for row_index, column_index, end_row, end_column, cell_element in placements:
+        target = table.cell(row_index, column_index)
+        if end_row != row_index or end_column != column_index:
+            target = target.merge(table.cell(end_row, end_column))
+        _clear_cell(target)
+        block_children = [
+            child for child in cell_element if child.tag.lower() in _BLOCK_TAGS
+        ]
+        if block_children:
+            _add_text_paragraph(target, cell_element.text or "", budget)
+            for child in block_children:
+                _append_html_block(target, child, budget)
+        else:
+            _add_paragraph_from_element(target, cell_element, budget)
+        if not target.paragraphs:
+            target.add_paragraph()
+
+
+def _preformatted_text(element: etree._Element) -> str:
+    parts = [element.text or ""]
+    for child in element:
+        if child.tag.lower() == "br":
+            parts.append("\n")
+        else:
+            parts.append(_preformatted_text(child))
+        parts.append(child.tail or "")
+    return "".join(parts)
+
+
+def _add_code_block(container, element: etree._Element) -> None:
+    paragraph = container.add_paragraph(style=_CODE_BLOCK_STYLE)
+    code = next(iter(element.xpath("./code")), element)
+    run = paragraph.add_run(_preformatted_text(code))
+    run.font.name = "Consolas"
+    run.font.size = Pt(10)
+
+
+def _add_horizontal_rule(container) -> None:
+    paragraph = container.add_paragraph(style=_HORIZONTAL_RULE_STYLE)
+    paragraph_property = paragraph._p.get_or_add_pPr()
+    borders = OxmlElement("w:pBdr")
+    bottom = OxmlElement("w:bottom")
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), "8")
+    bottom.set(qn("w:space"), "1")
+    bottom.set(qn("w:color"), "auto")
+    borders.append(bottom)
+    paragraph_property.append(borders)
+
+
+def _append_html_block(
+    container, element: etree._Element, budget: _ImageBudget
+) -> None:
+    tag = element.tag.lower()
+    if tag in {"ul", "ol"}:
+        _add_html_list(container, element, budget)
+        return
+    if tag == "table":
+        _add_table(container, element, budget)
+        return
+    if tag == "pre":
+        _add_code_block(container, element)
+        return
+    if tag == "hr":
+        _add_horizontal_rule(container)
+        return
+    if tag == "div" and any(child.tag.lower() in _BLOCK_TAGS for child in element):
+        _add_text_paragraph(container, element.text or "", budget)
+        for child in element:
+            if child.tag.lower() in _BLOCK_TAGS:
+                _append_html_block(container, child, budget)
+            elif "".join(child.itertext()).strip():
+                _add_paragraph_from_element(container, child, budget)
+            _add_text_paragraph(container, child.tail or "", budget)
+        return
+    style_name = None
+    if re.fullmatch(r"h[1-6]", tag):
+        style_name = f"Heading {tag[1]}"
+    _add_paragraph_from_element(container, element, budget, style_name=style_name)
+
+
+def html_to_docx(html_content: str) -> bytes:
+    budget = _ImageBudget()
+    root = _parse_html_fragment(html_content, budget)
+    document = Document()
+    _ensure_conversion_styles(document)
+    _add_text_paragraph(document, root.text or "", budget)
+    for element in root:
+        budget.check()
+        if element.tag.lower() in _BLOCK_TAGS:
+            _append_html_block(document, element, budget)
+        else:
+            _add_paragraph_from_element(document, element, budget)
+        _add_text_paragraph(document, element.tail or "", budget)
+    if not document.paragraphs and not document.tables:
+        document.add_paragraph()
+    output = io.BytesIO()
+    budget.check(force=True)
+    document.save(output)
+    docx_bytes = output.getvalue()
+    validate_docx_bytes(docx_bytes, _budget=budget)
+    budget.check(force=True)
+    return docx_bytes
+
+
+def _style_chain(style) -> Iterable:
+    seen: set[str] = set()
+    while style is not None and style.style_id not in seen:
+        seen.add(style.style_id)
+        yield style
+        style = style.base_style
+
+
+def _item_style_id(item: Run | Paragraph) -> str | None:
+    if isinstance(item, Run):
+        properties = item._r.rPr
+        style_element = properties.rStyle if properties is not None else None
+    else:
+        properties = item._p.pPr
+        style_element = properties.pStyle if properties is not None else None
+    return str(style_element.val) if style_element is not None else None
+
+
+def _cached_item_style(item: Run | Paragraph, kind: str, budget: _ImageBudget):
+    key = (kind, _item_style_id(item))
+    if key not in budget.style_cache:
+        try:
+            budget.style_cache[key] = item.style
+        except (AttributeError, KeyError, ValueError):
+            budget.style_cache[key] = None
+    return budget.style_cache[key]
+
+
+def _cached_named_style(document, name: str, budget: _ImageBudget):
+    key = ("named", name)
+    if key not in budget.style_cache:
+        try:
+            budget.style_cache[key] = document.styles[name]
+        except (AttributeError, KeyError, ValueError):
+            budget.style_cache[key] = None
+    return budget.style_cache[key]
+
+
+def _cached_style_chain(style, budget: _ImageBudget) -> tuple:
+    if style is None:
+        return ()
+    try:
+        key = (style.type, style.style_id)
+    except (AttributeError, ValueError):
+        return ()
+    if key not in budget.style_chain_cache:
+        try:
+            budget.style_chain_cache[key] = tuple(_style_chain(style))
+        except (AttributeError, ValueError):
+            budget.style_chain_cache[key] = (style,)
+    return budget.style_chain_cache[key]
+
+
+def _read_font_properties(font) -> _FontProperties:
+    def read(name: str):
+        try:
+            return getattr(font, name)
+        except (AttributeError, ValueError):
+            return None
+
+    color = None
+    highlight = None
+    try:
+        rgb = font.color.rgb
+        if rgb is not None:
+            color = f"#{str(rgb).upper()}"
+    except (AttributeError, ValueError):
+        pass
+    try:
+        highlight_value = font.highlight_color
+        if highlight_value is not None:
+            highlight = _HIGHLIGHT_TO_HEX.get(highlight_value)
+    except (AttributeError, ValueError):
+        pass
+    return _FontProperties(
+        bold=read("bold"),
+        italic=read("italic"),
+        underline=read("underline"),
+        strike=read("strike"),
+        superscript=read("superscript"),
+        subscript=read("subscript"),
+        font_name=read("name"),
+        font_size=read("size"),
+        color=color,
+        highlight=highlight,
+    )
+
+
+def _merge_font_properties(*sources: _FontProperties) -> _FontProperties:
+    def first(name: str):
+        return next(
+            (
+                value
+                for source in sources
+                if (value := getattr(source, name)) is not None
+            ),
+            None,
+        )
+
+    return _FontProperties(
+        bold=first("bold"),
+        italic=first("italic"),
+        underline=first("underline"),
+        strike=first("strike"),
+        superscript=first("superscript"),
+        subscript=first("subscript"),
+        font_name=first("font_name"),
+        font_size=first("font_size"),
+        color=first("color"),
+        highlight=first("highlight"),
+    )
+
+
+def _style_font_properties(style, budget: _ImageBudget) -> _FontProperties:
+    if style is None:
+        return _FontProperties()
+    try:
+        key = (style.type, style.style_id)
+    except (AttributeError, ValueError):
+        return _FontProperties()
+    if key not in budget.style_font_cache:
+        budget.style_font_cache[key] = _merge_font_properties(
+            *(
+                _read_font_properties(item.font)
+                for item in _cached_style_chain(style, budget)
+            )
+        )
+    return budget.style_font_cache[key]
+
+
+def _paragraph_font_properties(
+    paragraph: Paragraph, budget: _ImageBudget
+) -> _FontProperties:
+    key = id(paragraph._p)
+    if key not in budget.paragraph_font_cache:
+        paragraph_style = _cached_item_style(paragraph, "paragraph", budget)
+        normal_style = _cached_named_style(paragraph.part.document, "Normal", budget)
+        budget.paragraph_font_cache[key] = _merge_font_properties(
+            _style_font_properties(paragraph_style, budget),
+            _style_font_properties(normal_style, budget),
+        )
+    return budget.paragraph_font_cache[key]
+
+
+def _run_inline_style(
+    run: Run, paragraph: Paragraph, budget: _ImageBudget
+) -> _InlineStyle:
+    budget.check()
+    run_style = _cached_item_style(run, "character", budget)
+    properties = _merge_font_properties(
+        _read_font_properties(run.font),
+        _style_font_properties(run_style, budget),
+        _paragraph_font_properties(paragraph, budget),
+    )
+    r_pr = run._r.rPr
+    font_name = properties.font_name
+    highlight = properties.highlight
+    if r_pr is not None and r_pr.rFonts is not None:
+        for attribute in ("w:eastAsia", "w:hAnsi", "w:ascii"):
+            value = r_pr.rFonts.get(qn(attribute))
+            if value:
+                font_name = value
+                break
+    if r_pr is not None:
+        shading = r_pr.find(qn("w:shd"))
+        if shading is not None:
+            fill = (shading.get(qn("w:fill")) or "").upper()
+            if re.fullmatch(r"[0-9A-F]{6}", fill):
+                highlight = f"#{fill}"
+    try:
+        run_style_name = run_style.name if run_style is not None else ""
+        run_style_id = run_style.style_id if run_style is not None else ""
+    except (AttributeError, KeyError, ValueError):
+        run_style_name = run_style_id = ""
+    size = properties.font_size
+    return _InlineStyle(
+        bold=bool(properties.bold),
+        italic=bool(properties.italic),
+        underline=bool(properties.underline),
+        strike=bool(properties.strike),
+        superscript=bool(properties.superscript),
+        subscript=bool(properties.subscript),
+        font_name=font_name,
+        font_size_pt=size.pt if size is not None else None,
+        color=properties.color,
+        highlight=highlight,
+        code=_INLINE_CODE_STYLE in {run_style_name, run_style_id},
+    )
+
+
+def _set_html_text(element: etree._Element, text: str) -> None:
+    parts = text.split("\n")
+    element.text = parts[0]
+    for part in parts[1:]:
+        line_break = etree.SubElement(element, "br")
+        line_break.tail = part
+
+
+def _append_docx_image(
+    parent: etree._Element,
+    run: Run,
+    blip: etree._Element,
+    budget: _ImageBudget,
+) -> None:
+    linked_relationship_id = blip.get(qn("r:link"))
+    relationship_id = linked_relationship_id or blip.get(qn("r:embed"))
+    if not relationship_id:
+        return
+    image = etree.SubElement(parent, "img")
+    if linked_relationship_id:
+        try:
+            relationship = run.part.rels[linked_relationship_id]
+            if relationship.reltype != RT.IMAGE or not relationship.is_external:
+                raise _fail("invalid external image relationship")
+            image.set("src", _safe_network_url(relationship.target_ref))
+        except (AttributeError, KeyError):
+            raise _fail("invalid external image relationship") from None
+    else:
+        try:
+            image_part = run.part.related_parts[relationship_id]
+            image_bytes = image_part.blob
+            content_type = image_part.content_type.lower().replace(
+                "image/jpg", "image/jpeg"
+            )
+        except (AttributeError, KeyError):
+            raise _fail("invalid embedded image relationship") from None
+        data_uri = f"data:{content_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+        normalized_bytes, normalized_mime = _decode_image_data_uri(data_uri, budget)
+        image.set(
+            "src",
+            f"data:{normalized_mime};base64,{base64.b64encode(normalized_bytes).decode('ascii')}",
+        )
+    extents = run._r.xpath(".//wp:extent")
+    if extents:
+        try:
+            width_pt = int(extents[0].get("cx")) / 12700
+            height_pt = int(extents[0].get("cy")) / 12700
+            image.set("style", f"width: {width_pt:g}pt; height: {height_pt:g}pt")
+        except (TypeError, ValueError):
+            pass
+    properties = run._r.xpath(".//wp:docPr")
+    if properties:
+        alt = properties[0].get("descr") or properties[0].get("title")
+        if alt:
+            image.set("alt", alt[:1024])
+
+
+def _append_docx_run(
+    parent: etree._Element, run: Run, paragraph: Paragraph, budget: _ImageBudget
+) -> None:
+    budget.check()
+    if run.text:
+        style = _run_inline_style(run, paragraph, budget)
+        outer = etree.SubElement(parent, "span")
+        current = outer
+        for enabled, tag in (
+            (style.bold, "strong"),
+            (style.italic, "em"),
+            (style.underline, "u"),
+            (style.strike, "s"),
+            (style.superscript, "sup"),
+            (style.subscript and not style.superscript, "sub"),
+        ):
+            if enabled:
+                current = etree.SubElement(current, tag)
+        if style.code:
+            current = etree.SubElement(current, "code")
+        if style.highlight:
+            current = etree.SubElement(current, "mark")
+            current.set("style", f"background-color: {style.highlight}")
+        span_styles = []
+        if style.font_name:
+            span_styles.append(f"font-family: {style.font_name}")
+        if style.font_size_pt:
+            span_styles.append(f"font-size: {style.font_size_pt:g}pt")
+        if style.color:
+            span_styles.append(f"color: {style.color}")
+        if span_styles:
+            current = etree.SubElement(current, "span")
+            current.set("style", "; ".join(span_styles))
+        _set_html_text(current, run.text)
+    for blip in run._r.xpath(".//a:blip"):
+        _append_docx_image(parent, run, blip, budget)
+
+
+def _paragraph_alignment(paragraph: Paragraph, budget: _ImageBudget):
+    if paragraph.alignment is not None:
+        return paragraph.alignment
+    try:
+        paragraph_style = _cached_item_style(paragraph, "paragraph", budget)
+        for style in _cached_style_chain(paragraph_style, budget):
+            alignment = style.paragraph_format.alignment
+            if alignment is not None:
+                return alignment
+    except (AttributeError, KeyError, ValueError):
+        pass
+    return None
+
+
+def _paragraph_line_spacing(paragraph: Paragraph, budget: _ImageBudget):
+    spacing = paragraph.paragraph_format.line_spacing
+    if spacing is not None:
+        return spacing
+    try:
+        paragraph_style = _cached_item_style(paragraph, "paragraph", budget)
+        for style in _cached_style_chain(paragraph_style, budget):
+            spacing = style.paragraph_format.line_spacing
+            if spacing is not None:
+                return spacing
+    except (AttributeError, KeyError, ValueError):
+        pass
+    return None
+
+
+def _paragraph_css(paragraph: Paragraph, budget: _ImageBudget) -> str:
+    declarations = []
+    alignment = _paragraph_alignment(paragraph, budget)
+    alignment_map = {
+        WD_ALIGN_PARAGRAPH.LEFT: "left",
+        WD_ALIGN_PARAGRAPH.CENTER: "center",
+        WD_ALIGN_PARAGRAPH.RIGHT: "right",
+        WD_ALIGN_PARAGRAPH.JUSTIFY: "justify",
+        WD_ALIGN_PARAGRAPH.DISTRIBUTE: "justify",
+    }
+    if alignment in alignment_map:
+        declarations.append(f"text-align: {alignment_map[alignment]}")
+    spacing = _paragraph_line_spacing(paragraph, budget)
+    if spacing is not None:
+        if hasattr(spacing, "pt"):
+            declarations.append(f"line-height: {spacing.pt:g}pt")
+        elif isinstance(spacing, (float, int)):
+            declarations.append(f"line-height: {float(spacing):g}")
+    return "; ".join(declarations)
+
+
+def _heading_level(paragraph: Paragraph, budget: _ImageBudget) -> int | None:
+    try:
+        paragraph_style = _cached_item_style(paragraph, "paragraph", budget)
+        style_name = paragraph_style.name or ""
+        style_id = paragraph_style.style_id or ""
+    except (AttributeError, KeyError, ValueError):
+        return None
+    match = re.fullmatch(
+        r"Heading\s*([1-6])", style_name, re.IGNORECASE
+    ) or re.fullmatch(r"Heading([1-6])", style_id, re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def _paragraph_has_style(
+    paragraph: Paragraph, expected: str, budget: _ImageBudget
+) -> bool:
+    try:
+        paragraph_style = _cached_item_style(paragraph, "paragraph", budget)
+        return expected in {paragraph_style.name, paragraph_style.style_id}
+    except (AttributeError, KeyError, ValueError):
+        return False
+
+
+def _is_horizontal_rule(paragraph: Paragraph, budget: _ImageBudget) -> bool:
+    if _paragraph_has_style(paragraph, _HORIZONTAL_RULE_STYLE, budget):
+        return True
+    if paragraph.text.strip():
+        return False
+    paragraph_property = paragraph._p.pPr
+    if paragraph_property is None:
+        return False
+    borders = paragraph_property.find(qn("w:pBdr"))
+    return borders is not None and borders.find(qn("w:bottom")) is not None
+
+
+def _style_list_info(
+    paragraph: Paragraph, budget: _ImageBudget
+) -> tuple[str, int] | None:
+    try:
+        paragraph_style = _cached_item_style(paragraph, "paragraph", budget)
+        style_name = paragraph_style.name or ""
+        style_id = paragraph_style.style_id or ""
+    except (AttributeError, KeyError, ValueError):
+        return None
+    match = re.fullmatch(
+        r"List\s+(Bullet|Number)(?:\s+([1-9]\d*))?", style_name, re.IGNORECASE
+    ) or re.fullmatch(r"List(Bullet|Number)([1-9]\d*)?", style_id, re.IGNORECASE)
+    if not match:
+        return None
+    return (
+        "ul" if match.group(1).lower() == "bullet" else "ol",
+        max(0, int(match.group(2) or "1") - 1),
+    )
+
+
+def _numbering_kind(paragraph: Paragraph, num_id: int, level: int) -> str | None:
+    try:
+        numbering = paragraph.part.numbering_part.element
+        number = next(
+            node
+            for node in numbering.xpath("./w:num")
+            if int(node.get(qn("w:numId"), "-1")) == num_id
+        )
+        abstract_id_element = number.find(qn("w:abstractNumId"))
+        abstract_id = int(abstract_id_element.get(qn("w:val")))
+        abstract = next(
+            node
+            for node in numbering.xpath("./w:abstractNum")
+            if int(node.get(qn("w:abstractNumId"), "-1")) == abstract_id
+        )
+        levels = abstract.findall(qn("w:lvl"))
+        level_element = next(
+            (node for node in levels if int(node.get(qn("w:ilvl"), "0")) == level),
+            levels[0] if levels else None,
+        )
+        if level_element is None:
+            return None
+        format_element = level_element.find(qn("w:numFmt"))
+        number_format = (
+            format_element.get(qn("w:val"), "") if format_element is not None else ""
+        )
+        return "ul" if number_format == "bullet" else "ol"
+    except (AttributeError, KeyError, StopIteration, TypeError, ValueError):
+        return None
+
+
+def _list_info(paragraph: Paragraph, budget: _ImageBudget) -> tuple[str, int] | None:
+    style_info = _style_list_info(paragraph, budget)
+    num_pr = paragraph._p.pPr.numPr if paragraph._p.pPr is not None else None
+    if num_pr is None:
+        try:
+            paragraph_style = _cached_item_style(paragraph, "paragraph", budget)
+            for style in _cached_style_chain(paragraph_style, budget):
+                style_p_pr = style._element.pPr
+                if style_p_pr is not None and style_p_pr.numPr is not None:
+                    num_pr = style_p_pr.numPr
+                    break
+        except (AttributeError, KeyError, ValueError):
+            pass
+    if num_pr is None or num_pr.numId is None:
+        return style_info
+    try:
+        num_id = int(num_pr.numId.val)
+        level = (
+            int(num_pr.ilvl.val)
+            if num_pr.ilvl is not None
+            else (style_info[1] if style_info else 0)
+        )
+    except (TypeError, ValueError):
+        return style_info
+    kind = _numbering_kind(paragraph, num_id, level)
+    return (kind, level) if kind else style_info
+
+
+def _append_paragraph_contents(
+    parent: etree._Element, paragraph: Paragraph, budget: _ImageBudget
+) -> None:
+    for item in paragraph.iter_inner_content():
+        if isinstance(item, Run):
+            _append_docx_run(parent, item, paragraph, budget)
+        elif isinstance(item, Hyperlink):
+            href = item.url or (f"#{item.fragment}" if item.fragment else "")
+            try:
+                href = _safe_href(href)
+            except DocxConversionError:
+                href = ""
+            hyperlink_parent = (
+                etree.SubElement(parent, "a", href=href) if href else parent
+            )
+            for run in item.runs:
+                _append_docx_run(hyperlink_parent, run, paragraph, budget)
+
+
+def _append_docx_paragraph(
+    parent: etree._Element, paragraph: Paragraph, budget: _ImageBudget
+) -> etree._Element:
+    if _paragraph_has_style(paragraph, _CODE_BLOCK_STYLE, budget):
+        pre = etree.SubElement(parent, "pre")
+        code = etree.SubElement(pre, "code")
+        code.text = paragraph.text
+        return pre
+    if _is_horizontal_rule(paragraph, budget):
+        return etree.SubElement(parent, "hr")
+    heading_level = _heading_level(paragraph, budget)
+    element = etree.SubElement(parent, f"h{heading_level}" if heading_level else "p")
+    css = _paragraph_css(paragraph, budget)
+    if css:
+        element.set("style", css)
+    _append_paragraph_contents(element, paragraph, budget)
+    return element
+
+
+def _grid_span(cell: _Cell) -> int:
+    tc_pr = cell._tc.tcPr
+    if tc_pr is None or tc_pr.gridSpan is None:
+        return 1
+    try:
+        return max(1, int(tc_pr.gridSpan.val))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _append_docx_table(
+    parent: etree._Element, table: Table, budget: _ImageBudget
+) -> None:
+    table_element = etree.SubElement(parent, "table")
+    body = etree.SubElement(table_element, "tbody")
+    for row in table.rows:
+        budget.check()
+        row_element = etree.SubElement(body, "tr")
+        seen: set[int] = set()
+        for cell in row.cells:
+            budget.check()
+            cell_key = id(cell._tc)
+            if cell_key in seen:
+                continue
+            seen.add(cell_key)
+            cell_element = etree.SubElement(row_element, "td")
+            span = _grid_span(cell)
+            if span > 1:
+                cell_element.set("colspan", str(span))
+            _append_docx_blocks(cell_element, cell.iter_inner_content(), budget)
+
+
+def _append_list_paragraph(
+    parent: etree._Element,
+    paragraph: Paragraph,
+    info: tuple[str, int],
+    stack: list[_ListContext],
+    budget: _ImageBudget,
+    task_checked: bool | None = None,
+) -> None:
+    kind, level = info
+    if not stack:
+        level = 0
+    elif level > stack[-1].level + 1:
+        level = stack[-1].level + 1
+    while stack and (
+        level < stack[-1].level or (level == stack[-1].level and kind != stack[-1].kind)
+    ):
+        stack.pop()
+    if not stack or level > stack[-1].level:
+        list_parent = (
+            stack[-1].last_item if stack and stack[-1].last_item is not None else parent
+        )
+        list_element = etree.SubElement(list_parent, "ul" if kind == "task" else kind)
+        if kind == "task":
+            list_element.set("data-type", "taskList")
+        stack.append(_ListContext(level=level, kind=kind, element=list_element))
+    context = stack[-1]
+    item = etree.SubElement(context.element, "li")
+    content_parent = item
+    if kind == "task":
+        item.set("data-type", "taskItem")
+        item.set("data-checked", "true" if task_checked else "false")
+        content_parent = etree.SubElement(etree.SubElement(item, "div"), "p")
+    css = _paragraph_css(paragraph, budget)
+    if css:
+        content_parent.set("style", css)
+    _append_paragraph_contents(content_parent, paragraph, budget)
+    if kind == "task":
+        _strip_task_prefix(content_parent)
+    context.last_item = item
+
+
+def _task_checked(paragraph: Paragraph) -> bool | None:
+    text = paragraph.text.lstrip()
+    if text.startswith(_TASK_CHECKED):
+        return True
+    if text.startswith(_TASK_UNCHECKED):
+        return False
+    return None
+
+
+def _strip_task_prefix(element: etree._Element) -> None:
+    for text_node in element.xpath(".//text()"):
+        value = str(text_node)
+        if not value.strip():
+            continue
+        match = re.match(rf"^(\s*)[{_TASK_CHECKED}{_TASK_UNCHECKED}]\s?", value)
+        if not match:
+            return
+        parent = text_node.getparent()
+        replacement = value[: len(match.group(1))] + value[match.end() :]
+        if text_node.is_text:
+            parent.text = replacement
+        elif text_node.is_tail:
+            parent.tail = replacement
+        return
+
+
+def _append_docx_blocks(
+    parent: etree._Element,
+    blocks: Iterable[Paragraph | Table],
+    budget: _ImageBudget,
+) -> None:
+    stack: list[_ListContext] = []
+    for block in blocks:
+        budget.check()
+        if isinstance(block, Paragraph):
+            info = _list_info(block, budget)
+            task_checked = _task_checked(block)
+            if task_checked is not None:
+                info = ("task", info[1] if info else 0)
+            if info:
+                _append_list_paragraph(
+                    parent,
+                    block,
+                    info,
+                    stack,
+                    budget,
+                    task_checked=task_checked,
+                )
+            else:
+                stack.clear()
+                _append_docx_paragraph(parent, block, budget)
+        elif isinstance(block, Table):
+            stack.clear()
+            _append_docx_table(parent, block, budget)
+
+
+def docx_to_html(
+    docx_bytes: bytes,
+    *,
+    _budget: _ImageBudget | None = None,
+    _validated: bool = False,
+) -> str:
+    budget = _budget or _ImageBudget()
+    if not _validated:
+        validate_docx_bytes(docx_bytes, _budget=budget)
+    try:
+        document = Document(io.BytesIO(docx_bytes))
+        root = etree.Element("div")
+        _append_docx_blocks(root, document.iter_inner_content(), budget)
+        html_content = (
+            "".join(
+                etree.tostring(
+                    child, encoding="unicode", method="html", with_tail=False
+                )
+                for child in root
+            )
+            or "<p></p>"
+        )
+        sanitized_root = _parse_html_fragment(html_content, budget)
+        html_content = "".join(
+            etree.tostring(child, encoding="unicode", method="html", with_tail=False)
+            for child in sanitized_root
+        )
+    except DocxConversionError:
+        raise
+    except Exception:
+        raise _fail("unsupported DOCX content") from None
+    if len(html_content.encode("utf-8")) > MAX_HTML_BYTES:
+        raise _fail("converted HTML exceeds size limit")
+    budget.check(force=True)
+    return html_content or "<p></p>"
+
+
+def _paragraph_text_runs(paragraph: Paragraph) -> list[Run]:
+    runs: list[Run] = []
+    for item in paragraph.iter_inner_content():
+        if isinstance(item, Run):
+            runs.append(item)
+        elif isinstance(item, Hyperlink):
+            runs.extend(item.runs)
+    return runs
+
+
+def _trim_paragraph_spaces(paragraph: Paragraph) -> None:
+    runs = [run for run in _paragraph_text_runs(paragraph) if run.text]
+    if not runs:
+        return
+    runs[0].text = runs[0].text.lstrip(" \t")
+    runs[-1].text = runs[-1].text.rstrip(" \t")
+
+
+def replace_paragraph_text_matches(
+    paragraph: Paragraph,
+    pattern: re.Pattern,
+    replacer: Callable[[re.Match], str | None],
+) -> bool:
+    """Replace matches split across runs without collapsing surrounding run styles."""
+    runs = _paragraph_text_runs(paragraph)
+    if not runs:
+        return False
+    original_texts = [run.text for run in runs]
+    full_text = "".join(original_texts)
+    matches = list(pattern.finditer(full_text))
+    if not matches:
+        return False
+
+    starts: list[int] = []
+    cursor = 0
+    for text in original_texts:
+        starts.append(cursor)
+        cursor += len(text)
+
+    def locate(offset: int) -> tuple[int, int]:
+        for index, (start, text) in enumerate(zip(starts, original_texts)):
+            if start <= offset < start + len(text):
+                return index, offset - start
+        raise _fail("placeholder run mapping failed")
+
+    for match in reversed(matches):
+        if match.start() == match.end():
+            continue
+        replacement = replacer(match)
+        if replacement is None:
+            continue
+        start_index, start_offset = locate(match.start())
+        end_index, end_last_offset = locate(match.end() - 1)
+        end_offset = end_last_offset + 1
+        replacement_text = str(replacement)
+        if start_index == end_index:
+            current = runs[start_index].text
+            runs[start_index].text = (
+                current[:start_offset] + replacement_text + current[end_offset:]
+            )
+            continue
+        start_text = runs[start_index].text
+        end_text = runs[end_index].text
+        runs[start_index].text = start_text[:start_offset] + replacement_text
+        for index in range(start_index + 1, end_index):
+            runs[index].text = ""
+        runs[end_index].text = end_text[end_offset:]
+    return True

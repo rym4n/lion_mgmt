@@ -1,6 +1,7 @@
 # coding=utf-8
 import asyncio
 import base64
+from contextlib import suppress
 import io
 import os
 import re
@@ -28,11 +29,60 @@ from models import Account
 from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
 from models.report import ReportDocument, ReportSchedule
 from models.runlog import Runlog
+from services.agent.docx_converter import (
+    DocxConversionError,
+    docx_base64_to_html,
+    html_to_docx_base64,
+    replace_paragraph_text_matches,
+)
 from services.agent.schedule_runner import delete_report_schedule_timer, sync_report_schedule_timer
 from services.digital_employee.lion_agent_adapter import execute_prompt, workspace_id_for
 from settings import REPORT_TEMPLATE_BASE, REPORT_USER_BASE, RY_SERVICE_URL, TASK_TOPIC, TZ
 
 agent_bp = Blueprint("agent", url_prefix="/agent")
+
+_DOCX_CONVERSION_MAX_CONCURRENT = 2
+_DOCX_CONVERSION_MAX_QUEUED = 4
+_DOCX_CONVERSION_QUEUE_WAIT_SECONDS = 5.0
+_DOCX_CONVERSION_WORKERS = asyncio.BoundedSemaphore(
+    _DOCX_CONVERSION_MAX_CONCURRENT
+)
+_DOCX_CONVERSION_CAPACITY = asyncio.BoundedSemaphore(
+    _DOCX_CONVERSION_MAX_CONCURRENT + _DOCX_CONVERSION_MAX_QUEUED
+)
+
+
+class _DocxConversionBusyError(RuntimeError):
+    pass
+
+
+async def _run_docx_conversion(converter, value):
+    try:
+        await asyncio.wait_for(_DOCX_CONVERSION_CAPACITY.acquire(), timeout=0.05)
+    except TimeoutError:
+        raise _DocxConversionBusyError from None
+    worker_acquired = False
+    try:
+        try:
+            await asyncio.wait_for(
+                _DOCX_CONVERSION_WORKERS.acquire(),
+                timeout=_DOCX_CONVERSION_QUEUE_WAIT_SECONDS,
+            )
+            worker_acquired = True
+        except TimeoutError:
+            raise _DocxConversionBusyError from None
+
+        conversion_task = asyncio.create_task(asyncio.to_thread(converter, value))
+        try:
+            return await asyncio.shield(conversion_task)
+        except asyncio.CancelledError:
+            with suppress(Exception):
+                await conversion_task
+            raise
+    finally:
+        if worker_acquired:
+            _DOCX_CONVERSION_WORKERS.release()
+        _DOCX_CONVERSION_CAPACITY.release()
 
 
 __all__ = ["agent_bp"]
@@ -651,6 +701,73 @@ async def report_template_content(request: Request):
     return response_ok({"template_key": key, "filename": path.name, "content": content})
 
 
+@agent_bp.post("/report/docx/to-html")
+@openapi.definition(
+    summary="将 DOCX 转换为富文本 HTML",
+    description=(
+        "将 base64 编码的 .docx 正文转换为汇报编辑器支持的安全 HTML。"
+        "保留标题、字符与段落格式、列表、链接、表格和图片。需要 agent:r 权限。"
+    ),
+    body=_json_body({
+        "type": "object",
+        "required": ["content"],
+        "properties": {
+            "content": {"type": "string", "description": "严格 base64 编码的 .docx 文件内容"},
+        },
+    }),
+    response=_response("转换成功", {
+        "type": "object",
+        "properties": {"html": {"type": "string", "description": "安全的富文本 HTML"}},
+    }, {"400": "DOCX 内容或大小不符合要求"}),
+)
+@requires_permission("agent:r")
+async def report_docx_to_html(request: Request):
+    data = _require_json(request)
+    if not isinstance(data, dict) or not isinstance(data.get("content"), str):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    try:
+        html = await _run_docx_conversion(docx_base64_to_html, data["content"])
+    except _DocxConversionBusyError:
+        raise CustomError(ErrorCode.DOCX_CONVERSION_BUSY) from None
+    except DocxConversionError:
+        raise CustomError(ErrorCode.PARAM_ERROR) from None
+    return response_ok({"html": html})
+
+
+@agent_bp.post("/report/docx/from-html")
+@openapi.definition(
+    summary="将富文本 HTML 转换为 DOCX",
+    description=(
+        "将汇报编辑器支持的安全 HTML 转换为 base64 编码的 .docx 正文。"
+        "图片仅接受安全的 http/https 外链或内嵌栅格图，并拒绝脚本、危险链接"
+        "和超出限制的内容。需要 agent:u 权限。"
+    ),
+    body=_json_body({
+        "type": "object",
+        "required": ["html"],
+        "properties": {
+            "html": {"type": "string", "description": "汇报编辑器富文本 HTML"},
+        },
+    }),
+    response=_response("转换成功", {
+        "type": "object",
+        "properties": {"content": {"type": "string", "description": "base64 编码的 .docx 内容"}},
+    }, {"400": "HTML 内容、图片或大小不符合要求"}),
+)
+@requires_permission("agent:u")
+async def report_docx_from_html(request: Request):
+    data = _require_json(request)
+    if not isinstance(data, dict) or not isinstance(data.get("html"), str):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    try:
+        content = await _run_docx_conversion(html_to_docx_base64, data["html"])
+    except _DocxConversionBusyError:
+        raise CustomError(ErrorCode.DOCX_CONVERSION_BUSY) from None
+    except DocxConversionError:
+        raise CustomError(ErrorCode.PARAM_ERROR) from None
+    return response_ok({"content": content})
+
+
 @agent_bp.post("/report/save")
 @openapi.definition(
     summary="另存报告文档",
@@ -1084,7 +1201,7 @@ async def _resolve_fetch_placeholders(docx_bytes: bytes, fetch_config: dict, ten
                 for cell in row.cells:
                     yield from cell.paragraphs
 
-    all_text = " ".join("".join(r.text for r in p.runs) for p in _iter_paragraphs())
+    all_text = " ".join(p.text for p in _iter_paragraphs())
     active_keys = {m.group(1) for m in _FETCH_PLACEHOLDER_RE.finditer(all_text)} & set(fetch_config.keys())
 
     if not active_keys:
@@ -1100,25 +1217,15 @@ async def _resolve_fetch_placeholders(docx_bytes: bytes, fetch_config: dict, ten
         else:
             results[key] = _parse_fetch_result(raw)
 
-    def _replace_text(text: str) -> str:
-        def replacer(m: re.Match) -> str:
-            key = m.group(1)
-            path = m.group(2) or ""
-            if key not in results:
-                return m.group(0)
-            return _stringify_fetch(_get_fetch_value_by_path(results[key], path))
-        return _FETCH_PLACEHOLDER_RE.sub(replacer, text)
-
-    def _replace_paragraph(para):
-        full = "".join(r.text for r in para.runs)
-        if not _FETCH_PLACEHOLDER_RE.search(full):
-            return
-        replaced = _replace_text(full)
-        for i, run in enumerate(para.runs):
-            run.text = replaced if i == 0 else ""
+    def _replace_match(match: re.Match) -> str | None:
+        key = match.group(1)
+        path = match.group(2) or ""
+        if key not in results:
+            return None
+        return _stringify_fetch(_get_fetch_value_by_path(results[key], path))
 
     for para in _iter_paragraphs():
-        _replace_paragraph(para)
+        replace_paragraph_text_matches(para, _FETCH_PLACEHOLDER_RE, _replace_match)
 
     buf = io.BytesIO()
     doc.save(buf)
