@@ -1139,10 +1139,21 @@ async def save_relation(tenant: str, data: dict, operator: str | None) -> Supply
     return existing
 
 
+def _relation_type_model_keys(relation_type: SupplyChainCiRelationType) -> set[str]:
+    keys = set(relation_type.source_ci_types or []) | set(
+        relation_type.target_ci_types or []
+    )
+    for field in relation_type.relation_fields or []:
+        if isinstance(field, dict) and field.get("ref_ci_type"):
+            keys.add(field["ref_ci_type"])
+    return keys
+
+
 async def export_model_package(
     tenant: str,
     ci_type_keys: Iterable[str] | None = None,
     include_related: bool = False,
+    include_relations: bool = False,
 ) -> dict:
     requested_keys = list(dict.fromkeys(ci_type_keys or []))
     keys = requested_keys[:]
@@ -1160,7 +1171,7 @@ async def export_model_package(
                 related_keys.update(relation_type.source_ci_types or [])
                 related_keys.update(relation_type.target_ci_types or [])
             keys = sorted(related_keys)
-        else:
+        elif not include_relations:
             relation_types = []
 
     condition = Q(tenant_id=tenant, deleted=False)
@@ -1168,6 +1179,12 @@ async def export_model_package(
         condition &= Q(key__in=keys)
     ci_types = await SupplyChainCiType.filter(condition).order_by("key").all()
     keys = [item.key for item in ci_types]
+    if include_relations and not include_related:
+        exported_key_set = set(keys)
+        relation_types = [
+            item for item in relation_types
+            if _relation_type_model_keys(item).issubset(exported_key_set)
+        ]
     fields = await SupplyChainCiFieldDef.filter(tenant_id=tenant, ci_type_key__in=keys, deleted=False).order_by("ci_type_key", "sort").all()
     return {
         "version": 1,

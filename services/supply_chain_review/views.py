@@ -293,8 +293,9 @@ async def ci_type_export(request: Request):
     return response_ok(
         await export_model_package(
             tenant_id(request),
-            data.get("ci_type_keys"),
-            bool(data.get("include_related", False)),
+            ci_type_keys=data.get("ci_type_keys"),
+            include_related=bool(data.get("include_related", False)),
+            include_relations=bool(data.get("include_relations", False)),
         )
     )
 
