@@ -47,7 +47,7 @@ jobs:
     output:
       type: RegistryOutput
       tags: 10.3.0.41:5000/lion_mgmt:@tag@
-    platforms: linux/amd64
+    platforms: linux/amd64,linux/arm64
     condition: SUCCESSFUL
     optional: false
   triggers:
@@ -57,7 +57,7 @@ jobs:
   retryCondition: never
   maxRetries: 1
   retryDelay: 30
-  timeout: 1440
+  timeout: 14400
 - name: 同步镜像
   jobExecutor: tgy-deploy
   steps:
