@@ -1,4 +1,4 @@
-FROM python:3.11-slim AS builder
+FROM public.ecr.aws/docker/library/python:3.11-slim@sha256:baf89808ec37adeaab83cec287adb4a2afa4a11c1d51e961c7ec737877e61af6 AS builder
 
 ARG TARGETARCH
 
@@ -43,9 +43,10 @@ RUN --mount=type=cache,id=lion-mgmt-ccache-${TARGETARCH},target=/root/.ccache,sh
 RUN --mount=type=cache,id=lion-mgmt-ccache-${TARGETARCH},target=/root/.ccache,sharing=locked \
     nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
 
-FROM timberio/vector:0.50.0-debian AS vector
+FROM public.ecr.aws/docker/library/python:3.11-slim@sha256:baf89808ec37adeaab83cec287adb4a2afa4a11c1d51e961c7ec737877e61af6 AS runtime
 
-FROM python:3.11-slim AS runtime
+ARG TARGETARCH
+ARG VECTOR_VERSION=0.50.0
 
 ENV VIRTUAL_ENV=/app/.venv \
     RY_ENV=PROD \
@@ -60,7 +61,21 @@ RUN apt update -y \
     && mkdir /var/lib/vector \
     && mkdir tools
 
-COPY --from=vector /usr/bin/vector /usr/bin/vector
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+        amd64) VECTOR_ARCH=x86_64; VECTOR_SHA256=951ceb14f2382c1438696552745221c5584d6895f9aa2b0e12ff0e30271d4b0e ;; \
+        arm64) VECTOR_ARCH=aarch64; VECTOR_SHA256=ed73245a88638962093b9b5eb92ba3e17681a7b641e26eac674d07b137a605b8 ;; \
+        *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    VECTOR_TARBALL="/tmp/vector-${VECTOR_VERSION}.tar.gz"; \
+    curl -fL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 300 \
+        "https://github.com/vectordotdev/vector/releases/download/v${VECTOR_VERSION}/vector-${VECTOR_VERSION}-${VECTOR_ARCH}-unknown-linux-gnu.tar.gz" \
+        -o "${VECTOR_TARBALL}"; \
+    echo "${VECTOR_SHA256}  ${VECTOR_TARBALL}" | sha256sum -c -; \
+    tar -xOf "${VECTOR_TARBALL}" "./vector-${VECTOR_ARCH}-unknown-linux-gnu/bin/vector" > /usr/bin/vector; \
+    chmod 0755 /usr/bin/vector; \
+    rm -f "${VECTOR_TARBALL}"
+
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
 COPY migrations ./migrations
