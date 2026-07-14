@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/python:3.11.15-slim-bookworm@sha256:b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba AS builder
+FROM python:3.11-slim AS builder
 
 ARG TARGETARCH
 
@@ -35,25 +35,17 @@ COPY . ./
 RUN sed -i "s|AIOE_LICENSE_KEY|$(cat LICKEY | tr -d '\n')|g" libs/utils.py
 
 RUN --mount=type=cache,id=lion-mgmt-ccache-${TARGETARCH},target=/root/.ccache,sharing=locked \
-    NUITKA_JOBS=4; \
-    if [ "${TARGETARCH}" = "arm64" ]; then NUITKA_JOBS=1; export CFLAGS="-fPIC -O1"; fi; \
-    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs="${NUITKA_JOBS}" --remove-output --no-pyi-file core/
+    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file core/
 RUN --mount=type=cache,id=lion-mgmt-ccache-${TARGETARCH},target=/root/.ccache,sharing=locked \
-    NUITKA_JOBS=4; \
-    if [ "${TARGETARCH}" = "arm64" ]; then NUITKA_JOBS=1; export CFLAGS="-fPIC -O1"; fi; \
-    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs="${NUITKA_JOBS}" --remove-output --no-pyi-file libs/
+    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file libs/
 RUN --mount=type=cache,id=lion-mgmt-ccache-${TARGETARCH},target=/root/.ccache,sharing=locked \
-    NUITKA_JOBS=4; \
-    if [ "${TARGETARCH}" = "arm64" ]; then NUITKA_JOBS=1; export CFLAGS="-fPIC -O1"; fi; \
-    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs="${NUITKA_JOBS}" --remove-output --no-pyi-file models/
+    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file models/
 RUN --mount=type=cache,id=lion-mgmt-ccache-${TARGETARCH},target=/root/.ccache,sharing=locked \
-    NUITKA_JOBS=4; \
-    if [ "${TARGETARCH}" = "arm64" ]; then NUITKA_JOBS=1; export CFLAGS="-fPIC -O1"; fi; \
-    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs="${NUITKA_JOBS}" --remove-output --no-pyi-file services/
+    nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
 
-FROM 10.3.0.41:5000/lion_ship:v3.0.119@sha256:d83c1d079c5d8b9bd5158e5cd046f68bbb655f2b9033348974267850a8bfdc7e AS vector
+FROM timberio/vector:0.50.0-debian AS vector
 
-FROM public.ecr.aws/docker/library/python:3.11.15-slim-bookworm@sha256:b18992999dbe963a45a8a4da40ac2b1975be1a776d939d098c647482bcad5cba AS runtime
+FROM python:3.11-slim AS runtime
 
 ENV VIRTUAL_ENV=/app/.venv \
     RY_ENV=PROD \
