@@ -135,10 +135,10 @@ lion_mgmt 不再内置本地 Agent SDK；旧智能体执行、作战室问答、
 
 `Dockerfile` 使用多阶段构建：
 
-1. Builder 阶段安装 `uv`、`nuitka`、Chrome，执行 `uv sync --frozen --no-install-project --no-dev`。
+1. Builder 阶段安装 `uv`、`nuitka`，执行 `uv sync --frozen --no-install-project --no-dev`。
 2. 使用 Nuitka 将 `core/`、`libs/`、`models/`、`services/` 打包到 `dist/`。
 3. Runtime 阶段复制 Vector、虚拟环境、打包产物、迁移、配置和报告资源。
-4. 安装浏览器依赖、字体、bubblewrap 和 LibreOffice Writer。
+4. 安装运行时系统依赖，以及用于 docx 转 PDF 的 LibreOffice Writer 和 Noto CJK 字体。
 5. `docker-entrypoint.sh` 等待数据库、执行 `aerich upgrade`，再启动传入命令或回退到 `python server.py`。
 
 GitHub Actions 的 `.github/workflows/docker-image.yml` 在 `main` 分支和 `v*` tag 构建并推送 `linux/amd64,linux/arm64` 镜像到 `reg.hongcloud.net/lion_mgmt`。

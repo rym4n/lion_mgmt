@@ -3321,7 +3321,7 @@ def _extract_code_json_from_text(content: str) -> dict | None:
     try:
         code_data = orjson.loads(json_str)
     except orjson.JSONDecodeError as exc:
-        logger.warning(f"[lion_agent_browser] 解析代码 JSON 失败: {exc}")
+        logger.warning(f"解析应用开发代码 JSON 失败: {exc}")
         return None
     if not isinstance(code_data, dict) or "config" not in code_data or "main" not in code_data:
         return None

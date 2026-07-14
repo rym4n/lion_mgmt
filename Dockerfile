@@ -8,8 +8,6 @@ RUN apt update -y && apt install -y \
     python3-dev \
     make \
     libaio-dev \
-    curl \
-    unzip \
     ccache
 
 RUN pip install uv==0.9.22 nuitka==2.8.9
@@ -27,7 +25,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN curl -L "https://dl.hongcloud.net/installer/chrome-linux64.zip" -o /tmp/chrome.zip && unzip /tmp/chrome.zip -d /opt
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
@@ -59,10 +56,6 @@ WORKDIR /app
 
 RUN apt update -y \
     && apt install -y curl libc-dev python3-dev libaio-dev \
-       fonts-wqy-zenhei fonts-wqy-microhei bubblewrap \
-       libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
-       libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
-       libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir /var/lib/vector \
     && mkdir tools
@@ -70,7 +63,6 @@ RUN apt update -y \
 COPY --from=vector /usr/bin/vector /usr/bin/vector
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
-COPY --from=builder /opt/chrome-linux64 /root/.agent-browser/browsers/chrome-linux64
 COPY migrations ./migrations
 COPY pyproject.toml ./
 COPY settings ./settings

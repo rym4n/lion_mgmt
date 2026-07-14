@@ -21,6 +21,21 @@ def test_runtime_image_does_not_embed_builtin_package_templates():
     assert "COPY skill-template" not in dockerfile
 
 
+def test_runtime_image_does_not_embed_retired_browser_runtime():
+    root = Path(__file__).resolve().parents[2]
+    dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
+
+    retired_markers = (
+        "chrome-linux64",
+        ".agent-browser",
+        "AGENT_BROWSER_CHROME_PATH",
+        "/tmp/chrome.zip",
+        "fonts-wqy",
+        "bubblewrap",
+    )
+    assert all(marker not in dockerfile for marker in retired_markers)
+
+
 def test_bootstrap_import_does_not_load_full_app_factory():
     root = Path(__file__).resolve().parents[2]
     code = (
