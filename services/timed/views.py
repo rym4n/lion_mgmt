@@ -2,7 +2,6 @@
 
 import datetime
 
-from croniter import croniter
 import pytz
 from sanic import Blueprint
 from sanic.log import logger
@@ -21,7 +20,7 @@ from libs.security.authorization import (
     check_playbook_permission,
     requires_permission,
 )
-from libs.utils import strip_timezone_to_seconds, paginated_runlog_groups, runlog_list
+from libs.utils import strip_timezone_to_seconds, paginated_runlog_groups
 from models import (
     Playbook,
     PlaybookVersion,
@@ -30,6 +29,7 @@ from models import (
     ToolAction,
 )
 from services.workflow.views import get_playbook_input
+from services.timed.cron_expression import is_valid_cron_expression
 from settings import TASK_TOPIC
 
 timed_bp = Blueprint("timed", url_prefix="/timed")
@@ -136,7 +136,7 @@ def build_timer_rule(status, tactics, end_time):
                     },
                     "tactics": {
                         "type": "string",
-                        "description": "执行策略 如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数",
+                        "description": "执行策略 如果为单次执行，则传2025-12-12 00:00:00；如果为周期执行，则传0 */5 * * * *（秒 分 时 日 月 周）",
                     },
                     "end_time": {
                         "type": "string",
@@ -251,7 +251,7 @@ async def add_timed(request):
         elif status == 1:
             msg["timer"] = "cron"
             timer_rule["end_date"] = end_time
-            if not croniter.is_valid(tactics):
+            if not is_valid_cron_expression(tactics):
                 logger.info(f"定时任务{name}的执行策略{tactics}不符合crontab格式，创建失败")
                 raise CustomError(ErrorCode.CRON_EXPRESSION_ERROR)
             timer_rule["crontab"] = tactics
@@ -296,7 +296,7 @@ async def add_timed(request):
         elif status == 1:
             msg["timer"] = "cron"
             timer_rule["end_date"] = end_time
-            if not croniter.is_valid(tactics):
+            if not is_valid_cron_expression(tactics):
                 logger.info(f"定时任务{name}的执行策略{tactics}不符合crontab格式，创建失败")
                 raise CustomError(ErrorCode.CRON_EXPRESSION_ERROR)
             timer_rule["crontab"] = tactics
@@ -853,7 +853,7 @@ async def get_timed_detail(request):
                     },
                     "tactics": {
                         "type": "string",
-                        "description": "执行策略 如果为单次执行，则传此类型参数2025-12-12 00:00:00，如果为周期执行，则传*/5 * * * *类型参数",
+                        "description": "执行策略 如果为单次执行，则传2025-12-12 00:00:00；如果为周期执行，则传0 */5 * * * *（秒 分 时 日 月 周）",
                     },
                     "enable": {
                         "type": "integer",
@@ -1023,7 +1023,7 @@ async def update_timed(request):
         msg["timer_rule"] = {}
     else:
         if status == EXEC_TYPE_CRON:
-            if not croniter.is_valid(tactics):
+            if not is_valid_cron_expression(tactics):
                 logger.info(f"定时任务{timed.name}的执行策略{tactics}不符合crontab格式，更新失败")
                 raise CustomError(ErrorCode.CRON_EXPRESSION_ERROR)
         timer_info = build_timer_rule(status, tactics, end_time)
