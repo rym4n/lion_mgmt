@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 from services.timed.cron_expression import is_valid_cron_expression
@@ -39,3 +40,18 @@ def test_timed_views_use_the_shared_validator():
     source = Path("services/timed/views.py").read_text()
     assert source.count("is_valid_cron_expression(tactics)") == 3
     assert "croniter.is_valid(tactics)" not in source
+
+
+def test_event_views_import_runlog_list_from_its_owner():
+    tree = ast.parse(Path("services/event/views.py").read_text())
+    imported_names = {
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "libs.utils"
+        for alias in node.names
+    }
+    assert "runlog_list" in imported_names
+    assert not any(
+        isinstance(node, ast.ImportFrom) and node.module == "services.timed.views"
+        for node in ast.walk(tree)
+    )

@@ -13,9 +13,8 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.security.authorization import check_permissions, requires_permission
-from libs.utils import gen_random_code, gen_run_id, strip_timezone_to_seconds
+from libs.utils import gen_random_code, gen_run_id, runlog_list, strip_timezone_to_seconds
 from models import Account, Events, EventsIngestion, PlaybookVersion, Role, Room, Runlog, Tool, ToolAction, ToolResources
-from services.timed.views import runlog_list
 from settings import TASK_TOPIC, TZ
 
 TYPE_DICT = {"PLAYBOOK": "flow", "ACTION": "action"}
