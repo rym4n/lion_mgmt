@@ -25,9 +25,13 @@ from services.supply_chain_review.manager import (
     confirm_disposal_task,
     create_attachment_ref,
     create_notification_event,
+    delete_ci,
+    delete_ci_type,
     delete_field,
     delete_ledger_record,
     delete_process_record,
+    delete_relation,
+    delete_relation_type,
     discover_unknown_terminals,
     export_model_package,
     fields_for_type,
@@ -54,7 +58,7 @@ from services.supply_chain_review.manager import (
     save_field,
     save_ledger_record,
     save_process_record,
-    save_review_issue,
+    save_review_issue as save_review_issue,
     save_relation,
     save_relation_type,
     serialize_ci_field,
@@ -276,13 +280,13 @@ async def ci_type_save(request: Request):
 @openapi.definition(summary="删除CMDB模型")
 @requires_permission("supply_chain_review:model:d")
 async def ci_type_delete(request: Request):
-    ci_type = await get_ci_type_or_404(tenant_id(request), _json(request).get("id") or _json(request).get("key"))
-    if ci_type.is_locked:
-        raise CustomError(ErrorCode.FORBIDDEN)
-    ci_type.deleted = True
-    await ci_type.save()
-    await SupplyChainCiFieldDef.filter(tenant_id=ci_type.tenant_id, ci_type_key=ci_type.key, deleted=False).update(deleted=True)
-    return response_ok({"id": ci_type.id})
+    data = _json(request)
+    return response_ok(
+        await delete_ci_type(
+            tenant_id(request),
+            data.get("id") or data.get("key"),
+        )
+    )
 
 
 @supply_chain_review_cmdb_bp.post("/ci-type/export")
@@ -438,12 +442,13 @@ async def relation_type_save(request: Request):
 @openapi.definition(summary="删除CMDB关系类型")
 @requires_permission("supply_chain_review:relation:d")
 async def relation_type_delete(request: Request):
-    relation_type = await get_relation_type_or_404(tenant_id(request), _json(request).get("id") or _json(request).get("key"))
-    if relation_type.is_locked:
-        raise CustomError(ErrorCode.FORBIDDEN)
-    relation_type.deleted = True
-    await relation_type.save()
-    return response_ok({"id": relation_type.id})
+    data = _json(request)
+    return response_ok(
+        await delete_relation_type(
+            tenant_id(request),
+            data.get("id") or data.get("key"),
+        )
+    )
 
 
 @supply_chain_review_cmdb_bp.post("/ci/list")
@@ -487,11 +492,13 @@ async def ci_save(request: Request):
 @openapi.definition(summary="删除CI实例")
 @requires_permission("supply_chain_review:ci:d")
 async def ci_delete(request: Request):
-    ci = await get_ci_or_404(tenant_id(request), _json(request).get("id") or _json(request).get("ci_id"))
-    ci.deleted = True
-    await ci.save()
-    await SupplyChainCiRelation.filter(Q(source_ci_id=ci.id) | Q(target_ci_id=ci.id), tenant_id=ci.tenant_id, deleted=False).update(deleted=True)
-    return response_ok({"id": ci.id})
+    data = _json(request)
+    return response_ok(
+        await delete_ci(
+            tenant_id(request),
+            data.get("id") or data.get("ci_id"),
+        )
+    )
 
 
 @supply_chain_review_cmdb_bp.post("/ci/import")
@@ -563,12 +570,12 @@ async def relation_save(request: Request):
 @openapi.definition(summary="删除CI关系")
 @requires_permission("supply_chain_review:relation:d")
 async def relation_delete(request: Request):
-    relation = await SupplyChainCiRelation.filter(id=_json(request).get("id"), tenant_id=tenant_id(request), deleted=False).first()
-    if not relation:
-        raise CustomError(ErrorCode.NOT_FOUND)
-    relation.deleted = True
-    await relation.save()
-    return response_ok({"id": relation.id})
+    return response_ok(
+        await delete_relation(
+            tenant_id(request),
+            _json(request).get("id"),
+        )
+    )
 
 
 @supply_chain_review_cmdb_bp.post("/relation/graph")
