@@ -209,6 +209,10 @@ async def get_license(request: Request):
     请求参数
     """
     language = request.json.get("language", "CN")
+    current_tenant_id = request.ctx.session.get("tenant_id")
+    if not current_tenant_id:
+        raise CustomError(ErrorCode.SESSION_INVALID)
+
     permissions = await PermissionsMenu.all().values()
     lic = load_license()
     if not lic:
@@ -218,9 +222,6 @@ async def get_license(request: Request):
     if not user:
         raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
 
-    current_tenant_id = request.ctx.session.get("tenant_id")
-    if not current_tenant_id:
-        raise CustomError(ErrorCode.SESSION_INVALID)
     menu_dict = {}
     ai_type = 0
     tenant_type = False

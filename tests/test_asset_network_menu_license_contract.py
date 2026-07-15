@@ -3,10 +3,16 @@ import asyncio
 import importlib
 import inspect
 import re
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+from core.error_code import ErrorCode
+from libs.error_code.exception import CustomError
 from models.user import Account
+from services.license import views as license_views
 from services.license.views import (
     _licensed_module_keys,
     _menu_is_licensed,
@@ -137,6 +143,90 @@ def test_license_menu_scopes_roles_to_the_session_tenant():
     assert scoped_loop in source
     assert source.index(tenant_lookup) < source.index(tenant_guard) < source.index(scoped_loop)
     assert "for role in user.roles:" not in source
+
+
+def test_get_license_rejects_a_missing_tenant_before_the_no_license_fallback():
+    request = SimpleNamespace(json={}, ctx=SimpleNamespace(session={"sub": "account-1"}))
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(inspect.unwrap(get_license)(request))
+
+    assert exc_info.value.enum == ErrorCode.SESSION_INVALID
+
+
+def test_get_license_does_not_use_another_tenants_superuser_role(monkeypatch):
+    class FakeAccount:
+        _roles_for_tenant = Account._roles_for_tenant
+
+        def __init__(self):
+            self.roles = [
+                SimpleNamespace(tenant_id="tenant-default", permissions=["*:*"]),
+                SimpleNamespace(tenant_id="tenant-current", permissions=["dashboard:r"]),
+            ]
+
+    class AwaitableAccount:
+        def __init__(self, account):
+            self.account = account
+
+        def prefetch_related(self, *_relations):
+            return self
+
+        def __await__(self):
+            async def resolve():
+                return self.account
+
+            return resolve().__await__()
+
+    class PermissionQuery:
+        async def values(self):
+            return [
+                {
+                    "model": "event",
+                    "description": "事件管理",
+                    "bp": "event_bp",
+                    "Permissions": ["r"],
+                    "url": {
+                        "CN": {
+                            "path": "/event",
+                            "children": [],
+                            "meta": {"title": "事件管理"},
+                        }
+                    },
+                }
+            ]
+
+    license_data = {
+        "moduleList": [
+            {
+                "name": "事件管理",
+                "module": "event_bp",
+                "auth": True,
+                "expireTime": int(time.time() * 1000) + 60_000,
+            }
+        ]
+    }
+    monkeypatch.setattr(
+        license_views,
+        "PermissionsMenu",
+        SimpleNamespace(all=lambda: PermissionQuery()),
+    )
+    monkeypatch.setattr(
+        license_views,
+        "Account",
+        SimpleNamespace(get=lambda **_filters: AwaitableAccount(FakeAccount())),
+    )
+    monkeypatch.setattr(license_views, "load_license", lambda: license_data)
+    monkeypatch.setattr(license_views, "response_ok", lambda data: data)
+    request = SimpleNamespace(
+        json={"language": "CN"},
+        ctx=SimpleNamespace(
+            session={"sub": "account-1", "tenant_id": "tenant-current"}
+        ),
+    )
+
+    menus = asyncio.run(inspect.unwrap(get_license)(request))
+
+    assert menus == [{"tenant": False}]
 
 
 def test_role_permission_menu_keeps_full_permission_values_for_split_modules():
