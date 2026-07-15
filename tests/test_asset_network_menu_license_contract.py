@@ -1,10 +1,18 @@
 # coding=utf-8
 import asyncio
 import importlib
+import inspect
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
-from services.license.views import _licensed_module_keys, _menu_is_licensed, _role_can_open_menu
+from models.user import Account
+from services.license.views import (
+    _licensed_module_keys,
+    _menu_is_licensed,
+    _role_can_open_menu,
+    get_license,
+)
 from services.role.views import (
     _licensed_module_keys as _role_licensed_module_keys,
     _normalize_permission_menu,
@@ -104,6 +112,31 @@ def test_license_menu_permission_matching_supports_split_menu_models():
             "Permissions": [{"label": "查看大屏权限", "value": "r"}],
         },
     ) is False
+
+
+def test_license_menu_scopes_roles_to_the_session_tenant():
+    account = SimpleNamespace(
+        roles=[
+            SimpleNamespace(tenant_id="tenant-default", permissions=["*:*"]),
+            SimpleNamespace(tenant_id="tenant-current", permissions=["dashboard:r"]),
+        ]
+    )
+
+    workspace_roles = Account._roles_for_tenant(account, "tenant-current")
+
+    assert [role.permissions for role in workspace_roles] == [["dashboard:r"]]
+    assert len(Account._roles_for_tenant(account, None)) == 2
+
+    source = inspect.getsource(get_license)
+    tenant_lookup = 'current_tenant_id = request.ctx.session.get("tenant_id")'
+    tenant_guard = "if not current_tenant_id:"
+    scoped_loop = "for role in user._roles_for_tenant(current_tenant_id):"
+    assert tenant_lookup in source
+    assert tenant_guard in source
+    assert "raise CustomError(ErrorCode.SESSION_INVALID)" in source
+    assert scoped_loop in source
+    assert source.index(tenant_lookup) < source.index(tenant_guard) < source.index(scoped_loop)
+    assert "for role in user.roles:" not in source
 
 
 def test_role_permission_menu_keeps_full_permission_values_for_split_modules():

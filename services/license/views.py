@@ -218,10 +218,13 @@ async def get_license(request: Request):
     if not user:
         raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
 
+    current_tenant_id = request.ctx.session.get("tenant_id")
+    if not current_tenant_id:
+        raise CustomError(ErrorCode.SESSION_INVALID)
     menu_dict = {}
     ai_type = 0
     tenant_type = False
-    for role in user.roles:
+    for role in user._roles_for_tenant(current_tenant_id):
         perm_models = set()
         if role.permissions:
             valid_modules = _licensed_module_keys(lic)
@@ -319,8 +322,6 @@ async def get_license(request: Request):
     }
 
     SPECIAL_TENANT_ID = "8bce552d-c27c-41d4-8a1b-8c5bf38dfe18"
-    current_tenant_id = request.ctx.session.get("tenant_id")
-
     hidden_menus = {
         "产品许可",
         "產品許可",
