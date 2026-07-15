@@ -655,7 +655,7 @@ async def get_event_detail(request):
             room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id, room_type="public")
             event.room = room
             first = True
-            update_fields.append("room")
+            update_fields.append("room_id")
         if event.event_process_status == "待处理":
             event.event_process_status = "处理中"
             update_fields.append("event_process_status")
