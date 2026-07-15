@@ -1,19 +1,23 @@
 # coding=utf-8
 import asyncio
 import base64
+import copy
 from contextlib import suppress
 import io
 import os
 import re
-import subprocess
 import tempfile
 import uuid
 from datetime import datetime
+from html.parser import HTMLParser
 from pathlib import Path
 
 from croniter import croniter
 import orjson
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.shared import Inches, Pt, RGBColor
 from sanic import Blueprint, Request
 from sanic.log import logger
 from sanic_ext import openapi
@@ -22,12 +26,12 @@ from tortoise.expressions import Q
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import check_permissions, requires_permission
+from libs.security.authorization import check_action_execute_permission, check_permissions, requires_permission
 from libs.utils import gen_run_id, upload_to_s3
 from libs.kafka import aproduce
 from models import Account
 from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
-from models.report import ReportDocument, ReportSchedule
+from models.report import ReportDocument, ReportSchedule, ReportTemplate
 from models.runlog import Runlog
 from services.agent.docx_converter import (
     DocxConversionError,
@@ -633,6 +637,574 @@ REPORT_DOC_SCHEMA = {
     },
 }
 
+REPORT_EDITABLE_TEMPLATE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string", "description": "模板ID"},
+        "document_id": {"type": "string", "nullable": True, "description": "定时任务复用的报告文档ID"},
+        "name": {"type": "string", "description": "模板名称"},
+        "description": {"type": "string", "description": "模板说明"},
+        "content_html": {"type": "string", "description": "在线编辑器 HTML 内容"},
+        "fetch_config": {"type": "object", "description": "取数占位符动作配置"},
+        "annotations": {"type": "array", "description": "文档批注"},
+        "source_template_key": {"type": "string", "nullable": True, "description": "来源内置模板标识"},
+        "ctime": {"type": "string", "description": "创建时间"},
+        "utime": {"type": "string", "description": "更新时间"},
+    },
+}
+
+REPORT_EDITABLE_TEMPLATE_SUMMARY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string", "description": "模板ID"},
+        "name": {"type": "string", "description": "模板名称"},
+        "description": {"type": "string", "description": "模板说明"},
+        "source_template_key": {"type": "string", "nullable": True, "description": "来源内置模板标识"},
+        "placeholder_count": {"type": "integer", "description": "取数占位符数量"},
+        "annotation_count": {"type": "integer", "description": "批注数量"},
+        "ctime": {"type": "string", "description": "创建时间"},
+        "utime": {"type": "string", "description": "更新时间"},
+    },
+}
+
+
+class _ReportHTMLNode:
+    __slots__ = ("tag", "attrs", "children", "text")
+
+    def __init__(self, tag: str | None, attrs: dict | None = None, text: str = ""):
+        self.tag = tag
+        self.attrs = attrs or {}
+        self.children: list[_ReportHTMLNode] = []
+        self.text = text
+
+
+class _ReportHTMLParser(HTMLParser):
+    _VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+    _IGNORED_TAGS = {"head", "script", "style"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.root = _ReportHTMLNode("root")
+        self.stack = [self.root]
+
+    def handle_starttag(self, tag: str, attrs):
+        tag = tag.lower()
+        node = _ReportHTMLNode(tag, {str(key).lower(): value for key, value in attrs})
+        self.stack[-1].children.append(node)
+        if tag not in self._VOID_TAGS:
+            self.stack.append(node)
+
+    def handle_startendtag(self, tag: str, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag.lower() not in self._VOID_TAGS:
+            self.handle_endtag(tag)
+
+    def handle_endtag(self, tag: str):
+        tag = tag.lower()
+        for index in range(len(self.stack) - 1, 0, -1):
+            if self.stack[index].tag == tag:
+                del self.stack[index:]
+                return
+
+    def handle_data(self, data: str):
+        if data and not any(node.tag in self._IGNORED_TAGS for node in self.stack):
+            self.stack[-1].children.append(_ReportHTMLNode(None, text=data))
+
+
+_HTML_BLOCK_TAGS = {
+    "address", "article", "aside", "blockquote", "div", "dl", "fieldset", "figure", "footer",
+    "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "li", "main", "nav",
+    "ol", "p", "pre", "section", "table", "ul",
+}
+
+
+def _placeholder_token(node: _ReportHTMLNode) -> str | None:
+    if node.tag != "span" or "data-placeholder-id" not in node.attrs or "data-result-path" not in node.attrs:
+        return None
+    placeholder_id = str(node.attrs.get("data-placeholder-id") or "").strip()
+    if not placeholder_id:
+        return None
+    result_path = str(node.attrs.get("data-result-path") or "").strip().strip(".")
+    return "{" + placeholder_id + (f".{result_path}" if result_path else "") + "}"
+
+
+def _css_declarations(node: _ReportHTMLNode) -> dict[str, str]:
+    style = node.attrs.get("style") if node.tag is not None else None
+    if not isinstance(style, str):
+        return {}
+    declarations = {}
+    for item in style.split(";"):
+        if ":" not in item:
+            continue
+        key, value = item.split(":", 1)
+        if key.strip() and value.strip():
+            declarations[key.strip().lower()] = value.strip()
+    return declarations
+
+
+def _css_font_size(value: str | None):
+    if not value:
+        return None
+    normalized = value.strip().lower()
+    match = re.fullmatch(r"(-?\d+(?:\.\d+)?)(px|pt|em|rem)?", normalized)
+    if not match:
+        return None
+    amount = float(match.group(1))
+    if amount <= 0:
+        return None
+    unit = match.group(2) or "pt"
+    if unit == "px":
+        amount *= 0.75
+    elif unit in {"em", "rem"}:
+        amount *= 12
+    return Pt(amount)
+
+
+def _css_color(value: str | None):
+    if not value:
+        return None
+    normalized = value.strip().lower()
+    named_colors = {
+        "black": "000000",
+        "white": "FFFFFF",
+        "red": "FF0000",
+        "green": "008000",
+        "blue": "0000FF",
+        "yellow": "FFFF00",
+        "gray": "808080",
+        "grey": "808080",
+        "orange": "FFA500",
+        "purple": "800080",
+    }
+    normalized = named_colors.get(normalized, normalized)
+    if normalized.startswith("#"):
+        normalized = normalized[1:]
+    if re.fullmatch(r"[0-9a-f]{3}", normalized):
+        normalized = "".join(char * 2 for char in normalized)
+    if re.fullmatch(r"[0-9a-f]{6}", normalized):
+        return RGBColor.from_string(normalized.upper())
+    match = re.fullmatch(
+        r"rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,[^)]*)?\)",
+        normalized,
+    )
+    if match:
+        channels = [min(255, int(channel)) for channel in match.groups()]
+        return RGBColor(*channels)
+    return None
+
+
+def _inline_format(node: _ReportHTMLNode, inherited: dict | None = None) -> dict:
+    formatting = dict(inherited or {})
+    if node.tag is None:
+        return formatting
+    styles = _css_declarations(node)
+    if node.tag in {"b", "strong"}:
+        formatting["bold"] = True
+    if node.tag in {"em", "i"}:
+        formatting["italic"] = True
+    if node.tag == "u":
+        formatting["underline"] = True
+    if node.tag in {"del", "s", "strike"}:
+        formatting["strike"] = True
+
+    font_weight = styles.get("font-weight", "").lower()
+    if font_weight:
+        formatting["bold"] = font_weight in {"bold", "bolder"} or (
+            font_weight.isdigit() and int(font_weight) >= 600
+        )
+    font_style = styles.get("font-style", "").lower()
+    if font_style:
+        formatting["italic"] = font_style in {"italic", "oblique"}
+    decoration = " ".join(
+        value.lower()
+        for key, value in styles.items()
+        if key in {"text-decoration", "text-decoration-line"}
+    )
+    if decoration:
+        if "none" in decoration:
+            formatting["underline"] = False
+            formatting["strike"] = False
+        else:
+            if "underline" in decoration:
+                formatting["underline"] = True
+            if "line-through" in decoration:
+                formatting["strike"] = True
+
+    font_name = styles.get("font-family") or node.attrs.get("face")
+    if isinstance(font_name, str) and font_name.strip():
+        formatting["font_name"] = font_name.split(",", 1)[0].strip().strip("'\"")
+    font_size = _css_font_size(styles.get("font-size"))
+    if font_size is None and node.tag == "font" and node.attrs.get("size"):
+        html_sizes = {"1": 8, "2": 10, "3": 12, "4": 14, "5": 18, "6": 24, "7": 36}
+        size_value = html_sizes.get(str(node.attrs.get("size")).strip())
+        font_size = Pt(size_value) if size_value else None
+    if font_size is not None:
+        formatting["font_size"] = font_size
+    color = _css_color(styles.get("color") or node.attrs.get("color"))
+    if color is not None:
+        formatting["color"] = color
+    return formatting
+
+
+def _apply_run_format(run, formatting: dict) -> None:
+    if "bold" in formatting:
+        run.bold = bool(formatting["bold"])
+    if "italic" in formatting:
+        run.italic = bool(formatting["italic"])
+    if "underline" in formatting:
+        run.underline = bool(formatting["underline"])
+    if "strike" in formatting:
+        run.font.strike = bool(formatting["strike"])
+    if formatting.get("font_name"):
+        run.font.name = formatting["font_name"]
+        run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), formatting["font_name"])
+    if formatting.get("font_size") is not None:
+        run.font.size = formatting["font_size"]
+    if formatting.get("color") is not None:
+        run.font.color.rgb = formatting["color"]
+
+
+def _image_width(node: _ReportHTMLNode):
+    styles = _css_declarations(node)
+    value = styles.get("width") or node.attrs.get("width")
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)(px|pt|in|cm|mm)?", value.strip().lower())
+    if not match or float(match.group(1)) <= 0:
+        return None
+    amount = float(match.group(1))
+    unit = match.group(2) or "px"
+    if unit == "px":
+        return Inches(amount / 96)
+    if unit == "pt":
+        return Pt(amount)
+    if unit == "cm":
+        return Inches(amount / 2.54)
+    if unit == "mm":
+        return Inches(amount / 25.4)
+    return Inches(amount)
+
+
+def _append_data_image(paragraph, node: _ReportHTMLNode, formatting: dict) -> None:
+    source = node.attrs.get("src")
+    if not isinstance(source, str) or not source.lower().startswith("data:image/") or "," not in source:
+        return
+    header, encoded = source.split(",", 1)
+    if ";base64" not in header.lower():
+        return
+    try:
+        image_bytes = base64.b64decode(re.sub(r"\s+", "", encoded), validate=True)
+        run = paragraph.add_run()
+        _apply_run_format(run, formatting)
+        run.add_picture(io.BytesIO(image_bytes), width=_image_width(node))
+    except Exception as exc:
+        logger.warning("忽略无法写入 DOCX 的 data URL 图片: %s", exc)
+
+
+def _append_html_inline(paragraph, node: _ReportHTMLNode, *, formatting: dict | None = None) -> None:
+    current_format = _inline_format(node, formatting)
+    if node.tag is None:
+        text = re.sub(r"[\r\n\t]+", " ", node.text)
+        if text:
+            run = paragraph.add_run(text)
+            _apply_run_format(run, current_format)
+        return
+
+    if node.tag in _ReportHTMLParser._IGNORED_TAGS:
+        return
+    token = _placeholder_token(node)
+    if token is not None:
+        run = paragraph.add_run(token)
+        _apply_run_format(run, current_format)
+        return
+    if node.tag == "br":
+        paragraph.add_run("\n")
+        return
+    if node.tag == "img":
+        _append_data_image(paragraph, node, current_format)
+        return
+
+    for child in node.children:
+        _append_html_inline(paragraph, child, formatting=current_format)
+
+
+def _node_has_content(node: _ReportHTMLNode) -> bool:
+    if node.tag is None:
+        return bool(node.text.strip())
+    if _placeholder_token(node) is not None or node.tag in {"br", "hr", "img", "table"}:
+        return True
+    return any(_node_has_content(child) for child in node.children)
+
+
+def _apply_paragraph_format(paragraph, node: _ReportHTMLNode | None) -> None:
+    if node is None:
+        return
+    styles = _css_declarations(node)
+    alignment = styles.get("text-align") or node.attrs.get("align")
+    if isinstance(alignment, str):
+        alignment_map = {
+            "left": WD_ALIGN_PARAGRAPH.LEFT,
+            "start": WD_ALIGN_PARAGRAPH.LEFT,
+            "center": WD_ALIGN_PARAGRAPH.CENTER,
+            "right": WD_ALIGN_PARAGRAPH.RIGHT,
+            "end": WD_ALIGN_PARAGRAPH.RIGHT,
+            "justify": WD_ALIGN_PARAGRAPH.JUSTIFY,
+        }
+        if alignment.strip().lower() in alignment_map:
+            paragraph.alignment = alignment_map[alignment.strip().lower()]
+
+    line_height = styles.get("line-height")
+    if not line_height:
+        return
+    normalized = line_height.strip().lower()
+    try:
+        if normalized.endswith("%"):
+            paragraph.paragraph_format.line_spacing = float(normalized[:-1]) / 100
+        elif re.fullmatch(r"\d+(?:\.\d+)?", normalized):
+            paragraph.paragraph_format.line_spacing = float(normalized)
+        else:
+            spacing = _css_font_size(normalized)
+            if spacing is not None:
+                paragraph.paragraph_format.line_spacing = spacing
+    except ValueError:
+        return
+
+
+def _add_docx_paragraph(container, *, style: str | None = None, node: _ReportHTMLNode | None = None):
+    if style:
+        try:
+            paragraph = container.add_paragraph(style=style)
+        except KeyError:
+            paragraph = container.add_paragraph()
+    else:
+        paragraph = container.add_paragraph()
+    _apply_paragraph_format(paragraph, node)
+    return paragraph
+
+
+def _append_list_item_inline(paragraph, node: _ReportHTMLNode) -> None:
+    for child in node.children:
+        if child.tag not in {"ul", "ol"}:
+            _append_html_inline(paragraph, child)
+
+
+def _add_html_list(container, node: _ReportHTMLNode, *, ordered: bool) -> None:
+    style = "List Number" if ordered else "List Bullet"
+    for item in (child for child in node.children if child.tag == "li"):
+        paragraph = _add_docx_paragraph(container, style=style, node=item)
+        _append_list_item_inline(paragraph, item)
+        for nested in (child for child in item.children if child.tag in {"ul", "ol"}):
+            _add_html_list(container, nested, ordered=nested.tag == "ol")
+
+
+def _table_rows(node: _ReportHTMLNode) -> list[_ReportHTMLNode]:
+    rows = []
+    for child in node.children:
+        if child.tag == "tr":
+            rows.append(child)
+        elif child.tag in {"thead", "tbody", "tfoot"}:
+            rows.extend(_table_rows(child))
+    return rows
+
+
+def _remove_empty_first_cell_paragraph(cell) -> None:
+    if len(cell.paragraphs) <= 1 or cell.paragraphs[0].text:
+        return
+    paragraph = cell.paragraphs[0]._element
+    paragraph.getparent().remove(paragraph)
+
+
+def _add_html_table(container, node: _ReportHTMLNode) -> None:
+    rows = _table_rows(node)
+    cell_rows = [[child for child in row.children if child.tag in {"td", "th"}] for row in rows]
+    column_count = max((len(cells) for cells in cell_rows), default=0)
+    if not column_count:
+        return
+    table = container.add_table(rows=0, cols=column_count)
+    try:
+        table.style = "Table Grid"
+    except KeyError:
+        pass
+    for source_cells in cell_rows:
+        target_cells = table.add_row().cells
+        for index, source_cell in enumerate(source_cells):
+            _add_html_blocks(target_cells[index], source_cell.children)
+            _remove_empty_first_cell_paragraph(target_cells[index])
+            for paragraph in target_cells[index].paragraphs:
+                _apply_paragraph_format(paragraph, source_cell)
+
+
+def _add_html_block(container, node: _ReportHTMLNode) -> None:
+    if node.tag in {"html", "body", "main", "article", "section", "header", "footer", "aside", "nav", "div", "figure", "form", "fieldset", "dl"}:
+        _add_html_blocks(container, node.children)
+        return
+    if node.tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+        paragraph = _add_docx_paragraph(container, style=f"Heading {node.tag[1:]}", node=node)
+        _append_html_inline(paragraph, node)
+        return
+    if node.tag in {"p", "pre", "blockquote", "address"}:
+        paragraph = _add_docx_paragraph(
+            container,
+            style="Quote" if node.tag == "blockquote" else None,
+            node=node,
+        )
+        _append_html_inline(paragraph, node)
+        return
+    if node.tag in {"ul", "ol"}:
+        _add_html_list(container, node, ordered=node.tag == "ol")
+        return
+    if node.tag == "table":
+        _add_html_table(container, node)
+        return
+    if node.tag == "hr":
+        _add_docx_paragraph(container, node=node).add_run("---")
+        return
+    paragraph = _add_docx_paragraph(container, node=node)
+    _append_html_inline(paragraph, node)
+
+
+def _add_html_blocks(container, nodes: list[_ReportHTMLNode]) -> None:
+    inline_nodes: list[_ReportHTMLNode] = []
+
+    def flush_inline() -> None:
+        if not any(_node_has_content(item) for item in inline_nodes):
+            inline_nodes.clear()
+            return
+        paragraph = _add_docx_paragraph(container)
+        for item in inline_nodes:
+            _append_html_inline(paragraph, item)
+        inline_nodes.clear()
+
+    for node in nodes:
+        if node.tag in _HTML_BLOCK_TAGS or node.tag in {"html", "body"}:
+            flush_inline()
+            _add_html_block(container, node)
+        else:
+            inline_nodes.append(node)
+    flush_inline()
+
+
+def _html_to_docx_bytes(content_html: str) -> bytes:
+    parser = _ReportHTMLParser()
+    parser.feed(content_html)
+    parser.close()
+    document = Document()
+    _add_html_blocks(document, parser.root.children)
+    if not document.paragraphs and not document.tables:
+        document.add_paragraph()
+    output = io.BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+def _report_template_payload(data: dict, *, partial: bool) -> dict:
+    if not isinstance(data, dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    payload = {}
+    required = set() if partial else {"name", "content_html"}
+    if any(field not in data for field in required):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if "name" in data:
+        if not isinstance(data["name"], str):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        name = data["name"].strip()
+        if not name or len(name) > 255:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        payload["name"] = name
+    if "description" in data:
+        if not isinstance(data["description"], str):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        payload["description"] = data["description"]
+    elif not partial:
+        payload["description"] = ""
+    if "content_html" in data:
+        if not isinstance(data["content_html"], str):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        payload["content_html"] = data["content_html"]
+    if "fetch_config" in data:
+        if not isinstance(data["fetch_config"], dict):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        if any(
+            not isinstance(key, str) or not key.strip() or not isinstance(value, dict)
+            for key, value in data["fetch_config"].items()
+        ):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        payload["fetch_config"] = copy.deepcopy(data["fetch_config"])
+    elif not partial:
+        payload["fetch_config"] = {}
+    if "annotations" in data:
+        if not isinstance(data["annotations"], list) or any(
+            not isinstance(item, dict) for item in data["annotations"]
+        ):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        payload["annotations"] = copy.deepcopy(data["annotations"])
+    elif not partial:
+        payload["annotations"] = []
+    if "source_template_key" in data:
+        source_key = data["source_template_key"]
+        if source_key is not None and not isinstance(source_key, str):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        source_key = source_key.strip() if isinstance(source_key, str) else None
+        if source_key and len(source_key) > 128:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        payload["source_template_key"] = source_key or None
+    elif not partial:
+        payload["source_template_key"] = None
+    return payload
+
+
+def _report_template_request_id(data: dict) -> str:
+    if not isinstance(data, dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    raw_template_id = data.get("template_id")
+    raw_id = data.get("id")
+    if raw_template_id is not None and not isinstance(raw_template_id, str):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if raw_id is not None and not isinstance(raw_id, str):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if raw_template_id is not None and raw_id is not None and raw_template_id.strip() != raw_id.strip():
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    template_id = (raw_template_id if raw_template_id is not None else raw_id or "").strip()
+    if not template_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    return template_id
+
+
+def _report_template_output_name(name: str, *, suffix: str = "") -> str:
+    clean_name = re.sub(r'[\\/:*?"<>|]+', "_", name).strip().strip(".") or "报告"
+    stem = clean_name[:-5] if clean_name.lower().endswith(".docx") else clean_name
+    stem_byte_limit = max(1, 250 - len(suffix.encode("utf-8")))
+    safe_stem = stem.encode("utf-8")[:stem_byte_limit].decode("utf-8", errors="ignore") or "report"
+    return f"{safe_stem}{suffix}.docx"
+
+
+def _report_template_summary(template: ReportTemplate) -> dict:
+    fetch_config = template.fetch_config if isinstance(template.fetch_config, dict) else {}
+    annotations = template.annotations if isinstance(template.annotations, list) else []
+    return {
+        "id": template.id,
+        "ctime": template.json["ctime"],
+        "utime": template.json["utime"],
+        "name": template.name,
+        "description": template.description,
+        "source_template_key": template.source_template_key,
+        "placeholder_count": len(fetch_config),
+        "annotation_count": len(annotations),
+    }
+
+
+async def _get_owned_report_template(template_id: str, tenant_id: str, owner_id: str) -> ReportTemplate:
+    template = await ReportTemplate.get_or_none(
+        id=template_id,
+        tenant_id=tenant_id,
+        owner_id=owner_id,
+        deleted=False,
+    )
+    if not template:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    return template
+
 
 def _template_key(filename: str) -> str:
     """去掉 .docx 后缀作为 key"""
@@ -643,6 +1215,379 @@ def _user_report_dir(tenant_id: str, user_id: str) -> Path:
     p = Path(REPORT_USER_BASE) / tenant_id / user_id
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def _owned_report_path(user_dir: Path, rel_path: str | None) -> Path | None:
+    if not rel_path:
+        return None
+    root = user_dir.resolve()
+    candidate = (user_dir / rel_path).resolve()
+    if candidate == root or root not in candidate.parents:
+        return None
+    return candidate
+
+
+def _atomic_write_report_file(path: Path, content: bytes) -> None:
+    temporary = path.with_name(f".report-{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_bytes(content)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _canonical_report_filename(template: ReportTemplate, user_dir: Path, current_rel_path: str | None) -> str:
+    template_suffix = str(template.id).replace("-", "")[:8]
+    base_name = _report_template_output_name(template.name, suffix=f"_{template_suffix}")
+    if base_name == current_rel_path or not (user_dir / base_name).exists():
+        return base_name
+    stem = Path(base_name).stem
+    index = 1
+    while True:
+        candidate = _report_template_output_name(stem, suffix=f"_{index}")
+        if candidate == current_rel_path or not (user_dir / candidate).exists():
+            return candidate
+        index += 1
+
+
+async def _sync_report_template_document(
+    template: ReportTemplate,
+    tenant_id: str,
+    owner_id: str,
+    *,
+    canonical_bytes: bytes | None = None,
+) -> ReportDocument:
+    """Create or update the stable canonical document used by report schedules."""
+    content = canonical_bytes if canonical_bytes is not None else _html_to_docx_bytes(template.content_html)
+    fetch_config = copy.deepcopy(template.fetch_config or {})
+    if not isinstance(fetch_config, dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    document = None
+    if template.document_id:
+        document = await ReportDocument.get_or_none(
+            id=template.document_id,
+            tenant_id=tenant_id,
+            owner_id=owner_id,
+            deleted=False,
+        )
+
+    user_dir = _user_report_dir(tenant_id, owner_id)
+    old_rel_path = document.file_path if document else None
+    old_path = _owned_report_path(user_dir, old_rel_path)
+    rel_path = _canonical_report_filename(template, user_dir, old_rel_path)
+    document_name = _report_template_output_name(template.name)
+    target_path = _owned_report_path(user_dir, rel_path)
+    if target_path is None:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    previous_target_content = None
+    if target_path.exists():
+        previous_target_content = target_path.read_bytes()
+    _atomic_write_report_file(target_path, content)
+
+    document_created = False
+    document_snapshot = None
+    previous_template_document_id = template.document_id
+    try:
+        if document:
+            document_snapshot = {
+                "name": document.name,
+                "template_key": document.template_key,
+                "file_path": document.file_path,
+                "fetch_config": copy.deepcopy(document.fetch_config),
+            }
+            document.name = document_name
+            document.template_key = template.source_template_key or str(template.id)
+            document.file_path = rel_path
+            document.fetch_config = copy.deepcopy(fetch_config)
+            await document.save(update_fields=["name", "template_key", "file_path", "fetch_config", "utime"])
+        else:
+            document = await ReportDocument.create(
+                tenant_id=tenant_id,
+                owner_id=owner_id,
+                name=document_name,
+                template_key=template.source_template_key or str(template.id),
+                file_path=rel_path,
+                fetch_config=copy.deepcopy(fetch_config),
+            )
+            document_created = True
+
+        if str(template.document_id or "") != str(document.id):
+            template.document_id = document.id
+            await template.save(update_fields=["document_id", "utime"])
+    except Exception:
+        if previous_target_content is None:
+            target_path.unlink(missing_ok=True)
+        else:
+            try:
+                _atomic_write_report_file(target_path, previous_target_content)
+            except Exception as restore_exc:
+                logger.exception("恢复报告模板 canonical 文件失败: %s", restore_exc)
+        if document_created and document:
+            try:
+                await document.delete()
+            except Exception as cleanup_exc:
+                logger.exception("清理未关联的报告文档失败: %s", cleanup_exc)
+        elif document and document_snapshot:
+            for field, value in document_snapshot.items():
+                setattr(document, field, value)
+            try:
+                await document.save(update_fields=["name", "template_key", "file_path", "fetch_config", "utime"])
+            except Exception as restore_exc:
+                logger.exception("恢复报告文档记录失败: %s", restore_exc)
+        template.document_id = previous_template_document_id
+        raise
+
+    if old_path and old_path != target_path:
+        try:
+            old_path.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.warning("清理已重命名的旧报告模板文件失败 path=%s error=%s", old_path, exc)
+    return document
+
+
+@agent_bp.post("/report/template/list")
+@openapi.definition(
+    summary="分页查询报告模板",
+    description="查询当前用户管理的在线报告模板。需要 agent:r 权限。",
+    body=_json_body({
+        "type": "object",
+        "properties": {
+            "page": {"type": "integer", "minimum": 1},
+            "size": {"type": "integer", "minimum": 1, "maximum": 100},
+            "name": {"type": "string", "description": "模板名称模糊搜索"},
+        },
+    }),
+    response=_response("模板列表", {
+        "type": "object",
+        "properties": {
+            "list": {"type": "array", "items": REPORT_EDITABLE_TEMPLATE_SUMMARY_SCHEMA},
+            "total": {"type": "integer"},
+            "page": {"type": "integer"},
+            "size": {"type": "integer"},
+        },
+    }),
+)
+@requires_permission("agent:r")
+async def report_template_list(request: Request):
+    data = _require_json(request)
+    if not isinstance(data, dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    page = data.get("page", 1)
+    size = data.get("size", 20)
+    name = data.get("name", "")
+    if isinstance(page, bool) or not isinstance(page, int) or page < 1:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if isinstance(size, bool) or not isinstance(size, int) or size < 1 or size > 100:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if not isinstance(name, str):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    if not user_id:
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+    condition = Q(tenant_id=tenant_id, owner_id=user_id, deleted=False)
+    if name.strip():
+        condition &= Q(name__icontains=name.strip())
+    query = ReportTemplate.filter(condition)
+    total = await query.count()
+    templates = await query.order_by("-utime").offset((page - 1) * size).limit(size)
+    return response_ok({
+        "list": [_report_template_summary(template) for template in templates],
+        "total": total,
+        "page": page,
+        "size": size,
+    })
+
+
+@agent_bp.post("/report/template/detail")
+@openapi.definition(
+    summary="查询报告模板详情",
+    description="查询当前用户的一份在线报告模板。需要 agent:r 权限。",
+    body=_json_body({
+        "type": "object",
+        "anyOf": [{"required": ["template_id"]}, {"required": ["id"]}],
+        "properties": {
+            "template_id": {"type": "string", "description": "模板ID"},
+            "id": {"type": "string", "description": "兼容字段，与 template_id 等价"},
+        },
+    }),
+    response=_response("模板详情", REPORT_EDITABLE_TEMPLATE_SCHEMA, {"404": "模板不存在"}),
+)
+@requires_permission("agent:r")
+async def report_template_detail(request: Request):
+    data = _require_json(request)
+    template_id = _report_template_request_id(data)
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    template = await _get_owned_report_template(template_id, tenant_id, user_id)
+    return response_ok(template.json)
+
+
+@agent_bp.post("/report/template/save")
+@openapi.definition(
+    summary="保存报告模板",
+    description="无 id 时新增，有 id 时更新当前用户的模板。根据操作校验 agent:c 或 agent:u 权限。",
+    body=_json_body({
+        "type": "object",
+        "required": ["name", "content_html"],
+        "properties": {
+            "id": {"type": "string", "nullable": True},
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "content_html": {"type": "string"},
+            "fetch_config": {"type": "object"},
+            "annotations": {"type": "array"},
+            "source_template_key": {"type": "string", "nullable": True},
+        },
+    }),
+    response=_response("保存成功", REPORT_EDITABLE_TEMPLATE_SCHEMA),
+)
+@requires_permission("agent:c", "agent:u")
+async def report_template_save(request: Request):
+    data = _require_json(request)
+    if not isinstance(data, dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    raw_id = data.get("id")
+    if raw_id is not None and not isinstance(raw_id, str):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    template_id = raw_id.strip() if isinstance(raw_id, str) else ""
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    if not user_id:
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+    if template_id:
+        await check_permissions(request, "agent:u")
+        template = await _get_owned_report_template(template_id, tenant_id, user_id)
+        payload = _report_template_payload(data, partial=True)
+        if not payload:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        snapshot = {field: copy.deepcopy(getattr(template, field)) for field in payload}
+        for field, value in payload.items():
+            setattr(template, field, value)
+        canonical_bytes = _html_to_docx_bytes(template.content_html)
+        template_saved = False
+        try:
+            await template.save()
+            template_saved = True
+            await _sync_report_template_document(
+                template,
+                tenant_id,
+                user_id,
+                canonical_bytes=canonical_bytes,
+            )
+        except Exception:
+            if template_saved:
+                for field, value in snapshot.items():
+                    setattr(template, field, value)
+                try:
+                    await template.save()
+                except Exception as restore_exc:
+                    logger.exception("恢复报告模板记录失败: %s", restore_exc)
+            raise
+    else:
+        await check_permissions(request, "agent:c")
+        payload = _report_template_payload(data, partial=False)
+        canonical_bytes = _html_to_docx_bytes(payload["content_html"])
+        template = await ReportTemplate.create(
+            tenant_id=tenant_id,
+            owner_id=user_id,
+            **payload,
+        )
+        try:
+            await _sync_report_template_document(
+                template,
+                tenant_id,
+                user_id,
+                canonical_bytes=canonical_bytes,
+            )
+        except Exception:
+            try:
+                await template.delete()
+            except Exception as cleanup_exc:
+                logger.exception("清理未完成保存的报告模板失败: %s", cleanup_exc)
+            raise
+    return response_ok(template.json)
+
+
+@agent_bp.post("/report/template/delete")
+@openapi.definition(
+    summary="删除报告模板",
+    description="软删除当前用户的一份在线报告模板。需要 agent:d 权限。",
+    body=_json_body({
+        "type": "object",
+        "anyOf": [{"required": ["template_id"]}, {"required": ["id"]}],
+        "properties": {
+            "template_id": {"type": "string", "description": "模板ID"},
+            "id": {"type": "string", "description": "兼容字段，与 template_id 等价"},
+        },
+    }),
+    response=_response("删除成功", {"type": "object", "properties": {"id": {"type": "string"}}}),
+)
+@requires_permission("agent:d")
+async def report_template_delete(request: Request):
+    data = _require_json(request)
+    template_id = _report_template_request_id(data)
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    template = await _get_owned_report_template(template_id, tenant_id, user_id)
+    template.deleted = True
+    await template.save(update_fields=["deleted", "utime"])
+    return response_ok({"id": str(template.id)})
+
+
+@agent_bp.post("/report/template/generate")
+@openapi.definition(
+    summary="从在线模板生成报告",
+    description="执行模板中的取数占位符并生成用户 DOCX 文档。需要 agent:u 权限。",
+    body=_json_body({
+        "type": "object",
+        "anyOf": [{"required": ["template_id"]}, {"required": ["id"]}],
+        "properties": {
+            "template_id": {"type": "string", "description": "模板ID"},
+            "id": {"type": "string", "description": "兼容字段，与 template_id 等价"},
+            "name": {"type": "string", "description": "可选的生成文件名"},
+        },
+    }),
+    response=_response("生成成功", {
+        "type": "object",
+        "properties": {
+            "doc": REPORT_DOC_SCHEMA,
+            "content": {"type": "string", "description": "生成后 DOCX 的 base64 内容"},
+        },
+    }),
+)
+@requires_permission("agent:u")
+async def report_template_generate(request: Request):
+    data = _require_json(request)
+    template_id = _report_template_request_id(data)
+    output_name = data.get("name")
+    if output_name is not None and (not isinstance(output_name, str) or not output_name.strip()):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = str(_session_user_id(request) or "")
+    if not user_id:
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+    template = await _get_owned_report_template(template_id, tenant_id, user_id)
+    fetch_config = copy.deepcopy(template.fetch_config or {})
+    if not isinstance(fetch_config, dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    document = await _sync_report_template_document(template, tenant_id, user_id)
+    user_dir = _user_report_dir(tenant_id, user_id)
+    canonical_path = _owned_report_path(user_dir, document.file_path)
+    if canonical_path is None or not canonical_path.exists():
+        raise CustomError(ErrorCode.NOT_FOUND)
+    generated = canonical_path.read_bytes()
+    generated = await _resolve_fetch_placeholders(generated, fetch_config, tenant_id, user_id)
+    return response_ok({
+        "doc": document.json,
+        "content": base64.b64encode(generated).decode("utf-8"),
+    })
 
 
 @agent_bp.post("/report/templates")
@@ -939,7 +1884,7 @@ async def report_polish(request: Request):
             request_id=f"report-polish:{run_id}",
             message=prompt,
         )
-    except Exception as exc:
+    except Exception:
         raise CustomError(ErrorCode.INTERNAL_ERROR)
 
     return response_ok({"result": result})
@@ -988,7 +1933,7 @@ async def _get_owned_report_document(doc_id: str, tenant_id: str, owner_id: str)
 @agent_bp.post("/report/export")
 @openapi.definition(
     summary="导出报告文件并上传 S3 返回下载链接",
-    description="将用户保存的报告导出为 docx 或 pdf，上传到对象存储后返回下载链接。pdf 转换依赖服务器端 libreoffice。需要 agent:r 权限。",
+    description="将用户保存的 canonical 报告执行取数后导出为 docx 或 pdf，上传到对象存储并返回下载链接。pdf 转换依赖服务器端 libreoffice。需要 agent:u 权限。",
     body=_json_body({
         "type": "object",
         "required": ["doc_id", "format"],
@@ -1006,7 +1951,7 @@ async def _get_owned_report_document(doc_id: str, tenant_id: str, owner_id: str)
         },
     }, {"400": "参数错误", "404": "文档不存在", "500": "pdf 转换失败"}),
 )
-@requires_permission("agent:r")
+@requires_permission("agent:u")
 async def report_export(request: Request):
     data = _require_json(request)
     doc_id = str(data.get("doc_id") or "").strip()
@@ -1118,6 +2063,7 @@ async def report_notify_send(request: Request):
 
 # 占位符格式: {action_key.field.path}，如 {a.data.userate}
 _FETCH_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)(\.[^}]+)?\}")
+_MISSING_FETCH_VALUE = object()
 
 
 def _get_fetch_value_by_path(data, path: str):
@@ -1125,14 +2071,16 @@ def _get_fetch_value_by_path(data, path: str):
         return data
     for part in path.lstrip(".").split("."):
         if isinstance(data, dict):
-            data = data.get(part)
+            if part not in data:
+                return _MISSING_FETCH_VALUE
+            data = data[part]
         elif isinstance(data, list):
             try:
                 data = data[int(part)]
             except (ValueError, IndexError):
-                return None
+                return _MISSING_FETCH_VALUE
         else:
-            return None
+            return _MISSING_FETCH_VALUE
     return data
 
 
@@ -1145,6 +2093,32 @@ def _stringify_fetch(value) -> str:
 
 
 async def _execute_fetch_action(action_cfg: dict, tenant_id: str, operator_id) -> str:
+    if not isinstance(action_cfg, dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if isinstance(operator_id, Account):
+        operator = operator_id
+    else:
+        operator_key = str(operator_id or "").strip()
+        if not operator_key:
+            raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+        operator = await Account.get_or_none(id=operator_key, deleted=False).prefetch_related("roles")
+    if not operator:
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+
+    app_name = action_cfg.get("app_name") or action_cfg.get("tool_name") or ""
+    action_name = action_cfg.get("action") or action_cfg.get("func") or ""
+    resource = action_cfg.get("resource") or ""
+    if not await check_action_execute_permission(operator, app_name, action_name, resource, tenant_id):
+        logger.warning(
+            "拒绝无动作执行权的报告取数配置 tenant_id=%s operator_id=%s app_name=%s action=%s resource=%s",
+            tenant_id,
+            operator.id,
+            app_name,
+            action_name,
+            resource,
+        )
+        raise CustomError(ErrorCode.UNAUTH)
+
     params = {
         "resource": action_cfg.get("resource", ""),
         "node_name": action_cfg.get("node_name") or action_cfg.get("description", ""),
@@ -1157,22 +2131,23 @@ async def _execute_fetch_action(action_cfg: dict, tenant_id: str, operator_id) -
         "action_input": action_cfg.get("action_input") or {},
         "retry_times": int(action_cfg.get("retry_times") or 3),
         "timeout": int(action_cfg.get("timeout") or 300),
-        "executor": operator_id,
+        "executor": operator.id,
     }
     run_id = gen_run_id()
     await aproduce(TASK_TOPIC, {"run_type": "action", "run_id": run_id, "run_args": params, "tenant_id": tenant_id})
 
     wait_seconds = max(1, min(int(action_cfg.get("timeout") or 300), 300))
     for _ in range(wait_seconds):
-        log = await Runlog.filter(run_id=run_id, deleted=False).order_by("-utime").first()
-        if log and log.result and log.result != "执行中":
-            return log.result or ""
+        log = await Runlog.filter(run_id=run_id, tenant_id=tenant_id, deleted=False).order_by("-utime").first()
         if log and log.status in (-1, 2):
+            logger.error("报告取数动作执行失败 run_id=%s status=%s", run_id, log.status)
+            raise RuntimeError(f"report fetch action failed run_id={run_id}")
+        if log and log.result and log.result != "执行中":
             return log.result or ""
         await asyncio.sleep(1)
 
     logger.warning(f"取数动作执行超时 run_id={run_id}")
-    return ""
+    raise CustomError(ErrorCode.ACTION_TIMEOUT)
 
 
 def _parse_fetch_result(raw: str):
@@ -1189,9 +2164,6 @@ def _parse_fetch_result(raw: str):
 
 async def _resolve_fetch_placeholders(docx_bytes: bytes, fetch_config: dict, tenant_id: str, operator_id) -> bytes:
     """扫描 docx 中所有 {action_key.field.path} 占位符，并发执行取数动作后替换。"""
-    if not fetch_config:
-        return docx_bytes
-
     doc = Document(io.BytesIO(docx_bytes))
 
     def _iter_paragraphs():
@@ -1202,20 +2174,44 @@ async def _resolve_fetch_placeholders(docx_bytes: bytes, fetch_config: dict, ten
                     yield from cell.paragraphs
 
     all_text = " ".join(p.text for p in _iter_paragraphs())
-    active_keys = {m.group(1) for m in _FETCH_PLACEHOLDER_RE.finditer(all_text)} & set(fetch_config.keys())
+    placeholder_keys = {m.group(1) for m in _FETCH_PLACEHOLDER_RE.finditer(all_text)}
 
-    if not active_keys:
+    if not placeholder_keys:
         return docx_bytes
+    missing_configs = sorted(placeholder_keys - set(fetch_config.keys()))
+    if missing_configs:
+        logger.error("报告取数占位符缺少动作配置 keys=%s", missing_configs)
+        raise CustomError(ErrorCode.SERVER_ERROR)
+    active_keys = sorted(placeholder_keys)
 
     coros = {key: _execute_fetch_action(fetch_config[key], tenant_id, operator_id) for key in active_keys}
     fetched = await asyncio.gather(*coros.values(), return_exceptions=True)
     results: dict = {}
+    failures: dict[str, Exception] = {}
     for key, raw in zip(coros.keys(), fetched):
         if isinstance(raw, Exception):
             logger.warning(f"取数动作 {key} 执行异常: {raw}")
-            results[key] = None
+            failures[key] = raw
         else:
             results[key] = _parse_fetch_result(raw)
+
+    if failures:
+        logger.error("报告取数失败，占位符保留未替换 keys=%s", sorted(failures))
+        for key in sorted(failures):
+            if isinstance(failures[key], CustomError):
+                raise failures[key]
+        raise CustomError(ErrorCode.SERVER_ERROR)
+
+    missing_paths = sorted({
+        match.group(0)
+        for match in _FETCH_PLACEHOLDER_RE.finditer(all_text)
+        if match.group(1) in results
+        and _get_fetch_value_by_path(results[match.group(1)], match.group(2) or "")
+        is _MISSING_FETCH_VALUE
+    })
+    if missing_paths:
+        logger.error("报告取数结果路径不存在，占位符保留未替换 placeholders=%s", missing_paths)
+        raise CustomError(ErrorCode.SERVER_ERROR)
 
     def _replace_match(match: re.Match) -> str | None:
         key = match.group(1)
@@ -1309,8 +2305,8 @@ async def report_fetch_run(request: Request):
         raise CustomError(ErrorCode.NOT_FOUND)
 
     user_dir = _user_report_dir(tenant_id, user_id)
-    docx_path = user_dir / doc.file_path
-    if not docx_path.exists():
+    docx_path = _owned_report_path(user_dir, doc.file_path)
+    if docx_path is None or not docx_path.exists():
         raise CustomError(ErrorCode.NOT_FOUND)
 
     resolved = await _resolve_fetch_placeholders(
@@ -1336,8 +2332,8 @@ async def export_report_document(
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     user_dir = _user_report_dir(tenant_id, owner_id)
-    docx_path = user_dir / doc.file_path
-    if not docx_path.exists():
+    docx_path = _owned_report_path(user_dir, doc.file_path)
+    if docx_path is None or not docx_path.exists():
         raise CustomError(ErrorCode.NOT_FOUND)
 
     from settings import RY_USER_BUCKET

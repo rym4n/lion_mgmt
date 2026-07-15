@@ -5,6 +5,60 @@ from libs.utils import strip_timezone_to_seconds
 from models.base import BaseModel
 
 
+class ReportTemplate(BaseModel):
+    """用户可在线编辑的报告模板。"""
+
+    document = fields.ForeignKeyField(
+        "models.ReportDocument",
+        null=True,
+        related_name="source_templates",
+        description="关联的 canonical 报告文档",
+        on_delete=fields.SET_NULL,
+    )
+    owner = fields.ForeignKeyField(
+        "models.Account",
+        null=True,
+        related_name="report_templates",
+        description="所属用户",
+        on_delete=fields.SET_NULL,
+    )
+    name = fields.CharField(max_length=255, description="模板名称")
+    description = fields.TextField(default="", description="模板说明")
+    content_html = fields.TextField(default="", description="在线编辑器 HTML 内容")
+    fetch_config = fields.JSONField(default=dict, description="取数占位符动作配置")
+    annotations = fields.JSONField(default=list, description="文档批注")
+    source_template_key = fields.CharField(
+        max_length=128,
+        null=True,
+        description="来源内置模板标识",
+    )
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
+            "tenant_id": self.tenant_id,
+            "owner_id": self.owner_id,
+            "document_id": self.document_id,
+            "name": self.name,
+            "description": self.description,
+            "content_html": self.content_html,
+            "fetch_config": self.fetch_config,
+            "annotations": self.annotations,
+            "source_template_key": self.source_template_key,
+        }
+
+    class Meta:
+        table = "report_template"
+        ordering = ["-utime"]
+        indexes = (("tenant_id", "owner_id"),)
+
+
 class ReportDocument(BaseModel):
     """
     用户报告文档表。
