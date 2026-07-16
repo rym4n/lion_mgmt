@@ -1222,6 +1222,8 @@ async def get_run_log(request):
 
 
 async def timer_success_rate(timed: Timed):
+    previous_success_rate = timed.success_rate
+    previous_result = timed.result
     recent_runs = await Runlog.filter(timer_id=timed.id, deleted=False).annotate(latest_start_time=Max("start_time"), latest_ctime=Max("ctime")).group_by("run_id").order_by("-latest_start_time", "-latest_ctime").limit(10).values("run_id")
     run_ids = [row["run_id"] for row in recent_runs]
     logs = await Runlog.filter(timer_id=timed.id, run_id__in=run_ids, deleted=False).all() if run_ids else []
@@ -1245,7 +1247,8 @@ async def timer_success_rate(timed: Timed):
         timed.success_rate = None
         timed.result = None
 
-    await timed.save()
+    if timed.success_rate != previous_success_rate or timed.result != previous_result:
+        await timed.save(update_fields=["success_rate", "result", "utime"])
 
     return {
         "id": timed.id,

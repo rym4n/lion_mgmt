@@ -145,31 +145,18 @@ def test_action_permission_migration_merges_grants_before_soft_delete():
     assert 'WHERE "deleted" = False' in sql
 
 
-@pytest.mark.parametrize(
-    ("maintain", "tool_group_internal", "version_count", "expected"),
-    [
-        (False, True, 1, True),
-        (False, True, 2, False),
-        (False, False, 1, False),
-        (True, False, 2, True),
-    ],
-)
-def test_internal_tool_delete_keeps_at_least_one_version(
-    maintain,
-    tool_group_internal,
-    version_count,
-    expected,
-):
-    tool = SimpleNamespace(maintain=maintain, internal=False)
+@pytest.mark.parametrize(("maintain", "internal", "expected"), [(False, True, False), (False, False, False), (True, True, True)])
+def test_tool_delete_only_protects_maintenance_applications(maintain, internal, expected):
+    tool = SimpleNamespace(maintain=maintain, internal=internal)
 
-    assert (
-        tool_views._should_reject_tool_version_delete(
-            tool,
-            version_count,
-            tool_group_internal,
-        )
-        is expected
-    )
+    assert tool_views._should_reject_tool_version_delete(tool) is expected
+
+
+def test_delete_all_only_protects_maintenance_applications():
+    source = inspect.getsource(inspect.unwrap(tool_views.delete_tool_all))
+
+    assert "if any(tool.maintain for tool in active_tools):" in source
+    assert "tool_group_internal" not in source
 
 
 @pytest.mark.asyncio
@@ -262,91 +249,6 @@ class FakeTransaction:
 
     async def __aexit__(self, *_args):
         return None
-
-
-@pytest.mark.asyncio
-async def test_delete_last_version_rejects_mixed_internal_group_with_historical_marker(
-    monkeypatch,
-):
-    historical_internal = SimpleNamespace(
-        version="old-internal",
-        internal=True,
-        maintain=False,
-        deleted=True,
-        status=0,
-    )
-    active_non_internal = SimpleNamespace(
-        version="current",
-        internal=False,
-        maintain=False,
-        deleted=False,
-        status=0,
-    )
-
-    async def locked_versions(*_args):
-        return [historical_internal, active_non_internal]
-
-    async def unexpected_s3_delete(*_args):
-        raise AssertionError("an internal tool group must be rejected before S3 deletion")
-
-    monkeypatch.setattr(tool_views, "in_transaction", lambda: FakeTransaction())
-    monkeypatch.setattr(tool_views, "_lock_tool_versions", locked_versions)
-    monkeypatch.setattr(tool_views.utils, "delete_from_s3", unexpected_s3_delete)
-
-    request = SimpleNamespace(
-        json={"name": "sample_tool", "version": "current"},
-        ctx=SimpleNamespace(
-            session={
-                "tenant_id": "tenant-1",
-                "account_info": SimpleNamespace(username="admin"),
-            }
-        ),
-    )
-
-    with pytest.raises(CustomError) as exc_info:
-        await inspect.unwrap(tool_views.delete_tool)(request)
-
-    assert exc_info.value.enum is ErrorCode.INTERNAL_DELETE_ERROR
-
-
-@pytest.mark.asyncio
-async def test_delete_all_rejects_mixed_internal_group(monkeypatch):
-    active_versions = [
-        SimpleNamespace(
-            version="internal",
-            internal=True,
-            maintain=False,
-            deleted=False,
-            status=0,
-        ),
-        SimpleNamespace(
-            version="custom",
-            internal=False,
-            maintain=False,
-            deleted=False,
-            status=0,
-        ),
-    ]
-
-    async def locked_versions(*_args):
-        return active_versions
-
-    async def unexpected_s3_delete(*_args):
-        raise AssertionError("an internal tool group must be rejected before S3 deletion")
-
-    monkeypatch.setattr(tool_views, "in_transaction", lambda: FakeTransaction())
-    monkeypatch.setattr(tool_views, "_lock_tool_versions", locked_versions)
-    monkeypatch.setattr(tool_views.utils, "delete_from_s3", unexpected_s3_delete)
-
-    request = SimpleNamespace(
-        json={"name": "sample_tool"},
-        ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}),
-    )
-
-    with pytest.raises(CustomError) as exc_info:
-        await inspect.unwrap(tool_views.delete_tool_all)(request)
-
-    assert exc_info.value.enum is ErrorCode.INTERNAL_DELETE_ERROR
 
 
 @pytest.mark.asyncio

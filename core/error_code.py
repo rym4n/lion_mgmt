@@ -130,7 +130,7 @@ class ErrorCode(BaseErrorCode):
     MULTIPLE_SYSLOG_ADDRESS_NOT_SUPPORTED = ErrorData(4102, "多个syslog外发配置地址不支持用，分隔")
     INVALID_PORT_ERROR = ErrorData(4103, "端口范围超出1-65535之间，请检查配置")
     FLOW_TIME_OUT_ERROR = ErrorData(4104, "剧本运行超时时间不得小于5分钟或大于3天")
-    INTERNAL_DELETE_ERROR = ErrorData(4105, "系统内置，禁止删除")
+    INTERNAL_DELETE_ERROR = ErrorData(4105, "维护模式应用禁止删除")
     NOT_DOWNLOAD_ERROR = ErrorData(4106, "当前应用不支持下载")
     MAINTENANCE_MODE_ERROR = ErrorData(4107, "当前用户不支持查看维护模式")
 

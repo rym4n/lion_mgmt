@@ -94,8 +94,8 @@ async def _ensure_action_permission(tool_name, action_name, action_description, 
     )
 
 
-def _should_reject_tool_version_delete(tool, active_version_count, tool_group_internal):
-    return bool(tool.maintain or (tool_group_internal and active_version_count == 1))
+def _should_reject_tool_version_delete(tool):
+    return bool(tool.maintain)
 
 
 async def _apply_tool_group_internal_flags(tools, tenant_id):
@@ -1348,12 +1348,7 @@ async def delete_tool(request):
         if tool.status == 1:
             raise CustomError(ErrorCode.TOOL_HAS_SCRIPT_ERROR)
 
-        tool_group_internal = any(item.internal for item in tool_versions)
-        if _should_reject_tool_version_delete(
-            tool,
-            len(active_tools),
-            tool_group_internal,
-        ):
+        if _should_reject_tool_version_delete(tool):
             raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
 
         if len(active_tools) == 1:
@@ -1416,8 +1411,7 @@ async def delete_tool_all(request):
     async with in_transaction():
         tool_versions = await _lock_tool_versions(name, tenant_id)
         active_tools = [item for item in tool_versions if not item.deleted]
-        tool_group_internal = any(item.internal for item in tool_versions)
-        if tool_group_internal or any(tool.maintain for tool in active_tools):
+        if any(tool.maintain for tool in active_tools):
             raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
         if any(tool.status == 1 for tool in active_tools):
             raise CustomError(ErrorCode.TOOL_HAS_SCRIPT_ERROR)
