@@ -200,3 +200,4 @@ class ErrorCode(BaseErrorCode):
     ROOM_NOT_JOINED = ErrorData(4162, "用户尚未加入作战室，无法关注")
     PRIVATE_ROOM_JOIN_NOT_ALLOWED = ErrorData(4163, "私聊作战室禁止主动加入")
     DOCX_CONVERSION_BUSY = ErrorData(4164, "文档转换任务繁忙，请稍后重试")
+    ASSET_MODEL_HAS_DEPENDENCIES = ErrorData(4165, "资产模型存在依赖，无法删除")

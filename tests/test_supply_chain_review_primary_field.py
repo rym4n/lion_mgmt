@@ -186,6 +186,119 @@ def _install_field_save_fakes(monkeypatch, ci_type, existing=None, created=None)
     return transaction, filter_calls, create_kwargs
 
 
+def _install_ci_create_fakes(monkeypatch, ci_type):
+    operations = []
+    transaction = _FakeTransaction(operations)
+    create_kwargs = {}
+
+    def ci_type_filter(**kwargs):
+        assert kwargs == {
+            "tenant_id": "tenant-a",
+            "key": ci_type.key,
+            "deleted": False,
+        }
+        return _FakeQuery(ci_type, operations)
+
+    async def create_ci(**kwargs):
+        create_kwargs.update(kwargs)
+        operations.append(("create", kwargs["using_db"]))
+        return _FakeRecord(_json=kwargs, id="ci-1", **kwargs)
+
+    monkeypatch.setattr(manager, "in_transaction", lambda: transaction)
+    monkeypatch.setattr(
+        manager.SupplyChainCiType,
+        "filter",
+        staticmethod(ci_type_filter),
+    )
+    monkeypatch.setattr(
+        manager.SupplyChainCi,
+        "create",
+        staticmethod(create_ci),
+    )
+    return transaction, operations, create_kwargs
+
+
+def _install_ci_update_fakes(monkeypatch, ci_type, existing):
+    operations = []
+    transaction = _FakeTransaction(operations)
+
+    async def get_ci_type(tenant, key):
+        assert (tenant, key) == ("tenant-a", ci_type.key)
+        return ci_type
+
+    def ci_filter(**kwargs):
+        assert kwargs == {
+            "id": existing.id,
+            "tenant_id": "tenant-a",
+            "deleted": False,
+        }
+        return _FakeQuery(existing, operations)
+
+    monkeypatch.setattr(manager, "in_transaction", lambda: transaction)
+    monkeypatch.setattr(manager, "get_ci_type_or_404", get_ci_type)
+    monkeypatch.setattr(
+        manager.SupplyChainCi,
+        "filter",
+        staticmethod(ci_filter),
+    )
+    return transaction, operations
+
+
+@pytest.mark.parametrize("value", ["a", "Z", "a_1", "a" + "0" * 63])
+def test_validate_key_accepts_identifiers_from_one_to_64_characters(value):
+    assert manager.validate_key(value) == value
+
+
+@pytest.mark.parametrize("value", ["", "1a", "_a", "a" + "0" * 64])
+def test_validate_key_rejects_missing_invalid_or_overlong_identifiers(value):
+    with pytest.raises(CustomError) as exc_info:
+        manager.validate_key(value)
+
+    assert exc_info.value.enum is ErrorCode.PARAM_ERROR
+
+
+def test_save_field_creates_single_character_key(monkeypatch):
+    ci_type = _ci_type(primary_field="")
+    created = _field("field-1", "a")
+    transaction, _, create_kwargs = _install_field_save_fakes(
+        monkeypatch,
+        ci_type,
+        created=created,
+    )
+
+    item = asyncio.run(
+        manager.save_field(
+            "tenant-a",
+            _field_payload("a"),
+            "admin",
+            expected_exists=False,
+        )
+    )
+
+    assert item is created
+    assert create_kwargs["field_key"] == "a"
+    assert create_kwargs["using_db"] is transaction.connection
+
+
+def test_save_field_rejects_create_intent_for_existing_key(monkeypatch):
+    ci_type = _ci_type(primary_field="")
+    existing = _field("field-1", "a")
+    _install_field_save_fakes(monkeypatch, ci_type, existing=existing)
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(
+            manager.save_field(
+                "tenant-a",
+                _field_payload("a"),
+                "admin",
+                expected_exists=False,
+            )
+        )
+
+    assert exc_info.value.enum is ErrorCode.DATA_ALREADY_EXISTS
+    assert existing.save_calls == []
+
+
 def test_save_field_sets_new_field_as_model_primary(monkeypatch):
     ci_type = _ci_type()
     created = _field("field-1", "hostname")
@@ -570,24 +683,47 @@ def test_model_save_rejects_create_to_update_race(monkeypatch):
     assert existing.save_calls == []
 
 
+def test_model_save_maps_deleted_key_tombstone_to_already_exists(monkeypatch):
+    tombstone = _ci_type(primary_field="", deleted=True)
+    filter_calls = []
+    _install_transaction(monkeypatch)
+
+    def filter_ci_type(**kwargs):
+        filter_calls.append(kwargs)
+        return _FakeQuery(tombstone)
+
+    monkeypatch.setattr(
+        manager.SupplyChainCiType,
+        "filter",
+        staticmethod(filter_ci_type),
+    )
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(
+            manager.save_ci_type(
+                "tenant-a",
+                {"key": "server", "name": "服务器"},
+                "admin",
+                expected_exists=False,
+            )
+        )
+
+    assert exc_info.value.enum is ErrorCode.DATA_ALREADY_EXISTS
+    assert filter_calls == [{"tenant_id": "tenant-a", "key": "server"}]
+    assert tombstone.save_calls == []
+
+
 def test_instance_name_does_not_fall_back_to_unselected_name_attribute(monkeypatch):
     ci_type = _ci_type(primary_field="")
-    create_kwargs = {}
-
-    async def get_ci_type(tenant, key):
-        assert (tenant, key) == ("tenant-a", "server")
-        return ci_type
+    transaction, operations, create_kwargs = _install_ci_create_fakes(
+        monkeypatch,
+        ci_type,
+    )
 
     async def validate_attributes(*_args):
         return None
 
-    async def create_ci(**kwargs):
-        create_kwargs.update(kwargs)
-        return _FakeRecord(_json=kwargs, id="ci-1", **kwargs)
-
-    monkeypatch.setattr(manager, "get_ci_type_or_404", get_ci_type)
     monkeypatch.setattr(manager, "validate_ci_attributes", validate_attributes)
-    monkeypatch.setattr(manager.SupplyChainCi, "create", staticmethod(create_ci))
 
     asyncio.run(
         manager.save_ci(
@@ -598,25 +734,28 @@ def test_instance_name_does_not_fall_back_to_unselected_name_attribute(monkeypat
     )
 
     assert create_kwargs["name"] == "server"
+    assert create_kwargs["using_db"] is transaction.connection
+    assert operations == [
+        "transaction_enter",
+        ("using_db", transaction.connection),
+        "select_for_update",
+        "first",
+        ("create", transaction.connection),
+        ("transaction_exit", None),
+    ]
 
 
 def test_legacy_numeric_primary_value_is_converted_to_display_text(monkeypatch):
     ci_type = _ci_type(primary_field="port")
-    create_kwargs = {}
-
-    async def get_ci_type(*_args):
-        return ci_type
+    transaction, _, create_kwargs = _install_ci_create_fakes(
+        monkeypatch,
+        ci_type,
+    )
 
     async def validate_attributes(*_args):
         return None
 
-    async def create_ci(**kwargs):
-        create_kwargs.update(kwargs)
-        return _FakeRecord(_json=kwargs, id="ci-1", **kwargs)
-
-    monkeypatch.setattr(manager, "get_ci_type_or_404", get_ci_type)
     monkeypatch.setattr(manager, "validate_ci_attributes", validate_attributes)
-    monkeypatch.setattr(manager.SupplyChainCi, "create", staticmethod(create_ci))
 
     asyncio.run(
         manager.save_ci(
@@ -627,6 +766,55 @@ def test_legacy_numeric_primary_value_is_converted_to_display_text(monkeypatch):
     )
 
     assert create_kwargs["name"] == "443"
+    assert create_kwargs["using_db"] is transaction.connection
+
+
+def test_save_ci_update_locks_instance_and_rechecks_soft_delete(monkeypatch):
+    ci_type = _ci_type(primary_field="hostname")
+    existing = _FakeRecord(
+        _json={},
+        id="ci-1",
+        ci_type_key="server",
+        name="old",
+        project_area_id=None,
+        accessory_project_id=None,
+        attributes={"hostname": "old"},
+        status="active",
+        risk_status="normal",
+    )
+    transaction, operations = _install_ci_update_fakes(
+        monkeypatch,
+        ci_type,
+        existing,
+    )
+
+    async def validate_attributes(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(manager, "validate_ci_attributes", validate_attributes)
+
+    result = asyncio.run(
+        manager.save_ci(
+            "tenant-a",
+            {
+                "id": "ci-1",
+                "ci_type_key": "server",
+                "attributes": {"hostname": "new"},
+            },
+            "admin",
+        )
+    )
+
+    assert result is existing
+    assert existing.attributes == {"hostname": "new"}
+    assert existing.save_calls == [{"using_db": transaction.connection}]
+    assert operations == [
+        "transaction_enter",
+        ("using_db", transaction.connection),
+        "select_for_update",
+        "first",
+        ("transaction_exit", None),
+    ]
 
 
 def test_model_package_is_only_path_that_can_restore_primary_field(monkeypatch):
@@ -1417,15 +1605,10 @@ def test_field_save_endpoint_requires_update_permission_for_existing_id(monkeypa
     assert payload["is_primary"] is True
 
 
-def test_model_save_permission_uses_normalized_business_key(monkeypatch):
+def test_model_create_endpoint_uses_create_intent_even_when_key_exists(monkeypatch):
     ci_type = _ci_type(primary_field="hostname")
     permission_calls = []
-    filter_calls = []
     expected_exists_calls = []
-
-    def filter_type(**kwargs):
-        filter_calls.append(kwargs)
-        return _FakeQuery(ci_type)
 
     async def require_permission(
         _request,
@@ -1439,7 +1622,6 @@ def test_model_save_permission_uses_normalized_business_key(monkeypatch):
         expected_exists_calls.append(kwargs["expected_exists"])
         return ci_type
 
-    monkeypatch.setattr(views.SupplyChainCiType, "filter", staticmethod(filter_type))
     monkeypatch.setattr(views, "_require_save_permission", require_permission)
     monkeypatch.setattr(views, "save_ci_type", save_type)
     monkeypatch.setattr(views, "response_ok", lambda payload: payload)
@@ -1450,9 +1632,43 @@ def test_model_save_permission_uses_normalized_business_key(monkeypatch):
     )
     asyncio.run(inspect.unwrap(views.ci_type_save)(request))
 
-    assert filter_calls == [
-        {"key": "server", "tenant_id": "tenant-a", "deleted": False}
+    assert permission_calls == [
+        (
+            False,
+            "supply_chain_review:model:c",
+            "supply_chain_review:model:u",
+        )
     ]
+    assert expected_exists_calls == [False]
+
+
+def test_model_update_endpoint_uses_update_intent(monkeypatch):
+    ci_type = _ci_type(primary_field="hostname")
+    permission_calls = []
+    expected_exists_calls = []
+
+    async def require_permission(
+        _request,
+        exists,
+        create_permission,
+        update_permission,
+    ):
+        permission_calls.append((exists, create_permission, update_permission))
+
+    async def save_type(*_args, **kwargs):
+        expected_exists_calls.append(kwargs["expected_exists"])
+        return ci_type
+
+    monkeypatch.setattr(views, "_require_save_permission", require_permission)
+    monkeypatch.setattr(views, "save_ci_type", save_type)
+    monkeypatch.setattr(views, "response_ok", lambda payload: payload)
+
+    request = SimpleNamespace(
+        json={"id": "type-1", "key": "server", "name": "服务器"},
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+    )
+    asyncio.run(inspect.unwrap(views.ci_type_save)(request))
+
     assert permission_calls == [
         (
             True,
@@ -1463,16 +1679,11 @@ def test_model_save_permission_uses_normalized_business_key(monkeypatch):
     assert expected_exists_calls == [True]
 
 
-def test_field_save_permission_uses_normalized_business_keys(monkeypatch):
+def test_field_create_endpoint_uses_create_intent_even_when_key_exists(monkeypatch):
     field = _field("field-1", "hostname")
     ci_type = _ci_type(primary_field="hostname")
     permission_calls = []
-    filter_calls = []
     expected_exists_calls = []
-
-    def filter_field(**kwargs):
-        filter_calls.append(kwargs)
-        return _FakeQuery(field)
 
     async def require_permission(
         _request,
@@ -1489,11 +1700,6 @@ def test_field_save_permission_uses_normalized_business_keys(monkeypatch):
     async def get_ci_type(*_args):
         return ci_type
 
-    monkeypatch.setattr(
-        views.SupplyChainCiFieldDef,
-        "filter",
-        staticmethod(filter_field),
-    )
     monkeypatch.setattr(views, "_require_save_permission", require_permission)
     monkeypatch.setattr(views, "save_field", save_package_field)
     monkeypatch.setattr(views, "get_ci_type_or_404", get_ci_type)
@@ -1509,22 +1715,14 @@ def test_field_save_permission_uses_normalized_business_keys(monkeypatch):
     )
     asyncio.run(inspect.unwrap(views.ci_field_save)(request))
 
-    assert filter_calls == [
-        {
-            "tenant_id": "tenant-a",
-            "ci_type_key": "server",
-            "field_key": "hostname",
-            "deleted": False,
-        }
-    ]
     assert permission_calls == [
         (
-            True,
+            False,
             "supply_chain_review:field:c",
             "supply_chain_review:field:u",
         )
     ]
-    assert expected_exists_calls == [True]
+    assert expected_exists_calls == [False]
 
 
 def test_locked_model_allows_structure_preserving_unlock(monkeypatch):
@@ -1983,71 +2181,18 @@ def test_unrestricted_relation_type_delete_checks_every_locked_model(monkeypatch
     assert relation_type.save_calls == []
 
 
-def test_model_delete_rejects_unrestricted_relation_touching_locked_model(
+def _install_model_delete_fakes(
     monkeypatch,
+    ci_type,
+    *,
+    cis=None,
+    relation_types=None,
+    referencing_fields=None,
 ):
-    ci_type = _ci_type(key="application")
-    locked_ci_type = _ci_type(key="server", is_locked=True)
-    relation_type = _FakeRecord(
-        _json={},
-        id="relation-type-1",
-        key="contains",
-        source_ci_types=["application"],
-        target_ci_types=[],
-        relation_fields=[],
-        is_locked=False,
-    )
-
-    def ci_type_filter(*_args, **kwargs):
-        if not _args and kwargs == {
-            "tenant_id": "tenant-a",
-            "deleted": False,
-        }:
-            return _FakeQuery([ci_type, locked_ci_type])
-        return _FakeQuery(ci_type)
-
-    _install_transaction(monkeypatch)
-    monkeypatch.setattr(
-        manager.SupplyChainCiType,
-        "filter",
-        staticmethod(ci_type_filter),
-    )
-    monkeypatch.setattr(
-        manager.SupplyChainCiRelationType,
-        "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery([relation_type])),
-    )
-
-    with pytest.raises(CustomError) as exc_info:
-        asyncio.run(manager.delete_ci_type("tenant-a", "application"))
-
-    assert exc_info.value.enum is ErrorCode.FORBIDDEN
-    assert ci_type.save_calls == []
-
-
-def test_model_delete_allows_relations_when_every_referenced_model_is_unlocked(
-    monkeypatch,
-):
-    ci_type = _ci_type(key="application")
-    peer_ci_type = _ci_type(key="server")
-    relation_type = _FakeRecord(
-        _json={},
-        id="relation-type-1",
-        key="runs_on",
-        source_ci_types=["application"],
-        target_ci_types=["server"],
-        relation_fields=[],
-        is_locked=False,
-    )
     field_updates = []
     transaction = _install_transaction(monkeypatch)
 
-    def ci_type_filter(*_args, **kwargs):
-        if "key__in" in kwargs:
-            return _FakeQuery([ci_type, peer_ci_type])
-        return _FakeQuery(ci_type)
-
-    class FieldQuery:
+    class FieldUpdateQuery:
         def __init__(self):
             self.connection = None
 
@@ -2058,25 +2203,155 @@ def test_model_delete_allows_relations_when_every_referenced_model_is_unlocked(
         async def update(self, **kwargs):
             field_updates.append((kwargs, self.connection))
 
+    def field_filter(**kwargs):
+        if "ref_ci_type" in kwargs:
+            return _FakeQuery(referencing_fields or [])
+        return FieldUpdateQuery()
+
     monkeypatch.setattr(
         manager.SupplyChainCiType,
         "filter",
-        staticmethod(ci_type_filter),
+        staticmethod(lambda *_args, **_kwargs: _FakeQuery(ci_type)),
+    )
+    monkeypatch.setattr(
+        manager.SupplyChainCi,
+        "filter",
+        staticmethod(lambda **_kwargs: _FakeQuery(cis or [])),
     )
     monkeypatch.setattr(
         manager.SupplyChainCiRelationType,
         "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery([relation_type])),
+        staticmethod(lambda **_kwargs: _FakeQuery(relation_types or [])),
     )
-    def field_filter(**kwargs):
-        if kwargs.get("ref_ci_type") == "application":
-            return _FakeQuery([])
-        return FieldQuery()
-
     monkeypatch.setattr(
         manager.SupplyChainCiFieldDef,
         "filter",
         staticmethod(field_filter),
+    )
+    return transaction, field_updates
+
+
+def test_model_delete_rejects_locked_model(monkeypatch):
+    ci_type = _ci_type(key="application", is_locked=True)
+    _install_model_delete_fakes(monkeypatch, ci_type)
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(manager.delete_ci_type("tenant-a", "application"))
+
+    assert exc_info.value.enum is ErrorCode.FORBIDDEN
+    assert ci_type.save_calls == []
+
+
+def test_model_delete_rejects_active_ci(monkeypatch):
+    ci_type = _ci_type(key="application")
+    active_ci = _FakeRecord(
+        _json={},
+        id="ci-1",
+        ci_type_key="application",
+        deleted=False,
+    )
+    _install_model_delete_fakes(monkeypatch, ci_type, cis=[active_ci])
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(manager.delete_ci_type("tenant-a", "application"))
+
+    assert exc_info.value.enum is ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES
+    assert ci_type.save_calls == []
+
+
+@pytest.mark.parametrize(
+    ("source_ci_types", "target_ci_types", "relation_fields"),
+    [
+        (["application"], [], []),
+        ([], ["application"], []),
+        (
+            [],
+            [],
+            [
+                {
+                    "field_key": "application_ref",
+                    "data_type": "ref",
+                    "ref_ci_type": "application",
+                }
+            ],
+        ),
+    ],
+    ids=["source", "target", "relation-field"],
+)
+def test_model_delete_rejects_explicit_relation_type_dependency(
+    monkeypatch,
+    source_ci_types,
+    target_ci_types,
+    relation_fields,
+):
+    ci_type = _ci_type(key="application")
+    relation_type = _FakeRecord(
+        _json={},
+        id="relation-type-1",
+        key="contains",
+        source_ci_types=source_ci_types,
+        target_ci_types=target_ci_types,
+        relation_fields=relation_fields,
+        is_locked=False,
+    )
+    _install_model_delete_fakes(
+        monkeypatch,
+        ci_type,
+        relation_types=[relation_type],
+    )
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(manager.delete_ci_type("tenant-a", "application"))
+
+    assert exc_info.value.enum is ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES
+    assert ci_type.save_calls == []
+
+
+def test_model_delete_rejects_external_inbound_ref(monkeypatch):
+    ci_type = _ci_type(key="application")
+    inbound_ref = _field(
+        "field-1",
+        "application_ref",
+        "server",
+        data_type="ref",
+        ref_ci_type="application",
+    )
+    _install_model_delete_fakes(
+        monkeypatch,
+        ci_type,
+        referencing_fields=[inbound_ref],
+    )
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(manager.delete_ci_type("tenant-a", "application"))
+
+    assert exc_info.value.enum is ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES
+    assert ci_type.save_calls == []
+
+
+def test_model_delete_allows_self_ref_and_unrestricted_relation(monkeypatch):
+    ci_type = _ci_type(key="application")
+    self_ref = _field(
+        "field-1",
+        "parent",
+        "application",
+        data_type="ref",
+        ref_ci_type="application",
+    )
+    unrestricted_relation = _FakeRecord(
+        _json={},
+        id="relation-type-1",
+        key="contains",
+        source_ci_types=["server"],
+        target_ci_types=[],
+        relation_fields=[],
+        is_locked=False,
+    )
+    transaction, field_updates = _install_model_delete_fakes(
+        monkeypatch,
+        ci_type,
+        relation_types=[unrestricted_relation],
+        referencing_fields=[self_ref],
     )
 
     result = asyncio.run(manager.delete_ci_type("tenant-a", "application"))
@@ -2092,51 +2367,6 @@ def test_model_delete_allows_relations_when_every_referenced_model_is_unlocked(
     assert field_updates == [
         ({"deleted": True}, transaction.connection)
     ]
-
-
-def test_model_delete_rejects_inbound_ref_from_locked_model(monkeypatch):
-    ci_type = _ci_type(key="application")
-    locked_owner = _ci_type(key="server", is_locked=True)
-    inbound_ref = _field(
-        "field-1",
-        "application_ref",
-        "server",
-        data_type="ref",
-        ref_ci_type="application",
-    )
-
-    def ci_type_filter(*_args, **kwargs):
-        if kwargs.get("key__in") == ["server"]:
-            return _FakeQuery([locked_owner])
-        return _FakeQuery(ci_type)
-
-    def field_filter(**kwargs):
-        if kwargs.get("ref_ci_type") == "application":
-            return _FakeQuery([inbound_ref])
-        return _FakeQuery()
-
-    _install_transaction(monkeypatch)
-    monkeypatch.setattr(
-        manager.SupplyChainCiType,
-        "filter",
-        staticmethod(ci_type_filter),
-    )
-    monkeypatch.setattr(
-        manager.SupplyChainCiRelationType,
-        "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery([])),
-    )
-    monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
-        "filter",
-        staticmethod(field_filter),
-    )
-
-    with pytest.raises(CustomError) as exc_info:
-        asyncio.run(manager.delete_ci_type("tenant-a", "application"))
-
-    assert exc_info.value.enum is ErrorCode.FORBIDDEN
-    assert ci_type.save_calls == []
 
 
 def test_locked_model_rejects_relation_type_and_relation_deletes(monkeypatch):
@@ -2681,11 +2911,11 @@ def test_locked_model_allows_asset_instance_edit_and_integrity_cleanup_delete(
     relation_updates = []
     transaction = _install_transaction(monkeypatch)
 
-    async def get_ci_type(*_args):
-        return ci_type
-
     async def no_validation(*_args, **_kwargs):
         return None
+
+    async def get_ci_type(*_args):
+        return ci_type
 
     class RelationQuery:
         def __init__(self):
@@ -2698,8 +2928,8 @@ def test_locked_model_allows_asset_instance_edit_and_integrity_cleanup_delete(
         async def update(self, **kwargs):
             relation_updates.append((kwargs, self.connection))
 
-    monkeypatch.setattr(manager, "get_ci_type_or_404", get_ci_type)
     monkeypatch.setattr(manager, "validate_ci_attributes", no_validation)
+    monkeypatch.setattr(manager, "get_ci_type_or_404", get_ci_type)
     monkeypatch.setattr(views, "response_ok", lambda payload: payload)
     monkeypatch.setattr(
         manager.SupplyChainCi,
@@ -2711,11 +2941,6 @@ def test_locked_model_allows_asset_instance_edit_and_integrity_cleanup_delete(
         "filter",
         staticmethod(lambda *_args, **_kwargs: RelationQuery()),
     )
-
-    async def get_ci(*_args):
-        return ci
-
-    monkeypatch.setattr(manager, "get_ci_or_404", get_ci)
 
     result = asyncio.run(
         manager.save_ci(

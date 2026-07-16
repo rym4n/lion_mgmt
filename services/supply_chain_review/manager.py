@@ -43,7 +43,7 @@ from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
 
-KEY_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{1,63}$")
+KEY_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 CI_TYPE_CATEGORIES = {"asset", "master_data", "org"}
 CI_TYPE_STATUSES = {"active", "disabled"}
 CI_STATUSES = {"active", "disabled", "archived"}
@@ -867,7 +867,6 @@ async def save_ci_type(
             query = SupplyChainCiType.filter(
                 tenant_id=tenant,
                 key=payload["key"],
-                deleted=False,
             )
         existing = (
             await query.using_db(connection)
@@ -879,6 +878,8 @@ async def save_ci_type(
             raise CustomError(ErrorCode.NOT_FOUND)
         if data.get("id") and existing.key != payload["key"]:
             raise CustomError(ErrorCode.PARAM_ERROR)
+        if not data.get("id") and existing and getattr(existing, "deleted", False):
+            raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
         ensure_expected_existence(existing, expected_exists)
         if existing:
             if existing.is_locked:
@@ -1200,18 +1201,19 @@ async def save_relation_type(
         )
 
 
-async def save_ci(tenant: str, data: dict, operator: str | None) -> SupplyChainCi:
-    data = require_dict(data)
-    ci_type_key = validate_key(data.get("ci_type_key"), "ci_type_key")
-    ci_type = await get_ci_type_or_404(tenant, ci_type_key)
+async def _save_ci_for_type(
+    tenant: str,
+    data: dict,
+    operator: str | None,
+    ci_type: SupplyChainCiType,
+    existing: SupplyChainCi | None = None,
+    *,
+    connection=None,
+) -> SupplyChainCi:
+    ci_type_key = ci_type.key
     attributes = data.get("attributes") or {}
     if not isinstance(attributes, dict):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    existing = None
-    if data.get("id"):
-        existing = await get_ci_or_404(tenant, data["id"])
-        if existing.ci_type_key != ci_type_key:
-            raise CustomError(ErrorCode.PARAM_ERROR)
     await validate_ci_attributes(tenant, ci_type_key, attributes, getattr(existing, "id", None))
     status = data.get("status") or getattr(existing, "status", "active")
     risk_status = data.get("risk_status") or getattr(existing, "risk_status", "normal")
@@ -1236,9 +1238,70 @@ async def save_ci(tenant: str, data: dict, operator: str | None) -> SupplyChainC
     if existing:
         for key, value in payload.items():
             setattr(existing, key, value)
-        await existing.save()
+        if connection is None:
+            await existing.save()
+        else:
+            await existing.save(using_db=connection)
         return existing
-    return await SupplyChainCi.create(tenant_id=tenant, creator=operator, **payload)
+    return await SupplyChainCi.create(
+        using_db=connection,
+        tenant_id=tenant,
+        creator=operator,
+        **payload,
+    )
+
+
+async def save_ci(tenant: str, data: dict, operator: str | None) -> SupplyChainCi:
+    data = require_dict(data)
+    ci_type_key = validate_key(data.get("ci_type_key"), "ci_type_key")
+    if data.get("id"):
+        ci_type = await get_ci_type_or_404(tenant, ci_type_key)
+        async with in_transaction() as connection:
+            existing = (
+                await SupplyChainCi.filter(
+                    id=data["id"],
+                    tenant_id=tenant,
+                    deleted=False,
+                )
+                .using_db(connection)
+                .select_for_update()
+                .first()
+            )
+            if not existing:
+                raise CustomError(ErrorCode.NOT_FOUND)
+            if existing.ci_type_key != ci_type_key:
+                raise CustomError(ErrorCode.PARAM_ERROR)
+            return await _save_ci_for_type(
+                tenant,
+                data,
+                operator,
+                ci_type,
+                existing,
+                connection=connection,
+            )
+
+    # Model deletion takes the same row lock before checking for instances.
+    # The lock is model-scoped so unrelated CI creates remain concurrent.
+    async with in_transaction() as connection:
+        ci_type = (
+            await SupplyChainCiType.filter(
+                tenant_id=tenant,
+                key=ci_type_key,
+                deleted=False,
+            )
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if not ci_type:
+            raise CustomError(ErrorCode.NOT_FOUND)
+        return await _save_ci_for_type(
+            tenant,
+            data,
+            operator,
+            ci_type,
+            connection=connection,
+        )
 
 
 async def delete_ci(
@@ -1505,10 +1568,7 @@ def _relation_type_has_unrestricted_end(relation_type) -> bool:
 
 
 def _relation_type_references_ci_type(relation_type, ci_type_key: str) -> bool:
-    return (
-        _relation_type_has_unrestricted_end(relation_type)
-        or ci_type_key in _relation_type_model_keys(relation_type)
-    )
+    return ci_type_key in _relation_type_model_keys(relation_type)
 
 
 async def ensure_relation_type_structure_unlocked(
@@ -1558,6 +1618,19 @@ async def delete_ci_type(
             raise CustomError(ErrorCode.NOT_FOUND)
         if ci_type.is_locked:
             raise CustomError(ErrorCode.FORBIDDEN)
+        active_ci = (
+            await SupplyChainCi.filter(
+                tenant_id=tenant,
+                ci_type_key=ci_type.key,
+                deleted=False,
+            )
+            .using_db(connection)
+            .order_by("id")
+            .select_for_update()
+            .first()
+        )
+        if active_ci:
+            raise CustomError(ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES)
         relation_types = (
             await SupplyChainCiRelationType.filter(
                 tenant_id=tenant,
@@ -1573,11 +1646,8 @@ async def delete_ci_type(
             for relation_type in relation_types
             if _relation_type_references_ci_type(relation_type, ci_type.key)
         ]
-        await ensure_relation_type_structure_unlocked(
-            tenant,
-            *related_relation_types,
-            connection=connection,
-        )
+        if related_relation_types:
+            raise CustomError(ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES)
         referencing_fields = (
             await SupplyChainCiFieldDef.filter(
                 tenant_id=tenant,
@@ -1589,17 +1659,8 @@ async def delete_ci_type(
             .select_for_update()
             .all()
         )
-        await lock_ci_type_keys_for_structure(
-            tenant,
-            {
-                field.ci_type_key
-                for field in referencing_fields
-                if field.ci_type_key != ci_type.key
-            },
-            connection,
-            include_deleted=True,
-            require_all=False,
-        )
+        if any(field.ci_type_key != ci_type.key for field in referencing_fields):
+            raise CustomError(ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES)
         ci_type.deleted = True
         await ci_type.save(
             using_db=connection,

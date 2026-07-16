@@ -245,25 +245,10 @@ async def ci_type_detail(request: Request):
 async def ci_type_save(request: Request):
     data = _json(request)
     tenant = tenant_id(request)
-    if data.get("id"):
-        exists = await SupplyChainCiType.filter(
-            id=data["id"],
-            tenant_id=tenant,
-            deleted=False,
-        ).exists()
-    else:
-        key = validate_key(data.get("key")) if data.get("key") else None
-        exists = bool(
-            key
-            and await SupplyChainCiType.filter(
-                key=key,
-                tenant_id=tenant,
-                deleted=False,
-            ).exists()
-        )
+    is_update = bool(data.get("id"))
     await _require_save_permission(
         request,
-        exists,
+        is_update,
         "supply_chain_review:model:c",
         "supply_chain_review:model:u",
     )
@@ -271,7 +256,7 @@ async def ci_type_save(request: Request):
         tenant,
         data,
         operator_name(request),
-        expected_exists=exists,
+        expected_exists=is_update,
     )
     return response_ok(item.json)
 
@@ -353,36 +338,10 @@ async def ci_field_list(request: Request):
 async def ci_field_save(request: Request):
     data = _json(request)
     tenant = tenant_id(request)
-    if data.get("id"):
-        exists = await SupplyChainCiFieldDef.filter(
-            id=data["id"],
-            tenant_id=tenant,
-            deleted=False,
-        ).exists()
-    else:
-        ci_type_key = (
-            validate_key(data.get("ci_type_key"), "ci_type_key")
-            if data.get("ci_type_key")
-            else None
-        )
-        field_key = (
-            validate_key(data.get("field_key"), "field_key")
-            if data.get("field_key")
-            else None
-        )
-        exists = bool(
-            ci_type_key
-            and field_key
-            and await SupplyChainCiFieldDef.filter(
-                tenant_id=tenant,
-                ci_type_key=ci_type_key,
-                field_key=field_key,
-                deleted=False,
-            ).exists()
-        )
+    is_update = bool(data.get("id"))
     await _require_save_permission(
         request,
-        exists,
+        is_update,
         "supply_chain_review:field:c",
         "supply_chain_review:field:u",
     )
@@ -390,7 +349,7 @@ async def ci_field_save(request: Request):
         tenant,
         data,
         operator_name(request),
-        expected_exists=exists,
+        expected_exists=is_update,
     )
     ci_type = await get_ci_type_or_404(tenant, item.ci_type_key)
     return response_ok(serialize_ci_field(item, ci_type.primary_field))

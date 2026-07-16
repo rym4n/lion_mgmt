@@ -19,6 +19,10 @@ from services.dashboard.views import (
 )
 
 
+def _compact_sql(sql: str) -> str:
+    return " ".join(sql.lower().replace("public.", "").split()).replace(" ,", ",")
+
+
 CASES = {
     "events_day": {
         "rows": [{"day": "2026-07-11", "total": 3}],
@@ -292,8 +296,29 @@ def test_dashboard_refresh_index_migration_supports_concurrent_refresh():
         ),
     }
 
+    events_day_view = "CREATE MATERIALIZED VIEW IF NOT EXISTS public.events_day"
+    events_status_view = "CREATE MATERIALIZED VIEW IF NOT EXISTS public.events_status"
+    assert events_day_view in migration_sql
+    assert events_status_view in migration_sql
+    expected_event_views = (
+        "create materialized view if not exists events_day as "
+        "select (ctime::date) as day, count(id) as total, tenant_id "
+        "from events group by tenant_id, day;",
+        "create materialized view if not exists events_status as "
+        "select (ctime::date) as day, event_process_status, count(id) as total, "
+        "tenant_id from events group by tenant_id, day, event_process_status;",
+    )
+    compact_sql = _compact_sql(migration_sql)
+    for expected_view in expected_event_views:
+        assert expected_view in compact_sql
+    assert migration_sql.index(events_day_view) < migration_sql.index(
+        "idx_events_day_refresh_unique"
+    )
+    assert migration_sql.index(events_status_view) < migration_sql.index(
+        "idx_events_status_refresh_unique"
+    )
     assert migration_sql.count("CREATE UNIQUE INDEX") == 4
-    assert "IF NOT EXISTS" not in migration_sql
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS" not in migration_sql
     for index_name, index_target in expected_indexes.items():
         assert index_name in migration_sql
         assert f"ON {index_target}" in migration_sql
