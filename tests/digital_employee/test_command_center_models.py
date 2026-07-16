@@ -22,6 +22,7 @@ utils = _load_module("libs.utils_model_contract_test", "libs/utils.py")
 
 def test_command_run_and_approval_status_constants_are_flat_contracts():
     assert command_center.COMMAND_RUNTIME_LION_AGENT == "lion_agent"
+    assert command_center.COMMAND_TASK_STATUS_PENDING_CLARIFICATION == "pending_clarification"
     assert command_center.COMMAND_TASK_STATUS_PENDING_APPROVAL == "pending_approval"
     assert command_center.COMMAND_RUN_STATUS_WAITING_APPROVAL == "waiting_approval"
     assert command_center.COMMAND_RUN_STATUS_CONTINUATION_READY == "continuation_ready"

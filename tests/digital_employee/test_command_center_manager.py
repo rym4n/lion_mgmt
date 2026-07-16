@@ -95,9 +95,13 @@ def _load_manager(agent, scheduled_reports):
             return task
 
     class CommandTaskEvent:
+        created = []
+
         @classmethod
         async def create(cls, **kwargs):
-            return SimpleNamespace(**kwargs)
+            event = SimpleNamespace(**kwargs)
+            cls.created.append(event)
+            return event
 
     class CommandAgent:
         class Query:
@@ -154,6 +158,7 @@ def _load_manager(agent, scheduled_reports):
 
     sys.modules["models"] = types.ModuleType("models")
     command_center_module = types.ModuleType("models.command_center")
+    command_center_module.COMMAND_TASK_STATUS_PENDING_CLARIFICATION = "pending_clarification"
     command_center_module.CommandAgent = CommandAgent
     command_center_module.CommandTask = CommandTask
     command_center_module.CommandTaskEvent = CommandTaskEvent
@@ -194,6 +199,7 @@ def _load_manager(agent, scheduled_reports):
     command_center_pkg.__path__ = []
     sys.modules["services.command_center"] = command_center_pkg
     dispatcher_module = types.ModuleType("services.command_center.dispatcher")
+    dispatcher_module.MAX_CLARIFICATION_QUESTION_LENGTH = 300
     dispatcher_module.choose_agent_with_lion_agent = lambda task, agents, coordinator: _async_value(SimpleNamespace(agent=None))
     sys.modules["services.command_center.dispatcher"] = dispatcher_module
     realtime_module = types.ModuleType("services.command_center.realtime")
@@ -391,8 +397,9 @@ def test_stale_dispatch_sweep_does_not_fail_task_advanced_before_lock():
     manager = _load_manager(_agent("ops"), [])
     task = _task()
     task.status = "pending_dispatch"
-    task.ctime = None
+    task.utime = None
     lock_options = []
+    filters = []
 
     class Query:
         def using_db(self, connection):
@@ -409,12 +416,17 @@ def test_stale_dispatch_sweep_does_not_fail_task_advanced_before_lock():
             task.status = "dispatched"
             return None
 
-    manager.CommandTask.filter = classmethod(lambda cls, **kwargs: Query())
+    def filter_tasks(cls, **kwargs):
+        filters.append(kwargs)
+        return Query()
+
+    manager.CommandTask.filter = classmethod(filter_tasks)
 
     swept = asyncio.run(manager.sweep_stale_dispatch_tasks(operator_id="system-dispatch-timeout"))
 
     assert swept == 0
     assert lock_options == [{"skip_locked": True}]
+    assert all("utime__lt" in item and "ctime__lt" not in item for item in filters)
     assert task.status == "dispatched"
     assert task.saved is False
     assert manager.realtime_events == []
@@ -749,3 +761,177 @@ def test_task_content_prefers_description_and_supports_legacy_title_only_input()
         {"title": "旧标题", "description": "完整任务内容"}
     ) == "完整任务内容"
     assert manager.task_content_from_data({"title": "旧接口任务内容"}) == "旧接口任务内容"
+
+
+def test_dispatch_task_blocks_assignment_and_persists_bounded_clarification_history():
+    scheduled_tasks = []
+    manager = _load_manager(_agent("ops"), scheduled_tasks)
+    task = _task()
+    task.status = "pending_dispatch"
+    task.description = "原始任务描述"
+    task.assigned_agent = None
+    task.assigned_agent_key = None
+    task.dispatch_status = "pending"
+    task.dispatch_reason = None
+    task.payload = {
+        "secret": "keep-private",
+        "clarifications": [{"question": f"问题{i}", "answer": f"回答{i}"} for i in range(10)],
+    }
+
+    async def ensure_coordinator(tenant_id):
+        return SimpleNamespace(id="coordinator-1")
+
+    async def choose_agent(task_arg, agents, coordinator):
+        return SimpleNamespace(
+            agent=None,
+            dispatch_status="needs_clarification",
+            reason="缺少资源范围",
+            raw_response="structured-decision",
+            needs_clarification=True,
+            clarification_question="请提供需要处理的资源范围。",
+        )
+
+    manager.ensure_default_coordinator_agent = ensure_coordinator
+    manager.choose_agent_with_lion_agent = choose_agent
+
+    dispatched = asyncio.run(manager.dispatch_task(task, operator_id="user-1"))
+
+    assert dispatched is task
+    assert task.status == "pending_clarification"
+    assert task.dispatch_status == "needs_clarification"
+    assert task.dispatch_reason == "请提供需要处理的资源范围。"
+    assert task.assigned_agent_key is None
+    assert task.description == "原始任务描述"
+    assert task.payload["secret"] == "keep-private"
+    assert len(task.payload["clarifications"]) == manager.MAX_CLARIFICATION_HISTORY
+    assert task.payload["clarifications"][-1] == {"question": "请提供需要处理的资源范围。", "answer": None}
+    assert manager.CommandTaskEvent.created[-1].event_type == "clarification_requested"
+    assert manager.CommandTaskEvent.created[-1].status == "pending_clarification"
+    assert manager.realtime_events == [("tenant-1", "clarification_requested", "task-1")]
+    assert scheduled_tasks == []
+
+
+def test_answer_task_clarification_row_locks_then_schedules_redispatch_without_awaiting_failure():
+    scheduled_tasks = []
+    manager = _load_manager(_agent("ops"), scheduled_tasks)
+    task = _task()
+    task.status = "pending_clarification"
+    task.creator_id = "user-1"
+    task.description = "不可修改的原始描述"
+    task.dispatch_status = "needs_clarification"
+    task.dispatch_reason = "请提供资源范围。"
+    task.payload = {
+        "scope": {"kind": "resource-reference"},
+        "clarifications": [
+            {"question": "请提供环境。", "answer": "生产环境"},
+            {"question": "请提供资源范围。", "answer": None},
+        ],
+    }
+    task.utime = None
+    filters = []
+    locks = []
+
+    class Query:
+        def using_db(self, connection):
+            return self
+
+        def select_for_update(self):
+            locks.append(True)
+            return self
+
+        async def first(self):
+            return task
+
+    def filter_tasks(cls, **kwargs):
+        filters.append(kwargs)
+        return Query()
+
+    async def redispatch(task_arg, operator_id=None):
+        raise RuntimeError("later dispatch failure")
+
+    manager.CommandTask.filter = classmethod(filter_tasks)
+    manager.dispatch_task = redispatch
+
+    answered = asyncio.run(
+        manager.answer_task_clarification(
+            "tenant-1",
+            "task-1",
+            "  集群 prod-a 中标签 service=api 的主机  ",
+            "user-1",
+            owner_only=True,
+        )
+    )
+
+    assert answered is task
+    assert filters == [{"id": "task-1", "tenant_id": "tenant-1", "deleted": False}]
+    assert locks == [True]
+    assert task.description == "不可修改的原始描述"
+    assert task.payload["scope"] == {"kind": "resource-reference"}
+    assert task.payload["clarifications"][-1]["answer"] == "集群 prod-a 中标签 service=api 的主机"
+    assert task.status == "pending_dispatch"
+    assert task.dispatch_status == "pending"
+    assert task.utime is not None
+    assert len(scheduled_tasks) == 1
+    assert manager.CommandTaskEvent.created[-1].event_type == "clarification_answered"
+    assert manager.realtime_events == [("tenant-1", "clarification_answered", "task-1")]
+
+
+def test_answer_task_clarification_enforces_owner_and_answer_limit_before_redispatch():
+    manager = _load_manager(_agent("ops"), [])
+    task = _task()
+    task.status = "pending_clarification"
+    task.creator_id = "creator-1"
+    task.payload = {"clarifications": [{"question": "范围？", "answer": None}]}
+    dispatched = []
+
+    async def redispatch(task_arg, operator_id=None):
+        dispatched.append(task_arg.id)
+        return task_arg
+
+    manager.dispatch_task = redispatch
+
+    with pytest.raises(manager.TaskClarificationForbidden):
+        asyncio.run(
+            manager.answer_task_clarification(
+                "tenant-1",
+                "task-1",
+                "生产环境",
+                "other-user",
+                owner_only=True,
+            )
+        )
+    with pytest.raises(manager.InvalidClarificationAnswer):
+        asyncio.run(
+            manager.answer_task_clarification(
+                "tenant-1",
+                "task-1",
+                "x" * (manager.MAX_CLARIFICATION_ANSWER_LENGTH + 1),
+                "creator-1",
+                owner_only=True,
+            )
+        )
+
+    assert task.status == "pending_clarification"
+    assert task.payload["clarifications"][-1]["answer"] is None
+    assert dispatched == []
+
+
+def test_create_command_task_drops_caller_supplied_clarification_history():
+    manager = _load_manager(_agent("ops"), [])
+    creator = SimpleNamespace(id="user-1")
+
+    task = asyncio.run(
+        manager.create_command_task(
+            "tenant-1",
+            creator,
+            {
+                "description": "检查容量",
+                "payload": {
+                    "target": "cluster-a",
+                    "clarifications": [{"question": "伪造问题", "answer": "伪造回答"}],
+                },
+            },
+        )
+    )
+
+    assert task.payload == {"target": "cluster-a"}

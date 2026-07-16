@@ -7,17 +7,44 @@ from sanic_ext import openapi
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import requires_permission
+from libs.security.authorization import account_has_permission, requires_permission
 from models.command_center import COMMAND_APPROVAL_STATUS_PENDING, CommandAgent, CommandApproval, CommandTask, CommandTaskEvent, CommandTaskRun
 from settings import TZ
 
 from .approval_service import decide_approval, get_approval, list_approvals, resume_approved_approval
-from .manager import TERMINAL_TASK_STATUS, create_command_task, dispatch_task, has_task_content, list_tasks, update_task_progress
+from .manager import (
+    MAX_CLARIFICATION_ANSWER_LENGTH,
+    InvalidClarificationAnswer,
+    TERMINAL_TASK_STATUS,
+    TaskClarificationConflict,
+    TaskClarificationForbidden,
+    answer_task_clarification,
+    create_command_task,
+    dispatch_task,
+    has_task_content,
+    list_tasks,
+    update_task_progress,
+)
 from .realtime import publish_command_center_update
 from .summary import aggregate_usage, build_task_summary, humanize_event, normalize_usage, zero_usage
 
 command_bp = Blueprint("command_center", url_prefix="/command_center")
 __all__ = ["command_bp"]
+
+TASK_STATUS_ENUM = [
+    "pending_dispatch",
+    "pending_clarification",
+    "dispatched",
+    "pending_approval",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+    "handed_off",
+]
+DISPATCH_STATUS_ENUM = ["pending", "needs_clarification", "user_specified", "corrected", "auto_assigned", "no_candidate"]
+TASK_PROGRESS_WRITE_STATUS_ENUM = ["running", "completed", "failed", "cancelled"]
+TASK_PROGRESS_WRITE_STATUSES = frozenset(TASK_PROGRESS_WRITE_STATUS_ENUM)
 
 ERROR_RESPONSE_SCHEMA = {
     "type": "object",
@@ -71,7 +98,7 @@ TASK_SCHEMA = {
         "status": {
             "type": "string",
             "description": "任务状态",
-            "enum": ["pending_dispatch", "dispatched", "running", "completed", "failed", "cancelled"],
+            "enum": TASK_STATUS_ENUM,
         },
         "progress": {"type": "integer", "description": "任务进度，范围0-100", "minimum": 0, "maximum": 100},
         "required_capabilities": {
@@ -79,14 +106,22 @@ TASK_SCHEMA = {
             "description": "任务所需能力标签",
             "items": {"type": "string"},
         },
-        "payload": {"type": "object", "description": "任务载荷"},
+        "payload_summary": {"type": "object", "description": "任务载荷结构摘要，不包含原始值"},
+        "result_summary": {
+            "type": "object",
+            "description": "任务结果摘要，不包含原始结果",
+            "properties": {
+                "present": {"type": "boolean", "description": "是否已有结果"},
+                "length": {"type": "integer", "description": "结果文本长度"},
+            },
+        },
         "requested_agent_id": {"type": "string", "nullable": True, "description": "用户指定的智能体ID或agent_key"},
         "assigned_agent_id": {"type": "string", "nullable": True, "description": "实际分配的智能体ID"},
         "assigned_agent_key": {"type": "string", "nullable": True, "description": "实际分配的智能体逻辑标识"},
         "dispatch_status": {
             "type": "string",
             "description": "调度状态",
-            "enum": ["pending", "user_specified", "corrected", "auto_assigned", "no_candidate"],
+            "enum": DISPATCH_STATUS_ENUM,
         },
         "dispatch_reason": {"type": "string", "nullable": True, "description": "调度原因"},
         "run_id": {"type": "string", "nullable": True, "description": "后续执行系统run_id"},
@@ -94,6 +129,11 @@ TASK_SCHEMA = {
         "creator_id": {"type": "string", "nullable": True, "description": "创建人ID"},
         "started_at": {"type": "string", "nullable": True, "description": "开始时间"},
         "finished_at": {"type": "string", "nullable": True, "description": "结束时间"},
+        "assigned_agent_name": {"type": "string", "nullable": True, "description": "执行员工名称"},
+        "assigned_agent_role_name": {"type": "string", "nullable": True, "description": "执行员工岗位名称"},
+        "assigned_agent_deleted": {"type": "boolean", "description": "执行员工是否已删除"},
+        "creator_display_name": {"type": "string", "nullable": True, "description": "创建人显示名称"},
+        "token_usage": {"type": "object", "description": "任务令牌用量汇总"},
     },
 }
 
@@ -106,7 +146,7 @@ TASK_EVENT_SCHEMA = {
         "task_id": {"type": "string", "description": "任务ID"},
         "event_type": {
             "type": "string",
-            "description": "事件类型，如task_created、task_dispatched、dispatch_waiting、task_progress_updated",
+            "description": "事件类型，如task_created、clarification_requested、clarification_answered、task_dispatched、dispatch_waiting、task_progress_updated",
         },
         "status": {"type": "string", "nullable": True, "description": "任务状态快照"},
         "progress": {"type": "integer", "nullable": True, "description": "进度快照"},
@@ -618,7 +658,7 @@ async def update_agent_status(request: Request):
 @command_bp.post("/tasks/create")
 @openapi.definition(
     summary="创建指挥部任务并触发调度",
-    description="创建指挥部任务后立即返回创建结果，并在后台按required_capabilities触发调度；如指定agent_id但能力或状态不匹配，会自动纠正到可用智能体。需要command_center:c权限。",
+    description="创建任务后在后台先评估实施上下文；信息不足时转为待澄清且不会分配或执行，信息充分时再按required_capabilities调度。需要command_center:c权限。",
     body=_json_body(
         {
             "type": "object",
@@ -649,7 +689,7 @@ async def create_task(request: Request):
     tenant_id = request.ctx.session.get("tenant_id")
     creator = request.ctx.session["account_info"]
     task = await create_command_task(tenant_id, creator, data)
-    return response_ok(task.json)
+    return response_ok(_task_detail_json(task))
 
 
 @command_bp.post("/tasks/list")
@@ -663,7 +703,7 @@ async def create_task(request: Request):
                 "status": {
                     "type": "string",
                     "description": "可选，按任务状态过滤",
-                    "enum": ["pending_dispatch", "dispatched", "running", "completed", "failed", "cancelled"],
+                    "enum": TASK_STATUS_ENUM,
                 },
                 "agent_key": {"type": "string", "description": "可选，按实际分配的智能体agent_key过滤"},
                 "keyword": {"type": "string", "description": "可选，按任务标题或描述模糊搜索"},
@@ -876,7 +916,7 @@ async def task_stats(request: Request):
                 "status": {
                     "type": "string",
                     "description": "任务状态",
-                    "enum": ["pending_dispatch", "dispatched", "running", "completed", "failed", "cancelled"],
+                    "enum": TASK_PROGRESS_WRITE_STATUS_ENUM,
                 },
                 "run_id": {"type": "string", "description": "后续执行系统run_id"},
                 "message": {"type": "string", "description": "进度事件说明"},
@@ -892,13 +932,15 @@ async def task_progress(request: Request):
     task_id = data.get("id")
     if not task_id:
         raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    if "status" in data and data.get("status") not in TASK_PROGRESS_WRITE_STATUSES:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
     task = await CommandTask.get_or_none(id=task_id, tenant_id=tenant_id, deleted=False)
     if not task:
         raise CustomError(ErrorCode.NOT_FOUND)
     operator = request.ctx.session["account_info"]
     task = await update_task_progress(task, data, operator.id)
-    return response_ok(task.json)
+    return response_ok(_task_detail_json(task))
 
 
 @command_bp.post("/tasks/dispatch")
@@ -934,7 +976,63 @@ async def retry_dispatch(request: Request):
         await task.save(update_fields=["requested_agent_id"])
     operator = request.ctx.session["account_info"]
     task = await dispatch_task(task, operator.id)
-    return response_ok(task.json)
+    return response_ok(_task_detail_json(task))
+
+
+@command_bp.post("/tasks/clarification")
+@openapi.definition(
+    summary="补充任务澄清信息并重新调度",
+    description=(
+        "回答任务当前待澄清问题；答案会在租户范围内以有界历史保存，原始任务描述保持不变，"
+        "提交后重新评估上下文并调度。任务创建人需要command_center:c权限，其他操作者需要command_center:u权限。"
+    ),
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["id", "answer"],
+            "properties": {
+                "id": {"type": "string", "description": "任务ID"},
+                "answer": {
+                    "type": "string",
+                    "description": "对当前澄清问题的回答",
+                    "minLength": 1,
+                    "maxLength": MAX_CLARIFICATION_ANSWER_LENGTH,
+                },
+            },
+        }
+    ),
+    response=_response(
+        "已补充并重新调度",
+        TASK_SCHEMA,
+        {"400": "参数错误", "403": "仅任务创建人或任务运营人员可提交", "404": "任务不存在", "409": "任务当前不待澄清"},
+    ),
+)
+@requires_permission("command_center:c", "command_center:u")
+async def answer_clarification(request: Request):
+    data = _require_json(request)
+    task_id = data.get("id")
+    if not task_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
+    operator = request.ctx.session["account_info"]
+    owner_only = not account_has_permission(operator, "command_center:u", tenant_id=tenant_id)
+    try:
+        task = await answer_task_clarification(
+            tenant_id,
+            task_id,
+            data.get("answer"),
+            operator.id,
+            owner_only=owner_only,
+        )
+    except InvalidClarificationAnswer:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    except TaskClarificationForbidden:
+        raise CustomError(ErrorCode.FORBIDDEN)
+    except TaskClarificationConflict:
+        raise CustomError(ErrorCode.COMMAND_TASK_NOT_DISPATCHABLE)
+    if not task:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    return response_ok(_task_detail_json(task))
 
 
 @command_bp.post("/tasks/cancel")
@@ -972,7 +1070,7 @@ async def cancel_task(request: Request):
         {"status": "cancelled", "message": reason, "metadata": {"cancelled_by": operator.id}},
         operator.id,
     )
-    return response_ok(task.json)
+    return response_ok(_task_detail_json(task))
 
 
 @command_bp.post("/tasks/delete")

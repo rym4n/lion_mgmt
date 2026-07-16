@@ -8,6 +8,8 @@ from typing import Any
 TERMINAL_TASK_STATUSES = {"completed", "failed", "cancelled", "handed_off"}
 EVENT_PHRASES = {
     "task_created": "任务已创建",
+    "clarification_requested": "等待用户补充任务信息",
+    "clarification_answered": "用户已补充任务信息",
     "task_dispatched": "任务已分派",
     "dispatch_waiting": "等待可用数字员工",
     "task_progress_updated": "任务进度已更新",
@@ -110,6 +112,7 @@ def build_task_summary(
     finished_at = _dt(getattr(task, "finished_at", None)) or _dt(getattr(latest_run, "finished_at", None))
     status = getattr(task, "status", None)
     is_terminal = status in TERMINAL_TASK_STATUSES
+    needs_clarification = status == "pending_clarification"
     duration_end = finished_at
     if started_at and not is_terminal:
         duration_end = now or datetime.now(tz=started_at.tzinfo)
@@ -121,9 +124,10 @@ def build_task_summary(
         "duration_seconds": _seconds_between(started_at, duration_end),
         "token_usage": aggregate_usage(runs),
         "pending_approvals": len(pending_approvals),
+        "needs_clarification": needs_clarification,
         "has_error": bool(latest_error),
         "latest_error": latest_error,
         "latest_run_status": getattr(latest_run, "status", None) if latest_run else None,
         "latest_run_id": getattr(latest_run, "run_id", None) if latest_run else None,
-        "issues_count": len(pending_approvals) + (1 if latest_error else 0),
+        "issues_count": len(pending_approvals) + (1 if latest_error else 0) + (1 if needs_clarification else 0),
     }

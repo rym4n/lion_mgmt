@@ -5,11 +5,13 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from services.command_center import views
+from services.command_center import views  # noqa: E402
 
 
 def test_task_read_dto_summarizes_payload_and_result_without_raw_values():
@@ -25,7 +27,12 @@ def test_task_read_dto_summarizes_payload_and_result_without_raw_values():
             "status": "pending_approval",
             "progress": 30,
             "required_capabilities": ["ops"],
-            "payload": {"secret": "hidden", "targets": ["db01", "db02"], "options": {"force": True}},
+            "payload": {
+                "secret": "hidden",
+                "targets": ["db01", "db02"],
+                "options": {"force": True},
+                "clarifications": [{"question": "目标？", "answer": "credential-like-secret"}],
+            },
             "requested_agent_id": "ops-agent",
             "assigned_agent_id": "employee-1",
             "assigned_agent_key": "ops-agent",
@@ -48,9 +55,12 @@ def test_task_read_dto_summarizes_payload_and_result_without_raw_values():
         "secret": {"kind": "value", "present": True},
         "targets": {"kind": "list", "count": 2},
         "options": {"kind": "object", "count": 1},
+        "clarifications": {"kind": "list", "count": 1},
     }
     assert out["result_summary"] == {"present": True, "length": 30}
     assert out["title"] == "Restart database"
+    assert "clarifications" not in out
+    assert "credential-like-secret" not in str(out)
 
 
 def test_task_detail_run_dto_exposes_summaries_without_raw_snapshots():
@@ -241,3 +251,111 @@ def test_task_stats_aggregates_tenant_scoped_counts(monkeypatch):
     assert run_filters[0]["deleted"] is False
     assert task_filters[0]["deleted"] is False
     assert approval_filters[0] == {"tenant_id": "tenant-1", "deleted": False, "status": "pending"}
+
+
+def test_clarification_answer_api_scopes_tenant_and_enforces_owner_for_create_only_actor(monkeypatch):
+    calls = []
+    account = SimpleNamespace(id="creator-1", roles=[])
+    request = SimpleNamespace(
+        json={"id": "task-1", "answer": "集群 prod-a"},
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1", "account_info": account}),
+    )
+    task = SimpleNamespace(
+        json={
+            "id": "task-1",
+            "status": "pending_dispatch",
+            "payload": {
+                "secret": "hidden-value",
+                "clarifications": [{"question": "目标？", "answer": "集群 prod-a"}],
+            },
+            "result": "sensitive-result",
+        }
+    )
+
+    async def answer_task(tenant_id, task_id, answer, operator_id, *, owner_only=False):
+        calls.append((tenant_id, task_id, answer, operator_id, owner_only))
+        return task
+
+    monkeypatch.setattr(views, "account_has_permission", lambda actor, permission, tenant_id=None: False)
+    monkeypatch.setattr(views, "answer_task_clarification", answer_task)
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+
+    out = asyncio.run(inspect.unwrap(views.answer_clarification)(request))
+
+    assert out["id"] == "task-1"
+    assert out["payload_summary"] == {
+        "secret": {"kind": "value", "present": True},
+        "clarifications": {"kind": "list", "count": 1},
+    }
+    assert out["result_summary"] == {"present": True, "length": 16}
+    assert "payload" not in out
+    assert "result" not in out
+    assert "hidden-value" not in str(out)
+    assert "集群 prod-a" not in str(out)
+    assert calls == [("tenant-1", "task-1", "集群 prod-a", "creator-1", True)]
+
+
+def test_clarification_answer_api_allows_update_operator_without_ownership_check(monkeypatch):
+    calls = []
+    account = SimpleNamespace(id="operator-1", roles=[])
+    request = SimpleNamespace(
+        json={"id": "task-1", "answer": "集群 prod-a"},
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1", "account_info": account}),
+    )
+    task = SimpleNamespace(json={"id": "task-1", "status": "pending_dispatch"})
+
+    async def answer_task(tenant_id, task_id, answer, operator_id, *, owner_only=False):
+        calls.append(owner_only)
+        return task
+
+    monkeypatch.setattr(views, "account_has_permission", lambda actor, permission, tenant_id=None: True)
+    monkeypatch.setattr(views, "answer_task_clarification", answer_task)
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+
+    asyncio.run(inspect.unwrap(views.answer_clarification)(request))
+
+    assert calls == [False]
+    assert 'requires_permission("command_center:c", "command_center:u")' in inspect.getsource(views.answer_clarification)
+
+
+def test_command_task_openapi_enums_include_clarification_state():
+    assert "pending_clarification" in views.TASK_SCHEMA["properties"]["status"]["enum"]
+    assert "needs_clarification" in views.TASK_SCHEMA["properties"]["dispatch_status"]["enum"]
+    assert "payload" not in views.TASK_SCHEMA["properties"]
+    assert "payload_summary" in views.TASK_SCHEMA["properties"]
+    assert "result_summary" in views.TASK_SCHEMA["properties"]
+    assert views.TASK_PROGRESS_WRITE_STATUSES == {"running", "completed", "failed", "cancelled"}
+    assert "pending_clarification" not in views.TASK_PROGRESS_WRITE_STATUS_ENUM
+    assert '"enum": TASK_PROGRESS_WRITE_STATUS_ENUM' in inspect.getsource(views.task_progress)
+
+
+def test_task_progress_rejects_pending_clarification_before_loading_or_updating_task(monkeypatch):
+    calls = []
+
+    class TaskModel:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            calls.append(("load", kwargs))
+            return None
+
+    async def update_progress(task, data, operator_id=None):
+        calls.append(("update", data))
+        return task
+
+    request = SimpleNamespace(
+        json={"id": "task-1", "status": "pending_clarification"},
+        ctx=SimpleNamespace(
+            session={
+                "tenant_id": "tenant-1",
+                "account_info": SimpleNamespace(id="operator-1"),
+            }
+        ),
+    )
+    monkeypatch.setattr(views, "CommandTask", TaskModel)
+    monkeypatch.setattr(views, "update_task_progress", update_progress)
+
+    with pytest.raises(views.CustomError) as exc_info:
+        asyncio.run(inspect.unwrap(views.task_progress)(request))
+
+    assert exc_info.value.enum is views.ErrorCode.PARAM_VALUE_ERROR
+    assert calls == []

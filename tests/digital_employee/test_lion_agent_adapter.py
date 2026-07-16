@@ -81,11 +81,13 @@ def test_execute_prompt_sends_model_override():
             request_id="task-1",
             message="route task",
             model="aioe-lite",
+            system_prompt="immutable coordinator rules",
         )
     )
 
     assert result == "ok"
     assert client.payloads[-1]["model"] == "aioe-lite"
+    assert client.payloads[-1]["system_prompt"] == "immutable coordinator rules"
 
 
 def test_execute_prompt_omits_model_without_override():
@@ -100,6 +102,7 @@ def test_execute_prompt_omits_model_without_override():
     )
 
     assert "model" not in client.payloads[-1]
+    assert "system_prompt" not in client.payloads[-1]
 
 
 def test_stream_prompt_events_sends_model_override():
@@ -113,11 +116,13 @@ def test_stream_prompt_events_sends_model_override():
                 session_id="dispatch-1",
                 message="route task",
                 model="aioe-lite",
+                system_prompt="stream role override",
             )
         ]
 
     assert asyncio.run(consume()) == []
     assert client.payloads[-1]["model"] == "aioe-lite"
+    assert client.payloads[-1]["system_prompt"] == "stream role override"
 
 
 def test_stream_prompt_events_omits_model_without_override():

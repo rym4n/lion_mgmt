@@ -6,10 +6,10 @@ from sanic.log import logger
 from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
-from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
+from models.command_center import COMMAND_TASK_STATUS_PENDING_CLARIFICATION, CommandAgent, CommandTask, CommandTaskEvent
 from settings import TZ
 
-from .dispatcher import choose_agent_with_lion_agent
+from .dispatcher import MAX_CLARIFICATION_QUESTION_LENGTH, choose_agent_with_lion_agent
 from .realtime import publish_command_center_update
 
 
@@ -21,6 +21,50 @@ DEFAULT_COORDINATOR_CAPABILITIES = ["command_center", "coordination", "dispatch"
 DEFAULT_TASK_TITLE = "任务"
 MAX_COMPAT_TASK_TITLE_LENGTH = 255
 TASK_CONTENT_FIELDS = ("description", "content", "prompt", "message", "query", "question", "task")
+MAX_CLARIFICATION_ANSWER_LENGTH = 4000
+MAX_CLARIFICATION_HISTORY = 10
+
+
+class InvalidClarificationAnswer(ValueError):
+    pass
+
+
+class TaskClarificationConflict(ValueError):
+    pass
+
+
+class TaskClarificationForbidden(PermissionError):
+    pass
+
+
+def _normalize_clarifications(value) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    clarifications = []
+    for item in value[-MAX_CLARIFICATION_HISTORY:]:
+        if not isinstance(item, dict):
+            continue
+        question = item.get("question")
+        if not isinstance(question, str) or not question.strip():
+            continue
+        answer = item.get("answer")
+        if answer is not None and not isinstance(answer, str):
+            continue
+        clarifications.append(
+            {
+                "question": " ".join(question.split())[:MAX_CLARIFICATION_QUESTION_LENGTH],
+                "answer": answer.strip()[:MAX_CLARIFICATION_ANSWER_LENGTH] if isinstance(answer, str) else None,
+            }
+        )
+    return clarifications
+
+
+def _payload_with_clarification(payload, question: str) -> dict:
+    normalized_payload = dict(payload) if isinstance(payload, dict) else {}
+    clarifications = _normalize_clarifications(normalized_payload.get("clarifications"))
+    clarifications.append({"question": question, "answer": None})
+    normalized_payload["clarifications"] = clarifications[-MAX_CLARIFICATION_HISTORY:]
+    return normalized_payload
 
 
 def task_content_from_data(data: dict) -> str:
@@ -115,6 +159,20 @@ async def record_task_event(
     )
 
 
+async def _release_agent_assignment(agent: CommandAgent | None, task_id: str, connection) -> None:
+    if not agent:
+        return
+    agent.load = max(0, agent.load - 1)
+    if agent.current_task_id == task_id:
+        agent.current_task_id = None
+    if agent.status == "busy" and agent.load < agent.max_concurrent:
+        agent.status = "idle"
+    await agent.save(
+        using_db=connection,
+        update_fields=["load", "current_task_id", "status"],
+    )
+
+
 async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> CommandTask:
     if task.status not in DISPATCHABLE_TASK_STATUS:
         return task
@@ -136,7 +194,15 @@ async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> Co
             return locked_task
 
         previous_agent_key = locked_task.assigned_agent_key
-        candidate_key = decision.agent.agent_key if decision.agent else None
+        decision_requests_clarification = getattr(decision, "needs_clarification", False) is True
+        raw_question = getattr(decision, "clarification_question", None)
+        clarification_question = " ".join(raw_question.split()) if isinstance(raw_question, str) else None
+        clarification_requested = bool(
+            decision_requests_clarification
+            and clarification_question
+            and len(clarification_question) <= MAX_CLARIFICATION_QUESTION_LENGTH
+        )
+        candidate_key = decision.agent.agent_key if decision.agent and not decision_requests_clarification else None
         agent_keys = sorted({key for key in (previous_agent_key, candidate_key) if key})
         locked_agents = []
         if agent_keys:
@@ -164,22 +230,35 @@ async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> Co
         locked_task.dispatch_reason = decision.reason
         previous_agent = agents_by_key.get(previous_agent_key)
 
-        if candidate_available:
+        if decision_requests_clarification and not clarification_requested:
+            locked_task.dispatch_status = "no_candidate"
+            locked_task.dispatch_reason = "lion_agent 澄清决策格式无效，未执行任务"
+
+        if clarification_requested:
+            await _release_agent_assignment(previous_agent, locked_task.id, connection)
+            locked_task.assigned_agent = None
+            locked_task.assigned_agent_key = None
+            locked_task.status = COMMAND_TASK_STATUS_PENDING_CLARIFICATION
+            locked_task.dispatch_status = "needs_clarification"
+            locked_task.dispatch_reason = clarification_question
+            locked_task.payload = _payload_with_clarification(locked_task.payload, clarification_question)
+            await locked_task.save(using_db=connection)
+            await record_task_event(
+                locked_task,
+                "clarification_requested",
+                clarification_question,
+                operator_id,
+                {"dispatch_source": "lion_agent", "raw_response": getattr(decision, "raw_response", None)},
+                using_db=connection,
+            )
+        elif candidate_available:
             selected_agent = candidate
             locked_task.assigned_agent = candidate
             locked_task.assigned_agent_key = candidate.agent_key
             locked_task.status = "dispatched"
 
             if previous_agent and previous_agent.agent_key != candidate.agent_key:
-                previous_agent.load = max(0, previous_agent.load - 1)
-                if previous_agent.current_task_id == locked_task.id:
-                    previous_agent.current_task_id = None
-                if previous_agent.status == "busy" and previous_agent.load < previous_agent.max_concurrent:
-                    previous_agent.status = "idle"
-                await previous_agent.save(
-                    using_db=connection,
-                    update_fields=["load", "current_task_id", "status"],
-                )
+                await _release_agent_assignment(previous_agent, locked_task.id, connection)
 
             if not same_assignment:
                 candidate.load += 1
@@ -200,16 +279,7 @@ async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> Co
                 using_db=connection,
             )
         else:
-            if previous_agent:
-                previous_agent.load = max(0, previous_agent.load - 1)
-                if previous_agent.current_task_id == locked_task.id:
-                    previous_agent.current_task_id = None
-                if previous_agent.status == "busy" and previous_agent.load < previous_agent.max_concurrent:
-                    previous_agent.status = "idle"
-                await previous_agent.save(
-                    using_db=connection,
-                    update_fields=["load", "current_task_id", "status"],
-                )
+            await _release_agent_assignment(previous_agent, locked_task.id, connection)
             if decision.agent and not candidate_available:
                 locked_task.dispatch_status = "no_candidate"
                 locked_task.dispatch_reason = "候选员工容量已变化，请重新调度"
@@ -227,9 +297,10 @@ async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> Co
             )
 
     if locked_task is not task:
-        for field in ("assigned_agent_key", "dispatch_status", "dispatch_reason", "status"):
+        for field in ("assigned_agent_key", "dispatch_status", "dispatch_reason", "status", "payload"):
             setattr(task, field, getattr(locked_task, field))
-    await publish_command_center_update(locked_task.tenant_id, "task_dispatched", locked_task.id)
+    realtime_reason = "clarification_requested" if clarification_requested else "task_dispatched"
+    await publish_command_center_update(locked_task.tenant_id, realtime_reason, locked_task.id)
     if selected_agent and _should_auto_execute(selected_agent):
         _schedule_lion_agent_execution(locked_task, selected_agent, operator_id)
     return locked_task
@@ -300,6 +371,8 @@ def _schedule_task_dispatch(task: CommandTask, operator_id: str | None = None) -
 async def create_command_task(tenant_id: str, creator, data: dict) -> CommandTask:
     content = task_content_from_data(data)
     compatibility_title = content[:MAX_COMPAT_TASK_TITLE_LENGTH] or DEFAULT_TASK_TITLE
+    payload = dict(data.get("payload")) if isinstance(data.get("payload"), dict) else {}
+    payload.pop("clarifications", None)
     task = await CommandTask.create(
         tenant_id=tenant_id,
         title=compatibility_title,
@@ -307,7 +380,7 @@ async def create_command_task(tenant_id: str, creator, data: dict) -> CommandTas
         source=data.get("source", "manual"),
         priority=data.get("priority", 3),
         required_capabilities=data.get("required_capabilities", []),
-        payload=data.get("payload", {}),
+        payload=payload,
         requested_agent_id=data.get("agent_id") or data.get("requested_agent_id"),
         room_id=data.get("room_id"),
         creator=creator,
@@ -316,6 +389,67 @@ async def create_command_task(tenant_id: str, creator, data: dict) -> CommandTas
     await publish_command_center_update(task.tenant_id, "task_created", task.id)
     _schedule_task_dispatch(task, getattr(creator, "id", None))
     return task
+
+
+async def answer_task_clarification(
+    tenant_id: str,
+    task_id: str,
+    answer: str,
+    operator_id: str | None,
+    *,
+    owner_only: bool = False,
+) -> CommandTask | None:
+    if not isinstance(answer, str) or not answer.strip():
+        raise InvalidClarificationAnswer("clarification answer is required")
+    normalized_answer = answer.strip()
+    if len(normalized_answer) > MAX_CLARIFICATION_ANSWER_LENGTH:
+        raise InvalidClarificationAnswer("clarification answer is too long")
+
+    async with in_transaction() as connection:
+        locked_task = (
+            await CommandTask.filter(id=task_id, tenant_id=tenant_id, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if not locked_task:
+            return None
+        if owner_only and str(getattr(locked_task, "creator_id", None)) != str(operator_id):
+            raise TaskClarificationForbidden("only the task creator may answer this clarification")
+        if locked_task.status != COMMAND_TASK_STATUS_PENDING_CLARIFICATION:
+            raise TaskClarificationConflict("task is not waiting for clarification")
+
+        payload = dict(locked_task.payload) if isinstance(locked_task.payload, dict) else {}
+        clarifications = _normalize_clarifications(payload.get("clarifications"))
+        pending_index = next(
+            (index for index in range(len(clarifications) - 1, -1, -1) if clarifications[index]["answer"] is None),
+            None,
+        )
+        if pending_index is None:
+            raise TaskClarificationConflict("task has no unanswered clarification")
+
+        clarifications[pending_index]["answer"] = normalized_answer
+        payload["clarifications"] = clarifications[-MAX_CLARIFICATION_HISTORY:]
+        locked_task.payload = payload
+        locked_task.status = "pending_dispatch"
+        locked_task.dispatch_status = "pending"
+        locked_task.dispatch_reason = "用户已补充任务信息，等待重新调度"
+        locked_task.utime = datetime.now(TZ)
+        await locked_task.save(
+            using_db=connection,
+            update_fields=["payload", "status", "dispatch_status", "dispatch_reason", "utime"],
+        )
+        await record_task_event(
+            locked_task,
+            "clarification_answered",
+            "用户已补充任务信息，重新进入调度",
+            operator_id,
+            using_db=connection,
+        )
+
+    await publish_command_center_update(locked_task.tenant_id, "clarification_answered", locked_task.id)
+    _schedule_task_dispatch(locked_task, operator_id)
+    return locked_task
 
 
 async def apply_task_progress_in_transaction(
@@ -499,7 +633,7 @@ async def list_tasks(tenant_id: str, filters: dict) -> tuple[list[CommandTask], 
 
 
 async def sweep_stale_dispatch_tasks(operator_id: str | None = None) -> int:
-    """把长时间卡在 pending_dispatch 的任务置为失败，避免无可用数字员工时静默滞留。"""
+    """把长时间没有调度活动的 pending_dispatch 任务置为失败。"""
     from datetime import timedelta
 
     from settings import COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS
@@ -508,7 +642,7 @@ async def sweep_stale_dispatch_tasks(operator_id: str | None = None) -> int:
     stale_tasks = await CommandTask.filter(
         deleted=False,
         status="pending_dispatch",
-        ctime__lt=deadline,
+        utime__lt=deadline,
     ).all()
     swept = 0
     for task in stale_tasks:
@@ -525,7 +659,7 @@ async def sweep_stale_dispatch_tasks(operator_id: str | None = None) -> int:
                         tenant_id=task.tenant_id,
                         deleted=False,
                         status="pending_dispatch",
-                        ctime__lt=deadline,
+                        utime__lt=deadline,
                     )
                     .using_db(connection)
                     .select_for_update(skip_locked=True)

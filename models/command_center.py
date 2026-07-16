@@ -7,6 +7,7 @@ from models.base import BaseModel
 
 COMMAND_TASK_STATUS_DRAFT = "draft"
 COMMAND_TASK_STATUS_PENDING_DISPATCH = "pending_dispatch"
+COMMAND_TASK_STATUS_PENDING_CLARIFICATION = "pending_clarification"
 COMMAND_TASK_STATUS_DISPATCHED = "dispatched"
 COMMAND_TASK_STATUS_PENDING_APPROVAL = "pending_approval"
 COMMAND_TASK_STATUS_RUNNING = "running"

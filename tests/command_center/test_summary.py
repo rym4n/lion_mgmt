@@ -8,12 +8,14 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from services.command_center.summary import aggregate_usage, build_task_summary, humanize_event, normalize_usage
+from services.command_center.summary import aggregate_usage, build_task_summary, humanize_event, normalize_usage  # noqa: E402
 
 
 def test_humanize_event_known_and_unknown():
     assert humanize_event("runtime_tool_call") == "数字员工正在执行工具"
     assert humanize_event("approval_required") == "等待人工审批"
+    assert humanize_event("clarification_requested") == "等待用户补充任务信息"
+    assert humanize_event("clarification_answered") == "用户已补充任务信息"
     assert humanize_event("custom") == "任务状态更新"
 
 
@@ -90,3 +92,18 @@ def test_build_task_summary_uses_server_clock_for_live_duration():
 
     assert summary["is_terminal"] is False
     assert summary["duration_seconds"] == 65
+
+
+def test_build_task_summary_counts_pending_clarification_as_attention_issue():
+    task = SimpleNamespace(
+        status="pending_clarification",
+        progress=0,
+        assigned_agent_key=None,
+        started_at=None,
+        finished_at=None,
+    )
+
+    summary = build_task_summary(task, [], [])
+
+    assert summary["needs_clarification"] is True
+    assert summary["issues_count"] == 1
