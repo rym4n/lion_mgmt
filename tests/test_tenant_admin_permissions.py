@@ -1,4 +1,6 @@
 import ast
+import asyncio
+import importlib
 from pathlib import Path
 
 
@@ -32,3 +34,15 @@ def test_new_tenant_admin_uses_platform_wildcard_permissions():
     )
 
     assert ast.literal_eval(permissions) == ["*:*"]
+
+
+def test_existing_tenant_admin_roles_are_promoted_to_wildcard_permissions():
+    migration = importlib.import_module(
+        "migrations.models.78_20260717173000_promote_tenant_admin_permissions"
+    )
+    upgrade_sql = asyncio.run(migration.upgrade(None))
+
+    assert '"name" = \'租户管理员\'' in upgrade_sql
+    assert '"permissions" = \'["*:*\"]\'::jsonb' in upgrade_sql
+    assert '"deleted" = False' in upgrade_sql
+    assert "? '*:*'" in upgrade_sql

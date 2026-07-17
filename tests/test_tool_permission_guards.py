@@ -195,6 +195,16 @@ async def test_tool_list_exposes_historical_group_internal_identity(monkeypatch)
     ]
 
 
+def test_tool_lists_do_not_hide_versions_by_maintenance_flag():
+    all_tools_source = inspect.getsource(inspect.unwrap(tool_views.all_tools))
+    all_versions_source = inspect.getsource(inspect.unwrap(tool_views.all_versions))
+
+    assert "maintenance_mode" not in all_tools_source
+    assert "maintain=" not in all_tools_source
+    assert "maintenance_mode" not in all_versions_source
+    assert "maintain=" not in all_versions_source
+
+
 def test_tool_action_filter_preserves_actions_without_resource_requirement():
     source = inspect.getsource(inspect.unwrap(tool_views.tool_actions))
 

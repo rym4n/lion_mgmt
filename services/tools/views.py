@@ -809,8 +809,6 @@ async def all_tools(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     subquery = Tool.filter(deleted=False, tenant_id=tenant_id).annotate(latest_ctime=Max("ctime")).group_by("name")
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
-    subquery = subquery.filter(maintain=maintenance_mode if maintenance_mode else False)
     if req_json.get("tag"):
         subquery = subquery.filter(tag__contains=[req_json.get("tag")])
     subquery_results = await subquery.values("name", "latest_ctime")
@@ -825,7 +823,6 @@ async def all_tools(request):
 
         tool_names = [pair["name"] for pair in subquery_results]
         tool_rows_query = Tool.filter(name__in=tool_names, deleted=False, tenant_id=tenant_id)
-        tool_rows_query = tool_rows_query.filter(maintain=maintenance_mode if maintenance_mode else False)
         if req_json.get("tag"):
             tool_rows_query = tool_rows_query.filter(tag__contains=[req_json.get("tag")])
         matching_tool_rows = await tool_rows_query.values("name", "description", "main", "tag")
@@ -958,7 +955,6 @@ async def update_latest_tool_utime(tool_name, tenant_id, maintenance_mode=False)
 )
 @requires_permission("tool:r")
 async def all_versions(request):
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     name = request.json.get("name")
     if not name:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -969,7 +965,6 @@ async def all_versions(request):
         await Tool.filter(
             name=name,
             deleted=False,
-            maintain=maintenance_mode if maintenance_mode else False,
             tenant_id=tenant_id,
         )
         .order_by("-ctime")
