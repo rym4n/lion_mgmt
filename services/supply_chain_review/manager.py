@@ -41,6 +41,7 @@ from models.supply_chain_review import (
 from models.user import Tenant
 from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
+from pypinyin import lazy_pinyin
 
 
 KEY_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
@@ -745,7 +746,7 @@ def payload_field(data: dict, operator: str | None) -> dict:
     ci_type_id = data.get("ci_type_id") or data.get("ci_type_key")
     if not ci_type_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    payload = payload_dynamic_field(data)
+    payload = payload_dynamic_field(data, allow_missing_key=True)
     return {
         "ci_type_id": ci_type_id,
         "updater": operator,
@@ -753,9 +754,13 @@ def payload_field(data: dict, operator: str | None) -> dict:
     }
 
 
-def payload_dynamic_field(data: dict) -> dict:
+def payload_dynamic_field(data: dict, *, allow_missing_key: bool = False) -> dict:
     data = require_dict(data)
-    field_key = validate_key(data.get("field_key"), "field_key")
+    field_key = (
+        validate_key(data.get("field_key"), "field_key")
+        if data.get("field_key")
+        else None if allow_missing_key else validate_key(None, "field_key")
+    )
     data_type = data.get("data_type")
     if data_type not in FIELD_DATA_TYPES:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -775,6 +780,47 @@ def payload_dynamic_field(data: dict) -> dict:
         "sort": int(data.get("sort", 0) or 0),
         "is_locked": bool(data.get("is_locked", False)),
     }
+
+
+def _field_key_base(label: str) -> str:
+    transliterated = "".join(
+        lazy_pinyin(label, errors=lambda characters: list(characters))
+    )
+    base = re.sub(r"[^a-zA-Z0-9]+", "_", transliterated).strip("_").lower()
+    if not base:
+        base = "field"
+    if not base[0].isalpha():
+        base = f"field_{base}"
+    return base[:64].rstrip("_") or "field"
+
+
+def _has_duplicate_field_label(fields: Iterable, label: str, exclude_id=None) -> bool:
+    normalized_label = label.strip().casefold()
+    return any(
+        field.id != exclude_id
+        and str(field.label or "").strip().casefold() == normalized_label
+        for field in fields
+    )
+
+
+async def _allocate_field_key(
+    tenant: str,
+    ci_type_id: str,
+    label: str,
+    connection,
+) -> str:
+    base = _field_key_base(label)
+    candidate = base
+    suffix = 1
+    while await SupplyChainCiFieldDef.filter(
+        tenant_id=tenant,
+        ci_type_id=ci_type_id,
+        field_key=candidate,
+    ).using_db(connection).exists():
+        suffix += 1
+        suffix_text = f"_{suffix}"
+        candidate = f"{base[:64 - len(suffix_text)]}{suffix_text}"
+    return candidate
 
 
 def payload_relation_type(data: dict, operator: str | None) -> dict:
@@ -988,6 +1034,9 @@ async def save_field(
     connection=None,
 ) -> SupplyChainCiFieldDef:
     payload = payload_field(data, operator)
+    payload["label"] = str(payload.get("label") or "").strip()
+    if not payload["label"]:
+        raise CustomError(ErrorCode.PARAM_ERROR)
     requested_model_ref = payload["ci_type_id"]
     make_primary = data.get("is_primary") is True
     async with structure_write_transaction(tenant, connection) as connection:
@@ -1040,7 +1089,7 @@ async def save_field(
                 raise CustomError(ErrorCode.NOT_FOUND)
             if _field_model_id(existing) not in {payload["ci_type_id"], ci_type.key}:
                 raise CustomError(ErrorCode.PARAM_ERROR)
-        if not existing:
+        if not existing and payload.get("field_key"):
             existing = (
                 await SupplyChainCiFieldDef.filter(
                     tenant_id=tenant,
@@ -1057,6 +1106,26 @@ async def save_field(
                 .first()
             )
         ensure_expected_existence(existing, expected_exists)
+        active_fields = await SupplyChainCiFieldDef.filter(
+            tenant_id=tenant,
+            ci_type_id=payload["ci_type_id"],
+            deleted=False,
+        ).using_db(connection).select_for_update().all()
+        if _has_duplicate_field_label(
+            active_fields,
+            payload["label"],
+            getattr(existing, "id", None),
+        ):
+            raise CustomError(ErrorCode.ASSET_FIELD_NAME_EXISTS)
+        if existing:
+            payload["field_key"] = existing.field_key
+        elif not payload.get("field_key"):
+            payload["field_key"] = await _allocate_field_key(
+                tenant,
+                payload["ci_type_id"],
+                payload["label"],
+                connection,
+            )
         referenced_ci_type_keys = {
             key
             for key in (

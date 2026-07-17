@@ -1393,6 +1393,7 @@ dependencies = [
     { name = "psutil" },
     { name = "pyjwt" },
     { name = "pyotp" },
+    { name = "pypinyin" },
     { name = "python-docx" },
     { name = "pyyaml" },
     { name = "sanic" },
@@ -1438,6 +1439,7 @@ requires-dist = [
     { name = "psutil", specifier = ">=7.0.0" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pyotp", specifier = ">=2.9.0" },
+    { name = "pypinyin", specifier = ">=0.53.0" },
     { name = "python-docx", specifier = ">=1.1.0,<2.0.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "sanic", specifier = "==25.12.1" },
@@ -2395,6 +2397,15 @@ source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
 sdist = { url = "https://mirrors.aliyun.com/pypi/packages/cc/28/86ec1bccb2609d20349def444ef9dfe84aeccc984caa62f4634d50fee164/pypika_tortoise-0.6.3.tar.gz", hash = "sha256:6e17f00e77e78468836cb5c63eb6dc01445f83b1167e4f29f1c678949179c079" }
 wheels = [
     { url = "https://mirrors.aliyun.com/pypi/packages/a4/6a/da5ba6830dd16cea2804163a2cecc1b2a85b8e06c61f0abb0477069d013d/pypika_tortoise-0.6.3-py3-none-any.whl", hash = "sha256:762e508093f4d73d3654cdde5bce8f92f8f41d999993c44d972d4f1703a663df" },
+]
+
+[[package]]
+name = "pypinyin"
+version = "0.55.0"
+source = { registry = "https://mirrors.aliyun.com/pypi/simple" }
+sdist = { url = "https://mirrors.aliyun.com/pypi/packages/b4/a4/784cf98c09e0dc22776b0d7d8a4a5b761218bcae4608c2416ce1e167c8af/pypinyin-0.55.0.tar.gz", hash = "sha256:b5711b3a0c6f76e67408ec6b2e3c4987a3a806b7c528076e7c7b86fcf0eaa66b" }
+wheels = [
+    { url = "https://mirrors.aliyun.com/pypi/packages/b9/7b/4cabc76fcc21c3c7d5c671d8783984d30ac9d3bb387c4ba784fca3cdfa3a/pypinyin-0.55.0-py2.py3-none-any.whl", hash = "sha256:d53b1e8ad2cdb815fb2cb604ed3123372f5a28c6f447571244aca36fc62a286f" },
 ]
 
 [[package]]

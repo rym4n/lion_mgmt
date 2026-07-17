@@ -261,6 +261,62 @@ def test_validate_key_rejects_missing_invalid_or_overlong_identifiers(value):
     assert exc_info.value.enum is ErrorCode.PARAM_ERROR
 
 
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        ("服务器地址", "fuwuqidizhi"),
+        ("IP Address", "ip_address"),
+        ("123 端口", "field_123_duankou"),
+    ],
+)
+def test_field_key_base_is_generated_from_the_field_name(label, expected):
+    assert manager._field_key_base(label) == expected
+
+
+def test_duplicate_field_names_ignore_whitespace_and_english_case():
+    fields = [SimpleNamespace(id="field-1", label=" Host Name ")]
+
+    assert manager._has_duplicate_field_label(fields, "host name") is True
+    assert (
+        manager._has_duplicate_field_label(
+            fields,
+            "host name",
+            exclude_id="field-1",
+        )
+        is False
+    )
+
+
+def test_generated_field_key_uses_a_numeric_suffix_for_a_collision(monkeypatch):
+    filter_calls = []
+
+    def field_filter(**kwargs):
+        filter_calls.append(kwargs)
+        occupied = kwargs["field_key"] in {"fuwuqi", "fuwuqi_2"}
+        return _FakeQuery(SimpleNamespace(id="occupied") if occupied else None)
+
+    monkeypatch.setattr(
+        manager.SupplyChainCiFieldDef,
+        "filter",
+        staticmethod(field_filter),
+    )
+
+    key = asyncio.run(
+        manager._allocate_field_key(
+            "tenant-a",
+            "model-1",
+            "服务器",
+            object(),
+        )
+    )
+
+    assert key == "fuwuqi_3"
+    assert [call["field_key"] for call in filter_calls] == [
+        "fuwuqi",
+        "fuwuqi_2",
+        "fuwuqi_3",
+    ]
+
 def test_save_field_creates_single_character_key(monkeypatch):
     ci_type = _ci_type(primary_field="")
     created = _field("field-1", "a")
@@ -282,6 +338,30 @@ def test_save_field_creates_single_character_key(monkeypatch):
     assert item is created
     assert create_kwargs["field_key"] == "a"
     assert create_kwargs["using_db"] is transaction.connection
+
+
+def test_save_field_generates_an_internal_key_when_the_api_omits_it(monkeypatch):
+    ci_type = _ci_type(primary_field="")
+    created = _field("field-1", "fuwuqi")
+    _, _, create_kwargs = _install_field_save_fakes(
+        monkeypatch,
+        ci_type,
+        created=created,
+    )
+    payload = _field_payload("unused", label="服务器")
+    payload.pop("field_key")
+
+    item = asyncio.run(
+        manager.save_field(
+            "tenant-a",
+            payload,
+            "admin",
+            expected_exists=False,
+        )
+    )
+
+    assert item is created
+    assert create_kwargs["field_key"] == "fuwuqi"
 
 
 def test_save_field_rejects_create_intent_for_existing_key(monkeypatch):
@@ -351,9 +431,11 @@ def test_save_field_sets_existing_field_as_model_primary(monkeypatch):
     )
 
     assert item is existing
-    assert filter_calls == [
-        {"id": "field-2", "tenant_id": "tenant-a", "deleted": False}
-    ]
+    assert filter_calls[0] == {
+        "id": "field-2",
+        "tenant_id": "tenant-a",
+        "deleted": False,
+    }
     assert existing.save_calls == [{"using_db": transaction.connection}]
     assert ci_type.primary_field == "serial_number"
 
@@ -444,7 +526,7 @@ def test_legacy_non_text_primary_can_be_saved_without_type_change(monkeypatch):
     assert ci_type.save_calls == []
 
 
-def test_renaming_current_primary_field_updates_model_reference(monkeypatch):
+def test_renaming_current_primary_field_preserves_internal_key_and_model_reference(monkeypatch):
     ci_type = _ci_type(primary_field="hostname")
     existing = _field("field-1", "hostname")
     _install_field_save_fakes(monkeypatch, ci_type, existing=existing)
@@ -457,8 +539,9 @@ def test_renaming_current_primary_field_updates_model_reference(monkeypatch):
         )
     )
 
-    assert existing.field_key == "display_name"
-    assert ci_type.primary_field == "display_name"
+    assert existing.field_key == "hostname"
+    assert existing.label == "display_name"
+    assert ci_type.primary_field == "hostname"
 
 
 def test_field_without_primary_flag_keeps_model_package_primary_field(monkeypatch):
