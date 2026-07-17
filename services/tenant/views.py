@@ -124,30 +124,9 @@ async def add_tenant(request):
         role = await Role.create(
             name=TENANT_ADMIN_ROLE_NAME,
             description=TENANT_ADMIN_ROLE_NAME,
-            permissions=[
-                "dashboard:r",
-                "logs:r,d",
-                "status:r",
-                "sso:r,u",
-                "audit:r",
-                "ingestion:c,d,u,r",
-                "warroom:c,u,r",
-                "lic:c,r",
-                "timed:c,d,u,r",
-                "scene:c,d,u,r",
-                "system:c,d,u,r",
-                "inspection:c,d,u,r",
-                "large_screen:c,d,u,r",
-                "tenant:c,d,u,r",
-                "secure:c,d,u,r",
-                "workflow:c,d,u,r",
-                "tool:c,d,u,r",
-                "approve:u,r",
-                "var:c,d,u,r",
-                "event:c,d,u,r",
-                "role:c,d,u,r",
-                "user:c,d,u,r",
-            ],
+            # 租户管理员的权限随当前软件许可动态展开，避免新增菜单后继续
+            # 依赖一份会过期的静态权限清单。许可证过滤仍由菜单接口负责。
+            permissions=["*:*"],
             tenant_id=tenant.id,
         )
         await creator.roles.add(role)

@@ -317,12 +317,12 @@ async def ci_type_import(request: Request):
 @requires_permission("supply_chain_review:field:r")
 async def ci_field_list(request: Request):
     data = _json(request)
-    ci_type_key = data.get("ci_type_key")
-    if not ci_type_key:
+    ci_type_ref = data.get("ci_type_id") or data.get("ci_type_key")
+    if not ci_type_ref:
         raise CustomError(ErrorCode.PARAM_ERROR)
     tenant = tenant_id(request)
-    ci_type = await get_ci_type_or_404(tenant, ci_type_key)
-    fields = await fields_for_type(tenant, ci_type_key)
+    ci_type = await get_ci_type_or_404(tenant, ci_type_ref)
+    fields = await fields_for_type(tenant, ci_type.key)
     return response_ok(
         {
             "items": [
@@ -351,7 +351,9 @@ async def ci_field_save(request: Request):
         operator_name(request),
         expected_exists=is_update,
     )
-    ci_type = await get_ci_type_or_404(tenant, item.ci_type_key)
+    ci_type = await get_ci_type_or_404(
+        tenant, getattr(item, "ci_type_id", None) or item.ci_type_key
+    )
     return response_ok(serialize_ci_field(item, ci_type.primary_field))
 
 
@@ -417,7 +419,12 @@ async def ci_list(request: Request):
     data = _json(request)
     page, size, offset = normalize_page(data)
     condition = Q(tenant_id=tenant_id(request), deleted=False)
-    for field in ["ci_type_key", "project_area_id", "accessory_project_id", "status", "risk_status"]:
+    if data.get("ci_type_id") or data.get("ci_type_key"):
+        ci_type = await get_ci_type_or_404(
+            tenant_id(request), data.get("ci_type_id") or data.get("ci_type_key")
+        )
+        condition &= Q(ci_type_id=ci_type.id)
+    for field in ["project_area_id", "accessory_project_id", "status", "risk_status"]:
         if data.get(field):
             condition &= Q(**{field: data[field]})
     if data.get("keyword"):
@@ -470,7 +477,13 @@ async def ci_import(request: Request):
         raise CustomError(ErrorCode.PARAM_ERROR)
     imported = []
     for record in records:
-        record = {**record, "ci_type_key": record.get("ci_type_key") or data.get("ci_type_key")}
+        record = {
+            **record,
+            "ci_type_id": record.get("ci_type_id")
+            or data.get("ci_type_id")
+            or record.get("ci_type_key")
+            or data.get("ci_type_key"),
+        }
         imported.append((await save_ci(tenant_id(request), record, operator_name(request))).json)
     return response_ok({"total": len(imported), "items": imported})
 
@@ -480,7 +493,9 @@ async def ci_import(request: Request):
 @requires_permission("supply_chain_review:ci:r")
 async def ci_import_template(request: Request):
     data = _json(request)
-    ci_type = await get_ci_type_or_404(tenant_id(request), data.get("ci_type_key"))
+    ci_type = await get_ci_type_or_404(
+        tenant_id(request), data.get("ci_type_id") or data.get("ci_type_key")
+    )
     fields = await fields_for_type(ci_type.tenant_id, ci_type.key)
     columns = [
         {"field_key": "name", "label": "名称", "required": True, "data_type": "text"},

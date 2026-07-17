@@ -60,11 +60,13 @@ class SupplyChainCiType(BaseModel):
 class SupplyChainCiFieldDef(BaseModel):
     """Dynamic field definition for a CI model."""
 
+    ci_type_id = fields.CharField(max_length=36, description="所属模型 ID")
     ci_type_key = fields.CharField(max_length=64, description="所属模型 key")
     field_key = fields.CharField(max_length=64, description="字段 key")
     label = fields.CharField(max_length=255, description="字段名称")
     data_type = fields.CharField(max_length=20, description="字段类型")
     enum_options = fields.JSONField(default=list, description="枚举选项")
+    ref_ci_type_id = fields.CharField(max_length=36, null=True, description="引用模型 ID")
     ref_ci_type = fields.CharField(max_length=64, null=True, description="引用模型 key")
     required = fields.BooleanField(default=False, description="是否必填")
     unique = fields.BooleanField(default=False, description="是否唯一")
@@ -83,11 +85,13 @@ class SupplyChainCiFieldDef(BaseModel):
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
             "tenant_id": self.tenant_id,
+            "ci_type_id": self.ci_type_id,
             "ci_type_key": self.ci_type_key,
             "field_key": self.field_key,
             "label": self.label,
             "data_type": self.data_type,
             "enum_options": self.enum_options or [],
+            "ref_ci_type_id": self.ref_ci_type_id,
             "ref_ci_type": self.ref_ci_type,
             "required": self.required,
             "unique": self.unique,
@@ -103,8 +107,8 @@ class SupplyChainCiFieldDef(BaseModel):
     class Meta:
         table = "supply_chain_ci_field_def"
         ordering = ["sort", "ctime"]
-        unique_together = (("tenant_id", "ci_type_key", "field_key"),)
-        indexes = (("tenant_id", "ci_type_key"), ("tenant_id", "data_type"))
+        unique_together = (("tenant_id", "ci_type_id", "field_key"),)
+        indexes = (("tenant_id", "ci_type_id"), ("tenant_id", "data_type"))
 
 
 class SupplyChainCiRelationType(BaseModel):
@@ -112,6 +116,8 @@ class SupplyChainCiRelationType(BaseModel):
 
     key = fields.CharField(max_length=64, description="关系 key")
     name = fields.CharField(max_length=255, description="关系名称")
+    source_ci_type_ids = fields.JSONField(default=list, description="源模型 ID 列表")
+    target_ci_type_ids = fields.JSONField(default=list, description="目标模型 ID 列表")
     source_ci_types = fields.JSONField(default=list, description="源模型 key 列表")
     target_ci_types = fields.JSONField(default=list, description="目标模型 key 列表")
     cardinality = fields.CharField(max_length=10, default="n-n", description="1-1/1-n/n-n")
@@ -129,6 +135,8 @@ class SupplyChainCiRelationType(BaseModel):
             "tenant_id": self.tenant_id,
             "key": self.key,
             "name": self.name,
+            "source_ci_type_ids": self.source_ci_type_ids or [],
+            "target_ci_type_ids": self.target_ci_type_ids or [],
             "source_ci_types": self.source_ci_types or [],
             "target_ci_types": self.target_ci_types or [],
             "cardinality": self.cardinality,
@@ -147,6 +155,7 @@ class SupplyChainCiRelationType(BaseModel):
 class SupplyChainCi(BaseModel):
     """CMDB instance with dynamic attributes."""
 
+    ci_type_id = fields.CharField(max_length=36, description="模型 ID")
     ci_type_key = fields.CharField(max_length=64, description="模型 key")
     name = fields.CharField(max_length=255, description="实例名称")
     project_area_id = fields.CharField(max_length=36, null=True, description="厂区/区域 CI")
@@ -164,6 +173,7 @@ class SupplyChainCi(BaseModel):
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
             "tenant_id": self.tenant_id,
+            "ci_type_id": self.ci_type_id,
             "ci_type_key": self.ci_type_key,
             "name": self.name,
             "project_area_id": self.project_area_id,
@@ -179,11 +189,11 @@ class SupplyChainCi(BaseModel):
         table = "supply_chain_ci"
         ordering = ["-utime"]
         indexes = (
-            ("tenant_id", "ci_type_key"),
-            ("tenant_id", "ci_type_key", "status"),
+            ("tenant_id", "ci_type_id"),
+            ("tenant_id", "ci_type_id", "status"),
             ("tenant_id", "project_area_id"),
             ("tenant_id", "accessory_project_id"),
-            ("tenant_id", "ci_type_key", "project_area_id", "accessory_project_id"),
+            ("tenant_id", "ci_type_id", "project_area_id", "accessory_project_id"),
         )
 
 

@@ -553,6 +553,49 @@ def tenant_id(request) -> str:
     return value
 
 
+def _looks_like_uuid(value: object) -> bool:
+    try:
+        uuid.UUID(str(value))
+    except (TypeError, ValueError, AttributeError):
+        return False
+    return True
+
+
+def _model_ref_filter(value: str) -> dict:
+    return {"id": value} if _looks_like_uuid(value) else {"key": value}
+
+
+def _model_ref_list_filter(values: Iterable[str]) -> dict:
+    refs = list(values)
+    if refs and all(_looks_like_uuid(value) for value in refs):
+        return {"id__in": refs}
+    return {"key__in": refs}
+
+
+def _ci_model_id(ci) -> str:
+    return getattr(ci, "ci_type_id", None) or getattr(ci, "ci_type_key")
+
+
+def _field_model_id(field) -> str:
+    return getattr(field, "ci_type_id", None) or getattr(field, "ci_type_key")
+
+
+def _field_ref_model_id(field):
+    return getattr(field, "ref_ci_type_id", None) or getattr(field, "ref_ci_type", None)
+
+
+def _relation_source_model_ids(relation_type) -> list[str]:
+    if isinstance(relation_type, dict):
+        return relation_type.get("source_ci_type_ids") or relation_type.get("source_ci_types") or []
+    return getattr(relation_type, "source_ci_type_ids", None) or relation_type.source_ci_types or []
+
+
+def _relation_target_model_ids(relation_type) -> list[str]:
+    if isinstance(relation_type, dict):
+        return relation_type.get("target_ci_type_ids") or relation_type.get("target_ci_types") or []
+    return getattr(relation_type, "target_ci_type_ids", None) or relation_type.target_ci_types or []
+
+
 async def get_ci_type_or_404(tenant: str, key_or_id: str) -> SupplyChainCiType:
     ci_type = await SupplyChainCiType.filter(Q(id=key_or_id) | Q(key=key_or_id), tenant_id=tenant, deleted=False).first()
     if not ci_type:
@@ -574,8 +617,13 @@ async def get_ci_or_404(tenant: str, ci_id: str) -> SupplyChainCi:
     return ci
 
 
-async def fields_for_type(tenant: str, ci_type_key: str) -> list[SupplyChainCiFieldDef]:
-    return await SupplyChainCiFieldDef.filter(tenant_id=tenant, ci_type_key=ci_type_key, deleted=False).order_by("sort", "ctime").all()
+async def fields_for_type(tenant: str, ci_type_id_or_key: str) -> list[SupplyChainCiFieldDef]:
+    ci_type = await get_ci_type_or_404(tenant, ci_type_id_or_key)
+    return await SupplyChainCiFieldDef.filter(
+        tenant_id=tenant,
+        ci_type_id=ci_type.id,
+        deleted=False,
+    ).order_by("sort", "ctime").all()
 
 
 def enum_values(field: SupplyChainCiFieldDef) -> set:
@@ -627,10 +675,15 @@ async def validate_field_value(tenant: str, field, value):
     if data_type == "attachment" and not isinstance(value, list):
         raise CustomError(ErrorCode.PARAM_ERROR)
     if data_type == "ref":
-        ref_ci_type = field_attr(field, "ref_ci_type")
-        if not ref_ci_type:
+        ref_ci_type_id = field_attr(field, "ref_ci_type_id")
+        if not ref_ci_type_id:
             raise CustomError(ErrorCode.PARAM_ERROR)
-        target = await SupplyChainCi.filter(id=value, tenant_id=tenant, ci_type_key=ref_ci_type, deleted=False).first()
+        target = await SupplyChainCi.filter(
+            id=value,
+            tenant_id=tenant,
+            ci_type_id=ref_ci_type_id,
+            deleted=False,
+        ).first()
         if not target:
             raise CustomError(ErrorCode.PARAM_ERROR)
 
@@ -650,8 +703,8 @@ async def validate_dynamic_attributes(tenant: str, field_defs: list, attributes:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
 
-async def validate_ci_attributes(tenant: str, ci_type_key: str, attributes: dict, current_ci_id: str | None = None) -> None:
-    field_defs = await fields_for_type(tenant, ci_type_key)
+async def validate_ci_attributes(tenant: str, ci_type_id: str, attributes: dict, current_ci_id: str | None = None) -> None:
+    field_defs = await fields_for_type(tenant, ci_type_id)
     await validate_dynamic_attributes(tenant, field_defs, attributes)
     for field in field_defs:
         if not field.unique:
@@ -659,7 +712,7 @@ async def validate_ci_attributes(tenant: str, ci_type_key: str, attributes: dict
         value = attributes.get(field.field_key)
         if value in (None, ""):
             continue
-        existing = await SupplyChainCi.filter(tenant_id=tenant, ci_type_key=ci_type_key, deleted=False).all()
+        existing = await SupplyChainCi.filter(tenant_id=tenant, ci_type_id=ci_type_id, deleted=False).all()
         for item in existing:
             if current_ci_id and item.id == current_ci_id:
                 continue
@@ -669,14 +722,14 @@ async def validate_ci_attributes(tenant: str, ci_type_key: str, attributes: dict
 
 def payload_ci_type(data: dict, operator: str | None) -> dict:
     data = require_dict(data)
-    key = validate_key(data.get("key"))
+    key = validate_key(data.get("key")) if data.get("key") else None
     category = data.get("category") or "asset"
     status = data.get("status") or "active"
     if category not in CI_TYPE_CATEGORIES or status not in CI_TYPE_STATUSES:
         raise CustomError(ErrorCode.PARAM_ERROR)
     return {
         "key": key,
-        "name": (data.get("name") or key).strip(),
+        "name": (data.get("name") or key or "").strip(),
         "icon": data.get("icon"),
         "color": data.get("color"),
         "category": category,
@@ -689,10 +742,12 @@ def payload_ci_type(data: dict, operator: str | None) -> dict:
 
 def payload_field(data: dict, operator: str | None) -> dict:
     data = require_dict(data)
-    ci_type_key = validate_key(data.get("ci_type_key"), "ci_type_key")
+    ci_type_id = data.get("ci_type_id") or data.get("ci_type_key")
+    if not ci_type_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
     payload = payload_dynamic_field(data)
     return {
-        "ci_type_key": ci_type_key,
+        "ci_type_id": ci_type_id,
         "updater": operator,
         **payload,
     }
@@ -704,14 +759,14 @@ def payload_dynamic_field(data: dict) -> dict:
     data_type = data.get("data_type")
     if data_type not in FIELD_DATA_TYPES:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    if data_type == "ref" and not data.get("ref_ci_type"):
+    if data_type == "ref" and not (data.get("ref_ci_type_id") or data.get("ref_ci_type")):
         raise CustomError(ErrorCode.PARAM_ERROR)
     return {
         "field_key": field_key,
         "label": (data.get("label") or field_key).strip(),
         "data_type": data_type,
         "enum_options": data.get("enum_options") or [],
-        "ref_ci_type": validate_key(data.get("ref_ci_type"), "ref_ci_type") if data.get("ref_ci_type") else None,
+        "ref_ci_type_id": data.get("ref_ci_type_id") or data.get("ref_ci_type"),
         "required": bool(data.get("required", False)),
         "unique": bool(data.get("unique", False)),
         "searchable": bool(data.get("searchable", False)),
@@ -728,13 +783,13 @@ def payload_relation_type(data: dict, operator: str | None) -> dict:
     cardinality = data.get("cardinality") or "n-n"
     if cardinality not in RELATION_CARDINALITIES:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    source_ci_types = [validate_key(item, "source_ci_types") for item in data.get("source_ci_types") or []]
-    target_ci_types = [validate_key(item, "target_ci_types") for item in data.get("target_ci_types") or []]
+    source_ci_type_ids = list(dict.fromkeys(data.get("source_ci_type_ids") or data.get("source_ci_types") or []))
+    target_ci_type_ids = list(dict.fromkeys(data.get("target_ci_type_ids") or data.get("target_ci_types") or []))
     return {
         "key": key,
         "name": (data.get("name") or key).strip(),
-        "source_ci_types": source_ci_types,
-        "target_ci_types": target_ci_types,
+        "source_ci_type_ids": source_ci_type_ids,
+        "target_ci_type_ids": target_ci_type_ids,
         "cardinality": cardinality,
         "relation_fields": [payload_dynamic_field(item) for item in data.get("relation_fields") or []],
         "is_locked": bool(data.get("is_locked", False)),
@@ -831,7 +886,7 @@ async def lock_ci_type_keys_for_structure(
     if not include_deleted:
         filters["deleted"] = False
     if not include_all:
-        filters["key__in"] = sorted(keys)
+        filters.update(_model_ref_list_filter(sorted(keys)))
     ci_types = (
         await SupplyChainCiType.filter(**filters)
         .using_db(connection)
@@ -839,7 +894,13 @@ async def lock_ci_type_keys_for_structure(
         .select_for_update()
         .all()
     )
-    if require_all and keys - {ci_type.key for ci_type in ci_types}:
+    resolved_refs = {
+        value
+        for ci_type in ci_types
+        for value in (getattr(ci_type, "id", None), ci_type.key)
+        if value
+    }
+    if require_all and keys - resolved_refs:
         raise CustomError(ErrorCode.NOT_FOUND)
     if any(ci_type.is_locked for ci_type in ci_types):
         raise CustomError(ErrorCode.FORBIDDEN)
@@ -856,6 +917,8 @@ async def save_ci_type(
     connection=None,
 ) -> SupplyChainCiType:
     payload = payload_ci_type(data, operator)
+    if not data.get("id") and not payload["key"]:
+        payload["key"] = f"m_{uuid.uuid4().hex}"
     async with structure_write_transaction(tenant, connection) as connection:
         if data.get("id"):
             query = SupplyChainCiType.filter(
@@ -876,6 +939,10 @@ async def save_ci_type(
         )
         if data.get("id") and not existing:
             raise CustomError(ErrorCode.NOT_FOUND)
+        if existing and not payload["key"]:
+            payload["key"] = existing.key
+        if not payload["name"]:
+            payload["name"] = existing.name if existing else payload["key"]
         if data.get("id") and existing.key != payload["key"]:
             raise CustomError(ErrorCode.PARAM_ERROR)
         if not data.get("id") and existing and getattr(existing, "deleted", False):
@@ -921,13 +988,14 @@ async def save_field(
     connection=None,
 ) -> SupplyChainCiFieldDef:
     payload = payload_field(data, operator)
+    requested_model_ref = payload["ci_type_id"]
     make_primary = data.get("is_primary") is True
     async with structure_write_transaction(tenant, connection) as connection:
         ci_type = (
             await SupplyChainCiType.filter(
                 tenant_id=tenant,
-                key=payload["ci_type_key"],
                 deleted=False,
+                **_model_ref_filter(payload["ci_type_id"]),
             )
             .using_db(connection)
             .select_for_update()
@@ -937,18 +1005,24 @@ async def save_field(
             raise CustomError(ErrorCode.NOT_FOUND)
         if ci_type.is_locked:
             raise CustomError(ErrorCode.FORBIDDEN)
-        if payload.get("ref_ci_type"):
+        payload["ci_type_id"] = ci_type.id
+        payload["ci_type_key"] = ci_type.key
+        if payload.get("ref_ci_type_id"):
             ref_ci_type = (
                 await SupplyChainCiType.filter(
                     tenant_id=tenant,
-                    key=payload["ref_ci_type"],
                     deleted=False,
+                    **_model_ref_filter(payload["ref_ci_type_id"]),
                 )
                 .using_db(connection)
                 .first()
             )
             if not ref_ci_type:
                 raise CustomError(ErrorCode.NOT_FOUND)
+            payload["ref_ci_type_id"] = ref_ci_type.id
+            payload["ref_ci_type"] = ref_ci_type.key
+        else:
+            payload["ref_ci_type"] = None
 
         existing = None
         if data.get("id"):
@@ -964,15 +1038,19 @@ async def save_field(
             )
             if not existing:
                 raise CustomError(ErrorCode.NOT_FOUND)
-            if existing.ci_type_key != payload["ci_type_key"]:
+            if _field_model_id(existing) not in {payload["ci_type_id"], ci_type.key}:
                 raise CustomError(ErrorCode.PARAM_ERROR)
         if not existing:
             existing = (
                 await SupplyChainCiFieldDef.filter(
                     tenant_id=tenant,
-                    ci_type_key=payload["ci_type_key"],
                     field_key=payload["field_key"],
                     deleted=False,
+                    **(
+                        {"ci_type_id": payload["ci_type_id"]}
+                        if _looks_like_uuid(requested_model_ref)
+                        else {"ci_type_key": ci_type.key}
+                    ),
                 )
                 .using_db(connection)
                 .select_for_update()
@@ -1054,7 +1132,7 @@ async def delete_field(
         ci_type = (
             await SupplyChainCiType.filter(
                 tenant_id=tenant,
-                key=candidate.ci_type_key,
+                **_model_ref_filter(_field_model_id(candidate)),
                 deleted=False,
             )
             .using_db(connection)
@@ -1066,8 +1144,8 @@ async def delete_field(
         if ci_type.is_locked:
             raise CustomError(ErrorCode.FORBIDDEN)
         referenced_ci_type_keys = {
-            candidate.ref_ci_type
-        } - {None, ci_type.key}
+            _field_ref_model_id(candidate)
+        } - {None, ci_type.id}
         await lock_ci_type_keys_for_structure(
             tenant,
             referenced_ci_type_keys,
@@ -1087,7 +1165,7 @@ async def delete_field(
         )
         if not field:
             raise CustomError(ErrorCode.NOT_FOUND)
-        if field.ci_type_key != ci_type.key:
+        if _field_model_id(field) not in {ci_type.id, ci_type.key}:
             raise CustomError(ErrorCode.PARAM_ERROR)
         if field.field_key == ci_type.primary_field:
             raise CustomError(ErrorCode.FORBIDDEN)
@@ -1159,6 +1237,33 @@ async def save_relation_type(
 ) -> SupplyChainCiRelationType:
     payload = payload_relation_type(data, operator)
     async with structure_write_transaction(tenant, connection) as connection:
+        async def resolve_model_refs(refs: list[str]) -> tuple[list[str], list[str]]:
+            if not refs:
+                return [], []
+            models = await SupplyChainCiType.filter(
+                tenant_id=tenant,
+                deleted=False,
+                **_model_ref_list_filter(refs),
+            ).using_db(connection).all()
+            by_ref = {value: model for model in models for value in (model.id, model.key)}
+            if set(refs) - set(by_ref):
+                raise CustomError(ErrorCode.NOT_FOUND)
+            return [by_ref[ref].id for ref in refs], [by_ref[ref].key for ref in refs]
+
+        payload["source_ci_type_ids"], payload["source_ci_types"] = await resolve_model_refs(
+            payload["source_ci_type_ids"]
+        )
+        payload["target_ci_type_ids"], payload["target_ci_types"] = await resolve_model_refs(
+            payload["target_ci_type_ids"]
+        )
+        for field in payload["relation_fields"]:
+            ref = field.get("ref_ci_type_id")
+            if not ref:
+                field["ref_ci_type"] = None
+                continue
+            ref_ids, ref_keys = await resolve_model_refs([ref])
+            field["ref_ci_type_id"] = ref_ids[0]
+            field["ref_ci_type"] = ref_keys[0]
         if data.get("id"):
             query = SupplyChainCiRelationType.filter(
                 Q(id=data["id"]) | Q(key=data["id"]),
@@ -1214,7 +1319,7 @@ async def _save_ci_for_type(
     attributes = data.get("attributes") or {}
     if not isinstance(attributes, dict):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    await validate_ci_attributes(tenant, ci_type_key, attributes, getattr(existing, "id", None))
+    await validate_ci_attributes(tenant, ci_type.id, attributes, getattr(existing, "id", None))
     status = data.get("status") or getattr(existing, "status", "active")
     risk_status = data.get("risk_status") or getattr(existing, "risk_status", "normal")
     if status not in CI_STATUSES or risk_status not in RISK_STATUSES:
@@ -1226,6 +1331,7 @@ async def _save_ci_for_type(
         name_value = ci_type_key
     name = str(name_value).strip() or ci_type_key
     payload = {
+        "ci_type_id": ci_type.id,
         "ci_type_key": ci_type_key,
         "name": name,
         "project_area_id": data.get("project_area_id"),
@@ -1253,9 +1359,11 @@ async def _save_ci_for_type(
 
 async def save_ci(tenant: str, data: dict, operator: str | None) -> SupplyChainCi:
     data = require_dict(data)
-    ci_type_key = validate_key(data.get("ci_type_key"), "ci_type_key")
+    ci_type_id = data.get("ci_type_id") or data.get("ci_type_key")
+    if not ci_type_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
     if data.get("id"):
-        ci_type = await get_ci_type_or_404(tenant, ci_type_key)
+        ci_type = await get_ci_type_or_404(tenant, ci_type_id)
         async with in_transaction() as connection:
             existing = (
                 await SupplyChainCi.filter(
@@ -1269,7 +1377,7 @@ async def save_ci(tenant: str, data: dict, operator: str | None) -> SupplyChainC
             )
             if not existing:
                 raise CustomError(ErrorCode.NOT_FOUND)
-            if existing.ci_type_key != ci_type_key:
+            if _ci_model_id(existing) not in {ci_type.id, ci_type.key}:
                 raise CustomError(ErrorCode.PARAM_ERROR)
             return await _save_ci_for_type(
                 tenant,
@@ -1286,8 +1394,8 @@ async def save_ci(tenant: str, data: dict, operator: str | None) -> SupplyChainC
         ci_type = (
             await SupplyChainCiType.filter(
                 tenant_id=tenant,
-                key=ci_type_key,
                 deleted=False,
+                **_model_ref_filter(ci_type_id),
             )
             .using_db(connection)
             .select_for_update()
@@ -1351,9 +1459,9 @@ async def validate_relation_ends(
     *,
     connection=None,
 ) -> None:
-    if relation_type.source_ci_types and source.ci_type_key not in relation_type.source_ci_types:
+    if _relation_source_model_ids(relation_type) and _ci_model_id(source) not in _relation_source_model_ids(relation_type):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    if relation_type.target_ci_types and target.ci_type_key not in relation_type.target_ci_types:
+    if _relation_target_model_ids(relation_type) and _ci_model_id(target) not in _relation_target_model_ids(relation_type):
         raise CustomError(ErrorCode.PARAM_ERROR)
     if relation_type.cardinality in {"1-1", "1-n"}:
         existing_source_query = SupplyChainCiRelation.filter(
@@ -1497,7 +1605,7 @@ async def save_relation(
                 raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
 
         affected_ci_type_keys = {
-            ci.ci_type_key for ci in ci_by_id.values()
+            _ci_model_id(ci) for ci in ci_by_id.values()
         }
         await lock_ci_type_keys_for_structure(
             tenant,
@@ -1538,37 +1646,41 @@ async def save_relation(
 
 
 def _relation_type_model_keys(relation_type: SupplyChainCiRelationType) -> set[str]:
-    keys = set(relation_type.source_ci_types or []) | set(
-        relation_type.target_ci_types or []
+    keys = set(_relation_source_model_ids(relation_type)) | set(
+        _relation_target_model_ids(relation_type)
     )
     for field in relation_type.relation_fields or []:
-        if isinstance(field, dict) and field.get("ref_ci_type"):
-            keys.add(field["ref_ci_type"])
+        if isinstance(field, dict):
+            ref = field.get("ref_ci_type_id") or field.get("ref_ci_type")
+            if ref:
+                keys.add(ref)
     return keys
 
 
 def _relation_type_payload_model_keys(payload: dict) -> set[str]:
-    keys = set(payload.get("source_ci_types") or []) | set(
-        payload.get("target_ci_types") or []
+    keys = set(payload.get("source_ci_type_ids") or []) | set(
+        payload.get("target_ci_type_ids") or []
     )
     for field in payload.get("relation_fields") or []:
-        if isinstance(field, dict) and field.get("ref_ci_type"):
-            keys.add(field["ref_ci_type"])
+        if isinstance(field, dict):
+            ref = field.get("ref_ci_type_id") or field.get("ref_ci_type")
+            if ref:
+                keys.add(ref)
     return keys
 
 
 def _relation_type_has_unrestricted_end(relation_type) -> bool:
     if isinstance(relation_type, dict):
-        source_ci_types = relation_type.get("source_ci_types") or []
-        target_ci_types = relation_type.get("target_ci_types") or []
+        source_ci_types = _relation_source_model_ids(relation_type)
+        target_ci_types = _relation_target_model_ids(relation_type)
     else:
-        source_ci_types = relation_type.source_ci_types or []
-        target_ci_types = relation_type.target_ci_types or []
+        source_ci_types = _relation_source_model_ids(relation_type)
+        target_ci_types = _relation_target_model_ids(relation_type)
     return not source_ci_types or not target_ci_types
 
 
-def _relation_type_references_ci_type(relation_type, ci_type_key: str) -> bool:
-    return ci_type_key in _relation_type_model_keys(relation_type)
+def _relation_type_references_ci_type(relation_type, ci_type_id: str) -> bool:
+    return ci_type_id in _relation_type_model_keys(relation_type)
 
 
 async def ensure_relation_type_structure_unlocked(
@@ -1621,8 +1733,11 @@ async def delete_ci_type(
         active_ci = (
             await SupplyChainCi.filter(
                 tenant_id=tenant,
-                ci_type_key=ci_type.key,
-                deleted=False,
+                **(
+                    {"ci_type_id": ci_type.id}
+                    if _looks_like_uuid(key_or_id)
+                    else {"ci_type_key": ci_type.key}
+                ),
             )
             .using_db(connection)
             .order_by("id")
@@ -1634,7 +1749,6 @@ async def delete_ci_type(
         relation_types = (
             await SupplyChainCiRelationType.filter(
                 tenant_id=tenant,
-                deleted=False,
             )
             .using_db(connection)
             .order_by("key")
@@ -1644,33 +1758,34 @@ async def delete_ci_type(
         related_relation_types = [
             relation_type
             for relation_type in relation_types
-            if _relation_type_references_ci_type(relation_type, ci_type.key)
+            if _relation_type_references_ci_type(relation_type, ci_type.id)
+            or _relation_type_references_ci_type(relation_type, ci_type.key)
         ]
         if related_relation_types:
             raise CustomError(ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES)
         referencing_fields = (
             await SupplyChainCiFieldDef.filter(
                 tenant_id=tenant,
-                ref_ci_type=ci_type.key,
-                deleted=False,
+                **(
+                    {"ref_ci_type_id": ci_type.id}
+                    if _looks_like_uuid(key_or_id)
+                    else {"ref_ci_type": ci_type.key}
+                ),
             )
             .using_db(connection)
             .order_by("ci_type_key", "field_key")
             .select_for_update()
             .all()
         )
-        if any(field.ci_type_key != ci_type.key for field in referencing_fields):
+        if any(_field_model_id(field) not in {ci_type.id, ci_type.key} for field in referencing_fields):
             raise CustomError(ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES)
-        ci_type.deleted = True
-        await ci_type.save(
-            using_db=connection,
-            update_fields=["deleted", "utime"],
-        )
+        # Empty models have no historical identity to retain. Remove their own
+        # definitions first, then hard-delete the model so names can be reused.
         await SupplyChainCiFieldDef.filter(
             tenant_id=tenant,
-            ci_type_key=ci_type.key,
-            deleted=False,
-        ).using_db(connection).update(deleted=True)
+            ci_type_id=ci_type.id,
+        ).using_db(connection).delete()
+        await ci_type.delete(using_db=connection)
         return {"id": ci_type.id}
 
 
@@ -1736,7 +1851,7 @@ async def delete_relation(
         )
         await lock_ci_type_keys_for_structure(
             tenant,
-            {ci.ci_type_key for ci in ci_by_id.values()},
+            {_ci_model_id(ci) for ci in ci_by_id.values()},
             connection,
             include_deleted=True,
             require_all=False,
@@ -1755,11 +1870,19 @@ async def export_model_package(
     include_related: bool = False,
     include_relations: bool = False,
 ) -> dict:
-    requested_keys = list(dict.fromkeys(ci_type_keys or []))
+    requested_refs = list(dict.fromkeys(ci_type_keys or []))
+    requested_models = []
+    if requested_refs:
+        requested_models = await SupplyChainCiType.filter(
+            Q(id__in=requested_refs) | Q(key__in=requested_refs),
+            tenant_id=tenant,
+            deleted=False,
+        ).all()
+    requested_keys = [model.key for model in requested_models]
     keys = requested_keys[:]
     relation_types = await SupplyChainCiRelationType.filter(tenant_id=tenant, deleted=False).order_by("key").all()
 
-    if requested_keys:
+    if requested_refs:
         relation_types = [
             item for item in relation_types
             if set(item.source_ci_types or []).intersection(requested_keys)
@@ -1802,6 +1925,12 @@ MODEL_PACKAGE_IDENTITY_FIELDS = {
     "creator",
     "updater",
     "deleted",
+    # Runtime model UUIDs are local to one installation. Portable packages
+    # keep using their hidden key references and remap them on import.
+    "ci_type_id",
+    "ref_ci_type_id",
+    "source_ci_type_ids",
+    "target_ci_type_ids",
 }
 
 
@@ -1852,6 +1981,9 @@ def normalize_model_package(package: dict) -> dict:
     relation_types = normalized_items("relation_types")
     for item in relation_types:
         item["key"] = validate_key(item.get("key"))
+        for field in item.get("relation_fields") or []:
+            if isinstance(field, dict):
+                field.pop("ref_ci_type_id", None)
 
     return {
         "ci_types": ci_types,

@@ -51,6 +51,9 @@ large_screen_permissions = importlib.import_module(
 skill_management_permissions = importlib.import_module(
     "migrations.models.68_20260710170000_add_skill_management_license_permission_menu"
 )
+tenant_admin_and_report_labels = importlib.import_module(
+    "migrations.models.76_20260717143000_fix_tenant_admin_and_report_permission_labels"
+)
 
 
 def _compact(text: str) -> str:
@@ -451,6 +454,14 @@ def test_command_center_migration_splits_expert_team_license_modules():
     assert "command_center:r" in upgrade_sql
     assert "digital_employee:r" in upgrade_sql
     assert "agent:r" in upgrade_sql
+
+
+def test_report_schedule_permission_has_a_distinct_label():
+    upgrade_sql = asyncio.run(tenant_admin_and_report_labels.upgrade(None))
+
+    assert 'WHERE "model" = \'agent_report_schedule\'' in upgrade_sql
+    assert '"description" = \'汇报任务\'' in upgrade_sql
+    assert 'AND "description" = \'汇报助手\'' in upgrade_sql
 
 
 def test_skill_management_permission_menu_is_split_from_digital_employee():

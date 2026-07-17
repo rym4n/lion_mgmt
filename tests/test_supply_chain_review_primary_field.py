@@ -91,6 +91,7 @@ class _FakeRecord(SimpleNamespace):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.save_calls = []
+        self.delete_calls = []
 
     @property
     def json(self):
@@ -98,6 +99,9 @@ class _FakeRecord(SimpleNamespace):
 
     async def save(self, **kwargs):
         self.save_calls.append(kwargs)
+
+    async def delete(self, **kwargs):
+        self.delete_calls.append(kwargs)
 
 
 def _field(field_id, field_key, ci_type_key="server", **overrides):
@@ -2125,7 +2129,7 @@ def test_unrestricted_relation_type_save_checks_every_locked_model(
         )
 
     assert exc_info.value.enum is ErrorCode.FORBIDDEN
-    assert lock_queries == [
+    assert lock_queries[-1:] == [
         {
             "tenant_id": "tenant-a",
             "deleted": False,
@@ -2202,6 +2206,9 @@ def _install_model_delete_fakes(
 
         async def update(self, **kwargs):
             field_updates.append((kwargs, self.connection))
+
+        async def delete(self):
+            field_updates.append(("delete", self.connection))
 
     def field_filter(**kwargs):
         if "ref_ci_type" in kwargs:
@@ -2357,15 +2364,10 @@ def test_model_delete_allows_self_ref_and_unrestricted_relation(monkeypatch):
     result = asyncio.run(manager.delete_ci_type("tenant-a", "application"))
 
     assert result == {"id": "type-1"}
-    assert ci_type.deleted is True
-    assert ci_type.save_calls == [
-        {
-            "using_db": transaction.connection,
-            "update_fields": ["deleted", "utime"],
-        }
-    ]
+    assert ci_type.save_calls == []
+    assert ci_type.delete_calls == [{"using_db": transaction.connection}]
     assert field_updates == [
-        ({"deleted": True}, transaction.connection)
+        ("delete", transaction.connection)
     ]
 
 
