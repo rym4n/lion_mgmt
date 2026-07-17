@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 VIEWS_PATH = ROOT / "services/digital_employee/views.py"
 MANAGER_PATH = ROOT / "services/command_center/manager.py"
+COMMAND_VIEWS_PATH = ROOT / "services/command_center/views.py"
 
 
 def _function(path: Path, name: str) -> ast.AsyncFunctionDef:
@@ -44,3 +45,9 @@ def test_dispatch_only_loads_enabled_employees():
     source = _source(MANAGER_PATH, "dispatch_task")
 
     assert "CommandAgent.filter(tenant_id=task.tenant_id, deleted=False, enabled=True)" in source
+
+
+def test_command_center_agent_list_only_returns_enabled_employees():
+    source = _source(COMMAND_VIEWS_PATH, "list_agents")
+
+    assert "'enabled': True" in source

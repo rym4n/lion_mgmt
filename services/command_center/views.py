@@ -569,7 +569,7 @@ async def register_agent(request: Request):
 @command_bp.post("/agents/list")
 @openapi.definition(
     summary="查看智能体工作状态",
-    description="按租户查询未删除的指挥部智能体，可按状态过滤，并按status、load、agent_key排序。需要command_center:r权限。",
+    description="按租户查询已启用且未删除的指挥部智能体，可按状态过滤，并按status、load、agent_key排序。需要command_center:r权限。",
     body=_json_body(
         {
             "type": "object",
@@ -596,7 +596,7 @@ async def register_agent(request: Request):
 async def list_agents(request: Request):
     data = _require_json(request)
     tenant_id = request.ctx.session.get("tenant_id")
-    condition = {"tenant_id": tenant_id, "deleted": False}
+    condition = {"tenant_id": tenant_id, "deleted": False, "enabled": True}
     if data.get("status"):
         condition["status"] = data["status"]
     agents = await CommandAgent.filter(**condition).order_by("status", "load", "agent_key").all()

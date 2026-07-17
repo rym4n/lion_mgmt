@@ -418,6 +418,7 @@ async def relation_type_delete(request: Request):
 async def ci_list(request: Request):
     data = _json(request)
     page, size, offset = normalize_page(data)
+    ci_type = None
     condition = Q(tenant_id=tenant_id(request), deleted=False)
     if data.get("ci_type_id") or data.get("ci_type_key"):
         ci_type = await get_ci_type_or_404(
@@ -430,6 +431,37 @@ async def ci_list(request: Request):
     if data.get("keyword"):
         condition &= Q(name__icontains=data["keyword"])
     queryset = SupplyChainCi.filter(condition)
+
+    field_key = str(data.get("field_key") or "").strip()
+    field_keyword = str(data.get("field_keyword") or "")
+    if field_key and field_keyword:
+        if ci_type is None:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        fields = await fields_for_type(tenant_id(request), str(ci_type.id))
+        if not any(field.field_key == field_key for field in fields):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        exact = data.get("match_mode") == "exact"
+        expected = field_keyword.casefold()
+        matched_items = []
+        for item in await queryset.order_by("-utime").all():
+            value = (item.attributes or {}).get(field_key)
+            if value is None:
+                continue
+            actual = str(value).casefold()
+            matches = actual == expected if exact else expected in actual
+            if matches:
+                matched_items.append(item)
+        total = len(matched_items)
+        items = matched_items[offset : offset + size]
+        return response_ok(
+            {
+                "total": total,
+                "items": [item.json for item in items],
+                "page": page,
+                "size": size,
+            }
+        )
+
     total = await queryset.count()
     items = await queryset.order_by("-utime").offset(offset).limit(size).all()
     return response_ok({"total": total, "items": [item.json for item in items], "page": page, "size": size})
