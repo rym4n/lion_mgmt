@@ -86,14 +86,19 @@ async def get_visible_role(tenant_id: str, role_key: str) -> DigitalEmployeeRole
     return role
 
 
-async def get_visible_skills(tenant_id: str, skill_keys: list[str]) -> list[DigitalEmployeeSkill]:
+async def get_visible_skills(
+    tenant_id: str, skill_keys: list[str], enabled: bool | None = True
+) -> list[DigitalEmployeeSkill]:
     if not skill_keys:
         return []
     requested_keys = list(dict.fromkeys(skill_keys))
     query_keys = [key for key in requested_keys if key != AIOE_CLI_SKILL_KEY]
     skills = []
     if query_keys:
-        skills = await DigitalEmployeeSkill.filter(_visible_condition(tenant_id), skill_key__in=query_keys, enabled=True).all()
+        filters = {"skill_key__in": query_keys}
+        if enabled is not None:
+            filters["enabled"] = enabled
+        skills = await DigitalEmployeeSkill.filter(_visible_condition(tenant_id), **filters).all()
     preferred = prefer_tenant_records(skills, tenant_id, "skill_key")
     skills_by_key = {skill.skill_key: skill for skill in preferred}
     if AIOE_CLI_SKILL_KEY in requested_keys:

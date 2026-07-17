@@ -79,6 +79,7 @@ class CommandAgent(BaseModel):
     runtime = fields.CharField(max_length=30, default="lion_agent", description="运行时类型: lion_agent 等")
     prompt_config = fields.JSONField(default=dict, description="提示词扩展配置")
     is_builtin = fields.BooleanField(default=False, description="是否为内置智能体")
+    enabled = fields.BooleanField(default=True, description="是否启用")
     role = fields.ForeignKeyField(
         "models.DigitalEmployeeRole",
         null=True,
@@ -115,6 +116,7 @@ class CommandAgent(BaseModel):
             "runtime": self.runtime,
             "prompt_config": self.prompt_config,
             "is_builtin": self.is_builtin,
+            "enabled": self.enabled,
             "role_id": self.role_id,
             "role_key": self.role_key,
             "skill_keys": self.skill_keys,

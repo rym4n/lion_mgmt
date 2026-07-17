@@ -177,7 +177,7 @@ async def dispatch_task(task: CommandTask, operator_id: str | None = None) -> Co
     if task.status not in DISPATCHABLE_TASK_STATUS:
         return task
     coordinator = await ensure_default_coordinator_agent(task.tenant_id)
-    agents = await CommandAgent.filter(tenant_id=task.tenant_id, deleted=False).all()
+    agents = await CommandAgent.filter(tenant_id=task.tenant_id, deleted=False, enabled=True).all()
     decision = await choose_agent_with_lion_agent(task, agents, coordinator)
     selected_agent = None
 

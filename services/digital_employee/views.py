@@ -270,6 +270,17 @@ async def employee_update(request: Request):
     return response_ok(await _employee_payload(employee))
 
 
+@digital_employee_bp.post("/employee/toggle")
+@requires_permission("digital_employee:u")
+async def employee_toggle(request: Request):
+    data = _json(request)
+    employee = await _employee_or_404(_tenant_id(request), data.get("employee_id"))
+    employee.enabled = bool(data.get("enabled"))
+    await employee.save(update_fields=["enabled", "utime"])
+    await publish_command_center_update(employee.tenant_id, "employee_updated", employee.id)
+    return response_ok(await _employee_payload(employee))
+
+
 @digital_employee_bp.post("/employee/delete")
 @requires_permission("digital_employee:d")
 async def employee_delete(request: Request):
@@ -472,8 +483,18 @@ async def skill_save(request: Request):
     skill_key = str(data.get("skill_key") or data.get("key") or "").strip()
     if not skill_key or not data.get("name"):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    exists = await DigitalEmployeeSkill.filter(tenant_id=tenant_id, skill_key=skill_key, deleted=False).exists()
-    await _require_save_permission(request, exists, "digital_employee_skill:c", "digital_employee_skill:u")
+    visible = await DigitalEmployeeSkill.filter(_visible_filter(tenant_id), skill_key=skill_key).all()
+    existing = next(iter(prefer_tenant_records(visible, tenant_id, "skill_key")), None)
+    await _require_save_permission(request, existing is not None, "digital_employee_skill:c", "digital_employee_skill:u")
+    content_changed = not existing or any(
+        (
+            existing.name != data["name"],
+            existing.description != data.get("description"),
+            existing.skill_dir != (data.get("skill_dir") or ""),
+            existing.bindings != (data.get("bindings") or {}),
+            (existing.meta or {}).get("files") != data.get("files"),
+        )
+    )
     skill, _ = await DigitalEmployeeSkill.update_or_create(
         tenant_id=tenant_id,
         skill_key=skill_key,
@@ -482,13 +503,43 @@ async def skill_save(request: Request):
             "description": data.get("description"),
             "skill_dir": data.get("skill_dir") or "",
             "bindings": data.get("bindings") or {},
-            "require_approval": bool(data.get("require_approval", False)),
-            "version": int(data.get("version") or 1),
-            "enabled": bool(data.get("enabled", True)),
+            "require_approval": existing.require_approval if existing else False,
+            "version": existing.version + 1 if existing and content_changed else (existing.version if existing else 1),
+            "enabled": existing.enabled if existing else True,
             "meta": data,
             "deleted": False,
         },
     )
+    return response_ok(skill.json)
+
+
+@digital_employee_bp.post("/skill/toggle")
+@requires_permission("digital_employee_skill:u")
+async def skill_toggle(request: Request):
+    data = _json(request)
+    tenant_id = _tenant_id(request)
+    skills = await get_visible_skills(tenant_id, [data.get("skill_key")], enabled=None)
+    skill = skills[0]
+    if skill.tenant_id != tenant_id:
+        skill, _ = await DigitalEmployeeSkill.update_or_create(
+            tenant_id=tenant_id,
+            skill_key=skill.skill_key,
+            defaults={
+                "name": skill.name,
+                "description": skill.description,
+                "skill_dir": skill.skill_dir,
+                "bindings": skill.bindings,
+                "require_approval": skill.require_approval,
+                "version": skill.version,
+                "enabled": bool(data.get("enabled")),
+                "is_builtin": False,
+                "meta": skill.meta,
+                "deleted": False,
+            },
+        )
+    else:
+        skill.enabled = bool(data.get("enabled"))
+        await skill.save(update_fields=["enabled", "utime"])
     return response_ok(skill.json)
 
 
