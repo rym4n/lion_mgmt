@@ -317,6 +317,52 @@ def test_generated_field_key_uses_a_numeric_suffix_for_a_collision(monkeypatch):
         "fuwuqi_3",
     ]
 
+
+def test_generated_relation_key_uses_name_and_numeric_suffix(monkeypatch):
+    filter_calls = []
+
+    def relation_filter(**kwargs):
+        filter_calls.append(kwargs)
+        occupied = kwargs["key"] in {"yilai", "yilai_2"}
+        return _FakeQuery(SimpleNamespace(id="occupied") if occupied else None)
+
+    monkeypatch.setattr(
+        manager.SupplyChainCiRelationType,
+        "filter",
+        staticmethod(relation_filter),
+    )
+
+    key = asyncio.run(
+        manager._allocate_relation_key("tenant-a", "依赖", object())
+    )
+
+    assert key == "yilai_3"
+    assert [call["key"] for call in filter_calls] == [
+        "yilai",
+        "yilai_2",
+        "yilai_3",
+    ]
+
+
+def test_duplicate_relation_name_is_scoped_to_overlapping_models():
+    relation_type = SimpleNamespace(
+        name=" Depends On ",
+        source_ci_type_ids=["model-a"],
+        source_ci_types=[],
+        target_ci_type_ids=["model-b"],
+        target_ci_types=[],
+    )
+
+    assert manager._relation_name_overlaps(
+        relation_type, "depends on", {"model-b", "model-c"}
+    )
+    assert not manager._relation_name_overlaps(
+        relation_type, "depends on", {"model-c"}
+    )
+    assert not manager._relation_name_overlaps(
+        relation_type, "contains", {"model-a"}
+    )
+
 def test_save_field_creates_single_character_key(monkeypatch):
     ci_type = _ci_type(primary_field="")
     created = _field("field-1", "a")

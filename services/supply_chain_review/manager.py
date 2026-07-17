@@ -823,9 +823,31 @@ async def _allocate_field_key(
     return candidate
 
 
+async def _allocate_relation_key(tenant: str, name: str, connection) -> str:
+    base = _field_key_base(name)
+    candidate = base
+    suffix = 1
+    while await SupplyChainCiRelationType.filter(
+        tenant_id=tenant, key=candidate
+    ).using_db(connection).exists():
+        suffix += 1
+        suffix_text = f"_{suffix}"
+        candidate = f"{base[:64 - len(suffix_text)]}{suffix_text}"
+    return candidate
+
+
+def _relation_name_overlaps(relation_type, name: str, model_ids: set[str]) -> bool:
+    if str(relation_type.name or "").strip().casefold() != name.strip().casefold():
+        return False
+    relation_model_ids = set(_relation_source_model_ids(relation_type)) | set(
+        _relation_target_model_ids(relation_type)
+    )
+    return not model_ids or not relation_model_ids or bool(model_ids & relation_model_ids)
+
+
 def payload_relation_type(data: dict, operator: str | None) -> dict:
     data = require_dict(data)
-    key = validate_key(data.get("key"))
+    key = validate_key(data.get("key")) if data.get("key") else None
     cardinality = data.get("cardinality") or "n-n"
     if cardinality not in RELATION_CARDINALITIES:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -1339,22 +1361,44 @@ async def save_relation_type(
                 tenant_id=tenant,
                 deleted=False,
             )
-        else:
+        elif payload["key"]:
             query = SupplyChainCiRelationType.filter(
                 tenant_id=tenant,
                 key=payload["key"],
                 deleted=False,
             )
-        existing = (
-            await query.using_db(connection)
-            .order_by("key")
-            .select_for_update()
-            .first()
-        )
+        else:
+            query = None
+        existing = None
+        if query is not None:
+            existing = (
+                await query.using_db(connection)
+                .order_by("key")
+                .select_for_update()
+                .first()
+            )
         if data.get("id") and not existing:
             raise CustomError(ErrorCode.NOT_FOUND)
-        if data.get("id") and existing.key != payload["key"]:
-            raise CustomError(ErrorCode.PARAM_ERROR)
+        if existing:
+            payload["key"] = existing.key
+        elif not payload["key"]:
+            payload["key"] = await _allocate_relation_key(
+                tenant, payload["name"], connection
+            )
+        model_ids = set(payload["source_ci_type_ids"]) | set(
+            payload["target_ci_type_ids"]
+        )
+        relation_types = (
+            await SupplyChainCiRelationType.filter(tenant_id=tenant, deleted=False)
+            .using_db(connection)
+            .select_for_update()
+            .all()
+        )
+        for relation_type in relation_types:
+            if existing and relation_type.id == existing.id:
+                continue
+            if _relation_name_overlaps(relation_type, payload["name"], model_ids):
+                raise CustomError(ErrorCode.ASSET_RELATION_NAME_EXISTS)
         ensure_expected_existence(existing, expected_exists)
         await ensure_relation_type_structure_unlocked(
             tenant,
