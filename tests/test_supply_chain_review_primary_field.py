@@ -116,8 +116,6 @@ def _field(field_id, field_key, ci_type_key="server", **overrides):
         "ref_ci_type": None,
         "required": False,
         "unique": False,
-        "searchable": False,
-        "listable": True,
         "default_value": None,
         "sort": 0,
         "is_locked": False,

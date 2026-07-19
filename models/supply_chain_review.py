@@ -70,8 +70,6 @@ class SupplyChainCiFieldDef(BaseModel):
     ref_ci_type = fields.CharField(max_length=64, null=True, description="引用模型 key")
     required = fields.BooleanField(default=False, description="是否必填")
     unique = fields.BooleanField(default=False, description="是否唯一")
-    searchable = fields.BooleanField(default=False, description="是否可搜索")
-    listable = fields.BooleanField(default=True, description="是否列表展示")
     default_value = fields.JSONField(null=True, description="默认值")
     sort = fields.IntField(default=0, description="排序")
     is_locked = fields.BooleanField(default=False, description="锁定字段")
@@ -95,8 +93,6 @@ class SupplyChainCiFieldDef(BaseModel):
             "ref_ci_type": self.ref_ci_type,
             "required": self.required,
             "unique": self.unique,
-            "searchable": self.searchable,
-            "listable": self.listable,
             "default_value": self.default_value,
             "sort": self.sort,
             "is_locked": self.is_locked,

@@ -774,8 +774,6 @@ def payload_dynamic_field(data: dict, *, allow_missing_key: bool = False) -> dic
         "ref_ci_type_id": data.get("ref_ci_type_id") or data.get("ref_ci_type"),
         "required": bool(data.get("required", False)),
         "unique": bool(data.get("unique", False)),
-        "searchable": bool(data.get("searchable", False)),
-        "listable": bool(data.get("listable", True)),
         "default_value": data.get("default_value"),
         "sort": int(data.get("sort", 0) or 0),
         "is_locked": bool(data.get("is_locked", False)),
