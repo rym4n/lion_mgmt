@@ -214,7 +214,13 @@ def test_role_permission_all_labels_split_menu_actions_without_collapsing_granul
 
 def test_role_details_groups_nested_permissions_under_split_menu_model():
     structured = _build_structured_permissions(
-        ["supply_chain_review:model:r", "network_topology:r"],
+        [
+            "supply_chain_review:model:r",
+            "network_topology:c",
+            "network_topology:r",
+            "network_topology:u",
+            "network_topology:d",
+        ],
         [
             {
                 "model": "asset-management-models",
@@ -228,8 +234,10 @@ def test_role_details_groups_nested_permissions_under_split_menu_model():
                 "model": "network-management-topology",
                 "description": "网络拓扑",
                 "Permissions": [
+                    {"label": "新增网络拓扑权限", "value": "network_topology:c"},
                     {"label": "查看网络拓扑权限", "value": "network_topology:r"},
-                    {"label": "编辑网络拓扑权限", "value": "network_topology:w"},
+                    {"label": "修改网络拓扑权限", "value": "network_topology:u"},
+                    {"label": "删除网络拓扑权限", "value": "network_topology:d"},
                 ],
             },
         ],
@@ -239,7 +247,10 @@ def test_role_details_groups_nested_permissions_under_split_menu_model():
         {"supply_chain_review:model:r": "查看资产模型权限"}
     ]
     assert _by_model(structured)["network-management-topology"]["sp"] == [
-        {"network_topology:r": "查看网络拓扑权限"}
+        {"network_topology:c": "新增网络拓扑权限"},
+        {"network_topology:r": "查看网络拓扑权限"},
+        {"network_topology:u": "修改网络拓扑权限"},
+        {"network_topology:d": "删除网络拓扑权限"},
     ]
 
 

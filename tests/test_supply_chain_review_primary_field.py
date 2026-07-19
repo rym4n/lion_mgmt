@@ -37,6 +37,16 @@ class _FakeQuery:
             self.operations.append(("order_by", fields))
         return self
 
+    def annotate(self, **annotations):
+        if self.operations is not None:
+            self.operations.append(("annotate", tuple(annotations)))
+        return self
+
+    def group_by(self, *fields):
+        if self.operations is not None:
+            self.operations.append(("group_by", fields))
+        return self
+
     async def first(self):
         if self.operations is not None:
             self.operations.append("first")
@@ -65,6 +75,13 @@ class _FakeQuery:
     async def all(self):
         if self.operations is not None:
             self.operations.append("all")
+        if self.row is None:
+            return []
+        return self.row if isinstance(self.row, list) else [self.row]
+
+    async def values(self, *fields):
+        if self.operations is not None:
+            self.operations.append(("values", fields))
         if self.row is None:
             return []
         return self.row if isinstance(self.row, list) else [self.row]
@@ -1094,6 +1111,93 @@ def test_ci_type_list_orders_models_by_persisted_sort(monkeypatch):
 
     assert [item["id"] for item in payload["items"]] == ["type-2", "type-1"]
     assert ("order_by", ("sort", "key")) in operations
+
+
+def test_ci_type_list_optionally_aggregates_instance_counts(monkeypatch):
+    models = [
+        _ci_type(id="type-1", key="server", sort=1),
+        _ci_type(id="type-2", key="database", sort=2),
+    ]
+    aggregate_operations = []
+    instance_filter_calls = []
+
+    monkeypatch.setattr(
+        views.SupplyChainCiType,
+        "filter",
+        staticmethod(lambda *_args, **_kwargs: _FakeQuery(models)),
+    )
+
+    def instance_filter(**kwargs):
+        instance_filter_calls.append(kwargs)
+        return _FakeQuery(
+            [{"ci_type_id": "type-1", "instance_count": 3}],
+            aggregate_operations,
+        )
+
+    monkeypatch.setattr(
+        views.SupplyChainCi,
+        "filter",
+        staticmethod(instance_filter),
+    )
+    monkeypatch.setattr(views, "response_ok", lambda payload: payload)
+    request = SimpleNamespace(
+        json={"page": 1, "size": 100, "include_instance_count": True},
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+    )
+
+    payload = asyncio.run(inspect.unwrap(views.ci_type_list)(request))
+
+    assert instance_filter_calls == [
+        {
+            "tenant_id": "tenant-a",
+            "ci_type_id__in": ["type-1", "type-2"],
+            "deleted": False,
+        }
+    ]
+    assert [item["instance_count"] for item in payload["items"]] == [3, 0]
+    assert ("annotate", ("instance_count",)) in aggregate_operations
+    assert ("group_by", ("ci_type_id",)) in aggregate_operations
+    assert ("values", ("ci_type_id", "instance_count")) in aggregate_operations
+
+
+def test_ci_type_list_skips_instance_query_without_count_option(monkeypatch):
+    monkeypatch.setattr(
+        views.SupplyChainCiType,
+        "filter",
+        staticmethod(lambda *_args, **_kwargs: _FakeQuery([_ci_type()])),
+    )
+
+    def unexpected_instance_query(**_kwargs):
+        raise AssertionError("instance counts must remain opt-in")
+
+    monkeypatch.setattr(
+        views.SupplyChainCi,
+        "filter",
+        staticmethod(unexpected_instance_query),
+    )
+    monkeypatch.setattr(views, "response_ok", lambda payload: payload)
+    request = SimpleNamespace(
+        json={"page": 1, "size": 100},
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+    )
+
+    payload = asyncio.run(inspect.unwrap(views.ci_type_list)(request))
+
+    assert "instance_count" not in payload["items"][0]
+
+
+def test_required_attachment_field_rejects_empty_file_id_list():
+    field = _field(
+        "field-1",
+        "evidence",
+        data_type="attachment",
+        required=True,
+    )
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(manager.validate_field_value("tenant-a", field, []))
+
+    assert exc_info.value.enum is ErrorCode.PARAM_ERROR
 
 
 def test_ci_type_sort_migration_backfills_and_indexes_the_new_order():

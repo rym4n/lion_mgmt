@@ -662,11 +662,11 @@ def serialize_ci_field(field: SupplyChainCiFieldDef, primary_field: str) -> dict
 
 
 async def validate_field_value(tenant: str, field, value):
-    if value in (None, ""):
+    data_type = field_attr(field, "data_type")
+    if value in (None, "") or (data_type == "attachment" and value == []):
         if field_attr(field, "required", False):
             raise CustomError(ErrorCode.PARAM_ERROR)
         return
-    data_type = field_attr(field, "data_type")
     if data_type == "number" and not isinstance(value, (int, float)):
         raise CustomError(ErrorCode.PARAM_ERROR)
     if data_type == "bool" and not isinstance(value, bool):

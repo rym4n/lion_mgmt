@@ -396,6 +396,35 @@ def test_asset_network_route_meta_carries_menu_read_permissions():
         assert "supply_chain_review:policy:r" in text
 
 
+def test_network_topology_installer_uses_crud_and_migrates_legacy_write_permission():
+    init_sql = (ROOT / "aioe_package/aioe_install/init.sql").read_text()
+    menu_row = next(
+        line
+        for line in init_sql.splitlines()
+        if "'network-management-topology-perm'" in line
+    )
+
+    assert (
+        '["network_topology:c","network_topology:r",'
+        '"network_topology:u","network_topology:d"]'
+    ) in menu_row
+    assert "network_topology:w" not in menu_row
+
+    assert "WHERE permission_value <> 'network_topology:w'" in init_sql
+    assert "? 'network_topology:w'" in init_sql
+    for replacement in (
+        "network_topology:c",
+        "network_topology:u",
+        "network_topology:d",
+    ):
+        assert replacement in init_sql
+
+    route_read_meta = "'permissions', '[\"network_topology:r\"]'::jsonb"
+    route_auth_meta = "'auths', '[\"network_topology:r\"]'::jsonb"
+    assert route_read_meta in init_sql
+    assert route_auth_meta in init_sql
+
+
 def test_asset_data_menu_label_migration_repairs_previously_applied_menu():
     upgrade_sql = asyncio.run(asset_data_menu_label.upgrade(None))
     downgrade_sql = asyncio.run(asset_data_menu_label.downgrade(None))

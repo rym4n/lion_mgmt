@@ -4,6 +4,7 @@ from __future__ import annotations
 from sanic import Blueprint, Request
 from sanic_ext import openapi
 from tortoise.expressions import Q
+from tortoise.functions import Count
 
 from core.error_code import ErrorCode
 from core.response import response_ok
@@ -219,13 +220,38 @@ async def _require_model_package_permissions(
 async def ci_type_list(request: Request):
     data = _json(request)
     page, size, offset = normalize_page(data)
-    condition = Q(tenant_id=tenant_id(request), deleted=False) & _keyword_condition(data.get("keyword"))
+    tenant = tenant_id(request)
+    condition = Q(tenant_id=tenant, deleted=False) & _keyword_condition(data.get("keyword"))
     if data.get("status"):
         condition &= Q(status=data["status"])
     queryset = SupplyChainCiType.filter(condition)
     total = await queryset.count()
     items = await queryset.order_by("sort", "key").offset(offset).limit(size).all()
-    return response_ok({"total": total, "items": [item.json for item in items], "page": page, "size": size})
+    payload_items = [item.json for item in items]
+    if data.get("include_instance_count") and items:
+        counts = await (
+            SupplyChainCi.filter(
+                tenant_id=tenant,
+                ci_type_id__in=[item.id for item in items],
+                deleted=False,
+            )
+            .annotate(instance_count=Count("id"))
+            .group_by("ci_type_id")
+            .values("ci_type_id", "instance_count")
+        )
+        counts_by_type = {
+            row["ci_type_id"]: row["instance_count"] for row in counts
+        }
+        for item in payload_items:
+            item["instance_count"] = counts_by_type.get(item["id"], 0)
+    return response_ok(
+        {
+            "total": total,
+            "items": payload_items,
+            "page": page,
+            "size": size,
+        }
+    )
 
 
 @supply_chain_review_cmdb_bp.post("/ci-type/detail")
