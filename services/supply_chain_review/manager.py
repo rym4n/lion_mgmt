@@ -726,7 +726,22 @@ def payload_ci_type(data: dict, operator: str | None) -> dict:
     key = validate_key(data.get("key")) if data.get("key") else None
     category = data.get("category") or "asset"
     status = data.get("status") or "active"
-    if category not in CI_TYPE_CATEGORIES or status not in CI_TYPE_STATUSES:
+    raw_sort = data.get("sort", 0)
+    if raw_sort is None or raw_sort == "":
+        raw_sort = 0
+    try:
+        if isinstance(raw_sort, bool) or (
+            isinstance(raw_sort, float) and not raw_sort.is_integer()
+        ):
+            raise ValueError
+        sort = int(raw_sort)
+    except (TypeError, ValueError):
+        raise CustomError(ErrorCode.PARAM_ERROR) from None
+    if (
+        category not in CI_TYPE_CATEGORIES
+        or status not in CI_TYPE_STATUSES
+        or sort < 0
+    ):
         raise CustomError(ErrorCode.PARAM_ERROR)
     return {
         "key": key,
@@ -737,6 +752,7 @@ def payload_ci_type(data: dict, operator: str | None) -> dict:
         "primary_field": "",
         "status": status,
         "is_locked": bool(data.get("is_locked", False)),
+        "sort": sort,
         "updater": operator,
     }
 
@@ -980,9 +996,11 @@ async def save_ci_type(
     *,
     expected_exists: bool | None = None,
     allow_unlock: bool = True,
+    allow_sort_update: bool = False,
     connection=None,
 ) -> SupplyChainCiType:
     payload = payload_ci_type(data, operator)
+    sort_was_provided = allow_sort_update and "sort" in data
     if not data.get("id") and not payload["key"]:
         payload["key"] = f"m_{uuid.uuid4().hex}"
     async with structure_write_transaction(tenant, connection) as connection:
@@ -1029,6 +1047,8 @@ async def save_ci_type(
             for key in ("category", "color", "icon"):
                 if key not in data:
                     payload.pop(key, None)
+            if not sort_was_provided:
+                payload.pop("sort", None)
             payload.pop("primary_field", None)
             for key, value in payload.items():
                 setattr(existing, key, value)
@@ -1037,12 +1057,70 @@ async def save_ci_type(
                 update_fields=[*payload, "utime"],
             )
             return existing
+        if not sort_was_provided:
+            last_model = (
+                await SupplyChainCiType.filter(
+                    tenant_id=tenant,
+                    deleted=False,
+                )
+                .using_db(connection)
+                .order_by("-sort", "-ctime")
+                .first()
+            )
+            payload["sort"] = max(0, int(getattr(last_model, "sort", 0) or 0)) + 1
         return await SupplyChainCiType.create(
             using_db=connection,
             tenant_id=tenant,
             creator=operator,
             **payload,
         )
+
+
+async def reorder_ci_types(
+    tenant: str,
+    ci_type_ids: list[str] | None,
+    operator: str | None,
+    *,
+    connection=None,
+) -> list[SupplyChainCiType]:
+    if (
+        not isinstance(ci_type_ids, list)
+        or any(
+            not isinstance(ci_type_id, str) or not ci_type_id
+            for ci_type_id in ci_type_ids
+        )
+        or len(ci_type_ids) != len(set(ci_type_ids))
+    ):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    async with structure_write_transaction(tenant, connection) as connection:
+        active_models = (
+            await SupplyChainCiType.filter(
+                tenant_id=tenant,
+                deleted=False,
+            )
+            .using_db(connection)
+            .order_by("sort", "key")
+            .select_for_update()
+            .all()
+        )
+        models_by_id = {str(model.id): model for model in active_models}
+        if len(ci_type_ids) != len(active_models) or set(ci_type_ids) != set(
+            models_by_id
+        ):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+        ordered_models = [models_by_id[ci_type_id] for ci_type_id in ci_type_ids]
+        for position, model in enumerate(ordered_models, start=1):
+            if model.sort == position:
+                continue
+            model.sort = position
+            model.updater = operator
+            await model.save(
+                using_db=connection,
+                update_fields=["sort", "updater", "utime"],
+            )
+    return ordered_models
 
 
 async def save_field(
@@ -1198,6 +1276,66 @@ async def save_field(
                 update_fields=["primary_field", "updater", "utime"],
             )
     return item
+
+
+async def reorder_fields(
+    tenant: str,
+    ci_type_ref: str | None,
+    field_ids: list[str] | None,
+    operator: str | None,
+    *,
+    connection=None,
+) -> list[SupplyChainCiFieldDef]:
+    if (
+        not ci_type_ref
+        or not isinstance(field_ids, list)
+        or any(not isinstance(field_id, str) or not field_id for field_id in field_ids)
+        or len(field_ids) != len(set(field_ids))
+    ):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    async with structure_write_transaction(tenant, connection) as connection:
+        ci_type = (
+            await SupplyChainCiType.filter(
+                tenant_id=tenant,
+                deleted=False,
+                **_model_ref_filter(ci_type_ref),
+            )
+            .using_db(connection)
+            .select_for_update()
+            .first()
+        )
+        if not ci_type:
+            raise CustomError(ErrorCode.NOT_FOUND)
+        if ci_type.is_locked:
+            raise CustomError(ErrorCode.FORBIDDEN)
+
+        active_fields = (
+            await SupplyChainCiFieldDef.filter(
+                tenant_id=tenant,
+                ci_type_id=ci_type.id,
+                deleted=False,
+            )
+            .using_db(connection)
+            .order_by("sort", "ctime")
+            .select_for_update()
+            .all()
+        )
+        fields_by_id = {str(field.id): field for field in active_fields}
+        if len(field_ids) != len(active_fields) or set(field_ids) != set(fields_by_id):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+        ordered_fields = [fields_by_id[field_id] for field_id in field_ids]
+        for position, field in enumerate(ordered_fields, start=1):
+            if field.sort == position:
+                continue
+            field.sort = position
+            field.updater = operator
+            await field.save(
+                using_db=connection,
+                update_fields=["sort", "updater", "utime"],
+            )
+    return ordered_fields
 
 
 async def delete_field(
@@ -2011,7 +2149,7 @@ async def export_model_package(
     condition = Q(tenant_id=tenant, deleted=False)
     if keys:
         condition &= Q(key__in=keys)
-    ci_types = await SupplyChainCiType.filter(condition).order_by("key").all()
+    ci_types = await SupplyChainCiType.filter(condition).order_by("sort", "key").all()
     keys = [item.key for item in ci_types]
     if include_relations and not include_related:
         exported_key_set = set(keys)
@@ -2181,6 +2319,7 @@ async def _import_model_package_locked(
             operator,
             expected_exists=expected("ci_types", item["key"]),
             allow_unlock=False,
+            allow_sort_update=True,
             connection=connection,
         )
         created_or_updated["ci_types"] += 1

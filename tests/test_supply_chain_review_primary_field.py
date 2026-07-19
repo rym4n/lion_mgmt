@@ -47,6 +47,21 @@ class _FakeQuery:
     async def exists(self):
         return self.row is not None
 
+    async def count(self):
+        if self.row is None:
+            return 0
+        return len(self.row) if isinstance(self.row, list) else 1
+
+    def offset(self, value):
+        if self.operations is not None:
+            self.operations.append(("offset", value))
+        return self
+
+    def limit(self, value):
+        if self.operations is not None:
+            self.operations.append(("limit", value))
+        return self
+
     async def all(self):
         if self.operations is not None:
             self.operations.append("all")
@@ -136,6 +151,7 @@ def _ci_type(primary_field="name", **overrides):
         "primary_field": primary_field,
         "status": "active",
         "is_locked": False,
+        "sort": 0,
     }
     payload.update(overrides)
     return _FakeRecord(_json=payload, **payload)
@@ -406,6 +422,145 @@ def test_save_field_generates_an_internal_key_when_the_api_omits_it(monkeypatch)
 
     assert item is created
     assert create_kwargs["field_key"] == "fuwuqi"
+
+
+def test_reorder_fields_persists_the_complete_order_atomically(monkeypatch):
+    ci_type = _ci_type(primary_field="hostname")
+    hostname = _field("field-1", "hostname", sort=1)
+    address = _field("field-2", "ip_address", sort=2)
+    transaction = _install_transaction(monkeypatch)
+
+    monkeypatch.setattr(
+        manager.SupplyChainCiType,
+        "filter",
+        staticmethod(lambda **_kwargs: _FakeQuery(ci_type)),
+    )
+    monkeypatch.setattr(
+        manager.SupplyChainCiFieldDef,
+        "filter",
+        staticmethod(lambda **_kwargs: _FakeQuery([hostname, address])),
+    )
+
+    result = asyncio.run(
+        manager.reorder_fields(
+            "tenant-a",
+            "server",
+            ["field-2", "field-1"],
+            "admin",
+        )
+    )
+
+    assert result == [address, hostname]
+    assert [address.sort, hostname.sort] == [1, 2]
+    assert address.updater == hostname.updater == "admin"
+    expected_save = {
+        "using_db": transaction.connection,
+        "update_fields": ["sort", "updater", "utime"],
+    }
+    assert address.save_calls == [expected_save]
+    assert hostname.save_calls == [expected_save]
+
+
+def test_reorder_fields_rejects_an_incomplete_field_set(monkeypatch):
+    ci_type = _ci_type()
+    fields = [
+        _field("field-1", "hostname", sort=1),
+        _field("field-2", "ip_address", sort=2),
+    ]
+    _install_transaction(monkeypatch)
+    monkeypatch.setattr(
+        manager.SupplyChainCiType,
+        "filter",
+        staticmethod(lambda **_kwargs: _FakeQuery(ci_type)),
+    )
+    monkeypatch.setattr(
+        manager.SupplyChainCiFieldDef,
+        "filter",
+        staticmethod(lambda **_kwargs: _FakeQuery(fields)),
+    )
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(
+            manager.reorder_fields(
+                "tenant-a",
+                "server",
+                ["field-1"],
+                "admin",
+            )
+        )
+
+    assert exc_info.value.enum is ErrorCode.PARAM_ERROR
+    assert all(field.save_calls == [] for field in fields)
+
+
+def test_reorder_fields_rejects_a_locked_model(monkeypatch):
+    ci_type = _ci_type(is_locked=True)
+    field = _field("field-1", "hostname", sort=1)
+    _install_transaction(monkeypatch)
+    monkeypatch.setattr(
+        manager.SupplyChainCiType,
+        "filter",
+        staticmethod(lambda **_kwargs: _FakeQuery(ci_type)),
+    )
+    monkeypatch.setattr(
+        manager.SupplyChainCiFieldDef,
+        "filter",
+        staticmethod(lambda **_kwargs: _FakeQuery([field])),
+    )
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(
+            manager.reorder_fields(
+                "tenant-a",
+                "server",
+                ["field-1"],
+                "admin",
+            )
+        )
+
+    assert exc_info.value.enum is ErrorCode.FORBIDDEN
+    assert field.save_calls == []
+
+
+def test_field_reorder_endpoint_forwards_the_requested_order(monkeypatch):
+    ci_type = _ci_type(primary_field="hostname")
+    fields = [
+        _field("field-2", "ip_address", sort=1),
+        _field("field-1", "hostname", sort=2),
+    ]
+    reorder_calls = []
+
+    async def reorder(tenant, ci_type_ref, field_ids, operator):
+        reorder_calls.append((tenant, ci_type_ref, field_ids, operator))
+        return fields
+
+    async def get_ci_type(tenant, ci_type_ref):
+        assert (tenant, ci_type_ref) == ("tenant-a", "type-1")
+        return ci_type
+
+    monkeypatch.setattr(views, "reorder_fields", reorder)
+    monkeypatch.setattr(views, "get_ci_type_or_404", get_ci_type)
+    monkeypatch.setattr(views, "response_ok", lambda payload: payload)
+
+    request = SimpleNamespace(
+        json={
+            "ci_type_id": "type-1",
+            "field_ids": ["field-2", "field-1"],
+        },
+        ctx=SimpleNamespace(
+            session={
+                "tenant_id": "tenant-a",
+                "account_info": {"username": "admin"},
+            }
+        ),
+    )
+    payload = asyncio.run(inspect.unwrap(views.ci_field_reorder)(request))
+
+    assert reorder_calls == [
+        ("tenant-a", "type-1", ["field-2", "field-1"], "admin")
+    ]
+    assert [item["id"] for item in payload["items"]] == ["field-2", "field-1"]
+    assert payload["total"] == 2
 
 
 def test_save_field_rejects_create_intent_for_existing_key(monkeypatch):
@@ -739,6 +894,7 @@ def test_model_edit_preserves_hidden_legacy_fields_when_omitted(monkeypatch):
     assert ci_type.color == "#abcdef"
     assert ci_type.icon == "server"
     assert ci_type.primary_field == "hostname"
+    assert ci_type.sort == 0
     assert ci_type.save_calls == [
         {
             "using_db": transaction.connection,
@@ -788,7 +944,171 @@ def test_new_model_starts_without_implicit_primary_field(monkeypatch):
 
     assert item is created
     assert create_kwargs["primary_field"] == ""
+    assert create_kwargs["sort"] == 1
     assert create_kwargs["using_db"] is transaction.connection
+
+
+@pytest.mark.parametrize("sort", [-1, 1.5, True, "not-a-number", []])
+def test_model_payload_rejects_invalid_sort(sort):
+    with pytest.raises(CustomError) as exc_info:
+        manager.payload_ci_type(
+            {"key": "server", "name": "服务器", "sort": sort},
+            "admin",
+        )
+
+    assert exc_info.value.enum is ErrorCode.PARAM_ERROR
+
+
+def test_regular_model_save_cannot_overwrite_drag_order(monkeypatch):
+    ci_type = _ci_type(sort=7)
+    transaction = _install_transaction(monkeypatch)
+    monkeypatch.setattr(
+        manager.SupplyChainCiType,
+        "filter",
+        staticmethod(lambda *_args, **_kwargs: _FakeQuery(ci_type)),
+    )
+
+    asyncio.run(
+        manager.save_ci_type(
+            "tenant-a",
+            {
+                "id": "type-1",
+                "key": "server",
+                "name": "服务器模型",
+                "sort": 2,
+            },
+            "admin",
+        )
+    )
+
+    assert ci_type.sort == 7
+    assert ci_type.save_calls == [
+        {
+            "using_db": transaction.connection,
+            "update_fields": ["key", "name", "status", "is_locked", "updater", "utime"],
+        }
+    ]
+
+
+def test_reorder_ci_types_persists_the_complete_order_atomically(monkeypatch):
+    server = _ci_type(id="type-1", key="server", sort=1)
+    database = _ci_type(id="type-2", key="database", sort=2)
+    transaction = _install_transaction(monkeypatch)
+    monkeypatch.setattr(
+        manager.SupplyChainCiType,
+        "filter",
+        staticmethod(lambda **_kwargs: _FakeQuery([server, database])),
+    )
+
+    result = asyncio.run(
+        manager.reorder_ci_types(
+            "tenant-a",
+            ["type-2", "type-1"],
+            "admin",
+        )
+    )
+
+    assert result == [database, server]
+    assert [database.sort, server.sort] == [1, 2]
+    expected_save = {
+        "using_db": transaction.connection,
+        "update_fields": ["sort", "updater", "utime"],
+    }
+    assert database.save_calls == [expected_save]
+    assert server.save_calls == [expected_save]
+
+
+def test_reorder_ci_types_rejects_an_incomplete_model_set(monkeypatch):
+    models = [
+        _ci_type(id="type-1", key="server", sort=1),
+        _ci_type(id="type-2", key="database", sort=2),
+    ]
+    _install_transaction(monkeypatch)
+    monkeypatch.setattr(
+        manager.SupplyChainCiType,
+        "filter",
+        staticmethod(lambda **_kwargs: _FakeQuery(models)),
+    )
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(
+            manager.reorder_ci_types(
+                "tenant-a",
+                ["type-1"],
+                "admin",
+            )
+        )
+
+    assert exc_info.value.enum is ErrorCode.PARAM_ERROR
+    assert all(model.save_calls == [] for model in models)
+
+
+def test_ci_type_reorder_endpoint_forwards_the_requested_order(monkeypatch):
+    models = [
+        _ci_type(id="type-2", key="database", sort=1),
+        _ci_type(id="type-1", key="server", sort=2),
+    ]
+    reorder_calls = []
+
+    async def reorder(tenant, ci_type_ids, operator):
+        reorder_calls.append((tenant, ci_type_ids, operator))
+        return models
+
+    monkeypatch.setattr(views, "reorder_ci_types", reorder)
+    monkeypatch.setattr(views, "response_ok", lambda payload: payload)
+    request = SimpleNamespace(
+        json={"ci_type_ids": ["type-2", "type-1"]},
+        ctx=SimpleNamespace(
+            session={
+                "tenant_id": "tenant-a",
+                "account_info": {"username": "admin"},
+            }
+        ),
+    )
+
+    payload = asyncio.run(inspect.unwrap(views.ci_type_reorder)(request))
+
+    assert reorder_calls == [("tenant-a", ["type-2", "type-1"], "admin")]
+    assert [item["id"] for item in payload["items"]] == ["type-2", "type-1"]
+    assert payload["total"] == 2
+
+
+def test_ci_type_list_orders_models_by_persisted_sort(monkeypatch):
+    operations = []
+    models = [
+        _ci_type(id="type-2", key="database", sort=1),
+        _ci_type(id="type-1", key="server", sort=2),
+    ]
+    monkeypatch.setattr(
+        views.SupplyChainCiType,
+        "filter",
+        staticmethod(lambda *_args, **_kwargs: _FakeQuery(models, operations)),
+    )
+    monkeypatch.setattr(views, "response_ok", lambda payload: payload)
+    request = SimpleNamespace(
+        json={"page": 1, "size": 100},
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+    )
+
+    payload = asyncio.run(inspect.unwrap(views.ci_type_list)(request))
+
+    assert [item["id"] for item in payload["items"]] == ["type-2", "type-1"]
+    assert ("order_by", ("sort", "key")) in operations
+
+
+def test_ci_type_sort_migration_backfills_and_indexes_the_new_order():
+    migration = importlib.import_module(
+        "migrations.models.80_20260719120000_add_ci_type_sort"
+    )
+
+    upgrade_sql = asyncio.run(migration.upgrade(None))
+    downgrade_sql = asyncio.run(migration.downgrade(None))
+
+    assert 'ADD COLUMN "sort" INT NOT NULL DEFAULT 0' in upgrade_sql
+    assert 'PARTITION BY "tenant_id"' in upgrade_sql
+    assert 'ORDER BY "deleted", "key", "ctime", "id"' in upgrade_sql
+    assert 'idx_supply_chain_ci_type_tenant_sort' in upgrade_sql
+    assert 'DROP COLUMN "sort"' in downgrade_sql
 
 
 def test_model_save_rejects_create_to_update_race(monkeypatch):
@@ -1294,6 +1614,7 @@ def test_model_package_stages_new_locked_model_until_structure_is_imported(
     assert result == {"ci_types": 1, "fields": 0, "relation_types": 0}
     assert saved_payloads[0][0]["is_locked"] is False
     assert saved_payloads[0][1]["allow_unlock"] is False
+    assert saved_payloads[0][1]["allow_sort_update"] is True
     assert saved_payloads[0][1]["connection"] is transaction.connection
     assert final_filter_calls == [
         {

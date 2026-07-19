@@ -49,6 +49,8 @@ from services.supply_chain_review.manager import (
     overview_summary,
     overview_todo,
     policy_change_external_callback,
+    reorder_ci_types,
+    reorder_fields,
     retry_collection_run,
     risk_to_review_issue,
     run_collection_task,
@@ -222,7 +224,7 @@ async def ci_type_list(request: Request):
         condition &= Q(status=data["status"])
     queryset = SupplyChainCiType.filter(condition)
     total = await queryset.count()
-    items = await queryset.order_by("key").offset(offset).limit(size).all()
+    items = await queryset.order_by("sort", "key").offset(offset).limit(size).all()
     return response_ok({"total": total, "items": [item.json for item in items], "page": page, "size": size})
 
 
@@ -259,6 +261,24 @@ async def ci_type_save(request: Request):
         expected_exists=is_update,
     )
     return response_ok(item.json)
+
+
+@supply_chain_review_cmdb_bp.post("/ci-type/reorder")
+@openapi.definition(summary="调整CMDB模型顺序")
+@requires_permission("supply_chain_review:model:u")
+async def ci_type_reorder(request: Request):
+    data = _json(request)
+    models = await reorder_ci_types(
+        tenant_id(request),
+        data.get("ci_type_ids"),
+        operator_name(request),
+    )
+    return response_ok(
+        {
+            "items": [model.json for model in models],
+            "total": len(models),
+        }
+    )
 
 
 @supply_chain_review_cmdb_bp.post("/ci-type/delete")
@@ -355,6 +375,30 @@ async def ci_field_save(request: Request):
         tenant, getattr(item, "ci_type_id", None) or item.ci_type_key
     )
     return response_ok(serialize_ci_field(item, ci_type.primary_field))
+
+
+@supply_chain_review_cmdb_bp.post("/ci-field/reorder")
+@openapi.definition(summary="调整CMDB字段顺序")
+@requires_permission("supply_chain_review:field:u")
+async def ci_field_reorder(request: Request):
+    data = _json(request)
+    tenant = tenant_id(request)
+    ci_type_ref = data.get("ci_type_id") or data.get("ci_type_key")
+    fields = await reorder_fields(
+        tenant,
+        ci_type_ref,
+        data.get("field_ids"),
+        operator_name(request),
+    )
+    ci_type = await get_ci_type_or_404(tenant, ci_type_ref)
+    return response_ok(
+        {
+            "items": [
+                serialize_ci_field(field, ci_type.primary_field) for field in fields
+            ],
+            "total": len(fields),
+        }
+    )
 
 
 @supply_chain_review_cmdb_bp.post("/ci-field/delete")

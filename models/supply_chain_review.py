@@ -28,6 +28,7 @@ class SupplyChainCiType(BaseModel):
     primary_field = fields.CharField(max_length=64, default="", description="主展示字段")
     status = fields.CharField(max_length=20, default=CI_TYPE_STATUS_ACTIVE, description="active/disabled")
     is_locked = fields.BooleanField(default=False, description="交付锁定标记")
+    sort = fields.IntField(default=0, description="展示顺序")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
 
@@ -46,15 +47,16 @@ class SupplyChainCiType(BaseModel):
             "primary_field": self.primary_field,
             "status": self.status,
             "is_locked": self.is_locked,
+            "sort": self.sort,
             "creator": self.creator,
             "updater": self.updater,
         }
 
     class Meta:
         table = "supply_chain_ci_type"
-        ordering = ["-utime"]
+        ordering = ["sort", "key"]
         unique_together = (("tenant_id", "key"),)
-        indexes = (("tenant_id", "status"),)
+        indexes = (("tenant_id", "status"), ("tenant_id", "sort"))
 
 
 class SupplyChainCiFieldDef(BaseModel):
