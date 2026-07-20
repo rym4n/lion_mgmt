@@ -665,7 +665,11 @@ async def export_package_for_tenant(
                 or (role.meta or {}).get("default_skill_keys")
                 or []
             )
-            skills = await get_visible_skills(effective_tenant_id, [str(key) for key in skill_keys])
+            skills = await get_visible_skills(
+                effective_tenant_id,
+                [str(key) for key in skill_keys],
+                enabled=None,
+            )
             skill_sources = {
                 skill.skill_key: Path(skill.skill_dir)
                 for skill in skills
@@ -704,7 +708,7 @@ async def export_package_for_tenant(
             if role_key:
                 source_root = Path((await get_visible_role(effective_tenant_id, str(role_key))).template_dir)
             else:
-                skills = await get_visible_skills(effective_tenant_id, [str(skill_key)])
+                skills = await get_visible_skills(effective_tenant_id, [str(skill_key)], enabled=None)
                 source_root = Path(skills[0].skill_dir)
             if source_root.exists():
                 _archive_package_directory(archive, source_root)

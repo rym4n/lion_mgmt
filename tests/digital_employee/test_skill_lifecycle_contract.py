@@ -41,6 +41,24 @@ def test_employee_and_skill_toggles_have_update_permissions():
     assert "skill.tenant_id != tenant_id" in ast.unparse(skill)
 
 
+def test_disabled_skills_remain_manageable_and_delete_stays_tenant_scoped():
+    employee_detail_source = _source(VIEWS_PATH, "employee_detail")
+    detail_source = _source(VIEWS_PATH, "skill_detail")
+    lookup_source = _source(VIEWS_PATH, "_tenant_skill_or_404")
+    delete_source = _source(VIEWS_PATH, "skill_delete")
+    package_delete_source = _source(VIEWS_PATH, "package_delete")
+
+    assert "enabled=None" in employee_detail_source
+    assert "enabled=None" in detail_source
+    assert "tenant_id=tenant_id" in lookup_source
+    assert "deleted=False" in lookup_source
+    assert "get_visible_skills" not in lookup_source
+    assert "_tenant_skill_or_404" in delete_source
+    assert "SKILL_IN_USE_BY_EMPLOYEES" in delete_source
+    assert "_tenant_skill_or_404" in package_delete_source
+    assert "SKILL_IN_USE_BY_EMPLOYEES" in package_delete_source
+
+
 def test_dispatch_only_loads_enabled_employees():
     source = _source(MANAGER_PATH, "dispatch_task")
 

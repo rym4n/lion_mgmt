@@ -584,9 +584,10 @@ def test_export_builtin_monitor_bundle_contains_role_and_skills(tmp_path):
             meta={"default_skills": ["alert_triage", "shift_report_compose"]},
         )
 
-    async def fake_get_visible_skills(tenant_id, skill_keys):
+    async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
         assert tenant_id == "__builtin__"
         assert skill_keys == ["alert_triage", "shift_report_compose", "aioe-cli"]
+        assert enabled is None
         return [
             types.SimpleNamespace(skill_key="alert_triage", skill_dir=str(alert_root)),
             types.SimpleNamespace(skill_key="shift_report_compose", skill_dir=str(shift_root)),
@@ -662,9 +663,10 @@ def test_export_tenant_bundle_uses_imported_resource_dirs(tmp_path):
             meta={"default_skills": ["alert_triage"]},
         )
 
-    async def fake_get_visible_skills(tenant_id, skill_keys):
+    async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
         assert tenant_id == "tenant-1"
         assert skill_keys == ["alert_triage", "aioe-cli"]
+        assert enabled is None
         return [
             types.SimpleNamespace(skill_key="alert_triage", skill_dir=str(skill_root)),
             types.SimpleNamespace(skill_key="aioe-cli", skill_dir=str(aioe_cli_root)),
@@ -734,8 +736,9 @@ def test_export_bundle_writes_builtin_aioe_cli_when_resource_dir_missing(tmp_pat
             meta={"default_skills": ["alert_triage"]},
         )
 
-    async def fake_get_visible_skills(tenant_id, skill_keys):
+    async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
         assert skill_keys == ["alert_triage", "aioe-cli"]
+        assert enabled is None
         return [
             types.SimpleNamespace(skill_key="alert_triage", skill_dir=str(skill_root)),
             types.SimpleNamespace(skill_key="aioe-cli", skill_dir=""),
@@ -765,6 +768,55 @@ def test_export_bundle_writes_builtin_aioe_cli_when_resource_dir_missing(tmp_pat
     assert aioe_cli_manifest["bindings"]["aioe_api"]["requires_rbac_role"] is True
 
 
+def test_export_tenant_skill_includes_disabled_management_record(tmp_path):
+    skill_root = tmp_path / "resources" / "skill" / "period_report_compose"
+    skill_root.mkdir(parents=True)
+    (skill_root / "package.yaml").write_text(
+        yaml.safe_dump({"type": "skill", "skill_key": "period_report_compose", "version": 1}),
+        encoding="utf-8",
+    )
+    (skill_root / "manifest.yaml").write_text(
+        yaml.safe_dump({"key": "period_report_compose", "name": "周期报告生成", "enabled": False}),
+        encoding="utf-8",
+    )
+
+    async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
+        assert tenant_id == "tenant-1"
+        assert skill_keys == ["period_report_compose"]
+        assert enabled is None
+        return [
+            types.SimpleNamespace(
+                skill_key="period_report_compose",
+                skill_dir=str(skill_root),
+            )
+        ]
+
+    async def fake_get_visible_role(tenant_id, role_key):
+        raise AssertionError("single-skill export must not resolve a role")
+
+    manager_module = types.ModuleType("services.digital_employee.manager")
+    manager_module.get_visible_role = fake_get_visible_role
+    manager_module.get_visible_skills = fake_get_visible_skills
+    old_manager = sys.modules.get("services.digital_employee.manager")
+    sys.modules["services.digital_employee.manager"] = manager_module
+    try:
+        package = asyncio.run(
+            export_package_for_tenant(
+                "tenant-1",
+                skill_key="period_report_compose",
+            )
+        )
+    finally:
+        if old_manager is None:
+            sys.modules.pop("services.digital_employee.manager", None)
+        else:
+            sys.modules["services.digital_employee.manager"] = old_manager
+
+    package_type, meta = inspect_package(package)
+    assert package_type == "skill"
+    assert meta["skill_key"] == "period_report_compose"
+
+
 def test_export_role_package_strips_rbac_fields_and_rbac_roles_dir(tmp_path):
     role_root = tmp_path / "resources" / "role" / "monitor"
     (role_root / "rbac_roles").mkdir(parents=True)
@@ -788,7 +840,7 @@ def test_export_role_package_strips_rbac_fields_and_rbac_roles_dir(tmp_path):
     async def fake_get_visible_role(tenant_id, role_key):
         return types.SimpleNamespace(role_key="monitor", template_dir=str(role_root), meta={})
 
-    async def fake_get_visible_skills(tenant_id, skill_keys):
+    async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
         return []
 
     manager_module = types.ModuleType("services.digital_employee.manager")
@@ -844,9 +896,10 @@ def test_export_bundle_fails_when_default_skill_template_is_missing(tmp_path):
             meta={"default_skills": ["missing_skill"]},
         )
 
-    async def fake_get_visible_skills(tenant_id, skill_keys):
+    async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
         assert tenant_id == "__builtin__"
         assert skill_keys == ["missing_skill", "aioe-cli"]
+        assert enabled is None
         raise CustomError("PACKAGE_INVALID")
 
     manager_module = types.ModuleType("services.digital_employee.manager")

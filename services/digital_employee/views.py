@@ -108,6 +108,17 @@ async def _employee_or_404(tenant_id: str, employee_id: str) -> CommandAgent:
     return employee
 
 
+async def _tenant_skill_or_404(tenant_id: str, skill_key: str) -> DigitalEmployeeSkill:
+    skill = await DigitalEmployeeSkill.get_or_none(
+        tenant_id=tenant_id,
+        skill_key=skill_key,
+        deleted=False,
+    )
+    if not skill:
+        raise CustomError(ErrorCode.DIGITAL_EMPLOYEE_SKILL_NOT_FOUND)
+    return skill
+
+
 async def _visible_roles_by_key(tenant_id: str, role_keys: list[str]) -> dict[str, DigitalEmployeeRole]:
     keys = [key for key in dict.fromkeys(role_keys) if key]
     if not keys:
@@ -228,7 +239,11 @@ async def employee_list(request: Request):
 async def employee_detail(request: Request):
     employee = await _employee_or_404(_tenant_id(request), _json(request).get("employee_id"))
     role = await get_visible_role(employee.tenant_id, employee.role_key)
-    skills = await get_visible_skills(employee.tenant_id, effective_employee_skill_keys(employee.skill_keys or []))
+    skills = await get_visible_skills(
+        employee.tenant_id,
+        effective_employee_skill_keys(employee.skill_keys or []),
+        enabled=None,
+    )
     tasks = await CommandTask.filter(tenant_id=employee.tenant_id, assigned_agent_id=employee.id, deleted=False).order_by("-ctime").limit(10).all()
     payload = await _employee_payload(employee, role=role)
     payload.update(
@@ -472,7 +487,7 @@ async def skill_list(request: Request):
 @digital_employee_bp.post("/skill/detail")
 @requires_permission("digital_employee_skill:r")
 async def skill_detail(request: Request):
-    skills = await get_visible_skills(_tenant_id(request), [_json(request).get("skill_key")])
+    skills = await get_visible_skills(_tenant_id(request), [_json(request).get("skill_key")], enabled=None)
     return response_ok(skills[0].json)
 
 
@@ -546,9 +561,9 @@ async def skill_toggle(request: Request):
 @digital_employee_bp.post("/skill/delete")
 @requires_permission("digital_employee_skill:d")
 async def skill_delete(request: Request):
-    skills = await get_visible_skills(_tenant_id(request), [_json(request).get("skill_key")])
-    skill = skills[0]
-    if await CommandAgent.filter(tenant_id=_tenant_id(request), skill_keys__contains=[skill.skill_key], deleted=False).count():
+    tenant_id = _tenant_id(request)
+    skill = await _tenant_skill_or_404(tenant_id, _json(request).get("skill_key"))
+    if await CommandAgent.filter(tenant_id=tenant_id, skill_keys__contains=[skill.skill_key], deleted=False).count():
         raise CustomError(ErrorCode.SKILL_IN_USE_BY_EMPLOYEES)
     skill.deleted = True
     await skill.save(update_fields=["deleted", "utime"])
@@ -598,19 +613,20 @@ async def package_list(request: Request):
 @digital_employee_bp.post("/package/delete")
 async def package_delete(request: Request):
     data = _json(request)
+    tenant_id = _tenant_id(request)
     await _require_package_delete_permission(request, data)
     if data.get("role_key"):
-        role = await get_visible_role(_tenant_id(request), data["role_key"])
-        if await CommandAgent.filter(tenant_id=_tenant_id(request), role_key=role.role_key, deleted=False).count():
+        role = await get_visible_role(tenant_id, data["role_key"])
+        if await CommandAgent.filter(tenant_id=tenant_id, role_key=role.role_key, deleted=False).count():
             raise CustomError(ErrorCode.ROLE_IN_USE_BY_EMPLOYEES)
         role.deleted = True
         await role.save(update_fields=["deleted", "utime"])
     elif data.get("skill_key"):
-        skills = await get_visible_skills(_tenant_id(request), [data["skill_key"]])
-        if await CommandAgent.filter(tenant_id=_tenant_id(request), skill_keys__contains=[skills[0].skill_key], deleted=False).count():
+        skill = await _tenant_skill_or_404(tenant_id, data["skill_key"])
+        if await CommandAgent.filter(tenant_id=tenant_id, skill_keys__contains=[skill.skill_key], deleted=False).count():
             raise CustomError(ErrorCode.SKILL_IN_USE_BY_EMPLOYEES)
-        skills[0].deleted = True
-        await skills[0].save(update_fields=["deleted", "utime"])
+        skill.deleted = True
+        await skill.save(update_fields=["deleted", "utime"])
     else:
         raise CustomError(ErrorCode.PARAM_ERROR)
     return response_ok()

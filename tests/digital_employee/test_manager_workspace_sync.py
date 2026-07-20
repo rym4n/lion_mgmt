@@ -331,6 +331,7 @@ def test_get_visible_skills_supplies_builtin_aioe_cli_without_database_row():
             tenant_id="tenant-1",
             skill_key="triage",
             name="Triage",
+            enabled=True,
             meta={},
             bindings={},
         )
@@ -349,9 +350,40 @@ def test_get_visible_skills_supplies_builtin_aioe_cli_without_database_row():
 
         skills = asyncio.run(manager.get_visible_skills("tenant-1", ["triage", "aioe-cli"]))
 
-        assert calls == [{"skill_key__in": ["triage"], "enabled": True}]
+        assert calls == [{"skill_key__in": ["triage"]}]
         assert [skill.skill_key for skill in skills] == ["triage", "aioe-cli"]
         assert skills[1].json["skill_key"] == "aioe-cli"
         assert skills[1].json["bindings"]["aioe_api"]["requires_rbac_role"] is True
+    finally:
+        _restore_modules(original_modules)
+
+
+def test_get_visible_skills_applies_tenant_preference_before_enabled_filter():
+    manager, original_modules = _load_manager([])
+    try:
+        builtin = SimpleNamespace(tenant_id="__builtin__", skill_key="triage", enabled=True)
+        tenant_override = SimpleNamespace(tenant_id="tenant-1", skill_key="triage", enabled=False)
+
+        class Query:
+            async def all(self):
+                return [builtin, tenant_override]
+
+        class SkillModel:
+            @classmethod
+            def filter(cls, *args, **kwargs):
+                assert kwargs == {"skill_key__in": ["triage"]}
+                return Query()
+
+        manager.DigitalEmployeeSkill = SkillModel
+
+        manageable = asyncio.run(manager.get_visible_skills("tenant-1", ["triage"], enabled=None))
+        assert manageable == [tenant_override]
+
+        try:
+            asyncio.run(manager.get_visible_skills("tenant-1", ["triage"]))
+        except manager.CustomError as exc:
+            assert exc.enum == manager.ErrorCode.DIGITAL_EMPLOYEE_SKILL_NOT_FOUND
+        else:
+            raise AssertionError("disabled tenant override must hide the enabled builtin baseline")
     finally:
         _restore_modules(original_modules)

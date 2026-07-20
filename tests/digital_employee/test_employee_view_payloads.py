@@ -3,6 +3,8 @@ import asyncio
 import inspect
 from types import SimpleNamespace
 
+import pytest
+
 from services.digital_employee import views
 
 
@@ -168,8 +170,8 @@ def test_employee_detail_resolves_visible_role_instead_of_employee_foreign_key(m
         calls.append(("role", tenant_id, role_key))
         return role
 
-    async def fake_get_visible_skills(tenant_id, skill_keys):
-        calls.append(("skills", tenant_id, tuple(skill_keys)))
+    async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
+        calls.append(("skills", tenant_id, tuple(skill_keys), enabled))
         return [skill, FakeSkill(skill_key="aioe-cli", name="AIOE CLI", description="内置平台技能", bindings={}, meta={})]
 
     class TaskModel:
@@ -186,11 +188,70 @@ def test_employee_detail_resolves_visible_role_instead_of_employee_foreign_key(m
 
     out = asyncio.run(inspect.unwrap(views.employee_detail)(_request(body={"employee_id": "employee-1"})))
 
-    assert calls == [("role", "tenant-1", "monitor"), ("skills", "tenant-1", ("alert_triage", "aioe-cli"))]
+    assert calls == [("role", "tenant-1", "monitor"), ("skills", "tenant-1", ("alert_triage", "aioe-cli"), None)]
     assert out["role"]["id"] == "role-tenant"
     assert out["role"]["meta"]["responsibilities"] == "tenant expert responsibilities"
     assert out["skills"][0]["description"] == "专家级告警分诊技能"
     assert out["skills"][1]["skill_key"] == "aioe-cli"
+
+
+def test_skill_delete_checks_disabled_tenant_skill_usage_before_soft_delete(monkeypatch):
+    lookup_calls = []
+    usage_calls = []
+
+    class Skill:
+        skill_key = "period_report_compose"
+        deleted = False
+        saved_update_fields = []
+
+        async def save(self, update_fields=None):
+            self.saved_update_fields.append(update_fields)
+
+    skill = Skill()
+
+    class SkillModel:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            lookup_calls.append(kwargs)
+            return skill
+
+    class UsageQuery:
+        async def count(self):
+            return 1
+
+    class AgentModel:
+        @classmethod
+        def filter(cls, **kwargs):
+            usage_calls.append(kwargs)
+            return UsageQuery()
+
+    monkeypatch.setattr(views, "DigitalEmployeeSkill", SkillModel)
+    monkeypatch.setattr(views, "CommandAgent", AgentModel)
+
+    with pytest.raises(views.CustomError) as exc_info:
+        asyncio.run(
+            inspect.unwrap(views.skill_delete)(
+                _request(body={"skill_key": "period_report_compose"})
+            )
+        )
+
+    assert exc_info.value.enum is views.ErrorCode.SKILL_IN_USE_BY_EMPLOYEES
+    assert lookup_calls == [
+        {
+            "tenant_id": "tenant-1",
+            "skill_key": "period_report_compose",
+            "deleted": False,
+        }
+    ]
+    assert usage_calls == [
+        {
+            "tenant_id": "tenant-1",
+            "skill_keys__contains": ["period_report_compose"],
+            "deleted": False,
+        }
+    ]
+    assert skill.deleted is False
+    assert skill.saved_update_fields == []
 
 
 async def _async_value(value):

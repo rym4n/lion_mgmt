@@ -95,13 +95,12 @@ async def get_visible_skills(
     query_keys = [key for key in requested_keys if key != AIOE_CLI_SKILL_KEY]
     skills = []
     if query_keys:
-        filters = {"skill_key__in": query_keys}
-        if enabled is not None:
-            filters["enabled"] = enabled
-        skills = await DigitalEmployeeSkill.filter(_visible_condition(tenant_id), **filters).all()
+        skills = await DigitalEmployeeSkill.filter(_visible_condition(tenant_id), skill_key__in=query_keys).all()
     preferred = prefer_tenant_records(skills, tenant_id, "skill_key")
+    if enabled is not None:
+        preferred = [skill for skill in preferred if bool(skill.enabled) is enabled]
     skills_by_key = {skill.skill_key: skill for skill in preferred}
-    if AIOE_CLI_SKILL_KEY in requested_keys:
+    if AIOE_CLI_SKILL_KEY in requested_keys and enabled is not False:
         skills_by_key[AIOE_CLI_SKILL_KEY] = _builtin_aioe_cli_skill()
     if set(skills_by_key) != set(requested_keys):
         raise CustomError(ErrorCode.DIGITAL_EMPLOYEE_SKILL_NOT_FOUND)
