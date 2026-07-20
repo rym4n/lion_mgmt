@@ -72,6 +72,10 @@ def test_network_topology_routes_use_platform_crud_permissions():
         ),
         "/parse": ("parse_topology", ("network_topology:r",)),
         "/save": ("save_topology", ("network_topology:u",)),
+        "/manual-save": (
+            "save_manual_topology",
+            ("network_topology:c", "network_topology:u"),
+        ),
         "/create": ("create_topology", ("network_topology:c",)),
         "/update": ("update_topology", ("network_topology:u",)),
         "/list": ("list_topology", ("network_topology:r",)),
@@ -145,6 +149,8 @@ def test_network_topology_json_never_leaks_source_config_and_formats_dates():
     assert payload["utime"] == "2026-07-19 18:12:13"
     assert payload["node_count"] == 1
     assert payload["edge_count"] == 0
+    assert payload["mode"] == "automatic"
+    assert payload["source_type"] == "automatic"
 
 
 def test_detail_and_definition_separate_graph_data_from_editable_source_metadata(
@@ -172,6 +178,7 @@ def test_detail_and_definition_separate_graph_data_from_editable_source_metadata
         enabled=True,
         revision=4,
         action_sources=action_sources,
+        source_count=1,
         source_hash="source-hash-1",
         payload={
             "id": "topology-1",
@@ -213,6 +220,8 @@ def test_detail_and_definition_separate_graph_data_from_editable_source_metadata
     }
     assert detail["layout_json"] == {"core": {"x": 10, "y": 20}}
     assert detail["source_hash"] == "source-hash-1"
+    assert detail["mode"] == "automatic"
+    assert detail["source_type"] == "automatic"
     for definition_only_field in (
         "source_config",
         "action_sources",
@@ -244,6 +253,7 @@ def test_detail_and_definition_separate_graph_data_from_editable_source_metadata
     } <= detail_fields
     assert "source_config" not in detail_fields
     assert "action_sources" not in detail_fields
+    assert lookups[0][2]["include_source_count"] is True
     assert definition_fields == {
         "id",
         "name",
@@ -252,6 +262,45 @@ def test_detail_and_definition_separate_graph_data_from_editable_source_metadata
         "revision",
         "action_sources",
     }
+
+
+def test_manual_topology_detail_returns_derived_mode(monkeypatch):
+    from services.network_topology import views
+
+    topology = _TopologyRow(
+        id="manual-topology-1",
+        name="手工拓扑",
+        refresh_interval=3600,
+        enabled=False,
+        revision=2,
+        source_count=0,
+        source_hash=None,
+        payload={
+            "topology_json": {"nodes": [], "edges": []},
+            "layout_json": {},
+            "refresh_status": "pending",
+            "last_refresh_at": None,
+            "next_refresh_at": None,
+            "refresh_error": None,
+            "ctime": "2026-07-20 09:00:00",
+            "utime": "2026-07-20 09:01:00",
+        },
+    )
+
+    async def tenant_topology(_topology_id, tenant_id, **_kwargs):
+        assert tenant_id == "tenant-1"
+        return topology
+
+    monkeypatch.setattr(views, "_tenant_topology", tenant_topology)
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+
+    detail = asyncio.run(
+        inspect.unwrap(views.get_topology)(_request({"id": "manual-topology-1"}))
+    )
+
+    assert detail["mode"] == "manual"
+    assert detail["source_type"] == "manual"
+    assert detail["revision"] == 2
 
 
 def test_layout_normalization_requires_exact_nodes_and_finite_coordinates():
@@ -292,6 +341,129 @@ def test_layout_normalization_requires_exact_nodes_and_finite_coordinates():
     for layout in invalid_layouts:
         with pytest.raises(ValueError):
             views._normalize_layout(layout, topology_json)
+
+
+def test_manual_graph_normalization_validates_shape_references_and_coordinates():
+    from services.network_topology import views
+
+    graph = {
+        "nodes": [
+            {
+                "id": " core ",
+                "type": "process",
+                "position": {"x": 1, "y": 2},
+                "data": {"title": "核心交换机"},
+            },
+            {
+                "id": "edge",
+                "type": "process",
+                "position": {"x": 3, "y": 4},
+                "data": {"title": "接入交换机"},
+            },
+        ],
+        "edges": [
+            {
+                "id": " uplink ",
+                "source": " core ",
+                "target": "edge",
+                "type": "smoothstep",
+                "data": {"port": "Gi0/1"},
+            }
+        ],
+        "ignored": "manual payload metadata is not persisted",
+    }
+
+    normalized_graph, normalized_layout = views._normalize_manual_graph(
+        graph,
+        {
+            "core": {"x": 10, "y": -20.5},
+            "edge": {"x": 30, "y": 40},
+        },
+    )
+
+    assert normalized_layout == {
+        "core": {"x": 10.0, "y": -20.5},
+        "edge": {"x": 30.0, "y": 40.0},
+    }
+    assert normalized_graph == {
+        "nodes": [
+            {
+                "id": "core",
+                "type": "process",
+                "position": {"x": 10.0, "y": -20.5},
+                "data": {"title": "核心交换机"},
+            },
+            {
+                "id": "edge",
+                "type": "process",
+                "position": {"x": 30.0, "y": 40.0},
+                "data": {"title": "接入交换机"},
+            },
+        ],
+        "edges": [
+            {
+                "id": "uplink",
+                "source": "core",
+                "target": "edge",
+                "type": "smoothstep",
+                "data": {"port": "Gi0/1"},
+            }
+        ],
+    }
+
+    invalid_cases = [
+        (
+            {
+                "nodes": [{"id": "same"}, {"id": "same"}],
+                "edges": [],
+            },
+            {"same": {"x": 1, "y": 2}},
+        ),
+        (
+            {
+                "nodes": [{"id": "core"}],
+                "edges": [{"id": "missing", "source": "core", "target": "edge"}],
+            },
+            {"core": {"x": 1, "y": 2}},
+        ),
+        (
+            {
+                "nodes": [{"id": "core"}],
+                "edges": [{"id": "loop", "source": "core", "target": "core"}],
+            },
+            {"core": {"x": 1, "y": 2}},
+        ),
+        (
+            {"nodes": [{"id": "core"}, {"id": "edge"}], "edges": []},
+            {"core": {"x": 1, "y": 2}},
+        ),
+        (
+            {"nodes": [{"id": "core"}], "edges": []},
+            {"core": {"x": float("nan"), "y": 2}},
+        ),
+        (
+            {
+                "nodes": [
+                    {
+                        "id": "core",
+                        "data": {"title": "x" * (views._MAX_MANUAL_STRING_LENGTH + 1)},
+                    }
+                ],
+                "edges": [],
+            },
+            {"core": {"x": 1, "y": 2}},
+        ),
+    ]
+    for invalid_graph, invalid_layout in invalid_cases:
+        with pytest.raises(ValueError):
+            views._normalize_manual_graph(invalid_graph, invalid_layout)
+
+
+def test_topology_mode_derives_manual_and_automatic_without_persisted_mode():
+    from services.network_topology import views
+
+    assert views._topology_mode(0) == "manual"
+    assert views._topology_mode(2) == "automatic"
 
 
 def test_layout_update_locks_tenant_row_and_rejects_stale_source_hash(monkeypatch):
@@ -467,7 +639,25 @@ def test_network_topology_list_applies_name_filter_and_returns_safe_rows(monkeyp
             "utime": "2026-07-19 18:12:13",
         }
     )
-    query = _ListQuery([row])
+    manual_row = _TopologyRow(
+        payload={
+            "id": "topology-2",
+            "name": "手工分支网",
+            "source_count": 0,
+            "node_count": 1,
+            "edge_count": 0,
+            "refresh_interval": 3600,
+            "enabled": False,
+            "revision": 2,
+            "refresh_status": "manual",
+            "last_refresh_at": None,
+            "next_refresh_at": None,
+            "refresh_error": None,
+            "ctime": "2026-07-19 17:11:12",
+            "utime": "2026-07-19 17:12:13",
+        }
+    )
+    query = _ListQuery([row, manual_row])
     initial_filters = []
 
     class FakeNetworkTopology:
@@ -496,17 +686,21 @@ def test_network_topology_list_applies_name_filter_and_returns_safe_rows(monkeyp
     assert "layout_json" not in query.value_fields
     assert "action_sources" not in query.value_fields
     assert "last_run_ids" not in query.value_fields
-    assert result["total"] == 1
-    assert len(result["items"]) == 1
+    assert result["total"] == 2
+    assert len(result["items"]) == 2
     safe_row = result["items"][0]
     assert safe_row["id"] == "topology-1"
     assert safe_row["name"] == "总部核心网"
     assert safe_row["source_count"] == 1
     assert safe_row["node_count"] == 3
     assert safe_row["edge_count"] == 2
+    assert safe_row["mode"] == "automatic"
+    assert safe_row["source_type"] == "automatic"
     assert safe_row["last_refresh_at"] == "2026-07-19 18:10:11"
     assert safe_row["ctime"] == "2026-07-19 18:11:12"
     assert safe_row["utime"] == "2026-07-19 18:12:13"
+    assert result["items"][1]["mode"] == "manual"
+    assert result["items"][1]["source_type"] == "manual"
     for raw_field in (
         "source_config",
         "topology_json",
@@ -518,15 +712,21 @@ def test_network_topology_list_applies_name_filter_and_returns_safe_rows(monkeyp
 
 
 class _ExistsQuery:
-    def __init__(self):
+    def __init__(self, exists=False):
         self.excluded = []
+        self.exists_result = exists
+        self.connection = None
 
     def exclude(self, **kwargs):
         self.excluded.append(kwargs)
         return self
 
+    def using_db(self, connection):
+        self.connection = connection
+        return self
+
     async def exists(self):
-        return False
+        return self.exists_result
 
 
 class _Transaction:
@@ -565,6 +765,293 @@ class _MutableTopology:
             "revision": self.revision,
             "refresh_status": self.refresh_status,
         }
+
+
+def _manual_save_payload(**overrides):
+    payload = {
+        "name": "手工总部网络",
+        "topology_json": {
+            "nodes": [
+                {
+                    "id": "core",
+                    "type": "process",
+                    "position": {"x": 1, "y": 2},
+                    "data": {"title": "核心交换机"},
+                },
+                {
+                    "id": "edge",
+                    "type": "process",
+                    "position": {"x": 3, "y": 4},
+                    "data": {"title": "接入交换机"},
+                },
+            ],
+            "edges": [
+                {
+                    "id": "uplink",
+                    "source": "core",
+                    "target": "edge",
+                    "type": "smoothstep",
+                }
+            ],
+        },
+        "layout_json": {
+            "core": {"x": 10, "y": 20},
+            "edge": {"x": 30, "y": 40},
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
+class _ManualTopology(_MutableTopology):
+    def __init__(self):
+        super().__init__()
+        self.name = "旧手工拓扑"
+        self.source_config = "legacy-manual-config"
+        self.topology_json = {"nodes": [{"id": "old"}], "edges": []}
+        self.layout_json = {"old": {"x": 1, "y": 2}}
+        self.action_sources = []
+        self.executor_id = "legacy-account"
+        self.source_hash = "legacy-hash"
+        self.last_run_ids = ["legacy-run"]
+        self.last_refresh_at = datetime.now(timezone.utc)
+
+    @property
+    def json(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "mode": "automatic" if self.action_sources else "manual",
+            "source_type": "automatic" if self.action_sources else "manual",
+            "topology_json": self.topology_json,
+            "layout_json": self.layout_json,
+            "revision": self.revision,
+            "refresh_status": self.refresh_status,
+        }
+
+
+def test_manual_save_create_uses_create_permission_and_clears_automatic_state(
+    monkeypatch,
+):
+    from services.network_topology import views
+
+    duplicate_query = _ExistsQuery()
+    filter_calls = []
+    create_calls = []
+    permission_calls = []
+
+    class FakeNetworkTopology:
+        @classmethod
+        def filter(cls, **kwargs):
+            filter_calls.append(kwargs)
+            return duplicate_query
+
+        @classmethod
+        async def create(cls, **kwargs):
+            create_calls.append(kwargs)
+            return _TopologyRow(
+                payload={
+                    "id": "manual-topology-1",
+                    "name": kwargs["name"],
+                    "mode": "manual",
+                    "source_type": "manual",
+                    "revision": kwargs["revision"],
+                }
+            )
+
+    async def check_permission(request, permission):
+        permission_calls.append((request.ctx.session["tenant_id"], permission))
+
+    monkeypatch.setattr(views, "NetworkTopology", FakeNetworkTopology)
+    monkeypatch.setattr(views, "check_permissions", check_permission)
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+    monkeypatch.setattr(
+        views,
+        "_err",
+        lambda message, status=400: {"message": message, "status": status},
+    )
+
+    result = asyncio.run(
+        inspect.unwrap(views.save_manual_topology)(_request(_manual_save_payload()))
+    )
+
+    assert result == {
+        "id": "manual-topology-1",
+        "name": "手工总部网络",
+        "mode": "manual",
+        "source_type": "manual",
+        "revision": 1,
+    }
+    assert permission_calls == [("tenant-1", "network_topology:c")]
+    assert filter_calls == [
+        {"name": "手工总部网络", "deleted": False, "tenant_id": "tenant-1"}
+    ]
+    created = create_calls[0]
+    assert created["tenant_id"] == "tenant-1"
+    assert created["source_config"] == ""
+    assert created["action_sources"] == []
+    assert created["enabled"] is False
+    assert created["executor_id"] is None
+    assert created["source_hash"] is None
+    assert created["last_run_ids"] == []
+    assert created["refresh_status"] == "manual"
+    assert created["next_refresh_at"] is None
+    assert created["refresh_token"] is None
+    assert created["revision"] == 1
+    assert created["topology_json"]["nodes"][0]["position"] == {
+        "x": 10.0,
+        "y": 20.0,
+    }
+
+    duplicate_query.exists_result = True
+    duplicate_result = asyncio.run(
+        inspect.unwrap(views.save_manual_topology)(_request(_manual_save_payload()))
+    )
+    assert duplicate_result == {"message": "拓扑名称已存在", "status": 400}
+    assert len(create_calls) == 1
+
+
+def test_manual_save_update_locks_tenant_row_and_uses_revision_cas(monkeypatch):
+    from services.network_topology import views
+
+    record = _ManualTopology()
+    duplicate_query = _ExistsQuery()
+    filter_calls = []
+    lookups = []
+    permission_calls = []
+
+    class FakeNetworkTopology:
+        @classmethod
+        def filter(cls, **kwargs):
+            filter_calls.append(kwargs)
+            return duplicate_query
+
+    async def tenant_topology(topology_id, tenant_id, **kwargs):
+        lookups.append((topology_id, tenant_id, kwargs))
+        return record
+
+    async def check_permission(_request, permission):
+        permission_calls.append(permission)
+
+    monkeypatch.setattr(views, "NetworkTopology", FakeNetworkTopology)
+    monkeypatch.setattr(views, "_tenant_topology", tenant_topology)
+    monkeypatch.setattr(views, "check_permissions", check_permission)
+    monkeypatch.setattr(views, "in_transaction", lambda: _Transaction())
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+    monkeypatch.setattr(
+        views,
+        "_err",
+        lambda message, status=400: {"message": message, "status": status},
+    )
+
+    result = asyncio.run(
+        inspect.unwrap(views.save_manual_topology)(
+            _request(
+                _manual_save_payload(
+                    id="topology-1",
+                    revision=3,
+                    name="新手工拓扑",
+                )
+            )
+        )
+    )
+
+    assert result["id"] == "topology-1"
+    assert result["mode"] == "manual"
+    assert result["source_type"] == "manual"
+    assert result["revision"] == 4
+    assert permission_calls == ["network_topology:u"]
+    assert lookups == [
+        (
+            "topology-1",
+            "tenant-1",
+            {"connection": "connection-1", "lock": True},
+        )
+    ]
+    assert filter_calls == [
+        {"name": "新手工拓扑", "deleted": False, "tenant_id": "tenant-1"}
+    ]
+    assert duplicate_query.excluded == [{"id": "topology-1"}]
+    assert duplicate_query.connection == "connection-1"
+    assert record.name == "新手工拓扑"
+    assert record.source_config == ""
+    assert record.action_sources == []
+    assert record.enabled is False
+    assert record.executor_id is None
+    assert record.source_hash is None
+    assert record.last_run_ids == []
+    assert record.refresh_status == "manual"
+    assert record.last_refresh_at is None
+    assert record.next_refresh_at is None
+    assert record.refresh_token is None
+    assert record.saved["using_db"] == "connection-1"
+    assert "action_sources" in record.saved["update_fields"]
+    assert "revision" in record.saved["update_fields"]
+
+
+def test_manual_save_rejects_missing_or_stale_revision_and_automatic_rows(monkeypatch):
+    from services.network_topology import views
+
+    record = _ManualTopology()
+    permission_calls = []
+
+    async def tenant_topology(_topology_id, tenant_id, **kwargs):
+        assert tenant_id == "tenant-1"
+        assert kwargs == {"connection": "connection-1", "lock": True}
+        return record
+
+    async def check_permission(_request, permission):
+        permission_calls.append(permission)
+
+    class FakeNetworkTopology:
+        @classmethod
+        def filter(cls, **_kwargs):
+            raise AssertionError("rejected updates must not run duplicate-name queries")
+
+    monkeypatch.setattr(views, "NetworkTopology", FakeNetworkTopology)
+    monkeypatch.setattr(views, "_tenant_topology", tenant_topology)
+    monkeypatch.setattr(views, "check_permissions", check_permission)
+    monkeypatch.setattr(views, "in_transaction", lambda: _Transaction())
+    monkeypatch.setattr(
+        views,
+        "_err",
+        lambda message, status=400: {"message": message, "status": status},
+    )
+
+    missing_revision = asyncio.run(
+        inspect.unwrap(views.save_manual_topology)(
+            _request(_manual_save_payload(id="topology-1"))
+        )
+    )
+    assert missing_revision == {"message": "revision 不能为空", "status": 400}
+
+    stale_revision = asyncio.run(
+        inspect.unwrap(views.save_manual_topology)(
+            _request(_manual_save_payload(id="topology-1", revision=2))
+        )
+    )
+    assert stale_revision == {
+        "message": "拓扑已被更新，请重新打开后保存",
+        "status": 409,
+    }
+    assert record.saved is None
+
+    record.action_sources = [{"action_id": "automatic-action"}]
+    automatic_result = asyncio.run(
+        inspect.unwrap(views.save_manual_topology)(
+            _request(_manual_save_payload(id="topology-1", revision=3))
+        )
+    )
+    assert automatic_result == {
+        "message": "自动采集拓扑不能通过手工绘制覆盖",
+        "status": 409,
+    }
+    assert record.saved is None
+    assert permission_calls == [
+        "network_topology:u",
+        "network_topology:u",
+        "network_topology:u",
+    ]
 
 
 def test_network_topology_create_ignores_manual_config_and_starts_from_actions(

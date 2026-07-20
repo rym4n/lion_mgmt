@@ -13,6 +13,7 @@ from tortoise.transactions import in_transaction
 from core.response import response_ok
 from libs.security.authorization import (
     action_permission_hits,
+    check_permissions,
     is_superadmin,
     requires_permission,
 )
@@ -38,7 +39,14 @@ _MIN_REFRESH_INTERVAL = 300
 _MAX_REFRESH_INTERVAL = 86400
 _MAX_ACTION_SOURCES = 20
 _MAX_LAYOUT_NODES = 2000
+_MAX_MANUAL_EDGES = 10000
 _MAX_LAYOUT_COORDINATE = 10_000_000
+_MAX_MANUAL_GRAPH_BYTES = 4 * 1024 * 1024
+_MAX_MANUAL_GRAPH_DEPTH = 8
+_MAX_MANUAL_COLLECTION_ITEMS = 10000
+_MAX_MANUAL_OBJECT_FIELDS = 200
+_MAX_MANUAL_STRING_LENGTH = 10000
+_MAX_GRAPH_ID_LENGTH = 200
 _SOURCE_OPTION_KINDS = {"tools", "versions", "actions", "resources"}
 _SAFE_ACTION_INPUT_FIELDS = (
     "key",
@@ -88,6 +96,15 @@ def _parse_enabled(value, *, default: bool = True) -> bool:
     raise ValueError("启用状态不合法")
 
 
+def _parse_topology_name(data: dict) -> str:
+    name = str(data.get("name") or "").strip()
+    if not name:
+        raise ValueError("拓扑名称不能为空")
+    if len(name) > 200:
+        raise ValueError("拓扑名称不能超过 200 个字符")
+    return name
+
+
 def _parse_refresh_interval(value) -> int:
     try:
         interval = int(value if value is not None else 3600)
@@ -101,11 +118,7 @@ def _parse_refresh_interval(value) -> int:
 def _parse_definition(
     data: dict, *, default_enabled: bool = True
 ) -> tuple[str, list, int, bool]:
-    name = str(data.get("name") or "").strip()
-    if not name:
-        raise ValueError("拓扑名称不能为空")
-    if len(name) > 200:
-        raise ValueError("拓扑名称不能超过 200 个字符")
+    name = _parse_topology_name(data)
 
     action_sources = data.get("action_sources")
     if not isinstance(action_sources, list) or not action_sources:
@@ -119,6 +132,162 @@ def _parse_definition(
         _parse_refresh_interval(data.get("refresh_interval")),
         _parse_enabled(data.get("enabled"), default=default_enabled),
     )
+
+
+def _normalize_bounded_json(value, *, path: str, depth: int = 0):
+    if depth > _MAX_MANUAL_GRAPH_DEPTH:
+        raise ValueError(f"{path} 嵌套层级过深")
+    if value is None or isinstance(value, (str, bool, int)):
+        if isinstance(value, str) and len(value) > _MAX_MANUAL_STRING_LENGTH:
+            raise ValueError(f"{path} 文本不能超过 {_MAX_MANUAL_STRING_LENGTH} 个字符")
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"{path} 数值必须是有限数字")
+        return value
+    if isinstance(value, list):
+        if len(value) > _MAX_MANUAL_COLLECTION_ITEMS:
+            raise ValueError(f"{path} 数组元素过多")
+        return [
+            _normalize_bounded_json(
+                item,
+                path=f"{path}[{index}]",
+                depth=depth + 1,
+            )
+            for index, item in enumerate(value)
+        ]
+    if isinstance(value, dict):
+        if len(value) > _MAX_MANUAL_OBJECT_FIELDS:
+            raise ValueError(f"{path} 对象字段过多")
+        normalized = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not key or len(key) > _MAX_GRAPH_ID_LENGTH:
+                raise ValueError(f"{path} 包含不合法的字段名")
+            normalized[key] = _normalize_bounded_json(
+                item,
+                path=f"{path}.{key}",
+                depth=depth + 1,
+            )
+        return normalized
+    raise ValueError(f"{path} 包含不支持的数据类型")
+
+
+def _normalize_graph_identifier(value, *, label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} 必须是字符串")
+    identifier = value.strip()
+    if not identifier:
+        raise ValueError(f"{label} 不能为空")
+    if len(identifier) > _MAX_GRAPH_ID_LENGTH:
+        raise ValueError(f"{label} 不能超过 {_MAX_GRAPH_ID_LENGTH} 个字符")
+    return identifier
+
+
+def _normalize_manual_graph(
+    topology_json: dict, layout_json: dict
+) -> tuple[dict, dict]:
+    if not isinstance(topology_json, dict):
+        raise ValueError("topology_json 必须是对象")
+    if not isinstance(layout_json, dict):
+        raise ValueError("layout_json 必须是对象")
+
+    bounded_graph = _normalize_bounded_json(topology_json, path="topology_json")
+    nodes = bounded_graph.get("nodes")
+    edges = bounded_graph.get("edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        raise ValueError("topology_json 必须包含 nodes 和 edges 数组")
+    if len(nodes) > _MAX_LAYOUT_NODES:
+        raise ValueError(f"拓扑节点不能超过 {_MAX_LAYOUT_NODES} 个")
+    if len(edges) > _MAX_MANUAL_EDGES:
+        raise ValueError(f"拓扑连线不能超过 {_MAX_MANUAL_EDGES} 条")
+
+    normalized_nodes = []
+    node_ids = set()
+    for index, raw_node in enumerate(nodes):
+        if not isinstance(raw_node, dict):
+            raise ValueError(f"第 {index + 1} 个拓扑节点必须是对象")
+        node = dict(raw_node)
+        node_id = _normalize_graph_identifier(
+            node.get("id"), label=f"第 {index + 1} 个拓扑节点ID"
+        )
+        if node_id in node_ids:
+            raise ValueError(f"拓扑节点ID重复：{node_id}")
+        if "data" in node and not isinstance(node["data"], dict):
+            raise ValueError(f"节点 {node_id} 的 data 必须是对象")
+        if "position" in node:
+            position = node["position"]
+            if not isinstance(position, dict):
+                raise ValueError(f"节点 {node_id} 的 position 必须是对象")
+            node["position"] = _normalize_layout(
+                {node_id: position},
+                {"nodes": [{"id": node_id}], "edges": []},
+            )[node_id]
+        node["id"] = node_id
+        node_ids.add(node_id)
+        normalized_nodes.append(node)
+
+    normalized_edges = []
+    edge_ids = set()
+    directed_links = set()
+    for index, raw_edge in enumerate(edges):
+        if not isinstance(raw_edge, dict):
+            raise ValueError(f"第 {index + 1} 条拓扑连线必须是对象")
+        edge = dict(raw_edge)
+        edge_id = _normalize_graph_identifier(
+            edge.get("id"), label=f"第 {index + 1} 条拓扑连线ID"
+        )
+        source = _normalize_graph_identifier(
+            edge.get("source"), label=f"连线 {edge_id} 的 source"
+        )
+        target = _normalize_graph_identifier(
+            edge.get("target"), label=f"连线 {edge_id} 的 target"
+        )
+        if edge_id in edge_ids:
+            raise ValueError(f"拓扑连线ID重复：{edge_id}")
+        if source not in node_ids or target not in node_ids:
+            raise ValueError(f"连线 {edge_id} 引用了不存在的拓扑节点")
+        if source == target:
+            raise ValueError(f"连线 {edge_id} 不能连接同一个拓扑节点")
+        if (source, target) in directed_links:
+            raise ValueError(f"拓扑连线重复：{source} -> {target}")
+        if (
+            "data" in edge
+            and edge["data"] is not None
+            and not isinstance(edge["data"], dict)
+        ):
+            raise ValueError(f"连线 {edge_id} 的 data 必须是对象")
+        edge.update({"id": edge_id, "source": source, "target": target})
+        edge_ids.add(edge_id)
+        directed_links.add((source, target))
+        normalized_edges.append(edge)
+
+    normalized_graph = {"nodes": normalized_nodes, "edges": normalized_edges}
+    normalized_layout = _normalize_layout(layout_json, normalized_graph)
+    for node in normalized_nodes:
+        node["position"] = normalized_layout[node["id"]]
+    try:
+        graph_size = len(orjson.dumps(normalized_graph)) + len(
+            orjson.dumps(normalized_layout)
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("拓扑图包含无法保存的数据") from exc
+    if graph_size > _MAX_MANUAL_GRAPH_BYTES:
+        raise ValueError("拓扑图数据过大")
+    return normalized_graph, normalized_layout
+
+
+def _source_count_annotation() -> RawSQL:
+    return RawSQL(
+        "CASE WHEN jsonb_typeof(\"action_sources\") = 'array' "
+        'THEN jsonb_array_length("action_sources") ELSE 0 END'
+    )
+
+
+def _topology_mode(source_count) -> str:
+    try:
+        return "automatic" if int(source_count) > 0 else "manual"
+    except (TypeError, ValueError):
+        return "manual"
 
 
 def _normalize_layout(layout_json: dict, topology_json: dict | None) -> dict:
@@ -172,12 +341,15 @@ async def _tenant_topology(
     connection=None,
     lock: bool = False,
     fields: tuple[str, ...] | None = None,
+    include_source_count: bool = False,
 ):
     query = NetworkTopology.filter(id=topology_id, deleted=False, tenant_id=tenant_id)
     if connection is not None:
         query = query.using_db(connection)
     if lock:
         query = query.select_for_update()
+    if include_source_count:
+        query = query.annotate(source_count=_source_count_annotation())
     if fields:
         query = query.only(*fields)
     return await query.first()
@@ -597,6 +769,144 @@ async def save_topology(_request: Request):
     return _err("手工保存拓扑已停用，请配置应用动作数据源", status=410)
 
 
+@topology_bp.post("/manual-save")
+@openapi.definition(summary="创建或更新手工绘制的网络拓扑")
+@requires_permission("network_topology:c", "network_topology:u")
+async def save_manual_topology(request: Request):
+    data = request.json or {}
+    if not isinstance(data, dict):
+        return _err("请求参数必须是对象")
+
+    raw_topology_id = data.get("id")
+    if raw_topology_id is None:
+        raw_topology_id = data.get("topology_id")
+    if raw_topology_id is not None and not isinstance(raw_topology_id, str):
+        return _err("拓扑ID格式错误")
+    topology_id = (raw_topology_id or "").strip()
+
+    # The route accepts either permission so a single frontend save action can be
+    # used, but the actual mutation still requires the operation-specific grant.
+    await check_permissions(
+        request,
+        "network_topology:u" if topology_id else "network_topology:c",
+    )
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    if not tenant_id:
+        return _err("租户不存在")
+    try:
+        name = _parse_topology_name(data)
+        topology_json, layout_json = _normalize_manual_graph(
+            data.get("topology_json"),
+            data.get("layout_json"),
+        )
+    except ValueError as exc:
+        return _err(str(exc))
+
+    if not topology_id:
+        if await NetworkTopology.filter(
+            name=name,
+            deleted=False,
+            tenant_id=tenant_id,
+        ).exists():
+            return _err("拓扑名称已存在")
+        topology = await NetworkTopology.create(
+            name=name,
+            source_config="",
+            topology_json=topology_json,
+            layout_json=layout_json,
+            action_sources=[],
+            refresh_interval=3600,
+            enabled=False,
+            executor_id=None,
+            source_hash=None,
+            revision=1,
+            last_run_ids=[],
+            refresh_status="manual",
+            last_refresh_at=None,
+            next_refresh_at=None,
+            refresh_started_at=None,
+            refresh_token=None,
+            refresh_error=None,
+            tenant_id=tenant_id,
+        )
+        return response_ok(topology.json)
+
+    if "revision" not in data:
+        return _err("revision 不能为空")
+    expected_revision = data.get("revision")
+    try:
+        if isinstance(expected_revision, bool) or int(expected_revision) < 1:
+            raise ValueError
+        expected_revision = int(expected_revision)
+    except (TypeError, ValueError):
+        return _err("拓扑版本不合法")
+
+    async with in_transaction() as connection:
+        topology = await _tenant_topology(
+            topology_id,
+            tenant_id,
+            connection=connection,
+            lock=True,
+        )
+        if not topology:
+            return _err("拓扑数据不存在", status=404)
+        if topology.action_sources:
+            return _err("自动采集拓扑不能通过手工绘制覆盖", status=409)
+        if topology.revision != expected_revision:
+            return _err("拓扑已被更新，请重新打开后保存", status=409)
+
+        duplicate_query = NetworkTopology.filter(
+            name=name,
+            deleted=False,
+            tenant_id=tenant_id,
+        ).exclude(id=topology_id)
+        if await duplicate_query.using_db(connection).exists():
+            return _err("拓扑名称已存在")
+
+        topology.name = name
+        topology.source_config = ""
+        topology.topology_json = topology_json
+        topology.layout_json = layout_json
+        topology.action_sources = []
+        topology.refresh_interval = 3600
+        topology.enabled = False
+        topology.executor_id = None
+        topology.source_hash = None
+        topology.revision += 1
+        topology.last_run_ids = []
+        topology.refresh_status = "manual"
+        topology.last_refresh_at = None
+        topology.next_refresh_at = None
+        topology.refresh_started_at = None
+        topology.refresh_token = None
+        topology.refresh_error = None
+        await topology.save(
+            using_db=connection,
+            update_fields=[
+                "name",
+                "source_config",
+                "topology_json",
+                "layout_json",
+                "action_sources",
+                "refresh_interval",
+                "enabled",
+                "executor_id",
+                "source_hash",
+                "revision",
+                "last_run_ids",
+                "refresh_status",
+                "last_refresh_at",
+                "next_refresh_at",
+                "refresh_started_at",
+                "refresh_token",
+                "refresh_error",
+                "utime",
+            ],
+        )
+    return response_ok(topology.json)
+
+
 @topology_bp.post("/create")
 @openapi.definition(summary="创建配置驱动的网络拓扑")
 @requires_permission("network_topology:c")
@@ -742,10 +1052,7 @@ async def list_topology(request: Request):
     total = await queryset.count()
     item_data = await (
         queryset.annotate(
-            source_count=RawSQL(
-                "CASE WHEN jsonb_typeof(\"action_sources\") = 'array' "
-                'THEN jsonb_array_length("action_sources") ELSE 0 END'
-            ),
+            source_count=_source_count_annotation(),
             node_count=RawSQL(
                 "CASE WHEN jsonb_typeof(\"topology_json\"->'nodes') = 'array' "
                 "THEN jsonb_array_length(\"topology_json\"->'nodes') ELSE 0 END"
@@ -778,6 +1085,9 @@ async def list_topology(request: Request):
     for item in item_data:
         for field in ("last_refresh_at", "next_refresh_at", "ctime", "utime"):
             item[field] = strip_timezone_to_seconds(item.get(field))
+        mode = _topology_mode(item.get("source_count"))
+        item["mode"] = mode
+        item["source_type"] = mode
 
     return response_ok(
         {
@@ -817,13 +1127,17 @@ async def get_topology(request: Request):
             "ctime",
             "utime",
         ),
+        include_source_count=True,
     )
     if not topology:
         return _err("拓扑数据不存在", status=404)
     topology_json = topology.topology_json or {}
+    mode = _topology_mode(topology.source_count)
     payload = {
         "id": topology.id,
         "name": topology.name,
+        "mode": mode,
+        "source_type": mode,
         "topology_json": topology_json,
         "layout_json": topology.layout_json,
         "node_count": len(topology_json.get("nodes", [])),

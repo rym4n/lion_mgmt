@@ -9,7 +9,7 @@ __all__ = ["NetworkTopology"]
 
 
 class NetworkTopology(BaseModel):
-    """由应用动作采集配置后自动生成的网络拓扑。"""
+    """手工绘制或由应用动作采集配置后自动生成的网络拓扑。"""
 
     name = fields.CharField(max_length=200, description="拓扑名称")
     source_config = EncryptedTextField(
@@ -51,9 +51,12 @@ class NetworkTopology(BaseModel):
     @property
     def json(self) -> dict:
         topology = self.topology_json or {}
+        mode = "automatic" if self.action_sources else "manual"
         return {
             "id": self.id,
             "name": self.name,
+            "mode": mode,
+            "source_type": mode,
             "topology_json": topology,
             "layout_json": self.layout_json,
             "source_count": len(self.action_sources or []),
