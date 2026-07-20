@@ -81,6 +81,30 @@ def test_check_permissions_refreshes_stale_session_account(monkeypatch):
     assert cache.set_calls[0][0] == "account_account-1"
 
 
+def test_platform_wildcard_authorizes_nested_asset_permissions():
+    account = _account("account-1", ["*:*"])
+    request = SimpleNamespace(
+        ctx=SimpleNamespace(
+            session={
+                "sub": "account-1",
+                "account_info": account,
+                "tenant_id": "tenant-a",
+            }
+        ),
+        app=SimpleNamespace(ctx=SimpleNamespace(cache_client=_FakeCache())),
+        path="/supply-chain-review/ci-type/list",
+    )
+
+    assert (
+        asyncio.run(
+            authorization.check_permissions(
+                request, "supply_chain_review:model:r"
+            )
+        )
+        is True
+    )
+
+
 def test_check_permissions_ignores_roles_from_other_tenants(monkeypatch):
     stale_account = _account("account-1", ["warroom:r"], tenant_id="tenant-b")
     fresh_account = _account("account-1", ["warroom:r"], tenant_id="tenant-b")

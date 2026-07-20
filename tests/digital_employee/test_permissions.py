@@ -31,7 +31,7 @@ def test_digital_employee_routes_use_platform_two_segment_permissions():
         assert permission in source
 
 
-def test_platform_wildcard_matches_flat_digital_employee_permissions():
+def test_platform_wildcard_matches_permissions_at_any_depth():
     import ast
 
     path = ROOT / "libs/security/authorization.py"
@@ -43,7 +43,7 @@ def test_platform_wildcard_matches_flat_digital_employee_permissions():
     )
     module = ast.Module(body=[check_wildcard_node], type_ignores=[])
     ast.fix_missing_locations(module)
-    namespace: dict[str, object] = {}
+    namespace: dict[str, object] = {"SUPERADMIN_PERMISSION": "*:*"}
     exec(compile(module, str(path), "exec"), namespace)
     check_wildcard = namespace["check_wildcard"]
 
@@ -51,8 +51,9 @@ def test_platform_wildcard_matches_flat_digital_employee_permissions():
     assert check_wildcard("digital_employee:*", "digital_employee:r") is True
     assert check_wildcard("*:*", "digital_employee_skill:r") is True
     assert check_wildcard("digital_employee_skill:*", "digital_employee_skill:r") is True
-    assert check_wildcard("*:*", "digital_employee:role:r") is False
-    assert check_wildcard("*:*", "digital_employee:skill:r") is False
+    assert check_wildcard("*:*", "digital_employee:role:r") is True
+    assert check_wildcard("*:*", "digital_employee:skill:r") is True
+    assert check_wildcard("digital_employee:*", "digital_employee:role:r") is False
 
 
 def test_digital_employee_permission_migrations_flatten_existing_data():

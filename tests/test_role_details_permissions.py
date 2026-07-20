@@ -63,6 +63,35 @@ def test_role_details_expands_platform_wildcard_permissions():
     ]
 
 
+def test_role_details_expands_platform_wildcard_for_nested_asset_permissions():
+    structured = _build_structured_permissions(
+        ["*:*"],
+        [
+            {
+                "model": "asset-management-models",
+                "description": "资产模型",
+                "Permissions": [
+                    "supply_chain_review:model:c",
+                    "supply_chain_review:model:r",
+                    "supply_chain_review:field:r",
+                ],
+            }
+        ],
+    )
+
+    assert structured == [
+        {
+            "model": "asset-management-models",
+            "model_description": "资产模型",
+            "sp": [
+                {"supply_chain_review:model:c": "新增资产模型权限"},
+                {"supply_chain_review:model:r": "查看资产模型权限"},
+                {"supply_chain_review:field:r": "查看资产字段权限"},
+            ],
+        }
+    ]
+
+
 def test_role_update_cannot_remove_platform_wildcard_permission():
     superadmin_role = SimpleNamespace(permissions=["*:*"])
 
