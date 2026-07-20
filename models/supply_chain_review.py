@@ -13,8 +13,25 @@ CI_STATUS_DISABLED = "disabled"
 CI_STATUS_ARCHIVED = "archived"
 CI_RISK_STATUS_NORMAL = "normal"
 
-FIELD_DATA_TYPES = {"text", "number", "date", "datetime", "enum", "bool", "attachment", "ref"}
+FIELD_DATA_TYPES = {
+    "text",
+    "number",
+    "date",
+    "datetime",
+    "enum",
+    "bool",
+    "attachment",
+    "ref",
+}
 RELATION_CARDINALITIES = {"1-1", "1-n", "n-n"}
+
+
+def _policy_data_value(data: dict, *keys: str, fallback=None):
+    for key in keys:
+        value = data.get(key)
+        if value not in (None, ""):
+            return value
+    return fallback
 
 
 class SupplyChainCiType(BaseModel):
@@ -24,9 +41,15 @@ class SupplyChainCiType(BaseModel):
     name = fields.CharField(max_length=255, description="模型名称")
     icon = fields.CharField(max_length=100, null=True, description="图标")
     color = fields.CharField(max_length=32, null=True, description="颜色")
-    category = fields.CharField(max_length=30, default="asset", description="asset/master_data/org")
-    primary_field = fields.CharField(max_length=64, default="", description="主展示字段")
-    status = fields.CharField(max_length=20, default=CI_TYPE_STATUS_ACTIVE, description="active/disabled")
+    category = fields.CharField(
+        max_length=30, default="asset", description="asset/master_data/org"
+    )
+    primary_field = fields.CharField(
+        max_length=64, default="", description="主展示字段"
+    )
+    status = fields.CharField(
+        max_length=20, default=CI_TYPE_STATUS_ACTIVE, description="active/disabled"
+    )
     is_locked = fields.BooleanField(default=False, description="交付锁定标记")
     sort = fields.IntField(default=0, description="展示顺序")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
@@ -68,7 +91,9 @@ class SupplyChainCiFieldDef(BaseModel):
     label = fields.CharField(max_length=255, description="字段名称")
     data_type = fields.CharField(max_length=20, description="字段类型")
     enum_options = fields.JSONField(default=list, description="枚举选项")
-    ref_ci_type_id = fields.CharField(max_length=36, null=True, description="引用模型 ID")
+    ref_ci_type_id = fields.CharField(
+        max_length=36, null=True, description="引用模型 ID"
+    )
     ref_ci_type = fields.CharField(max_length=64, null=True, description="引用模型 key")
     required = fields.BooleanField(default=False, description="是否必填")
     unique = fields.BooleanField(default=False, description="是否唯一")
@@ -118,7 +143,9 @@ class SupplyChainCiRelationType(BaseModel):
     target_ci_type_ids = fields.JSONField(default=list, description="目标模型 ID 列表")
     source_ci_types = fields.JSONField(default=list, description="源模型 key 列表")
     target_ci_types = fields.JSONField(default=list, description="目标模型 key 列表")
-    cardinality = fields.CharField(max_length=10, default="n-n", description="1-1/1-n/n-n")
+    cardinality = fields.CharField(
+        max_length=10, default="n-n", description="1-1/1-n/n-n"
+    )
     relation_fields = fields.JSONField(default=list, description="关系属性字段定义")
     is_locked = fields.BooleanField(default=False, description="交付锁定标记")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
@@ -156,11 +183,21 @@ class SupplyChainCi(BaseModel):
     ci_type_id = fields.CharField(max_length=36, description="模型 ID")
     ci_type_key = fields.CharField(max_length=64, description="模型 key")
     name = fields.CharField(max_length=255, description="实例名称")
-    project_area_id = fields.CharField(max_length=36, null=True, description="厂区/区域 CI")
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
+    project_area_id = fields.CharField(
+        max_length=36, null=True, description="厂区/区域 CI"
+    )
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
     attributes = fields.JSONField(default=dict, description="动态属性")
-    status = fields.CharField(max_length=20, default=CI_STATUS_ACTIVE, description="active/disabled/archived")
-    risk_status = fields.CharField(max_length=20, default=CI_RISK_STATUS_NORMAL, description="normal/low/medium/high")
+    status = fields.CharField(
+        max_length=20, default=CI_STATUS_ACTIVE, description="active/disabled/archived"
+    )
+    risk_status = fields.CharField(
+        max_length=20,
+        default=CI_RISK_STATUS_NORMAL,
+        description="normal/low/medium/high",
+    )
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
 
@@ -199,8 +236,18 @@ class SupplyChainCiRelation(BaseModel):
     """Relation instance between two CIs."""
 
     relation_type_key = fields.CharField(max_length=64, description="关系类型 key")
-    source_ci = fields.ForeignKeyField("models.SupplyChainCi", related_name="source_relations", description="源 CI", on_delete=fields.CASCADE)
-    target_ci = fields.ForeignKeyField("models.SupplyChainCi", related_name="target_relations", description="目标 CI", on_delete=fields.CASCADE)
+    source_ci = fields.ForeignKeyField(
+        "models.SupplyChainCi",
+        related_name="source_relations",
+        description="源 CI",
+        on_delete=fields.CASCADE,
+    )
+    target_ci = fields.ForeignKeyField(
+        "models.SupplyChainCi",
+        related_name="target_relations",
+        description="目标 CI",
+        on_delete=fields.CASCADE,
+    )
     attributes = fields.JSONField(default=dict, description="关系属性")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
@@ -228,21 +275,33 @@ class SupplyChainCiRelation(BaseModel):
             ("tenant_id", "source_ci_id"),
             ("tenant_id", "target_ci_id"),
         )
-        unique_together = (("tenant_id", "relation_type_key", "source_ci_id", "target_ci_id"),)
+        unique_together = (
+            ("tenant_id", "relation_type_key", "source_ci_id", "target_ci_id"),
+        )
 
 
 class SupplyChainProjectAuthorization(BaseModel):
     """Personnel project authorization ledger."""
 
     personnel_ci_id = fields.CharField(max_length=36, description="人员 CI")
-    project_area_id = fields.CharField(max_length=36, null=True, description="厂区/区域 CI")
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
-    secrecy_level = fields.CharField(max_length=20, default="medium", description="low/medium/high/critical")
+    project_area_id = fields.CharField(
+        max_length=36, null=True, description="厂区/区域 CI"
+    )
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
+    secrecy_level = fields.CharField(
+        max_length=20, default="medium", description="low/medium/high/critical"
+    )
     project_role = fields.CharField(max_length=100, null=True, description="项目角色")
     authorized_from = fields.DateField(null=True, description="授权开始日期")
     authorized_to = fields.DateField(null=True, description="授权结束日期")
-    access_control_status = fields.CharField(max_length=20, default="normal", description="normal/abnormal/revoked")
-    status = fields.CharField(max_length=20, default="active", description="active/expired/revoked")
+    access_control_status = fields.CharField(
+        max_length=20, default="normal", description="normal/abnormal/revoked"
+    )
+    status = fields.CharField(
+        max_length=20, default="active", description="active/expired/revoked"
+    )
     remark = fields.TextField(null=True, description="备注")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
@@ -255,7 +314,9 @@ class SupplyChainProjectAuthorization(BaseModel):
             "accessory_project_id": self.accessory_project_id,
             "secrecy_level": self.secrecy_level,
             "project_role": self.project_role,
-            "authorized_from": str(self.authorized_from) if self.authorized_from else None,
+            "authorized_from": str(self.authorized_from)
+            if self.authorized_from
+            else None,
             "authorized_to": str(self.authorized_to) if self.authorized_to else None,
             "access_control_status": self.access_control_status,
             "status": self.status,
@@ -279,15 +340,25 @@ class SupplyChainNdaRecord(BaseModel):
     """Personnel NDA signing ledger."""
 
     personnel_ci_id = fields.CharField(max_length=36, description="人员 CI")
-    project_area_id = fields.CharField(max_length=36, null=True, description="厂区/区域 CI")
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
+    project_area_id = fields.CharField(
+        max_length=36, null=True, description="厂区/区域 CI"
+    )
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
     nda_type = fields.CharField(max_length=50, null=True, description="NDA 类型")
-    sign_status = fields.CharField(max_length=20, default="unsigned", description="signed/unsigned/expired")
+    sign_status = fields.CharField(
+        max_length=20, default="unsigned", description="signed/unsigned/expired"
+    )
     signed_at = fields.DatetimeField(null=True, description="签署时间")
     expires_at = fields.DatetimeField(null=True, description="到期时间")
     evidence_attachment_ids = fields.JSONField(default=list, description="证明附件")
-    source_type = fields.CharField(max_length=30, default="manual", description="hr/esign/manual")
-    source_record_id = fields.CharField(max_length=100, null=True, description="来源记录")
+    source_type = fields.CharField(
+        max_length=30, default="manual", description="hr/esign/manual"
+    )
+    source_record_id = fields.CharField(
+        max_length=100, null=True, description="来源记录"
+    )
     last_sync_at = fields.DatetimeField(null=True, description="最近同步时间")
     remark = fields.TextField(null=True, description="备注")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
@@ -327,15 +398,23 @@ class SupplyChainNdaRecord(BaseModel):
 class SupplyChainUnknownTerminal(BaseModel):
     """Network-side unknown terminal discovery ledger."""
 
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
     mac_address = fields.CharField(max_length=64, description="MAC 地址")
     ip_address = fields.CharField(max_length=64, null=True, description="IP 地址")
-    network_device_ci_id = fields.CharField(max_length=36, null=True, description="网络设备 CI")
+    network_device_ci_id = fields.CharField(
+        max_length=36, null=True, description="网络设备 CI"
+    )
     port = fields.CharField(max_length=100, null=True, description="交换机端口")
     first_seen_at = fields.DatetimeField(null=True, description="首次发现")
     last_seen_at = fields.DatetimeField(null=True, description="最近发现")
-    discovery_source = fields.CharField(max_length=30, default="switch_mac", description="switch_mac/arp/scan")
-    status = fields.CharField(max_length=20, default="pending", description="pending/confirmed/converted")
+    discovery_source = fields.CharField(
+        max_length=30, default="switch_mac", description="switch_mac/arp/scan"
+    )
+    status = fields.CharField(
+        max_length=20, default="pending", description="pending/confirmed/converted"
+    )
     endpoint_ci_id = fields.CharField(max_length=36, null=True, description="终端 CI")
     review_issue_id = fields.CharField(max_length=36, null=True, description="审查问题")
     remark = fields.TextField(null=True, description="备注")
@@ -375,10 +454,18 @@ class SupplyChainUnknownTerminal(BaseModel):
 class SupplyChainBoundaryLog(BaseModel):
     """Boundary file/mail/system access ledger."""
 
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
-    log_category = fields.CharField(max_length=30, description="file_operation/mail_outbound/system_access")
-    operator_account = fields.CharField(max_length=255, null=True, description="操作账号")
-    client_address = fields.CharField(max_length=100, null=True, description="客户端地址")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
+    log_category = fields.CharField(
+        max_length=30, description="file_operation/mail_outbound/system_access"
+    )
+    operator_account = fields.CharField(
+        max_length=255, null=True, description="操作账号"
+    )
+    client_address = fields.CharField(
+        max_length=100, null=True, description="客户端地址"
+    )
     personnel_ci_id = fields.CharField(max_length=36, null=True, description="人员 CI")
     endpoint_ci_id = fields.CharField(max_length=36, null=True, description="终端 CI")
     occurred_at = fields.DatetimeField(null=True, description="发生时间")
@@ -420,16 +507,28 @@ class SupplyChainBoundaryLog(BaseModel):
 class SupplyChainExceptionDeviceLog(BaseModel):
     """Exception device usage ledger."""
 
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
     exception_device_ci_id = fields.CharField(max_length=36, description="例外设备 CI")
     endpoint_ci_id = fields.CharField(max_length=36, null=True, description="终端 CI")
     personnel_ci_id = fields.CharField(max_length=36, null=True, description="人员 CI")
-    log_type = fields.CharField(max_length=20, default="use", description="insert/remove/use")
+    log_type = fields.CharField(
+        max_length=20, default="use", description="insert/remove/use"
+    )
     detail = fields.JSONField(default=dict, description="使用详情")
     occurred_at = fields.DatetimeField(null=True, description="发生时间")
-    source_type = fields.CharField(max_length=30, default="manual", description="file_parse/manual")
-    abnormal_type = fields.CharField(max_length=40, default="none", description="异常类型")
-    status = fields.CharField(max_length=20, default="pending", description="pending/confirmed/ignored/converted")
+    source_type = fields.CharField(
+        max_length=30, default="manual", description="file_parse/manual"
+    )
+    abnormal_type = fields.CharField(
+        max_length=40, default="none", description="异常类型"
+    )
+    status = fields.CharField(
+        max_length=20,
+        default="pending",
+        description="pending/confirmed/ignored/converted",
+    )
     review_issue_id = fields.CharField(max_length=36, null=True, description="审查问题")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
@@ -469,28 +568,48 @@ class SupplyChainExceptionDeviceLog(BaseModel):
 class SupplyChainCollectionTask(BaseModel):
     """Business wrapper around host collection abilities."""
 
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
-    domain = fields.CharField(max_length=30, description="network/personnel_nda/boundary/exception_device")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
+    domain = fields.CharField(
+        max_length=30, description="network/personnel_nda/boundary/exception_device"
+    )
     name = fields.CharField(max_length=255, description="任务名称")
-    execution_mode = fields.CharField(max_length=30, default="manual", description="采集方式")
+    execution_mode = fields.CharField(
+        max_length=30, default="manual", description="采集方式"
+    )
     playbook_id = fields.CharField(max_length=100, null=True, description="剧本 ID")
-    playbook_version_id = fields.CharField(max_length=100, null=True, description="剧本版本 ID")
+    playbook_version_id = fields.CharField(
+        max_length=100, null=True, description="剧本版本 ID"
+    )
     action_id = fields.CharField(max_length=100, null=True, description="动作 ID")
     action_name = fields.CharField(max_length=255, null=True, description="动作名称")
-    timed_task_id = fields.CharField(max_length=100, null=True, description="定时任务 ID")
-    event_ingestion_id = fields.CharField(max_length=100, null=True, description="事件接入 ID")
+    timed_task_id = fields.CharField(
+        max_length=100, null=True, description="定时任务 ID"
+    )
+    event_ingestion_id = fields.CharField(
+        max_length=100, null=True, description="事件接入 ID"
+    )
     target_type = fields.CharField(max_length=50, null=True, description="目标类型")
     target_ci_ids = fields.JSONField(default=list, description="目标 CI")
     credential_ref = fields.CharField(max_length=255, null=True, description="凭据引用")
     input_params = fields.JSONField(default=dict, description="输入参数")
-    parser_template_id = fields.CharField(max_length=36, null=True, description="解析模板")
-    mapping_template_id = fields.CharField(max_length=36, null=True, description="映射模板")
+    parser_template_id = fields.CharField(
+        max_length=36, null=True, description="解析模板"
+    )
+    mapping_template_id = fields.CharField(
+        max_length=36, null=True, description="映射模板"
+    )
     schedule_enabled = fields.BooleanField(default=False, description="是否启用调度")
     cron_expression = fields.CharField(max_length=100, null=True, description="Cron")
-    after_success_action = fields.CharField(max_length=30, default="none", description="none/policy_compare/risk_evaluate")
+    after_success_action = fields.CharField(
+        max_length=30, default="none", description="none/policy_compare/risk_evaluate"
+    )
     enabled = fields.BooleanField(default=True, description="是否启用")
     last_run_at = fields.DatetimeField(null=True, description="最近运行")
-    last_run_status = fields.CharField(max_length=20, null=True, description="最近运行状态")
+    last_run_status = fields.CharField(
+        max_length=20, null=True, description="最近运行状态"
+    )
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
 
@@ -526,25 +645,45 @@ class SupplyChainCollectionTask(BaseModel):
     class Meta:
         table = "supply_chain_collection_task"
         ordering = ["-utime"]
-        indexes = (("tenant_id", "domain"), ("tenant_id", "accessory_project_id"), ("tenant_id", "enabled"))
+        indexes = (
+            ("tenant_id", "domain"),
+            ("tenant_id", "accessory_project_id"),
+            ("tenant_id", "enabled"),
+        )
 
 
 class SupplyChainCollectionRun(BaseModel):
     """Collection run with run_id plumbing for external execution."""
 
     task_id = fields.CharField(max_length=36, null=True, description="采集任务")
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
     domain = fields.CharField(max_length=30, description="采集域")
     run_id = fields.CharField(max_length=64, description="运行 ID")
-    playbook_run_id = fields.CharField(max_length=100, null=True, description="剧本运行 ID")
-    action_run_id = fields.CharField(max_length=100, null=True, description="动作运行 ID")
-    timed_run_id = fields.CharField(max_length=100, null=True, description="定时运行 ID")
+    playbook_run_id = fields.CharField(
+        max_length=100, null=True, description="剧本运行 ID"
+    )
+    action_run_id = fields.CharField(
+        max_length=100, null=True, description="动作运行 ID"
+    )
+    timed_run_id = fields.CharField(
+        max_length=100, null=True, description="定时运行 ID"
+    )
     event_batch_id = fields.CharField(max_length=100, null=True, description="事件批次")
-    status = fields.CharField(max_length=20, default="pending", description="pending/running/success/failed/partial")
+    status = fields.CharField(
+        max_length=20,
+        default="pending",
+        description="pending/running/success/failed/partial",
+    )
     started_at = fields.DatetimeField(null=True, description="开始时间")
     finished_at = fields.DatetimeField(null=True, description="结束时间")
-    raw_payload_ref = fields.CharField(max_length=255, null=True, description="原始结果引用")
-    parsed_result_ref = fields.CharField(max_length=255, null=True, description="解析结果引用")
+    raw_payload_ref = fields.CharField(
+        max_length=255, null=True, description="原始结果引用"
+    )
+    parsed_result_ref = fields.CharField(
+        max_length=255, null=True, description="解析结果引用"
+    )
     total_count = fields.IntField(default=0, description="总数")
     success_count = fields.IntField(default=0, description="成功数")
     failed_count = fields.IntField(default=0, description="失败数")
@@ -593,8 +732,12 @@ class SupplyChainParseMappingTemplate(BaseModel):
 
     domain = fields.CharField(max_length=30, description="采集域")
     name = fields.CharField(max_length=255, description="模板名称")
-    source_format = fields.CharField(max_length=20, default="json", description="json/csv/text/raw_config/log")
-    parser_type = fields.CharField(max_length=20, default="builtin", description="builtin/regex/json_path/script")
+    source_format = fields.CharField(
+        max_length=20, default="json", description="json/csv/text/raw_config/log"
+    )
+    parser_type = fields.CharField(
+        max_length=20, default="builtin", description="builtin/regex/json_path/script"
+    )
     parser_rules = fields.JSONField(default=dict, description="解析规则")
     mapping_rules = fields.JSONField(default=dict, description="映射规则")
     enabled = fields.BooleanField(default=True, description="是否启用")
@@ -624,7 +767,9 @@ class SupplyChainParseMappingTemplate(BaseModel):
 class SupplyChainPresetPolicy(BaseModel):
     """Expected network policy baseline."""
 
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
     device_ci_id = fields.CharField(max_length=36, null=True, description="网络设备 CI")
     rule_name = fields.CharField(max_length=255, description="规则名称")
     source_zone = fields.CharField(max_length=100, null=True, description="源区域")
@@ -633,13 +778,21 @@ class SupplyChainPresetPolicy(BaseModel):
     target_address = fields.CharField(max_length=255, null=True, description="目标地址")
     protocol = fields.CharField(max_length=30, null=True, description="协议")
     port = fields.CharField(max_length=100, null=True, description="端口")
-    action = fields.CharField(max_length=20, default="permit", description="permit/deny")
+    action = fields.CharField(
+        max_length=20, default="permit", description="permit/deny"
+    )
     business_purpose = fields.TextField(null=True, description="业务用途")
-    approval_status = fields.CharField(max_length=30, null=True, description="外部审批状态")
-    effective_status = fields.CharField(max_length=20, default="active", description="active/disabled")
+    approval_status = fields.CharField(
+        max_length=30, null=True, description="外部审批状态"
+    )
+    effective_status = fields.CharField(
+        max_length=20, default="active", description="active/disabled"
+    )
     valid_from = fields.DateField(null=True, description="生效日期")
     valid_to = fields.DateField(null=True, description="失效日期")
-    risk_level = fields.CharField(max_length=20, default="medium", description="风险等级")
+    risk_level = fields.CharField(
+        max_length=20, default="medium", description="风险等级"
+    )
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
 
@@ -669,21 +822,33 @@ class SupplyChainPresetPolicy(BaseModel):
     class Meta:
         table = "supply_chain_preset_policy"
         ordering = ["-utime"]
-        indexes = (("tenant_id", "accessory_project_id"), ("tenant_id", "device_ci_id"), ("tenant_id", "effective_status"))
+        indexes = (
+            ("tenant_id", "accessory_project_id"),
+            ("tenant_id", "device_ci_id"),
+            ("tenant_id", "effective_status"),
+        )
 
 
 class SupplyChainActualPolicy(BaseModel):
     """Current firewall, switch, or other network-device policy."""
 
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
     device_ci_id = fields.CharField(max_length=36, null=True, description="网络设备 CI")
     device_key = fields.CharField(max_length=255, description="外部设备稳定标识")
     device_name = fields.CharField(max_length=255, null=True, description="设备名称")
-    device_type = fields.CharField(max_length=30, null=True, description="firewall/switch/other")
-    collection_run_id = fields.CharField(max_length=36, null=True, description="采集运行")
+    device_type = fields.CharField(
+        max_length=30, null=True, description="firewall/switch/other"
+    )
+    collection_run_id = fields.CharField(
+        max_length=36, null=True, description="采集运行"
+    )
     raw_rule_id = fields.CharField(max_length=255, null=True, description="原始规则 ID")
     policy_key = fields.CharField(max_length=255, description="外部策略稳定标识")
-    policy_type = fields.CharField(max_length=50, null=True, description="firewall/acl/other")
+    policy_type = fields.CharField(
+        max_length=50, null=True, description="firewall/acl/other"
+    )
     rule_name = fields.CharField(max_length=255, null=True, description="规则名称")
     source_zone = fields.CharField(max_length=100, null=True, description="源区域")
     source_address = fields.CharField(max_length=255, null=True, description="源地址")
@@ -691,11 +856,15 @@ class SupplyChainActualPolicy(BaseModel):
     target_address = fields.CharField(max_length=255, null=True, description="目标地址")
     protocol = fields.CharField(max_length=30, null=True, description="协议")
     port = fields.CharField(max_length=100, null=True, description="端口")
-    action = fields.CharField(max_length=20, default="permit", description="permit/deny")
+    action = fields.CharField(
+        max_length=20, default="permit", description="permit/deny"
+    )
     enabled = fields.BooleanField(default=True, description="策略是否启用")
     raw_text = fields.TextField(null=True, description="原始文本")
     policy_data = fields.JSONField(default=dict, description="厂商策略完整结构化数据")
-    parse_status = fields.CharField(max_length=20, default="parsed", description="parsed/unparsed")
+    parse_status = fields.CharField(
+        max_length=20, default="parsed", description="parsed/unparsed"
+    )
     revision = fields.IntField(default=1, description="策略版本")
     last_synced_at = fields.DatetimeField(null=True, description="最近同步时间")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
@@ -703,6 +872,7 @@ class SupplyChainActualPolicy(BaseModel):
 
     @property
     def json(self) -> dict:
+        policy_data = self.policy_data or {}
         return base_json(self) | {
             "accessory_project_id": self.accessory_project_id,
             "device_ci_id": self.device_ci_id,
@@ -720,10 +890,34 @@ class SupplyChainActualPolicy(BaseModel):
             "target_address": self.target_address,
             "protocol": self.protocol,
             "port": self.port,
+            "source_port": _policy_data_value(policy_data, "source_port", "src_port"),
+            "destination_port": _policy_data_value(
+                policy_data,
+                "destination_port",
+                "target_port",
+                "dest_port",
+                "dst_port",
+                fallback=self.port,
+            ),
+            "service": _policy_data_value(
+                policy_data,
+                "service",
+                "service_name",
+                "application",
+                fallback=self.protocol,
+            ),
+            "policy_order": _policy_data_value(
+                policy_data,
+                "policy_order",
+                "rule_order",
+                "position",
+                "sequence",
+                "order",
+            ),
             "action": self.action,
             "enabled": self.enabled,
             "raw_text": self.raw_text,
-            "policy_data": self.policy_data or {},
+            "policy_data": policy_data,
             "parse_status": self.parse_status,
             "revision": self.revision,
             "last_synced_at": strip_timezone_to_seconds(self.last_synced_at),
@@ -747,8 +941,12 @@ class SupplyChainActualPolicy(BaseModel):
 class SupplyChainPolicyCompareRun(BaseModel):
     """Policy compare run summary."""
 
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
-    collection_run_id = fields.CharField(max_length=36, null=True, description="采集运行")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
+    collection_run_id = fields.CharField(
+        max_length=36, null=True, description="采集运行"
+    )
     total = fields.IntField(default=0, description="总数")
     matched = fields.IntField(default=0, description="匹配数")
     added = fields.IntField(default=0, description="新增数")
@@ -780,18 +978,33 @@ class SupplyChainPolicyCompareRun(BaseModel):
     class Meta:
         table = "supply_chain_policy_compare_run"
         ordering = ["-ctime"]
-        indexes = (("tenant_id", "accessory_project_id"), ("tenant_id", "collection_run_id"))
+        indexes = (
+            ("tenant_id", "accessory_project_id"),
+            ("tenant_id", "collection_run_id"),
+        )
 
 
 class SupplyChainPolicyCompareItem(BaseModel):
     """Single policy compare item."""
 
     compare_run_id = fields.CharField(max_length=36, description="比对运行")
-    preset_policy_id = fields.CharField(max_length=36, null=True, description="预设策略")
-    actual_policy_id = fields.CharField(max_length=36, null=True, description="实际策略")
-    compare_type = fields.CharField(max_length=20, description="matched/added/missing/changed/unparsed")
-    risk_level = fields.CharField(max_length=20, default="medium", description="风险等级")
-    handle_status = fields.CharField(max_length=20, default="pending", description="pending/confirmed/ignored/converted")
+    preset_policy_id = fields.CharField(
+        max_length=36, null=True, description="预设策略"
+    )
+    actual_policy_id = fields.CharField(
+        max_length=36, null=True, description="实际策略"
+    )
+    compare_type = fields.CharField(
+        max_length=20, description="matched/added/missing/changed/unparsed"
+    )
+    risk_level = fields.CharField(
+        max_length=20, default="medium", description="风险等级"
+    )
+    handle_status = fields.CharField(
+        max_length=20,
+        default="pending",
+        description="pending/confirmed/ignored/converted",
+    )
     review_issue_id = fields.CharField(max_length=36, null=True, description="审查问题")
     diff = fields.JSONField(default=dict, description="差异")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
@@ -815,20 +1028,34 @@ class SupplyChainPolicyCompareItem(BaseModel):
     class Meta:
         table = "supply_chain_policy_compare_item"
         ordering = ["-utime"]
-        indexes = (("tenant_id", "compare_run_id"), ("tenant_id", "compare_type"), ("tenant_id", "handle_status"))
+        indexes = (
+            ("tenant_id", "compare_run_id"),
+            ("tenant_id", "compare_type"),
+            ("tenant_id", "handle_status"),
+        )
 
 
 class SupplyChainPolicyChange(BaseModel):
     """Immutable before/after history for access-control policy writes."""
 
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
     device_ci_id = fields.CharField(max_length=36, null=True, description="网络设备 CI")
-    device_key = fields.CharField(max_length=255, null=True, description="外部设备稳定标识")
-    actual_policy_id = fields.CharField(max_length=36, null=True, description="当前策略 ID")
-    policy_key = fields.CharField(max_length=255, null=True, description="外部策略稳定标识")
+    device_key = fields.CharField(
+        max_length=255, null=True, description="外部设备稳定标识"
+    )
+    actual_policy_id = fields.CharField(
+        max_length=36, null=True, description="当前策略 ID"
+    )
+    policy_key = fields.CharField(
+        max_length=255, null=True, description="外部策略稳定标识"
+    )
     batch_id = fields.CharField(max_length=64, null=True, description="同步批次 ID")
     policy_name = fields.CharField(max_length=255, null=True, description="策略名称")
-    change_type = fields.CharField(max_length=20, description="added/modified/deleted/synced")
+    change_type = fields.CharField(
+        max_length=20, description="added/modified/moved/deleted"
+    )
     revision = fields.IntField(default=1, description="策略写入后的版本")
     before_data = fields.JSONField(default=dict, description="写入前策略快照")
     after_data = fields.JSONField(default=dict, description="写入后策略快照")
@@ -836,8 +1063,12 @@ class SupplyChainPolicyChange(BaseModel):
     diff_text = fields.TextField(null=True, description="差异文本")
     detected_at = fields.DatetimeField(null=True, description="发现时间")
     risk_level = fields.CharField(max_length=20, default="high", description="风险等级")
-    external_approve_ref = fields.CharField(max_length=100, null=True, description="外部审批单号")
-    external_approve_result = fields.CharField(max_length=100, null=True, description="外部审批结果")
+    external_approve_ref = fields.CharField(
+        max_length=100, null=True, description="外部审批单号"
+    )
+    external_approve_result = fields.CharField(
+        max_length=100, null=True, description="外部审批结果"
+    )
     review_issue_id = fields.CharField(max_length=36, null=True, description="审查问题")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
@@ -884,13 +1115,19 @@ class SupplyChainPolicyChange(BaseModel):
 class SupplyChainNetworkTopology(BaseModel):
     """Stored LogicFlow network topology."""
 
-    project_area_id = fields.CharField(max_length=36, null=True, description="厂区/区域 CI")
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
+    project_area_id = fields.CharField(
+        max_length=36, null=True, description="厂区/区域 CI"
+    )
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
     name = fields.CharField(max_length=255, description="拓扑名称")
     version = fields.CharField(max_length=50, default="v1", description="版本")
     graph_data = fields.JSONField(default=dict, description="LogicFlow 数据")
     change_summary = fields.TextField(null=True, description="变更说明")
-    status = fields.CharField(max_length=20, default="active", description="active/archived")
+    status = fields.CharField(
+        max_length=20, default="active", description="active/archived"
+    )
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
 
@@ -911,24 +1148,42 @@ class SupplyChainNetworkTopology(BaseModel):
     class Meta:
         table = "supply_chain_network_topology"
         ordering = ["-utime"]
-        indexes = (("tenant_id", "project_area_id"), ("tenant_id", "accessory_project_id"), ("tenant_id", "status"))
+        indexes = (
+            ("tenant_id", "project_area_id"),
+            ("tenant_id", "accessory_project_id"),
+            ("tenant_id", "status"),
+        )
 
 
 class SupplyChainReviewIssue(BaseModel):
     """Review issue and remediation closure workflow."""
 
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
     domain = fields.CharField(max_length=30, description="问题域")
-    source_object_type = fields.CharField(max_length=80, null=True, description="来源对象类型")
-    source_object_id = fields.CharField(max_length=36, null=True, description="来源对象 ID")
+    source_object_type = fields.CharField(
+        max_length=80, null=True, description="来源对象类型"
+    )
+    source_object_id = fields.CharField(
+        max_length=36, null=True, description="来源对象 ID"
+    )
     issue_no = fields.CharField(max_length=64, description="问题编号")
     title = fields.CharField(max_length=255, description="标题")
     description = fields.TextField(null=True, description="描述")
-    risk_level = fields.CharField(max_length=20, default="medium", description="风险等级")
+    risk_level = fields.CharField(
+        max_length=20, default="medium", description="风险等级"
+    )
     remediation_requirement = fields.TextField(null=True, description="整改要求")
-    responsible_person = fields.CharField(max_length=255, null=True, description="责任人")
+    responsible_person = fields.CharField(
+        max_length=255, null=True, description="责任人"
+    )
     due_date = fields.DateField(null=True, description="截止日期")
-    status = fields.CharField(max_length=30, default="pending", description="pending/in_progress/pending_review/closed/returned")
+    status = fields.CharField(
+        max_length=30,
+        default="pending",
+        description="pending/in_progress/pending_review/closed/returned",
+    )
     attachment_ids = fields.JSONField(default=list, description="附件")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
@@ -957,7 +1212,12 @@ class SupplyChainReviewIssue(BaseModel):
         table = "supply_chain_review_issue"
         ordering = ["-utime"]
         unique_together = (("tenant_id", "issue_no"),)
-        indexes = (("tenant_id", "accessory_project_id"), ("tenant_id", "domain"), ("tenant_id", "status"), ("tenant_id", "risk_level"))
+        indexes = (
+            ("tenant_id", "accessory_project_id"),
+            ("tenant_id", "domain"),
+            ("tenant_id", "status"),
+            ("tenant_id", "risk_level"),
+        )
 
 
 class SupplyChainRemediationRecord(BaseModel):
@@ -999,16 +1259,24 @@ class SupplyChainDisposalRule(BaseModel):
     """Manual-confirm disposal rule."""
 
     project_area_id = fields.CharField(max_length=36, null=True, description="厂区 CI")
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
     trigger_type = fields.CharField(max_length=60, description="触发类型")
     enabled = fields.BooleanField(default=True, description="是否启用")
-    execution_mode = fields.CharField(max_length=30, default="manual_confirm", description="执行模式")
+    execution_mode = fields.CharField(
+        max_length=30, default="manual_confirm", description="执行模式"
+    )
     actions = fields.JSONField(default=list, description="处置动作")
     playbook_id = fields.CharField(max_length=100, null=True, description="剧本 ID")
     action_id = fields.CharField(max_length=100, null=True, description="动作 ID")
     input_mapping = fields.JSONField(default=dict, description="输入映射")
-    require_review_issue = fields.BooleanField(default=False, description="是否需要问题")
-    risk_level = fields.CharField(max_length=20, default="medium", description="风险等级")
+    require_review_issue = fields.BooleanField(
+        default=False, description="是否需要问题"
+    )
+    risk_level = fields.CharField(
+        max_length=20, default="medium", description="风险等级"
+    )
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
 
@@ -1033,7 +1301,12 @@ class SupplyChainDisposalRule(BaseModel):
     class Meta:
         table = "supply_chain_disposal_rule"
         ordering = ["-utime"]
-        indexes = (("tenant_id", "project_area_id"), ("tenant_id", "accessory_project_id"), ("tenant_id", "trigger_type"), ("tenant_id", "enabled"))
+        indexes = (
+            ("tenant_id", "project_area_id"),
+            ("tenant_id", "accessory_project_id"),
+            ("tenant_id", "trigger_type"),
+            ("tenant_id", "enabled"),
+        )
 
 
 class SupplyChainDisposalTask(BaseModel):
@@ -1042,11 +1315,17 @@ class SupplyChainDisposalTask(BaseModel):
     rule_id = fields.CharField(max_length=36, null=True, description="规则")
     trigger_type = fields.CharField(max_length=60, description="触发类型")
     project_area_id = fields.CharField(max_length=36, null=True, description="厂区 CI")
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
     personnel_ci_id = fields.CharField(max_length=36, null=True, description="人员 CI")
     related_ci_ids = fields.JSONField(default=list, description="关联 CI")
     actions = fields.JSONField(default=list, description="动作")
-    status = fields.CharField(max_length=30, default="pending_confirm", description="pending_confirm/executing/success/failed/skipped/cancelled")
+    status = fields.CharField(
+        max_length=30,
+        default="pending_confirm",
+        description="pending_confirm/executing/success/failed/skipped/cancelled",
+    )
     confirm_by = fields.CharField(max_length=255, null=True, description="确认人")
     confirmed_at = fields.DatetimeField(null=True, description="确认时间")
     run_id = fields.CharField(max_length=64, null=True, description="运行 ID")
@@ -1078,7 +1357,13 @@ class SupplyChainDisposalTask(BaseModel):
     class Meta:
         table = "supply_chain_disposal_task"
         ordering = ["-utime"]
-        indexes = (("tenant_id", "project_area_id"), ("tenant_id", "accessory_project_id"), ("tenant_id", "personnel_ci_id"), ("tenant_id", "status"), ("tenant_id", "run_id"))
+        indexes = (
+            ("tenant_id", "project_area_id"),
+            ("tenant_id", "accessory_project_id"),
+            ("tenant_id", "personnel_ci_id"),
+            ("tenant_id", "status"),
+            ("tenant_id", "run_id"),
+        )
 
 
 class SupplyChainAttachmentRef(BaseModel):
@@ -1128,11 +1413,15 @@ class SupplyChainNotificationEvent(BaseModel):
     target_type = fields.CharField(max_length=80, null=True, description="目标类型")
     target_id = fields.CharField(max_length=36, null=True, description="目标 ID")
     project_area_id = fields.CharField(max_length=36, null=True, description="厂区 CI")
-    accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目 CI"
+    )
     link = fields.CharField(max_length=255, null=True, description="链接")
     receivers = fields.JSONField(default=list, description="接收人")
     receiver_roles = fields.JSONField(default=list, description="接收角色")
-    status = fields.CharField(max_length=20, default="pending", description="pending/sent/failed")
+    status = fields.CharField(
+        max_length=20, default="pending", description="pending/sent/failed"
+    )
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
 
@@ -1158,7 +1447,11 @@ class SupplyChainNotificationEvent(BaseModel):
     class Meta:
         table = "supply_chain_notification_event"
         ordering = ["-ctime"]
-        indexes = (("tenant_id", "event_type"), ("tenant_id", "target_type", "target_id"), ("tenant_id", "status"))
+        indexes = (
+            ("tenant_id", "event_type"),
+            ("tenant_id", "target_type", "target_id"),
+            ("tenant_id", "status"),
+        )
 
 
 def base_json(item: BaseModel) -> dict:

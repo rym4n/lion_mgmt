@@ -25,7 +25,6 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
             ),
             "policy_key" = COALESCE(
                 NULLIF("raw_rule_id", ''),
-                NULLIF("rule_name", ''),
                 'legacy-policy:' || "id"
             ),
             "last_synced_at" = "utime";
@@ -81,7 +80,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
         COMMENT ON TABLE "supply_chain_actual_policy" IS
             '访问控制当前策略清单，由用户或外部剧本通过 CRUD 接口维护';
         COMMENT ON TABLE "supply_chain_policy_change" IS
-            '访问控制策略不可变写入历史';
+            '访问控制策略不可变变更历史（添加、修改、移动、删除）';
     """
 
 

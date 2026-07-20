@@ -27,6 +27,10 @@ SNAPSHOT_FIELDS = (
     "target_address",
     "protocol",
     "port",
+    "source_port",
+    "destination_port",
+    "service",
+    "policy_order",
     "action",
     "enabled",
     "raw_text",
@@ -57,6 +61,10 @@ class _PolicyRow:
             "target_address": None,
             "protocol": None,
             "port": None,
+            "source_port": None,
+            "destination_port": None,
+            "service": None,
+            "policy_order": None,
             "action": "permit",
             "enabled": True,
             "raw_text": None,
@@ -77,9 +85,44 @@ class _PolicyRow:
 
     @property
     def json(self):
-        return {"id": self.id} | {
+        payload = {"id": self.id} | {
             field: getattr(self, field) for field in SNAPSHOT_FIELDS
         }
+        policy_data = self.policy_data or {}
+
+        def first(*keys, fallback=None):
+            for key in keys:
+                value = policy_data.get(key)
+                if value not in (None, ""):
+                    return value
+            return fallback
+
+        payload.update(
+            {
+                "source_port": first("source_port", "src_port"),
+                "destination_port": first(
+                    "destination_port",
+                    "target_port",
+                    "dest_port",
+                    "dst_port",
+                    fallback=self.port,
+                ),
+                "service": first(
+                    "service",
+                    "service_name",
+                    "application",
+                    fallback=self.protocol,
+                ),
+                "policy_order": first(
+                    "policy_order",
+                    "rule_order",
+                    "position",
+                    "sequence",
+                    "order",
+                ),
+            }
+        )
+        return payload
 
 
 class _PolicyQuery:
@@ -183,9 +226,34 @@ def _policy_payload(policy_key, *, device_key="device-a", action="permit"):
         "target_address": "172.16.0.0/16",
         "protocol": "tcp",
         "port": "443",
+        "source_port": "1024-65535",
+        "destination_port": "443",
+        "service": "HTTPS",
+        "policy_order": 10,
         "action": action,
-        "policy_data": {"vendor": "example", "sequence": policy_key},
+        "policy_data": {"vendor": "example"},
     }
+
+
+def test_actual_policy_json_flattens_structured_policy_details():
+    policy = SupplyChainActualPolicy(
+        tenant_id="tenant-1",
+        device_key="device-a",
+        policy_key="allow-api",
+        port="80",
+        protocol="tcp",
+        policy_data={
+            "source_port": "1024-65535",
+            "destination_port": "443",
+            "service": "HTTPS",
+            "policy_order": 10,
+        },
+    )
+
+    assert policy.json["source_port"] == "1024-65535"
+    assert policy.json["destination_port"] == "443"
+    assert policy.json["service"] == "HTTPS"
+    assert policy.json["policy_order"] == 10
 
 
 def test_single_policy_crud_appends_immutable_before_after_history():
@@ -204,6 +272,9 @@ def test_single_policy_crud_appends_immutable_before_after_history():
     assert added["change_type"] == "added"
     assert added["before_data"] == {}
     assert added["after_data"]["action"] == "permit"
+    assert added["after_data"]["source_port"] == "1024-65535"
+    assert added["after_data"]["destination_port"] == "443"
+    assert added["after_data"]["service"] == "HTTPS"
     assert added["batch_id"] == "manual-create"
 
     updated = asyncio.run(
@@ -221,7 +292,13 @@ def test_single_policy_crud_appends_immutable_before_after_history():
 
     assert updated.revision == 2
     assert updated.action == "deny"
-    assert updated.policy_data == {"vendor": "example", "sequence": "allow-api"}
+    assert updated.policy_data == {
+        "vendor": "example",
+        "source_port": "1024-65535",
+        "destination_port": "443",
+        "service": "HTTPS",
+        "policy_order": 10,
+    }
     modified = _FakeHistoryModel.rows[1]
     assert modified["change_type"] == "modified"
     assert modified["before_data"]["action"] == "permit"
@@ -241,7 +318,7 @@ def test_single_policy_crud_appends_immutable_before_after_history():
     assert added["after_data"]["revision"] == 1
 
 
-def test_bulk_sync_records_unchanged_add_and_replace_missing_delete():
+def test_bulk_sync_skips_unchanged_history_and_replaces_missing_policy():
     existing = asyncio.run(
         manager.save_actual_policy("tenant-1", _policy_payload("keep"), "seed")
     )
@@ -292,9 +369,11 @@ def test_bulk_sync_records_unchanged_add_and_replace_missing_delete():
         "received": 2,
         "added": 1,
         "modified": 0,
+        "moved": 0,
         "deleted": 1,
+        "unchanged": 1,
         "synced": 1,
-        "history_count": 3,
+        "history_count": 2,
     }
     assert existing.deleted is False
     assert existing.revision == 2
@@ -305,11 +384,94 @@ def test_bulk_sync_records_unchanged_add_and_replace_missing_delete():
     assert sorted(item["change_type"] for item in _FakeHistoryModel.rows) == [
         "added",
         "deleted",
-        "synced",
     ]
     assert {item["batch_id"] for item in _FakeHistoryModel.rows} == {"playbook-run-1"}
     assert {item["sync_source"] for item in _FakeHistoryModel.rows} == {
         "nightly-firewall-playbook"
+    }
+
+
+def test_policy_order_only_update_is_recorded_as_move():
+    existing = asyncio.run(
+        manager.save_actual_policy("tenant-1", _policy_payload("move-me"), "seed")
+    )
+    _FakeHistoryModel.rows = []
+
+    updated = asyncio.run(
+        manager.save_actual_policy(
+            "tenant-1",
+            {
+                "id": existing.id,
+                "revision": existing.revision,
+                "policy_order": 30,
+                "batch_id": "move-batch",
+            },
+            "alice",
+        )
+    )
+
+    assert updated.policy_data["policy_order"] == 30
+    assert len(_FakeHistoryModel.rows) == 1
+    moved = _FakeHistoryModel.rows[0]
+    assert moved["change_type"] == "moved"
+    assert moved["before_data"]["policy_order"] == 10
+    assert moved["after_data"]["policy_order"] == 30
+    assert moved["creator"] == "alice"
+
+
+def test_canonical_policy_details_prefer_structured_data_over_legacy_fields():
+    structured = manager._normalize_actual_policy_payload(
+        {
+            "device_key": "device-a",
+            "policy_key": "canonical-precedence",
+            "port": "80",
+            "protocol": "tcp",
+            "policy_data": {
+                "src_port": "1024-65535",
+                "target_port": "443",
+                "application": "HTTPS",
+                "sequence": 10,
+            },
+        },
+        "playbook",
+    )
+
+    assert structured["policy_data"] == {
+        "src_port": "1024-65535",
+        "target_port": "443",
+        "application": "HTTPS",
+        "sequence": 10,
+        "source_port": "1024-65535",
+        "destination_port": "443",
+        "service": "HTTPS",
+        "policy_order": 10,
+    }
+
+    top_level = manager._normalize_actual_policy_payload(
+        {
+            "device_key": "device-a",
+            "policy_key": "canonical-precedence",
+            "source_port": "2000-65535",
+            "destination_port": "8443",
+            "service": "HTTPS-ALT",
+            "policy_order": 20,
+            "port": "80",
+            "protocol": "tcp",
+            "policy_data": {
+                "source_port": "1024-65535",
+                "destination_port": "443",
+                "service": "HTTPS",
+                "policy_order": 10,
+            },
+        },
+        "playbook",
+    )
+
+    assert top_level["policy_data"] == {
+        "source_port": "2000-65535",
+        "destination_port": "8443",
+        "service": "HTTPS-ALT",
+        "policy_order": 20,
     }
 
 
@@ -356,6 +518,7 @@ def test_policy_identity_is_non_null_and_unique_for_active_inventory_rows():
 
     assert fields_map["device_key"].null is False
     assert fields_map["policy_key"].null is False
+    assert manager.POLICY_CHANGE_TYPES == {"added", "modified", "moved", "deleted"}
     assert (
         'CREATE UNIQUE INDEX IF NOT EXISTS "idx_scr_actual_tenant_policy_identity"'
         in migration
@@ -363,3 +526,8 @@ def test_policy_identity_is_non_null_and_unique_for_active_inventory_rows():
     assert ') WHERE NOT "deleted";' in migration
     assert 'ALTER COLUMN "device_key" SET NOT NULL' in migration
     assert 'ALTER COLUMN "policy_key" SET NOT NULL' in migration
+    assert (
+        "NULLIF(\"raw_rule_id\", ''),\n                'legacy-policy:' || \"id\""
+        in migration
+    )
+    assert "NULLIF(\"rule_name\", '')" not in migration

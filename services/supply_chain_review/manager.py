@@ -59,16 +59,48 @@ UNKNOWN_TERMINAL_STATUSES = {"pending", "confirmed", "converted"}
 UNKNOWN_DISCOVERY_SOURCES = {"switch_mac", "arp", "scan"}
 BOUNDARY_LOG_CATEGORIES = {"file_operation", "mail_outbound", "system_access"}
 EXCEPTION_LOG_TYPES = {"insert", "remove", "use"}
-EXCEPTION_ABNORMAL_TYPES = {"none", "unauthorized_terminal", "unauthorized_person", "off_hours", "unregistered"}
+EXCEPTION_ABNORMAL_TYPES = {
+    "none",
+    "unauthorized_terminal",
+    "unauthorized_person",
+    "off_hours",
+    "unregistered",
+}
 EXCEPTION_LOG_STATUSES = {"pending", "confirmed", "ignored", "converted"}
 COLLECTION_DOMAINS = {"network", "personnel_nda", "boundary", "exception_device"}
-COLLECTION_EXECUTION_MODES = {"playbook_action", "tool_action", "timed_task", "event_ingestion", "http_api", "file_parse", "manual"}
+COLLECTION_EXECUTION_MODES = {
+    "playbook_action",
+    "tool_action",
+    "timed_task",
+    "event_ingestion",
+    "http_api",
+    "file_parse",
+    "manual",
+}
 COLLECTION_RUN_STATUSES = {"pending", "running", "success", "failed", "partial"}
 AFTER_SUCCESS_ACTIONS = {"none", "policy_compare", "risk_evaluate"}
 POLICY_ACTIONS = {"permit", "deny"}
 POLICY_COMPARE_TYPES = {"matched", "added", "missing", "changed", "unparsed"}
 POLICY_HANDLE_STATUSES = {"pending", "confirmed", "ignored", "converted"}
-POLICY_CHANGE_TYPES = {"added", "modified", "deleted", "synced"}
+POLICY_CHANGE_TYPES = {"added", "modified", "moved", "deleted"}
+POLICY_DETAIL_ALIASES = {
+    "source_port": ("source_port", "src_port"),
+    "destination_port": (
+        "destination_port",
+        "target_port",
+        "dest_port",
+        "dst_port",
+        "port",
+    ),
+    "service": ("service", "service_name", "application", "protocol"),
+    "policy_order": (
+        "policy_order",
+        "rule_order",
+        "position",
+        "sequence",
+        "order",
+    ),
+}
 MAX_POLICY_SYNC_ITEMS = 5000
 TOPOLOGY_STATUSES = {"active", "archived"}
 ISSUE_STATUSES = {"pending", "in_progress", "pending_review", "closed", "returned"}
@@ -79,8 +111,21 @@ ISSUE_TRANSITIONS = {
     "returned": {"in_progress"},
     "closed": set(),
 }
-DISPOSAL_TRIGGER_TYPES = {"person_resigned", "nda_expired", "nda_unsigned", "authorization_expired", "access_control_abnormal"}
-DISPOSAL_TASK_STATUSES = {"pending_confirm", "executing", "success", "failed", "skipped", "cancelled"}
+DISPOSAL_TRIGGER_TYPES = {
+    "person_resigned",
+    "nda_expired",
+    "nda_unsigned",
+    "authorization_expired",
+    "access_control_abnormal",
+}
+DISPOSAL_TASK_STATUSES = {
+    "pending_confirm",
+    "executing",
+    "success",
+    "failed",
+    "skipped",
+    "cancelled",
+}
 DISPOSAL_ACTIONS = {
     "revoke_project_authorization",
     "revoke_access_control",
@@ -149,7 +194,10 @@ LEDGER_CONFIGS = {
             "last_sync_at",
             "remark",
         ],
-        "enums": {"sign_status": NDA_SIGN_STATUSES, "source_type": {"hr", "esign", "manual"}},
+        "enums": {
+            "sign_status": NDA_SIGN_STATUSES,
+            "source_type": {"hr", "esign", "manual"},
+        },
         "keyword": ["nda_type", "source_record_id", "remark"],
         "order": ["-utime"],
     },
@@ -171,7 +219,10 @@ LEDGER_CONFIGS = {
             "review_issue_id",
             "remark",
         ],
-        "enums": {"status": UNKNOWN_TERMINAL_STATUSES, "discovery_source": UNKNOWN_DISCOVERY_SOURCES},
+        "enums": {
+            "status": UNKNOWN_TERMINAL_STATUSES,
+            "discovery_source": UNKNOWN_DISCOVERY_SOURCES,
+        },
         "keyword": ["mac_address", "ip_address", "port", "remark"],
         "order": ["-last_seen_at", "-utime"],
     },
@@ -307,7 +358,15 @@ PROCESS_CONFIGS = {
         "model": SupplyChainParseMappingTemplate,
         "resource": "collection",
         "required": ["domain", "name"],
-        "fields": ["domain", "name", "source_format", "parser_type", "parser_rules", "mapping_rules", "enabled"],
+        "fields": [
+            "domain",
+            "name",
+            "source_format",
+            "parser_type",
+            "parser_rules",
+            "mapping_rules",
+            "enabled",
+        ],
         "enums": {"domain": COLLECTION_DOMAINS},
         "keyword": ["name"],
         "order": ["-utime"],
@@ -335,7 +394,12 @@ PROCESS_CONFIGS = {
             "risk_level",
         ],
         "enums": {"action": POLICY_ACTIONS, "risk_level": RISK_STATUSES - {"normal"}},
-        "keyword": ["rule_name", "source_address", "target_address", "business_purpose"],
+        "keyword": [
+            "rule_name",
+            "source_address",
+            "target_address",
+            "business_purpose",
+        ],
         "order": ["-utime"],
     },
     "actual-policy": {
@@ -401,7 +465,10 @@ PROCESS_CONFIGS = {
             "external_approve_result",
             "review_issue_id",
         ],
-        "enums": {"change_type": POLICY_CHANGE_TYPES, "risk_level": RISK_STATUSES - {"normal"}},
+        "enums": {
+            "change_type": POLICY_CHANGE_TYPES,
+            "risk_level": RISK_STATUSES - {"normal"},
+        },
         "keyword": [
             "device_key",
             "policy_key",
@@ -435,7 +502,15 @@ PROCESS_CONFIGS = {
         "model": SupplyChainNetworkTopology,
         "resource": "topology",
         "required": ["name"],
-        "fields": ["project_area_id", "accessory_project_id", "name", "version", "graph_data", "change_summary", "status"],
+        "fields": [
+            "project_area_id",
+            "accessory_project_id",
+            "name",
+            "version",
+            "graph_data",
+            "change_summary",
+            "status",
+        ],
         "enums": {"status": TOPOLOGY_STATUSES},
         "keyword": ["name", "version", "change_summary"],
         "order": ["-utime"],
@@ -467,7 +542,16 @@ PROCESS_CONFIGS = {
         "model": SupplyChainRemediationRecord,
         "resource": "issue",
         "required": ["review_issue_id", "action_type"],
-        "fields": ["review_issue_id", "action_type", "content", "attachment_ids", "operator", "operated_at", "from_status", "to_status"],
+        "fields": [
+            "review_issue_id",
+            "action_type",
+            "content",
+            "attachment_ids",
+            "operator",
+            "operated_at",
+            "from_status",
+            "to_status",
+        ],
         "keyword": ["content", "operator"],
         "order": ["-operated_at", "-ctime"],
     },
@@ -488,7 +572,10 @@ PROCESS_CONFIGS = {
             "require_review_issue",
             "risk_level",
         ],
-        "enums": {"trigger_type": DISPOSAL_TRIGGER_TYPES, "risk_level": RISK_STATUSES - {"normal"}},
+        "enums": {
+            "trigger_type": DISPOSAL_TRIGGER_TYPES,
+            "risk_level": RISK_STATUSES - {"normal"},
+        },
         "keyword": ["trigger_type"],
         "order": ["-utime"],
     },
@@ -514,7 +601,17 @@ PROCESS_CONFIGS = {
         "model": SupplyChainAttachmentRef,
         "resource": "attachment",
         "required": ["object_type", "object_id", "file_id", "file_name"],
-        "fields": ["object_type", "object_id", "file_id", "file_name", "file_type", "file_size", "uploaded_by", "uploaded_at", "remark"],
+        "fields": [
+            "object_type",
+            "object_id",
+            "file_id",
+            "file_name",
+            "file_type",
+            "file_size",
+            "uploaded_by",
+            "uploaded_at",
+            "remark",
+        ],
         "keyword": ["object_type", "file_name", "remark"],
         "order": ["-uploaded_at", "-ctime"],
     },
@@ -580,7 +677,11 @@ def operator_name(request) -> str | None:
     account = getattr(request.ctx, "session", {}).get("account_info")
     if isinstance(account, dict):
         return account.get("username") or account.get("name") or account.get("id")
-    return getattr(account, "username", None) or getattr(account, "name", None) or getattr(account, "id", None)
+    return (
+        getattr(account, "username", None)
+        or getattr(account, "name", None)
+        or getattr(account, "id", None)
+    )
 
 
 def tenant_id(request) -> str:
@@ -623,25 +724,47 @@ def _field_ref_model_id(field):
 
 def _relation_source_model_ids(relation_type) -> list[str]:
     if isinstance(relation_type, dict):
-        return relation_type.get("source_ci_type_ids") or relation_type.get("source_ci_types") or []
-    return getattr(relation_type, "source_ci_type_ids", None) or relation_type.source_ci_types or []
+        return (
+            relation_type.get("source_ci_type_ids")
+            or relation_type.get("source_ci_types")
+            or []
+        )
+    return (
+        getattr(relation_type, "source_ci_type_ids", None)
+        or relation_type.source_ci_types
+        or []
+    )
 
 
 def _relation_target_model_ids(relation_type) -> list[str]:
     if isinstance(relation_type, dict):
-        return relation_type.get("target_ci_type_ids") or relation_type.get("target_ci_types") or []
-    return getattr(relation_type, "target_ci_type_ids", None) or relation_type.target_ci_types or []
+        return (
+            relation_type.get("target_ci_type_ids")
+            or relation_type.get("target_ci_types")
+            or []
+        )
+    return (
+        getattr(relation_type, "target_ci_type_ids", None)
+        or relation_type.target_ci_types
+        or []
+    )
 
 
 async def get_ci_type_or_404(tenant: str, key_or_id: str) -> SupplyChainCiType:
-    ci_type = await SupplyChainCiType.filter(Q(id=key_or_id) | Q(key=key_or_id), tenant_id=tenant, deleted=False).first()
+    ci_type = await SupplyChainCiType.filter(
+        Q(id=key_or_id) | Q(key=key_or_id), tenant_id=tenant, deleted=False
+    ).first()
     if not ci_type:
         raise CustomError(ErrorCode.NOT_FOUND)
     return ci_type
 
 
-async def get_relation_type_or_404(tenant: str, key_or_id: str) -> SupplyChainCiRelationType:
-    relation_type = await SupplyChainCiRelationType.filter(Q(id=key_or_id) | Q(key=key_or_id), tenant_id=tenant, deleted=False).first()
+async def get_relation_type_or_404(
+    tenant: str, key_or_id: str
+) -> SupplyChainCiRelationType:
+    relation_type = await SupplyChainCiRelationType.filter(
+        Q(id=key_or_id) | Q(key=key_or_id), tenant_id=tenant, deleted=False
+    ).first()
     if not relation_type:
         raise CustomError(ErrorCode.NOT_FOUND)
     return relation_type
@@ -654,18 +777,26 @@ async def get_ci_or_404(tenant: str, ci_id: str) -> SupplyChainCi:
     return ci
 
 
-async def fields_for_type(tenant: str, ci_type_id_or_key: str) -> list[SupplyChainCiFieldDef]:
+async def fields_for_type(
+    tenant: str, ci_type_id_or_key: str
+) -> list[SupplyChainCiFieldDef]:
     ci_type = await get_ci_type_or_404(tenant, ci_type_id_or_key)
-    return await SupplyChainCiFieldDef.filter(
-        tenant_id=tenant,
-        ci_type_id=ci_type.id,
-        deleted=False,
-    ).order_by("sort", "ctime").all()
+    return (
+        await SupplyChainCiFieldDef.filter(
+            tenant_id=tenant,
+            ci_type_id=ci_type.id,
+            deleted=False,
+        )
+        .order_by("sort", "ctime")
+        .all()
+    )
 
 
 def enum_values(field: SupplyChainCiFieldDef) -> set:
     values = set()
-    enum_options = field.get("enum_options", []) if isinstance(field, dict) else field.enum_options
+    enum_options = (
+        field.get("enum_options", []) if isinstance(field, dict) else field.enum_options
+    )
     for option in enum_options or []:
         if isinstance(option, dict):
             value = option.get("value")
@@ -725,14 +856,22 @@ async def validate_field_value(tenant: str, field, value):
             raise CustomError(ErrorCode.PARAM_ERROR)
 
 
-async def validate_dynamic_attributes(tenant: str, field_defs: list, attributes: dict) -> None:
+async def validate_dynamic_attributes(
+    tenant: str, field_defs: list, attributes: dict
+) -> None:
     field_by_key = {}
     for field in field_defs:
-        field_key = field.field_key if hasattr(field, "field_key") else field.get("field_key")
+        field_key = (
+            field.field_key if hasattr(field, "field_key") else field.get("field_key")
+        )
         if not field_key:
             raise CustomError(ErrorCode.PARAM_ERROR)
         field_by_key[field_key] = field
-        default_value = field.default_value if hasattr(field, "default_value") else field.get("default_value")
+        default_value = (
+            field.default_value
+            if hasattr(field, "default_value")
+            else field.get("default_value")
+        )
         if field_key not in attributes and default_value is not None:
             attributes[field_key] = default_value
         await validate_field_value(tenant, field, attributes.get(field_key))
@@ -740,7 +879,9 @@ async def validate_dynamic_attributes(tenant: str, field_defs: list, attributes:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
 
-async def validate_ci_attributes(tenant: str, ci_type_id: str, attributes: dict, current_ci_id: str | None = None) -> None:
+async def validate_ci_attributes(
+    tenant: str, ci_type_id: str, attributes: dict, current_ci_id: str | None = None
+) -> None:
     field_defs = await fields_for_type(tenant, ci_type_id)
     await validate_dynamic_attributes(tenant, field_defs, attributes)
     for field in field_defs:
@@ -749,7 +890,9 @@ async def validate_ci_attributes(tenant: str, ci_type_id: str, attributes: dict,
         value = attributes.get(field.field_key)
         if value in (None, ""):
             continue
-        existing = await SupplyChainCi.filter(tenant_id=tenant, ci_type_id=ci_type_id, deleted=False).all()
+        existing = await SupplyChainCi.filter(
+            tenant_id=tenant, ci_type_id=ci_type_id, deleted=False
+        ).all()
         for item in existing:
             if current_ci_id and item.id == current_ci_id:
                 continue
@@ -773,11 +916,7 @@ def payload_ci_type(data: dict, operator: str | None) -> dict:
         sort = int(raw_sort)
     except (TypeError, ValueError):
         raise CustomError(ErrorCode.PARAM_ERROR) from None
-    if (
-        category not in CI_TYPE_CATEGORIES
-        or status not in CI_TYPE_STATUSES
-        or sort < 0
-    ):
+    if category not in CI_TYPE_CATEGORIES or status not in CI_TYPE_STATUSES or sort < 0:
         raise CustomError(ErrorCode.PARAM_ERROR)
     return {
         "key": key,
@@ -811,12 +950,16 @@ def payload_dynamic_field(data: dict, *, allow_missing_key: bool = False) -> dic
     field_key = (
         validate_key(data.get("field_key"), "field_key")
         if data.get("field_key")
-        else None if allow_missing_key else validate_key(None, "field_key")
+        else None
+        if allow_missing_key
+        else validate_key(None, "field_key")
     )
     data_type = data.get("data_type")
     if data_type not in FIELD_DATA_TYPES:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    if data_type == "ref" and not (data.get("ref_ci_type_id") or data.get("ref_ci_type")):
+    if data_type == "ref" and not (
+        data.get("ref_ci_type_id") or data.get("ref_ci_type")
+    ):
         raise CustomError(ErrorCode.PARAM_ERROR)
     return {
         "field_key": field_key,
@@ -862,14 +1005,18 @@ async def _allocate_field_key(
     base = _field_key_base(label)
     candidate = base
     suffix = 1
-    while await SupplyChainCiFieldDef.filter(
-        tenant_id=tenant,
-        ci_type_id=ci_type_id,
-        field_key=candidate,
-    ).using_db(connection).exists():
+    while (
+        await SupplyChainCiFieldDef.filter(
+            tenant_id=tenant,
+            ci_type_id=ci_type_id,
+            field_key=candidate,
+        )
+        .using_db(connection)
+        .exists()
+    ):
         suffix += 1
         suffix_text = f"_{suffix}"
-        candidate = f"{base[:64 - len(suffix_text)]}{suffix_text}"
+        candidate = f"{base[: 64 - len(suffix_text)]}{suffix_text}"
     return candidate
 
 
@@ -877,12 +1024,14 @@ async def _allocate_relation_key(tenant: str, name: str, connection) -> str:
     base = _field_key_base(name)
     candidate = base
     suffix = 1
-    while await SupplyChainCiRelationType.filter(
-        tenant_id=tenant, key=candidate
-    ).using_db(connection).exists():
+    while (
+        await SupplyChainCiRelationType.filter(tenant_id=tenant, key=candidate)
+        .using_db(connection)
+        .exists()
+    ):
         suffix += 1
         suffix_text = f"_{suffix}"
-        candidate = f"{base[:64 - len(suffix_text)]}{suffix_text}"
+        candidate = f"{base[: 64 - len(suffix_text)]}{suffix_text}"
     return candidate
 
 
@@ -892,7 +1041,9 @@ def _relation_name_overlaps(relation_type, name: str, model_ids: set[str]) -> bo
     relation_model_ids = set(_relation_source_model_ids(relation_type)) | set(
         _relation_target_model_ids(relation_type)
     )
-    return not model_ids or not relation_model_ids or bool(model_ids & relation_model_ids)
+    return (
+        not model_ids or not relation_model_ids or bool(model_ids & relation_model_ids)
+    )
 
 
 def payload_relation_type(data: dict, operator: str | None) -> dict:
@@ -901,15 +1052,25 @@ def payload_relation_type(data: dict, operator: str | None) -> dict:
     cardinality = data.get("cardinality") or "n-n"
     if cardinality not in RELATION_CARDINALITIES:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    source_ci_type_ids = list(dict.fromkeys(data.get("source_ci_type_ids") or data.get("source_ci_types") or []))
-    target_ci_type_ids = list(dict.fromkeys(data.get("target_ci_type_ids") or data.get("target_ci_types") or []))
+    source_ci_type_ids = list(
+        dict.fromkeys(
+            data.get("source_ci_type_ids") or data.get("source_ci_types") or []
+        )
+    )
+    target_ci_type_ids = list(
+        dict.fromkeys(
+            data.get("target_ci_type_ids") or data.get("target_ci_types") or []
+        )
+    )
     return {
         "key": key,
         "name": (data.get("name") or key).strip(),
         "source_ci_type_ids": source_ci_type_ids,
         "target_ci_type_ids": target_ci_type_ids,
         "cardinality": cardinality,
-        "relation_fields": [payload_dynamic_field(item) for item in data.get("relation_fields") or []],
+        "relation_fields": [
+            payload_dynamic_field(item) for item in data.get("relation_fields") or []
+        ],
         "is_locked": bool(data.get("is_locked", False)),
         "updater": operator,
     }
@@ -1052,10 +1213,7 @@ async def save_ci_type(
                 key=payload["key"],
             )
         existing = (
-            await query.using_db(connection)
-            .order_by("key")
-            .select_for_update()
-            .first()
+            await query.using_db(connection).order_by("key").select_for_update().first()
         )
         if data.get("id") and not existing:
             raise CustomError(ErrorCode.NOT_FOUND)
@@ -1240,11 +1398,16 @@ async def save_field(
                 .first()
             )
         ensure_expected_existence(existing, expected_exists)
-        active_fields = await SupplyChainCiFieldDef.filter(
-            tenant_id=tenant,
-            ci_type_id=payload["ci_type_id"],
-            deleted=False,
-        ).using_db(connection).select_for_update().all()
+        active_fields = (
+            await SupplyChainCiFieldDef.filter(
+                tenant_id=tenant,
+                ci_type_id=payload["ci_type_id"],
+                deleted=False,
+            )
+            .using_db(connection)
+            .select_for_update()
+            .all()
+        )
         if _has_duplicate_field_label(
             active_fields,
             payload["label"],
@@ -1406,9 +1569,7 @@ async def delete_field(
             raise CustomError(ErrorCode.NOT_FOUND)
         if ci_type.is_locked:
             raise CustomError(ErrorCode.FORBIDDEN)
-        referenced_ci_type_keys = {
-            _field_ref_model_id(candidate)
-        } - {None, ci_type.id}
+        referenced_ci_type_keys = {_field_ref_model_id(candidate)} - {None, ci_type.id}
         await lock_ci_type_keys_for_structure(
             tenant,
             referenced_ci_type_keys,
@@ -1500,25 +1661,34 @@ async def save_relation_type(
 ) -> SupplyChainCiRelationType:
     payload = payload_relation_type(data, operator)
     async with structure_write_transaction(tenant, connection) as connection:
+
         async def resolve_model_refs(refs: list[str]) -> tuple[list[str], list[str]]:
             if not refs:
                 return [], []
-            models = await SupplyChainCiType.filter(
-                tenant_id=tenant,
-                deleted=False,
-                **_model_ref_list_filter(refs),
-            ).using_db(connection).all()
-            by_ref = {value: model for model in models for value in (model.id, model.key)}
+            models = (
+                await SupplyChainCiType.filter(
+                    tenant_id=tenant,
+                    deleted=False,
+                    **_model_ref_list_filter(refs),
+                )
+                .using_db(connection)
+                .all()
+            )
+            by_ref = {
+                value: model for model in models for value in (model.id, model.key)
+            }
             if set(refs) - set(by_ref):
                 raise CustomError(ErrorCode.NOT_FOUND)
             return [by_ref[ref].id for ref in refs], [by_ref[ref].key for ref in refs]
 
-        payload["source_ci_type_ids"], payload["source_ci_types"] = await resolve_model_refs(
-            payload["source_ci_type_ids"]
-        )
-        payload["target_ci_type_ids"], payload["target_ci_types"] = await resolve_model_refs(
-            payload["target_ci_type_ids"]
-        )
+        (
+            payload["source_ci_type_ids"],
+            payload["source_ci_types"],
+        ) = await resolve_model_refs(payload["source_ci_type_ids"])
+        (
+            payload["target_ci_type_ids"],
+            payload["target_ci_types"],
+        ) = await resolve_model_refs(payload["target_ci_type_ids"])
         for field in payload["relation_fields"]:
             ref = field.get("ref_ci_type_id")
             if not ref:
@@ -1604,7 +1774,9 @@ async def _save_ci_for_type(
     attributes = data.get("attributes") or {}
     if not isinstance(attributes, dict):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    await validate_ci_attributes(tenant, ci_type.id, attributes, getattr(existing, "id", None))
+    await validate_ci_attributes(
+        tenant, ci_type.id, attributes, getattr(existing, "id", None)
+    )
     status = data.get("status") or getattr(existing, "status", "active")
     risk_status = data.get("risk_status") or getattr(existing, "risk_status", "normal")
     if status not in CI_STATUSES or risk_status not in RISK_STATUSES:
@@ -1727,11 +1899,15 @@ async def delete_ci(
             using_db=connection,
             update_fields=["deleted", "utime"],
         )
-        await SupplyChainCiRelation.filter(
-            Q(source_ci_id=ci.id) | Q(target_ci_id=ci.id),
-            tenant_id=tenant,
-            deleted=False,
-        ).using_db(connection).update(deleted=True)
+        await (
+            SupplyChainCiRelation.filter(
+                Q(source_ci_id=ci.id) | Q(target_ci_id=ci.id),
+                tenant_id=tenant,
+                deleted=False,
+            )
+            .using_db(connection)
+            .update(deleted=True)
+        )
         return {"id": ci.id}
 
 
@@ -1744,9 +1920,13 @@ async def validate_relation_ends(
     *,
     connection=None,
 ) -> None:
-    if _relation_source_model_ids(relation_type) and _ci_model_id(source) not in _relation_source_model_ids(relation_type):
+    if _relation_source_model_ids(relation_type) and _ci_model_id(
+        source
+    ) not in _relation_source_model_ids(relation_type):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    if _relation_target_model_ids(relation_type) and _ci_model_id(target) not in _relation_target_model_ids(relation_type):
+    if _relation_target_model_ids(relation_type) and _ci_model_id(
+        target
+    ) not in _relation_target_model_ids(relation_type):
         raise CustomError(ErrorCode.PARAM_ERROR)
     if relation_type.cardinality in {"1-1", "1-n"}:
         existing_source_query = SupplyChainCiRelation.filter(
@@ -1889,9 +2069,7 @@ async def save_relation(
             if duplicate and duplicate.id != existing.id:
                 raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
 
-        affected_ci_type_keys = {
-            _ci_model_id(ci) for ci in ci_by_id.values()
-        }
+        affected_ci_type_keys = {_ci_model_id(ci) for ci in ci_by_id.values()}
         await lock_ci_type_keys_for_structure(
             tenant,
             affected_ci_type_keys,
@@ -1982,9 +2160,7 @@ async def ensure_relation_type_structure_unlocked(
             model_keys.update(_relation_type_payload_model_keys(relation_type))
         else:
             model_keys.update(_relation_type_model_keys(relation_type))
-        include_all = include_all or _relation_type_has_unrestricted_end(
-            relation_type
-        )
+        include_all = include_all or _relation_type_has_unrestricted_end(relation_type)
     await lock_ci_type_keys_for_structure(
         tenant,
         model_keys,
@@ -2056,25 +2232,36 @@ async def delete_ci_type(
             .select_for_update()
             .all()
         )
-        if any(_field_model_id(field) not in {ci_type.id, ci_type.key} for field in referencing_fields):
+        if any(
+            _field_model_id(field) not in {ci_type.id, ci_type.key}
+            for field in referencing_fields
+        ):
             raise CustomError(ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES)
         # Deleted field definitions remain as tombstones. Detach their inbound
         # references before the target model is hard-deleted so the FK can be
         # released without discarding the field history.
-        await SupplyChainCiFieldDef.filter(
-            tenant_id=tenant,
-            deleted=True,
-            ref_ci_type_id=ci_type.id,
-        ).using_db(connection).update(
-            ref_ci_type_id=None,
-            ref_ci_type=None,
+        await (
+            SupplyChainCiFieldDef.filter(
+                tenant_id=tenant,
+                deleted=True,
+                ref_ci_type_id=ci_type.id,
+            )
+            .using_db(connection)
+            .update(
+                ref_ci_type_id=None,
+                ref_ci_type=None,
+            )
         )
         # Empty models have no historical identity to retain. Remove their own
         # definitions first, then hard-delete the model so names can be reused.
-        await SupplyChainCiFieldDef.filter(
-            tenant_id=tenant,
-            ci_type_id=ci_type.id,
-        ).using_db(connection).delete()
+        await (
+            SupplyChainCiFieldDef.filter(
+                tenant_id=tenant,
+                ci_type_id=ci_type.id,
+            )
+            .using_db(connection)
+            .delete()
+        )
         await ci_type.delete(using_db=connection)
         return {"id": ci_type.id}
 
@@ -2170,11 +2357,16 @@ async def export_model_package(
         ).all()
     requested_keys = [model.key for model in requested_models]
     keys = requested_keys[:]
-    relation_types = await SupplyChainCiRelationType.filter(tenant_id=tenant, deleted=False).order_by("key").all()
+    relation_types = (
+        await SupplyChainCiRelationType.filter(tenant_id=tenant, deleted=False)
+        .order_by("key")
+        .all()
+    )
 
     if requested_refs:
         relation_types = [
-            item for item in relation_types
+            item
+            for item in relation_types
             if set(item.source_ci_types or []).intersection(requested_keys)
             or set(item.target_ci_types or []).intersection(requested_keys)
         ]
@@ -2195,10 +2387,17 @@ async def export_model_package(
     if include_relations and not include_related:
         exported_key_set = set(keys)
         relation_types = [
-            item for item in relation_types
+            item
+            for item in relation_types
             if _relation_type_model_keys(item).issubset(exported_key_set)
         ]
-    fields = await SupplyChainCiFieldDef.filter(tenant_id=tenant, ci_type_key__in=keys, deleted=False).order_by("ci_type_key", "sort").all()
+    fields = (
+        await SupplyChainCiFieldDef.filter(
+            tenant_id=tenant, ci_type_key__in=keys, deleted=False
+        )
+        .order_by("ci_type_key", "sort")
+        .all()
+    )
     return {
         "version": 1,
         "ci_types": [item.json for item in ci_types],
@@ -2440,13 +2639,20 @@ async def _import_model_package_locked(
     return created_or_updated
 
 
-async def build_relation_graph(tenant: str, root_ci_id: str | None = None, depth: int = 1) -> dict:
+async def build_relation_graph(
+    tenant: str, root_ci_id: str | None = None, depth: int = 1
+) -> dict:
     depth = max(1, min(3, int(depth or 1)))
     visited: dict[str, SupplyChainCi] = {}
     edges: list[SupplyChainCiRelation] = []
     frontier = {root_ci_id} if root_ci_id else set()
     if not frontier:
-        roots = await SupplyChainCi.filter(tenant_id=tenant, deleted=False).order_by("-utime").limit(50).all()
+        roots = (
+            await SupplyChainCi.filter(tenant_id=tenant, deleted=False)
+            .order_by("-utime")
+            .limit(50)
+            .all()
+        )
         visited.update({item.id: item for item in roots})
         frontier = {item.id for item in roots}
     for _ in range(depth):
@@ -2463,7 +2669,9 @@ async def build_relation_graph(tenant: str, root_ci_id: str | None = None, depth
             next_frontier.add(relation.source_ci_id)
             next_frontier.add(relation.target_ci_id)
         frontier = next_frontier - set(visited.keys())
-        cis = await SupplyChainCi.filter(id__in=list(next_frontier), tenant_id=tenant, deleted=False).all()
+        cis = await SupplyChainCi.filter(
+            id__in=list(next_frontier), tenant_id=tenant, deleted=False
+        ).all()
         visited.update({item.id: item for item in cis})
     if root_ci_id and root_ci_id not in visited:
         root = await get_ci_or_404(tenant, root_ci_id)
@@ -2507,7 +2715,9 @@ def ledger_payload(domain: str, data: dict, operator: str | None) -> dict:
             raise CustomError(ErrorCode.PARAM_ERROR)
     if "detail" in payload and not isinstance(payload["detail"], dict):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    if "evidence_attachment_ids" in payload and not isinstance(payload["evidence_attachment_ids"], list):
+    if "evidence_attachment_ids" in payload and not isinstance(
+        payload["evidence_attachment_ids"], list
+    ):
         raise CustomError(ErrorCode.PARAM_ERROR)
     payload["updater"] = operator
     return payload
@@ -2531,11 +2741,23 @@ async def list_ledger_records(tenant: str, domain: str, data: dict) -> dict:
         condition &= keyword_condition
     queryset = config["model"].filter(condition)
     total = await queryset.count()
-    items = await queryset.order_by(*config.get("order", ["-utime"])).offset(offset).limit(size).all()
-    return {"total": total, "items": [item.json for item in items], "page": page, "size": size}
+    items = (
+        await queryset.order_by(*config.get("order", ["-utime"]))
+        .offset(offset)
+        .limit(size)
+        .all()
+    )
+    return {
+        "total": total,
+        "items": [item.json for item in items],
+        "page": page,
+        "size": size,
+    }
 
 
-async def accessory_project_ids_for_area(tenant: str, project_area_id: str) -> list[str]:
+async def accessory_project_ids_for_area(
+    tenant: str, project_area_id: str
+) -> list[str]:
     relations = await SupplyChainCiRelation.filter(
         tenant_id=tenant,
         deleted=False,
@@ -2554,19 +2776,27 @@ async def ledger_scope_condition(tenant: str, config: dict, data: dict) -> Q:
     if "project_area_id" in config["fields"]:
         return condition & Q(project_area_id=data["project_area_id"])
     if "accessory_project_id" in config["fields"]:
-        project_ids = await accessory_project_ids_for_area(tenant, data["project_area_id"])
+        project_ids = await accessory_project_ids_for_area(
+            tenant, data["project_area_id"]
+        )
         return condition & Q(accessory_project_id__in=project_ids or ["__none__"])
     return condition
 
 
 async def get_ledger_record_or_404(tenant: str, domain: str, record_id: str):
-    record = await ledger_config(domain)["model"].filter(id=record_id, tenant_id=tenant, deleted=False).first()
+    record = (
+        await ledger_config(domain)["model"]
+        .filter(id=record_id, tenant_id=tenant, deleted=False)
+        .first()
+    )
     if not record:
         raise CustomError(ErrorCode.NOT_FOUND)
     return record
 
 
-async def save_ledger_record(tenant: str, domain: str, data: dict, operator: str | None):
+async def save_ledger_record(
+    tenant: str, domain: str, data: dict, operator: str | None
+):
     config = ledger_config(domain)
     payload = ledger_payload(domain, data, operator)
     existing = None
@@ -2588,8 +2818,20 @@ async def delete_ledger_record(tenant: str, domain: str, record_id: str) -> dict
 
 
 async def build_project_tree(tenant: str) -> dict:
-    areas = await SupplyChainCi.filter(tenant_id=tenant, deleted=False, ci_type_key="project_area").order_by("name").all()
-    projects = await SupplyChainCi.filter(tenant_id=tenant, deleted=False, ci_type_key="accessory_project").order_by("name").all()
+    areas = (
+        await SupplyChainCi.filter(
+            tenant_id=tenant, deleted=False, ci_type_key="project_area"
+        )
+        .order_by("name")
+        .all()
+    )
+    projects = (
+        await SupplyChainCi.filter(
+            tenant_id=tenant, deleted=False, ci_type_key="accessory_project"
+        )
+        .order_by("name")
+        .all()
+    )
     relations = await SupplyChainCiRelation.filter(
         tenant_id=tenant,
         deleted=False,
@@ -2613,35 +2855,73 @@ async def build_project_tree(tenant: str) -> dict:
         for area in areas
     ]
     if unassigned:
-        tree.append({
-            "id": "__unassigned__",
-            "name": "未关联配件项目",
-            "ci_type_key": "virtual",
-            "children": [project.json for project in unassigned],
-        })
+        tree.append(
+            {
+                "id": "__unassigned__",
+                "name": "未关联配件项目",
+                "ci_type_key": "virtual",
+                "children": [project.json for project in unassigned],
+            }
+        )
     return {"items": tree, "total": len(tree)}
 
 
 async def overview_summary(tenant: str, data: dict) -> dict:
-    auth_scope = await ledger_scope_condition(tenant, LEDGER_CONFIGS["personnel-authorization"], data)
+    auth_scope = await ledger_scope_condition(
+        tenant, LEDGER_CONFIGS["personnel-authorization"], data
+    )
     nda_scope = await ledger_scope_condition(tenant, LEDGER_CONFIGS["nda-record"], data)
-    unknown_scope = await ledger_scope_condition(tenant, LEDGER_CONFIGS["unknown-terminal"], data)
-    boundary_scope = await ledger_scope_condition(tenant, LEDGER_CONFIGS["boundary-log"], data)
-    exception_scope = await ledger_scope_condition(tenant, LEDGER_CONFIGS["exception-device-log"], data)
-    disposal_scope = await process_scope_condition(tenant, PROCESS_CONFIGS["disposal-task"], data)
-    review_issue_scope = await process_scope_condition(tenant, PROCESS_CONFIGS["review-issue"], data)
-    collection_run_scope = await process_scope_condition(tenant, PROCESS_CONFIGS["collection-run"], data)
-    project_count = await SupplyChainCi.filter(tenant_id=tenant, deleted=False, ci_type_key="accessory_project").count()
-    area_count = await SupplyChainCi.filter(tenant_id=tenant, deleted=False, ci_type_key="project_area").count()
-    nda_unsigned = await SupplyChainNdaRecord.filter(nda_scope & Q(sign_status="unsigned")).count()
-    nda_expired = await SupplyChainNdaRecord.filter(nda_scope & Q(sign_status="expired")).count()
-    authorization_abnormal = await SupplyChainProjectAuthorization.filter(auth_scope & Q(access_control_status="abnormal")).count()
-    unknown_pending = await SupplyChainUnknownTerminal.filter(unknown_scope & Q(status="pending")).count()
-    boundary_risk = await SupplyChainBoundaryLog.filter(boundary_scope & Q(risk_flag=True)).count()
-    exception_abnormal = await SupplyChainExceptionDeviceLog.filter(exception_scope & ~Q(abnormal_type="none")).count()
-    disposal_pending = await SupplyChainDisposalTask.filter(disposal_scope & Q(status="pending_confirm")).count()
-    issue_pending_review = await SupplyChainReviewIssue.filter(review_issue_scope & Q(status="pending_review")).count()
-    collection_failed = await SupplyChainCollectionRun.filter(collection_run_scope & Q(status="failed")).count()
+    unknown_scope = await ledger_scope_condition(
+        tenant, LEDGER_CONFIGS["unknown-terminal"], data
+    )
+    boundary_scope = await ledger_scope_condition(
+        tenant, LEDGER_CONFIGS["boundary-log"], data
+    )
+    exception_scope = await ledger_scope_condition(
+        tenant, LEDGER_CONFIGS["exception-device-log"], data
+    )
+    disposal_scope = await process_scope_condition(
+        tenant, PROCESS_CONFIGS["disposal-task"], data
+    )
+    review_issue_scope = await process_scope_condition(
+        tenant, PROCESS_CONFIGS["review-issue"], data
+    )
+    collection_run_scope = await process_scope_condition(
+        tenant, PROCESS_CONFIGS["collection-run"], data
+    )
+    project_count = await SupplyChainCi.filter(
+        tenant_id=tenant, deleted=False, ci_type_key="accessory_project"
+    ).count()
+    area_count = await SupplyChainCi.filter(
+        tenant_id=tenant, deleted=False, ci_type_key="project_area"
+    ).count()
+    nda_unsigned = await SupplyChainNdaRecord.filter(
+        nda_scope & Q(sign_status="unsigned")
+    ).count()
+    nda_expired = await SupplyChainNdaRecord.filter(
+        nda_scope & Q(sign_status="expired")
+    ).count()
+    authorization_abnormal = await SupplyChainProjectAuthorization.filter(
+        auth_scope & Q(access_control_status="abnormal")
+    ).count()
+    unknown_pending = await SupplyChainUnknownTerminal.filter(
+        unknown_scope & Q(status="pending")
+    ).count()
+    boundary_risk = await SupplyChainBoundaryLog.filter(
+        boundary_scope & Q(risk_flag=True)
+    ).count()
+    exception_abnormal = await SupplyChainExceptionDeviceLog.filter(
+        exception_scope & ~Q(abnormal_type="none")
+    ).count()
+    disposal_pending = await SupplyChainDisposalTask.filter(
+        disposal_scope & Q(status="pending_confirm")
+    ).count()
+    issue_pending_review = await SupplyChainReviewIssue.filter(
+        review_issue_scope & Q(status="pending_review")
+    ).count()
+    collection_failed = await SupplyChainCollectionRun.filter(
+        collection_run_scope & Q(status="failed")
+    ).count()
     return {
         "area_count": area_count,
         "accessory_project_count": project_count,
@@ -2660,24 +2940,92 @@ async def overview_summary(tenant: str, data: dict) -> dict:
 
 
 async def overview_todo(tenant: str, data: dict) -> dict:
-    auth_scope = await ledger_scope_condition(tenant, LEDGER_CONFIGS["personnel-authorization"], data)
+    auth_scope = await ledger_scope_condition(
+        tenant, LEDGER_CONFIGS["personnel-authorization"], data
+    )
     nda_scope = await ledger_scope_condition(tenant, LEDGER_CONFIGS["nda-record"], data)
-    unknown_scope = await ledger_scope_condition(tenant, LEDGER_CONFIGS["unknown-terminal"], data)
-    boundary_scope = await ledger_scope_condition(tenant, LEDGER_CONFIGS["boundary-log"], data)
-    exception_scope = await ledger_scope_condition(tenant, LEDGER_CONFIGS["exception-device-log"], data)
-    disposal_scope = await process_scope_condition(tenant, PROCESS_CONFIGS["disposal-task"], data)
-    review_issue_scope = await process_scope_condition(tenant, PROCESS_CONFIGS["review-issue"], data)
-    collection_run_scope = await process_scope_condition(tenant, PROCESS_CONFIGS["collection-run"], data)
+    unknown_scope = await ledger_scope_condition(
+        tenant, LEDGER_CONFIGS["unknown-terminal"], data
+    )
+    boundary_scope = await ledger_scope_condition(
+        tenant, LEDGER_CONFIGS["boundary-log"], data
+    )
+    exception_scope = await ledger_scope_condition(
+        tenant, LEDGER_CONFIGS["exception-device-log"], data
+    )
+    disposal_scope = await process_scope_condition(
+        tenant, PROCESS_CONFIGS["disposal-task"], data
+    )
+    review_issue_scope = await process_scope_condition(
+        tenant, PROCESS_CONFIGS["review-issue"], data
+    )
+    collection_run_scope = await process_scope_condition(
+        tenant, PROCESS_CONFIGS["collection-run"], data
+    )
     items = [
-        {"type": "nda_unsigned", "title": "NDA 未签署", "total": await SupplyChainNdaRecord.filter(nda_scope & Q(sign_status="unsigned")).count()},
-        {"type": "nda_expired", "title": "NDA 已过期", "total": await SupplyChainNdaRecord.filter(nda_scope & Q(sign_status="expired")).count()},
-        {"type": "authorization_abnormal", "title": "门禁授权异常", "total": await SupplyChainProjectAuthorization.filter(auth_scope & Q(access_control_status="abnormal")).count()},
-        {"type": "disposal_task_pending_confirm", "title": "待确认权限回收", "total": await SupplyChainDisposalTask.filter(disposal_scope & Q(status="pending_confirm")).count()},
-        {"type": "review_issue_pending_review", "title": "待复核问题", "total": await SupplyChainReviewIssue.filter(review_issue_scope & Q(status="pending_review")).count()},
-        {"type": "unknown_terminal_pending", "title": "待确认未知终端", "total": await SupplyChainUnknownTerminal.filter(unknown_scope & Q(status="pending")).count()},
-        {"type": "collection_run_failed", "title": "采集失败", "total": await SupplyChainCollectionRun.filter(collection_run_scope & Q(status="failed")).count()},
-        {"type": "boundary_risk", "title": "边界风险日志", "total": await SupplyChainBoundaryLog.filter(boundary_scope & Q(risk_flag=True)).count()},
-        {"type": "exception_device_abnormal", "title": "例外设备异常", "total": await SupplyChainExceptionDeviceLog.filter(exception_scope & ~Q(abnormal_type="none")).count()},
+        {
+            "type": "nda_unsigned",
+            "title": "NDA 未签署",
+            "total": await SupplyChainNdaRecord.filter(
+                nda_scope & Q(sign_status="unsigned")
+            ).count(),
+        },
+        {
+            "type": "nda_expired",
+            "title": "NDA 已过期",
+            "total": await SupplyChainNdaRecord.filter(
+                nda_scope & Q(sign_status="expired")
+            ).count(),
+        },
+        {
+            "type": "authorization_abnormal",
+            "title": "门禁授权异常",
+            "total": await SupplyChainProjectAuthorization.filter(
+                auth_scope & Q(access_control_status="abnormal")
+            ).count(),
+        },
+        {
+            "type": "disposal_task_pending_confirm",
+            "title": "待确认权限回收",
+            "total": await SupplyChainDisposalTask.filter(
+                disposal_scope & Q(status="pending_confirm")
+            ).count(),
+        },
+        {
+            "type": "review_issue_pending_review",
+            "title": "待复核问题",
+            "total": await SupplyChainReviewIssue.filter(
+                review_issue_scope & Q(status="pending_review")
+            ).count(),
+        },
+        {
+            "type": "unknown_terminal_pending",
+            "title": "待确认未知终端",
+            "total": await SupplyChainUnknownTerminal.filter(
+                unknown_scope & Q(status="pending")
+            ).count(),
+        },
+        {
+            "type": "collection_run_failed",
+            "title": "采集失败",
+            "total": await SupplyChainCollectionRun.filter(
+                collection_run_scope & Q(status="failed")
+            ).count(),
+        },
+        {
+            "type": "boundary_risk",
+            "title": "边界风险日志",
+            "total": await SupplyChainBoundaryLog.filter(
+                boundary_scope & Q(risk_flag=True)
+            ).count(),
+        },
+        {
+            "type": "exception_device_abnormal",
+            "title": "例外设备异常",
+            "total": await SupplyChainExceptionDeviceLog.filter(
+                exception_scope & ~Q(abnormal_type="none")
+            ).count(),
+        },
     ]
     return {"items": items, "total": sum(item["total"] for item in items)}
 
@@ -2707,7 +3055,14 @@ def process_payload(domain: str, data: dict, operator: str | None) -> dict:
     ]:
         if field in payload and not isinstance(payload[field], dict):
             raise CustomError(ErrorCode.PARAM_ERROR)
-    for field in ["target_ci_ids", "actions", "related_ci_ids", "attachment_ids", "receivers", "receiver_roles"]:
+    for field in [
+        "target_ci_ids",
+        "actions",
+        "related_ci_ids",
+        "attachment_ids",
+        "receivers",
+        "receiver_roles",
+    ]:
         if field in payload and not isinstance(payload[field], list):
             raise CustomError(ErrorCode.PARAM_ERROR)
     for action in payload.get("actions") or []:
@@ -2720,7 +3075,9 @@ def process_payload(domain: str, data: dict, operator: str | None) -> dict:
     if domain == "disposal-task":
         payload["status"] = "pending_confirm"
     if domain == "review-issue" and not payload.get("issue_no"):
-        payload["issue_no"] = f"SCR-{datetime.datetime.now(datetime.UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}"
+        payload["issue_no"] = (
+            f"SCR-{datetime.datetime.now(datetime.UTC).strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}"
+        )
     payload["updater"] = operator
     return payload
 
@@ -2734,7 +3091,9 @@ async def process_scope_condition(tenant: str, config: dict, data: dict) -> Q:
         if "project_area_id" in config["fields"]:
             area_condition |= Q(project_area_id=data["project_area_id"])
         if "accessory_project_id" in config["fields"]:
-            project_ids = await accessory_project_ids_for_area(tenant, data["project_area_id"])
+            project_ids = await accessory_project_ids_for_area(
+                tenant, data["project_area_id"]
+            )
             area_condition |= Q(accessory_project_id__in=project_ids or ["__none__"])
         condition &= area_condition
     return condition
@@ -2756,18 +3115,34 @@ async def list_process_records(tenant: str, domain: str, data: dict) -> dict:
         condition &= keyword_condition
     queryset = config["model"].filter(condition)
     total = await queryset.count()
-    items = await queryset.order_by(*config.get("order", ["-utime"])).offset(offset).limit(size).all()
-    return {"total": total, "items": [item.json for item in items], "page": page, "size": size}
+    items = (
+        await queryset.order_by(*config.get("order", ["-utime"]))
+        .offset(offset)
+        .limit(size)
+        .all()
+    )
+    return {
+        "total": total,
+        "items": [item.json for item in items],
+        "page": page,
+        "size": size,
+    }
 
 
 async def get_process_record_or_404(tenant: str, domain: str, record_id: str):
-    record = await process_config(domain)["model"].filter(id=record_id, tenant_id=tenant, deleted=False).first()
+    record = (
+        await process_config(domain)["model"]
+        .filter(id=record_id, tenant_id=tenant, deleted=False)
+        .first()
+    )
     if not record:
         raise CustomError(ErrorCode.NOT_FOUND)
     return record
 
 
-async def save_process_record(tenant: str, domain: str, data: dict, operator: str | None):
+async def save_process_record(
+    tenant: str, domain: str, data: dict, operator: str | None
+):
     config = process_config(domain)
     payload = process_payload(domain, data, operator)
     existing = None
@@ -2849,15 +3224,15 @@ def _normalize_actual_policy_payload(
         "rule_name",
         255,
     )
-    normalized["device_name"] = _policy_text(
-        first("device_name"), "device_name", 255
-    ) or None
-    normalized["device_type"] = _policy_text(
-        first("device_type"), "device_type", 30
-    ).lower() or None
-    normalized["policy_type"] = _policy_text(
-        first("policy_type"), "policy_type", 50
-    ).lower() or None
+    normalized["device_name"] = (
+        _policy_text(first("device_name"), "device_name", 255) or None
+    )
+    normalized["device_type"] = (
+        _policy_text(first("device_type"), "device_type", 30).lower() or None
+    )
+    normalized["policy_type"] = (
+        _policy_text(first("policy_type"), "policy_type", 50).lower() or None
+    )
 
     action = _policy_text(first("action") or "permit", "action", 20).lower()
     action_aliases = {
@@ -2879,24 +3254,40 @@ def _normalize_actual_policy_payload(
         raise CustomError(ErrorCode.PARAM_ERROR)
     normalized["enabled"] = enabled
 
-    if "policy_data" not in data:
-        if "policy_data" in defaults:
-            normalized["policy_data"] = defaults["policy_data"]
-        else:
-            normalized["policy_data"] = {
-                key: value
-                for key, value in data.items()
-                if key
-                not in {
-                    "id",
-                    "revision",
-                    "batch_id",
-                    "replace",
-                    "sync_source",
-                }
+    if "policy_data" in data:
+        if not isinstance(data["policy_data"], dict):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        policy_data = dict(data["policy_data"])
+    elif "policy_data" in defaults:
+        policy_data = dict(defaults["policy_data"] or {})
+    else:
+        policy_data = {
+            key: value
+            for key, value in data.items()
+            if key
+            not in {
+                "id",
+                "revision",
+                "batch_id",
+                "replace",
+                "sync_source",
             }
-    elif not isinstance(data["policy_data"], dict):
-        raise CustomError(ErrorCode.PARAM_ERROR)
+        }
+    for canonical_key, aliases in POLICY_DETAIL_ALIASES.items():
+        if canonical_key in data:
+            policy_data[canonical_key] = data[canonical_key]
+            continue
+        nested_alias = next((alias for alias in aliases if alias in policy_data), None)
+        if nested_alias is not None:
+            policy_data[canonical_key] = policy_data[nested_alias]
+            continue
+        top_level_alias = next(
+            (alias for alias in aliases if alias != canonical_key and alias in data),
+            None,
+        )
+        if top_level_alias is not None:
+            policy_data[canonical_key] = data[top_level_alias]
+    normalized["policy_data"] = policy_data
 
     payload = process_payload("actual-policy", normalized, operator)
     payload["device_key"] = device_key
@@ -2926,6 +3317,10 @@ def _policy_snapshot(record: SupplyChainActualPolicy) -> dict:
             "target_address",
             "protocol",
             "port",
+            "source_port",
+            "destination_port",
+            "service",
+            "policy_order",
             "action",
             "enabled",
             "raw_text",
@@ -2943,6 +3338,28 @@ def _policy_content(snapshot: dict) -> dict:
         for key, value in snapshot.items()
         if key not in {"id", "revision", "last_synced_at"}
     }
+
+
+def _policy_content_without_order(snapshot: dict) -> dict:
+    content = _policy_content(snapshot)
+    content.pop("policy_order", None)
+    policy_data = dict(content.get("policy_data") or {})
+    for alias in POLICY_DETAIL_ALIASES["policy_order"]:
+        policy_data.pop(alias, None)
+    content["policy_data"] = policy_data
+    return content
+
+
+def _classify_policy_update(before_data: dict, after_data: dict) -> str | None:
+    if _policy_content(before_data) == _policy_content(after_data):
+        return None
+    if before_data.get("policy_order") != after_data.get(
+        "policy_order"
+    ) and _policy_content_without_order(before_data) == _policy_content_without_order(
+        after_data
+    ):
+        return "moved"
+    return "modified"
 
 
 def _policy_diff_text(before_data: dict, after_data: dict) -> str:
@@ -2991,9 +3408,7 @@ async def _append_policy_history(
 
 async def _locked_actual_policy(connection, tenant: str, record_id: str):
     return await (
-        SupplyChainActualPolicy.filter(
-            id=record_id, tenant_id=tenant, deleted=False
-        )
+        SupplyChainActualPolicy.filter(id=record_id, tenant_id=tenant, deleted=False)
         .using_db(connection)
         .select_for_update()
         .first()
@@ -3006,12 +3421,8 @@ async def save_actual_policy(
     data = require_dict(data)
     record_id = _policy_text(data.get("id"), "id", 36)
     now = datetime.datetime.now(datetime.UTC)
-    batch_id = _policy_text(data.get("batch_id"), "batch_id", 64) or str(
-        uuid.uuid4()
-    )
-    sync_source = _policy_text(
-        data.get("sync_source") or "manual", "sync_source", 100
-    )
+    batch_id = _policy_text(data.get("batch_id"), "batch_id", 64) or str(uuid.uuid4())
+    sync_source = _policy_text(data.get("sync_source") or "manual", "sync_source", 100)
 
     async with in_transaction() as connection:
         existing = None
@@ -3031,9 +3442,7 @@ async def save_actual_policy(
             before_data = _policy_snapshot(existing)
             defaults = before_data
 
-        payload = _normalize_actual_policy_payload(
-            data, operator, defaults=defaults
-        )
+        payload = _normalize_actual_policy_payload(data, operator, defaults=defaults)
         duplicate_query = SupplyChainActualPolicy.filter(
             tenant_id=tenant,
             device_key=payload["device_key"],
@@ -3052,7 +3461,6 @@ async def save_actual_policy(
             existing.last_synced_at = now
             await existing.save(using_db=connection)
             record = existing
-            change_type = "modified"
         else:
             record = await SupplyChainActualPolicy.create(
                 using_db=connection,
@@ -3062,21 +3470,24 @@ async def save_actual_policy(
                 last_synced_at=now,
                 **payload,
             )
-            change_type = "added"
 
         after_data = _policy_snapshot(record)
-        await _append_policy_history(
-            connection,
-            tenant=tenant,
-            record=record,
-            change_type=change_type,
-            before_data=before_data,
-            after_data=after_data,
-            batch_id=batch_id,
-            sync_source=sync_source,
-            operator=operator,
-            detected_at=now,
+        change_type = (
+            _classify_policy_update(before_data, after_data) if existing else "added"
         )
+        if change_type:
+            await _append_policy_history(
+                connection,
+                tenant=tenant,
+                record=record,
+                change_type=change_type,
+                before_data=before_data,
+                after_data=after_data,
+                batch_id=batch_id,
+                sync_source=sync_source,
+                operator=operator,
+                detected_at=now,
+            )
     return record
 
 
@@ -3112,9 +3523,7 @@ async def delete_actual_policy(
     return {"id": record.id}
 
 
-async def sync_actual_policies(
-    tenant: str, data: dict, operator: str | None
-) -> dict:
+async def sync_actual_policies(tenant: str, data: dict, operator: str | None) -> dict:
     data = require_dict(data)
     policies = data.get("policies")
     if not isinstance(policies, list) or len(policies) > MAX_POLICY_SYNC_ITEMS:
@@ -3125,9 +3534,7 @@ async def sync_actual_policies(
     if not policies and not replace:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    batch_id = _policy_text(data.get("batch_id"), "batch_id", 64) or str(
-        uuid.uuid4()
-    )
+    batch_id = _policy_text(data.get("batch_id"), "batch_id", 64) or str(uuid.uuid4())
     sync_source = _policy_text(
         data.get("sync_source") or "playbook", "sync_source", 100
     )
@@ -3150,9 +3557,7 @@ async def sync_actual_policies(
     for item in policies:
         if not isinstance(item, dict):
             raise CustomError(ErrorCode.PARAM_ERROR)
-        payload = _normalize_actual_policy_payload(
-            {**shared, **item}, operator
-        )
+        payload = _normalize_actual_policy_payload({**shared, **item}, operator)
         identity = (payload["device_key"], payload["policy_key"])
         if identity in identities:
             raise CustomError(ErrorCode.PARAM_ERROR)
@@ -3172,7 +3577,13 @@ async def sync_actual_policies(
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     now = datetime.datetime.now(datetime.UTC)
-    counts = {"added": 0, "modified": 0, "deleted": 0, "synced": 0}
+    counts = {
+        "added": 0,
+        "modified": 0,
+        "moved": 0,
+        "deleted": 0,
+        "unchanged": 0,
+    }
     device_keys = {payload["device_key"] for payload in normalized_items}
     if replace_device_key:
         device_keys.add(replace_device_key)
@@ -3205,11 +3616,7 @@ async def sync_actual_policies(
                 record.last_synced_at = now
                 await record.save(using_db=connection)
                 after_data = _policy_snapshot(record)
-                change_type = (
-                    "synced"
-                    if _policy_content(before_data) == _policy_content(after_data)
-                    else "modified"
-                )
+                change_type = _classify_policy_update(before_data, after_data)
             else:
                 record = await SupplyChainActualPolicy.create(
                     using_db=connection,
@@ -3223,19 +3630,21 @@ async def sync_actual_policies(
                 change_type = "added"
                 existing_by_identity[identity] = record
 
-            counts[change_type] += 1
-            await _append_policy_history(
-                connection,
-                tenant=tenant,
-                record=record,
-                change_type=change_type,
-                before_data=before_data,
-                after_data=after_data,
-                batch_id=batch_id,
-                sync_source=sync_source,
-                operator=operator,
-                detected_at=now,
-            )
+            count_key = change_type or "unchanged"
+            counts[count_key] += 1
+            if change_type:
+                await _append_policy_history(
+                    connection,
+                    tenant=tenant,
+                    record=record,
+                    change_type=change_type,
+                    before_data=before_data,
+                    after_data=after_data,
+                    batch_id=batch_id,
+                    sync_source=sync_source,
+                    operator=operator,
+                    detected_at=now,
+                )
 
         if replace:
             received_keys = {
@@ -3273,7 +3682,8 @@ async def sync_actual_policies(
         "batch_id": batch_id,
         "received": len(normalized_items),
         **counts,
-        "history_count": sum(counts.values()),
+        "synced": counts["unchanged"],
+        "history_count": sum(counts[key] for key in POLICY_CHANGE_TYPES),
     }
 
 
@@ -3343,15 +3753,28 @@ def policy_key(item) -> tuple:
 
 
 def policy_diff(preset, actual) -> dict:
-    keys = ["source_zone", "source_address", "target_zone", "target_address", "protocol", "port", "action"]
+    keys = [
+        "source_zone",
+        "source_address",
+        "target_zone",
+        "target_address",
+        "protocol",
+        "port",
+        "action",
+    ]
     return {
-        key: {"preset": getattr(preset, key, None), "actual": getattr(actual, key, None)}
+        key: {
+            "preset": getattr(preset, key, None),
+            "actual": getattr(actual, key, None),
+        }
         for key in keys
         if getattr(preset, key, None) != getattr(actual, key, None)
     }
 
 
-async def create_policy_change_from_compare(tenant: str, actual, change_type: str, diff: dict, operator: str | None) -> None:
+async def create_policy_change_from_compare(
+    tenant: str, actual, change_type: str, diff: dict, operator: str | None
+) -> None:
     await SupplyChainPolicyChange.create(
         tenant_id=tenant,
         accessory_project_id=actual.accessory_project_id,
@@ -3387,74 +3810,90 @@ async def run_policy_compare(tenant: str, data: dict, operator: str | None) -> d
     )
     items = []
     presets_by_key = {policy_key(item): item for item in preset_policies}
-    presets_by_name = {item.rule_name: item for item in preset_policies if item.rule_name}
+    presets_by_name = {
+        item.rule_name: item for item in preset_policies if item.rule_name
+    }
     matched_preset_ids = set()
     for actual in actual_policies:
         if actual.parse_status != "parsed":
-            items.append(await SupplyChainPolicyCompareItem.create(
-                tenant_id=tenant,
-                compare_run_id=run.id,
-                actual_policy_id=actual.id,
-                compare_type="unparsed",
-                risk_level="medium",
-                creator=operator,
-                updater=operator,
-            ))
+            items.append(
+                await SupplyChainPolicyCompareItem.create(
+                    tenant_id=tenant,
+                    compare_run_id=run.id,
+                    actual_policy_id=actual.id,
+                    compare_type="unparsed",
+                    risk_level="medium",
+                    creator=operator,
+                    updater=operator,
+                )
+            )
             continue
         preset = presets_by_key.get(policy_key(actual))
         if preset:
             matched_preset_ids.add(preset.id)
-            items.append(await SupplyChainPolicyCompareItem.create(
-                tenant_id=tenant,
-                compare_run_id=run.id,
-                preset_policy_id=preset.id,
-                actual_policy_id=actual.id,
-                compare_type="matched",
-                risk_level="low",
-                handle_status="confirmed",
-                creator=operator,
-                updater=operator,
-            ))
+            items.append(
+                await SupplyChainPolicyCompareItem.create(
+                    tenant_id=tenant,
+                    compare_run_id=run.id,
+                    preset_policy_id=preset.id,
+                    actual_policy_id=actual.id,
+                    compare_type="matched",
+                    risk_level="low",
+                    handle_status="confirmed",
+                    creator=operator,
+                    updater=operator,
+                )
+            )
             continue
         name_match = presets_by_name.get(actual.rule_name)
         if name_match and name_match.id not in matched_preset_ids:
             diff = policy_diff(name_match, actual)
             matched_preset_ids.add(name_match.id)
-            await create_policy_change_from_compare(tenant, actual, "modified", diff, operator)
-            items.append(await SupplyChainPolicyCompareItem.create(
+            await create_policy_change_from_compare(
+                tenant, actual, "modified", diff, operator
+            )
+            items.append(
+                await SupplyChainPolicyCompareItem.create(
+                    tenant_id=tenant,
+                    compare_run_id=run.id,
+                    preset_policy_id=name_match.id,
+                    actual_policy_id=actual.id,
+                    compare_type="changed",
+                    risk_level="high",
+                    diff=diff,
+                    creator=operator,
+                    updater=operator,
+                )
+            )
+            continue
+        await create_policy_change_from_compare(
+            tenant, actual, "added", actual.json, operator
+        )
+        items.append(
+            await SupplyChainPolicyCompareItem.create(
                 tenant_id=tenant,
                 compare_run_id=run.id,
-                preset_policy_id=name_match.id,
                 actual_policy_id=actual.id,
-                compare_type="changed",
+                compare_type="added",
                 risk_level="high",
-                diff=diff,
                 creator=operator,
                 updater=operator,
-            ))
-            continue
-        await create_policy_change_from_compare(tenant, actual, "added", actual.json, operator)
-        items.append(await SupplyChainPolicyCompareItem.create(
-            tenant_id=tenant,
-            compare_run_id=run.id,
-            actual_policy_id=actual.id,
-            compare_type="added",
-            risk_level="high",
-            creator=operator,
-            updater=operator,
-        ))
+            )
+        )
     for preset in preset_policies:
         if preset.id in matched_preset_ids:
             continue
-        items.append(await SupplyChainPolicyCompareItem.create(
-            tenant_id=tenant,
-            compare_run_id=run.id,
-            preset_policy_id=preset.id,
-            compare_type="missing",
-            risk_level=preset.risk_level or "medium",
-            creator=operator,
-            updater=operator,
-        ))
+        items.append(
+            await SupplyChainPolicyCompareItem.create(
+                tenant_id=tenant,
+                compare_run_id=run.id,
+                preset_policy_id=preset.id,
+                compare_type="missing",
+                risk_level=preset.risk_level or "medium",
+                creator=operator,
+                updater=operator,
+            )
+        )
     counts = {item.compare_type: 0 for item in items}
     for item in items:
         counts[item.compare_type] = counts.get(item.compare_type, 0) + 1
@@ -3469,10 +3908,14 @@ async def run_policy_compare(tenant: str, data: dict, operator: str | None) -> d
     return {**run.json, "items": [item.json for item in items]}
 
 
-async def update_compare_item_status(tenant: str, item_id: str, status: str, operator: str | None) -> dict:
+async def update_compare_item_status(
+    tenant: str, item_id: str, status: str, operator: str | None
+) -> dict:
     if status not in POLICY_HANDLE_STATUSES:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    item = await SupplyChainPolicyCompareItem.filter(id=item_id, tenant_id=tenant, deleted=False).first()
+    item = await SupplyChainPolicyCompareItem.filter(
+        id=item_id, tenant_id=tenant, deleted=False
+    ).first()
     if not item:
         raise CustomError(ErrorCode.NOT_FOUND)
     item.handle_status = status
@@ -3481,10 +3924,14 @@ async def update_compare_item_status(tenant: str, item_id: str, status: str, ope
     return item.json
 
 
-async def policy_change_external_callback(tenant: str, data: dict, operator: str | None) -> dict:
+async def policy_change_external_callback(
+    tenant: str, data: dict, operator: str | None
+) -> dict:
     change = None
     if data.get("id"):
-        change = await SupplyChainPolicyChange.filter(id=data["id"], tenant_id=tenant, deleted=False).first()
+        change = await SupplyChainPolicyChange.filter(
+            id=data["id"], tenant_id=tenant, deleted=False
+        ).first()
     if not change and data.get("external_approve_ref"):
         change = await SupplyChainPolicyChange.filter(
             external_approve_ref=data["external_approve_ref"],
@@ -3493,14 +3940,18 @@ async def policy_change_external_callback(tenant: str, data: dict, operator: str
         ).first()
     if not change:
         raise CustomError(ErrorCode.NOT_FOUND)
-    change.external_approve_ref = data.get("external_approve_ref") or change.external_approve_ref
+    change.external_approve_ref = (
+        data.get("external_approve_ref") or change.external_approve_ref
+    )
     change.external_approve_result = data.get("external_approve_result")
     change.updater = operator
     await change.save()
     return change.json
 
 
-async def discover_unknown_terminals(tenant: str, data: dict, operator: str | None) -> dict:
+async def discover_unknown_terminals(
+    tenant: str, data: dict, operator: str | None
+) -> dict:
     records = data.get("items") or data.get("records") or []
     if not isinstance(records, list):
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -3514,23 +3965,36 @@ async def discover_unknown_terminals(tenant: str, data: dict, operator: str | No
             tenant_id=tenant,
             deleted=False,
             mac_address=mac_address,
-            accessory_project_id=record.get("accessory_project_id") or data.get("accessory_project_id"),
+            accessory_project_id=record.get("accessory_project_id")
+            or data.get("accessory_project_id"),
         ).first()
         payload = {
             **record,
-            "accessory_project_id": record.get("accessory_project_id") or data.get("accessory_project_id"),
-            "last_seen_at": record.get("last_seen_at") or datetime.datetime.now(datetime.UTC),
+            "accessory_project_id": record.get("accessory_project_id")
+            or data.get("accessory_project_id"),
+            "last_seen_at": record.get("last_seen_at")
+            or datetime.datetime.now(datetime.UTC),
         }
         if existing:
             payload["id"] = existing.id
-        saved.append((await save_ledger_record(tenant, "unknown-terminal", payload, operator)).json)
+        saved.append(
+            (
+                await save_ledger_record(tenant, "unknown-terminal", payload, operator)
+            ).json
+        )
     return {"total": len(saved), "items": saved}
 
 
-async def transition_review_issue(tenant: str, data: dict, operator: str | None) -> dict:
-    issue = await get_process_record_or_404(tenant, "review-issue", data.get("id") or data.get("review_issue_id"))
+async def transition_review_issue(
+    tenant: str, data: dict, operator: str | None
+) -> dict:
+    issue = await get_process_record_or_404(
+        tenant, "review-issue", data.get("id") or data.get("review_issue_id")
+    )
     to_status = data.get("to_status")
-    if to_status not in ISSUE_STATUSES or to_status not in ISSUE_TRANSITIONS.get(issue.status, set()):
+    if to_status not in ISSUE_STATUSES or to_status not in ISSUE_TRANSITIONS.get(
+        issue.status, set()
+    ):
         raise CustomError(ErrorCode.PARAM_ERROR)
     from_status = issue.status
     issue.status = to_status
@@ -3575,7 +4039,9 @@ async def risk_to_review_issue(tenant: str, data: dict, operator: str | None) ->
 
 
 async def confirm_disposal_task(tenant: str, data: dict, operator: str | None) -> dict:
-    task = await get_process_record_or_404(tenant, "disposal-task", data.get("id") or data.get("task_id"))
+    task = await get_process_record_or_404(
+        tenant, "disposal-task", data.get("id") or data.get("task_id")
+    )
     if task.status not in {"pending_confirm", "failed"}:
         raise CustomError(ErrorCode.PARAM_ERROR)
     task.status = "executing"
@@ -3586,7 +4052,9 @@ async def confirm_disposal_task(tenant: str, data: dict, operator: str | None) -
     await task.save()
     rule = None
     if task.rule_id:
-        rule = await SupplyChainDisposalRule.filter(id=task.rule_id, tenant_id=tenant, deleted=False).first()
+        rule = await SupplyChainDisposalRule.filter(
+            id=task.rule_id, tenant_id=tenant, deleted=False
+        ).first()
     return {
         **task.json,
         "execution_payload": {
@@ -3602,7 +4070,9 @@ async def confirm_disposal_task(tenant: str, data: dict, operator: str | None) -
 
 
 async def cancel_disposal_task(tenant: str, data: dict, operator: str | None) -> dict:
-    task = await get_process_record_or_404(tenant, "disposal-task", data.get("id") or data.get("task_id"))
+    task = await get_process_record_or_404(
+        tenant, "disposal-task", data.get("id") or data.get("task_id")
+    )
     if task.status in {"success", "cancelled"}:
         raise CustomError(ErrorCode.PARAM_ERROR)
     task.status = "cancelled"
@@ -3612,7 +4082,9 @@ async def cancel_disposal_task(tenant: str, data: dict, operator: str | None) ->
     return task.json
 
 
-async def create_notification_event(tenant: str, data: dict, operator: str | None) -> dict:
+async def create_notification_event(
+    tenant: str, data: dict, operator: str | None
+) -> dict:
     event = await save_process_record(tenant, "notification-event", data, operator)
     return {
         **event.json,
@@ -3635,6 +4107,10 @@ async def create_notification_event(tenant: str, data: dict, operator: str | Non
 async def create_attachment_ref(tenant: str, data: dict, operator: str | None) -> dict:
     payload = process_payload("attachment-ref", data, operator)
     payload["uploaded_by"] = payload.get("uploaded_by") or operator
-    payload["uploaded_at"] = payload.get("uploaded_at") or datetime.datetime.now(datetime.UTC)
-    ref = await SupplyChainAttachmentRef.create(tenant_id=tenant, creator=operator, **payload)
+    payload["uploaded_at"] = payload.get("uploaded_at") or datetime.datetime.now(
+        datetime.UTC
+    )
+    ref = await SupplyChainAttachmentRef.create(
+        tenant_id=tenant, creator=operator, **payload
+    )
     return ref.json
