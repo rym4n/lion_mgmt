@@ -29,7 +29,12 @@ def test_skill_save_maintains_version_and_lifecycle_fields_server_side():
     assert "existing.enabled if existing else True" in source
     assert "existing.require_approval if existing else False" in source
     assert "data.get('version')" not in source
-    assert "_visible_filter(tenant_id)" in source
+    assert "skill_candidate_condition(tenant_id)" in source
+    assert "prefer_tenant_records(candidates, tenant_id, 'skill_key')" in source
+    assert "existing is not None and (not existing.deleted)" in source
+    assert "'is_builtin': False" in source
+    assert "'deleted': False" in source
+    assert "_visible_filter(tenant_id)" not in source
 
 
 def test_employee_and_skill_toggles_have_update_permissions():
@@ -41,22 +46,23 @@ def test_employee_and_skill_toggles_have_update_permissions():
     assert "skill.tenant_id != tenant_id" in ast.unparse(skill)
 
 
-def test_disabled_skills_remain_manageable_and_delete_stays_tenant_scoped():
+def test_disabled_and_builtin_skills_remain_manageable_with_tenant_scoped_delete():
     employee_detail_source = _source(VIEWS_PATH, "employee_detail")
     detail_source = _source(VIEWS_PATH, "skill_detail")
-    lookup_source = _source(VIEWS_PATH, "_tenant_skill_or_404")
+    lookup_source = _source(VIEWS_PATH, "_manageable_skill_or_404")
+    soft_delete_source = _source(VIEWS_PATH, "_soft_delete_skill_for_tenant")
     delete_source = _source(VIEWS_PATH, "skill_delete")
     package_delete_source = _source(VIEWS_PATH, "package_delete")
 
     assert "enabled=None" in employee_detail_source
     assert "enabled=None" in detail_source
-    assert "tenant_id=tenant_id" in lookup_source
-    assert "deleted=False" in lookup_source
-    assert "get_visible_skills" not in lookup_source
-    assert "_tenant_skill_or_404" in delete_source
-    assert "SKILL_IN_USE_BY_EMPLOYEES" in delete_source
-    assert "_tenant_skill_or_404" in package_delete_source
-    assert "SKILL_IN_USE_BY_EMPLOYEES" in package_delete_source
+    assert "skill_candidate_condition" in lookup_source
+    assert "prefer_visible_skills" in lookup_source
+    assert "DigitalEmployeeSkill.update_or_create" in soft_delete_source
+    assert "'is_builtin': False" in soft_delete_source
+    assert "'deleted': True" in soft_delete_source
+    assert "_delete_skill_for_tenant" in delete_source
+    assert "_delete_skill_for_tenant" in package_delete_source
 
 
 def test_dispatch_only_loads_enabled_employees():

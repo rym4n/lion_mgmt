@@ -295,6 +295,136 @@ def test_upsert_role_strips_package_rbac_defaults(tmp_path):
     assert Role.records == {}
 
 
+def test_upsert_skill_tenant_import_restores_tombstone(tmp_path):
+    skill_root = tmp_path / "alert_triage"
+    skill_root.mkdir()
+    (skill_root / "manifest.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "key": "alert_triage",
+                "name": "告警分诊",
+                "version": 2,
+                "enabled": True,
+            },
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    tombstone = types.SimpleNamespace(
+        tenant_id="tenant-1",
+        skill_key="alert_triage",
+        version=1,
+        deleted=True,
+        is_builtin=False,
+    )
+
+    class StubDigitalEmployeeSkill:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            assert kwargs == {
+                "tenant_id": "tenant-1",
+                "skill_key": "alert_triage",
+                "deleted": False,
+            }
+            return None
+
+        @classmethod
+        async def update_or_create(cls, **kwargs):
+            assert kwargs["tenant_id"] == "tenant-1"
+            assert kwargs["skill_key"] == "alert_triage"
+            for key, value in kwargs["defaults"].items():
+                setattr(tombstone, key, value)
+            return tombstone, False
+
+    original_skill_model = package_importer.DigitalEmployeeSkill
+    package_importer.DigitalEmployeeSkill = StubDigitalEmployeeSkill
+    try:
+        skill = asyncio.run(
+            package_importer._upsert_skill(
+                skill_root,
+                {"type": "skill", "skill_key": "alert_triage", "version": 2},
+                "tenant-1",
+                False,
+            )
+        )
+    finally:
+        package_importer.DigitalEmployeeSkill = original_skill_model
+
+    assert skill is tombstone
+    assert tombstone.deleted is False
+    assert tombstone.is_builtin is False
+    assert tombstone.version == 2
+
+
+def test_upsert_skill_builtin_import_keeps_tenant_tombstone(tmp_path):
+    skill_root = tmp_path / "alert_triage"
+    skill_root.mkdir()
+    (skill_root / "manifest.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "key": "alert_triage",
+                "name": "告警分诊",
+                "version": 3,
+                "enabled": True,
+            },
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    tenant_tombstone = types.SimpleNamespace(
+        tenant_id="tenant-1",
+        skill_key="alert_triage",
+        deleted=True,
+    )
+    records = {("tenant-1", "alert_triage"): tenant_tombstone}
+
+    class StubDigitalEmployeeSkill:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            assert kwargs == {
+                "tenant_id": "__builtin__",
+                "skill_key": "alert_triage",
+                "deleted": False,
+            }
+            return records.get((kwargs["tenant_id"], kwargs["skill_key"]))
+
+        @classmethod
+        async def update_or_create(cls, **kwargs):
+            key = (kwargs["tenant_id"], kwargs["skill_key"])
+            skill = records.get(key)
+            created = skill is None
+            if created:
+                skill = types.SimpleNamespace(
+                    tenant_id=kwargs["tenant_id"],
+                    skill_key=kwargs["skill_key"],
+                )
+                records[key] = skill
+            for field, value in kwargs["defaults"].items():
+                setattr(skill, field, value)
+            return skill, created
+
+    original_skill_model = package_importer.DigitalEmployeeSkill
+    package_importer.DigitalEmployeeSkill = StubDigitalEmployeeSkill
+    try:
+        asyncio.run(
+            package_importer._upsert_skill(
+                skill_root,
+                {"type": "skill", "skill_key": "alert_triage", "version": 3},
+                "__builtin__",
+                True,
+            )
+        )
+    finally:
+        package_importer.DigitalEmployeeSkill = original_skill_model
+
+    assert tenant_tombstone.deleted is True
+    assert records[("tenant-1", "alert_triage")] is tenant_tombstone
+    builtin = records[("__builtin__", "alert_triage")]
+    assert builtin.is_builtin is True
+    assert builtin.deleted is False
+    assert builtin.version == 3
+
+
 def test_upsert_role_rejects_missing_identity(tmp_path):
     role_root = tmp_path / "monitor"
     role_root.mkdir()

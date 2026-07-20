@@ -198,22 +198,16 @@ def test_employee_detail_resolves_visible_role_instead_of_employee_foreign_key(m
 def test_skill_delete_checks_disabled_tenant_skill_usage_before_soft_delete(monkeypatch):
     lookup_calls = []
     usage_calls = []
+    delete_calls = []
 
-    class Skill:
-        skill_key = "period_report_compose"
-        deleted = False
-        saved_update_fields = []
+    skill = SimpleNamespace(skill_key="period_report_compose", deleted=False)
 
-        async def save(self, update_fields=None):
-            self.saved_update_fields.append(update_fields)
+    async def fake_manageable_skill(tenant_id, skill_key):
+        lookup_calls.append((tenant_id, skill_key))
+        return skill
 
-    skill = Skill()
-
-    class SkillModel:
-        @classmethod
-        async def get_or_none(cls, **kwargs):
-            lookup_calls.append(kwargs)
-            return skill
+    async def fake_soft_delete(tenant_id, selected_skill):
+        delete_calls.append((tenant_id, selected_skill))
 
     class UsageQuery:
         async def count(self):
@@ -225,7 +219,8 @@ def test_skill_delete_checks_disabled_tenant_skill_usage_before_soft_delete(monk
             usage_calls.append(kwargs)
             return UsageQuery()
 
-    monkeypatch.setattr(views, "DigitalEmployeeSkill", SkillModel)
+    monkeypatch.setattr(views, "_manageable_skill_or_404", fake_manageable_skill)
+    monkeypatch.setattr(views, "_soft_delete_skill_for_tenant", fake_soft_delete)
     monkeypatch.setattr(views, "CommandAgent", AgentModel)
 
     with pytest.raises(views.CustomError) as exc_info:
@@ -236,13 +231,7 @@ def test_skill_delete_checks_disabled_tenant_skill_usage_before_soft_delete(monk
         )
 
     assert exc_info.value.enum is views.ErrorCode.SKILL_IN_USE_BY_EMPLOYEES
-    assert lookup_calls == [
-        {
-            "tenant_id": "tenant-1",
-            "skill_key": "period_report_compose",
-            "deleted": False,
-        }
-    ]
+    assert lookup_calls == [("tenant-1", "period_report_compose")]
     assert usage_calls == [
         {
             "tenant_id": "tenant-1",
@@ -251,7 +240,229 @@ def test_skill_delete_checks_disabled_tenant_skill_usage_before_soft_delete(monk
         }
     ]
     assert skill.deleted is False
-    assert skill.saved_update_fields == []
+    assert delete_calls == []
+
+
+def test_builtin_skill_delete_creates_tenant_tombstone_without_mutating_baseline(monkeypatch):
+    builtin = SimpleNamespace(
+        tenant_id=views.BUILTIN_TENANT_ID,
+        skill_key="alert_triage",
+        name="告警分诊",
+        description="内置技能",
+        skill_dir="/data/__builtin__/alert_triage",
+        bindings={"runtime_skills": ["alert_triage"]},
+        require_approval=False,
+        version=3,
+        enabled=True,
+        meta={"key": "alert_triage"},
+        deleted=False,
+    )
+    upserts = []
+
+    async def fake_manageable_skill(tenant_id, skill_key):
+        assert (tenant_id, skill_key) == ("tenant-1", "alert_triage")
+        return builtin
+
+    class UsageQuery:
+        async def count(self):
+            return 0
+
+    class AgentModel:
+        @classmethod
+        def filter(cls, **kwargs):
+            return UsageQuery()
+
+    class SkillModel:
+        @classmethod
+        async def update_or_create(cls, **kwargs):
+            upserts.append(kwargs)
+            return SimpleNamespace(), True
+
+    monkeypatch.setattr(views, "_manageable_skill_or_404", fake_manageable_skill)
+    monkeypatch.setattr(views, "CommandAgent", AgentModel)
+    monkeypatch.setattr(views, "DigitalEmployeeSkill", SkillModel)
+
+    asyncio.run(views._delete_skill_for_tenant("tenant-1", "alert_triage"))
+
+    assert builtin.deleted is False
+    assert upserts == [
+        {
+            "tenant_id": "tenant-1",
+            "skill_key": "alert_triage",
+            "defaults": {
+                "name": "告警分诊",
+                "description": "内置技能",
+                "skill_dir": "/data/__builtin__/alert_triage",
+                "bindings": {"runtime_skills": ["alert_triage"]},
+                "require_approval": False,
+                "version": 3,
+                "is_builtin": False,
+                "enabled": True,
+                "meta": {"key": "alert_triage"},
+                "deleted": True,
+            },
+        }
+    ]
+
+
+def test_tenant_skill_delete_soft_deletes_owned_record():
+    class Skill(SimpleNamespace):
+        async def save(self, update_fields=None):
+            self.saved_update_fields.append(update_fields)
+
+    skill = Skill(tenant_id="tenant-1", deleted=False, saved_update_fields=[])
+
+    asyncio.run(views._soft_delete_skill_for_tenant("tenant-1", skill))
+
+    assert skill.deleted is True
+    assert skill.saved_update_fields == [["deleted", "utime"]]
+
+
+def test_skill_save_restores_tenant_tombstone_as_custom_skill(monkeypatch):
+    builtin = SimpleNamespace(
+        tenant_id=views.BUILTIN_TENANT_ID,
+        skill_key="alert_triage",
+        name="Builtin alert triage",
+        description="builtin",
+        skill_dir="/data/__builtin__/alert_triage",
+        bindings={},
+        require_approval=False,
+        version=4,
+        enabled=True,
+        meta={},
+        deleted=False,
+    )
+    tombstone = SimpleNamespace(
+        tenant_id="tenant-1",
+        skill_key="alert_triage",
+        name="Old alert triage",
+        description="old",
+        skill_dir="/data/tenant-1/alert_triage",
+        bindings={},
+        require_approval=True,
+        version=2,
+        enabled=False,
+        meta={"files": []},
+        deleted=True,
+    )
+    permission_checks = []
+    upserts = []
+
+    class SkillModel:
+        @classmethod
+        def filter(cls, *args, **kwargs):
+            assert kwargs == {"skill_key": "alert_triage"}
+            return FakeQuery([builtin, tombstone])
+
+        @classmethod
+        async def update_or_create(cls, **kwargs):
+            upserts.append(kwargs)
+            return SimpleNamespace(json={"skill_key": kwargs["skill_key"]}), False
+
+    async def fake_require_save_permission(request, exists, create_permission, update_permission):
+        permission_checks.append((exists, create_permission, update_permission))
+
+    monkeypatch.setattr(views, "DigitalEmployeeSkill", SkillModel)
+    monkeypatch.setattr(views, "_require_save_permission", fake_require_save_permission)
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+
+    out = asyncio.run(
+        views.skill_save(
+            _request(
+                body={
+                    "skill_key": "alert_triage",
+                    "name": "Restored alert triage",
+                    "description": "tenant restored",
+                    "bindings": {},
+                    "files": [],
+                }
+            )
+        )
+    )
+
+    assert out == {"skill_key": "alert_triage"}
+    assert permission_checks == [
+        (False, "digital_employee_skill:c", "digital_employee_skill:u")
+    ]
+    assert upserts[0]["tenant_id"] == "tenant-1"
+    assert upserts[0]["defaults"]["is_builtin"] is False
+    assert upserts[0]["defaults"]["deleted"] is False
+    assert upserts[0]["defaults"]["enabled"] is False
+    assert upserts[0]["defaults"]["require_approval"] is True
+    assert upserts[0]["defaults"]["version"] == 3
+
+
+def test_skill_list_tenant_tombstone_hides_builtin_before_keyword_filter(monkeypatch):
+    builtin = SimpleNamespace(
+        tenant_id=views.BUILTIN_TENANT_ID,
+        skill_key="alert_triage",
+        name="Renamed builtin skill",
+        description="new baseline description",
+        is_builtin=True,
+        deleted=False,
+        json={"skill_key": "alert_triage"},
+    )
+    tombstone = SimpleNamespace(
+        tenant_id="tenant-1",
+        skill_key="alert_triage",
+        name="Old builtin skill",
+        description="old baseline description",
+        is_builtin=False,
+        deleted=True,
+        json={"skill_key": "alert_triage"},
+    )
+
+    class SkillModel:
+        @classmethod
+        def filter(cls, *args, **kwargs):
+            return FakeQuery([builtin, tombstone])
+
+    monkeypatch.setattr(views, "DigitalEmployeeSkill", SkillModel)
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+
+    out = asyncio.run(
+        inspect.unwrap(views.skill_list)(
+            _request(body={"page": 1, "size": 20, "keyword": "renamed"})
+        )
+    )
+
+    assert out["list"] == []
+    assert out["total"] == 0
+
+
+def test_package_list_tenant_tombstone_hides_builtin(monkeypatch):
+    builtin = SimpleNamespace(
+        tenant_id=views.BUILTIN_TENANT_ID,
+        skill_key="alert_triage",
+        is_builtin=True,
+        deleted=False,
+        json={"skill_key": "alert_triage"},
+    )
+    tombstone = SimpleNamespace(
+        tenant_id="tenant-1",
+        skill_key="alert_triage",
+        is_builtin=False,
+        deleted=True,
+        json={"skill_key": "alert_triage"},
+    )
+
+    class RoleModel:
+        @classmethod
+        def filter(cls, *args, **kwargs):
+            return FakeQuery([])
+
+    class SkillModel:
+        @classmethod
+        def filter(cls, *args, **kwargs):
+            return FakeQuery([builtin, tombstone])
+
+    monkeypatch.setattr(views, "DigitalEmployeeRole", RoleModel)
+    monkeypatch.setattr(views, "DigitalEmployeeSkill", SkillModel)
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+
+    out = asyncio.run(inspect.unwrap(views.package_list)(_request()))
+
+    assert out == {"roles": [], "skills": []}
 
 
 async def _async_value(value):

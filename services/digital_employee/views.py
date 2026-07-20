@@ -25,6 +25,8 @@ from .manager import (
     get_visible_role,
     get_visible_skills,
     prefer_tenant_records,
+    prefer_visible_skills,
+    skill_candidate_condition,
     sync_employee_workspace,
     update_employee_skills,
     upgrade_role_for_existing_employees,
@@ -108,15 +110,45 @@ async def _employee_or_404(tenant_id: str, employee_id: str) -> CommandAgent:
     return employee
 
 
-async def _tenant_skill_or_404(tenant_id: str, skill_key: str) -> DigitalEmployeeSkill:
-    skill = await DigitalEmployeeSkill.get_or_none(
-        tenant_id=tenant_id,
+async def _manageable_skill_or_404(tenant_id: str, skill_key: str) -> DigitalEmployeeSkill:
+    skills = await DigitalEmployeeSkill.filter(
+        skill_candidate_condition(tenant_id),
         skill_key=skill_key,
-        deleted=False,
-    )
+    ).all()
+    skill = next(iter(prefer_visible_skills(skills, tenant_id)), None)
     if not skill:
         raise CustomError(ErrorCode.DIGITAL_EMPLOYEE_SKILL_NOT_FOUND)
     return skill
+
+
+async def _soft_delete_skill_for_tenant(tenant_id: str, skill: DigitalEmployeeSkill) -> None:
+    if skill.tenant_id == tenant_id:
+        skill.deleted = True
+        await skill.save(update_fields=["deleted", "utime"])
+        return
+    await DigitalEmployeeSkill.update_or_create(
+        tenant_id=tenant_id,
+        skill_key=skill.skill_key,
+        defaults={
+            "name": skill.name,
+            "description": skill.description,
+            "skill_dir": skill.skill_dir,
+            "bindings": skill.bindings,
+            "require_approval": skill.require_approval,
+            "version": skill.version,
+            "is_builtin": False,
+            "enabled": skill.enabled,
+            "meta": skill.meta,
+            "deleted": True,
+        },
+    )
+
+
+async def _delete_skill_for_tenant(tenant_id: str, skill_key: str) -> None:
+    skill = await _manageable_skill_or_404(tenant_id, skill_key)
+    if await CommandAgent.filter(tenant_id=tenant_id, skill_keys__contains=[skill.skill_key], deleted=False).count():
+        raise CustomError(ErrorCode.SKILL_IN_USE_BY_EMPLOYEES)
+    await _soft_delete_skill_for_tenant(tenant_id, skill)
 
 
 async def _visible_roles_by_key(tenant_id: str, role_keys: list[str]) -> dict[str, DigitalEmployeeRole]:
@@ -472,13 +504,19 @@ async def role_upgrade_employees(request: Request):
 async def skill_list(request: Request):
     data = _json(request)
     page, size, offset = _page(data)
-    condition = _visible_filter(_tenant_id(request))
+    tenant_id = _tenant_id(request)
+    condition = skill_candidate_condition(tenant_id)
+    skills = await DigitalEmployeeSkill.filter(condition).order_by("-is_builtin", "-utime").all()
+    skills = prefer_visible_skills(skills, tenant_id)
     if data.get("keyword"):
-        keyword = data["keyword"]
-        condition &= Q(name__icontains=keyword) | Q(skill_key__icontains=keyword) | Q(description__icontains=keyword)
-    queryset = DigitalEmployeeSkill.filter(condition)
-    skills = await queryset.order_by("-is_builtin", "-utime").all()
-    skills = prefer_tenant_records(skills, _tenant_id(request), "skill_key")
+        keyword = str(data["keyword"]).casefold()
+        skills = [
+            skill
+            for skill in skills
+            if keyword in str(skill.name or "").casefold()
+            or keyword in str(skill.skill_key or "").casefold()
+            or keyword in str(skill.description or "").casefold()
+        ]
     total = len(skills)
     skills = skills[offset : offset + size]
     return response_ok({"list": [skill.json for skill in skills], "total": total, "page": page, "size": size})
@@ -498,9 +536,17 @@ async def skill_save(request: Request):
     skill_key = str(data.get("skill_key") or data.get("key") or "").strip()
     if not skill_key or not data.get("name"):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    visible = await DigitalEmployeeSkill.filter(_visible_filter(tenant_id), skill_key=skill_key).all()
-    existing = next(iter(prefer_tenant_records(visible, tenant_id, "skill_key")), None)
-    await _require_save_permission(request, existing is not None, "digital_employee_skill:c", "digital_employee_skill:u")
+    candidates = await DigitalEmployeeSkill.filter(
+        skill_candidate_condition(tenant_id),
+        skill_key=skill_key,
+    ).all()
+    existing = next(iter(prefer_tenant_records(candidates, tenant_id, "skill_key")), None)
+    await _require_save_permission(
+        request,
+        existing is not None and not existing.deleted,
+        "digital_employee_skill:c",
+        "digital_employee_skill:u",
+    )
     content_changed = not existing or any(
         (
             existing.name != data["name"],
@@ -520,6 +566,7 @@ async def skill_save(request: Request):
             "bindings": data.get("bindings") or {},
             "require_approval": existing.require_approval if existing else False,
             "version": existing.version + 1 if existing and content_changed else (existing.version if existing else 1),
+            "is_builtin": False,
             "enabled": existing.enabled if existing else True,
             "meta": data,
             "deleted": False,
@@ -562,11 +609,7 @@ async def skill_toggle(request: Request):
 @requires_permission("digital_employee_skill:d")
 async def skill_delete(request: Request):
     tenant_id = _tenant_id(request)
-    skill = await _tenant_skill_or_404(tenant_id, _json(request).get("skill_key"))
-    if await CommandAgent.filter(tenant_id=tenant_id, skill_keys__contains=[skill.skill_key], deleted=False).count():
-        raise CustomError(ErrorCode.SKILL_IN_USE_BY_EMPLOYEES)
-    skill.deleted = True
-    await skill.save(update_fields=["deleted", "utime"])
+    await _delete_skill_for_tenant(tenant_id, _json(request).get("skill_key"))
     return response_ok()
 
 
@@ -604,9 +647,9 @@ async def package_export(request: Request):
 async def package_list(request: Request):
     tenant_id = _tenant_id(request)
     roles = await DigitalEmployeeRole.filter(_visible_filter(tenant_id)).all()
-    skills = await DigitalEmployeeSkill.filter(_visible_filter(tenant_id)).all()
+    skills = await DigitalEmployeeSkill.filter(skill_candidate_condition(tenant_id)).all()
     roles = prefer_tenant_records(roles, tenant_id, "role_key")
-    skills = prefer_tenant_records(skills, tenant_id, "skill_key")
+    skills = prefer_visible_skills(skills, tenant_id)
     return response_ok({"roles": [role.json for role in roles], "skills": [skill.json for skill in skills]})
 
 
@@ -622,11 +665,7 @@ async def package_delete(request: Request):
         role.deleted = True
         await role.save(update_fields=["deleted", "utime"])
     elif data.get("skill_key"):
-        skill = await _tenant_skill_or_404(tenant_id, data["skill_key"])
-        if await CommandAgent.filter(tenant_id=tenant_id, skill_keys__contains=[skill.skill_key], deleted=False).count():
-            raise CustomError(ErrorCode.SKILL_IN_USE_BY_EMPLOYEES)
-        skill.deleted = True
-        await skill.save(update_fields=["deleted", "utime"])
+        await _delete_skill_for_tenant(tenant_id, data["skill_key"])
     else:
         raise CustomError(ErrorCode.PARAM_ERROR)
     return response_ok()

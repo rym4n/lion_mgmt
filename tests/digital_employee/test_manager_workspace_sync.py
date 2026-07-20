@@ -387,3 +387,41 @@ def test_get_visible_skills_applies_tenant_preference_before_enabled_filter():
             raise AssertionError("disabled tenant override must hide the enabled builtin baseline")
     finally:
         _restore_modules(original_modules)
+
+
+def test_get_visible_skills_applies_tenant_tombstone_before_deleted_filter():
+    manager, original_modules = _load_manager([])
+    try:
+        builtin = SimpleNamespace(
+            tenant_id="__builtin__",
+            skill_key="triage",
+            enabled=True,
+            deleted=False,
+        )
+        tenant_tombstone = SimpleNamespace(
+            tenant_id="tenant-1",
+            skill_key="triage",
+            enabled=True,
+            deleted=True,
+        )
+
+        class Query:
+            async def all(self):
+                return [builtin, tenant_tombstone]
+
+        class SkillModel:
+            @classmethod
+            def filter(cls, *args, **kwargs):
+                assert kwargs == {"skill_key__in": ["triage"]}
+                return Query()
+
+        manager.DigitalEmployeeSkill = SkillModel
+
+        try:
+            asyncio.run(manager.get_visible_skills("tenant-1", ["triage"], enabled=None))
+        except manager.CustomError as exc:
+            assert exc.enum == manager.ErrorCode.DIGITAL_EMPLOYEE_SKILL_NOT_FOUND
+        else:
+            raise AssertionError("tenant tombstone must hide the builtin baseline")
+    finally:
+        _restore_modules(original_modules)

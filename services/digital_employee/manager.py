@@ -25,6 +25,15 @@ def _visible_condition(tenant_id: str):
     return Q(deleted=False) & (Q(tenant_id=tenant_id) | Q(is_builtin=True))
 
 
+def skill_candidate_condition(tenant_id: str):
+    """Load tenant rows before deciding whether a builtin baseline is visible."""
+    return Q(tenant_id=tenant_id) | Q(
+        tenant_id=BUILTIN_TENANT_ID,
+        is_builtin=True,
+        deleted=False,
+    )
+
+
 def prefer_tenant_records(records: list, tenant_id: str, key_attr: str) -> list:
     """Prefer tenant-owned package rows over package-provided builtin baselines."""
     preferred = {}
@@ -36,6 +45,12 @@ def prefer_tenant_records(records: list, tenant_id: str, key_attr: str) -> list:
         if current is None or (getattr(record, "tenant_id", None) == tenant_id and getattr(current, "tenant_id", None) != tenant_id):
             preferred[key] = record
     return list(preferred.values())
+
+
+def prefer_visible_skills(records: list, tenant_id: str) -> list:
+    """Apply tenant preference before filtering tenant-scoped tombstones."""
+    preferred = prefer_tenant_records(records, tenant_id, "skill_key")
+    return [skill for skill in preferred if not bool(getattr(skill, "deleted", False))]
 
 
 class BuiltinAioeCliSkill(SimpleNamespace):
@@ -95,8 +110,8 @@ async def get_visible_skills(
     query_keys = [key for key in requested_keys if key != AIOE_CLI_SKILL_KEY]
     skills = []
     if query_keys:
-        skills = await DigitalEmployeeSkill.filter(_visible_condition(tenant_id), skill_key__in=query_keys).all()
-    preferred = prefer_tenant_records(skills, tenant_id, "skill_key")
+        skills = await DigitalEmployeeSkill.filter(skill_candidate_condition(tenant_id), skill_key__in=query_keys).all()
+    preferred = prefer_visible_skills(skills, tenant_id)
     if enabled is not None:
         preferred = [skill for skill in preferred if bool(skill.enabled) is enabled]
     skills_by_key = {skill.skill_key: skill for skill in preferred}
