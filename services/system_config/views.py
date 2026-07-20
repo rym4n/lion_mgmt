@@ -14,7 +14,7 @@ import jwt
 import orjson
 import pytz
 import yaml
-from sanic import Blueprint, json, response
+from sanic import Blueprint, Request, json, response
 from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.transactions import in_transaction
@@ -25,6 +25,7 @@ from libs.error_code.exception import CustomError
 from libs.security.authorization import get_superadmin_role, load_license, requires_permission
 from libs.utils import get_from_s3, query_vlog, strip_timezone_to_seconds, upload_to_s3
 from models import Config, Playbook, PlaybookPermissions, PlaybookVersion, Role, Tool, ToolResources
+from services.digital_employee.package_api import import_package_from_request, request_is_loopback
 from services.event_ingestion.views import check_vector_config
 from services.tools.views import upload_tool
 from services.workflow.views import statistics_data, tool_action_update
@@ -1571,6 +1572,15 @@ async def download_file(request, file_id):
             await asyncio.to_thread(os.remove, tmp_path)
     else:
         return response_ok("文件不存在")
+
+
+@system_bp.post("/bootstrap/digital-employee/package/import")
+@openapi.exclude()
+async def bootstrap_digital_employee_package(request: Request):
+    if not request_is_loopback(request):
+        raise CustomError(ErrorCode.IP_FORBIDDEN)
+    result = await import_package_from_request(request, is_builtin=True)
+    return response_ok(result.json)
 
 
 @system_bp.post("/init-data")

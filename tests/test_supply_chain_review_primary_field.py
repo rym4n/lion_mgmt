@@ -2745,7 +2745,8 @@ def _install_model_delete_fakes(
     relation_types=None,
     referencing_fields=None,
 ):
-    field_updates = []
+    operations = []
+    field_queries = []
     transaction = _install_transaction(monkeypatch)
 
     class FieldUpdateQuery:
@@ -2757,37 +2758,62 @@ def _install_model_delete_fakes(
             return self
 
         async def update(self, **kwargs):
-            field_updates.append((kwargs, self.connection))
+            operations.append(("update", kwargs, self.connection))
 
         async def delete(self):
-            field_updates.append(("delete", self.connection))
+            operations.append(("delete", self.connection))
+
+    def active_rows(rows, filters):
+        if "deleted" not in filters:
+            return rows
+        return [
+            row
+            for row in rows
+            if getattr(row, "deleted", False) is filters["deleted"]
+        ]
 
     def field_filter(**kwargs):
-        if "ref_ci_type" in kwargs:
-            return _FakeQuery(referencing_fields or [])
+        field_queries.append(kwargs)
+        if (
+            "ref_ci_type" in kwargs or "ref_ci_type_id" in kwargs
+        ) and kwargs.get("deleted") is not True:
+            return _FakeQuery(active_rows(referencing_fields or [], kwargs))
         return FieldUpdateQuery()
+
+    async def delete_model(**kwargs):
+        ci_type.delete_calls.append(kwargs)
+        operations.append(("model_delete", kwargs["using_db"]))
+
+    ci_type.delete = delete_model
 
     monkeypatch.setattr(
         manager.SupplyChainCiType,
         "filter",
         staticmethod(lambda *_args, **_kwargs: _FakeQuery(ci_type)),
     )
+
+    def ci_filter(**kwargs):
+        return _FakeQuery(active_rows(cis or [], kwargs))
+
+    def relation_type_filter(**kwargs):
+        return _FakeQuery(active_rows(relation_types or [], kwargs))
+
     monkeypatch.setattr(
         manager.SupplyChainCi,
         "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery(cis or [])),
+        staticmethod(ci_filter),
     )
     monkeypatch.setattr(
         manager.SupplyChainCiRelationType,
         "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery(relation_types or [])),
+        staticmethod(relation_type_filter),
     )
     monkeypatch.setattr(
         manager.SupplyChainCiFieldDef,
         "filter",
         staticmethod(field_filter),
     )
-    return transaction, field_updates
+    return transaction, operations, field_queries
 
 
 def test_model_delete_rejects_locked_model(monkeypatch):
@@ -2801,21 +2827,28 @@ def test_model_delete_rejects_locked_model(monkeypatch):
     assert ci_type.save_calls == []
 
 
-def test_model_delete_rejects_active_ci(monkeypatch):
+@pytest.mark.parametrize("deleted", [False, True], ids=["active", "soft-deleted"])
+def test_model_delete_rejects_any_ci(monkeypatch, deleted):
     ci_type = _ci_type(key="application")
-    active_ci = _FakeRecord(
+    ci = _FakeRecord(
         _json={},
         id="ci-1",
+        ci_type_id=ci_type.id,
         ci_type_key="application",
-        deleted=False,
+        deleted=deleted,
     )
-    _install_model_delete_fakes(monkeypatch, ci_type, cis=[active_ci])
+    _, operations, _ = _install_model_delete_fakes(
+        monkeypatch,
+        ci_type,
+        cis=[ci],
+    )
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(manager.delete_ci_type("tenant-a", "application"))
 
     assert exc_info.value.enum is ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES
     assert ci_type.save_calls == []
+    assert operations == []
 
 
 @pytest.mark.parametrize(
@@ -2853,7 +2886,7 @@ def test_model_delete_rejects_explicit_relation_type_dependency(
         relation_fields=relation_fields,
         is_locked=False,
     )
-    _install_model_delete_fakes(
+    _, operations, _ = _install_model_delete_fakes(
         monkeypatch,
         ci_type,
         relation_types=[relation_type],
@@ -2864,6 +2897,7 @@ def test_model_delete_rejects_explicit_relation_type_dependency(
 
     assert exc_info.value.enum is ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES
     assert ci_type.save_calls == []
+    assert operations == []
 
 
 def test_model_delete_rejects_external_inbound_ref(monkeypatch):
@@ -2873,9 +2907,10 @@ def test_model_delete_rejects_external_inbound_ref(monkeypatch):
         "application_ref",
         "server",
         data_type="ref",
+        ref_ci_type_id=ci_type.id,
         ref_ci_type="application",
     )
-    _install_model_delete_fakes(
+    _, operations, _ = _install_model_delete_fakes(
         monkeypatch,
         ci_type,
         referencing_fields=[inbound_ref],
@@ -2886,6 +2921,68 @@ def test_model_delete_rejects_external_inbound_ref(monkeypatch):
 
     assert exc_info.value.enum is ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES
     assert ci_type.save_calls == []
+    assert operations == []
+
+
+def test_model_delete_by_key_ignores_deleted_dependencies_and_detaches_id_only_field_tombstone(
+    monkeypatch,
+):
+    model_id = "11111111-1111-1111-1111-111111111111"
+    ci_type = _ci_type(id=model_id, key="application")
+    deleted_relation_type = _FakeRecord(
+        _json={},
+        id="relation-type-1",
+        key="contains",
+        source_ci_type_ids=[model_id],
+        target_ci_type_ids=[],
+        source_ci_types=["application"],
+        target_ci_types=[],
+        relation_fields=[],
+        deleted=True,
+        is_locked=False,
+    )
+    deleted_inbound_ref = _field(
+        "field-1",
+        "application_ref",
+        "server",
+        ci_type_id="server-type",
+        data_type="ref",
+        ref_ci_type_id=model_id,
+        ref_ci_type=None,
+        deleted=True,
+    )
+    transaction, operations, field_queries = _install_model_delete_fakes(
+        monkeypatch,
+        ci_type,
+        relation_types=[deleted_relation_type],
+        referencing_fields=[deleted_inbound_ref],
+    )
+
+    result = asyncio.run(manager.delete_ci_type("tenant-a", "application"))
+
+    assert result == {"id": model_id}
+    assert field_queries == [
+        {
+            "tenant_id": "tenant-a",
+            "deleted": False,
+            "ref_ci_type_id": model_id,
+        },
+        {
+            "tenant_id": "tenant-a",
+            "deleted": True,
+            "ref_ci_type_id": model_id,
+        },
+        {"tenant_id": "tenant-a", "ci_type_id": model_id},
+    ]
+    assert operations == [
+        (
+            "update",
+            {"ref_ci_type_id": None, "ref_ci_type": None},
+            transaction.connection,
+        ),
+        ("delete", transaction.connection),
+        ("model_delete", transaction.connection),
+    ]
 
 
 def test_model_delete_allows_self_ref_and_unrestricted_relation(monkeypatch):
@@ -2895,6 +2992,7 @@ def test_model_delete_allows_self_ref_and_unrestricted_relation(monkeypatch):
         "parent",
         "application",
         data_type="ref",
+        ref_ci_type_id=ci_type.id,
         ref_ci_type="application",
     )
     unrestricted_relation = _FakeRecord(
@@ -2906,7 +3004,7 @@ def test_model_delete_allows_self_ref_and_unrestricted_relation(monkeypatch):
         relation_fields=[],
         is_locked=False,
     )
-    transaction, field_updates = _install_model_delete_fakes(
+    transaction, operations, _ = _install_model_delete_fakes(
         monkeypatch,
         ci_type,
         relation_types=[unrestricted_relation],
@@ -2918,8 +3016,14 @@ def test_model_delete_allows_self_ref_and_unrestricted_relation(monkeypatch):
     assert result == {"id": "type-1"}
     assert ci_type.save_calls == []
     assert ci_type.delete_calls == [{"using_db": transaction.connection}]
-    assert field_updates == [
-        ("delete", transaction.connection)
+    assert operations == [
+        (
+            "update",
+            {"ref_ci_type_id": None, "ref_ci_type": None},
+            transaction.connection,
+        ),
+        ("delete", transaction.connection),
+        ("model_delete", transaction.connection),
     ]
 
 

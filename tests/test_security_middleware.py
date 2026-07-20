@@ -36,3 +36,17 @@ def test_regular_digital_employee_routes_still_require_session_auth(monkeypatch)
     _run(middleware.before_request(SimpleNamespace(path="/digital_employee/employee/list")))
 
     assert called_paths == ["/digital_employee/employee/list"]
+
+
+def test_digital_employee_bootstrap_route_requires_session_auth(monkeypatch):
+    called_paths = []
+
+    async def fake_authenticate(request):
+        called_paths.append(request.path)
+
+    monkeypatch.setattr(security, "authenticate", fake_authenticate)
+    middleware = security.SecurityMiddleware()
+
+    _run(middleware.before_request(SimpleNamespace(path="/system/bootstrap/digital-employee/package/import")))
+
+    assert called_paths == ["/system/bootstrap/digital-employee/package/import"]

@@ -31,8 +31,8 @@ from .manager import (
     update_employee_skills,
     upgrade_role_for_existing_employees,
 )
-from .package_format import PackageFormatError, UnsupportedPackageTypeError, inspect_package
-from .package_importer import export_package_for_tenant, import_package, normalize_role_prompt_fields, require_role_identity
+from .package_api import import_package_from_request
+from .package_importer import export_package_for_tenant, normalize_role_prompt_fields, require_role_identity
 from .rbac import require_existing_platform_role
 from .runtime_callbacks import fetch_runtime_transcript, save_runtime_report, save_runtime_transcript
 
@@ -74,21 +74,6 @@ def _page(data: dict) -> tuple[int, int, int]:
 
 async def _require_save_permission(request: Request, exists: bool, create_permission: str, update_permission: str) -> None:
     await check_permissions(request, update_permission if exists else create_permission)
-
-
-def _package_type_or_error(file_bytes: bytes) -> str:
-    try:
-        package_type, _ = inspect_package(file_bytes)
-    except UnsupportedPackageTypeError as exc:
-        raise CustomError(ErrorCode.PACKAGE_TYPE_UNSUPPORTED) from exc
-    except PackageFormatError as exc:
-        raise CustomError(ErrorCode.PACKAGE_INVALID) from exc
-    return package_type
-
-
-async def _require_package_import_permission(request: Request, file_bytes: bytes) -> None:
-    permission = "digital_employee_skill:c" if _package_type_or_error(file_bytes) == "skill" else "digital_employee:c"
-    await check_permissions(request, permission)
 
 
 async def _require_package_export_permission(request: Request, data: dict) -> None:
@@ -615,17 +600,9 @@ async def skill_delete(request: Request):
 
 @digital_employee_bp.post("/package/import")
 async def package_import(request: Request):
-    uploaded = request.files.get("file") if request.files else None
-    if uploaded:
-        file_bytes = uploaded.body
-    elif request.body:
-        file_bytes = request.body
-    else:
-        raise CustomError(ErrorCode.PACKAGE_INVALID)
-    await _require_package_import_permission(request, file_bytes)
     is_builtin_value = request.form.get("is_builtin") if request.form else False
     is_builtin = str(is_builtin_value).lower() in {"1", "true", "yes", "on"}
-    result = await import_package(file_bytes, _tenant_id(request), is_builtin, _operator(request), request=request)
+    result = await import_package_from_request(request, is_builtin=is_builtin)
     return response_ok(result.json)
 
 

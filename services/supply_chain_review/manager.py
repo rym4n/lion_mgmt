@@ -2018,11 +2018,7 @@ async def delete_ci_type(
         active_ci = (
             await SupplyChainCi.filter(
                 tenant_id=tenant,
-                **(
-                    {"ci_type_id": ci_type.id}
-                    if _looks_like_uuid(key_or_id)
-                    else {"ci_type_key": ci_type.key}
-                ),
+                ci_type_id=ci_type.id,
             )
             .using_db(connection)
             .order_by("id")
@@ -2034,6 +2030,7 @@ async def delete_ci_type(
         relation_types = (
             await SupplyChainCiRelationType.filter(
                 tenant_id=tenant,
+                deleted=False,
             )
             .using_db(connection)
             .order_by("key")
@@ -2051,11 +2048,8 @@ async def delete_ci_type(
         referencing_fields = (
             await SupplyChainCiFieldDef.filter(
                 tenant_id=tenant,
-                **(
-                    {"ref_ci_type_id": ci_type.id}
-                    if _looks_like_uuid(key_or_id)
-                    else {"ref_ci_type": ci_type.key}
-                ),
+                deleted=False,
+                ref_ci_type_id=ci_type.id,
             )
             .using_db(connection)
             .order_by("ci_type_key", "field_key")
@@ -2064,6 +2058,17 @@ async def delete_ci_type(
         )
         if any(_field_model_id(field) not in {ci_type.id, ci_type.key} for field in referencing_fields):
             raise CustomError(ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES)
+        # Deleted field definitions remain as tombstones. Detach their inbound
+        # references before the target model is hard-deleted so the FK can be
+        # released without discarding the field history.
+        await SupplyChainCiFieldDef.filter(
+            tenant_id=tenant,
+            deleted=True,
+            ref_ci_type_id=ci_type.id,
+        ).using_db(connection).update(
+            ref_ci_type_id=None,
+            ref_ci_type=None,
+        )
         # Empty models have no historical identity to retain. Remove their own
         # definitions first, then hard-delete the model so names can be reused.
         await SupplyChainCiFieldDef.filter(
