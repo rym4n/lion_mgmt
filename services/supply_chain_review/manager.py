@@ -7,6 +7,8 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Iterable
 
+import orjson
+
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from models.supply_chain_review import (
@@ -66,7 +68,8 @@ AFTER_SUCCESS_ACTIONS = {"none", "policy_compare", "risk_evaluate"}
 POLICY_ACTIONS = {"permit", "deny"}
 POLICY_COMPARE_TYPES = {"matched", "added", "missing", "changed", "unparsed"}
 POLICY_HANDLE_STATUSES = {"pending", "confirmed", "ignored", "converted"}
-POLICY_CHANGE_TYPES = {"added", "modified"}
+POLICY_CHANGE_TYPES = {"added", "modified", "deleted", "synced"}
+MAX_POLICY_SYNC_ITEMS = 5000
 TOPOLOGY_STATUSES = {"active", "archived"}
 ISSUE_STATUSES = {"pending", "in_progress", "pending_review", "closed", "returned"}
 ISSUE_TRANSITIONS = {
@@ -227,6 +230,9 @@ PROCESS_FILTER_FIELDS = [
     "status",
     "enabled",
     "device_ci_id",
+    "device_key",
+    "device_type",
+    "policy_type",
     "collection_run_id",
     "compare_run_id",
     "compare_type",
@@ -335,12 +341,17 @@ PROCESS_CONFIGS = {
     "actual-policy": {
         "model": SupplyChainActualPolicy,
         "resource": "policy",
-        "required": [],
+        "required": ["device_key", "policy_key"],
         "fields": [
             "accessory_project_id",
             "device_ci_id",
+            "device_key",
+            "device_name",
+            "device_type",
             "collection_run_id",
             "raw_rule_id",
+            "policy_key",
+            "policy_type",
             "rule_name",
             "source_zone",
             "source_address",
@@ -349,11 +360,21 @@ PROCESS_CONFIGS = {
             "protocol",
             "port",
             "action",
+            "enabled",
             "raw_text",
+            "policy_data",
             "parse_status",
         ],
         "enums": {"action": POLICY_ACTIONS, "parse_status": {"parsed", "unparsed"}},
-        "keyword": ["rule_name", "raw_rule_id", "source_address", "target_address"],
+        "keyword": [
+            "device_key",
+            "device_name",
+            "policy_key",
+            "rule_name",
+            "raw_rule_id",
+            "source_address",
+            "target_address",
+        ],
         "order": ["-utime"],
     },
     "policy-change": {
@@ -363,8 +384,16 @@ PROCESS_CONFIGS = {
         "fields": [
             "accessory_project_id",
             "device_ci_id",
+            "device_key",
+            "actual_policy_id",
+            "policy_key",
+            "batch_id",
             "policy_name",
             "change_type",
+            "revision",
+            "before_data",
+            "after_data",
+            "sync_source",
             "diff_text",
             "detected_at",
             "risk_level",
@@ -373,7 +402,14 @@ PROCESS_CONFIGS = {
             "review_issue_id",
         ],
         "enums": {"change_type": POLICY_CHANGE_TYPES, "risk_level": RISK_STATUSES - {"normal"}},
-        "keyword": ["policy_name", "diff_text", "external_approve_ref"],
+        "keyword": [
+            "device_key",
+            "policy_key",
+            "policy_name",
+            "batch_id",
+            "diff_text",
+            "external_approve_ref",
+        ],
         "order": ["-detected_at", "-utime"],
     },
     "policy-compare-run": {
@@ -2655,7 +2691,15 @@ def process_payload(domain: str, data: dict, operator: str | None) -> dict:
         value = payload.get(field)
         if value and value not in allowed:
             raise CustomError(ErrorCode.PARAM_ERROR)
-    for field in ["input_params", "parser_rules", "mapping_rules", "graph_data"]:
+    for field in [
+        "input_params",
+        "parser_rules",
+        "mapping_rules",
+        "graph_data",
+        "policy_data",
+        "before_data",
+        "after_data",
+    ]:
         if field in payload and not isinstance(payload[field], dict):
             raise CustomError(ErrorCode.PARAM_ERROR)
     for field in ["target_ci_ids", "actions", "related_ci_ids", "attachment_ids", "receivers", "receiver_roles"]:
@@ -2743,6 +2787,489 @@ async def delete_process_record(tenant: str, domain: str, record_id: str) -> dic
     record.deleted = True
     await record.save()
     return {"id": record.id}
+
+
+def _policy_text(value, field: str, maximum: int) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list, tuple, set)):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    text = str(value).strip()
+    if len(text) > maximum:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    return text
+
+
+def _normalize_actual_policy_payload(
+    data: dict,
+    operator: str | None,
+    *,
+    defaults: dict | None = None,
+) -> dict:
+    data = require_dict(data)
+    defaults = defaults or {}
+
+    def first(*keys: str):
+        for key in keys:
+            value = data.get(key)
+            if value not in (None, ""):
+                return value
+        for key in keys:
+            value = defaults.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
+    device_key = _policy_text(
+        first("device_key", "device_id", "device_ci_id"), "device_key", 255
+    )
+    policy_key = _policy_text(
+        first("policy_key", "policy_id", "raw_rule_id", "rule_name", "name"),
+        "policy_key",
+        255,
+    )
+    if not device_key or not policy_key:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    normalized = {**defaults, **data}
+    normalized["device_key"] = device_key
+    normalized["policy_key"] = policy_key
+    normalized["raw_rule_id"] = _policy_text(
+        first("raw_rule_id", "policy_id", "policy_key") or policy_key,
+        "raw_rule_id",
+        255,
+    )
+    normalized["rule_name"] = _policy_text(
+        first("rule_name", "name", "policy_key") or policy_key,
+        "rule_name",
+        255,
+    )
+    normalized["device_name"] = _policy_text(
+        first("device_name"), "device_name", 255
+    ) or None
+    normalized["device_type"] = _policy_text(
+        first("device_type"), "device_type", 30
+    ).lower() or None
+    normalized["policy_type"] = _policy_text(
+        first("policy_type"), "policy_type", 50
+    ).lower() or None
+
+    action = _policy_text(first("action") or "permit", "action", 20).lower()
+    action_aliases = {
+        "allow": "permit",
+        "accept": "permit",
+        "pass": "permit",
+        "block": "deny",
+        "drop": "deny",
+        "reject": "deny",
+    }
+    normalized["action"] = action_aliases.get(action, action)
+    if normalized["action"] not in POLICY_ACTIONS:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    enabled = first("enabled")
+    if enabled is None:
+        enabled = True
+    if not isinstance(enabled, bool):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    normalized["enabled"] = enabled
+
+    if "policy_data" not in data:
+        if "policy_data" in defaults:
+            normalized["policy_data"] = defaults["policy_data"]
+        else:
+            normalized["policy_data"] = {
+                key: value
+                for key, value in data.items()
+                if key
+                not in {
+                    "id",
+                    "revision",
+                    "batch_id",
+                    "replace",
+                    "sync_source",
+                }
+            }
+    elif not isinstance(data["policy_data"], dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    payload = process_payload("actual-policy", normalized, operator)
+    payload["device_key"] = device_key
+    payload["policy_key"] = policy_key
+    return payload
+
+
+def _policy_snapshot(record: SupplyChainActualPolicy) -> dict:
+    payload = record.json
+    return {
+        key: payload.get(key)
+        for key in (
+            "id",
+            "accessory_project_id",
+            "device_ci_id",
+            "device_key",
+            "device_name",
+            "device_type",
+            "collection_run_id",
+            "raw_rule_id",
+            "policy_key",
+            "policy_type",
+            "rule_name",
+            "source_zone",
+            "source_address",
+            "target_zone",
+            "target_address",
+            "protocol",
+            "port",
+            "action",
+            "enabled",
+            "raw_text",
+            "policy_data",
+            "parse_status",
+            "revision",
+            "last_synced_at",
+        )
+    }
+
+
+def _policy_content(snapshot: dict) -> dict:
+    return {
+        key: value
+        for key, value in snapshot.items()
+        if key not in {"id", "revision", "last_synced_at"}
+    }
+
+
+def _policy_diff_text(before_data: dict, after_data: dict) -> str:
+    keys = sorted(set(before_data) | set(after_data))
+    changed = [key for key in keys if before_data.get(key) != after_data.get(key)]
+    return orjson.dumps(
+        {"changed_fields": changed}, option=orjson.OPT_SORT_KEYS
+    ).decode("utf-8")
+
+
+async def _append_policy_history(
+    connection,
+    *,
+    tenant: str,
+    record: SupplyChainActualPolicy,
+    change_type: str,
+    before_data: dict,
+    after_data: dict,
+    batch_id: str,
+    sync_source: str,
+    operator: str | None,
+    detected_at: datetime.datetime,
+) -> SupplyChainPolicyChange:
+    return await SupplyChainPolicyChange.create(
+        using_db=connection,
+        tenant_id=tenant,
+        accessory_project_id=record.accessory_project_id,
+        device_ci_id=record.device_ci_id,
+        device_key=record.device_key,
+        actual_policy_id=record.id,
+        policy_key=record.policy_key,
+        batch_id=batch_id,
+        policy_name=record.rule_name,
+        change_type=change_type,
+        revision=record.revision,
+        before_data=before_data,
+        after_data=after_data,
+        sync_source=sync_source,
+        diff_text=_policy_diff_text(before_data, after_data),
+        detected_at=detected_at,
+        risk_level="medium",
+        creator=operator,
+        updater=operator,
+    )
+
+
+async def _locked_actual_policy(connection, tenant: str, record_id: str):
+    return await (
+        SupplyChainActualPolicy.filter(
+            id=record_id, tenant_id=tenant, deleted=False
+        )
+        .using_db(connection)
+        .select_for_update()
+        .first()
+    )
+
+
+async def save_actual_policy(
+    tenant: str, data: dict, operator: str | None
+) -> SupplyChainActualPolicy:
+    data = require_dict(data)
+    record_id = _policy_text(data.get("id"), "id", 36)
+    now = datetime.datetime.now(datetime.UTC)
+    batch_id = _policy_text(data.get("batch_id"), "batch_id", 64) or str(
+        uuid.uuid4()
+    )
+    sync_source = _policy_text(
+        data.get("sync_source") or "manual", "sync_source", 100
+    )
+
+    async with in_transaction() as connection:
+        existing = None
+        before_data = {}
+        defaults = {}
+        if record_id:
+            existing = await _locked_actual_policy(connection, tenant, record_id)
+            if not existing:
+                raise CustomError(ErrorCode.NOT_FOUND)
+            if data.get("revision") is not None:
+                try:
+                    expected_revision = int(data["revision"])
+                except (TypeError, ValueError) as exc:
+                    raise CustomError(ErrorCode.PARAM_ERROR) from exc
+                if expected_revision != existing.revision:
+                    raise CustomError(ErrorCode.PARAM_ERROR)
+            before_data = _policy_snapshot(existing)
+            defaults = before_data
+
+        payload = _normalize_actual_policy_payload(
+            data, operator, defaults=defaults
+        )
+        duplicate_query = SupplyChainActualPolicy.filter(
+            tenant_id=tenant,
+            device_key=payload["device_key"],
+            policy_key=payload["policy_key"],
+            deleted=False,
+        ).using_db(connection)
+        if existing:
+            duplicate_query = duplicate_query.exclude(id=existing.id)
+        if await duplicate_query.exists():
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+        if existing:
+            for key, value in payload.items():
+                setattr(existing, key, value)
+            existing.revision += 1
+            existing.last_synced_at = now
+            await existing.save(using_db=connection)
+            record = existing
+            change_type = "modified"
+        else:
+            record = await SupplyChainActualPolicy.create(
+                using_db=connection,
+                tenant_id=tenant,
+                creator=operator,
+                revision=1,
+                last_synced_at=now,
+                **payload,
+            )
+            change_type = "added"
+
+        after_data = _policy_snapshot(record)
+        await _append_policy_history(
+            connection,
+            tenant=tenant,
+            record=record,
+            change_type=change_type,
+            before_data=before_data,
+            after_data=after_data,
+            batch_id=batch_id,
+            sync_source=sync_source,
+            operator=operator,
+            detected_at=now,
+        )
+    return record
+
+
+async def delete_actual_policy(
+    tenant: str, record_id: str, operator: str | None
+) -> dict:
+    record_id = _policy_text(record_id, "id", 36)
+    if not record_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    now = datetime.datetime.now(datetime.UTC)
+    async with in_transaction() as connection:
+        record = await _locked_actual_policy(connection, tenant, record_id)
+        if not record:
+            raise CustomError(ErrorCode.NOT_FOUND)
+        before_data = _policy_snapshot(record)
+        record.deleted = True
+        record.revision += 1
+        record.last_synced_at = now
+        record.updater = operator
+        await record.save(using_db=connection)
+        await _append_policy_history(
+            connection,
+            tenant=tenant,
+            record=record,
+            change_type="deleted",
+            before_data=before_data,
+            after_data={},
+            batch_id=str(uuid.uuid4()),
+            sync_source="manual",
+            operator=operator,
+            detected_at=now,
+        )
+    return {"id": record.id}
+
+
+async def sync_actual_policies(
+    tenant: str, data: dict, operator: str | None
+) -> dict:
+    data = require_dict(data)
+    policies = data.get("policies")
+    if not isinstance(policies, list) or len(policies) > MAX_POLICY_SYNC_ITEMS:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    replace = data.get("replace", False)
+    if not isinstance(replace, bool):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if not policies and not replace:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    batch_id = _policy_text(data.get("batch_id"), "batch_id", 64) or str(
+        uuid.uuid4()
+    )
+    sync_source = _policy_text(
+        data.get("sync_source") or "playbook", "sync_source", 100
+    )
+    shared = {
+        key: data[key]
+        for key in (
+            "accessory_project_id",
+            "device_ci_id",
+            "device_key",
+            "device_id",
+            "device_name",
+            "device_type",
+            "collection_run_id",
+            "policy_type",
+        )
+        if key in data
+    }
+    normalized_items = []
+    identities = set()
+    for item in policies:
+        if not isinstance(item, dict):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        payload = _normalize_actual_policy_payload(
+            {**shared, **item}, operator
+        )
+        identity = (payload["device_key"], payload["policy_key"])
+        if identity in identities:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        identities.add(identity)
+        normalized_items.append(payload)
+
+    replace_device_key = _policy_text(
+        data.get("device_key") or data.get("device_id") or data.get("device_ci_id"),
+        "device_key",
+        255,
+    )
+    if replace and not replace_device_key:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if replace and any(
+        payload["device_key"] != replace_device_key for payload in normalized_items
+    ):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    now = datetime.datetime.now(datetime.UTC)
+    counts = {"added": 0, "modified": 0, "deleted": 0, "synced": 0}
+    device_keys = {payload["device_key"] for payload in normalized_items}
+    if replace_device_key:
+        device_keys.add(replace_device_key)
+
+    async with in_transaction() as connection:
+        existing_rows = []
+        if device_keys:
+            existing_rows = await (
+                SupplyChainActualPolicy.filter(
+                    tenant_id=tenant,
+                    device_key__in=list(device_keys),
+                    deleted=False,
+                )
+                .using_db(connection)
+                .select_for_update()
+                .all()
+            )
+        existing_by_identity = {
+            (row.device_key, row.policy_key): row for row in existing_rows
+        }
+
+        for payload in normalized_items:
+            identity = (payload["device_key"], payload["policy_key"])
+            record = existing_by_identity.get(identity)
+            before_data = _policy_snapshot(record) if record else {}
+            if record:
+                for key, value in payload.items():
+                    setattr(record, key, value)
+                record.revision += 1
+                record.last_synced_at = now
+                await record.save(using_db=connection)
+                after_data = _policy_snapshot(record)
+                change_type = (
+                    "synced"
+                    if _policy_content(before_data) == _policy_content(after_data)
+                    else "modified"
+                )
+            else:
+                record = await SupplyChainActualPolicy.create(
+                    using_db=connection,
+                    tenant_id=tenant,
+                    creator=operator,
+                    revision=1,
+                    last_synced_at=now,
+                    **payload,
+                )
+                after_data = _policy_snapshot(record)
+                change_type = "added"
+                existing_by_identity[identity] = record
+
+            counts[change_type] += 1
+            await _append_policy_history(
+                connection,
+                tenant=tenant,
+                record=record,
+                change_type=change_type,
+                before_data=before_data,
+                after_data=after_data,
+                batch_id=batch_id,
+                sync_source=sync_source,
+                operator=operator,
+                detected_at=now,
+            )
+
+        if replace:
+            received_keys = {
+                payload["policy_key"]
+                for payload in normalized_items
+                if payload["device_key"] == replace_device_key
+            }
+            for record in existing_rows:
+                if (
+                    record.device_key != replace_device_key
+                    or record.policy_key in received_keys
+                ):
+                    continue
+                before_data = _policy_snapshot(record)
+                record.deleted = True
+                record.revision += 1
+                record.last_synced_at = now
+                record.updater = operator
+                await record.save(using_db=connection)
+                counts["deleted"] += 1
+                await _append_policy_history(
+                    connection,
+                    tenant=tenant,
+                    record=record,
+                    change_type="deleted",
+                    before_data=before_data,
+                    after_data={},
+                    batch_id=batch_id,
+                    sync_source=sync_source,
+                    operator=operator,
+                    detected_at=now,
+                )
+
+    return {
+        "batch_id": batch_id,
+        "received": len(normalized_items),
+        **counts,
+        "history_count": sum(counts.values()),
+    }
 
 
 async def run_collection_task(tenant: str, task_id: str, operator: str | None) -> dict:

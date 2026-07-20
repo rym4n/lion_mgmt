@@ -673,12 +673,17 @@ class SupplyChainPresetPolicy(BaseModel):
 
 
 class SupplyChainActualPolicy(BaseModel):
-    """Actual policy parsed from network collection."""
+    """Current firewall, switch, or other network-device policy."""
 
     accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
     device_ci_id = fields.CharField(max_length=36, null=True, description="网络设备 CI")
+    device_key = fields.CharField(max_length=255, description="外部设备稳定标识")
+    device_name = fields.CharField(max_length=255, null=True, description="设备名称")
+    device_type = fields.CharField(max_length=30, null=True, description="firewall/switch/other")
     collection_run_id = fields.CharField(max_length=36, null=True, description="采集运行")
     raw_rule_id = fields.CharField(max_length=255, null=True, description="原始规则 ID")
+    policy_key = fields.CharField(max_length=255, description="外部策略稳定标识")
+    policy_type = fields.CharField(max_length=50, null=True, description="firewall/acl/other")
     rule_name = fields.CharField(max_length=255, null=True, description="规则名称")
     source_zone = fields.CharField(max_length=100, null=True, description="源区域")
     source_address = fields.CharField(max_length=255, null=True, description="源地址")
@@ -687,8 +692,12 @@ class SupplyChainActualPolicy(BaseModel):
     protocol = fields.CharField(max_length=30, null=True, description="协议")
     port = fields.CharField(max_length=100, null=True, description="端口")
     action = fields.CharField(max_length=20, default="permit", description="permit/deny")
+    enabled = fields.BooleanField(default=True, description="策略是否启用")
     raw_text = fields.TextField(null=True, description="原始文本")
+    policy_data = fields.JSONField(default=dict, description="厂商策略完整结构化数据")
     parse_status = fields.CharField(max_length=20, default="parsed", description="parsed/unparsed")
+    revision = fields.IntField(default=1, description="策略版本")
+    last_synced_at = fields.DatetimeField(null=True, description="最近同步时间")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
 
@@ -697,8 +706,13 @@ class SupplyChainActualPolicy(BaseModel):
         return base_json(self) | {
             "accessory_project_id": self.accessory_project_id,
             "device_ci_id": self.device_ci_id,
+            "device_key": self.device_key,
+            "device_name": self.device_name,
+            "device_type": self.device_type,
             "collection_run_id": self.collection_run_id,
             "raw_rule_id": self.raw_rule_id,
+            "policy_key": self.policy_key,
+            "policy_type": self.policy_type,
             "rule_name": self.rule_name,
             "source_zone": self.source_zone,
             "source_address": self.source_address,
@@ -707,8 +721,12 @@ class SupplyChainActualPolicy(BaseModel):
             "protocol": self.protocol,
             "port": self.port,
             "action": self.action,
+            "enabled": self.enabled,
             "raw_text": self.raw_text,
+            "policy_data": self.policy_data or {},
             "parse_status": self.parse_status,
+            "revision": self.revision,
+            "last_synced_at": strip_timezone_to_seconds(self.last_synced_at),
             "creator": self.creator,
             "updater": self.updater,
         }
@@ -716,7 +734,14 @@ class SupplyChainActualPolicy(BaseModel):
     class Meta:
         table = "supply_chain_actual_policy"
         ordering = ["-utime"]
-        indexes = (("tenant_id", "accessory_project_id"), ("tenant_id", "device_ci_id"), ("tenant_id", "collection_run_id"), ("tenant_id", "parse_status"))
+        indexes = (
+            ("tenant_id", "accessory_project_id"),
+            ("tenant_id", "device_ci_id"),
+            ("tenant_id", "device_key"),
+            ("tenant_id", "device_key", "policy_key"),
+            ("tenant_id", "collection_run_id"),
+            ("tenant_id", "parse_status"),
+        )
 
 
 class SupplyChainPolicyCompareRun(BaseModel):
@@ -794,12 +819,20 @@ class SupplyChainPolicyCompareItem(BaseModel):
 
 
 class SupplyChainPolicyChange(BaseModel):
-    """Detected policy change with external callback placeholders."""
+    """Immutable before/after history for access-control policy writes."""
 
     accessory_project_id = fields.CharField(max_length=36, null=True, description="配件项目 CI")
     device_ci_id = fields.CharField(max_length=36, null=True, description="网络设备 CI")
+    device_key = fields.CharField(max_length=255, null=True, description="外部设备稳定标识")
+    actual_policy_id = fields.CharField(max_length=36, null=True, description="当前策略 ID")
+    policy_key = fields.CharField(max_length=255, null=True, description="外部策略稳定标识")
+    batch_id = fields.CharField(max_length=64, null=True, description="同步批次 ID")
     policy_name = fields.CharField(max_length=255, null=True, description="策略名称")
-    change_type = fields.CharField(max_length=20, description="added/modified")
+    change_type = fields.CharField(max_length=20, description="added/modified/deleted/synced")
+    revision = fields.IntField(default=1, description="策略写入后的版本")
+    before_data = fields.JSONField(default=dict, description="写入前策略快照")
+    after_data = fields.JSONField(default=dict, description="写入后策略快照")
+    sync_source = fields.CharField(max_length=100, null=True, description="写入来源")
     diff_text = fields.TextField(null=True, description="差异文本")
     detected_at = fields.DatetimeField(null=True, description="发现时间")
     risk_level = fields.CharField(max_length=20, default="high", description="风险等级")
@@ -814,8 +847,16 @@ class SupplyChainPolicyChange(BaseModel):
         return base_json(self) | {
             "accessory_project_id": self.accessory_project_id,
             "device_ci_id": self.device_ci_id,
+            "device_key": self.device_key,
+            "actual_policy_id": self.actual_policy_id,
+            "policy_key": self.policy_key,
+            "batch_id": self.batch_id,
             "policy_name": self.policy_name,
             "change_type": self.change_type,
+            "revision": self.revision,
+            "before_data": self.before_data or {},
+            "after_data": self.after_data or {},
+            "sync_source": self.sync_source,
             "diff_text": self.diff_text,
             "detected_at": strip_timezone_to_seconds(self.detected_at),
             "risk_level": self.risk_level,
@@ -829,7 +870,15 @@ class SupplyChainPolicyChange(BaseModel):
     class Meta:
         table = "supply_chain_policy_change"
         ordering = ["-detected_at", "-utime"]
-        indexes = (("tenant_id", "accessory_project_id"), ("tenant_id", "device_ci_id"), ("tenant_id", "change_type"), ("tenant_id", "detected_at"))
+        indexes = (
+            ("tenant_id", "accessory_project_id"),
+            ("tenant_id", "device_ci_id"),
+            ("tenant_id", "device_key"),
+            ("tenant_id", "actual_policy_id"),
+            ("tenant_id", "batch_id"),
+            ("tenant_id", "change_type"),
+            ("tenant_id", "detected_at"),
+        )
 
 
 class SupplyChainNetworkTopology(BaseModel):

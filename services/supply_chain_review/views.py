@@ -1,6 +1,9 @@
 # coding=utf-8
 from __future__ import annotations
 
+import datetime
+import math
+
 from sanic import Blueprint, Request
 from sanic_ext import openapi
 from tortoise.expressions import Q
@@ -28,6 +31,7 @@ from services.supply_chain_review.manager import (
     create_notification_event,
     delete_ci,
     delete_ci_type,
+    delete_actual_policy,
     delete_field,
     delete_ledger_record,
     delete_process_record,
@@ -58,6 +62,7 @@ from services.supply_chain_review.manager import (
     run_policy_compare,
     save_ci,
     save_ci_type,
+    save_actual_policy,
     save_field,
     save_ledger_record,
     save_process_record,
@@ -65,6 +70,7 @@ from services.supply_chain_review.manager import (
     save_relation,
     save_relation_type,
     serialize_ci_field,
+    sync_actual_policies,
     tenant_id,
     update_compare_item_status,
     transition_review_issue,
@@ -135,6 +141,197 @@ def _keyword_condition(keyword: str | None):
     if not keyword:
         return Q()
     return Q(name__icontains=keyword) | Q(key__icontains=keyword)
+
+
+_LEGACY_CI_FIELD_FILTER_KEYS = {"field_key", "field_keyword", "match_mode"}
+
+
+def _ci_field_filter_request(data: dict) -> tuple[dict, bool] | None:
+    legacy_keys = _LEGACY_CI_FIELD_FILTER_KEYS & data.keys()
+    if "field_filter" in data:
+        if legacy_keys or not isinstance(data["field_filter"], dict):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        payload = dict(data["field_filter"])
+        legacy = False
+    elif legacy_keys:
+        if legacy_keys == {"match_mode"}:
+            if data["match_mode"] not in {"fuzzy", "exact"}:
+                raise CustomError(ErrorCode.PARAM_ERROR)
+            return None
+        if "field_key" not in data or "field_keyword" not in data:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        match_mode = data.get("match_mode", "fuzzy")
+        if match_mode not in {"fuzzy", "exact"}:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        payload = {
+            "field_key": data["field_key"],
+            "operator": "eq" if match_mode == "exact" else "contains",
+            "value": data["field_keyword"],
+        }
+        legacy = True
+    else:
+        return None
+
+    field_key = payload.get("field_key")
+    if not isinstance(field_key, str) or not field_key.strip():
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    payload["field_key"] = field_key.strip()
+    return payload, legacy
+
+
+def _require_ci_field_filter_shape(
+    payload: dict,
+    allowed: set[str],
+    required: set[str],
+) -> None:
+    if set(payload) - allowed or not required.issubset(payload):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+
+def _is_finite_number(value) -> bool:
+    return type(value) is int or (type(value) is float and math.isfinite(value))
+
+
+def _parse_ci_filter_temporal(value, data_type: str):
+    if not isinstance(value, str) or not value:
+        raise ValueError
+    if data_type == "date":
+        return datetime.datetime.strptime(value, "%Y-%m-%d").date()
+    return datetime.datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+
+
+def _strict_equal(left, right) -> bool:
+    return type(left) is type(right) and left == right
+
+
+def _ci_field_enum_values(field) -> list:
+    values = []
+    for option in getattr(field, "enum_options", None) or []:
+        value = option.get("value") if isinstance(option, dict) else option
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def _normalize_ci_field_filter(field, payload: dict, *, legacy: bool = False) -> dict:
+    data_type = getattr(field, "data_type", None)
+    operator = payload.get("operator")
+    if data_type == "attachment" or not isinstance(operator, str):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if legacy and data_type not in {"text", "ref"}:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    normalized = {
+        "field_key": payload["field_key"],
+        "data_type": data_type,
+    }
+    if data_type == "text":
+        _require_ci_field_filter_shape(
+            payload,
+            {"field_key", "operator", "value"},
+            {"field_key", "operator", "value"},
+        )
+        if operator not in {"contains", "eq"}:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        value = payload["value"]
+        if not isinstance(value, str) or not value:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        return normalized | {"operator": operator, "value": value.casefold()}
+
+    if data_type in {"number", "date", "datetime"}:
+        _require_ci_field_filter_shape(
+            payload,
+            {"field_key", "operator", "lower", "upper"},
+            {"field_key", "operator"},
+        )
+        if operator != "between":
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        lower = payload.get("lower")
+        upper = payload.get("upper")
+        if lower is None and upper is None:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        if data_type == "number":
+            if (lower is not None and not _is_finite_number(lower)) or (
+                upper is not None and not _is_finite_number(upper)
+            ):
+                raise CustomError(ErrorCode.PARAM_ERROR)
+        else:
+            try:
+                lower = (
+                    _parse_ci_filter_temporal(lower, data_type)
+                    if lower is not None
+                    else None
+                )
+                upper = (
+                    _parse_ci_filter_temporal(upper, data_type)
+                    if upper is not None
+                    else None
+                )
+            except (TypeError, ValueError):
+                raise CustomError(ErrorCode.PARAM_ERROR) from None
+        if lower is not None and upper is not None and lower > upper:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        return normalized | {
+            "operator": "between",
+            "lower": lower,
+            "upper": upper,
+        }
+
+    if data_type in {"enum", "bool", "ref"}:
+        _require_ci_field_filter_shape(
+            payload,
+            {"field_key", "operator", "value"},
+            {"field_key", "operator", "value"},
+        )
+        value = payload["value"]
+        if data_type == "ref" and legacy:
+            operator = "eq"
+        if operator != "eq":
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        if data_type == "enum" and not any(
+            _strict_equal(value, option) for option in _ci_field_enum_values(field)
+        ):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        if data_type == "bool" and type(value) is not bool:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        if data_type == "ref" and (not isinstance(value, str) or not value):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        return normalized | {"operator": "eq", "value": value}
+
+    raise CustomError(ErrorCode.PARAM_ERROR)
+
+
+def _matches_ci_field_filter(value, field_filter: dict) -> bool:
+    if value is None:
+        return False
+    data_type = field_filter["data_type"]
+    if data_type == "text":
+        if not isinstance(value, str):
+            return False
+        actual = value.casefold()
+        expected = field_filter["value"]
+        return (
+            actual == expected
+            if field_filter["operator"] == "eq"
+            else expected in actual
+        )
+    if data_type == "number":
+        if not _is_finite_number(value):
+            return False
+        lower = field_filter["lower"]
+        upper = field_filter["upper"]
+        return (lower is None or value >= lower) and (upper is None or value <= upper)
+    if data_type in {"date", "datetime"}:
+        try:
+            actual = _parse_ci_filter_temporal(value, data_type)
+        except (TypeError, ValueError):
+            return False
+        lower = field_filter["lower"]
+        upper = field_filter["upper"]
+        return (lower is None or actual >= lower) and (upper is None or actual <= upper)
+    if data_type in {"enum", "bool", "ref"}:
+        return _strict_equal(value, field_filter["value"])
+    return False
 
 
 async def _require_save_permission(
@@ -488,11 +685,13 @@ async def relation_type_delete(request: Request):
 async def ci_list(request: Request):
     data = _json(request)
     page, size, offset = normalize_page(data)
+    filter_request = _ci_field_filter_request(data)
+    tenant = tenant_id(request)
     ci_type = None
-    condition = Q(tenant_id=tenant_id(request), deleted=False)
+    condition = Q(tenant_id=tenant, deleted=False)
     if data.get("ci_type_id") or data.get("ci_type_key"):
         ci_type = await get_ci_type_or_404(
-            tenant_id(request), data.get("ci_type_id") or data.get("ci_type_key")
+            tenant, data.get("ci_type_id") or data.get("ci_type_key")
         )
         condition &= Q(ci_type_id=ci_type.id)
     for field in ["project_area_id", "accessory_project_id", "status", "risk_status"]:
@@ -502,24 +701,22 @@ async def ci_list(request: Request):
         condition &= Q(name__icontains=data["keyword"])
     queryset = SupplyChainCi.filter(condition)
 
-    field_key = str(data.get("field_key") or "").strip()
-    field_keyword = str(data.get("field_keyword") or "")
-    if field_key and field_keyword:
+    if filter_request is not None:
         if ci_type is None:
             raise CustomError(ErrorCode.PARAM_ERROR)
-        fields = await fields_for_type(tenant_id(request), str(ci_type.id))
-        if not any(field.field_key == field_key for field in fields):
+        payload, legacy = filter_request
+        fields = await fields_for_type(tenant, str(ci_type.id))
+        field = next(
+            (item for item in fields if item.field_key == payload["field_key"]),
+            None,
+        )
+        if field is None:
             raise CustomError(ErrorCode.PARAM_ERROR)
-        exact = data.get("match_mode") == "exact"
-        expected = field_keyword.casefold()
+        field_filter = _normalize_ci_field_filter(field, payload, legacy=legacy)
         matched_items = []
         for item in await queryset.order_by("-utime").all():
-            value = (item.attributes or {}).get(field_key)
-            if value is None:
-                continue
-            actual = str(value).casefold()
-            matches = actual == expected if exact else expected in actual
-            if matches:
+            value = (item.attributes or {}).get(field_filter["field_key"])
+            if _matches_ci_field_filter(value, field_filter):
                 matched_items.append(item)
         total = len(matched_items)
         items = matched_items[offset : offset + size]
@@ -751,6 +948,8 @@ def _register_process_routes(
     resource: str,
     title: str,
     blueprint: Blueprint = supply_chain_review_process_bp,
+    *,
+    readonly: bool = False,
 ) -> None:
     async def list_view(request: Request, _domain=domain):
         return response_ok(await list_process_records(tenant_id(request), _domain, _json(request)))
@@ -760,10 +959,30 @@ def _register_process_routes(
         return response_ok(record.json)
 
     async def save_view(request: Request, _domain=domain):
-        record = await save_process_record(tenant_id(request), _domain, _json(request), operator_name(request))
+        data = _json(request)
+        await check_permissions(
+            request,
+            f"supply_chain_review:{resource}:{'u' if data.get('id') else 'c'}",
+        )
+        if _domain == "actual-policy":
+            record = await save_actual_policy(
+                tenant_id(request), data, operator_name(request)
+            )
+        else:
+            record = await save_process_record(
+                tenant_id(request), _domain, data, operator_name(request)
+            )
         return response_ok(record.json)
 
     async def delete_view(request: Request, _domain=domain):
+        if _domain == "actual-policy":
+            return response_ok(
+                await delete_actual_policy(
+                    tenant_id(request),
+                    _json(request).get("id"),
+                    operator_name(request),
+                )
+            )
         return response_ok(await delete_process_record(tenant_id(request), _domain, _json(request).get("id")))
 
     list_view.__name__ = f"{path.replace('-', '_')}_list"
@@ -780,24 +999,32 @@ def _register_process_routes(
         f"/{path}/detail",
         methods=["POST"],
     )
-    blueprint.add_route(
-        requires_permission(f"supply_chain_review:{resource}:c", f"supply_chain_review:{resource}:u")(openapi.definition(summary=f"保存{title}")(save_view)),
-        f"/{path}/save",
-        methods=["POST"],
-    )
-    blueprint.add_route(
-        requires_permission(f"supply_chain_review:{resource}:d")(openapi.definition(summary=f"删除{title}")(delete_view)),
-        f"/{path}/delete",
-        methods=["POST"],
-    )
+    if not readonly:
+        blueprint.add_route(
+            requires_permission(f"supply_chain_review:{resource}:c", f"supply_chain_review:{resource}:u")(openapi.definition(summary=f"保存{title}")(save_view)),
+            f"/{path}/save",
+            methods=["POST"],
+        )
+        blueprint.add_route(
+            requires_permission(f"supply_chain_review:{resource}:d")(openapi.definition(summary=f"删除{title}")(delete_view)),
+            f"/{path}/delete",
+            methods=["POST"],
+        )
 
 
 _register_process_routes("collection-task", "collection-task", "collection", "采集任务")
 _register_process_routes("collection-run", "collection-run", "collection", "采集运行")
 _register_process_routes("parse-template", "parse-template", "collection", "解析映射模板")
-_register_process_routes("preset-policy", "preset-policy", "policy", "预设策略", network_access_control_bp)
-_register_process_routes("actual-policy", "actual-policy", "policy", "实际策略", network_access_control_bp)
-_register_process_routes("policy-change", "policy-change", "policy", "策略变更", network_access_control_bp)
+_register_process_routes("preset-policy", "preset-policy", "policy", "预设策略")
+_register_process_routes("actual-policy", "actual-policy", "policy", "策略清单", network_access_control_bp)
+_register_process_routes(
+    "policy-change",
+    "policy-change",
+    "policy",
+    "策略更新历史",
+    network_access_control_bp,
+    readonly=True,
+)
 _register_process_routes("network-topology", "network-topology", "topology", "网络拓扑")
 _register_process_routes("review-issue", "review-issue", "issue", "审查问题")
 _register_process_routes("remediation-record", "remediation-record", "issue", "整改记录")
@@ -821,21 +1048,36 @@ async def collection_run_retry(request: Request):
     return response_ok(await retry_collection_run(tenant_id(request), _json(request).get("id"), operator_name(request)))
 
 
-@network_access_control_bp.post("/policy-compare/run")
+@network_access_control_bp.post("/actual-policy/sync")
+@openapi.definition(summary="批量同步访问控制策略并记录历史")
+@requires_permission("supply_chain_review:policy:c", "supply_chain_review:policy:u")
+async def actual_policy_sync(request: Request):
+    await check_permissions(request, "supply_chain_review:policy:c")
+    await check_permissions(request, "supply_chain_review:policy:u")
+    if _json(request).get("replace") is True:
+        await check_permissions(request, "supply_chain_review:policy:d")
+    return response_ok(
+        await sync_actual_policies(
+            tenant_id(request), _json(request), operator_name(request)
+        )
+    )
+
+
+@supply_chain_review_action_bp.post("/policy-compare/run")
 @openapi.definition(summary="运行策略比对")
 @requires_permission("supply_chain_review:policy:u")
 async def policy_compare_run(request: Request):
     return response_ok(await run_policy_compare(tenant_id(request), _json(request), operator_name(request)))
 
 
-@network_access_control_bp.post("/policy-compare/run-list")
+@supply_chain_review_action_bp.post("/policy-compare/run-list")
 @openapi.definition(summary="策略比对运行列表")
 @requires_permission("supply_chain_review:policy:r")
 async def policy_compare_run_list(request: Request):
     return response_ok(await list_process_records(tenant_id(request), "policy-compare-run", _json(request)))
 
 
-@network_access_control_bp.post("/policy-compare/item-list")
+@supply_chain_review_action_bp.post("/policy-compare/item-list")
 @openapi.definition(summary="策略比对明细列表")
 @requires_permission("supply_chain_review:policy:r")
 async def policy_compare_item_list(request: Request):
@@ -851,21 +1093,21 @@ async def policy_compare_item_list(request: Request):
     return response_ok({"total": total, "items": [item.json for item in items], "page": page, "size": size})
 
 
-@network_access_control_bp.post("/policy-compare/item-confirm")
+@supply_chain_review_action_bp.post("/policy-compare/item-confirm")
 @openapi.definition(summary="确认策略比对明细")
 @requires_permission("supply_chain_review:policy:u")
 async def policy_compare_item_confirm(request: Request):
     return response_ok(await update_compare_item_status(tenant_id(request), _json(request).get("id"), "confirmed", operator_name(request)))
 
 
-@network_access_control_bp.post("/policy-compare/item-ignore")
+@supply_chain_review_action_bp.post("/policy-compare/item-ignore")
 @openapi.definition(summary="忽略策略比对明细")
 @requires_permission("supply_chain_review:policy:u")
 async def policy_compare_item_ignore(request: Request):
     return response_ok(await update_compare_item_status(tenant_id(request), _json(request).get("id"), "ignored", operator_name(request)))
 
 
-@network_access_control_bp.post("/policy-change/external-callback")
+@supply_chain_review_action_bp.post("/policy-change/external-callback")
 @openapi.definition(summary="策略变更外部审批结果回写")
 @requires_permission("supply_chain_review:policy:u")
 async def policy_change_callback(request: Request):

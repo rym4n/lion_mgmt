@@ -94,9 +94,18 @@ def test_network_access_control_license_key_registers_policy_routes_only(monkeyp
     app_factory.register_blueprints(app)
     paths = _route_paths(app)
 
-    assert "/supply-chain-review/preset-policy/list" in paths
     assert "/supply-chain-review/actual-policy/list" in paths
-    assert "/supply-chain-review/policy-change/external-callback" in paths
+    assert "/supply-chain-review/actual-policy/detail" in paths
+    assert "/supply-chain-review/actual-policy/save" in paths
+    assert "/supply-chain-review/actual-policy/delete" in paths
+    assert "/supply-chain-review/actual-policy/sync" in paths
+    assert "/supply-chain-review/policy-change/list" in paths
+    assert "/supply-chain-review/policy-change/detail" in paths
+    assert "/supply-chain-review/policy-change/save" not in paths
+    assert "/supply-chain-review/policy-change/delete" not in paths
+    assert "/supply-chain-review/preset-policy/list" not in paths
+    assert "/supply-chain-review/policy-compare/run" not in paths
+    assert "/supply-chain-review/policy-change/external-callback" not in paths
     assert "/supply-chain-review/collection-task/list" not in paths
     assert "/supply-chain-review/disposal-task/confirm" not in paths
 
@@ -136,4 +145,13 @@ def test_asset_and_network_keys_do_not_duplicate_shared_blueprints(monkeypatch):
 
     app_factory.register_blueprints(app)
 
-    assert len([route for route in app.router.routes if route.path.lstrip("/") == "supply-chain-review/ci-type/list"]) == 1
+    assert (
+        len(
+            [
+                route
+                for route in app.router.routes
+                if route.path.lstrip("/") == "supply-chain-review/ci-type/list"
+            ]
+        )
+        == 1
+    )

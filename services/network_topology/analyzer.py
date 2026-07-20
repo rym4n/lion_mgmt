@@ -3,7 +3,7 @@
 网络拓扑 AI 解析模块。
 
 流程：
-  1. 接收按应用动作和设备资源分组的自动采集结果
+  1. 接收外部剧本通过拓扑接口写入的设备配置
   2. 通过 Nanobot/lion_agent 非流式解析
   3. 校验并标准化拓扑 JSON
 
@@ -48,6 +48,7 @@ MAX_SOURCE_REF_ITEMS = 100
 MAX_SOURCE_REF_VALUE_LENGTH = 128
 MAX_MODEL_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_TOPOLOGY_JSON_BYTES = 8 * 1024 * 1024
+EXTERNAL_SOURCE_KEY = ("external-sync", "external-config")
 
 _PRIVATE_KEY_BLOCK_RE = re.compile(
     r"-----BEGIN [^-\r\n]*(?:PRIVATE KEY|OPENSSH PRIVATE KEY)-----.*?"
@@ -412,17 +413,21 @@ def _source_evidence_index(
     source_aggregate: Any,
 ) -> dict[tuple[str, str], tuple[str, ...]]:
     if isinstance(source_aggregate, (str, bytes, bytearray)):
+        raw_source = source_aggregate
         try:
             source_aggregate = orjson.loads(source_aggregate)
         except orjson.JSONDecodeError:
-            return {}
+            fragments = _result_search_fragments(raw_source)
+            return {EXTERNAL_SOURCE_KEY: fragments} if fragments else {}
     if not isinstance(source_aggregate, dict):
-        return {}
+        fragments = _result_search_fragments(source_aggregate)
+        return {EXTERNAL_SOURCE_KEY: fragments} if fragments else {}
 
     index: dict[tuple[str, str], list[str]] = {}
     sources = source_aggregate.get("sources")
     if not isinstance(sources, list):
-        return {}
+        fragments = _result_search_fragments(source_aggregate)
+        return {EXTERNAL_SOURCE_KEY: fragments} if fragments else {}
     for source in sources:
         if not isinstance(source, dict):
             continue
@@ -445,11 +450,19 @@ def _bound_source_refs(
     value: Any,
     source_index: dict[tuple[str, str], tuple[str, ...]],
 ) -> list[dict[str, str]]:
-    return [
+    refs = [
         ref
         for ref in _sanitize_source_refs(value)
         if (ref["action_id"], ref["resource_id"]) in source_index
     ]
+    if not refs and EXTERNAL_SOURCE_KEY in source_index:
+        refs = [
+            {
+                "action_id": EXTERNAL_SOURCE_KEY[0],
+                "resource_id": EXTERNAL_SOURCE_KEY[1],
+            }
+        ]
+    return refs
 
 
 def _bound_node_provenance(
@@ -615,8 +628,10 @@ def _add_alias(aliases: dict[str, str | None], alias: Any, stable_id: str) -> No
         aliases[alias] = None
 
 
-def _has_explicit_edge_evidence(edge: dict) -> bool:
-    if not _sanitize_source_refs(edge.get("source_refs")):
+def _has_explicit_edge_evidence(
+    edge: dict, *, require_source_refs: bool = True
+) -> bool:
+    if require_source_refs and not _sanitize_source_refs(edge.get("source_refs")):
         return False
     if not _sanitize_string_list(
         edge.get("evidence"),
@@ -860,7 +875,10 @@ def _parse_topology(raw_text: str, *, source_aggregate: Any = None) -> dict:
     for index, raw_edge in enumerate(data["edges"]):
         if not isinstance(raw_edge, dict):
             raise ValueError(f"edges[{index}] 必须是对象")
-        if not _has_explicit_edge_evidence(raw_edge):
+        if not _has_explicit_edge_evidence(
+            raw_edge,
+            require_source_refs=EXTERNAL_SOURCE_KEY not in source_index,
+        ):
             continue
         source_alias = _clean_identifier(raw_edge.get("source"))
         target_alias = _clean_identifier(raw_edge.get("target"))
@@ -991,7 +1009,7 @@ async def analyze_topology(
     tenant_id: str,
     session_id: str | None = None,
 ) -> dict:
-    """Non-streaming analyzer used by automatic background refreshes."""
+    """解析外部剧本写入的设备配置并返回标准拓扑数据。"""
     session_id = session_id or f"network-topology:{uuid.uuid4()}"
     redacted_config_text = _redacted_source_config_text(config_text)
     raw_text = await _execute_bounded_prompt(
