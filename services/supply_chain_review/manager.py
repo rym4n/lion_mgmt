@@ -1875,11 +1875,13 @@ async def delete_ci(
     *,
     connection=None,
 ) -> dict:
-    """Soft-delete an asset instance and its incident edges atomically.
+    """Hard-delete an asset instance and its incident edges atomically.
 
-    Instance lifecycle remains available for locked models. The tenant
-    structure lock only serializes the incident-edge cleanup with direct
-    relation writes so a concurrent relation cannot survive the deletion.
+    Instance lifecycle remains available for locked models. Soft-delete
+    tombstones previously blocked empty-model cleanup; hard delete keeps
+    the model free once its last live instance is removed. The tenant
+    structure lock serializes edge cleanup with direct relation writes so
+    a concurrent relation cannot survive the deletion.
     """
     async with structure_write_transaction(tenant, connection) as connection:
         ci = (
@@ -1894,20 +1896,15 @@ async def delete_ci(
         )
         if not ci:
             raise CustomError(ErrorCode.NOT_FOUND)
-        ci.deleted = True
-        await ci.save(
-            using_db=connection,
-            update_fields=["deleted", "utime"],
-        )
         await (
             SupplyChainCiRelation.filter(
                 Q(source_ci_id=ci.id) | Q(target_ci_id=ci.id),
                 tenant_id=tenant,
-                deleted=False,
             )
             .using_db(connection)
-            .update(deleted=True)
+            .delete()
         )
+        await ci.delete(using_db=connection)
         return {"id": ci.id}
 
 
@@ -2191,10 +2188,14 @@ async def delete_ci_type(
             raise CustomError(ErrorCode.NOT_FOUND)
         if ci_type.is_locked:
             raise CustomError(ErrorCode.FORBIDDEN)
+        # Only live instances block model deletion. Any historical soft-delete
+        # tombstones left by older builds are purged below so they neither block
+        # nor leave orphan rows after the model is hard-deleted.
         active_ci = (
             await SupplyChainCi.filter(
                 tenant_id=tenant,
                 ci_type_id=ci_type.id,
+                deleted=False,
             )
             .using_db(connection)
             .order_by("id")
@@ -2252,8 +2253,25 @@ async def delete_ci_type(
                 ref_ci_type=None,
             )
         )
-        # Empty models have no historical identity to retain. Remove their own
-        # definitions first, then hard-delete the model so names can be reused.
+        # Empty models have no historical identity to retain. Purge leftover
+        # soft-deleted instances (and any residual edges) first, remove field
+        # definitions, then hard-delete the model so names can be reused.
+        await (
+            SupplyChainCiRelation.filter(
+                Q(source_ci__ci_type_id=ci_type.id) | Q(target_ci__ci_type_id=ci_type.id),
+                tenant_id=tenant,
+            )
+            .using_db(connection)
+            .delete()
+        )
+        await (
+            SupplyChainCi.filter(
+                tenant_id=tenant,
+                ci_type_id=ci_type.id,
+            )
+            .using_db(connection)
+            .delete()
+        )
         await (
             SupplyChainCiFieldDef.filter(
                 tenant_id=tenant,

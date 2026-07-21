@@ -203,3 +203,9 @@ class ErrorCode(BaseErrorCode):
     ASSET_MODEL_HAS_DEPENDENCIES = ErrorData(4165, "资产模型存在依赖，无法删除")
     ASSET_FIELD_NAME_EXISTS = ErrorData(4166, "同一模型内字段名称已存在")
     ASSET_RELATION_NAME_EXISTS = ErrorData(4167, "同一模型内关系名称已存在")
+    EVENT_REPORT_PLAYBOOK_MISSING = ErrorData(
+        4168, "事件报告生成剧本未配置或未启用，请联系管理员"
+    )
+    EVENT_REPORT_GENERATE_FAILED = ErrorData(
+        4169, "事件报告生成失败，请稍后重试或联系管理员"
+    )

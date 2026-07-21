@@ -2825,6 +2825,33 @@ def _install_model_delete_fakes(
             return _FakeQuery(active_rows(referencing_fields or [], kwargs))
         return FieldUpdateQuery()
 
+    class BulkDeleteQuery:
+        def __init__(self, op_name):
+            self.op_name = op_name
+            self.connection = None
+
+        def using_db(self, connection):
+            self.connection = connection
+            return self
+
+        def order_by(self, *fields):
+            return self
+
+        def select_for_update(self):
+            return self
+
+        async def first(self):
+            return None
+
+        async def all(self):
+            return []
+
+        async def delete(self):
+            operations.append((self.op_name, self.connection))
+
+        async def update(self, **kwargs):
+            operations.append(("update", kwargs, self.connection))
+
     async def delete_model(**kwargs):
         ci_type.delete_calls.append(kwargs)
         operations.append(("model_delete", kwargs["using_db"]))
@@ -2838,10 +2865,18 @@ def _install_model_delete_fakes(
     )
 
     def ci_filter(**kwargs):
-        return _FakeQuery(active_rows(cis or [], kwargs))
+        rows = active_rows(cis or [], kwargs)
+        # Hard-delete path on empty / tombstone-only models: no deleted=False
+        # filter means purge all remaining CIs of this type.
+        if "deleted" not in kwargs and "id" not in kwargs:
+            return BulkDeleteQuery("ci_delete")
+        return _FakeQuery(rows)
 
     def relation_type_filter(**kwargs):
         return _FakeQuery(active_rows(relation_types or [], kwargs))
+
+    def relation_filter(*_args, **_kwargs):
+        return BulkDeleteQuery("relation_delete")
 
     monkeypatch.setattr(
         manager.SupplyChainCi,
@@ -2858,6 +2893,11 @@ def _install_model_delete_fakes(
         "filter",
         staticmethod(field_filter),
     )
+    monkeypatch.setattr(
+        manager.SupplyChainCiRelation,
+        "filter",
+        staticmethod(relation_filter),
+    )
     return transaction, operations, field_queries
 
 
@@ -2872,15 +2912,14 @@ def test_model_delete_rejects_locked_model(monkeypatch):
     assert ci_type.save_calls == []
 
 
-@pytest.mark.parametrize("deleted", [False, True], ids=["active", "soft-deleted"])
-def test_model_delete_rejects_any_ci(monkeypatch, deleted):
+def test_model_delete_rejects_active_ci(monkeypatch):
     ci_type = _ci_type(key="application")
     ci = _FakeRecord(
         _json={},
         id="ci-1",
         ci_type_id=ci_type.id,
         ci_type_key="application",
-        deleted=deleted,
+        deleted=False,
     )
     _, operations, _ = _install_model_delete_fakes(
         monkeypatch,
@@ -2894,6 +2933,31 @@ def test_model_delete_rejects_any_ci(monkeypatch, deleted):
     assert exc_info.value.enum is ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES
     assert ci_type.save_calls == []
     assert operations == []
+
+
+def test_model_delete_purges_soft_deleted_cis(monkeypatch):
+    """Soft-deleted instance tombstones must not block model deletion."""
+    ci_type = _ci_type(key="application")
+    soft_deleted = _FakeRecord(
+        _json={},
+        id="ci-soft",
+        ci_type_id=ci_type.id,
+        ci_type_key="application",
+        deleted=True,
+    )
+    transaction, operations, field_queries = _install_model_delete_fakes(
+        monkeypatch,
+        ci_type,
+        cis=[soft_deleted],
+    )
+
+    result = asyncio.run(manager.delete_ci_type("tenant-a", "application"))
+
+    assert result == {"id": "type-1"}
+    assert ("relation_delete", transaction.connection) in operations
+    assert ("ci_delete", transaction.connection) in operations
+    assert ("model_delete", transaction.connection) in operations
+    assert field_queries  # field tombstone detach + own field purge still run
 
 
 @pytest.mark.parametrize(
@@ -3025,6 +3089,8 @@ def test_model_delete_by_key_ignores_deleted_dependencies_and_detaches_id_only_f
             {"ref_ci_type_id": None, "ref_ci_type": None},
             transaction.connection,
         ),
+        ("relation_delete", transaction.connection),
+        ("ci_delete", transaction.connection),
         ("delete", transaction.connection),
         ("model_delete", transaction.connection),
     ]
@@ -3067,6 +3133,8 @@ def test_model_delete_allows_self_ref_and_unrestricted_relation(monkeypatch):
             {"ref_ci_type_id": None, "ref_ci_type": None},
             transaction.connection,
         ),
+        ("relation_delete", transaction.connection),
+        ("ci_delete", transaction.connection),
         ("delete", transaction.connection),
         ("model_delete", transaction.connection),
     ]
@@ -3629,7 +3697,10 @@ def test_locked_model_allows_asset_instance_edit_and_integrity_cleanup_delete(
             return self
 
         async def update(self, **kwargs):
-            relation_updates.append((kwargs, self.connection))
+            relation_updates.append(("update", kwargs, self.connection))
+
+        async def delete(self):
+            relation_updates.append(("delete", self.connection))
 
     monkeypatch.setattr(manager, "validate_ci_attributes", no_validation)
     monkeypatch.setattr(manager, "get_ci_type_or_404", get_ci_type)
@@ -3664,13 +3735,9 @@ def test_locked_model_allows_asset_instance_edit_and_integrity_cleanup_delete(
 
     assert result is ci
     assert ci.attributes == {"hostname": "new"}
-    assert ci.deleted is True
-    assert len(ci.save_calls) == 2
-    assert ci.save_calls[-1] == {
-        "using_db": transaction.connection,
-        "update_fields": ["deleted", "utime"],
-    }
+    # Instance deletion is hard-delete: no soft-delete flag, record.delete() called.
+    assert ci.delete_calls == [{"using_db": transaction.connection}]
     assert delete_result == {"id": "ci-1"}
     assert relation_updates == [
-        ({"deleted": True}, transaction.connection)
+        ("delete", transaction.connection)
     ]

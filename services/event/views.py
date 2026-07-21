@@ -736,10 +736,18 @@ async def update_event(request):
     if status := params.get("event_process_status"):
         event.event_process_status = status
         if status == "已处理":
-            event.download_url = await create_ai_report(event.id, tenant_id)
+            # Closing an event must not fail when the AI report playbook is
+            # missing; report generation is best-effort and re-triggered on
+            # download. Only a successful link is persisted.
+            try:
+                download_url = await create_ai_report(event.id, tenant_id)
+            except CustomError:
+                download_url = ""
+            if download_url:
+                event.download_url = download_url
+                update_fields.append("download_url")
             event.close_time = TZ.localize(datetime.now())
             update_fields.append("close_time")
-            update_fields.append("download_url")
         update_fields.append("event_process_status")
 
     if room_user_id := params.get("room_user_id"):
@@ -767,9 +775,17 @@ async def update_event(request):
 
 
 async def create_ai_report(event_id, tenant_id):
-    pv = await PlaybookVersion.filter(playbook__name="AI", deleted=False, status=1, tenant_id=tenant_id).order_by("-ctime").first()
+    """Generate an event report via the tenant's enabled "AI" playbook.
+
+    Raises CustomError when the playbook is missing/disabled or the run ends
+    without producing a download_link, so callers never treat an empty string
+    as a successful report URL.
+    """
+    pv = await PlaybookVersion.filter(
+        playbook__name="AI", deleted=False, status=1, tenant_id=tenant_id
+    ).order_by("-ctime").first()
     if not pv:
-        return ""
+        raise CustomError(ErrorCode.EVENT_REPORT_PLAYBOOK_MISSING)
     download_link = ""
     params = {
         "flow_id": pv.id,
@@ -782,21 +798,30 @@ async def create_ai_report(event_id, tenant_id):
         runlog = await Runlog.filter(run_id=run_id, deleted=False).order_by("-ctime").all()
         if runlog:
             for log in runlog:
-                if "download_link" in log.result:
-                    download_link = orjson.loads(log.result)["data"]["download_link"]
-                    return download_link
+                if log.result and "download_link" in log.result:
+                    try:
+                        payload = orjson.loads(log.result)
+                        download_link = (
+                            payload.get("data", {}).get("download_link")
+                            or payload.get("download_link")
+                            or ""
+                        )
+                    except Exception:
+                        download_link = ""
+                    if download_link:
+                        return download_link
 
             if any(log.node_type == "end-node" for log in runlog):
                 break
         await asyncio.sleep(1)
 
-    return download_link
+    raise CustomError(ErrorCode.EVENT_REPORT_GENERATE_FAILED)
 
 
 @event_bp.post("/report")
 @openapi.definition(
     summary="获取报告下载链接",
-    description="获取报告下载链接",
+    description="获取报告下载链接；未配置 AI 剧本或生成失败时返回明确错误码",
     body={"event_id": "事件id"},
     response={
         "200": {
@@ -805,17 +830,7 @@ async def create_ai_report(event_id, tenant_id):
                 "application/json": {
                     "example": {
                         "code": 0,
-                        "data": {
-                            "status": "success",
-                            "result": {
-                                "code": 0,
-                                "msg": "",
-                                "data": {
-                                    "download_link": "https://192.168.12.254/api/system/down-file/9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx",
-                                    "file_id": "9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx",
-                                },
-                            },
-                        },
+                        "data": "https://192.168.12.254/api/system/down-file/9c0e33ca-b416-4e1b-a6d7-da80172d81a6.docx",
                         "message": "生成成功",
                     }
                 }
@@ -832,10 +847,12 @@ async def get_report(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    event = await Events.get(id=event_id, tenant_id=tenant_id)
+    event = await Events.get_or_none(id=event_id, tenant_id=tenant_id, deleted=False)
+    if not event:
+        raise CustomError(ErrorCode.NOT_FOUND)
     if event.download_url:
         return response_ok(event.download_url)
-    else:
-        event.download_url = await create_ai_report(event.id, tenant_id)
-        await event.save()
-        return response_ok(event.download_url)
+
+    event.download_url = await create_ai_report(event.id, tenant_id)
+    await event.save(update_fields=["download_url", "utime"])
+    return response_ok(event.download_url)
