@@ -696,6 +696,12 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
             suffix = logo_name.split(".")[-1]
             save_path = await utils.upload_to_s3(zip_data, "system", f"{tool_name}/{version}.zip", "tools")
             logo_path = await utils.upload_to_s3(logo_data, "user", f"{tool_name}.{suffix}", "tools")
+            if not save_path or not logo_path:
+                if save_path:
+                    await utils.delete_from_s3("system", f"{tool_name}/{version}.zip", "tools")
+                if logo_path:
+                    await utils.delete_from_s3("user", f"{tool_name}.{suffix}", "tools")
+                return config_data, version, tool_name, tool_description, "工具包上传失败，请检查文件存储服务"
 
             maintenance_mode = await redis_client.get(token_id)
             tool = await Tool.create(
