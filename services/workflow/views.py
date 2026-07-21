@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
 import asyncio
-from collections import defaultdict
 from datetime import datetime
 import hashlib
 import io
@@ -9,8 +8,6 @@ import re
 import secrets
 import uuid
 import zipfile
-
-from sanic.log import logger
 
 from aiocache import caches
 import orjson
@@ -34,7 +31,6 @@ from libs.security.authorization import (
     check_playbook_permission,
     get_superadmin_role,
     is_superadmin,
-    is_superadmin_role,
     load_license,
     playbook_ids_for_user,
     playbook_permission,
@@ -60,7 +56,7 @@ from models import (
 from services.approvement.views import expire_pending_approvals
 from services.tools.views import upload_tool
 from services.tools.views import tool_action_playbook_delete, tool_action_update
-from settings import TASK_TOPIC, TZ, RY_AI_MODEL, RY_AI_API_BASE, LLM_KEY
+from settings import TASK_TOPIC, TZ, RY_AI_API_BASE, LLM_KEY
 
 workflow_bp = Blueprint("workflow", url_prefix="/playbook")
 _all__ = ["workflow_bp"]
@@ -1438,6 +1434,25 @@ async def statistics_data(flow_json, tenant_id):
     return actions_list
 
 
+def _rewrite_imported_action_versions(flow_json, version_map):
+    if not version_map or not isinstance(flow_json, dict):
+        return flow_json
+
+    for node in flow_json.get("nodes") or []:
+        if not isinstance(node, dict) or node.get("type") != "action-node":
+            continue
+        props = node.get("properties")
+        if not isinstance(props, dict):
+            continue
+        tool_name = props.get("app_name")
+        source_version = props.get("version")
+        target_version = version_map.get((tool_name, source_version))
+        if target_version:
+            props["version"] = target_version
+
+    return flow_json
+
+
 @workflow_bp.post("/tag/new")
 @openapi.definition(
     summary="新建标签",
@@ -2292,6 +2307,7 @@ async def import_workflow(request):
                 self.name = name
                 self.body = body
 
+        tool_version_map = {}
         for fn in names:
             if not fn.endswith(".zip"):
                 continue
@@ -2312,6 +2328,7 @@ async def import_workflow(request):
             result = await upload_tool(mock_file, lic, creator.username, tenant_id, request)
 
             if result and result.get("msg") == "success":
+                tool_version_map[(t_name, t_ver)] = result.get("version")
                 imported["tools"] += 1
 
         if "workflow.json" in names:
@@ -2325,6 +2342,7 @@ async def import_workflow(request):
                 remark = item.get("remark", "")
                 change_desc = item.get("change_desc", "")
                 flow_json = item.get("flow_json") or {}
+                flow_json = _rewrite_imported_action_versions(flow_json, tool_version_map)
                 async with in_transaction():
                     pb = await Playbook.get_or_none(name=name, deleted=False, tenant_id=tenant_id)
                     if not pb:
