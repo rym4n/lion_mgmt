@@ -46,20 +46,28 @@ def _roles_for_tenant(roles, tenant_id: str | None):
     roles_list = list(roles)
     if tenant_id is None:
         return roles_list
-    return [role for role in roles_list if getattr(role, "tenant_id", None) == tenant_id]
+    return [
+        role for role in roles_list if getattr(role, "tenant_id", None) == tenant_id
+    ]
 
 
 async def _refresh_session_account(request: Request):
-    account_id = request.ctx.session.get("sub") if hasattr(request.ctx, "session") else None
+    account_id = (
+        request.ctx.session.get("sub") if hasattr(request.ctx, "session") else None
+    )
     if not account_id:
         return None
-    account = await Account.get_or_none(id=account_id, deleted=False).prefetch_related("roles")
+    account = await Account.get_or_none(id=account_id, deleted=False).prefetch_related(
+        "roles"
+    )
     if not account:
         return None
     request.ctx.session["account_info"] = account
     cache_client = getattr(request.app.ctx, "cache_client", None)
     if cache_client:
-        await cache_client.set(f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION)
+        await cache_client.set(
+            f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION
+        )
     return account
 
 
@@ -73,14 +81,22 @@ async def check_permissions(request: Request, *required_permissions: str) -> boo
     # roles = await account.roles.filter(deleted=False).all()
     account = request.ctx.session["account_info"]
     tenant_id = request.ctx.session.get("tenant_id")
-    if _roles_have_any_permission(_roles_for_tenant(account.roles, tenant_id), required_permissions):
+    if _roles_have_any_permission(
+        _roles_for_tenant(account.roles, tenant_id), required_permissions
+    ):
         return True
 
     refreshed_account = await _refresh_session_account(request)
-    if refreshed_account and _roles_have_any_permission(_roles_for_tenant(refreshed_account.roles, tenant_id), required_permissions):
+    if refreshed_account and _roles_have_any_permission(
+        _roles_for_tenant(refreshed_account.roles, tenant_id), required_permissions
+    ):
         return True
 
-    pm = await PermissionsMenu.filter(model=request.path.split("/")[1]).first().values("description")
+    pm = (
+        await PermissionsMenu.filter(model=request.path.split("/")[1])
+        .first()
+        .values("description")
+    )
     module = pm.get("description") if pm else request.path.split("/")[1]
     raise CustomError(ErrorData(4004, f"缺少{module}模块的操作权限"))
 
@@ -115,7 +131,9 @@ def check_wildcard(wildcard: str, pattern: str):
     return all("*" in part for part in wildcard_parts[len(pattern_parts) :])
 
 
-def account_has_permission(account, *required_permissions: str, tenant_id: str | None = None) -> bool:
+def account_has_permission(
+    account, *required_permissions: str, tenant_id: str | None = None
+) -> bool:
     """判断账户是否拥有全部指定的垂直权限（不抛异常，供业务层做条件判断用）。
 
     与 check_permissions 共用 check_wildcard 匹配规则，但后者是装饰器用途、
@@ -126,7 +144,10 @@ def account_has_permission(account, *required_permissions: str, tenant_id: str |
         return False
     for role in _roles_for_tenant(account.roles, tenant_id):
         for role_permission in role.permissions or []:
-            if all(check_wildcard(role_permission, pattern) for pattern in required_permissions):
+            if all(
+                check_wildcard(role_permission, pattern)
+                for pattern in required_permissions
+            ):
                 return True
     return False
 
@@ -140,7 +161,9 @@ async def get_superadmin_role():
     """按权限本质取超管 Role 对象，供需要将超管作为 PlaybookPermissions/ActionPermissions
     授权对象的场景使用。取第一条 permissions 里含 *:* 的角色（种子数据里只有一条）。
     """
-    return await Role.filter(permissions__contains=[SUPERADMIN_PERMISSION], deleted=False).first()
+    return await Role.filter(
+        permissions__contains=[SUPERADMIN_PERMISSION], deleted=False
+    ).first()
 
 
 def is_superadmin_role(role) -> bool:
@@ -169,7 +192,52 @@ async def playbook_ids_for_user(account, tenant_id: str, permission: str = "r") 
     return set(pb_ids)
 
 
-def action_permission_hits(permission, resource_id: str, user_id: str, user_role_ids: set) -> bool:
+def _merged_playbook_permissions(permission_records) -> set[str]:
+    permissions: set[str] = set()
+    for permission_record in permission_records or []:
+        permissions.update(permission_record.permissions or [])
+    return permissions
+
+
+async def _playbook_permission_records(playbook_id: str, tenant_id: str, **filters):
+    return await PlaybookPermissions.filter(
+        pb_id=playbook_id,
+        tenant_id=tenant_id,
+        deleted=False,
+        **filters,
+    ).all()
+
+
+async def _candidate_permission_playbook_ids(
+    playbook_id: str, tenant_id: str
+) -> list[str]:
+    playbook_ids = [playbook_id]
+    playbook_version = await PlaybookVersion.get_or_none(
+        id=playbook_id, tenant_id=tenant_id
+    )
+    if playbook_version and playbook_version.playbook_id not in playbook_ids:
+        playbook_ids.append(playbook_version.playbook_id)
+    return playbook_ids
+
+
+async def _has_playbook_permission_record(
+    playbook_ids: list[str],
+    tenant_id: str,
+    required_permissions,
+    **filters,
+) -> bool:
+    for playbook_id in playbook_ids:
+        permissions = _merged_playbook_permissions(
+            await _playbook_permission_records(playbook_id, tenant_id, **filters)
+        )
+        if permissions and all(perm in permissions for perm in required_permissions):
+            return True
+    return False
+
+
+def action_permission_hits(
+    permission, resource_id: str, user_id: str, user_role_ids: set
+) -> bool:
     """判断当前用户是否命中一条 ActionPermissions 记录里指定 resource 的授权。
 
     ActionPermissions.users / roles 结构（`services/tools/views.py:1841-1870` 授权处写入）：
@@ -178,6 +246,7 @@ def action_permission_hits(permission, resource_id: str, user_id: str, user_role
 
     命中条件：用户直接被授权 OR 用户任一角色被授权。传入 None/异常结构时安全返回 False。
     """
+
     def _first_dict(value):
         if isinstance(value, list) and value and isinstance(value[0], dict):
             return value[0]
@@ -200,7 +269,9 @@ async def tool_requires_resource(tool_name, tenant_id) -> bool:
     return bool(resource_model and resource_model.status == 1)
 
 
-async def check_action_execute_permission(account, tool_name, action_func, resource, tenant_id) -> bool:
+async def check_action_execute_permission(
+    account, tool_name, action_func, resource, tenant_id
+) -> bool:
     """判定账户是否对 (tool, action, resource) 拥有执行权。写侧（add_timed/update_timed
     等）用它把前端下拉过滤对应的授权关卡落到 API 层——纯前端过滤是 UX，不是安全边界。
 
@@ -222,7 +293,9 @@ async def check_action_execute_permission(account, tool_name, action_func, resou
     user_id = str(account.id) if account and getattr(account, "id", None) else None
     if not user_id:
         return False
-    user_role_ids = {str(role.id) for role in _roles_for_tenant(account.roles, tenant_id)}
+    user_role_ids = {
+        str(role.id) for role in _roles_for_tenant(account.roles, tenant_id)
+    }
     permissions = await ActionPermissions.filter(
         tool_name=tool_name,
         action_name__in=[action_func, "all"],
@@ -298,7 +371,9 @@ def playbook_permission(*required_permissions: str):
                 if not user:
                     raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
 
-                has_access = await check_playbook_permission(request, user, playbook_id, required_permissions)
+                has_access = await check_playbook_permission(
+                    request, user, playbook_id, required_permissions
+                )
 
                 if not has_access:
                     raise CustomError(ErrorCode.UNAUTH)
@@ -322,32 +397,29 @@ async def check_playbook_permission(request, user, playbook_id, required_permiss
     data = await request.app.ctx.cache_client.get((playbook_id, user_id))
 
     tenant_id = request.ctx.session.get("tenant_id")
+    playbook_ids = await _candidate_permission_playbook_ids(playbook_id, tenant_id)
 
     if not data:
-        pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id, users_id=user_id, tenant_id=tenant_id)
-        if pp:
-            data = pp.permissions
-        else:
-            pv = await PlaybookVersion.get_or_none(id=playbook_id, tenant_id=tenant_id)
-            if pv:
-                pp = await PlaybookPermissions.get_or_none(pb_id=pv.playbook_id, users_id=user_id, tenant_id=tenant_id)
-                if pp:
-                    data = pp.permissions
+        if await _has_playbook_permission_record(
+            playbook_ids,
+            tenant_id,
+            required_permissions,
+            users_id=user_id,
+        ):
+            return True
     if data and all(perm in data for perm in required_permissions):
         return True
     else:
         for role in user_roles:
             data = await request.app.ctx.cache_client.get((playbook_id, role))
             if not data:
-                pp = await PlaybookPermissions.get_or_none(pb_id=playbook_id, roles_id=role, tenant_id=tenant_id)
-                if pp:
-                    data = pp.permissions
-                else:
-                    pv = await PlaybookVersion.get_or_none(id=playbook_id, tenant_id=tenant_id)
-                    if pv:
-                        pp = await PlaybookPermissions.get_or_none(pb_id=pv.playbook_id, roles_id=role, tenant_id=tenant_id)
-                        if pp:
-                            data = pp.permissions
+                if await _has_playbook_permission_record(
+                    playbook_ids,
+                    tenant_id,
+                    required_permissions,
+                    roles_id=role,
+                ):
+                    return True
             if data and all(perm in data for perm in required_permissions):
                 return True
     return False

@@ -41,6 +41,11 @@ class _FakePermissionsMenuQuery:
         return _FakeValuesQuery({})
 
 
+class _FakeCacheWithValues(_FakeValuesQuery):
+    async def get(self, key):
+        return self.value.get(key)
+
+
 class _FakeCache:
     def __init__(self):
         self.set_calls = []
@@ -52,6 +57,29 @@ class _FakeCache:
 def _account(account_id, permissions, tenant_id="tenant-a"):
     roles = [SimpleNamespace(permissions=permissions, tenant_id=tenant_id)]
     return SimpleNamespace(id=account_id, roles=roles)
+
+
+def _playbook_account(account_id, role_ids):
+    return SimpleNamespace(
+        id=account_id,
+        roles=[SimpleNamespace(id=role_id) for role_id in role_ids],
+    )
+
+
+class _FakePlaybookPermissionQuery:
+    def __init__(self, records):
+        self.records = records
+
+    async def all(self):
+        return self.records
+
+
+class _FakePlaybookVersionQuery:
+    def __await__(self):
+        async def _result():
+            return None
+
+        return _result().__await__()
 
 
 def test_check_permissions_refreshes_stale_session_account(monkeypatch):
@@ -76,7 +104,12 @@ def test_check_permissions_refreshes_stale_session_account(monkeypatch):
         lambda **_kwargs: _FakeAccountQuery(fresh_account),
     )
 
-    assert asyncio.run(authorization.check_permissions(request, "supply_chain_review:model:r")) is True
+    assert (
+        asyncio.run(
+            authorization.check_permissions(request, "supply_chain_review:model:r")
+        )
+        is True
+    )
     assert request.ctx.session["account_info"] is fresh_account
     assert cache.set_calls[0][0] == "account_account-1"
 
@@ -97,9 +130,7 @@ def test_platform_wildcard_authorizes_nested_asset_permissions():
 
     assert (
         asyncio.run(
-            authorization.check_permissions(
-                request, "supply_chain_review:model:r"
-            )
+            authorization.check_permissions(request, "supply_chain_review:model:r")
         )
         is True
     )
@@ -139,7 +170,9 @@ def test_check_permissions_ignores_roles_from_other_tenants(monkeypatch):
     "role_permission",
     ["agent_report_schedule:c", "agent_report_schedule:c,d,u,r", "*:*"],
 )
-def test_check_permissions_accepts_canonical_report_schedule_permissions(role_permission):
+def test_check_permissions_accepts_canonical_report_schedule_permissions(
+    role_permission,
+):
     account = _account("account-1", [role_permission])
     request = SimpleNamespace(
         ctx=SimpleNamespace(
@@ -154,8 +187,98 @@ def test_check_permissions_accepts_canonical_report_schedule_permissions(role_pe
     )
 
     assert (
+        asyncio.run(authorization.check_permissions(request, "agent_report_schedule:c"))
+        is True
+    )
+
+
+def test_check_playbook_permission_merges_duplicate_user_grants(monkeypatch):
+    captured_filters = []
+
+    def fake_filter(**kwargs):
+        captured_filters.append(kwargs)
+        return _FakePlaybookPermissionQuery(
+            [
+                SimpleNamespace(permissions=["r"]),
+                SimpleNamespace(permissions=["u"]),
+            ]
+        )
+
+    monkeypatch.setattr(authorization.PlaybookPermissions, "filter", fake_filter)
+    monkeypatch.setattr(
+        authorization.PlaybookVersion,
+        "get_or_none",
+        lambda **_kwargs: _FakePlaybookVersionQuery(),
+    )
+
+    request = SimpleNamespace(
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+        app=SimpleNamespace(ctx=SimpleNamespace(cache_client=_FakeCacheWithValues({}))),
+    )
+
+    assert (
         asyncio.run(
-            authorization.check_permissions(request, "agent_report_schedule:c")
+            authorization.check_playbook_permission(
+                request,
+                _playbook_account("account-1", []),
+                "playbook-1",
+                ("r", "u"),
+            )
         )
         is True
     )
+    assert captured_filters == [
+        {
+            "pb_id": "playbook-1",
+            "tenant_id": "tenant-a",
+            "deleted": False,
+            "users_id": "account-1",
+        }
+    ]
+
+
+def test_check_playbook_permission_merges_duplicate_role_grants(monkeypatch):
+    captured_filters = []
+
+    def fake_filter(**kwargs):
+        captured_filters.append(kwargs)
+        if "users_id" in kwargs:
+            return _FakePlaybookPermissionQuery([])
+        records_by_role = {
+            "role-1": [SimpleNamespace(permissions=["r"])],
+            "role-2": [
+                SimpleNamespace(permissions=["r"]),
+                SimpleNamespace(permissions=["u"]),
+            ],
+        }
+        return _FakePlaybookPermissionQuery(records_by_role.get(kwargs["roles_id"], []))
+
+    monkeypatch.setattr(authorization.PlaybookPermissions, "filter", fake_filter)
+    monkeypatch.setattr(
+        authorization.PlaybookVersion,
+        "get_or_none",
+        lambda **_kwargs: _FakePlaybookVersionQuery(),
+    )
+
+    request = SimpleNamespace(
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+        app=SimpleNamespace(ctx=SimpleNamespace(cache_client=_FakeCacheWithValues({}))),
+    )
+
+    assert (
+        asyncio.run(
+            authorization.check_playbook_permission(
+                request,
+                _playbook_account("account-1", ["role-2"]),
+                "playbook-1",
+                ("r", "u"),
+            )
+        )
+        is True
+    )
+    assert {
+        (item.get("users_id"), item.get("roles_id")) for item in captured_filters
+    } == {
+        ("account-1", None),
+        (None, "role-2"),
+    }
