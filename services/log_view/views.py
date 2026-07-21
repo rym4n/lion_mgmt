@@ -1,4 +1,5 @@
 # coding=utf-8
+import re
 from datetime import datetime
 
 import pytz
@@ -15,6 +16,36 @@ from models.event import EventsIngestion
 
 logs_bp = Blueprint("logs", url_prefix="/logs")
 _all__ = ["logs_bp"]
+
+DEFAULT_LOG_QUERY_LIMIT = 100
+MAX_LOG_QUERY_LIMIT = 1000
+_LIMITING_PIPE_RE = re.compile(r"(?:^|\|)\s*(?:limit|first|last)\b", re.IGNORECASE)
+
+
+def _parse_log_limit(value, *, default=DEFAULT_LOG_QUERY_LIMIT):
+    if value is None or isinstance(value, bool):
+        return default
+
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        return default
+
+    if limit <= 0:
+        return default
+    return min(limit, MAX_LOG_QUERY_LIMIT)
+
+
+def _query_has_explicit_limit(query):
+    return bool(_LIMITING_PIPE_RE.search(query or ""))
+
+
+def _resolve_log_query_limit(query, requested_limit):
+    if requested_limit is not None:
+        return _parse_log_limit(requested_limit)
+    if _query_has_explicit_limit(query):
+        return MAX_LOG_QUERY_LIMIT
+    return DEFAULT_LOG_QUERY_LIMIT
 
 
 @logs_bp.route("/query", methods=["POST"])
@@ -36,6 +67,10 @@ _all__ = ["logs_bp"]
                     "end": {
                         "type": "string",
                         "description": "查询结束时间（UTC格式：2025-01-01T00:00:00Z）",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": f"返回日志条数，默认{DEFAULT_LOG_QUERY_LIMIT}，最大{MAX_LOG_QUERY_LIMIT}",
                     },
                 },
             }
@@ -82,7 +117,8 @@ async def get_logs_by_sql(request):
         end_dt = datetime.strptime(end, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
         end_iso = end_dt.isoformat().replace("+00:00", "Z")
 
-    result = await query_vlog(query, project_id, start_iso, end_iso, limit=1000)
+    limit = _resolve_log_query_limit(query, param.get("limit"))
+    result = await query_vlog(query, project_id, start_iso, end_iso, limit=limit)
     return response_ok(result) if result is not None else response_fail(ErrorCode.VICTORIA_LOGS_ERROR)
 
 
