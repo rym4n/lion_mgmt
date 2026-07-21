@@ -774,15 +774,20 @@ async def ci_import(request: Request):
     records = data.get("items") or data.get("records") or []
     if not isinstance(records, list):
         raise CustomError(ErrorCode.PARAM_ERROR)
+    target_ci_type = data.get("ci_type_id") or data.get("ci_type_key")
     imported = []
     for record in records:
+        if not isinstance(record, dict):
+            raise CustomError(ErrorCode.PARAM_ERROR)
         record = {
             **record,
-            "ci_type_id": record.get("ci_type_id")
-            or data.get("ci_type_id")
-            or record.get("ci_type_key")
-            or data.get("ci_type_key"),
+            "ci_type_id": target_ci_type
+            or record.get("ci_type_id")
+            or record.get("ci_type_key"),
         }
+        if target_ci_type:
+            record.pop("id", None)
+            record.pop("ci_type_key", None)
         imported.append((await save_ci(tenant_id(request), record, operator_name(request))).json)
     return response_ok({"total": len(imported), "items": imported})
 

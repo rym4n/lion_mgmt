@@ -580,6 +580,51 @@ def test_field_reorder_endpoint_forwards_the_requested_order(monkeypatch):
     assert payload["total"] == 2
 
 
+def test_ci_import_prefers_selected_model_over_record_model(monkeypatch):
+    save_calls = []
+
+    async def save_ci(tenant, record, operator):
+        save_calls.append((tenant, record, operator))
+        return _FakeRecord(_json={"id": f"ci-{len(save_calls)}"})
+
+    monkeypatch.setattr(views, "save_ci", save_ci)
+    monkeypatch.setattr(views, "response_ok", lambda payload: payload)
+
+    request = SimpleNamespace(
+        json={
+            "ci_type_id": "target-type",
+            "items": [
+                {
+                    "id": "source-ci",
+                    "ci_type_id": "source-type",
+                    "ci_type_key": "source-key",
+                    "attributes": {"name": "server-1"},
+                }
+            ],
+        },
+        ctx=SimpleNamespace(
+            session={
+                "tenant_id": "tenant-a",
+                "account_info": {"username": "admin"},
+            }
+        ),
+    )
+
+    payload = asyncio.run(inspect.unwrap(views.ci_import)(request))
+
+    assert payload == {"total": 1, "items": [{"id": "ci-1"}]}
+    assert save_calls == [
+        (
+            "tenant-a",
+            {
+                "ci_type_id": "target-type",
+                "attributes": {"name": "server-1"},
+            },
+            "admin",
+        )
+    ]
+
+
 def test_save_field_rejects_create_intent_for_existing_key(monkeypatch):
     ci_type = _ci_type(primary_field="")
     existing = _field("field-1", "a")
