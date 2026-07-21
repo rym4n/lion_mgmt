@@ -334,6 +334,61 @@ async def upload_and_extract_zip(request):
         await resp.eof()
 
 
+# 资源 data_type 兼容变更白名单：旧类型 -> 允许的新类型集合。
+# 仅放行安全增强型变更；其它类型改动（含 password -> string 安全降级）继续拦截。
+_COMPATIBLE_RESOURCE_TYPE_CHANGES = {
+    "string": {"password"},
+}
+
+
+def _is_compatible_type_change(old_type, new_type) -> bool:
+    """资源 data_type 变化是否为非破坏性兼容变更。"""
+    if old_type == new_type:
+        return True
+    return new_type in _COMPATIBLE_RESOURCE_TYPE_CHANGES.get(old_type, set())
+
+
+async def _resource_keys_in_use(tool_name: str, tenant_id: str) -> set[str]:
+    """返回当前租户下该工具所有资源实例实际持有的 key 集合。
+
+    用于判断“删除某个资源 key”是否会影响存量实例：
+    只要任意实例的 resources 快照里还带着该 key，就视为仍被使用。
+    """
+    used: set[str] = set()
+    instances = await ToolResources.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).all()
+    for inst in instances:
+        resources = inst.resources_json
+        if isinstance(resources, dict):
+            used.update(resources.keys())
+    return used
+
+
+async def _rewrite_instance_data_types(tool_name: str, tenant_id: str, type_migrations: dict[str, str]) -> None:
+    """把存量资源实例内联的 data_type 同步为模板的新类型。
+
+    脱敏逻辑（ToolResources.json）读的是实例内联的 data_type，不是模板。
+    模板放行 string -> password 后若不回写实例，存量 token 会继续明文展示。
+    type_migrations: {resource_key: new_data_type}
+    """
+    if not type_migrations:
+        return
+    instances = await ToolResources.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).all()
+    for inst in instances:
+        resources = inst.resources_json
+        if not isinstance(resources, dict):
+            continue
+        changed = False
+        for key, new_type in type_migrations.items():
+            field = resources.get(key)
+            if isinstance(field, dict) and field.get("data_type") != new_type:
+                field["data_type"] = new_type
+                changed = True
+        if changed:
+            # EncryptedTextField 接受 JSON 字符串；写入时自动加密
+            inst.resources = orjson.dumps(resources).decode()
+            await inst.save(update_fields=["resources", "utime"])
+
+
 async def upload_tool(zip_file, lic, creator, tenant_id, request):
     # 按工具名称去重统计应用数量（同一工具的多个版本只算一个应用）
     tool_names = await Tool.filter(deleted=False, maintain=False).values_list("name", flat=True)
@@ -388,11 +443,30 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
             trm.version = version
             await trm.save()
     else:
+        # 在覆盖模板前，先收集需要回写到存量实例的 data_type 兼容变更
+        # （脱敏读的是实例内联 data_type，不是模板）
+        old_resources = configuration.resources or {}
+        new_resources = config_data.get("resource") or {}
+        type_migrations: dict[str, str] = {}
+        if isinstance(old_resources, dict) and isinstance(new_resources, dict):
+            for key, new_field in new_resources.items():
+                old_field = old_resources.get(key)
+                if not isinstance(old_field, dict) or not isinstance(new_field, dict):
+                    continue
+                old_type = old_field.get("data_type")
+                new_type = new_field.get("data_type")
+                if old_type != new_type and _is_compatible_type_change(old_type, new_type):
+                    type_migrations[key] = new_type
+
         if configuration.health_check != 1 and health_check == 1:
             configuration.health_check = health_check
             configuration.version = version
         configuration.resources = config_data.get("resource")
-        await configuration.save()
+        # 模板写库与实例 data_type 回写放同一事务，避免中间态
+        async with in_transaction():
+            await configuration.save()
+            if type_migrations:
+                await _rewrite_instance_data_types(tool_name, tenant_id, type_migrations)
 
     return {
         "tool": zip_filename,
@@ -669,8 +743,11 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
 
             configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).first().values("resources")
             if configuration and configuration["resources"] != config_data.get("resource", {}):
-                for key in config_data.get("resource", {}).keys():
-                    if key not in configuration["resources"].keys() and config_data.get("resource", {})[key].get("required") is True:
+                old_resources = configuration["resources"] or {}
+                new_resources = config_data.get("resource", {}) or {}
+                for key in new_resources.keys():
+                    # 新增必填资源：无法为存量实例自动补值，拦截
+                    if key not in old_resources.keys() and new_resources[key].get("required") is True:
                         return (
                             config_data,
                             version,
@@ -678,13 +755,31 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                             tool_description,
                             "工具资源不一致，请新建工具或删除原工具后再次上传",
                         )
-                    if key in configuration["resources"].keys() and config_data.get("resource", {})[key].get("data_type") != configuration["resources"][key].get("data_type"):
+                    # 已有 key 的类型变化：仅放行安全增强型（string -> password），
+                    # 其余类型改动（含 password -> string 安全降级）继续拦截
+                    if key in old_resources.keys():
+                        old_type = old_resources[key].get("data_type")
+                        new_type = new_resources[key].get("data_type")
+                        if new_type != old_type and not _is_compatible_type_change(old_type, new_type):
+                            return (
+                                config_data,
+                                version,
+                                tool_name,
+                                tool_description,
+                                "工具资源不一致，请新建工具或删除原工具后再次上传",
+                            )
+                # 删除资源 key：仅当该工具在当前租户下无实例仍持有该 key 时才允许
+                removed_keys = set(old_resources.keys()) - set(new_resources.keys())
+                if removed_keys:
+                    used_keys = await _resource_keys_in_use(name, tenant_id)
+                    blocked = removed_keys & used_keys
+                    if blocked:
                         return (
                             config_data,
                             version,
                             tool_name,
                             tool_description,
-                            "工具资源不一致，请新建工具或删除原工具后再次上传",
+                            f"资源 {', '.join(sorted(blocked))} 仍被已有实例使用，无法删除，请先清理相关资源实例",
                         )
 
             file_hash = hasher.hexdigest()
