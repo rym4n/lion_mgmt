@@ -2,6 +2,7 @@
 import asyncio
 import datetime
 from collections import Counter, defaultdict
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -80,6 +81,20 @@ class _Transaction:
 def _catalog():
     builtin_catalog.load_builtin_catalog.cache_clear()
     return builtin_catalog.load_builtin_catalog()
+
+
+def test_runtime_image_copies_builtin_catalog_assets():
+    repository = Path(__file__).resolve().parents[1]
+    dockerfile = (repository / "Dockerfile").read_text(encoding="utf-8")
+
+    assert (
+        "COPY services/supply_chain_review/builtin_catalog/ "
+        "./services/supply_chain_review/builtin_catalog/"
+    ) in dockerfile
+    assert (
+        repository
+        / "services/supply_chain_review/builtin_catalog/bklite-2026.07-v1/catalog.json"
+    ).is_file()
 
 
 def test_builtin_catalog_has_exact_v1_counts_digest_and_references():

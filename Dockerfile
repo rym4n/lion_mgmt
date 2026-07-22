@@ -68,6 +68,7 @@ COPY pyproject.toml ./
 COPY settings ./settings
 COPY server.py ./
 COPY docker-entrypoint.sh ./
+COPY services/supply_chain_review/builtin_catalog/ ./services/supply_chain_review/builtin_catalog/
 COPY services/inspection/inspection_report_template.docx ./services/inspection/inspection_report_template.docx
 COPY services/inspection/inspection_template_model.xlsx ./services/inspection/inspection_template_model.xlsx
 

@@ -1,11 +1,14 @@
 # coding=utf-8
 import uuid
 from datetime import datetime
+from urllib.parse import urlsplit
 
 import orjson
 from sanic import HTTPResponse, Request
 from sanic_ext.extensions.openapi.builders import OperationStore
 
+from core.error_code import ErrorCode
+from core.response import response_fail
 from libs.kafka import aproduce
 from libs.security.authentication import authenticate
 from libs.security.authorization import check_permissions
@@ -13,6 +16,50 @@ from libs.utils import get_client_ip
 from settings import AUDIT_TOPIC, TZ
 
 from .base import BaseMiddleware
+
+
+UNSAFE_HTTP_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+def _normalized_origin(value: str | None) -> tuple[str, str, int] | None:
+    if not value:
+        return None
+    try:
+        parsed = urlsplit(value.strip())
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+    return parsed.scheme, parsed.hostname.casefold(), port
+
+
+def _effective_request_origin(request: Request) -> tuple[str, str, int] | None:
+    forwarded_proto = request.headers.get("X-Forwarded-Proto")
+    scheme = (
+        (forwarded_proto or getattr(request, "scheme", "http")).split(",", 1)[0].strip()
+    )
+    host = (request.headers.get("Host") or getattr(request, "host", "")).strip()
+    return _normalized_origin(f"{scheme}://{host}")
+
+
+def _is_cross_origin_unsafe_request(request: Request) -> bool:
+    if getattr(request, "method", "GET").upper() not in UNSAFE_HTTP_METHODS:
+        return False
+    origin = request.headers.get("Origin")
+    if not origin:
+        return False
+    return _normalized_origin(origin) != _effective_request_origin(request)
 
 
 def _get_openapi_summary(request: Request) -> str:
@@ -36,7 +83,10 @@ def _get_openapi_summary(request: Request) -> str:
 class SecurityMiddleware(BaseMiddleware):
     """安全相关的控制"""
 
-    async def before_request(self, request: Request) -> None:
+    async def before_request(self, request: Request) -> HTTPResponse | None:
+        if _is_cross_origin_unsafe_request(request):
+            return response_fail(ErrorCode.FORBIDDEN, status=403)
+
         # 判断请求URI是否需要身份验证
         white_urls = [
             "/user/login",
