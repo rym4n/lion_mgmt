@@ -223,47 +223,20 @@ def test_invalid_filter_request_shapes_are_rejected(data):
     def normalize_request():
         request = views._ci_field_filter_request(data)
         if request is not None:
-            payload, legacy = request
-            views._normalize_ci_field_filter(_field("text"), payload, legacy=legacy)
+            views._normalize_ci_field_filter(_field("text"), request)
 
     _assert_param_error(normalize_request)
 
 
-def test_legacy_text_and_ref_filters_remain_compatible():
-    text_payload, text_legacy = views._ci_field_filter_request(
-        {
-            "field_key": "field",
-            "field_keyword": "DB-01",
-            "match_mode": "fuzzy",
-        }
-    )
-    text_filter = views._normalize_ci_field_filter(
-        _field("text"), text_payload, legacy=text_legacy
-    )
-    ref_payload, ref_legacy = views._ci_field_filter_request(
-        {
-            "field_key": "field",
-            "field_keyword": "ci-1",
-            "match_mode": "fuzzy",
-        }
-    )
-    ref_filter = views._normalize_ci_field_filter(
-        _field("ref"), ref_payload, legacy=ref_legacy
-    )
-
-    assert views._matches_ci_field_filter("primary-db-01-node", text_filter)
-    assert ref_filter["operator"] == "eq"
-    assert views._matches_ci_field_filter("ci-1", ref_filter)
-    _assert_param_error(
-        lambda: views._normalize_ci_field_filter(
-            _field("number"), text_payload, legacy=text_legacy
+def test_retired_field_filter_contract_is_rejected():
+    for payload in (
+        {"field_key": "field", "field_keyword": "DB-01"},
+        {"field_key": "owner", "field_keyword": "ci-1", "match_mode": "exact"},
+        {"match_mode": "fuzzy"},
+    ):
+        _assert_param_error(
+            lambda payload=payload: views._ci_field_filter_request(payload)
         )
-    )
-
-
-@pytest.mark.parametrize("match_mode", ["fuzzy", "exact"])
-def test_legacy_match_mode_without_filter_values_is_ignored(match_mode):
-    assert views._ci_field_filter_request({"match_mode": match_mode}) is None
 
 
 def test_ci_list_filters_before_paginating_and_preserves_filtered_total(monkeypatch):
@@ -298,26 +271,25 @@ def test_ci_list_filters_before_paginating_and_preserves_filtered_total(monkeypa
     assert operations == [("order_by", ("-utime",)), "all"]
 
 
-def test_ci_list_accepts_legacy_text_filter(monkeypatch):
+def test_ci_list_rejects_retired_text_filter(monkeypatch):
     records = [
         _CiRecord(id="match", attributes={"hostname": "Primary-DB"}),
         _CiRecord(id="miss", attributes={"hostname": "web-01"}),
     ]
 
-    payload, _operations = _run_ci_list(
-        monkeypatch,
-        {
-            "ci_type_id": "type-1",
-            "field_key": "hostname",
-            "field_keyword": "db",
-            "match_mode": "fuzzy",
-        },
-        records,
-        [_field("text", field_key="hostname")],
+    _assert_param_error(
+        lambda: _run_ci_list(
+            monkeypatch,
+            {
+                "ci_type_id": "type-1",
+                "field_key": "hostname",
+                "field_keyword": "db",
+                "match_mode": "fuzzy",
+            },
+            records,
+            [_field("text", field_key="hostname")],
+        )
     )
-
-    assert payload["total"] == 1
-    assert [item["id"] for item in payload["items"]] == ["match"]
 
 
 def test_ci_list_rejects_unknown_filter_field(monkeypatch):

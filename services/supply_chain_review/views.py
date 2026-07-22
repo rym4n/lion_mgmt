@@ -17,15 +17,31 @@ from libs.utils import get_url_from_s3, upload_to_s3
 from models.supply_chain_review import (
     SupplyChainCi,
     SupplyChainCiFieldDef,
+    SupplyChainCiModelGroup,
     SupplyChainCiRelation,
     SupplyChainCiRelationType,
     SupplyChainCiType,
+    SupplyChainCiUniqueRule,
     SupplyChainPolicyCompareItem,
+)
+from models.user import Account, Tenant
+from services.supply_chain_review.builtin_catalog import (
+    apply_builtin_activation,
+    builtin_catalog_status,
+    complete_builtin_onboarding,
+    delete_model_group,
+    ensure_builtin_catalog,
+    list_model_groups,
+    preview_builtin_activation,
+    reconcile_builtin_catalog,
+    reorder_model_groups,
+    save_model_group,
 )
 from services.supply_chain_review.manager import (
     build_relation_graph,
     build_project_tree,
     cancel_disposal_task,
+    ci_directory_options,
     confirm_disposal_task,
     create_attachment_ref,
     create_notification_event,
@@ -37,6 +53,7 @@ from services.supply_chain_review.manager import (
     delete_process_record,
     delete_relation,
     delete_relation_type,
+    delete_relation_types,
     discover_unknown_terminals,
     export_model_package,
     fields_for_type,
@@ -120,6 +137,21 @@ def _json(request: Request) -> dict:
     return request.json or {}
 
 
+def _query(request: Request) -> dict:
+    return {key: request.args.get(key) for key in request.args}
+
+
+def _query_bool(data: dict, key: str, default: bool) -> bool:
+    value = data.get(key)
+    if value in (None, ""):
+        return default
+    if value in {True, "true", "1", 1}:
+        return True
+    if value in {False, "false", "0", 0}:
+        return False
+    raise CustomError(ErrorCode.PARAM_ERROR)
+
+
 def _form_data(request: Request) -> dict:
     data = {}
     for key, value in (request.form or {}).items():
@@ -143,40 +175,20 @@ def _keyword_condition(keyword: str | None):
     return Q(name__icontains=keyword) | Q(key__icontains=keyword)
 
 
-_LEGACY_CI_FIELD_FILTER_KEYS = {"field_key", "field_keyword", "match_mode"}
-
-
-def _ci_field_filter_request(data: dict) -> tuple[dict, bool] | None:
-    legacy_keys = _LEGACY_CI_FIELD_FILTER_KEYS & data.keys()
-    if "field_filter" in data:
-        if legacy_keys or not isinstance(data["field_filter"], dict):
-            raise CustomError(ErrorCode.PARAM_ERROR)
-        payload = dict(data["field_filter"])
-        legacy = False
-    elif legacy_keys:
-        if legacy_keys == {"match_mode"}:
-            if data["match_mode"] not in {"fuzzy", "exact"}:
-                raise CustomError(ErrorCode.PARAM_ERROR)
-            return None
-        if "field_key" not in data or "field_keyword" not in data:
-            raise CustomError(ErrorCode.PARAM_ERROR)
-        match_mode = data.get("match_mode", "fuzzy")
-        if match_mode not in {"fuzzy", "exact"}:
-            raise CustomError(ErrorCode.PARAM_ERROR)
-        payload = {
-            "field_key": data["field_key"],
-            "operator": "eq" if match_mode == "exact" else "contains",
-            "value": data["field_keyword"],
-        }
-        legacy = True
-    else:
+def _ci_field_filter_request(data: dict) -> dict | None:
+    if {"field_key", "field_keyword", "match_mode"} & data.keys():
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if "field_filter" not in data:
         return None
+    if not isinstance(data["field_filter"], dict):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    payload = dict(data["field_filter"])
 
     field_key = payload.get("field_key")
     if not isinstance(field_key, str) or not field_key.strip():
         raise CustomError(ErrorCode.PARAM_ERROR)
     payload["field_key"] = field_key.strip()
-    return payload, legacy
+    return payload
 
 
 def _require_ci_field_filter_shape(
@@ -213,19 +225,17 @@ def _ci_field_enum_values(field) -> list:
     return values
 
 
-def _normalize_ci_field_filter(field, payload: dict, *, legacy: bool = False) -> dict:
+def _normalize_ci_field_filter(field, payload: dict) -> dict:
     data_type = getattr(field, "data_type", None)
     operator = payload.get("operator")
     if data_type == "attachment" or not isinstance(operator, str):
-        raise CustomError(ErrorCode.PARAM_ERROR)
-    if legacy and data_type not in {"text", "ref"}:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     normalized = {
         "field_key": payload["field_key"],
         "data_type": data_type,
     }
-    if data_type == "text":
+    if data_type in {"text", "organization", "user"}:
         _require_ci_field_filter_shape(
             payload,
             {"field_key", "operator", "value"},
@@ -284,8 +294,6 @@ def _normalize_ci_field_filter(field, payload: dict, *, legacy: bool = False) ->
             {"field_key", "operator", "value"},
         )
         value = payload["value"]
-        if data_type == "ref" and legacy:
-            operator = "eq"
         if operator != "eq":
             raise CustomError(ErrorCode.PARAM_ERROR)
         if data_type == "enum" and not any(
@@ -298,13 +306,60 @@ def _normalize_ci_field_filter(field, payload: dict, *, legacy: bool = False) ->
             raise CustomError(ErrorCode.PARAM_ERROR)
         return normalized | {"operator": "eq", "value": value}
 
+    if data_type == "tag":
+        _require_ci_field_filter_shape(
+            payload,
+            {"field_key", "operator", "value"},
+            {"field_key", "operator", "value"},
+        )
+        value = payload["value"]
+        if operator not in {"contains", "eq"} or not isinstance(value, str) or not value:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        return normalized | {"operator": operator, "value": value.casefold()}
+
     raise CustomError(ErrorCode.PARAM_ERROR)
+
+
+async def _resolve_ci_directory_filter(tenant: str, field_filter: dict) -> None:
+    data_type = field_filter["data_type"]
+    if data_type not in {"organization", "user"}:
+        return
+    expected = field_filter["value"]
+    exact = field_filter["operator"] == "eq"
+    if data_type == "organization":
+        organizations = await Tenant.filter(id=tenant, deleted=False).all()
+        values = [
+            (item.id, [item.id, item.name or item.id]) for item in organizations
+        ]
+    else:
+        accounts = await Account.filter(
+            deleted=False,
+            disabled=False,
+            member__id__in=[tenant],
+        ).all()
+        values = [
+            (
+                item.id,
+                [item.id, item.username, item.display_name or item.username],
+            )
+            for item in accounts
+        ]
+    field_filter["resolved_values"] = {
+        item_id
+        for item_id, labels in values
+        if any(
+            (label.casefold() == expected if exact else expected in label.casefold())
+            for label in labels
+        )
+    }
 
 
 def _matches_ci_field_filter(value, field_filter: dict) -> bool:
     if value is None:
         return False
     data_type = field_filter["data_type"]
+    if data_type in {"organization", "user"}:
+        return isinstance(value, str) and value in field_filter["resolved_values"]
     if data_type == "text":
         if not isinstance(value, str):
             return False
@@ -331,6 +386,16 @@ def _matches_ci_field_filter(value, field_filter: dict) -> bool:
         return (lower is None or actual >= lower) and (upper is None or actual <= upper)
     if data_type in {"enum", "bool", "ref"}:
         return _strict_equal(value, field_filter["value"])
+    if data_type == "tag":
+        if not isinstance(value, list):
+            return False
+        expected = field_filter["value"]
+        actual = [item.casefold() for item in value if isinstance(item, str)]
+        return (
+            expected in actual
+            if field_filter["operator"] == "eq"
+            else any(expected in item for item in actual)
+        )
     return False
 
 
@@ -352,6 +417,10 @@ async def _require_model_package_permissions(
     package: dict,
 ) -> tuple[dict, dict[str, set]]:
     normalized = normalize_model_package(package)
+    group_keys = {
+        validate_key(item.get("key"), "group_key")
+        for item in normalized["model_groups"]
+    }
     model_keys = {validate_key(item.get("key")) for item in normalized["ci_types"]}
     field_keys = {
         (
@@ -363,6 +432,22 @@ async def _require_model_package_permissions(
     relation_keys = {
         validate_key(item.get("key")) for item in normalized["relation_types"]
     }
+    unique_rule_keys = {
+        (
+            validate_key(item.get("ci_type_key"), "ci_type_key"),
+            validate_key(item.get("key"), "unique_rule_key"),
+        )
+        for item in normalized["unique_rules"]
+    }
+
+    existing_group_keys = set()
+    if group_keys:
+        existing_groups = await SupplyChainCiModelGroup.filter(
+            tenant_id=tenant,
+            key__in=list(group_keys),
+            deleted=False,
+        ).all()
+        existing_group_keys = {item.key for item in existing_groups}
 
     existing_model_keys = set()
     if model_keys:
@@ -394,21 +479,164 @@ async def _require_model_package_permissions(
         ).all()
         existing_relation_keys = {item.key for item in existing_relations}
 
+    existing_unique_rule_keys = set()
+    if unique_rule_keys:
+        existing_unique_rules = await SupplyChainCiUniqueRule.filter(
+            tenant_id=tenant,
+            ci_type_key__in=list({item[0] for item in unique_rule_keys}),
+            key__in=list({item[1] for item in unique_rule_keys}),
+            deleted=False,
+        ).all()
+        existing_unique_rule_keys = {
+            (item.ci_type_key, item.key) for item in existing_unique_rules
+        } & unique_rule_keys
+
     resources = (
+        ("model", group_keys, existing_group_keys),
         ("model", model_keys, existing_model_keys),
+        ("model", unique_rule_keys, existing_unique_rule_keys),
         ("field", field_keys, existing_field_keys),
         ("relation", relation_keys, existing_relation_keys),
     )
+    permission_requirements = {
+        resource: {"create": False, "update": False}
+        for resource in ("model", "field", "relation")
+    }
     for resource, requested, existing in resources:
         if requested - existing:
-            await check_permissions(request, f"supply_chain_review:{resource}:c")
+            permission_requirements[resource]["create"] = True
         if requested & existing:
+            permission_requirements[resource]["update"] = True
+    for resource, requirements in permission_requirements.items():
+        if requirements["create"]:
+            await check_permissions(request, f"supply_chain_review:{resource}:c")
+        if requirements["update"]:
             await check_permissions(request, f"supply_chain_review:{resource}:u")
     return normalized, {
+        "model_groups": existing_group_keys,
         "ci_types": existing_model_keys,
         "fields": existing_field_keys,
+        "unique_rules": existing_unique_rule_keys,
         "relation_types": existing_relation_keys,
     }
+
+
+@supply_chain_review_cmdb_bp.get("/cmdb/model-group/list")
+@openapi.definition(summary="资产模型分组目录")
+@requires_permission("supply_chain_review:model:r")
+async def model_group_list(request: Request):
+    data = _query(request)
+    return response_ok(
+        await list_model_groups(
+            tenant_id(request),
+            keyword=data.get("keyword"),
+            status=data.get("status") or "all",
+            include_models=_query_bool(data, "include_models", True),
+            include_instance_count=_query_bool(data, "include_counts", False),
+        )
+    )
+
+
+@supply_chain_review_cmdb_bp.post("/cmdb/model-group/save")
+@openapi.definition(summary="保存租户自定义模型分组")
+async def model_group_save(request: Request):
+    data = _json(request)
+    await _require_save_permission(
+        request,
+        bool(data.get("id")),
+        "supply_chain_review:model:c",
+        "supply_chain_review:model:u",
+    )
+    group = await save_model_group(
+        tenant_id(request),
+        data,
+        operator_name(request),
+    )
+    return response_ok(group.json)
+
+
+@supply_chain_review_cmdb_bp.post("/cmdb/model-group/delete")
+@openapi.definition(summary="删除空的租户自定义模型分组")
+@requires_permission("supply_chain_review:model:d")
+async def model_group_delete(request: Request):
+    return response_ok(
+        await delete_model_group(tenant_id(request), _json(request).get("id"))
+    )
+
+
+@supply_chain_review_cmdb_bp.post("/cmdb/model-group/reorder")
+@openapi.definition(summary="调整模型分组展示顺序")
+@requires_permission("supply_chain_review:model:u")
+async def model_group_reorder(request: Request):
+    groups = await reorder_model_groups(
+        tenant_id(request),
+        _json(request).get("group_ids"),
+        operator_name(request),
+    )
+    return response_ok({"items": [group.json for group in groups]})
+
+
+@supply_chain_review_cmdb_bp.get("/cmdb/builtin-catalog/status")
+@openapi.definition(summary="内置资产模型目录状态")
+@requires_permission("supply_chain_review:model:r")
+async def catalog_status(request: Request):
+    return response_ok(
+        await builtin_catalog_status(tenant_id(request), operator_name(request))
+    )
+
+
+@supply_chain_review_cmdb_bp.post("/cmdb/builtin-catalog/reconcile")
+@openapi.definition(summary="协调内置资产模型目录")
+@requires_permission("supply_chain_review:builtin-catalog:admin")
+async def catalog_reconcile(request: Request):
+    return response_ok(
+        await reconcile_builtin_catalog(tenant_id(request), operator_name(request))
+    )
+
+
+@supply_chain_review_cmdb_bp.post("/cmdb/builtin-activation/preview")
+@openapi.definition(summary="预览资产模型启停影响")
+@requires_permission("supply_chain_review:builtin-activation:u")
+async def builtin_activation_preview(request: Request):
+    return response_ok(
+        await preview_builtin_activation(
+            tenant_id(request),
+            _json(request),
+            operator_name(request),
+        )
+    )
+
+
+@supply_chain_review_cmdb_bp.post("/cmdb/builtin-activation/apply")
+@openapi.definition(summary="应用资产模型启停")
+@requires_permission("supply_chain_review:builtin-activation:u")
+async def builtin_activation_apply(request: Request):
+    return response_ok(
+        await apply_builtin_activation(
+            tenant_id(request),
+            _json(request),
+            operator_name(request),
+        )
+    )
+
+
+@supply_chain_review_cmdb_bp.post("/cmdb/builtin-activation/onboarding-complete")
+@openapi.definition(summary="完成资产模型首次启用引导")
+@requires_permission("supply_chain_review:builtin-activation:u")
+async def builtin_activation_onboarding_complete(request: Request):
+    return response_ok(
+        await complete_builtin_onboarding(
+            tenant_id(request),
+            operator_name(request),
+        )
+    )
+
+
+@supply_chain_review_cmdb_bp.get("/cmdb/directory/options")
+@openapi.definition(summary="资产组织与用户目录选项")
+@requires_permission("supply_chain_review:model:r")
+async def cmdb_directory_options(request: Request):
+    return response_ok(await ci_directory_options(tenant_id(request)))
 
 
 @supply_chain_review_cmdb_bp.post("/ci-type/list")
@@ -418,9 +646,14 @@ async def ci_type_list(request: Request):
     data = _json(request)
     page, size, offset = normalize_page(data)
     tenant = tenant_id(request)
+    await ensure_builtin_catalog(tenant, operator_name(request))
     condition = Q(tenant_id=tenant, deleted=False) & _keyword_condition(data.get("keyword"))
     if data.get("status"):
         condition &= Q(status=data["status"])
+    if data.get("group_id"):
+        condition &= Q(group_id=data["group_id"])
+    if data.get("group_key"):
+        condition &= Q(group_key=data["group_key"])
     queryset = SupplyChainCiType.filter(condition)
     total = await queryset.count()
     items = await queryset.order_by("sort", "key").offset(offset).limit(size).all()
@@ -679,6 +912,18 @@ async def relation_type_delete(request: Request):
     )
 
 
+@supply_chain_review_cmdb_bp.post("/relation-type/batch-delete")
+@openapi.definition(summary="批量删除自定义CMDB关系类型")
+@requires_permission("supply_chain_review:relation:d")
+async def relation_type_batch_delete(request: Request):
+    return response_ok(
+        await delete_relation_types(
+            tenant_id(request),
+            _json(request).get("ids"),
+        )
+    )
+
+
 @supply_chain_review_cmdb_bp.post("/ci/list")
 @openapi.definition(summary="CI实例列表")
 @requires_permission("supply_chain_review:ci:r")
@@ -704,7 +949,7 @@ async def ci_list(request: Request):
     if filter_request is not None:
         if ci_type is None:
             raise CustomError(ErrorCode.PARAM_ERROR)
-        payload, legacy = filter_request
+        payload = filter_request
         fields = await fields_for_type(tenant, str(ci_type.id))
         field = next(
             (item for item in fields if item.field_key == payload["field_key"]),
@@ -712,7 +957,8 @@ async def ci_list(request: Request):
         )
         if field is None:
             raise CustomError(ErrorCode.PARAM_ERROR)
-        field_filter = _normalize_ci_field_filter(field, payload, legacy=legacy)
+        field_filter = _normalize_ci_field_filter(field, payload)
+        await _resolve_ci_directory_filter(tenant, field_filter)
         matched_items = []
         for item in await queryset.order_by("-utime").all():
             value = (item.attributes or {}).get(field_filter["field_key"])

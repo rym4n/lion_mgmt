@@ -1,0 +1,12 @@
+{
+  "catalog_key": "bklite-builtins",
+  "catalog_version": "bklite-2026.07-v1",
+  "source_snapshot_at": "2026-07-22",
+  "schema_version": 1,
+  "group_count": 29,
+  "model_count": 230,
+  "field_count": 3741,
+  "unique_rule_count": 1,
+  "relation_count": 185,
+  "digest": "sha256:9bc98ee277611282bbd9de0e218df695022ec696aa4ae06948661a0bd96173f8"
+}

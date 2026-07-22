@@ -209,3 +209,12 @@ class ErrorCode(BaseErrorCode):
     EVENT_REPORT_GENERATE_FAILED = ErrorData(
         4169, "事件报告生成失败，请稍后重试或联系管理员"
     )
+    CANNOT_OPERATE_CROSS_TENANT_USER = ErrorData(
+        4170, "无法操作其他租户的用户"
+    )
+    CANNOT_OPERATE_SUPERADMIN = ErrorData(
+        4171, "无权禁用或删除超级管理员账号"
+    )
+    OUTBOUND_CONNECTION_TEST_FAILED = ErrorData(
+        4172, "连接测试失败，请检查地址、端口或凭据"
+    )

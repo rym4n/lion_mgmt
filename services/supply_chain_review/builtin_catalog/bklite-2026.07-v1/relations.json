@@ -1,0 +1,3332 @@
+[
+  {
+    "key": "aliyun_bucket_belong_aliyun_account",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "aliyun_bucket"
+    ],
+    "target_model_keys": [
+      "aliyun_account"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "eee8f8b12a47c9f1db2f79b18abc91f99cb894cbb1fee38179aecd8381e3e74f"
+  },
+  {
+    "key": "aliyun_clb_belong_aliyun_account",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "aliyun_clb"
+    ],
+    "target_model_keys": [
+      "aliyun_account"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "c8a1bd84d92320e7946f27db64a10074449b1e14f7c36eba9225fa746ae54393"
+  },
+  {
+    "key": "aliyun_ecs_belong_aliyun_account",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "aliyun_ecs"
+    ],
+    "target_model_keys": [
+      "aliyun_account"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "cc5cfd9cd864a3e379da345d5d794ccabf987730d3df97bc796c932c6b259e77"
+  },
+  {
+    "key": "aliyun_kafka_inst_belong_aliyun_account",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "aliyun_kafka_inst"
+    ],
+    "target_model_keys": [
+      "aliyun_account"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "7814b6b47e8cbaf994f86a012f52acfe8a586a8d1ab9df400fbd2f94a531ec76"
+  },
+  {
+    "key": "aliyun_mongodb_belong_aliyun_account",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "aliyun_mongodb"
+    ],
+    "target_model_keys": [
+      "aliyun_account"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "1325bedf56118567d82dc78c4e720e4fe9a36bb809095e93c4a3778044e1b67d"
+  },
+  {
+    "key": "aliyun_mysql_belong_aliyun_account",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "aliyun_mysql"
+    ],
+    "target_model_keys": [
+      "aliyun_account"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "b96cd566a2894b3eb5d55c6b114f3217f94f8ecb4e5e4462934caee4491f555c"
+  },
+  {
+    "key": "aliyun_pgsql_belong_aliyun_account",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "aliyun_pgsql"
+    ],
+    "target_model_keys": [
+      "aliyun_account"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "f11c417ad0b4e0b86864c3fe21167dbe7eb75900e610f38b7bbbf5989dd8bc4e"
+  },
+  {
+    "key": "aliyun_redis_belong_aliyun_account",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "aliyun_redis"
+    ],
+    "target_model_keys": [
+      "aliyun_account"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "f5a5c7d5e7ca82ef07883d8b3262c84dd91a54ce0dcd1705dccdf65453a021ba"
+  },
+  {
+    "key": "application_contains_host",
+    "name": "包含",
+    "semantic_key": "contains",
+    "source_model_keys": [
+      "application"
+    ],
+    "target_model_keys": [
+      "host"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "26e93d14a774e941972405b3f7755f49819a44e3ce8f532554754573e1e78205"
+  },
+  {
+    "key": "application_run_host",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "application"
+    ],
+    "target_model_keys": [
+      "host"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "c2ff5cbf920ea9ebdf6246de7deee782801b50fe457414101cc6ff9e0dd6faad"
+  },
+  {
+    "key": "datacenter_run_server_room",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "datacenter"
+    ],
+    "target_model_keys": [
+      "server_room"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "05d05f591122fc853951f0dbba74b2096b791253a4d75a90d7e30155693736db"
+  },
+  {
+    "key": "fusioncompute_datastore_belong_fusioncompute_host",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "fusioncompute_datastore"
+    ],
+    "target_model_keys": [
+      "fusioncompute_host"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "48bb29c7905fc1fb79969912e081f991ea1d9d98d909107bc0d496759815dd37"
+  },
+  {
+    "key": "fusioncompute_host_belong_fusioncompute",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "fusioncompute_host"
+    ],
+    "target_model_keys": [
+      "fusioncompute"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "9f60aad26368985ecbba13399fa546345e3708e63f225ddc8bbf7eead7b0e763"
+  },
+  {
+    "key": "fusioncompute_vm_belong_fusioncompute_datastore",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "fusioncompute_vm"
+    ],
+    "target_model_keys": [
+      "fusioncompute_datastore"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "f649a9e505ecb15b341c81139044284dcf8592b8c91eae9a66bb9d230a9dcddc"
+  },
+  {
+    "key": "fusioncompute_vm_belong_fusioncompute_host",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "fusioncompute_vm"
+    ],
+    "target_model_keys": [
+      "fusioncompute_host"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "b2ca1b166554c0e57a788c22f5ca3acbd02d96c8830c8fb3aa5fc6ebaa49c8fb"
+  },
+  {
+    "key": "fusioninsight_cluster_belong_fusioninsight",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "fusioninsight_cluster"
+    ],
+    "target_model_keys": [
+      "fusioninsight"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "0c25ee60701fb3a1856839235d31bf4478ab70c30157c46261713cdc72435609"
+  },
+  {
+    "key": "fusioninsight_host_belong_fusioninsight_cluster",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "fusioninsight_host"
+    ],
+    "target_model_keys": [
+      "fusioninsight_cluster"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "744f6cfd5e5d0013c4a97fd93eb1cf9409e63c309452cd0bede21f7a1520aa3a"
+  },
+  {
+    "key": "host_install_on_activemq",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "activemq"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "ab2829c5fde0fc80f22135412b52bebe1109fa198a3a42677836849ca9d5e568"
+  },
+  {
+    "key": "host_install_on_apache",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "apache"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "fd9fd3367792e0f22bb6976c039e77beaff45c4cb25f5081014c3243b71f5ac7"
+  },
+  {
+    "key": "host_install_on_dameng",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "dameng"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "758cb80952e26b4a5dc245af65fa3587c2c13cf3da8fd26308d76775bd0756ef"
+  },
+  {
+    "key": "host_install_on_db2",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "db2"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "ba1a3db9db5e5929b50cad7a9f7678b6f1e68e6e6c0aa7b9af4ff531c597739b"
+  },
+  {
+    "key": "host_install_on_docker",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "docker"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "15db1e683b65c5c71f7daac7f6ac464f388908991078b863519daa71efd85986"
+  },
+  {
+    "key": "host_install_on_es",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "es"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "2c6c9a3871ed892f1ed3db1fbefff50d9965ee60df80098b814a7cce91d9ecad"
+  },
+  {
+    "key": "host_install_on_etcd",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "etcd"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "5d5d947aa3c7e32ddcb97b32151b6732a1a83813c65c4522bdb657000fd77878"
+  },
+  {
+    "key": "host_install_on_iis",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "iis"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "8fac3632984f1a9cfa78d4ffee44cf37909bbd409d40ddfc2f7257d5d8933f3e"
+  },
+  {
+    "key": "host_install_on_kafka",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "kafka"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "082830034dcd77a865c371830089e8c66998a4fe17239a64b2fc2ff018fed33b"
+  },
+  {
+    "key": "host_install_on_keepalive",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "keepalive"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "06ec069560e05114f68604752b537f94a1f5fb06b279f1800113878fcbc89b53"
+  },
+  {
+    "key": "host_install_on_mongodb",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "mongodb"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "3a64a313b980a9d4cf0e308d7fd2a823791f5df6c34f7ff5926827ed27085995"
+  },
+  {
+    "key": "host_install_on_mssql",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "mssql"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "44babe602085f9726415c09ee417e3e6b2cd9cf11c500c39aa38d691abd2cc0b"
+  },
+  {
+    "key": "host_install_on_mysql",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "mysql"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "11492943ad4c729a8b142ac6300b6cd5098ae715a31f119259204676407c99a2"
+  },
+  {
+    "key": "host_install_on_nginx",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "nginx"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "c968da815974783a816c028caec5fa047eacd69024d0446fb61a62084b5780a6"
+  },
+  {
+    "key": "host_install_on_oracle",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "oracle"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "a9dae53e17c39818953bcbe99719cdf951c932ebf9e946e374e5434d8834325e"
+  },
+  {
+    "key": "host_install_on_postgresql",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "postgresql"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "83e1cadc03ef70bb5da2b1d2f0b103f7061ae5e820c7861cd35b1b9528bad74f"
+  },
+  {
+    "key": "host_install_on_rabbitmq",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "rabbitmq"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "136a65629443866b84ecc1e31d8444ba06a0c8f5be9695294526fbcfb897f1e8"
+  },
+  {
+    "key": "host_install_on_redis",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "redis"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "893b56bfb1e8b97b91142772a9a6d8c04a43d19af387c15bf61b4517482da436"
+  },
+  {
+    "key": "host_install_on_tidb",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "tidb"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "7294d479f52731c16e4874775f654a5fa7baf405e5c14ecffab8c77a0ea9ea6e"
+  },
+  {
+    "key": "host_install_on_tomcat",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "tomcat"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "28b6a777c4a5881d6e02c9b479bf6e9a9a5c7e1ef4bbd7f6a517b097f9ee35a6"
+  },
+  {
+    "key": "host_install_on_tongweb",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "tongweb"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "33b7ac5204ef762f6746b6b9e19f757d354b1f6d9b824f53bdcd3c48b0cc53bb"
+  },
+  {
+    "key": "host_install_on_weblogic",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "weblogic"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "5e1b3f6f00246757389640049e479a8abcff9c646062411929af36922168d171"
+  },
+  {
+    "key": "host_install_on_websphere",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "websphere"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "e703d94fb4dcf955e0dc925bbd79aef0f25d9257bc33294914c3d2898428848e"
+  },
+  {
+    "key": "host_install_on_zookeeper",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "zookeeper"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "70cbbc0059e67cd26bdf0d399587c903d42cde734a7654b005c0345bf11a7e19"
+  },
+  {
+    "key": "host_run_activemq",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "activemq"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "dfc5b1d98da83c241a38721b3c2afdb8f1a0b344b9dae0a99805b7b39aeabfc4"
+  },
+  {
+    "key": "host_run_apache",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "apache"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "5f3ca280bbec3e6488468401d6effe4b08cf674212c45983d949c5af1aca3988"
+  },
+  {
+    "key": "host_run_ceph",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "ceph"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "9b9a291490595a73c4410025073bb3f3ed6f96c2cbaf021ecccf0d9a43747973"
+  },
+  {
+    "key": "host_run_dameng",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "dameng"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "4fa6917f295bfc1d099f54a8542270833b9ff02e4fb0db279f924ad0ceb8bfbd"
+  },
+  {
+    "key": "host_run_db2",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "db2"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "03abf44e86aec3282860d45ac34347856a71fc221b1e4d4480aa751e4ce320f2"
+  },
+  {
+    "key": "host_run_docker",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "docker"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "33fbd035258a1dc34e9d1998e099f4869d5cafc12722df06cabcb7cebb56951a"
+  },
+  {
+    "key": "host_run_es",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "es"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "d5285c4c50b37689defc497e91bb6797d9d9fc1fbefc726e8b504a86ab0f1fab"
+  },
+  {
+    "key": "host_run_etcd",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "etcd"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "7b4da6af7d434b9a346aea3317076e8ae9e0a362d0c645a960aa67431b7ee4c1"
+  },
+  {
+    "key": "host_run_haproxy",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "haproxy"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "ebab9f858554ae162d5f83f82f9f3b857e980ac6120f7c10864a9dd47e347cc7"
+  },
+  {
+    "key": "host_run_hbase",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "hbase"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "c233892c26f7be585c157d661e310c64bcd5c06ad28f3fbc04cdcf99131e6e54"
+  },
+  {
+    "key": "host_run_iis",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "iis"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "2a78884e852f222c59d3a314bec4cd4228e90a3c3379725df3f033f70cea47fc"
+  },
+  {
+    "key": "host_run_jboss",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "jboss"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "43d6e39c8e6137c09d35129afa777e3f74b0cd8e579b8a8d38609abcac42f166"
+  },
+  {
+    "key": "host_run_jetty",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "jetty"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "1f26b123e6258970713e75a9a23d834173bb089a882d3e6fda8a375e10d466ce"
+  },
+  {
+    "key": "host_run_kafka",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "kafka"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "1d441946a78e73d8ab131c45ca1b365329245962e7876adffcca4bd187720bce"
+  },
+  {
+    "key": "host_run_keepalive",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "keepalive"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "6b40d8defbc0005ffaab50fbbde73fa8e0bb78695245ba2cbab518c040386b72"
+  },
+  {
+    "key": "host_run_memcached",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "memcached"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "8abc827ccff0645fbe7d7d623987b9ddaeaa28adb9edea8b8d93ba7630045775"
+  },
+  {
+    "key": "host_run_mongodb",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "mongodb"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "8bb7634d2c92a6c05ba48c4d62253204339d11e821564111feac720a6eba3684"
+  },
+  {
+    "key": "host_run_mssql",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "mssql"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "a654d9f0a7792ddbdd77163e08a0a890cc837cc8ccfacc99da42ec0dba73c4c9"
+  },
+  {
+    "key": "host_run_mysql",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "mysql"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "e768044bf1ecf6696bd979dd26da6dd02d544fb5091d07b58e46bd68a8bd39f1"
+  },
+  {
+    "key": "host_run_nginx",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "nginx"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "efd9b38968d1226c76b8d29cda94dca22d3aad7e85de1116916d438c30dd80c3"
+  },
+  {
+    "key": "host_run_openresty",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "openresty"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "5a5a6c08f4803955b27411366a2b0f7c8cf76474001f28d2a0272d2c148cb06f"
+  },
+  {
+    "key": "host_run_oracle",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "oracle"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "35fecb4d638eb8da335e86fc203873507fcbd4079a0f7fdb56dee6c33c529330"
+  },
+  {
+    "key": "host_run_postgresql",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "postgresql"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "b67eba63aeee66a0d336f6c7b544fc1ea655b0cb314a13c629f3102ff36b7698"
+  },
+  {
+    "key": "host_run_rabbitmq",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "rabbitmq"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "ac9a11b3c48c3668e9b3ae98788068b2acf32437b94b7eb2a2a4c655df267d2a"
+  },
+  {
+    "key": "host_run_redis",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "redis"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "4df1a631d28aa2a75f5abb4bda87331ffd384709a1884a0bbc3a5595468fff08"
+  },
+  {
+    "key": "host_run_rocketmq",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "rocketmq"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "d28bd0b0f1272c7c3d245a10ee443689b105dcd68b202ab14915398a843bcb77"
+  },
+  {
+    "key": "host_run_spark",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "spark"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "edc05ffc831e6bd1509d421b4f7fb47d2d7c07db560347714be46d84585a28ef"
+  },
+  {
+    "key": "host_run_squid",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "squid"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "2c2f4648d448fca2d9ae2a3b28054d09bc2f3912b7d3f8c44e1c985d7216ec6c"
+  },
+  {
+    "key": "host_run_tidb",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "tidb"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "e3f4389f0804b784aecf116b2d86dd818e5743b581ae79081ca55f07886a8ce5"
+  },
+  {
+    "key": "host_run_tomcat",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "tomcat"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "2b918b62a3aa8b6b2c0d50c516f736e9df4cfcd64ba1b7fdc98bfe04e1a36381"
+  },
+  {
+    "key": "host_run_tongweb",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "tongweb"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "12d45423a2f8eed7ab2026e0aae3ae75bdb21dd1cd6a44b40c3360ba8daa8ebe"
+  },
+  {
+    "key": "host_run_tuxedo",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "tuxedo"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "54349dc156aec3b0d122dc49686a4e3f34f01697750998cfe1762193ff43117c"
+  },
+  {
+    "key": "host_run_vmware_vm",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "vmware_vm"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "17d07ca52a46924304b2bba2b5fdc0cb3731bcee8d8cd644b7304b3cef3e1e9a"
+  },
+  {
+    "key": "host_run_weblogic",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "weblogic"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "81496907b375cea126a6db8aca3314269e768ad081bdf6cc56031df304a896be"
+  },
+  {
+    "key": "host_run_websphere",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "websphere"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "85ec01ec5f10ba066ef142b69137e8618dc2d490aded96f254dafd2319012512"
+  },
+  {
+    "key": "host_run_zookeeper",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "host"
+    ],
+    "target_model_keys": [
+      "zookeeper"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "92f0eca00c50aebf744e75a3ce88275af9a4417547a4ebcd08fdef06eee3302a"
+  },
+  {
+    "key": "hwcloud_dcs_belong_hwcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "hwcloud_dcs"
+    ],
+    "target_model_keys": [
+      "hwcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "56e069daafdf32ed9a7b6d0c6d87c56d50bab5f3ca241c848249eb76d981d003"
+  },
+  {
+    "key": "hwcloud_ecs_belong_hwcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "hwcloud_ecs"
+    ],
+    "target_model_keys": [
+      "hwcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "b66b8a28051e860e0928143ff38a2700b9f92d45fc1e840810c677f347c6ed01"
+  },
+  {
+    "key": "hwcloud_eip_belong_hwcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "hwcloud_eip"
+    ],
+    "target_model_keys": [
+      "hwcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "a6a243bf147dd2e7bbcf9eeff7e5cfd6fa58ec8a6e06de0011ab0cd259727f5c"
+  },
+  {
+    "key": "hwcloud_elb_belong_hwcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "hwcloud_elb"
+    ],
+    "target_model_keys": [
+      "hwcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "e7cfa5ef4a8e88fc822fb5e2c4c7077ecaaf100e25561b9c6fcf5d6a415190f2"
+  },
+  {
+    "key": "hwcloud_evs_belong_hwcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "hwcloud_evs"
+    ],
+    "target_model_keys": [
+      "hwcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "2a742ae5690d310b1cb0884e0d8522466a1323ecca5b1cbe3800c805849f52ea"
+  },
+  {
+    "key": "hwcloud_evs_install_on_hwcloud_ecs",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "hwcloud_evs"
+    ],
+    "target_model_keys": [
+      "hwcloud_ecs"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "455b95116b6c467303809961a0a05f2466072face72f79e9a5b6ef5fd07ff781"
+  },
+  {
+    "key": "hwcloud_obs_belong_hwcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "hwcloud_obs"
+    ],
+    "target_model_keys": [
+      "hwcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "b4b794158a9f10ed03f1169f4a8d44fa8434b50f3a16326e7c6ea7c669b3b9ec"
+  },
+  {
+    "key": "hwcloud_rds_belong_hwcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "hwcloud_rds"
+    ],
+    "target_model_keys": [
+      "hwcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "85d0662f7902cad4531131a80a2fa7ef1849847419e4c9829d51b7e563b0a043"
+  },
+  {
+    "key": "hwcloud_sg_belong_hwcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "hwcloud_sg"
+    ],
+    "target_model_keys": [
+      "hwcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "8b9eef848bd67ce234e577ff72af5fd4cc90e8a45671b843dd6c355b00b774b3"
+  },
+  {
+    "key": "hwcloud_subnet_belong_hwcloud_vpc",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "hwcloud_subnet"
+    ],
+    "target_model_keys": [
+      "hwcloud_vpc"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "34ebe92829367cd3c6a736bb209abe40f7ce90efec15ed0e9b00bf17bfe6476a"
+  },
+  {
+    "key": "hwcloud_vpc_belong_hwcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "hwcloud_vpc"
+    ],
+    "target_model_keys": [
+      "hwcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "b78aa161b018d77d270eaea1fd07df7ef5ec92a6f3e1920a38b2dcc6b837be5a"
+  },
+  {
+    "key": "ibmmq_channel_belong_ibmmq",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "ibmmq_channel"
+    ],
+    "target_model_keys": [
+      "ibmmq"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "331b9f6b32d82fb0d6604126f9f56e2681ff18dd411a7fbecb9ca3c9501a8603"
+  },
+  {
+    "key": "ibmmq_listener_belong_ibmmq",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "ibmmq_listener"
+    ],
+    "target_model_keys": [
+      "ibmmq"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "5874644a5a208f649f35440a9804f441547a6031d73acc4f0ada0bdb32276fd0"
+  },
+  {
+    "key": "ibmmq_localqueue_belong_ibmmq",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "ibmmq_localqueue"
+    ],
+    "target_model_keys": [
+      "ibmmq"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "fb0958dce116fa2443c258916773271d31c965786ace781118e732148449de28"
+  },
+  {
+    "key": "ibmmq_remotequeue_belong_ibmmq",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "ibmmq_remotequeue"
+    ],
+    "target_model_keys": [
+      "ibmmq"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "dd3f2907d77fd010885b10b7ba7fd09738036ffcf817ccc1695228a6cbbb7319"
+  },
+  {
+    "key": "inspurincloudrail_vm_belong_inspurincloudrail",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "inspurincloudrail_vm"
+    ],
+    "target_model_keys": [
+      "inspurincloudrail"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "e7351950334fc46c878d8ed8e37b0a89275b0ab757bebaeaa12f924fb9fd1039"
+  },
+  {
+    "key": "interface_belong_firewall",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "interface"
+    ],
+    "target_model_keys": [
+      "firewall"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "5f4866ec50dce60cf646efaf56bda1c82e26268cfab0b1fc30045bd218e33877"
+  },
+  {
+    "key": "interface_belong_loadbalance",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "interface"
+    ],
+    "target_model_keys": [
+      "loadbalance"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "2960541e4ed525e37d9b9ed0c8029de8918cf051c121bc9bd4885f4058a4d1d6"
+  },
+  {
+    "key": "interface_belong_router",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "interface"
+    ],
+    "target_model_keys": [
+      "router"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "601cfef7a5773dc7b17d8b488786e84af96c694e190d6fa643fe598e6ca6b73c"
+  },
+  {
+    "key": "interface_belong_switch",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "interface"
+    ],
+    "target_model_keys": [
+      "switch"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "9aa623415634daf4c10959a1b4d83bd96710ea41567808a2ad07a865626e8440"
+  },
+  {
+    "key": "interface_connect_interface",
+    "name": "关联",
+    "semantic_key": "connect",
+    "source_model_keys": [
+      "interface"
+    ],
+    "target_model_keys": [
+      "interface"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "989a3cd7655a0004f44a020b88816fa985f3809750b0e25fb1d07435e3de7871"
+  },
+  {
+    "key": "ip_connect_host",
+    "name": "关联",
+    "semantic_key": "connect",
+    "source_model_keys": [
+      "ip"
+    ],
+    "target_model_keys": [
+      "host"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "a12457543d2745b042d7689e3d4a3efc9d75654be24812b65177ec6cc1cb0136"
+  },
+  {
+    "key": "k8s_namespace_belong_k8s_cluster",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "k8s_namespace"
+    ],
+    "target_model_keys": [
+      "k8s_cluster"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "f3b62a03eaf3a4141bb3dea73892ab7fe43fab9176b2095e2c88bae6f177b876"
+  },
+  {
+    "key": "k8s_node_group_k8s_cluster",
+    "name": "组成",
+    "semantic_key": "group",
+    "source_model_keys": [
+      "k8s_node"
+    ],
+    "target_model_keys": [
+      "k8s_cluster"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "8524c4b18f504f5e8a0db83badafd5dcc90672c8897a1abac88bc243b5424fcd"
+  },
+  {
+    "key": "k8s_pod_group_k8s_namespace",
+    "name": "组成",
+    "semantic_key": "group",
+    "source_model_keys": [
+      "k8s_pod"
+    ],
+    "target_model_keys": [
+      "k8s_namespace"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "d862bddb07906b14bf89de6d1c7a1448255ce9fa4038a0a2b70cc218c764b56a"
+  },
+  {
+    "key": "k8s_pod_group_k8s_workload",
+    "name": "组成",
+    "semantic_key": "group",
+    "source_model_keys": [
+      "k8s_pod"
+    ],
+    "target_model_keys": [
+      "k8s_workload"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "f2948de87a1db8cddd7e6538cf5b240dcf2cb1dc35b6ef77c71d03195309886a"
+  },
+  {
+    "key": "k8s_pod_run_k8s_node",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "k8s_pod"
+    ],
+    "target_model_keys": [
+      "k8s_node"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "9cf90d1b72c75385cb860651145a4c1bfa59334e003d036dd3387b18ea15775e"
+  },
+  {
+    "key": "k8s_workload_belong_k8s_namespace",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "k8s_workload"
+    ],
+    "target_model_keys": [
+      "k8s_namespace"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "8d4d5ea76262eb4b92521e3e9771833433b474bcfd51a0a89b1b819fdc4558d0"
+  },
+  {
+    "key": "manageone_cloud_belong_manageone",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "manageone_cloud"
+    ],
+    "target_model_keys": [
+      "manageone"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "1c32afc28a6b5b512fa638745adf73e79a126fe39ae0af8f7c4d9cec6d9e1d90"
+  },
+  {
+    "key": "manageone_ds_belong_manageone_cloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "manageone_ds"
+    ],
+    "target_model_keys": [
+      "manageone_cloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "4615451e542c5b9c0ef3ba1ee9e0657bb074656b69b231cf28f09dc1909c6d9c"
+  },
+  {
+    "key": "manageone_eip_belong_manageone_cloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "manageone_eip"
+    ],
+    "target_model_keys": [
+      "manageone_cloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "a199f6bdf6f698502eb05c66fb5a01408ee9a156d433f01ebf417b6eb06f2682"
+  },
+  {
+    "key": "manageone_host_belong_manageone_cloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "manageone_host"
+    ],
+    "target_model_keys": [
+      "manageone_cloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "a5d67e58a871529041d9be9380523f54bab37b33e449a5ce9a35993b4e1b3da0"
+  },
+  {
+    "key": "manageone_host_install_on_manageone_server",
+    "name": "安装于",
+    "semantic_key": "install_on",
+    "source_model_keys": [
+      "manageone_host"
+    ],
+    "target_model_keys": [
+      "manageone_server"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "69f815dc5cd65fa4d84300a0e045bb059ad86e72db521f8c27332cef9dfc24cc"
+  },
+  {
+    "key": "manageone_server_belong_manageone_cloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "manageone_server"
+    ],
+    "target_model_keys": [
+      "manageone_cloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "d92e688b66be33f4b8da2a33568d142fa7622f948ae97b8e747219422006fbf9"
+  },
+  {
+    "key": "nacos_namespace_belong_nacos",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nacos_namespace"
+    ],
+    "target_model_keys": [
+      "nacos"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "1877aaff7e0b665e1ab96a8a95f661a1d36a067c9c552561d949bbfae0a78f0b"
+  },
+  {
+    "key": "nacos_node_belong_nacos",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nacos_node"
+    ],
+    "target_model_keys": [
+      "nacos"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "fdf3ba9b5b635c972b77c320a66c30371a5dd3ea597cae75f000ef26728a60dd"
+  },
+  {
+    "key": "nacos_service_belong_nacos",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nacos_service"
+    ],
+    "target_model_keys": [
+      "nacos"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "214d22109f0f361d8736bd03982d854d55b3febb6cb653513c2443f6e058a289"
+  },
+  {
+    "key": "nutanixhci_disk_belong_nutanixhci",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_disk"
+    ],
+    "target_model_keys": [
+      "nutanixhci"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "75a3f78ab2279a60ffaf200c4bc78e3946843bc74f30554694a86aedc365905f"
+  },
+  {
+    "key": "nutanixhci_disk_belong_nutanixhci_host",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_disk"
+    ],
+    "target_model_keys": [
+      "nutanixhci_host"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "d949d9066f825c97287158e2e473764351ea9f124b7495da8ec5b232170767c0"
+  },
+  {
+    "key": "nutanixhci_disk_belong_nutanixhci_sp",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_disk"
+    ],
+    "target_model_keys": [
+      "nutanixhci_sp"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "e13e22a6f4284b215cf8bbbf324b8acf68489bc719cf340553ddd1785feb010d"
+  },
+  {
+    "key": "nutanixhci_host_belong_nutanixhci",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_host"
+    ],
+    "target_model_keys": [
+      "nutanixhci"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "86a0f3f76eeed3f8183733dcac7dadb9cf3e20704d50984b42bf2ab630823e2c"
+  },
+  {
+    "key": "nutanixhci_sc_belong_nutanixhci",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_sc"
+    ],
+    "target_model_keys": [
+      "nutanixhci"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "510ca864502b883f7c8c0747799ab04d30c3547ca6a440c853ef598b70b5aa5a"
+  },
+  {
+    "key": "nutanixhci_sc_belong_nutanixhci_sp",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_sc"
+    ],
+    "target_model_keys": [
+      "nutanixhci_sp"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "8c9c735644b77530aa4ecf0dd13e69d57d9099beee7fbf8f4829957e9ac0a977"
+  },
+  {
+    "key": "nutanixhci_sp_belong_nutanixhci",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_sp"
+    ],
+    "target_model_keys": [
+      "nutanixhci"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "e2d07dff0fee15d17b7d48e99dde016b583387d67ba91a214f2df88c09c2938b"
+  },
+  {
+    "key": "nutanixhci_vd_belong_nutanixhci",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_vd"
+    ],
+    "target_model_keys": [
+      "nutanixhci"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "f7dbc10d21fdf62a75e7d6afe2043075250ea0b27792af531141b69786dc81fd"
+  },
+  {
+    "key": "nutanixhci_vd_belong_nutanixhci_sc",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_vd"
+    ],
+    "target_model_keys": [
+      "nutanixhci_sc"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "2c88278148c21023738e0a42c0f7c55972452cbdde1f42fa89daf1fc7b1e605c"
+  },
+  {
+    "key": "nutanixhci_vd_belong_nutanixhci_vg",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_vd"
+    ],
+    "target_model_keys": [
+      "nutanixhci_vg"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "c3b3d7f1c8466100172c27baab4bd39684cfcbc14b1d5ddfb9cc48bd3c2686e7"
+  },
+  {
+    "key": "nutanixhci_vd_belong_nutanixhci_vm",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_vd"
+    ],
+    "target_model_keys": [
+      "nutanixhci_vm"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "0eacb0e2e266d40c5ea8ac6f69c92dea3fcf000fa4aa9408ea7a7b6d4184ba29"
+  },
+  {
+    "key": "nutanixhci_vg_belong_nutanixhci",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_vg"
+    ],
+    "target_model_keys": [
+      "nutanixhci"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "7a0219fcbde6b5f077d084aa1a176b2582d866da82086d88119dee330154c071"
+  },
+  {
+    "key": "nutanixhci_vg_belong_nutanixhci_sc",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_vg"
+    ],
+    "target_model_keys": [
+      "nutanixhci_sc"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "2effbf9a4a1fe0fcc862a2547791d10c2172869be641e0a50eadcba635ba23b7"
+  },
+  {
+    "key": "nutanixhci_vm_belong_nutanixhci",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_vm"
+    ],
+    "target_model_keys": [
+      "nutanixhci"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "f8aed28553a6084ebbf2107c381e928a71dd3a85bedf672829ab37e7b9b58ba1"
+  },
+  {
+    "key": "nutanixhci_vm_belong_nutanixhci_host",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_vm"
+    ],
+    "target_model_keys": [
+      "nutanixhci_host"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "b84536385da62c776ebd244e5abdd4cebe323eb8007bb64e975b37d91526b012"
+  },
+  {
+    "key": "nutanixhci_vm_belong_nutanixhci_sc",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "nutanixhci_vm"
+    ],
+    "target_model_keys": [
+      "nutanixhci_sc"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "8b4861397ed7cf7b631f6f25f1d75e48fcb17595f1d72c58bf51f7967ec6cca7"
+  },
+  {
+    "key": "oceanbase_server_belong_oceanbase",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "oceanbase_server"
+    ],
+    "target_model_keys": [
+      "oceanbase"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "9bdc5848a91a2d0257bfcd194f21437de6d501104de06b233d696ed872347ba8"
+  },
+  {
+    "key": "oceanbase_server_belong_oceanbase_zone",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "oceanbase_server"
+    ],
+    "target_model_keys": [
+      "oceanbase_zone"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "8f6dfa7f86a854871f8bc179b8d03081a4452bff17e81b0cd5b250390682b296"
+  },
+  {
+    "key": "oceanbase_tenant_belong_oceanbase",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "oceanbase_tenant"
+    ],
+    "target_model_keys": [
+      "oceanbase"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "fd46865055950da56e5a22c6d05ad16001731b951d736dd6729492e246065a00"
+  },
+  {
+    "key": "oceanbase_zone_belong_oceanbase",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "oceanbase_zone"
+    ],
+    "target_model_keys": [
+      "oceanbase"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "141e4663478bd1bff35b49363a5d1a4e6ae183023945d676e29e7b04ddfb026d"
+  },
+  {
+    "key": "openstack_eip_belong_openstack",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "openstack_eip"
+    ],
+    "target_model_keys": [
+      "openstack"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "45de94f65eee62ce0cd06558c404098241f43bceeec539b119d3ac36997f4304"
+  },
+  {
+    "key": "openstack_node_belong_openstack",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "openstack_node"
+    ],
+    "target_model_keys": [
+      "openstack"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "6c2c7c4f0c79dd96d10c3cd516894c399290412de83d4724f257d18cd6a613d2"
+  },
+  {
+    "key": "openstack_sg_belong_openstack",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "openstack_sg"
+    ],
+    "target_model_keys": [
+      "openstack"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "289633445380f8ab632cb0d3ef4d1c9bd84b46141f903f8a2169372b0ac33eca"
+  },
+  {
+    "key": "openstack_sp_belong_openstack",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "openstack_sp"
+    ],
+    "target_model_keys": [
+      "openstack"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "eed8831df51492f747c5106d99fd9de19d79daf4fe3c5de763f34dc081b48852"
+  },
+  {
+    "key": "openstack_sp_belong_openstack_node",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "openstack_sp"
+    ],
+    "target_model_keys": [
+      "openstack_node"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "38e9e74cf20e21fdb9519d03f30cd3f25d99557b00b7188dffa7486cf4c92597"
+  },
+  {
+    "key": "openstack_subnet_belong_openstack_vpc",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "openstack_subnet"
+    ],
+    "target_model_keys": [
+      "openstack_vpc"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "386601e0cf86077d8a744be01b0c13e8c19d3e8c83a2e8f0889a11c11fbaa844"
+  },
+  {
+    "key": "openstack_vg_belong_openstack_node",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "openstack_vg"
+    ],
+    "target_model_keys": [
+      "openstack_node"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "8ae872c89ec4d961e1bd9e8aab28390df5bb886bb855de51c21b56e4d016ba07"
+  },
+  {
+    "key": "openstack_vg_belong_openstack_sp",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "openstack_vg"
+    ],
+    "target_model_keys": [
+      "openstack_sp"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "589c5c416607c4b243983cceaff723e693d8cbefda6259b20e12f23e0e19a447"
+  },
+  {
+    "key": "openstack_vg_belong_openstack_vm",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "openstack_vg"
+    ],
+    "target_model_keys": [
+      "openstack_vm"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "b759d7654fc80f90c2e10548e2bb5da7c2e11f43fb4cff2947e3bf3c7e902ee3"
+  },
+  {
+    "key": "openstack_vm_belong_openstack_vm",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "openstack_vm"
+    ],
+    "target_model_keys": [
+      "openstack_vm"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "e9191f16fce373caebd64e87b2b350bb4dddba555295c7d1de2542e258434693"
+  },
+  {
+    "key": "openstack_vpc_belong_openstack",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "openstack_vpc"
+    ],
+    "target_model_keys": [
+      "openstack"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "f0aa023ba82447aeaf52b6bb2d8eb692770fa6baf4dc8f9dbf253ede5481ba08"
+  },
+  {
+    "key": "physcial_server_contains_disk",
+    "name": "包含",
+    "semantic_key": "contains",
+    "source_model_keys": [
+      "physcial_server"
+    ],
+    "target_model_keys": [
+      "disk"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "1cb06260bd54b83496afbcccdc9e99dc65fad2185a753c65228e972cdcecd91e"
+  },
+  {
+    "key": "physcial_server_contains_gpu",
+    "name": "包含",
+    "semantic_key": "contains",
+    "source_model_keys": [
+      "physcial_server"
+    ],
+    "target_model_keys": [
+      "gpu"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "c3404d2721e6c3e025366d458a71b58c0b6be1acf05c766024d70a05e463d873"
+  },
+  {
+    "key": "physcial_server_contains_memory",
+    "name": "包含",
+    "semantic_key": "contains",
+    "source_model_keys": [
+      "physcial_server"
+    ],
+    "target_model_keys": [
+      "memory"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "04f65e620cf74022911469cdaa669cee3ddfe4bd18ba3ca4766d6d844fd44dfb"
+  },
+  {
+    "key": "physcial_server_contains_nic",
+    "name": "包含",
+    "semantic_key": "contains",
+    "source_model_keys": [
+      "physcial_server"
+    ],
+    "target_model_keys": [
+      "nic"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "479b8dcdd9a2661a4825bb28612c63658622b539fd2d9cd08fa4c3ee09db7c48"
+  },
+  {
+    "key": "qcloud_bucket_belong_qcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "qcloud_bucket"
+    ],
+    "target_model_keys": [
+      "qcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "dc69d9c0bcdaafaaf97acc520fef759cbe00b75e6682974146e66aff31cc039e"
+  },
+  {
+    "key": "qcloud_clb_belong_qcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "qcloud_clb"
+    ],
+    "target_model_keys": [
+      "qcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "861338ff7784485ade95a63ae2b7df624d88da6b419bc50a7e81de70d76aa5d5"
+  },
+  {
+    "key": "qcloud_cvm_belong_qcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "qcloud_cvm"
+    ],
+    "target_model_keys": [
+      "qcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "24a0560402791cbbd64cbd86e4ee0c5210288899363f24c1cdcfcf65698ee8fc"
+  },
+  {
+    "key": "qcloud_eip_belong_qcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "qcloud_eip"
+    ],
+    "target_model_keys": [
+      "qcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "7c9c2b292246f9573efad8d4dcf61b0833f421b1cb5a0a78ebee008f226e592d"
+  },
+  {
+    "key": "qcloud_filesystem_belong_qcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "qcloud_filesystem"
+    ],
+    "target_model_keys": [
+      "qcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "c02425c1aa153e7186f67c4d8d8714e286a7bf463da461a25c6f86d12c7b331d"
+  },
+  {
+    "key": "qcloud_mongodb_belong_qcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "qcloud_mongodb"
+    ],
+    "target_model_keys": [
+      "qcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "b3092a207af4a3e402e49adcdde1c39a6c6b30fabe2fa5b222a1b6c729b8c1df"
+  },
+  {
+    "key": "qcloud_mysql_belong_qcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "qcloud_mysql"
+    ],
+    "target_model_keys": [
+      "qcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "daf50ef802aaf53e3a19a8f78cae70cd60db8746b736d68219e6355103b23c9c"
+  },
+  {
+    "key": "qcloud_pgsql_belong_qcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "qcloud_pgsql"
+    ],
+    "target_model_keys": [
+      "qcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "4d8e48f4fc7cbee984df42cab4130028a5631785bea822ba2b74c16ebbc730c5"
+  },
+  {
+    "key": "qcloud_plusar_cluster_belong_qcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "qcloud_plusar_cluster"
+    ],
+    "target_model_keys": [
+      "qcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "95d141f5efee04f97702271ed76f657db03362729d427e6249faa2d668e2d714"
+  },
+  {
+    "key": "qcloud_rocketmq_belong_qcloud",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "qcloud_rocketmq"
+    ],
+    "target_model_keys": [
+      "qcloud"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "db81fb1740a1a368bbb878926aee00d2e941b8f2f798a05003fb734f33f897df"
+  },
+  {
+    "key": "rack_contains_firewall",
+    "name": "包含",
+    "semantic_key": "contains",
+    "source_model_keys": [
+      "rack"
+    ],
+    "target_model_keys": [
+      "firewall"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "3d37c019ed0b9773e3fb1894688c43c525e9f5ecfcf1b926cea941e8364dd66c"
+  },
+  {
+    "key": "rack_contains_loadbalance",
+    "name": "包含",
+    "semantic_key": "contains",
+    "source_model_keys": [
+      "rack"
+    ],
+    "target_model_keys": [
+      "loadbalance"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "f5925fefcab8f7887a7252ff12780aab096bede66fe44e3d74b096c8ae849b52"
+  },
+  {
+    "key": "rack_contains_physcial_server",
+    "name": "包含",
+    "semantic_key": "contains",
+    "source_model_keys": [
+      "rack"
+    ],
+    "target_model_keys": [
+      "physcial_server"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "3e64035347129503001320a38bf30b47e4e098b717d1fe862e1eda02fa4ac74a"
+  },
+  {
+    "key": "rack_contains_router",
+    "name": "包含",
+    "semantic_key": "contains",
+    "source_model_keys": [
+      "rack"
+    ],
+    "target_model_keys": [
+      "router"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "97aeb3da51672d94fd20e3e4e6fc0025a39b2c98249ca6629128a90c44e60aaa"
+  },
+  {
+    "key": "rack_contains_switch",
+    "name": "包含",
+    "semantic_key": "contains",
+    "source_model_keys": [
+      "rack"
+    ],
+    "target_model_keys": [
+      "switch"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "a4dfb8c4a1e0413b026cec455adc18b975516b53b17cf7f7dd9936af4b3dfa83"
+  },
+  {
+    "key": "sangforscp_vm_belong_sangforscp_host",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "sangforscp_vm"
+    ],
+    "target_model_keys": [
+      "sangforscp_host"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "04844e3e4d9a53afae6bd3964cb49a314604b2279b31a3dbd3f8623afe9bcf81"
+  },
+  {
+    "key": "server_bmc_belong_physcial_server",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "server_bmc"
+    ],
+    "target_model_keys": [
+      "physcial_server"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "1d90a7176ae610fc20c8ee03fc1a5d1f63d692d95d662ff061074d6504aceca1"
+  },
+  {
+    "key": "server_bmc_cpu_belong_server_bmc",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "server_bmc_cpu"
+    ],
+    "target_model_keys": [
+      "server_bmc"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "41e53c08b47426b7cbae7a039af8677ce371bc298277d6f939fab6af9cb56ca7"
+  },
+  {
+    "key": "server_bmc_disk_belong_server_bmc",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "server_bmc_disk"
+    ],
+    "target_model_keys": [
+      "server_bmc"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "330dd7bae6d18aa30b6bfd85b6a839cafaa4cf5ad4963f6a44664662f33123b9"
+  },
+  {
+    "key": "server_bmc_memory_belong_server_bmc",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "server_bmc_memory"
+    ],
+    "target_model_keys": [
+      "server_bmc"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "9e3f3a619a9d2d5c6432e098665e41c739f672159588fa0d5f1da73b9b3390a2"
+  },
+  {
+    "key": "server_bmc_nic_belong_server_bmc",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "server_bmc_nic"
+    ],
+    "target_model_keys": [
+      "server_bmc"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "69f04c1cbf0f149385a73f9cbfda65c76ea153a143f350844157093aa3880f21"
+  },
+  {
+    "key": "server_bmc_vdisk_belong_server_bmc",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "server_bmc_vdisk"
+    ],
+    "target_model_keys": [
+      "server_bmc"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "7e1f5c07e3a62815e7dd5f6870e3270e851ad5b735f4cd0655e3a1b94630f7ba"
+  },
+  {
+    "key": "server_room_run_rack",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "server_room"
+    ],
+    "target_model_keys": [
+      "rack"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "db1a864ed4d1e3e877c785c8118bdb6f4e14f3d77bdefed37e11bb050abe0d96"
+  },
+  {
+    "key": "smartx_cluster_belong_smartx",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "smartx_cluster"
+    ],
+    "target_model_keys": [
+      "smartx"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "e413fa482ee48203ffe2177d18214e01507ffef58435f5e179bb962a94aa90b9"
+  },
+  {
+    "key": "smartx_vm_belong_smartx_cluster",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "smartx_vm"
+    ],
+    "target_model_keys": [
+      "smartx_cluster"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "e2aa580cc0dc2b349c00384b9ccdcf1fa156d9faa70dfe29e560054f84f965cd"
+  },
+  {
+    "key": "smartx_vmvolume_belong_smartx_cluster",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "smartx_vmvolume"
+    ],
+    "target_model_keys": [
+      "smartx_cluster"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "7bb73bcc8153385b1b387f89aa2a0834fe541a104de8404b22e4289dfbbcd9bf"
+  },
+  {
+    "key": "storage_disk_belong_storage",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "storage_disk"
+    ],
+    "target_model_keys": [
+      "storage"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "46dba48ac8fd803679c898d1a5f7b468cdaf4702fc5acf99d89f2415568fe602"
+  },
+  {
+    "key": "storage_pool_belong_storage",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "storage_pool"
+    ],
+    "target_model_keys": [
+      "storage"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "57ec0c710cd2de7aeccf06336b419fc9035d62c2b504cefe0c540da129617734"
+  },
+  {
+    "key": "storage_volume_belong_storage",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "storage_volume"
+    ],
+    "target_model_keys": [
+      "storage"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "06d76a0dad3f57a6892b1a69ccef13b6c7318f1e110889a0325f8b525cde6fc9"
+  },
+  {
+    "key": "storage_volume_belong_storage_pool",
+    "name": "属于",
+    "semantic_key": "belong",
+    "source_model_keys": [
+      "storage_volume"
+    ],
+    "target_model_keys": [
+      "storage_pool"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "ad91662d9da1cd16d246829aa8b1cbc330a1fc3343c4e94612260e7df83a21af"
+  },
+  {
+    "key": "subnet_group_ip",
+    "name": "组成",
+    "semantic_key": "group",
+    "source_model_keys": [
+      "subnet"
+    ],
+    "target_model_keys": [
+      "ip"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "5088424a9f43596a9f6240c92e9922c354981b11436351d24b300e69b26d9d9a"
+  },
+  {
+    "key": "system_contains_application",
+    "name": "包含",
+    "semantic_key": "contains",
+    "source_model_keys": [
+      "system"
+    ],
+    "target_model_keys": [
+      "application"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "one",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "b27b2de37399039ca3378e716a058f75d706fbeebd6cb3a370fc86b3cbc5a235"
+  },
+  {
+    "key": "vmware_ds_connect_vmware_esxi",
+    "name": "关联",
+    "semantic_key": "connect",
+    "source_model_keys": [
+      "vmware_ds"
+    ],
+    "target_model_keys": [
+      "vmware_esxi"
+    ],
+    "source_to_target": "many",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "d3f705fa1888136b1f8d886c22bcb0be02bb2c68fc70b3937e9d98d3bf8a7a81"
+  },
+  {
+    "key": "vmware_esxi_group_vmware_vc",
+    "name": "组成",
+    "semantic_key": "group",
+    "source_model_keys": [
+      "vmware_esxi"
+    ],
+    "target_model_keys": [
+      "vmware_vc"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "ad70e941a53cea965c9762123095f62d3db39b4c268251a623a1850c97028465"
+  },
+  {
+    "key": "vmware_vm_connect_vmware_ds",
+    "name": "关联",
+    "semantic_key": "connect",
+    "source_model_keys": [
+      "vmware_vm"
+    ],
+    "target_model_keys": [
+      "vmware_ds"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "090f04762adcb86f75f1dd7ad56cbb5099cf683660e7d4ffb70619aacbea2c44"
+  },
+  {
+    "key": "vmware_vm_run_vmware_esxi",
+    "name": "运行于",
+    "semantic_key": "run",
+    "source_model_keys": [
+      "vmware_vm"
+    ],
+    "target_model_keys": [
+      "vmware_esxi"
+    ],
+    "source_to_target": "one",
+    "target_to_source": "many",
+    "relation_fields": [],
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "916d3c8b578b72991ee4c0c810648a31e49c39956631bc2db4960aa3f16cdb1c"
+  }
+]

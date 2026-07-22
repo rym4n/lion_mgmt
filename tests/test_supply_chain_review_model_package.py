@@ -42,10 +42,10 @@ def _q_filters(q):
 
 def _install_export_fakes(monkeypatch, missing_ci_type_keys=()):
     ci_types = [
-        _PackageObject(key="app", name="应用"),
-        _PackageObject(key="server", name="服务器"),
-        _PackageObject(key="team", name="团队"),
-        _PackageObject(key="user", name="人员"),
+        _PackageObject(id="app-id", key="app", name="应用", group_key="custom"),
+        _PackageObject(id="server-id", key="server", name="服务器", group_key="custom"),
+        _PackageObject(id="team-id", key="team", name="团队", group_key="custom"),
+        _PackageObject(id="user-id", key="user", name="人员", group_key="custom"),
     ]
     ci_types = [item for item in ci_types if item.key not in missing_ci_type_keys]
     fields = [
@@ -93,6 +93,20 @@ def _install_export_fakes(monkeypatch, missing_ci_type_keys=()):
         manager.SupplyChainCiRelationType,
         "filter",
         staticmethod(lambda *args, **kwargs: _FakeQuery(relation_types)),
+    )
+    monkeypatch.setattr(
+        manager.SupplyChainCiModelGroup,
+        "filter",
+        staticmethod(
+            lambda *args, **kwargs: _FakeQuery(
+                [_PackageObject(key="custom", name="自定义模型", sort=1)]
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        manager.SupplyChainCiUniqueRule,
+        "filter",
+        staticmethod(lambda *args, **kwargs: _FakeQuery([])),
     )
 
 

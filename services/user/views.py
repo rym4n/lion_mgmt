@@ -25,7 +25,7 @@ from libs.security.authentication import (
     validate_password,
     validate_username,
 )
-from libs.security.authorization import check_permissions, requires_permission
+from libs.security.authorization import check_permissions, is_superadmin, requires_permission
 from libs.utils import (
     get_client_ip,
     get_expiration_date,
@@ -1061,6 +1061,34 @@ async def update_user(request):
     return response_ok("success")
 
 
+async def _ensure_can_manage_target_user(request, target: Account) -> None:
+    """租户隔离 + 超管保护，防止租户管理员越权操作平台级/其他租户账号。
+
+    - 目标账号必须是操作者所在租户的成员（member M2M），超管(*:*)例外可跨租户；
+      账号列表本就按 member 过滤，编辑/删除必须对齐，否则可直接按用户名越权。
+    - 非超管不得禁用或删除超管账号（含内置 admin），避免租户管理员停用全平台超管。
+    """
+    operator = request.ctx.session["account_info"]
+    tenant_id = request.ctx.session.get("tenant_id") or operator.tenant_id
+    operator_is_superadmin = is_superadmin(operator)
+
+    # 目标是超管而操作者不是 —— 直接拒绝（覆盖内置 admin 及任何自定义超管）。
+    await target.fetch_related("roles")
+    if is_superadmin(target) and not operator_is_superadmin:
+        raise CustomError(ErrorCode.CANNOT_OPERATE_SUPERADMIN)
+
+    # 超管可跨租户管理；普通管理员只能操作本租户成员。
+    if operator_is_superadmin:
+        return
+    in_tenant = await Account.filter(
+        id=target.id,
+        deleted=False,
+        member__id__in=[tenant_id],
+    ).exists()
+    if not in_tenant:
+        raise CustomError(ErrorCode.CANNOT_OPERATE_CROSS_TENANT_USER)
+
+
 @user_bp.post("/edit")
 @openapi.definition(
     summary="修改任意用户信息",
@@ -1134,9 +1162,12 @@ async def update_user(request):
 )
 @requires_permission("user:u")
 async def edit_user(request):
-    user = await Account.get(username=request.json.get("username"), deleted=False).prefetch_related("roles")
+    user = await Account.get_or_none(username=request.json.get("username"), deleted=False).prefetch_related("roles")
     if not user:
         raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+
+    # 租户隔离 + 超管保护：禁用/修改前校验目标账号归属与超管身份。
+    await _ensure_can_manage_target_user(request, user)
 
     params = request.json
     need_update = False
@@ -1214,7 +1245,13 @@ async def delelte_user(request):
     if username == "admin":
         raise CustomError(ErrorCode.CANNOT_DELETE_ADMIN)
 
-    await Account.filter(username=username, deleted=False, tenant_id=request.ctx.session["account_info"].tenant_id).update(deleted=True)
+    target = await Account.get_or_none(username=username, deleted=False).prefetch_related("roles")
+    if not target:
+        return response_ok("success")
+    # 租户隔离 + 超管保护：与编辑一致，禁止跨租户删除或删除超管账号。
+    await _ensure_can_manage_target_user(request, target)
+
+    await Account.filter(id=target.id, deleted=False).update(deleted=True)
     return response_ok("success")
 
 

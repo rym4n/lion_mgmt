@@ -7,7 +7,7 @@ import os
 import uuid
 import zipfile
 from datetime import datetime, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import aiofile
 import jwt
@@ -23,7 +23,13 @@ from core.error_code import ErrorCode
 from core.response import response_fail, response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import get_superadmin_role, load_license, requires_permission
-from libs.utils import get_from_s3, query_vlog, strip_timezone_to_seconds, upload_to_s3
+from libs.utils import (
+    delete_from_s3,
+    get_from_s3,
+    query_vlog,
+    strip_timezone_to_seconds,
+    upload_to_s3,
+)
 from models import Config, Playbook, PlaybookPermissions, PlaybookVersion, Role, Tool, ToolResources
 from services.digital_employee.package_api import import_package_from_request, request_is_loopback
 from services.event_ingestion.views import check_vector_config
@@ -33,6 +39,42 @@ from settings import AUTHENTICATION_SESSION_EXPIRATION, SECRET, SESSION_ENCODING
 
 system_bp = Blueprint("system", url_prefix="/system")
 _all__ = ["system_bp"]
+
+_PICTURE_TYPES = ("background", "webico", "logo")
+_DEFAULT_PICTURE_URLS = {
+    "background": "",
+    "webico": "",
+    "logo": "/logo.svg",
+}
+
+
+def _custom_picture_filename(pic_type: str, picture_url: str) -> str | None:
+    """Return an object name only for files owned by system personalization."""
+    if pic_type not in _PICTURE_TYPES or not picture_url:
+        return None
+
+    path = urlparse(picture_url).path
+    prefix = "/files/user/custom/"
+    if not path.startswith(prefix):
+        return None
+
+    filename = path.removeprefix(prefix)
+    expected_stem = "bg" if pic_type == "background" else pic_type
+    if "/" in filename or (
+        filename not in (expected_stem,)
+        and not filename.startswith(f"{expected_stem}.")
+    ):
+        return None
+    return filename
+
+
+def _picture_payload(pic_type: str, picture_url: str = "") -> dict:
+    customized = bool(picture_url)
+    return {
+        "type": pic_type,
+        "url": picture_url if customized else _DEFAULT_PICTURE_URLS[pic_type],
+        "customized": customized,
+    }
 
 
 @system_bp.post("/upload")
@@ -152,8 +194,8 @@ async def upload_image(request):
 
 @system_bp.get("/picture")
 @openapi.definition(
-    summary="获取自定义图片",
-    description="获取自定义图片",
+    summary="获取系统图片设置",
+    description="获取图片地址及是否为自定义设置；未设置 Logo 时返回系统默认 Logo",
     parameter=[
         {
             "name": "type",
@@ -166,18 +208,87 @@ async def upload_image(request):
     response={
         "200": {
             "description": "获取成功",
-            "content": {"image/*": {"schema": {"type": "string", "format": "binary"}}},
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "type": {"type": "string"},
+                                    "url": {"type": "string"},
+                                    "customized": {"type": "boolean"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
         }
     },
 )
 async def get_bgpic(request):
     pic_type = request.args.get("type")
-    if pic_type not in ("background", "webico", "logo"):
+    if pic_type not in _PICTURE_TYPES:
         raise CustomError(ErrorCode.PARAM_ERROR)
     cfg = await Config.get_or_none(key=pic_type, module="system")
+    return response_ok(_picture_payload(pic_type, cfg.value if cfg else ""))
+
+
+@system_bp.delete("/picture")
+@openapi.definition(
+    summary="删除自定义图片",
+    description="删除个性化设置中的自定义背景图、网页图标或系统 Logo，并恢复默认设置",
+    parameter=[
+        {
+            "name": "type",
+            "in": "query",
+            "description": "图片类型: background, webico, logo",
+            "required": True,
+            "schema": {"type": "string"},
+        }
+    ],
+    response={
+        "200": {
+            "description": "恢复默认设置成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "type": {"type": "string"},
+                                    "url": {"type": "string"},
+                                    "customized": {"type": "boolean"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("system:d")
+async def delete_picture(request):
+    pic_type = request.args.get("type")
+    if pic_type not in _PICTURE_TYPES:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    cfg = await Config.get_or_none(key=pic_type, module="system")
     if cfg:
-        return response_ok({"url": cfg.value})
-    return response.raw(b"", content_type="image/png")
+        filename = _custom_picture_filename(pic_type, cfg.value)
+        picture_url = cfg.value
+        await cfg.delete()
+        if filename and not await delete_from_s3("user", filename, "custom"):
+            logger.warning(f"自定义图片对象清理失败，已恢复默认设置: {picture_url}")
+
+    return response_ok(_picture_payload(pic_type))
 
 
 @system_bp.get("/platform")
@@ -1336,6 +1447,159 @@ async def outgoing(request):
     await Config.update_or_create(key="outgoing_audit_log", module="audit_log", defaults={"value": str(json_data)})
 
     return response_ok("保存成功")
+
+
+def _parse_host_port(addr: str) -> tuple[str, int]:
+    """解析 host:port，端口非法时抛 INVALID_PORT_ERROR（与 outgoing 校验一致）。"""
+    addr = (addr or "").strip()
+    host, _, port_str = addr.rpartition(":")
+    if not host or not port_str:
+        raise CustomError(ErrorCode.INVALID_PORT_ERROR)
+    try:
+        port = int(port_str)
+    except ValueError:
+        raise CustomError(ErrorCode.INVALID_PORT_ERROR)
+    if port < 1 or port > 65535:
+        raise CustomError(ErrorCode.INVALID_PORT_ERROR)
+    return host, port
+
+
+async def _test_syslog_connectivity(addr: str, mode: str) -> None:
+    """探测 syslog 目标可达性。
+
+    - tcp：建立真实连接确认端口开放/可达；
+    - udp：无连接，仅确认地址可解析并尝试发一个探测包（尽力而为，无法保证对端接收）。
+    失败统一抛 OUTBOUND_CONNECTION_TEST_FAILED。
+    """
+    host, port = _parse_host_port(addr)
+    mode = (mode or "tcp").lower()
+    try:
+        if mode == "udp":
+            loop = asyncio.get_running_loop()
+            transport, _ = await asyncio.wait_for(
+                loop.create_datagram_endpoint(
+                    lambda: asyncio.DatagramProtocol(),
+                    remote_addr=(host, port),
+                ),
+                timeout=5,
+            )
+            try:
+                transport.sendto(b"")
+            finally:
+                transport.close()
+        else:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=5
+            )
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+    except CustomError:
+        raise
+    except Exception as exc:
+        logger.warning(f"syslog 连接测试失败 {addr} ({mode}): {exc}")
+        raise CustomError(ErrorCode.OUTBOUND_CONNECTION_TEST_FAILED)
+
+
+async def _test_kafka_connectivity(item: dict) -> None:
+    """短连 kafka broker，校验网络连通及 SASL 凭据（若配置）。失败抛 OUTBOUND_CONNECTION_TEST_FAILED。"""
+    from aiokafka import AIOKafkaProducer
+
+    bootstrap_servers = (item.get("sink_address") or "").strip()
+    if not bootstrap_servers:
+        raise CustomError(ErrorCode.INVALID_PORT_ERROR)
+    for addr in bootstrap_servers.split(","):
+        _parse_host_port(addr)
+
+    producer_kwargs: dict = {
+        "bootstrap_servers": bootstrap_servers,
+        "request_timeout_ms": 5000,
+    }
+    if mechanism := item.get("sasl_mechanism"):
+        producer_kwargs.update(
+            security_protocol="SASL_PLAINTEXT",
+            sasl_mechanism=mechanism,
+            sasl_plain_username=item.get("sasl_username"),
+            sasl_plain_password=item.get("sasl_password"),
+        )
+
+    producer = AIOKafkaProducer(**producer_kwargs)
+    try:
+        await asyncio.wait_for(producer.start(), timeout=8)
+    except CustomError:
+        raise
+    except Exception as exc:
+        logger.warning(f"kafka 连接测试失败 {bootstrap_servers}: {exc}")
+        raise CustomError(ErrorCode.OUTBOUND_CONNECTION_TEST_FAILED)
+    finally:
+        try:
+            await asyncio.wait_for(producer.stop(), timeout=5)
+        except Exception:
+            pass
+
+
+@system_bp.post("/outgoing/test")
+@openapi.definition(
+    summary="测试审计日志外发连接",
+    description="测试审计日志外发目标的网络连通性与凭据（不落盘），需要audit:u权限",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["sink_type", "sink_address"],
+                "properties": {
+                    "sink_type": {"type": "string", "description": "外发方式：kafka 或 syslog"},
+                    "sink_address": {"type": "string", "description": "外发地址 host:port"},
+                    "sink_protocol": {"type": "string", "description": "syslog 协议 tcp/udp"},
+                    "kafka_topic": {"type": "string", "description": "kafka 主题（可选）"},
+                    "sasl_mechanism": {"type": "string", "description": "SASL 机制（可选）"},
+                    "sasl_username": {"type": "string", "description": "SASL 用户名（可选）"},
+                    "sasl_password": {"type": "string", "description": "SASL 密码（可选）"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "测试成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("audit:u")
+async def test_outgoing(request):
+    item = request.json or {}
+    sink_type = item.get("sink_type")
+    sink_address = (item.get("sink_address") or "").strip()
+    if not sink_type or not sink_address:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if sink_type == "kafka":
+        await _test_kafka_connectivity(item)
+    elif sink_type == "syslog":
+        mode = item.get("sink_protocol")
+        if not mode:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        # syslog 不支持逗号分隔多地址（与 outgoing 保存逻辑一致）
+        if len(sink_address.split(",")) > 1:
+            raise CustomError(ErrorCode.MULTIPLE_SYSLOG_ADDRESS_NOT_SUPPORTED)
+        await _test_syslog_connectivity(sink_address, mode)
+    else:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    return response_ok("连接测试通过")
 
 
 @system_bp.post("/outgoing-config")
