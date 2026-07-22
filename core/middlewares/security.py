@@ -93,20 +93,27 @@ class SecurityMiddleware(BaseMiddleware):
             "/health",
             "/system/oauth/status",
             "/system/platform",
-            "/system/picture",
             "/user/oauth/login",
             "/user/oauth/callback",
             "/user/local-auth",
             "/user/iframe-login",
             "/approve/callback",
         ]
+        white_method_urls = {("GET", "/system/picture")}
         white_prefixes = [
             "/system/down-file/",
             "/agent/report/schedule/internal/",
             "/digital_employee/internal/",
             "/digital_employee/runtime/",
         ]
-        if request.path not in white_urls and not any(request.path.startswith(prefix) for prefix in white_prefixes):
+        request_method = getattr(request, "method", "GET").upper()
+        if (
+            request.path not in white_urls
+            and (request_method, request.path) not in white_method_urls
+            and not any(
+                request.path.startswith(prefix) for prefix in white_prefixes
+            )
+        ):
             await authenticate(request)
             if request.path == "/docs" or request.path.startswith("/docs/"):
                 await check_permissions(request, "apidoc:r")

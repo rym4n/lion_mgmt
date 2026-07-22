@@ -120,6 +120,29 @@ def test_cross_origin_safe_request_keeps_iframe_login_flow(monkeypatch):
     assert called_paths == []
 
 
+def test_system_picture_only_allows_anonymous_get(monkeypatch):
+    authenticated_requests = []
+
+    async def fake_authenticate(request):
+        authenticated_requests.append((request.method, request.path))
+
+    monkeypatch.setattr(security, "authenticate", fake_authenticate)
+    middleware = security.SecurityMiddleware()
+
+    _run(
+        middleware.before_request(
+            _request(path="/system/picture", method="GET")
+        )
+    )
+    _run(
+        middleware.before_request(
+            _request(path="/system/picture", method="DELETE")
+        )
+    )
+
+    assert authenticated_requests == [("DELETE", "/system/picture")]
+
+
 def test_digital_employee_internal_routes_skip_session_auth(monkeypatch):
     called_paths = []
 
