@@ -104,8 +104,7 @@ def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
         "sha256:9bc98ee277611282bbd9de0e218df695022ec696aa4ae06948661a0bd96173f8"
     )
     assert {
-        name: len(catalog[name])
-        for name in builtin_catalog.CATALOG_FILES
+        name: len(catalog[name]) for name in builtin_catalog.CATALOG_FILES
     } == builtin_catalog.CATALOG_COUNTS
     assert sum(item["is_derived"] for item in catalog["fields"]) == 537
     assert Counter(
@@ -115,7 +114,10 @@ def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
 
     model_keys = {item["key"] for item in catalog["models"]}
     assert "rex-test" not in model_keys
-    assert {item["key"] for item in catalog["groups"]}.isdisjoint({"it-system", "t"})
+    assert {item["key"] for item in catalog["groups"]}.isdisjoint(
+        {"custom", "it-system", "t"}
+    )
+    assert "自定义模型" not in {item["name"] for item in catalog["groups"]}
     assert all(
         set(item["source_model_keys"] + item["target_model_keys"]) <= model_keys
         for item in catalog["relations"]
@@ -149,7 +151,9 @@ def test_builtin_catalog_preserves_table_schema_and_composite_unique_rule():
     fields = {item["builtin_key"]: item for item in catalog["fields"]}
 
     assert fields["host.proc"]["options"]["schema_mode"] == "fixed"
-    assert {column["column_id"] for column in fields["host.proc"]["options"]["columns"]} == {
+    assert {
+        column["column_id"] for column in fields["host.proc"]["options"]["columns"]
+    } == {
         "pid",
         "name",
         "arg",
@@ -162,8 +166,7 @@ def test_builtin_catalog_preserves_table_schema_and_composite_unique_rule():
         "columns": [],
     }
     assert [
-        (item["model_key"], item["field_keys"])
-        for item in catalog["unique_rules"]
+        (item["model_key"], item["field_keys"]) for item in catalog["unique_rules"]
     ] == [("host", ["ip_addr", "cloud"])]
 
 
@@ -262,7 +265,12 @@ def test_composite_unique_rule_is_enforced_for_instances(monkeypatch):
         "filter",
         staticmethod(
             lambda **_kwargs: _Query(
-                [_Record(id="ci-existing", attributes={"ip_addr": "10.0.0.1", "cloud": "aliyun"})]
+                [
+                    _Record(
+                        id="ci-existing",
+                        attributes={"ip_addr": "10.0.0.1", "cloud": "aliyun"},
+                    )
+                ]
             )
         ),
     )
@@ -270,9 +278,7 @@ def test_composite_unique_rule_is_enforced_for_instances(monkeypatch):
         manager.SupplyChainCiUniqueRule,
         "filter",
         staticmethod(
-            lambda **_kwargs: _Query(
-                [SimpleNamespace(field_keys=["ip_addr", "cloud"])]
-            )
+            lambda **_kwargs: _Query([SimpleNamespace(field_keys=["ip_addr", "cloud"])])
         ),
     )
 
@@ -571,6 +577,109 @@ def test_unchanged_catalog_reconcile_is_audited(monkeypatch):
     assert events[0]["before_state"] == events[0]["after_state"]
 
 
+def test_ready_catalog_version_change_does_not_overwrite_user_edits(monkeypatch):
+    metadata = _catalog()["metadata"]
+    state = _Record(
+        catalog_version="older-factory-version",
+        catalog_digest="older-digest",
+        revision=3,
+        status="ready",
+        onboarding_completed=True,
+        updater="user-a",
+    )
+    events = []
+
+    async def no_lock(*_args):
+        return None
+
+    async def reject_catalog_reseed(*_args):
+        pytest.fail("a ready factory catalog must not reseed user-managed records")
+
+    async def create_event(**kwargs):
+        events.append(kwargs)
+        return _Record(**kwargs)
+
+    monkeypatch.setattr(builtin_catalog, "in_transaction", _Transaction)
+    monkeypatch.setattr(builtin_catalog, "_lock_tenant", no_lock)
+    monkeypatch.setattr(
+        builtin_catalog.SupplyChainBuiltinCatalogState,
+        "filter",
+        staticmethod(lambda **_kwargs: _Query(state)),
+    )
+    monkeypatch.setattr(
+        builtin_catalog, "_upsert_builtin_groups", reject_catalog_reseed
+    )
+    monkeypatch.setattr(
+        builtin_catalog.SupplyChainBuiltinCatalogEvent,
+        "create",
+        staticmethod(create_event),
+    )
+
+    result = asyncio.run(
+        builtin_catalog._reconcile_builtin_catalog_once(
+            "tenant-a",
+            "admin",
+            "metadata-upgrade",
+        )
+    )
+
+    assert result["changed"] is True
+    assert result["changes"] == {"metadata": 1}
+    assert state.catalog_version == builtin_catalog.CATALOG_VERSION
+    assert state.catalog_digest == metadata["digest"]
+    assert state.save_calls[0]["update_fields"] == [
+        "catalog_version",
+        "catalog_digest",
+        "updater",
+        "utime",
+    ]
+    assert events[0]["changes"] == {"metadata": 1}
+
+
+def test_product_builtin_group_can_be_renamed_and_deleted(monkeypatch):
+    group = _Record(
+        id="group-1",
+        key="hardware",
+        name="硬件",
+        sort=1,
+        is_builtin=True,
+        is_locked=False,
+        deleted=False,
+        updater=None,
+    )
+
+    async def no_lock(*_args):
+        return None
+
+    monkeypatch.setattr(builtin_catalog, "in_transaction", _Transaction)
+    monkeypatch.setattr(builtin_catalog, "_lock_tenant", no_lock)
+    monkeypatch.setattr(
+        builtin_catalog.SupplyChainCiModelGroup,
+        "filter",
+        staticmethod(lambda **_kwargs: _Query(group)),
+    )
+    monkeypatch.setattr(
+        builtin_catalog.SupplyChainCiType,
+        "filter",
+        staticmethod(lambda **_kwargs: _Query()),
+    )
+
+    updated = asyncio.run(
+        builtin_catalog.save_model_group(
+            "tenant-a",
+            {"id": group.id, "key": group.key, "name": "基础硬件"},
+            "admin",
+        )
+    )
+    deleted = asyncio.run(builtin_catalog.delete_model_group("tenant-a", group.id))
+
+    assert updated is group
+    assert group.name == "基础硬件"
+    assert deleted == {"id": group.id}
+    assert group.deleted is True
+    assert len(group.save_calls) == 2
+
+
 def test_failed_catalog_reconcile_marks_state_and_records_failure_type(monkeypatch):
     metadata = _catalog()["metadata"]
     state = _Record(
@@ -646,16 +755,12 @@ def test_startup_reconcile_processes_every_tenant_without_stopping_on_failure(
     )
     monkeypatch.setattr(builtin_catalog, "reconcile_builtin_catalog", reconcile)
 
-    result = asyncio.run(
-        builtin_catalog.reconcile_all_tenant_builtin_catalogs()
-    )
+    result = asyncio.run(builtin_catalog.reconcile_all_tenant_builtin_catalogs())
 
     assert result == {
         "total": 2,
         "changed": 1,
         "unchanged": 0,
-        "failed": [
-            {"tenant_id": "tenant-b", "failure_reason": "RuntimeError"}
-        ],
+        "failed": [{"tenant_id": "tenant-b", "failure_reason": "RuntimeError"}],
     }
     assert AssetCatalogListener in LISTENER_TUPLE

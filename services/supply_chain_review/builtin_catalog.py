@@ -59,7 +59,6 @@ RELATION_QUANTITY_COUNTS = {
 }
 ACTIVATION_ACTIONS = {"enable", "disable"}
 ACTIVATION_SCOPES = {"model", "group", "selection", "all"}
-CUSTOM_GROUP_KEY = "custom"
 GROUP_KEY_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
 
 
@@ -74,9 +73,13 @@ def _canonical(value) -> bytes:
 
 @lru_cache(maxsize=1)
 def load_builtin_catalog() -> dict:
-    metadata = json.loads((CATALOG_DIRECTORY / "catalog.json").read_text(encoding="utf-8"))
+    metadata = json.loads(
+        (CATALOG_DIRECTORY / "catalog.json").read_text(encoding="utf-8")
+    )
     catalog = {
-        name: json.loads((CATALOG_DIRECTORY / f"{name}.json").read_text(encoding="utf-8"))
+        name: json.loads(
+            (CATALOG_DIRECTORY / f"{name}.json").read_text(encoding="utf-8")
+        )
         for name in CATALOG_FILES
     }
     counts = {name: len(items) for name, items in catalog.items()}
@@ -104,7 +107,10 @@ def load_builtin_catalog() -> dict:
 
     group_keys = {item["key"] for item in catalog["groups"]}
     model_keys = {item["key"] for item in catalog["models"]}
-    if len(group_keys) != CATALOG_COUNTS["groups"] or len(model_keys) != CATALOG_COUNTS["models"]:
+    if (
+        len(group_keys) != CATALOG_COUNTS["groups"]
+        or len(model_keys) != CATALOG_COUNTS["models"]
+    ):
         raise RuntimeError("builtin asset catalog contains duplicate keys")
     if any(item["group_key"] not in group_keys for item in catalog["models"]):
         raise RuntimeError("builtin asset catalog contains unknown model groups")
@@ -117,7 +123,10 @@ def load_builtin_catalog() -> dict:
         raise RuntimeError("builtin asset catalog contains duplicate fields")
     if any(item["data_type"] not in FIELD_DATA_TYPES for item in catalog["fields"]):
         raise RuntimeError("builtin asset catalog contains unsupported field types")
-    if sum(bool(item.get("is_derived")) for item in catalog["fields"]) != DERIVED_FIELD_COUNT:
+    if (
+        sum(bool(item.get("is_derived")) for item in catalog["fields"])
+        != DERIVED_FIELD_COUNT
+    ):
         raise RuntimeError("builtin asset catalog derived-field count mismatch")
     if any(item["model_key"] not in model_keys for item in catalog["unique_rules"]):
         raise RuntimeError("builtin asset catalog contains unknown unique-rule models")
@@ -126,7 +135,9 @@ def load_builtin_catalog() -> dict:
             (rule["model_key"], field_key) not in field_identities
             for field_key in rule["field_keys"]
         ):
-            raise RuntimeError("builtin asset catalog unique rule contains unknown fields")
+            raise RuntimeError(
+                "builtin asset catalog unique rule contains unknown fields"
+            )
     relation_quantity_counts = {
         quantities: sum(
             relation["source_to_target"] == quantities[0]
@@ -138,25 +149,40 @@ def load_builtin_catalog() -> dict:
     if relation_quantity_counts != RELATION_QUANTITY_COUNTS:
         raise RuntimeError("builtin asset catalog relation quantity mismatch")
     for relation in catalog["relations"]:
-        endpoints = set(relation["source_model_keys"]) | set(relation["target_model_keys"])
+        endpoints = set(relation["source_model_keys"]) | set(
+            relation["target_model_keys"]
+        )
         if endpoints - model_keys:
-            raise RuntimeError("builtin asset catalog contains unknown relation endpoints")
+            raise RuntimeError(
+                "builtin asset catalog contains unknown relation endpoints"
+            )
         if {
             relation["source_to_target"],
             relation["target_to_source"],
         } - RELATION_QUANTITIES:
-            raise RuntimeError("builtin asset catalog contains invalid relation quantity")
+            raise RuntimeError(
+                "builtin asset catalog contains invalid relation quantity"
+            )
     table_fields = {
-        item["builtin_key"]: item for item in catalog["fields"] if item["data_type"] == "table"
+        item["builtin_key"]: item
+        for item in catalog["fields"]
+        if item["data_type"] == "table"
     }
-    if table_fields.get("host.proc", {}).get("options", {}).get("schema_mode") != "fixed":
+    if (
+        table_fields.get("host.proc", {}).get("options", {}).get("schema_mode")
+        != "fixed"
+    ):
         raise RuntimeError("builtin asset catalog host process schema is incomplete")
     if table_fields.get("ip.ip_table", {}).get("options") != {
         "schema_mode": "dynamic",
         "columns": [],
     }:
-        raise RuntimeError("builtin asset catalog dynamic IP table schema is incomplete")
-    source_icons = {item.get("source_icon") for item in catalog["models"] if item.get("source_icon")}
+        raise RuntimeError(
+            "builtin asset catalog dynamic IP table schema is incomplete"
+        )
+    source_icons = {
+        item.get("source_icon") for item in catalog["models"] if item.get("source_icon")
+    }
     if {item.get("source_icon") for item in catalog["icon_aliases"]} != source_icons:
         raise RuntimeError("builtin asset catalog icon aliases are incomplete")
     return {"metadata": metadata, **catalog}
@@ -178,10 +204,14 @@ async def _bulk_create(model, items: list, connection) -> None:
         await model.bulk_create(items, batch_size=500, using_db=connection)
 
 
-async def _upsert_builtin_groups(tenant: str, catalog: dict, operator: str | None, connection) -> tuple[dict, int]:
+async def _upsert_builtin_groups(
+    tenant: str, catalog: dict, operator: str | None, connection
+) -> tuple[dict, int]:
     existing = {
         item.key: item
-        for item in await SupplyChainCiModelGroup.filter(tenant_id=tenant).using_db(connection).all()
+        for item in await SupplyChainCiModelGroup.filter(tenant_id=tenant)
+        .using_db(connection)
+        .all()
     }
     created = []
     updated = 0
@@ -191,7 +221,7 @@ async def _upsert_builtin_groups(tenant: str, catalog: dict, operator: str | Non
             "name": definition["name"],
             "sort": definition["sort"],
             "is_builtin": True,
-            "is_locked": True,
+            "is_locked": False,
             "builtin_version": CATALOG_VERSION,
             "builtin_hash": definition["builtin_hash"],
             "deleted": False,
@@ -213,19 +243,6 @@ async def _upsert_builtin_groups(tenant: str, catalog: dict, operator: str | Non
                 setattr(item, key, value)
             await item.save(using_db=connection, update_fields=[*values, "utime"])
             updated += 1
-    if CUSTOM_GROUP_KEY not in existing:
-        custom = SupplyChainCiModelGroup(
-            tenant_id=tenant,
-            key=CUSTOM_GROUP_KEY,
-            name="自定义模型",
-            sort=len(catalog["groups"]) + 1,
-            is_builtin=False,
-            is_locked=False,
-            creator=operator,
-            updater=operator,
-        )
-        created.append(custom)
-        existing[CUSTOM_GROUP_KEY] = custom
     await _bulk_create(SupplyChainCiModelGroup, created, connection)
     return existing, len(created) + updated
 
@@ -239,7 +256,9 @@ async def _upsert_builtin_models(
 ) -> tuple[dict, int]:
     existing = {
         item.key: item
-        for item in await SupplyChainCiType.filter(tenant_id=tenant).using_db(connection).all()
+        for item in await SupplyChainCiType.filter(tenant_id=tenant)
+        .using_db(connection)
+        .all()
     }
     created = []
     updated = 0
@@ -251,7 +270,7 @@ async def _upsert_builtin_models(
             "group_id": group.id,
             "group_key": group.key,
             "primary_field": definition["primary_field"],
-            "is_locked": True,
+            "is_locked": False,
             "is_builtin": True,
             "builtin_key": definition["key"],
             "builtin_version": CATALOG_VERSION,
@@ -295,7 +314,9 @@ async def _upsert_builtin_fields(
         for item in await SupplyChainCiFieldDef.filter(
             tenant_id=tenant,
             is_builtin=True,
-        ).using_db(connection).all()
+        )
+        .using_db(connection)
+        .all()
         if item.builtin_key
     }
     occupied = {
@@ -303,7 +324,9 @@ async def _upsert_builtin_fields(
         for item in await SupplyChainCiFieldDef.filter(
             tenant_id=tenant,
             deleted=False,
-        ).using_db(connection).all()
+        )
+        .using_db(connection)
+        .all()
         if not item.is_builtin
     }
     created = []
@@ -323,12 +346,10 @@ async def _upsert_builtin_fields(
             "unique": definition["unique"],
             "editable": definition["editable"],
             "is_derived": definition["is_derived"],
-            "field_group": definition["field_group"],
-            "field_group_sort": definition["field_group_sort"],
             "user_prompt": definition["user_prompt"],
             "default_value": definition["default_value"],
             "sort": definition["sort"],
-            "is_locked": True,
+            "is_locked": False,
             "is_builtin": True,
             "builtin_key": definition["builtin_key"],
             "builtin_version": CATALOG_VERSION,
@@ -369,7 +390,9 @@ async def _upsert_builtin_unique_rules(
         for item in await SupplyChainCiUniqueRule.filter(
             tenant_id=tenant,
             is_builtin=True,
-        ).using_db(connection).all()
+        )
+        .using_db(connection)
+        .all()
         if item.builtin_key
     }
     occupied = {
@@ -377,7 +400,9 @@ async def _upsert_builtin_unique_rules(
         for item in await SupplyChainCiUniqueRule.filter(
             tenant_id=tenant,
             deleted=False,
-        ).using_db(connection).all()
+        )
+        .using_db(connection)
+        .all()
         if not item.is_builtin
     }
     created = []
@@ -390,7 +415,7 @@ async def _upsert_builtin_unique_rules(
             "key": definition["builtin_key"][:64],
             "field_keys": definition["field_keys"],
             "sort": definition["sort"],
-            "is_locked": True,
+            "is_locked": False,
             "is_builtin": True,
             "builtin_key": definition["builtin_key"],
             "builtin_version": CATALOG_VERSION,
@@ -403,7 +428,9 @@ async def _upsert_builtin_unique_rules(
         if item is None:
             if (model.id, definition["builtin_key"][:64]) in occupied:
                 raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
-            created.append(SupplyChainCiUniqueRule(tenant_id=tenant, creator=operator, **values))
+            created.append(
+                SupplyChainCiUniqueRule(tenant_id=tenant, creator=operator, **values)
+            )
         elif item.builtin_hash != definition["builtin_hash"] or item.deleted:
             for key, value in values.items():
                 setattr(item, key, value)
@@ -425,7 +452,9 @@ async def _upsert_builtin_relations(
         for item in await SupplyChainCiRelationType.filter(
             tenant_id=tenant,
             is_builtin=True,
-        ).using_db(connection).all()
+        )
+        .using_db(connection)
+        .all()
         if item.builtin_key
     }
     occupied = {
@@ -433,7 +462,9 @@ async def _upsert_builtin_relations(
         for item in await SupplyChainCiRelationType.filter(
             tenant_id=tenant,
             deleted=False,
-        ).using_db(connection).all()
+        )
+        .using_db(connection)
+        .all()
         if not item.is_builtin
     }
     created = []
@@ -452,7 +483,7 @@ async def _upsert_builtin_relations(
             "source_to_target": definition["source_to_target"],
             "target_to_source": definition["target_to_source"],
             "relation_fields": definition["relation_fields"],
-            "is_locked": True,
+            "is_locked": False,
             "is_builtin": True,
             "builtin_key": definition["key"],
             "builtin_version": CATALOG_VERSION,
@@ -492,7 +523,9 @@ async def _ensure_activations(
         for item in await SupplyChainBuiltinActivation.filter(
             tenant_id=tenant,
             subject_type="model",
-        ).using_db(connection).all()
+        )
+        .using_db(connection)
+        .all()
     }
     created = [
         SupplyChainBuiltinActivation(
@@ -560,26 +593,40 @@ async def _reconcile_builtin_catalog_once(
             .first()
         )
         before_state = state.json if state else {}
-        if (
-            state
-            and state.catalog_version == CATALOG_VERSION
-            and state.catalog_digest == metadata["digest"]
-            and state.status == "ready"
-        ):
+        if state and state.status == "ready":
+            metadata_changed = (
+                state.catalog_version != CATALOG_VERSION
+                or state.catalog_digest != metadata["digest"]
+            )
+            if metadata_changed:
+                state.catalog_version = CATALOG_VERSION
+                state.catalog_digest = metadata["digest"]
+                state.updater = operator
+                await state.save(
+                    using_db=connection,
+                    update_fields=[
+                        "catalog_version",
+                        "catalog_digest",
+                        "updater",
+                        "utime",
+                    ],
+                )
             await _record_catalog_event(
                 tenant,
                 request_id,
-                "unchanged",
+                "succeeded" if metadata_changed else "unchanged",
                 metadata,
                 operator,
                 connection,
                 before_state=before_state,
                 after_state=state.json,
+                changes={"metadata": 1} if metadata_changed else None,
             )
             return {
                 "request_id": request_id,
                 "state": state.json,
-                "changed": False,
+                "changed": metadata_changed,
+                "changes": {"metadata": 1} if metadata_changed else {},
                 **CATALOG_COUNTS,
             }
 
@@ -755,7 +802,9 @@ async def reconcile_all_tenant_builtin_catalogs(
     return result
 
 
-async def ensure_builtin_catalog(tenant: str, operator: str | None = None) -> SupplyChainBuiltinCatalogState:
+async def ensure_builtin_catalog(
+    tenant: str, operator: str | None = None
+) -> SupplyChainBuiltinCatalogState:
     metadata = load_builtin_catalog()["metadata"]
     state = await SupplyChainBuiltinCatalogState.filter(
         tenant_id=tenant,
@@ -816,16 +865,18 @@ async def save_model_group(
             )
             if not group:
                 raise CustomError(ErrorCode.NOT_FOUND)
-            if group.is_builtin or group.is_locked:
-                raise CustomError(ErrorCode.FORBIDDEN)
             if key and key != group.key:
                 raise CustomError(ErrorCode.PARAM_ERROR)
         else:
             key = key or f"group_{uuid.uuid4().hex}"
-            if await SupplyChainCiModelGroup.filter(
-                tenant_id=tenant,
-                key=key,
-            ).using_db(connection).exists():
+            if (
+                await SupplyChainCiModelGroup.filter(
+                    tenant_id=tenant,
+                    key=key,
+                )
+                .using_db(connection)
+                .exists()
+            ):
                 raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
         try:
             sort = int(data.get("sort", getattr(group, "sort", 10000)) or 0)
@@ -870,13 +921,15 @@ async def delete_model_group(tenant: str, group_id: str) -> dict:
         )
         if not group:
             raise CustomError(ErrorCode.NOT_FOUND)
-        if group.is_builtin or group.is_locked or group.key == CUSTOM_GROUP_KEY:
-            raise CustomError(ErrorCode.FORBIDDEN)
-        if await SupplyChainCiType.filter(
-            tenant_id=tenant,
-            group_id=group.id,
-            deleted=False,
-        ).using_db(connection).exists():
+        if (
+            await SupplyChainCiType.filter(
+                tenant_id=tenant,
+                group_id=group.id,
+                deleted=False,
+            )
+            .using_db(connection)
+            .exists()
+        ):
             raise CustomError(ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES)
         group.deleted = True
         await group.save(using_db=connection, update_fields=["deleted", "utime"])
@@ -934,14 +987,22 @@ async def list_model_groups(
     include_instance_count: bool = False,
 ) -> dict:
     state = await ensure_builtin_catalog(tenant)
-    groups = await SupplyChainCiModelGroup.filter(
-        tenant_id=tenant,
-        deleted=False,
-    ).order_by("sort", "key").all()
-    models = await SupplyChainCiType.filter(
-        tenant_id=tenant,
-        deleted=False,
-    ).order_by("group_key", "sort", "key").all()
+    groups = (
+        await SupplyChainCiModelGroup.filter(
+            tenant_id=tenant,
+            deleted=False,
+        )
+        .order_by("sort", "key")
+        .all()
+    )
+    models = (
+        await SupplyChainCiType.filter(
+            tenant_id=tenant,
+            deleted=False,
+        )
+        .order_by("group_key", "sort", "key")
+        .all()
+    )
     instance_counts = {}
     if include_instance_count and models:
         for ci in await SupplyChainCi.filter(
@@ -956,7 +1017,10 @@ async def list_model_groups(
         all_group_models = [item for item in models if item.group_id == group.id]
         group_models = list(all_group_models)
         if keyword_folded:
-            group_matches = keyword_folded in group.name.casefold() or keyword_folded in group.key.casefold()
+            group_matches = (
+                keyword_folded in group.name.casefold()
+                or keyword_folded in group.key.casefold()
+            )
             group_models = [
                 item
                 for item in group_models
@@ -1022,13 +1086,21 @@ async def _resolve_activation_models(
     all_models = await query.order_by("key").all()
     if scope == "all":
         return all_models
-    if not subject_keys or any(not isinstance(key, str) or not key for key in subject_keys):
+    if not subject_keys or any(
+        not isinstance(key, str) or not key for key in subject_keys
+    ):
         raise CustomError(ErrorCode.PARAM_ERROR)
     wanted = set(subject_keys)
     if scope == "model":
-        selected = [item for item in all_models if item.key in wanted or item.id in wanted]
+        selected = [
+            item for item in all_models if item.key in wanted or item.id in wanted
+        ]
     elif scope == "group":
-        selected = [item for item in all_models if item.group_key in wanted or item.group_id in wanted]
+        selected = [
+            item
+            for item in all_models
+            if item.group_key in wanted or item.group_id in wanted
+        ]
     else:
         selected = [
             item
@@ -1060,7 +1132,9 @@ async def _activation_impact(
         all_models_query = all_models_query.using_db(connection)
     all_models = await all_models_query.all()
     target_enabled = {
-        item.key: enabled if item.key in model_keys else item.status == CI_TYPE_STATUS_ACTIVE
+        item.key: enabled
+        if item.key in model_keys
+        else item.status == CI_TYPE_STATUS_ACTIVE
         for item in all_models
     }
     active_relations = 0
@@ -1068,7 +1142,9 @@ async def _activation_impact(
     cross_group_dependencies = []
     selected_group_keys = {item.group_key for item in models}
     for relation in relations:
-        endpoints = set(relation.source_ci_types or []) | set(relation.target_ci_types or [])
+        endpoints = set(relation.source_ci_types or []) | set(
+            relation.target_ci_types or []
+        )
         if not endpoints & model_keys:
             continue
         if all(target_enabled.get(key, False) for key in endpoints):
@@ -1076,7 +1152,9 @@ async def _activation_impact(
         else:
             dormant_relations += 1
         for endpoint in sorted(endpoints - model_keys):
-            endpoint_model = next((item for item in all_models if item.key == endpoint), None)
+            endpoint_model = next(
+                (item for item in all_models if item.key == endpoint), None
+            )
             if endpoint_model and endpoint_model.group_key not in selected_group_keys:
                 cross_group_dependencies.append(
                     {
@@ -1146,7 +1224,9 @@ async def preview_builtin_activation(
     models = await _resolve_activation_models(tenant, scope, subject_keys)
     impact = await _activation_impact(tenant, models, action == "enable")
     token = uuid.uuid4().hex
-    expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=10)
+    expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(
+        minutes=10
+    )
     await SupplyChainBuiltinActivationPreview.create(
         tenant_id=tenant,
         token=token,
@@ -1177,7 +1257,12 @@ async def apply_builtin_activation(
     token = data.get("preview_token")
     request_id = data.get("request_id")
     expected_revision = data.get("expected_tenant_revision")
-    if not isinstance(token, str) or not token or not isinstance(request_id, str) or not request_id:
+    if (
+        not isinstance(token, str)
+        or not token
+        or not isinstance(request_id, str)
+        or not request_id
+    ):
         raise CustomError(ErrorCode.PARAM_ERROR)
     async with in_transaction() as connection:
         await _lock_tenant(tenant, connection)

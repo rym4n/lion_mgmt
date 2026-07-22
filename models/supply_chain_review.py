@@ -62,7 +62,6 @@ class SupplyChainCiModelGroup(BaseModel):
             "name": self.name,
             "sort": self.sort,
             "is_builtin": self.is_builtin,
-            "is_locked": self.is_locked,
             "builtin_version": self.builtin_version,
             "builtin_hash": self.builtin_hash,
             "creator": self.creator,
@@ -95,7 +94,9 @@ class SupplyChainCiType(BaseModel):
     builtin_key = fields.CharField(max_length=64, null=True, description="内置稳定标识")
     builtin_version = fields.CharField(max_length=64, null=True, description="内置版本")
     builtin_hash = fields.CharField(max_length=64, null=True, description="定义摘要")
-    owner = fields.CharField(max_length=20, default="tenant", description="product/tenant")
+    owner = fields.CharField(
+        max_length=20, default="tenant", description="product/tenant"
+    )
     sort = fields.IntField(default=0, description="展示顺序")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
@@ -114,7 +115,6 @@ class SupplyChainCiType(BaseModel):
             "group_key": self.group_key,
             "primary_field": self.primary_field,
             "status": self.status,
-            "is_locked": self.is_locked,
             "is_builtin": self.is_builtin,
             "builtin_key": self.builtin_key,
             "builtin_version": self.builtin_version,
@@ -157,17 +157,23 @@ class SupplyChainCiFieldDef(BaseModel):
     unique = fields.BooleanField(default=False, description="是否唯一")
     editable = fields.BooleanField(default=True, description="是否可编辑")
     is_derived = fields.BooleanField(default=False, description="派生展示字段")
-    field_group = fields.CharField(max_length=255, default="其他", description="字段分组")
+    field_group = fields.CharField(
+        max_length=255, default="其他", description="字段分组"
+    )
     field_group_sort = fields.IntField(default=0, description="字段分组顺序")
     user_prompt = fields.TextField(null=True, description="字段提示")
     default_value = fields.JSONField(null=True, description="默认值")
     sort = fields.IntField(default=0, description="排序")
     is_locked = fields.BooleanField(default=False, description="锁定字段")
     is_builtin = fields.BooleanField(default=False, description="产品内置字段")
-    builtin_key = fields.CharField(max_length=160, null=True, description="内置稳定标识")
+    builtin_key = fields.CharField(
+        max_length=160, null=True, description="内置稳定标识"
+    )
     builtin_version = fields.CharField(max_length=64, null=True, description="内置版本")
     builtin_hash = fields.CharField(max_length=64, null=True, description="定义摘要")
-    owner = fields.CharField(max_length=20, default="tenant", description="product/tenant")
+    owner = fields.CharField(
+        max_length=20, default="tenant", description="product/tenant"
+    )
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
 
@@ -192,12 +198,9 @@ class SupplyChainCiFieldDef(BaseModel):
             "unique": self.unique,
             "editable": self.editable,
             "is_derived": self.is_derived,
-            "field_group": self.field_group,
-            "field_group_sort": self.field_group_sort,
             "user_prompt": self.user_prompt,
             "default_value": self.default_value,
             "sort": self.sort,
-            "is_locked": self.is_locked,
             "is_builtin": self.is_builtin,
             "builtin_key": self.builtin_key,
             "builtin_version": self.builtin_version,
@@ -228,10 +231,14 @@ class SupplyChainCiUniqueRule(BaseModel):
     sort = fields.IntField(default=0, description="规则顺序")
     is_locked = fields.BooleanField(default=False, description="锁定规则")
     is_builtin = fields.BooleanField(default=False, description="产品内置规则")
-    builtin_key = fields.CharField(max_length=160, null=True, description="内置稳定标识")
+    builtin_key = fields.CharField(
+        max_length=160, null=True, description="内置稳定标识"
+    )
     builtin_version = fields.CharField(max_length=64, null=True, description="内置版本")
     builtin_hash = fields.CharField(max_length=64, null=True, description="定义摘要")
-    owner = fields.CharField(max_length=20, default="tenant", description="product/tenant")
+    owner = fields.CharField(
+        max_length=20, default="tenant", description="product/tenant"
+    )
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
 
@@ -245,7 +252,6 @@ class SupplyChainCiUniqueRule(BaseModel):
             "key": self.key,
             "field_keys": self.field_keys or [],
             "sort": self.sort,
-            "is_locked": self.is_locked,
             "is_builtin": self.is_builtin,
             "builtin_key": self.builtin_key,
             "builtin_version": self.builtin_version,
@@ -279,10 +285,14 @@ class SupplyChainCiRelationType(BaseModel):
     relation_fields = fields.JSONField(default=list, description="关系属性字段定义")
     is_locked = fields.BooleanField(default=False, description="交付锁定标记")
     is_builtin = fields.BooleanField(default=False, description="产品内置关系")
-    builtin_key = fields.CharField(max_length=160, null=True, description="内置稳定标识")
+    builtin_key = fields.CharField(
+        max_length=160, null=True, description="内置稳定标识"
+    )
     builtin_version = fields.CharField(max_length=64, null=True, description="内置版本")
     builtin_hash = fields.CharField(max_length=64, null=True, description="定义摘要")
-    owner = fields.CharField(max_length=20, default="tenant", description="product/tenant")
+    owner = fields.CharField(
+        max_length=20, default="tenant", description="product/tenant"
+    )
     creator = fields.CharField(max_length=255, null=True, description="创建人")
     updater = fields.CharField(max_length=255, null=True, description="更新人")
 
@@ -303,7 +313,6 @@ class SupplyChainCiRelationType(BaseModel):
             "target_to_source": self.target_to_source,
             "semantic_key": self.semantic_key,
             "relation_fields": self.relation_fields or [],
-            "is_locked": self.is_locked,
             "is_builtin": self.is_builtin,
             "builtin_key": self.builtin_key,
             "builtin_version": self.builtin_version,
@@ -355,7 +364,9 @@ class SupplyChainBuiltinCatalogEvent(BaseModel):
     """Audit event for builtin-catalog initialization and reconciliation."""
 
     request_id = fields.CharField(max_length=64, description="协调请求 ID")
-    action = fields.CharField(max_length=20, default="reconcile", description="协调动作")
+    action = fields.CharField(
+        max_length=20, default="reconcile", description="协调动作"
+    )
     status = fields.CharField(
         max_length=20,
         description="succeeded/unchanged/failed",
