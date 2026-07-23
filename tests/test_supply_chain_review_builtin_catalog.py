@@ -102,7 +102,7 @@ def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
     catalog = _catalog()
 
     assert catalog["metadata"]["digest"] == (
-        "sha256:1d28e88f660173486a64e9d7482a2e62d8de0f2e9a929b2ab44a64aaf7bc830d"
+        "sha256:408a4b533d66bde953e05fd50ba2f05739cc64d7c84f276a42601b89f3ea4736"
     )
     assert {
         name: len(catalog[name]) for name in builtin_catalog.CATALOG_FILES
@@ -121,8 +121,10 @@ def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
     assert "自定义模型" not in {item["name"] for item in catalog["groups"]}
     assert {"organization", "user"} <= model_keys
     assert all(
-        item["data_type"] not in {"organization", "user"} for item in catalog["fields"]
+        item["data_type"] not in {"organization", "user", "table"}
+        for item in catalog["fields"]
     )
+    assert all(item.get("source_data_type") != "table" for item in catalog["fields"])
     assert {
         item.get("ref_ci_type_id")
         for item in catalog["fields"]
@@ -145,6 +147,73 @@ def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
         for item in catalog["fields"]
     ]
     assert len(field_names) == len(set(field_names))
+
+
+def test_soc_foundation_models_and_employee_fields_match_product_definitions():
+    catalog = _catalog()
+    model_definitions = {
+        item["key"]: item
+        for item in build_asset_builtin_catalog.DIRECTORY_MODELS
+        if item["key"] in {"project", "area", "authorized_device", "user", "file_share"}
+    }
+    models = {item["key"]: item for item in catalog["models"]}
+
+    assert {
+        key: (
+            models[key]["name"],
+            models[key]["group_key"],
+            models[key]["primary_field"],
+        )
+        for key in model_definitions
+    } == {
+        "project": ("项目", "directory", "name"),
+        "area": ("区域", "directory", "name"),
+        "authorized_device": ("授权/例外设备", "directory", "device_name"),
+        "user": ("员工", "directory", "person_name"),
+        "file_share": ("共享文件", "directory", "share_name"),
+    }
+    assert "personnel" not in models
+    assert "用户" not in {item["name"] for item in catalog["models"]}
+
+    fields_by_model = defaultdict(list)
+    for field in catalog["fields"]:
+        fields_by_model[field["model_key"]].append(field)
+
+    for model_key, definition in model_definitions.items():
+        actual = sorted(fields_by_model[model_key], key=lambda field: field["sort"])
+        expected = sorted(definition["fields"], key=lambda field: field["sort"])
+        assert [
+            (
+                field["field_key"],
+                field["label"],
+                field["data_type"],
+                field["required"],
+                field["unique"],
+                field["sort"],
+                field["enum_options"],
+            )
+            for field in actual
+        ] == [
+            (
+                field["field_key"],
+                field["label"],
+                field.get("data_type", "text"),
+                field.get("required", False),
+                field.get("unique", False),
+                field["sort"],
+                field.get("enum_options", []),
+            )
+            for field in expected
+        ]
+
+    assert len(fields_by_model["project"]) == 8
+    assert len(fields_by_model["area"]) == 7
+    assert len(fields_by_model["authorized_device"]) == 11
+    assert len(fields_by_model["user"]) == 13
+    assert len(fields_by_model["file_share"]) == 8
+    assert {"inst_name", "username"}.isdisjoint(
+        {field["field_key"] for field in fields_by_model["user"]}
+    )
 
 
 def test_builtin_catalog_removes_redundant_fields_without_renaming_survivors():
@@ -219,6 +288,45 @@ def test_catalog_builder_deletes_duplicate_and_derived_fields():
     assert all(field["builtin_hash"] for field in fields)
 
 
+def test_catalog_builder_replaces_legacy_user_with_soc_foundation_models():
+    models = [
+        {"key": "host", "name": "主机"},
+        {"key": "user", "name": "用户"},
+    ]
+    fields = [
+        {"model_key": "host", "field_key": "name"},
+        {"model_key": "user", "field_key": "inst_name"},
+        {"model_key": "user", "field_key": "username"},
+    ]
+
+    build_asset_builtin_catalog.replace_directory_models(models, fields)
+
+    model_by_key = {model["key"]: model for model in models}
+    assert set(model_by_key) == {
+        "host",
+        "organization",
+        "project",
+        "area",
+        "authorized_device",
+        "user",
+        "file_share",
+    }
+    assert model_by_key["user"]["name"] == "员工"
+    assert model_by_key["user"]["primary_field"] == "person_name"
+    assert all(model["builtin_hash"] for model in models if model["key"] != "host")
+    assert {field["field_key"] for field in fields if field["model_key"] == "user"} == {
+        definition["field_key"]
+        for definition in next(
+            model
+            for model in build_asset_builtin_catalog.DIRECTORY_MODELS
+            if model["key"] == "user"
+        )["fields"]
+    }
+    assert {"inst_name", "username"}.isdisjoint(
+        {field["field_key"] for field in fields if field["model_key"] == "user"}
+    )
+
+
 def test_reference_fields_and_relation_edges_have_distinct_contracts():
     catalog = _catalog()
     ref_pairs = {
@@ -240,25 +348,8 @@ def test_reference_fields_and_relation_edges_have_distinct_contracts():
     assert ref_pairs.isdisjoint({(target, source) for source, target in relation_pairs})
 
 
-def test_builtin_catalog_preserves_table_schema_and_composite_unique_rule():
+def test_builtin_catalog_preserves_composite_unique_rule():
     catalog = _catalog()
-    fields = {item["builtin_key"]: item for item in catalog["fields"]}
-
-    assert fields["host.proc"]["options"]["schema_mode"] == "fixed"
-    assert {
-        column["column_id"] for column in fields["host.proc"]["options"]["columns"]
-    } == {
-        "pid",
-        "name",
-        "arg",
-        "exe",
-        "cwd",
-        "ports",
-    }
-    assert fields["ip.ip_table"]["options"] == {
-        "schema_mode": "dynamic",
-        "columns": [],
-    }
     assert [
         (item["model_key"], item["field_keys"]) for item in catalog["unique_rules"]
     ] == [("host", ["ip_addr", "cloud"])]
@@ -295,38 +386,6 @@ def test_organization_and_user_fields_require_tenant_stable_ids(monkeypatch):
         ({"data_type": "organization"}, "研发中心"),
         ({"data_type": "user"}, "张三"),
     ):
-        with pytest.raises(CustomError) as exc_info:
-            asyncio.run(manager.validate_field_value("tenant-a", field, value))
-        assert exc_info.value.enum is ErrorCode.PARAM_ERROR
-
-
-def test_fixed_and_dynamic_table_values_are_validated_by_schema():
-    fields = {
-        item["builtin_key"]: item
-        for item in _catalog()["fields"]
-        if item["builtin_key"] in {"host.proc", "ip.ip_table"}
-    }
-    asyncio.run(
-        manager.validate_field_value(
-            "tenant-a",
-            fields["host.proc"],
-            [{"pid": 1, "name": "nginx", "ports": "80"}],
-        )
-    )
-    asyncio.run(
-        manager.validate_field_value(
-            "tenant-a",
-            fields["ip.ip_table"],
-            [{"address": "10.0.0.1", "primary": True, "weight": 1}],
-        )
-    )
-
-    invalid_values = (
-        (fields["host.proc"], [{"pid": "one"}]),
-        (fields["host.proc"], [{"unknown": "value"}]),
-        (fields["ip.ip_table"], [{"nested": {"not": "scalar"}}]),
-    )
-    for field, value in invalid_values:
         with pytest.raises(CustomError) as exc_info:
             asyncio.run(manager.validate_field_value("tenant-a", field, value))
         assert exc_info.value.enum is ErrorCode.PARAM_ERROR

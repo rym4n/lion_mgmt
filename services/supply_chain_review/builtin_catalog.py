@@ -44,8 +44,8 @@ CATALOG_FILES = (
 )
 CATALOG_COUNTS = {
     "groups": 30,
-    "models": 232,
-    "fields": 3205,
+    "models": 236,
+    "fields": 3248,
     "unique_rules": 1,
     "relations": 185,
     "icon_aliases": 28,
@@ -182,23 +182,6 @@ def load_builtin_catalog() -> dict:
             raise RuntimeError(
                 "builtin asset catalog contains invalid relation quantity"
             )
-    table_fields = {
-        item["builtin_key"]: item
-        for item in catalog["fields"]
-        if item["data_type"] == "table"
-    }
-    if (
-        table_fields.get("host.proc", {}).get("options", {}).get("schema_mode")
-        != "fixed"
-    ):
-        raise RuntimeError("builtin asset catalog host process schema is incomplete")
-    if table_fields.get("ip.ip_table", {}).get("options") != {
-        "schema_mode": "dynamic",
-        "columns": [],
-    }:
-        raise RuntimeError(
-            "builtin asset catalog dynamic IP table schema is incomplete"
-        )
     source_icons = {
         item.get("source_icon") for item in catalog["models"] if item.get("source_icon")
     }

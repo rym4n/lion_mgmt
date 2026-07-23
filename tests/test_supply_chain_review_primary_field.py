@@ -1371,6 +1371,45 @@ def test_required_attachment_field_rejects_empty_file_id_list():
     assert exc_info.value.enum is ErrorCode.PARAM_ERROR
 
 
+def test_required_ref_ignores_historical_default_when_target_has_no_instances():
+    field = _field(
+        "field-1",
+        "application",
+        data_type="ref",
+        ref_ci_type_id="application-type",
+        required=True,
+        default_value="默认",
+    )
+    attributes = {}
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(
+            manager.validate_dynamic_attributes("tenant-a", [field], attributes)
+        )
+
+    assert exc_info.value.enum is ErrorCode.PARAM_ERROR
+    assert attributes == {}
+
+
+def test_ref_field_payload_discards_defaults_and_table_type_is_rejected():
+    payload = manager.payload_dynamic_field(
+        {
+            "field_key": "application",
+            "label": "应用",
+            "data_type": "ref",
+            "ref_ci_type_id": "application-type",
+            "default_value": "默认",
+        }
+    )
+
+    assert payload["default_value"] is None
+    with pytest.raises(CustomError) as exc_info:
+        manager.payload_dynamic_field(
+            {"field_key": "details", "label": "明细", "data_type": "table"}
+        )
+    assert exc_info.value.enum is ErrorCode.PARAM_ERROR
+
+
 def test_ci_type_sort_migration_backfills_and_indexes_the_new_order():
     migration = importlib.import_module(
         "migrations.models.80_20260719120000_add_ci_type_sort"

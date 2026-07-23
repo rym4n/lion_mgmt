@@ -13,8 +13,8 @@ CATALOG_KEY = "bklite-builtins"
 CATALOG_VERSION = "bklite-2026.07-v1"
 EXPECTED_COUNTS = {
     "groups": 30,
-    "models": 232,
-    "fields": 3205,
+    "models": 236,
+    "fields": 3248,
     "unique_rules": 1,
     "relations": 185,
     "icon_aliases": 28,
@@ -35,24 +35,407 @@ CARDINALITIES = {
 }
 CLOUD_GROUPS = {"aliyun", "aws", "azure", "hwcloud", "qcloud", "openstack"}
 DIRECTORY_GROUP = {"key": "directory", "name": "基础数据"}
+# SOC definitions were captured read-only from 10.3.0.46 on 2026-07-23.
 DIRECTORY_MODELS = (
     {
         "key": "organization",
         "name": "组织",
+        "icon": "ri:organization-chart",
+        "primary_field": "inst_name",
         "fields": (
-            ("inst_name", "组织名称", True, True),
-            ("path", "组织路径", False, False),
+            {
+                "field_key": "inst_name",
+                "label": "组织名称",
+                "required": True,
+                "unique": True,
+                "sort": 1,
+                "source_data_type": "synthetic",
+                "options": {
+                    "validation_type": "unrestricted",
+                    "widget_type": "single_line",
+                    "custom_regex": "",
+                },
+            },
+            {
+                "field_key": "path",
+                "label": "组织路径",
+                "sort": 2,
+                "source_data_type": "synthetic",
+                "options": {
+                    "validation_type": "unrestricted",
+                    "widget_type": "single_line",
+                    "custom_regex": "",
+                },
+            },
+        ),
+    },
+    {
+        "key": "project",
+        "name": "项目",
+        "icon": "ri:folder-3-line",
+        "primary_field": "name",
+        "fields": (
+            {
+                "field_key": "code",
+                "label": "项目编码",
+                "required": True,
+                "unique": True,
+                "sort": 10,
+            },
+            {
+                "field_key": "name",
+                "label": "项目名称",
+                "required": True,
+                "sort": 20,
+            },
+            {
+                "field_key": "project_type",
+                "label": "项目类型",
+                "data_type": "enum",
+                "enum_options": [
+                    "项目",
+                    "厂区项目",
+                    "配件项目",
+                    "研发项目",
+                    "客户项目",
+                    "其他",
+                ],
+                "sort": 30,
+            },
+            {"field_key": "owner_department", "label": "责任部门", "sort": 40},
+            {"field_key": "manager", "label": "负责人", "sort": 50},
+            {
+                "field_key": "security_level",
+                "label": "安全等级",
+                "data_type": "enum",
+                "enum_options": ["一般", "重要", "核心", "涉密", "未知"],
+                "sort": 60,
+            },
+            {
+                "field_key": "business_status",
+                "label": "状态",
+                "data_type": "enum",
+                "enum_options": ["正常", "停用", "规划中", "未知"],
+                "sort": 70,
+            },
+            {"field_key": "remark", "label": "备注", "sort": 80},
+        ),
+    },
+    {
+        "key": "area",
+        "name": "区域",
+        "icon": "ri:map-pin-2-line",
+        "primary_field": "name",
+        "fields": (
+            {
+                "field_key": "code",
+                "label": "区域编码",
+                "required": True,
+                "unique": True,
+                "sort": 10,
+            },
+            {
+                "field_key": "name",
+                "label": "区域名称",
+                "required": True,
+                "sort": 20,
+            },
+            {
+                "field_key": "area_type",
+                "label": "区域类型",
+                "data_type": "enum",
+                "enum_options": [
+                    "厂区",
+                    "楼栋",
+                    "楼层",
+                    "机房",
+                    "实验室",
+                    "办公区",
+                    "外协区域",
+                    "核心内网",
+                    "外网出口",
+                    "防火墙边界",
+                    "终端接入",
+                    "监控网",
+                    "门禁网",
+                    "其他",
+                ],
+                "sort": 50,
+            },
+            {
+                "field_key": "physical_location",
+                "label": "物理位置",
+                "sort": 60,
+            },
+            {
+                "field_key": "security_level",
+                "label": "安全等级",
+                "data_type": "enum",
+                "enum_options": ["一般", "重要", "核心", "涉密", "未知"],
+                "sort": 70,
+            },
+            {
+                "field_key": "business_status",
+                "label": "状态",
+                "data_type": "enum",
+                "enum_options": ["正常", "停用", "规划中", "未知"],
+                "sort": 80,
+            },
+            {"field_key": "remark", "label": "备注", "sort": 90},
+        ),
+    },
+    {
+        "key": "authorized_device",
+        "name": "授权/例外设备",
+        "icon": "ri:shield-check-line",
+        "primary_field": "device_name",
+        "fields": (
+            {
+                "field_key": "device_name",
+                "label": "设备名称",
+                "required": True,
+                "sort": 10,
+            },
+            {
+                "field_key": "auth_method",
+                "label": "授权方式",
+                "data_type": "enum",
+                "enum_options": [
+                    "序列号",
+                    "有线MAC地址",
+                    "无线MAC地址",
+                    "USB序列号",
+                    "设备指纹",
+                    "人工登记",
+                    "其他",
+                ],
+                "sort": 30,
+            },
+            {
+                "field_key": "auth_value",
+                "label": "授权认证值",
+                "unique": True,
+                "sort": 40,
+            },
+            {
+                "field_key": "device_usage",
+                "label": "设备用途",
+                "data_type": "enum",
+                "enum_options": [
+                    "常规接入",
+                    "例外使用",
+                    "调试使用",
+                    "只读介质",
+                    "其他",
+                ],
+                "sort": 80,
+            },
+            {
+                "field_key": "authorization_status",
+                "label": "授权状态",
+                "data_type": "enum",
+                "enum_options": ["授权", "未授权", "已撤销", "过期", "异常", "未知"],
+                "sort": 90,
+            },
+            {
+                "field_key": "valid_from",
+                "label": "授权开始日期",
+                "data_type": "date",
+                "sort": 100,
+            },
+            {
+                "field_key": "valid_to",
+                "label": "授权结束日期",
+                "data_type": "date",
+                "sort": 110,
+            },
+            {
+                "field_key": "need_alarm",
+                "label": "是否告警",
+                "data_type": "bool",
+                "sort": 120,
+            },
+            {
+                "field_key": "source_order_no",
+                "label": "OA/审批单号",
+                "sort": 130,
+            },
+            {"field_key": "control_plan", "label": "管控方案", "sort": 140},
+            {"field_key": "remark", "label": "备注", "sort": 150},
         ),
     },
     {
         "key": "user",
-        "name": "用户",
+        "name": "员工",
+        "icon": "ri:contacts-book-line",
+        "primary_field": "person_name",
         "fields": (
-            ("inst_name", "用户名称", True, True),
-            ("username", "登录账号", True, True),
+            {
+                "field_key": "employee_no",
+                "label": "工号",
+                "required": True,
+                "unique": True,
+                "sort": 10,
+            },
+            {
+                "field_key": "person_name",
+                "label": "姓名",
+                "required": True,
+                "sort": 20,
+            },
+            {
+                "field_key": "employment_status",
+                "label": "在职状态",
+                "data_type": "enum",
+                "enum_options": ["在职", "离职", "外协", "未知"],
+                "sort": 30,
+            },
+            {"field_key": "company", "label": "所属公司", "sort": 40},
+            {"field_key": "department", "label": "部门", "sort": 50},
+            {
+                "field_key": "is_secret",
+                "label": "是否涉密",
+                "data_type": "bool",
+                "sort": 70,
+            },
+            {
+                "field_key": "entry_date",
+                "label": "入职日",
+                "data_type": "date",
+                "sort": 80,
+            },
+            {
+                "field_key": "leave_date",
+                "label": "离职日",
+                "data_type": "date",
+                "sort": 90,
+            },
+            {
+                "field_key": "access_auth_status",
+                "label": "门禁授权状态",
+                "data_type": "enum",
+                "enum_options": ["授权", "未授权", "已撤销", "异常", "未知"],
+                "sort": 100,
+            },
+            {
+                "field_key": "nda_sign_status",
+                "label": "保密协议签署状态",
+                "data_type": "enum",
+                "enum_options": ["已签署", "未签署", "过期", "不适用", "未知"],
+                "sort": 110,
+            },
+            {
+                "field_key": "nda_signed_at",
+                "label": "保密协议签署时间",
+                "data_type": "datetime",
+                "sort": 120,
+            },
+            {
+                "field_key": "updated_at",
+                "label": "更新时间",
+                "data_type": "datetime",
+                "sort": 130,
+            },
+            {"field_key": "remark", "label": "备注", "sort": 140},
+        ),
+    },
+    {
+        "key": "file_share",
+        "name": "共享文件",
+        "icon": "ri:folder-shared-line",
+        "primary_field": "share_name",
+        "fields": (
+            {
+                "field_key": "share_name",
+                "label": "共享名称",
+                "required": True,
+                "sort": 10,
+            },
+            {
+                "field_key": "file_server",
+                "label": "文件服务器",
+                "required": True,
+                "sort": 20,
+            },
+            {"field_key": "share_path", "label": "共享路径", "sort": 30},
+            {
+                "field_key": "owner_department",
+                "label": "责任部门",
+                "sort": 70,
+            },
+            {
+                "field_key": "permission_baseline",
+                "label": "访问权限基线",
+                "sort": 90,
+            },
+            {
+                "field_key": "sensitivity_level",
+                "label": "数据敏感等级",
+                "data_type": "enum",
+                "enum_options": ["公开", "内部", "敏感", "高敏", "未知"],
+                "sort": 100,
+            },
+            {
+                "field_key": "business_status",
+                "label": "状态",
+                "data_type": "enum",
+                "enum_options": ["正常", "停用", "异常", "未知"],
+                "sort": 110,
+            },
+            {"field_key": "remark", "label": "备注", "sort": 120},
         ),
     },
 )
+
+
+def replace_directory_models(models: list[dict], fields: list[dict]) -> None:
+    directory_keys = {definition["key"] for definition in DIRECTORY_MODELS}
+    models[:] = [item for item in models if item["key"] not in directory_keys]
+    fields[:] = [item for item in fields if item["model_key"] not in directory_keys]
+
+    for definition in DIRECTORY_MODELS:
+        model_payload = {
+            "key": definition["key"],
+            "name": definition["name"],
+            "group_key": DIRECTORY_GROUP["key"],
+            "icon": definition["icon"],
+            "source_icon": "",
+            "primary_field": definition["primary_field"],
+            "sort": len(models) + 1,
+            "is_builtin": True,
+            "is_locked": True,
+            "default_enabled": False,
+        }
+        model_payload["builtin_hash"] = digest(model_payload)
+        models.append(model_payload)
+
+        for field in definition["fields"]:
+            data_type = field.get("data_type", "text")
+            field_payload = {
+                "builtin_key": f"{definition['key']}.{field['field_key']}",
+                "model_key": definition["key"],
+                "field_key": field["field_key"],
+                "source_field_key": field["field_key"],
+                "label": field["label"],
+                "data_type": data_type,
+                "source_data_type": field.get("source_data_type", data_type),
+                "field_group": "基本信息",
+                "field_group_sort": 1,
+                "options": field.get("options", {}),
+                "enum_options": field.get("enum_options", []),
+                "required": field.get("required", False),
+                "unique": field.get("unique", False),
+                "editable": True,
+                "is_derived": False,
+                "default_value": None,
+                "user_prompt": "",
+                "sort": field["sort"],
+                "is_builtin": True,
+                "is_locked": True,
+                "owner": "product",
+            }
+            field_payload["builtin_hash"] = digest(field_payload)
+            fields.append(field_payload)
 
 
 def canonical(value) -> bytes:
@@ -142,10 +525,6 @@ def mapped_field_type(field: dict) -> tuple[str, dict]:
             options.get("display_format") if isinstance(options, dict) else None
         )
         return ("date" if display_format == "date" else "datetime"), options
-    if source_type == "table":
-        if isinstance(options, list):
-            return "table", {"schema_mode": "fixed", "columns": options}
-        return "table", {"schema_mode": "dynamic", "columns": []}
     if source_type in {"organization", "user"}:
         return "ref", options
     if source_type in {
@@ -204,6 +583,8 @@ def build_catalog(
         group_order: dict[str, int] = {}
         field_occurrences: dict[str, int] = {}
         for field_position, field in enumerate(attrs, start=1):
+            if field.get("attr_type") == "table":
+                continue
             source_field_key = field["attr_id"]
             occurrence = field_occurrences.get(source_field_key, 0) + 1
             field_occurrences[source_field_key] = occurrence
@@ -288,53 +669,7 @@ def build_catalog(
             rule_payload["builtin_hash"] = digest(rule_payload)
             unique_rules.append(rule_payload)
 
-    for directory_model in DIRECTORY_MODELS:
-        model_payload = {
-            "key": directory_model["key"],
-            "name": directory_model["name"],
-            "group_key": DIRECTORY_GROUP["key"],
-            "icon": "ri:contacts-book-line",
-            "source_icon": "",
-            "primary_field": "inst_name",
-            "sort": len(models) + 1,
-            "is_builtin": True,
-            "is_locked": True,
-            "default_enabled": False,
-        }
-        model_payload["builtin_hash"] = digest(model_payload)
-        models.append(model_payload)
-        for field_position, (field_key, label, required, unique) in enumerate(
-            directory_model["fields"], start=1
-        ):
-            field_payload = {
-                "builtin_key": f"{directory_model['key']}.{field_key}",
-                "model_key": directory_model["key"],
-                "field_key": field_key,
-                "source_field_key": field_key,
-                "label": label,
-                "data_type": "text",
-                "source_data_type": "synthetic",
-                "field_group": "基本信息",
-                "field_group_sort": 1,
-                "options": {
-                    "validation_type": "unrestricted",
-                    "widget_type": "single_line",
-                    "custom_regex": "",
-                },
-                "enum_options": [],
-                "required": required,
-                "unique": unique,
-                "editable": True,
-                "is_derived": False,
-                "default_value": None,
-                "user_prompt": "",
-                "sort": field_position,
-                "is_builtin": True,
-                "is_locked": True,
-                "owner": "product",
-            }
-            field_payload["builtin_hash"] = digest(field_payload)
-            fields.append(field_payload)
+    replace_directory_models(models, fields)
 
     source_relations: dict[str, dict] = {}
     for path in sorted(associations_dir.glob("*.json")):
@@ -412,7 +747,7 @@ def write_catalog(catalog: dict[str, list[dict]], output_dir: Path) -> None:
     metadata = {
         "catalog_key": CATALOG_KEY,
         "catalog_version": CATALOG_VERSION,
-        "source_snapshot_at": "2026-07-22",
+        "source_snapshot_at": "2026-07-23",
         "schema_version": 1,
         "group_count": len(catalog["groups"]),
         "model_count": len(catalog["models"]),

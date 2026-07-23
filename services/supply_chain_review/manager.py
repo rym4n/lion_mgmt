@@ -870,48 +870,6 @@ async def validate_field_value(tenant: str, field, value):
         or any(not isinstance(item, str) or not item.strip() for item in value)
     ):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    if data_type == "table":
-        if not isinstance(value, list) or any(
-            not isinstance(row, dict) for row in value
-        ):
-            raise CustomError(ErrorCode.PARAM_ERROR)
-        options = field_attr(field, "options", {}) or {}
-        if not isinstance(options, dict):
-            raise CustomError(ErrorCode.PARAM_ERROR)
-        schema_mode = options.get("schema_mode")
-        columns = options.get("columns")
-        if schema_mode not in {"fixed", "dynamic"} or not isinstance(columns, list):
-            raise CustomError(ErrorCode.PARAM_ERROR)
-        if schema_mode == "fixed":
-            column_types = {
-                column.get("column_id"): column.get("column_type")
-                for column in columns
-                if isinstance(column, dict) and column.get("column_id")
-            }
-            if len(column_types) != len(columns):
-                raise CustomError(ErrorCode.PARAM_ERROR)
-            for row in value:
-                if set(row) - set(column_types):
-                    raise CustomError(ErrorCode.PARAM_ERROR)
-                for column_id, cell in row.items():
-                    column_type = column_types[column_id]
-                    if column_type in {"int", "float", "number"}:
-                        if isinstance(cell, bool) or not isinstance(cell, (int, float)):
-                            raise CustomError(ErrorCode.PARAM_ERROR)
-                    elif column_type in {"str", "text"}:
-                        if not isinstance(cell, str):
-                            raise CustomError(ErrorCode.PARAM_ERROR)
-                    else:
-                        raise CustomError(ErrorCode.PARAM_ERROR)
-        else:
-            for row in value:
-                if any(not isinstance(key, str) or not key.strip() for key in row):
-                    raise CustomError(ErrorCode.PARAM_ERROR)
-                if any(
-                    cell is not None and not isinstance(cell, (str, int, float, bool))
-                    for cell in row.values()
-                ):
-                    raise CustomError(ErrorCode.PARAM_ERROR)
     options = field_attr(field, "options", {}) or {}
     if data_type == "enum" and isinstance(options, dict) and options.get("multiple"):
         if not isinstance(value, list) or any(
@@ -950,7 +908,11 @@ async def validate_dynamic_attributes(
             if hasattr(field, "default_value")
             else field.get("default_value")
         )
-        if field_key not in attributes and default_value is not None:
+        if (
+            field_attr(field, "data_type") != "ref"
+            and field_key not in attributes
+            and default_value is not None
+        ):
             attributes[field_key] = default_value
         await validate_field_value(tenant, field, attributes.get(field_key))
     if set(attributes.keys()) - set(field_by_key.keys()):
@@ -1057,8 +1019,6 @@ def payload_dynamic_field(data: dict, *, allow_missing_key: bool = False) -> dic
     ):
         raise CustomError(ErrorCode.PARAM_ERROR)
     options = data.get("options") or {}
-    if data_type == "table" and not options:
-        options = {"schema_mode": "dynamic", "columns": []}
     return {
         "field_key": field_key,
         "label": (data.get("label") or field_key).strip(),
@@ -1071,7 +1031,7 @@ def payload_dynamic_field(data: dict, *, allow_missing_key: bool = False) -> dic
         "editable": bool(data.get("editable", True)),
         "is_derived": bool(data.get("is_derived", False)),
         "user_prompt": data.get("user_prompt"),
-        "default_value": data.get("default_value"),
+        "default_value": None if data_type == "ref" else data.get("default_value"),
         "sort": int(data.get("sort", 0) or 0),
     }
 

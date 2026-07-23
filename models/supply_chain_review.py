@@ -25,7 +25,6 @@ FIELD_DATA_TYPES = {
     "organization",
     "user",
     "tag",
-    "table",
 }
 RELATION_QUANTITIES = {"one", "many"}
 
