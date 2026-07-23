@@ -45,12 +45,12 @@ CATALOG_FILES = (
 CATALOG_COUNTS = {
     "groups": 30,
     "models": 232,
-    "fields": 3745,
+    "fields": 3205,
     "unique_rules": 1,
     "relations": 185,
     "icon_aliases": 28,
 }
-DERIVED_FIELD_COUNT = 537
+DERIVED_FIELD_COUNT = 0
 RELATION_QUANTITY_COUNTS = {
     ("one", "one"): 1,
     ("many", "one"): 49,
@@ -69,6 +69,10 @@ def _canonical(value) -> bytes:
         sort_keys=True,
         separators=(",", ":"),
     ).encode()
+
+
+def _normalized_field_label(value: object) -> str:
+    return " ".join(str(value or "").split()).casefold()
 
 
 @lru_cache(maxsize=1)
@@ -121,6 +125,15 @@ def load_builtin_catalog() -> dict:
     }
     if len(field_identities) != CATALOG_COUNTS["fields"]:
         raise RuntimeError("builtin asset catalog contains duplicate fields")
+    field_labels = {
+        (item["model_key"], _normalized_field_label(item.get("label")))
+        for item in catalog["fields"]
+    }
+    if (
+        any(not label for _, label in field_labels)
+        or len(field_labels) != CATALOG_COUNTS["fields"]
+    ):
+        raise RuntimeError("builtin asset catalog contains duplicate field names")
     if any(item["data_type"] not in FIELD_DATA_TYPES for item in catalog["fields"]):
         raise RuntimeError("builtin asset catalog contains unsupported field types")
     if any(
@@ -211,7 +224,12 @@ async def _bulk_create(model, items: list, connection) -> None:
 
 
 async def _upsert_builtin_groups(
-    tenant: str, catalog: dict, operator: str | None, connection
+    tenant: str,
+    catalog: dict,
+    operator: str | None,
+    connection,
+    *,
+    preserve_existing: bool = False,
 ) -> tuple[dict, int]:
     existing = {
         item.key: item
@@ -244,7 +262,9 @@ async def _upsert_builtin_groups(
             existing[item.key] = item
         elif not item.is_builtin:
             raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
-        elif item.builtin_hash != definition["builtin_hash"] or item.deleted:
+        elif not preserve_existing and (
+            item.builtin_hash != definition["builtin_hash"] or item.deleted
+        ):
             for key, value in values.items():
                 setattr(item, key, value)
             await item.save(using_db=connection, update_fields=[*values, "utime"])
@@ -259,6 +279,8 @@ async def _upsert_builtin_models(
     groups: dict,
     operator: str | None,
     connection,
+    *,
+    preserve_existing: bool = False,
 ) -> tuple[dict, int]:
     existing = {
         item.key: item
@@ -299,7 +321,9 @@ async def _upsert_builtin_models(
             existing[item.key] = item
         elif not item.is_builtin or item.owner != "product":
             raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
-        elif item.builtin_hash != definition["builtin_hash"] or item.deleted:
+        elif not preserve_existing and (
+            item.builtin_hash != definition["builtin_hash"] or item.deleted
+        ):
             for key, value in values.items():
                 setattr(item, key, value)
             await item.save(using_db=connection, update_fields=[*values, "utime"])
@@ -314,6 +338,8 @@ async def _upsert_builtin_fields(
     models: dict,
     operator: str | None,
     connection,
+    *,
+    preserve_existing: bool = False,
 ) -> int:
     existing = {
         item.builtin_key: item
@@ -378,7 +404,9 @@ async def _upsert_builtin_fields(
                     **values,
                 )
             )
-        elif item.builtin_hash != definition["builtin_hash"] or item.deleted:
+        elif not preserve_existing and (
+            item.builtin_hash != definition["builtin_hash"] or item.deleted
+        ):
             for key, value in values.items():
                 setattr(item, key, value)
             await item.save(using_db=connection, update_fields=[*values, "utime"])
@@ -393,6 +421,8 @@ async def _upsert_builtin_unique_rules(
     models: dict,
     operator: str | None,
     connection,
+    *,
+    preserve_existing: bool = False,
 ) -> int:
     existing = {
         item.builtin_key: item
@@ -440,7 +470,9 @@ async def _upsert_builtin_unique_rules(
             created.append(
                 SupplyChainCiUniqueRule(tenant_id=tenant, creator=operator, **values)
             )
-        elif item.builtin_hash != definition["builtin_hash"] or item.deleted:
+        elif not preserve_existing and (
+            item.builtin_hash != definition["builtin_hash"] or item.deleted
+        ):
             for key, value in values.items():
                 setattr(item, key, value)
             await item.save(using_db=connection, update_fields=[*values, "utime"])
@@ -455,6 +487,8 @@ async def _upsert_builtin_relations(
     models: dict,
     operator: str | None,
     connection,
+    *,
+    preserve_existing: bool = False,
 ) -> int:
     existing = {
         item.builtin_key: item
@@ -512,7 +546,9 @@ async def _upsert_builtin_relations(
                     **values,
                 )
             )
-        elif item.builtin_hash != definition["builtin_hash"] or item.deleted:
+        elif not preserve_existing and (
+            item.builtin_hash != definition["builtin_hash"] or item.deleted
+        ):
             for key, value in values.items():
                 setattr(item, key, value)
             await item.save(using_db=connection, update_fields=[*values, "utime"])
@@ -602,57 +638,71 @@ async def _reconcile_builtin_catalog_once(
             .first()
         )
         before_state = state.json if state else {}
-        if state and state.status == "ready":
-            metadata_changed = (
+        metadata_changed = bool(
+            state
+            and (
                 state.catalog_version != CATALOG_VERSION
                 or state.catalog_digest != metadata["digest"]
             )
-            if metadata_changed:
-                state.catalog_version = CATALOG_VERSION
-                state.catalog_digest = metadata["digest"]
-                state.updater = operator
-                await state.save(
-                    using_db=connection,
-                    update_fields=[
-                        "catalog_version",
-                        "catalog_digest",
-                        "updater",
-                        "utime",
-                    ],
-                )
+        )
+        preserve_existing = bool(state and state.status == "ready")
+        if preserve_existing and not metadata_changed:
             await _record_catalog_event(
                 tenant,
                 request_id,
-                "succeeded" if metadata_changed else "unchanged",
+                "unchanged",
                 metadata,
                 operator,
                 connection,
                 before_state=before_state,
                 after_state=state.json,
-                changes={"metadata": 1} if metadata_changed else None,
             )
             return {
                 "request_id": request_id,
                 "state": state.json,
-                "changed": metadata_changed,
-                "changes": {"metadata": 1} if metadata_changed else {},
+                "changed": False,
+                "changes": {},
                 **CATALOG_COUNTS,
             }
 
         groups, group_changes = await _upsert_builtin_groups(
-            tenant, catalog, operator, connection
+            tenant,
+            catalog,
+            operator,
+            connection,
+            preserve_existing=preserve_existing,
         )
         models, model_changes = await _upsert_builtin_models(
-            tenant, catalog, groups, operator, connection
+            tenant,
+            catalog,
+            groups,
+            operator,
+            connection,
+            preserve_existing=preserve_existing,
         )
         field_changes = await _upsert_builtin_fields(
-            tenant, catalog, models, operator, connection
+            tenant,
+            catalog,
+            models,
+            operator,
+            connection,
+            preserve_existing=preserve_existing,
         )
         rule_changes = await _upsert_builtin_unique_rules(
-            tenant, catalog, models, operator, connection
+            tenant,
+            catalog,
+            models,
+            operator,
+            connection,
+            preserve_existing=preserve_existing,
         )
         relation_changes = await _upsert_builtin_relations(
-            tenant, catalog, models, operator, connection
+            tenant,
+            catalog,
+            models,
+            operator,
+            connection,
+            preserve_existing=preserve_existing,
         )
         activation_changes = await _ensure_activations(
             tenant, catalog, operator, connection
@@ -691,6 +741,8 @@ async def _reconcile_builtin_catalog_once(
             "relations": relation_changes,
             "activations": activation_changes,
         }
+        if metadata_changed:
+            changes["metadata"] = 1
         await _record_catalog_event(
             tenant,
             request_id,

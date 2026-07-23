@@ -14,7 +14,7 @@ CATALOG_VERSION = "bklite-2026.07-v1"
 EXPECTED_COUNTS = {
     "groups": 30,
     "models": 232,
-    "fields": 3745,
+    "fields": 3205,
     "unique_rules": 1,
     "relations": 185,
     "icon_aliases": 28,
@@ -66,6 +66,47 @@ def canonical(value) -> bytes:
 
 def digest(value) -> str:
     return hashlib.sha256(canonical(value)).hexdigest()
+
+
+def normalized_field_label(value: object) -> str:
+    return " ".join(str(value or "").split()).casefold()
+
+
+def remove_redundant_fields(fields: list[dict]) -> list[dict]:
+    original_order = {id(field): position for position, field in enumerate(fields)}
+    fields_by_model: dict[str, list[dict]] = {}
+    for field in fields:
+        if not normalized_field_label(field.get("label")):
+            raise ValueError(f"missing field label: {field.get('builtin_key')}")
+        fields_by_model.setdefault(field["model_key"], []).append(field)
+
+    retained = []
+    for model_fields in fields_by_model.values():
+        fields_by_label: dict[str, list[dict]] = {}
+        for field in model_fields:
+            fields_by_label.setdefault(
+                normalized_field_label(field["label"]), []
+            ).append(field)
+
+        for duplicate_fields in fields_by_label.values():
+            ordered_fields = sorted(
+                duplicate_fields,
+                key=lambda field: (
+                    bool(field.get("is_derived")),
+                    int(field.get("sort") or 0),
+                    field["field_key"],
+                ),
+            )
+            canonical = ordered_fields[0]
+            if not canonical.get("is_derived"):
+                retained.append(canonical)
+
+    retained.sort(key=lambda field: original_order[id(field)])
+    for field in retained:
+        field.pop("builtin_hash", None)
+        field["builtin_hash"] = digest(field)
+    fields[:] = retained
+    return fields
 
 
 def load_data(path: Path) -> list[dict]:
@@ -343,6 +384,7 @@ def build_catalog(
             }.items()
         )
     ]
+    remove_redundant_fields(fields)
     catalog = {
         "groups": groups,
         "models": models,

@@ -11,6 +11,7 @@ from core.error_code import ErrorCode
 from core.listeners import AssetCatalogListener, LISTENER_TUPLE
 from libs.error_code.exception import CustomError
 from services.supply_chain_review import builtin_catalog, manager
+from scripts import build_asset_builtin_catalog
 
 
 class _Query:
@@ -101,12 +102,12 @@ def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
     catalog = _catalog()
 
     assert catalog["metadata"]["digest"] == (
-        "sha256:0e696ce577189ea1dfa90e7a081308e15a8bd4b635b7395d2154ef74ebb51c00"
+        "sha256:1d28e88f660173486a64e9d7482a2e62d8de0f2e9a929b2ab44a64aaf7bc830d"
     )
     assert {
         name: len(catalog[name]) for name in builtin_catalog.CATALOG_FILES
     } == builtin_catalog.CATALOG_COUNTS
-    assert sum(item["is_derived"] for item in catalog["fields"]) == 537
+    assert sum(item["is_derived"] for item in catalog["fields"]) == 0
     assert Counter(
         (item["source_to_target"], item["target_to_source"])
         for item in catalog["relations"]
@@ -131,9 +132,22 @@ def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
         set(item["source_model_keys"] + item["target_model_keys"]) <= model_keys
         for item in catalog["relations"]
     )
+    ref_fields = [item for item in catalog["fields"] if item["data_type"] == "ref"]
+    assert len(ref_fields) == 311
+    assert Counter(item["ref_ci_type_id"] for item in ref_fields) == Counter(
+        {"organization": 209, "user": 102}
+    )
+    field_names = [
+        (
+            item["model_key"],
+            build_asset_builtin_catalog.normalized_field_label(item["label"]),
+        )
+        for item in catalog["fields"]
+    ]
+    assert len(field_names) == len(set(field_names))
 
 
-def test_builtin_catalog_disambiguates_only_the_five_duplicate_source_fields():
+def test_builtin_catalog_removes_redundant_fields_without_renaming_survivors():
     catalog = _catalog()
     by_source = defaultdict(list)
     for field in catalog["fields"]:
@@ -146,13 +160,84 @@ def test_builtin_catalog_disambiguates_only_the_five_duplicate_source_fields():
         for identity, field_keys in by_source.items()
         if len(field_keys) > 1
     }
-    assert duplicates == {
-        ("office", "type"): ["type", "type__2"],
-        ("office", "type_display"): ["type_display", "type_display__2"],
-        ("peripherals", "type"): ["type", "type__2"],
-        ("peripherals", "type_display"): ["type_display", "type_display__2"],
-        ("tongweb", "version"): ["version", "version__2"],
+    assert duplicates == {}
+    fields = {field["builtin_key"]: field for field in catalog["fields"]}
+    assert fields["office.type"]["label"] == "资产类型"
+    assert fields["peripherals.type"]["label"] == "资产类型"
+    assert fields["tongweb.version"]["label"] == "版本"
+    assert {
+        "office.type__2",
+        "office.type_display",
+        "office.type_display__2",
+        "peripherals.type__2",
+        "peripherals.type_display",
+        "peripherals.type_display__2",
+        "tongweb.version__2",
+        "k8s_cluster.organization_display",
+    }.isdisjoint(fields)
+
+
+def test_catalog_builder_deletes_duplicate_and_derived_fields():
+    fields = [
+        {
+            "builtin_key": "server.name",
+            "model_key": "server",
+            "field_key": "name",
+            "label": " Host  Name ",
+            "sort": 1,
+            "is_derived": False,
+        },
+        {
+            "builtin_key": "server.name_copy",
+            "model_key": "server",
+            "field_key": "name_copy",
+            "label": "host name",
+            "sort": 2,
+            "is_derived": False,
+        },
+        {
+            "builtin_key": "server.name_display",
+            "model_key": "server",
+            "field_key": "name_display",
+            "label": "HOST NAME",
+            "sort": 3,
+            "is_derived": True,
+        },
+        {
+            "builtin_key": "server.orphan_display",
+            "model_key": "server",
+            "field_key": "orphan_display",
+            "label": "Orphan Display",
+            "sort": 4,
+            "is_derived": True,
+        },
+    ]
+
+    build_asset_builtin_catalog.remove_redundant_fields(fields)
+
+    assert [field["label"] for field in fields] == [" Host  Name "]
+    assert all(field["builtin_hash"] for field in fields)
+
+
+def test_reference_fields_and_relation_edges_have_distinct_contracts():
+    catalog = _catalog()
+    ref_pairs = {
+        (field["model_key"], field["ref_ci_type_id"])
+        for field in catalog["fields"]
+        if field["data_type"] == "ref"
     }
+    relation_pairs = {
+        (source, target)
+        for relation in catalog["relations"]
+        for source in relation["source_model_keys"]
+        for target in relation["target_model_keys"]
+    }
+
+    assert len(catalog["relations"]) == 185
+    assert len(ref_pairs) == 262
+    assert len(relation_pairs) == 160
+    assert ref_pairs.isdisjoint(relation_pairs)
+    assert ref_pairs.isdisjoint({(target, source) for source, target in relation_pairs})
 
 
 def test_builtin_catalog_preserves_table_schema_and_composite_unique_rule():
@@ -586,7 +671,9 @@ def test_unchanged_catalog_reconcile_is_audited(monkeypatch):
     assert events[0]["before_state"] == events[0]["after_state"]
 
 
-def test_ready_catalog_version_change_does_not_overwrite_user_edits(monkeypatch):
+def test_ready_catalog_version_change_adds_missing_definitions_without_overwrite(
+    monkeypatch,
+):
     metadata = _catalog()["metadata"]
     state = _Record(
         catalog_version="older-factory-version",
@@ -597,12 +684,34 @@ def test_ready_catalog_version_change_does_not_overwrite_user_edits(monkeypatch)
         updater="user-a",
     )
     events = []
+    calls = []
 
     async def no_lock(*_args):
         return None
 
-    async def reject_catalog_reseed(*_args):
-        pytest.fail("a ready factory catalog must not reseed user-managed records")
+    async def upsert_groups(*_args, preserve_existing=False):
+        calls.append(("groups", preserve_existing))
+        return {}, 1
+
+    async def upsert_models(*_args, preserve_existing=False):
+        calls.append(("models", preserve_existing))
+        return {}, 2
+
+    async def upsert_fields(*_args, preserve_existing=False):
+        calls.append(("fields", preserve_existing))
+        return 4
+
+    async def upsert_rules(*_args, preserve_existing=False):
+        calls.append(("unique_rules", preserve_existing))
+        return 0
+
+    async def upsert_relations(*_args, preserve_existing=False):
+        calls.append(("relations", preserve_existing))
+        return 0
+
+    async def ensure_activations(*_args):
+        calls.append(("activations", True))
+        return 2
 
     async def create_event(**kwargs):
         events.append(kwargs)
@@ -615,9 +724,12 @@ def test_ready_catalog_version_change_does_not_overwrite_user_edits(monkeypatch)
         "filter",
         staticmethod(lambda **_kwargs: _Query(state)),
     )
-    monkeypatch.setattr(
-        builtin_catalog, "_upsert_builtin_groups", reject_catalog_reseed
-    )
+    monkeypatch.setattr(builtin_catalog, "_upsert_builtin_groups", upsert_groups)
+    monkeypatch.setattr(builtin_catalog, "_upsert_builtin_models", upsert_models)
+    monkeypatch.setattr(builtin_catalog, "_upsert_builtin_fields", upsert_fields)
+    monkeypatch.setattr(builtin_catalog, "_upsert_builtin_unique_rules", upsert_rules)
+    monkeypatch.setattr(builtin_catalog, "_upsert_builtin_relations", upsert_relations)
+    monkeypatch.setattr(builtin_catalog, "_ensure_activations", ensure_activations)
     monkeypatch.setattr(
         builtin_catalog.SupplyChainBuiltinCatalogEvent,
         "create",
@@ -633,16 +745,72 @@ def test_ready_catalog_version_change_does_not_overwrite_user_edits(monkeypatch)
     )
 
     assert result["changed"] is True
-    assert result["changes"] == {"metadata": 1}
+    assert result["changes"] == {
+        "groups": 1,
+        "models": 2,
+        "fields": 4,
+        "unique_rules": 0,
+        "relations": 0,
+        "activations": 2,
+        "metadata": 1,
+    }
+    assert calls == [
+        ("groups", True),
+        ("models", True),
+        ("fields", True),
+        ("unique_rules", True),
+        ("relations", True),
+        ("activations", True),
+    ]
     assert state.catalog_version == builtin_catalog.CATALOG_VERSION
     assert state.catalog_digest == metadata["digest"]
     assert state.save_calls[0]["update_fields"] == [
         "catalog_version",
         "catalog_digest",
+        "status",
         "updater",
         "utime",
     ]
-    assert events[0]["changes"] == {"metadata": 1}
+    assert events[0]["changes"] == result["changes"]
+
+
+def test_additive_catalog_reconcile_preserves_existing_field_edits(monkeypatch):
+    definition = next(
+        field
+        for field in _catalog()["fields"]
+        if field["builtin_key"] == "host.inst_name"
+    )
+    existing = _Record(
+        builtin_key=definition["builtin_key"],
+        builtin_hash="installed-factory-hash",
+        label="租户自定义实例名称",
+        deleted=False,
+    )
+    model = _Record(id="host-model-id", key="host")
+
+    def field_filter(**kwargs):
+        return _Query([existing] if kwargs.get("is_builtin") else [])
+
+    monkeypatch.setattr(
+        builtin_catalog.SupplyChainCiFieldDef,
+        "filter",
+        staticmethod(field_filter),
+    )
+
+    changes = asyncio.run(
+        builtin_catalog._upsert_builtin_fields(
+            "tenant-a",
+            {"fields": [definition]},
+            {"host": model},
+            "system",
+            object(),
+            preserve_existing=True,
+        )
+    )
+
+    assert changes == 0
+    assert existing.label == "租户自定义实例名称"
+    assert existing.save_calls == []
 
 
 def test_product_builtin_group_can_be_renamed_and_deleted(monkeypatch):

@@ -358,7 +358,7 @@ def test_field_key_base_is_generated_from_the_field_name(label, expected):
 def test_duplicate_field_names_ignore_whitespace_and_english_case():
     fields = [SimpleNamespace(id="field-1", label=" Host Name ")]
 
-    assert manager._has_duplicate_field_label(fields, "host name") is True
+    assert manager._has_duplicate_field_label(fields, "host   name") is True
     assert (
         manager._has_duplicate_field_label(
             fields,

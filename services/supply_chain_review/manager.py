@@ -1089,10 +1089,10 @@ def _field_key_base(label: str) -> str:
 
 
 def _has_duplicate_field_label(fields: Iterable, label: str, exclude_id=None) -> bool:
-    normalized_label = label.strip().casefold()
+    normalized_label = " ".join(label.split()).casefold()
     return any(
         field.id != exclude_id
-        and str(field.label or "").strip().casefold() == normalized_label
+        and " ".join(str(field.label or "").split()).casefold() == normalized_label
         for field in fields
     )
 
