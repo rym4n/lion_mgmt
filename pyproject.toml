@@ -27,7 +27,6 @@ dependencies = [
     "psutil>=7.0.0",
     "pillow>=11.2.1",
     "jsonpath>=0.82.2",
-    "elasticsearch[async]==8.18.1",
     "aiohttp>=3.12.13",
     "croniter>=6.0.0",
     "jsonrpcserver>=5.0.9",

@@ -442,64 +442,6 @@ async def query_vlog(query, project_id, start=None, end=None, account_id=0, limi
             logger.error(f"VictoriaLogs query error: {e}")
             return None
 
-
-# async def setup_ilm_policy(policy_name, retention_age="180d"):
-#     """设置ILM策略"""
-#     async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
-#         policy = {
-#             "phases": {
-#                 "hot": {
-#                     "min_age": "0ms",
-#                     "actions": {
-#                         "set_priority": {
-#                             "priority": 100
-#                         }
-#                     }
-#                 },
-#                 "delete": {
-#                     "min_age": retention_age,
-#                     "actions": {
-#                         "delete": {}
-#                     }
-#                 }
-#             }
-#         }
-#         await es.ilm.put_lifecycle(name=policy_name, policy=policy)
-#
-#
-# async def delete_ilm_policy(policy_name):
-#     """删除ILM策略"""
-#     async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
-#         try:
-#             await es.ilm.delete_lifecycle(name=policy_name)
-#         except NotFoundError:
-#             pass
-#
-#
-# async def setup_logs_template(alias_name, ilm_policy):
-#     async with AsyncElasticsearch(ES_HOST, basic_auth=(ES_USER, ES_PASS)) as es:
-#         template = {
-#             "aliases": {alias_name: {}},
-#             "settings": {
-#                 "number_of_shards": 1, "number_of_replicas": 0, "index.refresh_interval": "5s",
-#                 "index.lifecycle.name": ilm_policy
-#             },
-#             "mappings": {
-#                 "dynamic_templates": [
-#                     {"strings_as_keywords": {"match_mapping_type": "string", "mapping": {"type": "keyword"}}},
-#                     {"longs_as_numbers": {"match_mapping_type": "long", "mapping": {"type": "long"}}}
-#                 ],
-#                 "properties": {
-#                     "message": {
-#                         "type": "text"
-#                     }
-#                 }
-#             }
-#         }
-#         await es.indices.put_index_template(name=f"template-{alias_name}", index_patterns=[alias_name + "-*"], priority=500,
-#                                             data_stream=None, template=template)
-
-
 async def upload_to_s3(
     file_content: bytes,
     bucket_name: str,
