@@ -3,7 +3,7 @@ name: mgmt镜像构建
 on:
   push:
     branches: [ main ]
-    tags: [ "v*" ]
+    tags: [ "v3.1.*" ]
 
 jobs:
   build-images:
@@ -26,6 +26,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: bash scripts/aioe-version.sh validate "${GITHUB_REF#refs/tags/}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
