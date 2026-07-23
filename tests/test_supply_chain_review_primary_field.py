@@ -1111,6 +1111,31 @@ def test_new_model_can_select_a_product_builtin_group(monkeypatch):
     assert create_kwargs["using_db"] is transaction.connection
 
 
+def test_generated_group_key_is_not_filtered_as_a_model_group_id(monkeypatch):
+    group_key = "group_05e8c818c8cf4c0d808d6f8df4c0942f"
+    group = _FakeRecord(_json={}, id="group-id", key=group_key)
+    captured = {}
+
+    class GroupQuery(_FakeQuery):
+        def filter(self, condition):
+            captured["condition"] = condition
+            return self
+
+    monkeypatch.setattr(
+        manager.SupplyChainCiModelGroup,
+        "filter",
+        staticmethod(lambda **_kwargs: GroupQuery(group)),
+    )
+
+    result = asyncio.run(
+        manager.resolve_ci_model_group("tenant-a", group_key, object())
+    )
+
+    assert result is group
+    assert captured["condition"].filters == {"key": group_key}
+    assert captured["condition"].children == ()
+
+
 @pytest.mark.parametrize("sort", [-1, 1.5, True, "not-a-number", []])
 def test_model_payload_rejects_invalid_sort(sort):
     with pytest.raises(CustomError) as exc_info:

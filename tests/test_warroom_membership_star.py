@@ -6,6 +6,7 @@ import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
+import orjson
 import pytest
 
 from core.error_code import ErrorCode
@@ -22,10 +23,14 @@ class _ExistsQuery:
 
 
 class _Users:
-    def __init__(self, member):
+    def __init__(self, member, items=()):
         self.member = member
+        self.items = list(items)
         self.added = []
         self.filters = []
+
+    def __iter__(self):
+        return iter(self.items)
 
     def filter(self, **kwargs):
         self.filters.append(kwargs)
@@ -59,6 +64,30 @@ def _room_model(monkeypatch, room):
         async def get(**kwargs):
             calls.append(kwargs)
             return room
+
+    monkeypatch.setattr(views, "Room", FakeRoom)
+    return calls
+
+
+def _prefetched_room_model(monkeypatch, room):
+    calls = []
+
+    class RoomQuery:
+        def prefetch_related(self, *relations):
+            calls.append(("prefetch_related", relations))
+            return self
+
+        def __await__(self):
+            async def resolve():
+                return room
+
+            return resolve().__await__()
+
+    class FakeRoom:
+        @staticmethod
+        def get(**kwargs):
+            calls.append(("get", kwargs))
+            return RoomQuery()
 
     monkeypatch.setattr(views, "Room", FakeRoom)
     return calls
@@ -127,6 +156,61 @@ def test_room_not_joined_error_code_contract():
     assert "加入作战室" in ErrorCode.ROOM_NOT_JOINED.message
     assert ErrorCode.PRIVATE_ROOM_JOIN_NOT_ALLOWED.code == 4163
     assert "私聊作战室" in ErrorCode.PRIVATE_ROOM_JOIN_NOT_ALLOWED.message
+
+
+def test_acquire_members_rejects_non_members(monkeypatch):
+    user = SimpleNamespace(id="user-1")
+    room = SimpleNamespace(id="room-1", users=_Users(member=False))
+    room_queries = _prefetched_room_model(monkeypatch, room)
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(inspect.unwrap(views.acquire_members)(_request(user)))
+
+    assert exc_info.value.enum is ErrorCode.ROOM_MEMBER_ACCESS_DENIED
+    assert room.users.filters == [{"id": "user-1"}]
+    assert room_queries == [
+        ("get", {"id": "room-1", "tenant_id": "tenant-1"}),
+        ("prefetch_related", ("creator", "users")),
+    ]
+
+
+def test_acquire_members_returns_tenant_members_to_room_members(monkeypatch):
+    requester = SimpleNamespace(id="user-1")
+
+    async def tenant_members():
+        return [SimpleNamespace(id="tenant-1")]
+
+    async def roles():
+        return [SimpleNamespace(name="operator")]
+
+    member = SimpleNamespace(
+        id="user-2",
+        username="member",
+        display_name="成员",
+        member=SimpleNamespace(all=tenant_members),
+        roles=SimpleNamespace(all=roles),
+    )
+    room = SimpleNamespace(
+        id="room-1",
+        users=_Users(member=True, items=[member]),
+    )
+    _prefetched_room_model(monkeypatch, room)
+
+    response = asyncio.run(inspect.unwrap(views.acquire_members)(_request(requester)))
+
+    assert orjson.loads(response.body) == {
+        "code": 0,
+        "data": {
+            "members": [
+                {
+                    "id": "user-2",
+                    "username": "member",
+                    "display_name": "成员",
+                    "roles": ["operator"],
+                }
+            ]
+        },
+    }
 
 
 def test_get_all_rooms_filters_private_rooms_and_deduplicates(monkeypatch):

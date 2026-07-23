@@ -513,7 +513,12 @@ async def get_all_rooms(request: Request):
 async def acquire_members(request: Request):
     room_id = request.json.get("id")
     tenant_id = request.ctx.session.get("tenant_id")
-    room = await Room.get(id=room_id, tenant_id=tenant_id).prefetch_related("creator", "users")
+    room = await Room.get(id=room_id, tenant_id=tenant_id).prefetch_related(
+        "creator", "users"
+    )
+    user = request.ctx.session["account_info"]
+    if not await room.users.filter(id=user.id).exists():
+        raise CustomError(ErrorCode.ROOM_MEMBER_ACCESS_DENIED)
 
     user_list = []
     for user in room.users:

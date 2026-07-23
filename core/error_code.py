@@ -218,3 +218,4 @@ class ErrorCode(BaseErrorCode):
     OUTBOUND_CONNECTION_TEST_FAILED = ErrorData(
         4172, "连接测试失败，请检查地址、端口或凭据"
     )
+    ROOM_MEMBER_ACCESS_DENIED = ErrorData(4173, "仅作战室成员可查看成员列表")

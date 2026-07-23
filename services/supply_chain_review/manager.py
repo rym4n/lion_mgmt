@@ -1209,7 +1209,12 @@ async def resolve_ci_model_group(
 ) -> SupplyChainCiModelGroup:
     query = SupplyChainCiModelGroup.filter(tenant_id=tenant, deleted=False)
     if group_ref:
-        query = query.filter(Q(id=group_ref) | Q(key=group_ref))
+        if not isinstance(group_ref, str):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        group_filter = Q(key=group_ref)
+        if len(group_ref) <= 36:
+            group_filter |= Q(id=group_ref)
+        query = query.filter(group_filter)
     group = (
         await query.using_db(connection)
         .order_by("sort", "key")
