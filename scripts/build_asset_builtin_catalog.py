@@ -12,9 +12,9 @@ from pathlib import Path
 CATALOG_KEY = "bklite-builtins"
 CATALOG_VERSION = "bklite-2026.07-v1"
 EXPECTED_COUNTS = {
-    "groups": 29,
-    "models": 230,
-    "fields": 3741,
+    "groups": 30,
+    "models": 232,
+    "fields": 3745,
     "unique_rules": 1,
     "relations": 185,
     "icon_aliases": 28,
@@ -34,6 +34,25 @@ CARDINALITIES = {
     "n:n": ("many", "many"),
 }
 CLOUD_GROUPS = {"aliyun", "aws", "azure", "hwcloud", "qcloud", "openstack"}
+DIRECTORY_GROUP = {"key": "directory", "name": "基础数据"}
+DIRECTORY_MODELS = (
+    {
+        "key": "organization",
+        "name": "组织",
+        "fields": (
+            ("inst_name", "组织名称", True, True),
+            ("path", "组织路径", False, False),
+        ),
+    },
+    {
+        "key": "user",
+        "name": "用户",
+        "fields": (
+            ("inst_name", "用户名称", True, True),
+            ("username", "登录账号", True, True),
+        ),
+    },
+)
 
 
 def canonical(value) -> bytes:
@@ -78,18 +97,20 @@ def mapped_field_type(field: dict) -> tuple[str, dict]:
     if source_type == "float":
         return "number", {"number_format": "decimal", "source_options": options}
     if source_type == "time":
-        display_format = options.get("display_format") if isinstance(options, dict) else None
+        display_format = (
+            options.get("display_format") if isinstance(options, dict) else None
+        )
         return ("date" if display_format == "date" else "datetime"), options
     if source_type == "table":
         if isinstance(options, list):
             return "table", {"schema_mode": "fixed", "columns": options}
         return "table", {"schema_mode": "dynamic", "columns": []}
+    if source_type in {"organization", "user"}:
+        return "ref", options
     if source_type in {
         "bool",
         "enum",
         "attachment",
-        "organization",
-        "user",
         "tag",
     }:
         return source_type, options
@@ -104,7 +125,9 @@ def build_catalog(
     classifications = [
         item for item in load_data(classifications_path) if item.get("is_pre") is True
     ]
-    source_models = [item for item in load_data(models_path) if item.get("is_pre") is True]
+    source_models = [
+        item for item in load_data(models_path) if item.get("is_pre") is True
+    ]
     group_keys = {item["classification_id"] for item in classifications}
     model_keys = {item["model_id"] for item in source_models}
 
@@ -119,6 +142,14 @@ def build_catalog(
         }
         payload["builtin_hash"] = digest(payload)
         groups.append(payload)
+    directory_group = {
+        **DIRECTORY_GROUP,
+        "sort": len(groups) + 1,
+        "is_builtin": True,
+        "is_locked": True,
+    }
+    directory_group["builtin_hash"] = digest(directory_group)
+    groups.append(directory_group)
 
     models = []
     fields = []
@@ -170,13 +201,20 @@ def build_catalog(
                 "unique": bool(field.get("is_only", False)),
                 "editable": bool(field.get("editable", True)),
                 "is_derived": bool(field.get("is_display_field", False)),
-                "default_value": field.get("default_value"),
+                "default_value": (
+                    None
+                    if field.get("attr_type") in {"organization", "user"}
+                    and field.get("default_value") == []
+                    else field.get("default_value")
+                ),
                 "user_prompt": field.get("user_prompt") or "",
                 "sort": field_position,
                 "is_builtin": True,
                 "is_locked": True,
                 "owner": "product",
             }
+            if field.get("attr_type") in {"organization", "user"}:
+                field_payload["ref_ci_type_id"] = field["attr_type"]
             field_payload["builtin_hash"] = digest(field_payload)
             fields.append(field_payload)
 
@@ -209,6 +247,54 @@ def build_catalog(
             rule_payload["builtin_hash"] = digest(rule_payload)
             unique_rules.append(rule_payload)
 
+    for directory_model in DIRECTORY_MODELS:
+        model_payload = {
+            "key": directory_model["key"],
+            "name": directory_model["name"],
+            "group_key": DIRECTORY_GROUP["key"],
+            "icon": "ri:contacts-book-line",
+            "source_icon": "",
+            "primary_field": "inst_name",
+            "sort": len(models) + 1,
+            "is_builtin": True,
+            "is_locked": True,
+            "default_enabled": False,
+        }
+        model_payload["builtin_hash"] = digest(model_payload)
+        models.append(model_payload)
+        for field_position, (field_key, label, required, unique) in enumerate(
+            directory_model["fields"], start=1
+        ):
+            field_payload = {
+                "builtin_key": f"{directory_model['key']}.{field_key}",
+                "model_key": directory_model["key"],
+                "field_key": field_key,
+                "source_field_key": field_key,
+                "label": label,
+                "data_type": "text",
+                "source_data_type": "synthetic",
+                "field_group": "基本信息",
+                "field_group_sort": 1,
+                "options": {
+                    "validation_type": "unrestricted",
+                    "widget_type": "single_line",
+                    "custom_regex": "",
+                },
+                "enum_options": [],
+                "required": required,
+                "unique": unique,
+                "editable": True,
+                "is_derived": False,
+                "default_value": None,
+                "user_prompt": "",
+                "sort": field_position,
+                "is_builtin": True,
+                "is_locked": True,
+                "owner": "product",
+            }
+            field_payload["builtin_hash"] = digest(field_payload)
+            fields.append(field_payload)
+
     source_relations: dict[str, dict] = {}
     for path in sorted(associations_dir.glob("*.json")):
         for relation in load_data(path):
@@ -217,7 +303,9 @@ def build_catalog(
             source_relations.setdefault(relation["model_asst_id"], relation)
 
     relations = []
-    for relation in sorted(source_relations.values(), key=lambda value: value["model_asst_id"]):
+    for relation in sorted(
+        source_relations.values(), key=lambda value: value["model_asst_id"]
+    ):
         source_key = relation["src_model_id"]
         target_key = relation["dst_model_id"]
         if source_key not in model_keys or target_key not in model_keys:
@@ -225,7 +313,9 @@ def build_catalog(
         try:
             source_to_target, target_to_source = CARDINALITIES[relation["mapping"]]
         except KeyError as exc:
-            raise ValueError(f"unsupported relation mapping: {relation['mapping']}") from exc
+            raise ValueError(
+                f"unsupported relation mapping: {relation['mapping']}"
+            ) from exc
         semantic_key = relation["asst_id"]
         payload = {
             "key": relation["model_asst_id"],
@@ -263,7 +353,9 @@ def build_catalog(
     }
     actual_counts = {key: len(value) for key, value in catalog.items()}
     if actual_counts != EXPECTED_COUNTS:
-        raise ValueError(f"catalog count mismatch: {actual_counts} != {EXPECTED_COUNTS}")
+        raise ValueError(
+            f"catalog count mismatch: {actual_counts} != {EXPECTED_COUNTS}"
+        )
     return catalog
 
 

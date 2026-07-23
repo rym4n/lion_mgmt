@@ -43,9 +43,9 @@ CATALOG_FILES = (
     "icon_aliases",
 )
 CATALOG_COUNTS = {
-    "groups": 29,
-    "models": 230,
-    "fields": 3741,
+    "groups": 30,
+    "models": 232,
+    "fields": 3745,
     "unique_rules": 1,
     "relations": 185,
     "icon_aliases": 28,
@@ -123,6 +123,12 @@ def load_builtin_catalog() -> dict:
         raise RuntimeError("builtin asset catalog contains duplicate fields")
     if any(item["data_type"] not in FIELD_DATA_TYPES for item in catalog["fields"]):
         raise RuntimeError("builtin asset catalog contains unsupported field types")
+    if any(
+        item.get("ref_ci_type_id") not in model_keys
+        for item in catalog["fields"]
+        if item["data_type"] == "ref"
+    ):
+        raise RuntimeError("builtin asset catalog contains invalid model references")
     if (
         sum(bool(item.get("is_derived")) for item in catalog["fields"])
         != DERIVED_FIELD_COUNT
@@ -333,6 +339,7 @@ async def _upsert_builtin_fields(
     updated = 0
     for definition in catalog["fields"]:
         model = models[definition["model_key"]]
+        ref_model = models.get(definition.get("ref_ci_type_id"))
         values = {
             "ci_type_id": model.id,
             "ci_type_key": model.key,
@@ -342,6 +349,8 @@ async def _upsert_builtin_fields(
             "data_type": definition["data_type"],
             "enum_options": definition["enum_options"],
             "options": definition["options"],
+            "ref_ci_type_id": ref_model.id if ref_model else None,
+            "ref_ci_type": ref_model.key if ref_model else None,
             "required": definition["required"],
             "unique": definition["unique"],
             "editable": definition["editable"],

@@ -230,5 +230,13 @@
     "is_builtin": true,
     "is_locked": true,
     "builtin_hash": "1510da91d8091978a7bc57c98d3915acd001303f337e29f6ccdf69b035fd77fa"
+  },
+  {
+    "key": "directory",
+    "name": "基础数据",
+    "sort": 30,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "eac39821d9c91f75b086e304f54ab65d46ec2a076a0ac89c726be59257371057"
   }
 ]

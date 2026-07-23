@@ -101,7 +101,7 @@ def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
     catalog = _catalog()
 
     assert catalog["metadata"]["digest"] == (
-        "sha256:9bc98ee277611282bbd9de0e218df695022ec696aa4ae06948661a0bd96173f8"
+        "sha256:0e696ce577189ea1dfa90e7a081308e15a8bd4b635b7395d2154ef74ebb51c00"
     )
     assert {
         name: len(catalog[name]) for name in builtin_catalog.CATALOG_FILES
@@ -118,6 +118,15 @@ def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
         {"custom", "it-system", "t"}
     )
     assert "自定义模型" not in {item["name"] for item in catalog["groups"]}
+    assert {"organization", "user"} <= model_keys
+    assert all(
+        item["data_type"] not in {"organization", "user"} for item in catalog["fields"]
+    )
+    assert {
+        item.get("ref_ci_type_id")
+        for item in catalog["fields"]
+        if item.get("source_data_type") in {"organization", "user"}
+    } == {"organization", "user"}
     assert all(
         set(item["source_model_keys"] + item["target_model_keys"]) <= model_keys
         for item in catalog["relations"]
