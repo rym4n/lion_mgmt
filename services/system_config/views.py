@@ -2,6 +2,8 @@
 
 import ast
 import asyncio
+import copy
+import hashlib
 import io
 import os
 import uuid
@@ -41,6 +43,10 @@ system_bp = Blueprint("system", url_prefix="/system")
 _all__ = ["system_bp"]
 
 _PICTURE_TYPES = ("background", "webico", "logo")
+_OUTGOING_AUDIT_CONFIG_KEY = "outgoing_audit_log"
+_TENANT_AUDIT_TRANSFORM_PREFIX = "aioe_tenant_audit_"
+_TENANT_AUDIT_SINK_PREFIX = "aioe_tenant_sink_"
+_OUTGOING_CONFIG_LOCK = asyncio.Lock()
 _DEFAULT_PICTURE_URLS = {
     "background": "",
     "webico": "",
@@ -1242,7 +1248,11 @@ async def search_audit(request):
     uri = request.json.get("uri")
     client_ua = request.json.get("client_ua")
 
-    query = 'topic:"lion_audit"'
+    tenant_id = request.ctx.session.get("tenant_id")
+    if not tenant_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    query = f'topic:"lion_audit" AND tenant_id:{orjson.dumps(str(tenant_id)).decode()}'
     if username:
         query += f' AND username:"{username}"'
     if ip:
@@ -1302,6 +1312,152 @@ async def search_audit(request):
             "data": data,
         }
     )
+
+
+def _outgoing_config_key(tenant_id: str) -> str:
+    return f"{_OUTGOING_AUDIT_CONFIG_KEY}:{tenant_id}"
+
+
+def _parse_outgoing_config(value: str) -> list[dict]:
+    try:
+        parsed = orjson.loads(value)
+    except orjson.JSONDecodeError:
+        parsed = ast.literal_eval(value)
+    if not isinstance(parsed, list):
+        raise ValueError("outgoing audit config must be a list")
+    return parsed
+
+
+async def _load_outgoing_configs() -> dict[str, list[dict]]:
+    rows = await Config.filter(
+        key__startswith=_OUTGOING_AUDIT_CONFIG_KEY,
+        module="audit_log",
+        deleted=False,
+    ).all()
+    configs: dict[str, list[dict]] = {}
+
+    # Load the legacy global key first. A tenant-specific key, when present,
+    # replaces it for the same tenant without exposing the legacy value to
+    # other tenants.
+    for row in sorted(rows, key=lambda item: item.key != _OUTGOING_AUDIT_CONFIG_KEY):
+        if row.key == _OUTGOING_AUDIT_CONFIG_KEY:
+            tenant_id = str(row.tenant_id or "")
+        elif row.key.startswith(f"{_OUTGOING_AUDIT_CONFIG_KEY}:"):
+            tenant_id = row.key.removeprefix(f"{_OUTGOING_AUDIT_CONFIG_KEY}:")
+        else:
+            continue
+        if not tenant_id:
+            continue
+        try:
+            configs[tenant_id] = _parse_outgoing_config(row.value)
+        except (SyntaxError, ValueError, TypeError) as exc:
+            logger.warning(
+                "忽略无效的审计日志外发配置: key=%s, error=%s",
+                row.key,
+                exc,
+            )
+    return configs
+
+
+def _build_outgoing_sinks(
+    items: list[dict], *, inputs: list[str], scope: str
+) -> dict[str, dict]:
+    sinks: dict[str, dict] = {}
+    seen_addresses: set[str] = set()
+
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        sink_type = item.get("sink_type")
+        raw_address = item.get("sink_address")
+        if sink_type not in {"kafka", "syslog"} or not isinstance(raw_address, str):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+        addresses = [address.strip() for address in raw_address.split(",")]
+        if not all(addresses):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        if len(addresses) > 1 and sink_type == "syslog":
+            raise CustomError(ErrorCode.MULTIPLE_SYSLOG_ADDRESS_NOT_SUPPORTED)
+
+        for address in addresses:
+            try:
+                port = int(address.rsplit(":", 1)[-1])
+            except (ValueError, IndexError):
+                raise CustomError(ErrorCode.INVALID_PORT_ERROR)
+            if port < 1 or port > 65535:
+                raise CustomError(ErrorCode.INVALID_PORT_ERROR)
+            if address in seen_addresses:
+                raise CustomError(ErrorCode.OUTBOUND_ADDRESS_CAN_NOT_BE_REPEATED)
+            seen_addresses.add(address)
+
+        common_config = {"inputs": inputs, "encoding": {"codec": "json"}}
+        sink_key = f"{_TENANT_AUDIT_SINK_PREFIX}{scope}_{index}"
+
+        if sink_type == "kafka":
+            topic = item.get("kafka_topic")
+            if not topic:
+                raise CustomError(ErrorCode.PARAM_ERROR)
+            sink_config = {
+                "type": "kafka",
+                "bootstrap_servers": ",".join(addresses),
+                "topic": topic,
+                **common_config,
+            }
+            if mechanism := item.get("sasl_mechanism"):
+                sink_config["sasl"] = {
+                    "enabled": True,
+                    "mechanism": mechanism,
+                    "username": item.get("sasl_username"),
+                    "password": item.get("sasl_password"),
+                }
+        else:
+            mode = item.get("sink_protocol")
+            if mode not in {"tcp", "udp"}:
+                raise CustomError(ErrorCode.PARAM_ERROR)
+            sink_config = {
+                "type": "socket",
+                "address": addresses[0],
+                "mode": mode,
+                **common_config,
+            }
+        sinks[sink_key] = sink_config
+
+    return sinks
+
+
+def _build_outgoing_vector_config(
+    base_config: dict, configs_by_tenant: dict[str, list[dict]]
+) -> dict:
+    default_sink = copy.deepcopy(base_config.get("sinks", {}).get("aioe_default_audit"))
+    if not isinstance(default_sink, dict) or not isinstance(default_sink.get("inputs"), list):
+        raise CustomError(ErrorCode.OUTBOUND_FILE_CONFIGURATION_FAILED)
+
+    transforms = {
+        key: copy.deepcopy(value)
+        for key, value in (base_config.get("transforms") or {}).items()
+        if not key.startswith(_TENANT_AUDIT_TRANSFORM_PREFIX)
+    }
+    data = {
+        "sources": copy.deepcopy(base_config.get("sources") or {}),
+        "transforms": transforms,
+        "sinks": {"aioe_default_audit": default_sink},
+    }
+
+    for tenant_id, items in sorted(configs_by_tenant.items()):
+        if not items:
+            continue
+        scope = hashlib.sha256(tenant_id.encode()).hexdigest()[:16]
+        transform_name = f"{_TENANT_AUDIT_TRANSFORM_PREFIX}{scope}"
+        data["transforms"][transform_name] = {
+            "type": "filter",
+            "inputs": copy.deepcopy(default_sink["inputs"]),
+            "condition": f'.tenant_id == {orjson.dumps(tenant_id).decode()}',
+        }
+        data["sinks"].update(
+            _build_outgoing_sinks(items, inputs=[transform_name], scope=scope)
+        )
+
+    return data
 
 
 @system_bp.post("/outgoing")
@@ -1367,84 +1523,45 @@ async def search_audit(request):
 )
 @requires_permission("audit:u")
 async def outgoing(request):
-    yaml_file = os.path.join(VECTOR_CFG, "aioe_audit.yaml")
-    async with aiofile.AIOFile(yaml_file, "r", encoding="utf-8") as f:
-        content = await f.read()
-        old_data = yaml.safe_load(content)
+    tenant_id = str(request.ctx.session.get("tenant_id") or "")
+    if not tenant_id or not isinstance(request.json, list):
+        raise CustomError(ErrorCode.PARAM_ERROR)
 
-    data = {"sources": old_data["sources"], "transforms": old_data["transforms"], "sinks": {}}
-    data["sinks"]["aioe_default_audit"] = old_data["sinks"]["aioe_default_audit"]
-    json_data = request.json
-    seen_addresses = set()
+    async with _OUTGOING_CONFIG_LOCK:
+        yaml_file = os.path.join(VECTOR_CFG, "aioe_audit.yaml")
+        async with aiofile.AIOFile(yaml_file, "r", encoding="utf-8") as f:
+            content = await f.read()
+            old_data = yaml.safe_load(content)
 
-    for i, item in enumerate(json_data):
-        sink_type = item.get("sink_type")
-        raw_address = item.get("sink_address")
+        json_data = request.json
+        configs_by_tenant = await _load_outgoing_configs()
+        configs_by_tenant[tenant_id] = json_data
+        data = _build_outgoing_vector_config(old_data, configs_by_tenant)
 
-        if not raw_address and not sink_type:
-            raise CustomError(ErrorCode.PARAM_ERROR)
+        yaml_str = yaml.dump(
+            data, default_flow_style=False, allow_unicode=True, sort_keys=False
+        )
 
-        addresses = raw_address.split(",")
-        if len(addresses) > 1 and sink_type == "syslog":
-            raise CustomError(ErrorCode.MULTIPLE_SYSLOG_ADDRESS_NOT_SUPPORTED)
+        # Connectivity is tested by /outgoing/test. Revalidating every tenant's
+        # remote sink here would let another tenant's outage block this save.
+        if not check_vector_config(
+            data,
+            vector_config_yaml=yaml_str,
+            skip_healthchecks=True,
+        ):
+            raise CustomError(ErrorCode.OUTBOUND_FILE_CONFIGURATION_FAILED)
 
-        for addr in addresses:
-            try:
-                port = int(addr.split(":")[-1])
-                if port > 65535 or port < 1:
-                    raise CustomError(ErrorCode.INVALID_PORT_ERROR)
-            except (ValueError, IndexError):
-                raise CustomError(ErrorCode.INVALID_PORT_ERROR)
+        async with aiofile.AIOFile(yaml_file, mode="w", encoding="utf-8") as file:
+            await file.write(yaml_str)
 
-            if addr in seen_addresses:
-                raise CustomError(ErrorCode.OUTBOUND_ADDRESS_CAN_NOT_BE_REPEATED)
-            seen_addresses.add(addr)
-
-        sink_key_suffix = str(i)
-        common_config = {"inputs": old_data["sinks"]["aioe_default_audit"]["inputs"], "encoding": {"codec": "json"}}
-
-        if sink_type == "kafka":
-            topic = item.get("kafka_topic")
-            if not topic:
-                raise CustomError(ErrorCode.PARAM_ERROR)
-
-            sink_config = {
-                "type": "kafka",
-                "bootstrap_servers": raw_address,
-                "topic": topic,
-                **common_config,
-            }
-
-            if mechanism := item.get("sasl_mechanism"):
-                sink_config["sasl"] = {
-                    "enabled": True,
-                    "mechanism": mechanism,
-                    "username": item.get("sasl_username"),
-                    "password": item.get("sasl_password"),
-                }
-            data["sinks"][f"kafka_sinks_{sink_key_suffix}"] = sink_config
-
-        elif sink_type == "syslog":
-            mode = item.get("sink_protocol")
-            if not mode:
-                raise CustomError(ErrorCode.PARAM_ERROR)
-
-            data["sinks"][f"syslog_sinks_{sink_key_suffix}"] = {
-                "type": "socket",
-                "address": addresses[0],
-                "mode": mode,
-                **common_config,
-            }
-
-    yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
-
-    if not check_vector_config(data, vector_config_yaml=yaml_str):
-        raise CustomError(ErrorCode.OUTBOUND_FILE_CONFIGURATION_FAILED)
-
-    async with aiofile.AIOFile(yaml_file, mode="w", encoding="utf-8") as file:
-        await file.write(yaml_str)
-
-    await Config.update_or_create(key="outgoing_audit_log", module="audit_log", defaults={"value": str(json_data)})
+        await Config.update_or_create(
+            key=_outgoing_config_key(tenant_id),
+            module="audit_log",
+            defaults={
+                "value": orjson.dumps(json_data).decode(),
+                "tenant_id": tenant_id,
+            },
+        )
 
     return response_ok("保存成功")
 
@@ -1639,12 +1756,11 @@ async def test_outgoing(request):
 )
 @requires_permission("audit:r")
 async def get_outgoing_config(request):
-    config = await Config.get_or_none(key="outgoing_audit_log", module="audit_log")
-    if not config:
-        return response_ok([])
-
-    python_list = ast.literal_eval(config.value)
-    return response_ok(python_list)
+    tenant_id = str(request.ctx.session.get("tenant_id") or "")
+    if not tenant_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    configs_by_tenant = await _load_outgoing_configs()
+    return response_ok(configs_by_tenant.get(tenant_id, []))
 
 
 @system_bp.post("/up-mt")

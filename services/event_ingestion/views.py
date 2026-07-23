@@ -273,7 +273,7 @@ def get_conditional_statements(conditions):
     return conditional_statements
 
 
-def check_vector_config(vector_config, vector_config_yaml=None):
+def check_vector_config(vector_config, vector_config_yaml=None, *, skip_healthchecks=False):
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", encoding="utf-8", delete=False) as tmp_file:
         if vector_config_yaml:
             yaml_str = vector_config_yaml
@@ -285,7 +285,10 @@ def check_vector_config(vector_config, vector_config_yaml=None):
 
         tmp_path = tmp_file.name
 
-        result = run_linux_command(f"vector validate --config-yaml {tmp_path}")
+        healthcheck_option = " --skip-healthchecks" if skip_healthchecks else ""
+        result = run_linux_command(
+            f"vector validate{healthcheck_option} --config-yaml {tmp_path}"
+        )
 
     try:
         if result["code"] != 0:

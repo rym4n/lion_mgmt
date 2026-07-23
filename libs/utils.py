@@ -410,6 +410,25 @@ def local_time_to_utc(time_str):
         raise ValueError(f"Invalid time format: {time_str}")
 
 
+def _is_empty_stream_id_query_error(response) -> bool:
+    """Treat an invalid stream-id filter like a filter with no matches.
+
+    VictoriaLogs returns HTTP 400 when the special ``_stream_id`` field is
+    filtered with a value that is not a complete stream id.  In the log-center
+    UI this value comes from the generic field filter, where an unknown value
+    should produce an empty result instead of turning the whole query into a
+    service error.  Keep the compatibility narrow so other malformed LogsQL
+    queries still surface as failures.
+    """
+    if getattr(response, "status_code", None) != 400:
+        return False
+    error_text = getattr(response, "text", "") or ""
+    return (
+        "cannot parse _stream_id" in error_text
+        and "cannot unmarshal _stream_id" in error_text
+    )
+
+
 async def query_vlog(query, project_id, start=None, end=None, account_id=0, limit=None):
     # 构建VictoriaLogs查询参数
     params = {"query": query}
@@ -436,6 +455,8 @@ async def query_vlog(query, project_id, start=None, end=None, account_id=0, limi
                     result.append(orjson.loads(line))
             return result
         except httpx.HTTPStatusError as e:
+            if _is_empty_stream_id_query_error(e.response):
+                return []
             logger.error(f"VictoriaLogs HTTP error: {e.response.status_code} - {e.response.text}")
             return None
         except Exception as e:
