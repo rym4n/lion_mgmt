@@ -24,7 +24,7 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_fail, response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import get_superadmin_role, load_license, requires_permission
+from libs.security.authorization import get_superadmin_role, requires_permission
 from libs.utils import (
     delete_from_s3,
     get_from_s3,
@@ -32,7 +32,7 @@ from libs.utils import (
     strip_timezone_to_seconds,
     upload_to_s3,
 )
-from models import Config, Playbook, PlaybookPermissions, PlaybookVersion, Role, Tool, ToolResources
+from models import Config, Playbook, PlaybookPermissions, PlaybookVersion, ToolResources
 from services.digital_employee.package_api import import_package_from_request, request_is_loopback
 from services.event_ingestion.views import check_vector_config
 from services.tools.views import upload_tool

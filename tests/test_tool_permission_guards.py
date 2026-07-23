@@ -205,10 +205,216 @@ def test_tool_lists_do_not_hide_versions_by_maintenance_flag():
     assert "maintain=" not in all_versions_source
 
 
-def test_tool_action_filter_preserves_actions_without_resource_requirement():
-    source = inspect.getsource(inspect.unwrap(tool_views.tool_actions))
+@pytest.mark.asyncio
+async def test_tool_actions_returns_all_actions_when_legacy_filter_is_true(
+    monkeypatch,
+):
+    class FakeTool:
+        @staticmethod
+        async def get_or_none(**kwargs):
+            assert kwargs == {
+                "name": "sample_tool",
+                "version": "version-1",
+                "deleted": False,
+                "tenant_id": "tenant-1",
+            }
+            return SimpleNamespace(id="tool-1")
 
-    assert "await tool_requires_resource(name, tenant_id)" in source
+    class FakeActionQuery:
+        async def values(self, *fields):
+            assert fields == ("action", "id", "playbook")
+            return [
+                {
+                    "id": "action-1",
+                    "action": {"func": "query", "name": "查询"},
+                    "playbook": [],
+                },
+                {
+                    "id": "action-2",
+                    "action": {"func": "update", "name": "更新"},
+                    "playbook": [],
+                },
+            ]
+
+    class FakeToolAction:
+        @staticmethod
+        def filter(**kwargs):
+            assert kwargs == {
+                "tool_name": "sample_tool",
+                "version_number": "version-1",
+                "tenant_id": "tenant-1",
+            }
+            return FakeActionQuery()
+
+    monkeypatch.setattr(tool_views, "Tool", FakeTool)
+    monkeypatch.setattr(tool_views, "ToolAction", FakeToolAction)
+    monkeypatch.setattr(tool_views, "response_ok", lambda data: data)
+
+    request = SimpleNamespace(
+        json={
+            "name": "sample_tool",
+            "version": "version-1",
+            "filter_by_permission": True,
+        },
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}),
+    )
+
+    result = await inspect.unwrap(tool_views.tool_actions)(request)
+
+    assert [action["func"] for action in result["actions"]] == [
+        "query",
+        "update",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tool_resources_marks_permission_without_hiding_resources(
+    monkeypatch,
+):
+    resources = [
+        SimpleNamespace(
+            id="resource-1",
+            json={"id": "resource-1", "name": "已授权资源"},
+        ),
+        SimpleNamespace(
+            id="resource-2",
+            json={"id": "resource-2", "name": "未授权资源"},
+        ),
+    ]
+    permission = SimpleNamespace(
+        users=[{"resource-1": ["user-1"]}],
+        roles=[],
+    )
+
+    class FakeResourceQuery:
+        async def all(self):
+            return resources
+
+    class FakeToolResources:
+        @staticmethod
+        def filter(**kwargs):
+            assert kwargs == {
+                "tool_name": "sample_tool",
+                "deleted": False,
+                "internal": False,
+                "tenant_id": "tenant-1",
+            }
+            return FakeResourceQuery()
+
+    class FakePermissionQuery:
+        async def all(self):
+            return [permission]
+
+    class FakeActionPermissions:
+        @staticmethod
+        def filter(**kwargs):
+            assert kwargs == {
+                "tool_name": "sample_tool",
+                "action_name__in": ["query", "all"],
+                "deleted": False,
+                "tenant_id": "tenant-1",
+            }
+            return FakePermissionQuery()
+
+    async def cache_get(_key):
+        return False
+
+    cache_client = SimpleNamespace(get=cache_get)
+    account = SimpleNamespace(id="user-1", roles=[])
+    request = SimpleNamespace(
+        json={
+            "name": "sample_tool",
+            "action_name": "query",
+            "filter_by_permission": True,
+        },
+        ctx=SimpleNamespace(
+            session={
+                "id": "session-1",
+                "tenant_id": "tenant-1",
+                "account_info": account,
+            }
+        ),
+        app=SimpleNamespace(ctx=SimpleNamespace(cache_client=cache_client)),
+    )
+
+    monkeypatch.setattr(tool_views, "ToolResources", FakeToolResources)
+    monkeypatch.setattr(tool_views, "ActionPermissions", FakeActionPermissions)
+    monkeypatch.setattr(tool_views, "is_superadmin", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(tool_views, "response_ok", lambda data: data)
+
+    result = await inspect.unwrap(tool_views.tool_resources_detailed)(request)
+
+    assert result == [
+        {
+            "id": "resource-1",
+            "name": "已授权资源",
+            "has_permission": True,
+        },
+        {
+            "id": "resource-2",
+            "name": "未授权资源",
+            "has_permission": False,
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tool_resources_marks_every_resource_allowed_for_superadmin(
+    monkeypatch,
+):
+    resources = [
+        SimpleNamespace(id="resource-1", json={"id": "resource-1"}),
+        SimpleNamespace(id="resource-2", json={"id": "resource-2"}),
+    ]
+
+    class FakeResourceQuery:
+        async def all(self):
+            return resources
+
+    class FakeToolResources:
+        @staticmethod
+        def filter(**_kwargs):
+            return FakeResourceQuery()
+
+    class RejectPermissionQuery:
+        @staticmethod
+        def filter(**_kwargs):
+            raise AssertionError("superadmin must not query action permissions")
+
+    async def cache_get(_key):
+        return False
+
+    request = SimpleNamespace(
+        json={
+            "name": "sample_tool",
+            "action_name": "query",
+            "filter_by_permission": True,
+        },
+        ctx=SimpleNamespace(
+            session={
+                "id": "session-1",
+                "tenant_id": "tenant-1",
+                "account_info": SimpleNamespace(id="admin-1", roles=[]),
+            }
+        ),
+        app=SimpleNamespace(
+            ctx=SimpleNamespace(
+                cache_client=SimpleNamespace(get=cache_get),
+            )
+        ),
+    )
+
+    monkeypatch.setattr(tool_views, "ToolResources", FakeToolResources)
+    monkeypatch.setattr(tool_views, "ActionPermissions", RejectPermissionQuery)
+    monkeypatch.setattr(tool_views, "is_superadmin", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(tool_views, "response_ok", lambda data: data)
+
+    result = await inspect.unwrap(tool_views.tool_resources_detailed)(request)
+
+    assert result == [
+        {"id": "resource-1", "has_permission": True},
+        {"id": "resource-2", "has_permission": True},
+    ]
 
 
 @pytest.mark.asyncio

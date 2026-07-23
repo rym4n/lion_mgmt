@@ -34,7 +34,6 @@ from libs.security.authorization import (
     is_superadmin,
     load_license,
     requires_permission,
-    tool_requires_resource,
 )
 from libs.utils import gen_run_id
 from models import (
@@ -1092,7 +1091,7 @@ async def all_versions(request):
                     "version": {"type": "string", "description": "工具版本号"},
                     "filter_by_permission": {
                         "type": "boolean",
-                        "description": "为 true 时只返回当前用户在 ActionPermissions 中至少对一个资源有执行权的动作；超管豁免。默认 false。",
+                        "description": "兼容旧客户端的保留字段，不再过滤动作；资源执行权限由资源详情接口返回。",
                     },
                 },
             }
@@ -1159,7 +1158,6 @@ async def all_versions(request):
 async def tool_actions(request):
     name = request.json.get("name")
     version = request.json.get("version")
-    filter_by_permission = bool(request.json.get("filter_by_permission"))
     if not name or not version:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
@@ -1171,47 +1169,8 @@ async def tool_actions(request):
 
     actions = await ToolAction.filter(tool_name=name, version_number=version, tenant_id=tenant_id).values("action", "id", "playbook")
 
-    # 按用户执行权过滤：定时任务/巡检等挑选可执行动作的场景使用。超管豁免。
-    permitted_funcs = None
-    if filter_by_permission:
-        user = request.ctx.session.get("account_info")
-        if not is_superadmin(
-            user,
-            tenant_id=tenant_id,
-        ) and await tool_requires_resource(name, tenant_id):
-            user_id = str(user.id)
-            user_role_ids = {
-                str(role.id)
-                for role in (user.roles or [])
-                if getattr(role, "tenant_id", None) == tenant_id
-            }
-            all_action_perms = await ActionPermissions.filter(tool_name=name, deleted=False, tenant_id=tenant_id).all()
-            # 收集当前用户至少对一个资源有权的动作名；"all" 记录对该工具所有动作统一授权
-            permitted_funcs = set()
-            for perm in all_action_perms:
-                user_map = perm.users[0] if isinstance(perm.users, list) and perm.users and isinstance(perm.users[0], dict) else {}
-                role_map = perm.roles[0] if isinstance(perm.roles, list) and perm.roles and isinstance(perm.roles[0], dict) else {}
-                hit = False
-                for resource_id, granted_users in user_map.items():
-                    if user_id in {str(x) for x in granted_users or []}:
-                        hit = True
-                        break
-                if not hit:
-                    for resource_id, granted_roles in role_map.items():
-                        if not user_role_ids.isdisjoint({str(x) for x in granted_roles or []}):
-                            hit = True
-                            break
-                if hit:
-                    if perm.action_name == "all":
-                        permitted_funcs = None  # "all" 命中即等价于全部放行
-                        break
-                    permitted_funcs.add(perm.action_name)
-
     action_list = []
     for action in actions:
-        func_name = action.get("action", {}).get("func")
-        if permitted_funcs is not None and func_name not in permitted_funcs:
-            continue
         action.get("action")["id"] = action.get("id")
         pv_list = []
         if action.get("playbook"):
@@ -1673,11 +1632,11 @@ async def add_tool_resource(request):
                     "name": {"type": "string", "description": "工具名称"},
                     "action_name": {
                         "type": "string",
-                        "description": "动作 func，与 filter_by_permission=true 搭配使用，只返回该动作下当前用户有权的资源",
+                        "description": "动作 func，与 filter_by_permission=true 搭配使用，为每个资源计算执行权限",
                     },
                     "filter_by_permission": {
                         "type": "boolean",
-                        "description": "为 true 且传入 action_name 时按 ActionPermissions 过滤资源；超管豁免。默认 false。",
+                        "description": "为 true 且传入 action_name 时返回全部资源并通过 has_permission 标记执行权限；超管豁免。默认 false。",
                     },
                 },
             }
@@ -1706,6 +1665,10 @@ async def add_tool_resource(request):
                                         "resources": {"type": "object"},
                                         "creator": {"type": "string"},
                                         "updater": {"type": "string"},
+                                        "has_permission": {
+                                            "type": "boolean",
+                                            "description": "当前用户是否有权使用该资源执行所选动作；仅请求权限标记时返回",
+                                        },
                                     },
                                 },
                             },
@@ -1734,10 +1697,13 @@ async def tool_resources_detailed(request):
         tenant_id=tenant_id,
     ).all()
 
-    # 按 (tool, action) 的资源级授权过滤：供定时任务/巡检等挑选可执行资源；超管豁免。
+    permission_by_resource = None
+    # 返回全部资源，并按 (tool, action) 标记资源级授权；超管全部放行。
     if filter_by_permission and action_name:
         user = request.ctx.session.get("account_info")
-        if not is_superadmin(user, tenant_id=tenant_id):
+        if is_superadmin(user, tenant_id=tenant_id):
+            permission_by_resource = {str(resource.id): True for resource in resources}
+        else:
             user_id = str(user.id)
             user_role_ids = {
                 str(role.id)
@@ -1750,12 +1716,30 @@ async def tool_resources_detailed(request):
                 deleted=False,
                 tenant_id=tenant_id,
             ).all()
-            resources = [
-                r for r in resources
-                if any(action_permission_hits(perm, str(r.id), user_id, user_role_ids) for perm in action_perms)
-            ]
+            permission_by_resource = {
+                str(resource.id): any(
+                    action_permission_hits(
+                        permission,
+                        str(resource.id),
+                        user_id,
+                        user_role_ids,
+                    )
+                    for permission in action_perms
+                )
+                for resource in resources
+            }
 
-    return response_ok([r.json for r in resources])
+    resource_list = []
+    for resource in resources:
+        resource_data = resource.json
+        if permission_by_resource is not None:
+            resource_data["has_permission"] = permission_by_resource.get(
+                str(resource.id),
+                False,
+            )
+        resource_list.append(resource_data)
+
+    return response_ok(resource_list)
 
 
 @tools_bp.post("/resource/update")
