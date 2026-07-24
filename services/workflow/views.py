@@ -31,6 +31,7 @@ from libs.security.authorization import (
     check_playbook_permission,
     get_superadmin_role,
     is_superadmin,
+    is_superadmin_role,
     load_license,
     playbook_ids_for_user,
     playbook_permission,
@@ -365,7 +366,7 @@ async def list_workflow(request):
     user = request.ctx.session.get("account_info")
 
     # permission_filter：'r' 剧本管理列表（默认，向后兼容）；'e' 供定时任务/巡检等场景挑选可执行剧本。
-    # 超管(*:*)豁免——避免"我明明是超管但看不到自己刚导入的剧本"的空档。
+    # 全平台超管豁免，避免看不到自己刚导入的剧本。
     perm_filter = (request.json.get("permission_filter") or "r").strip()
     if perm_filter not in ("r", "e"):
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -1665,8 +1666,17 @@ async def add_permission(request):
     if playbook.internal:
         raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
 
-    # 处理用户权限
+    protected_users = await Account.filter(
+        id__in=list(users.keys()), deleted=False, type="user"
+    ).prefetch_related("roles")
+    superadmin_users = {
+        account.id for account in protected_users if is_superadmin(account)
+    }
+
+    # 处理用户权限；跳过超管账号，其权限不允许通过此接口被覆盖（保护语义）
     for uid, perms in users.items():
+        if uid in superadmin_users:
+            continue
         await PlaybookPermissions.update_or_create(
             pb_id=playbook_id,
             users_id=uid,
@@ -1675,11 +1685,18 @@ async def add_permission(request):
         )
         await request.app.ctx.cache_client.set((playbook_id, uid), perms, ttl=2592000)
 
+    protected_roles = {
+        role.id
+        for role in await Role.filter(
+            id__in=list(roles.keys()),
+            deleted=False,
+        ).all()
+        if is_superadmin_role(role)
+    }
+
     # 处理角色权限；跳过超管角色，其权限不允许通过此接口被覆盖（保护语义）
-    superadmin_role = await get_superadmin_role()
-    superadmin_id = superadmin_role.id if superadmin_role else None
     for rid, perms in roles.items():
-        if rid == superadmin_id:
+        if rid in protected_roles:
             continue
         await PlaybookPermissions.update_or_create(
             pb_id=playbook_id,

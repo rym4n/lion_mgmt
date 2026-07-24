@@ -136,7 +136,7 @@ def test_role_details_expands_platform_wildcard_for_nested_asset_permissions():
 
 
 def test_role_update_cannot_remove_platform_wildcard_permission():
-    superadmin_role = SimpleNamespace(permissions=["*:*"])
+    superadmin_role = SimpleNamespace(id="111111", permissions=["*:*"])
 
     assert _preserve_superadmin_permission(superadmin_role, ["screen:r"]) == [
         "screen:r",
@@ -145,6 +145,9 @@ def test_role_update_cannot_remove_platform_wildcard_permission():
     assert _preserve_superadmin_permission(superadmin_role, ["*:*"]) == ["*:*"]
     assert _preserve_superadmin_permission(
         SimpleNamespace(permissions=["role:r"]), ["screen:r"]
+    ) == ["screen:r"]
+    assert _preserve_superadmin_permission(
+        SimpleNamespace(id="tenant-admin", permissions=["*:*"]), ["screen:r"]
     ) == ["screen:r"]
 
 

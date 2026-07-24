@@ -22,14 +22,19 @@ from services.timed.views import (
 
 def _account(*permission_lists, tenant_ids=None):
     tenant_ids = tenant_ids or ["tenant-a"] * len(permission_lists)
-    roles = [SimpleNamespace(permissions=perms, tenant_id=tenant_id) for perms, tenant_id in zip(permission_lists, tenant_ids)]
+    roles = [
+        SimpleNamespace(id=f"role-{index}", permissions=perms, tenant_id=tenant_id)
+        for index, (perms, tenant_id) in enumerate(
+            zip(permission_lists, tenant_ids)
+        )
+    ]
     return SimpleNamespace(roles=roles)
 
 
 def test_account_has_permission_matches_wildcard():
-    superadmin = _account(["*:*"])
-    assert account_has_permission(superadmin, "timed:r") is True
-    assert is_superadmin(superadmin) is True
+    wildcard_admin = _account(["*:*"])
+    assert account_has_permission(wildcard_admin, "timed:r") is True
+    assert is_superadmin(wildcard_admin) is False
 
     tenant_admin = _account(["timed:c,d,u,r", "workflow:c,d,u,r"])
     assert account_has_permission(tenant_admin, "timed:r") is True
@@ -54,11 +59,16 @@ def test_account_has_permission_can_scope_roles_by_tenant():
     assert account_has_permission(account, "event:r", tenant_id="tenant-a") is True
 
 
-def test_is_superadmin_can_scope_roles_by_tenant():
-    account = _account(["*:*"], ["event:r"], tenant_ids=["tenant-b", "tenant-a"])
+def test_is_superadmin_only_matches_fixed_platform_role_id():
+    account = SimpleNamespace(
+        roles=[
+            SimpleNamespace(id="tenant-admin", permissions=["*:*"], tenant_id="tenant-a"),
+            SimpleNamespace(id="111111", permissions=["role:r"], tenant_id="tenant-b"),
+        ]
+    )
 
     assert is_superadmin(account) is True
-    assert is_superadmin(account, tenant_id="tenant-a") is False
+    assert is_superadmin(account, tenant_id="tenant-a") is True
     assert is_superadmin(account, tenant_id="tenant-b") is True
 
 
@@ -356,7 +366,17 @@ async def test_check_action_execute_permission_superadmin_bypass(monkeypatch):
             raise AssertionError("超管应豁免，不该查表")
 
     monkeypatch.setattr("libs.security.authorization.ActionPermissions", _Blocker)
-    account = SimpleNamespace(id="admin-1", roles=[SimpleNamespace(id="r", name="超管", permissions=["*:*"], tenant_id="t1")])
+    account = SimpleNamespace(
+        id="admin-1",
+        roles=[
+            SimpleNamespace(
+                id="111111",
+                name="超管",
+                permissions=["role:r"],
+                tenant_id="t1",
+            )
+        ],
+    )
     assert await check_action_execute_permission(account, "lion_mgmt", "get_events_list", "res-1", "t1") is True
     assert called["filter"] == 0
 

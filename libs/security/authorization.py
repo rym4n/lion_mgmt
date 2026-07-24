@@ -25,8 +25,9 @@ from models import (
 )
 from settings import AUTHENTICATION_SESSION_EXPIRATION, LICENSE_DIR
 
-# 超管角色的本质是拥有 *:* 通配权限的那条 Role（见 aioe_package/aioe_install/init.sql 初始化）。
-# 用权限本质而非硬编码角色 id "111111" 定位，避免多环境/多次种子数据下 id 漂移导致的隐性 bug。
+# 全平台超管角色是产品固定身份，初始化数据见 aioe_package/aioe_install/init.sql。
+SUPERADMIN_ROLE_ID = "111111"
+# *:* 是通配权限，不等价于全平台超管身份。
 SUPERADMIN_PERMISSION = "*:*"
 # 租户管理员是租户维度的管理角色，各租户内以名称"租户管理员"唯一（见 services/tenant/views.py:125）。
 TENANT_ADMIN_ROLE_NAME = "租户管理员"
@@ -237,31 +238,29 @@ def has_uncontrolled_playbook_permission(
 
 
 def is_superadmin(account, tenant_id: str | None = None) -> bool:
-    """超管判定：拥有 *:* 通配权限即为超管，而非硬编码角色 id '111111'。"""
-    return account_has_permission(account, SUPERADMIN_PERMISSION, tenant_id=tenant_id)
+    """全平台超管身份判定：只认固定超管角色 id，不按 *:* 权限推导。"""
+    return bool(
+        account
+        and getattr(account, "roles", None)
+        and any(is_superadmin_role(role) for role in account.roles)
+    )
 
 
 async def get_superadmin_role():
-    """按权限本质取超管 Role 对象，供需要将超管作为 PlaybookPermissions/ActionPermissions
-    授权对象的场景使用。取第一条 permissions 里含 *:* 的角色（种子数据里只有一条）。
-    """
-    return await Role.filter(
-        permissions__contains=[SUPERADMIN_PERMISSION], deleted=False
-    ).first()
+    """取全平台超管 Role 对象，供 PlaybookPermissions/ActionPermissions 等授权对象使用。"""
+    return await Role.get_or_none(id=SUPERADMIN_ROLE_ID, deleted=False)
 
 
 def is_superadmin_role(role) -> bool:
-    """判定给定 Role 是否为超管角色（用其权限本质，不看 id/name）。"""
-    if not role:
-        return False
-    return SUPERADMIN_PERMISSION in (role.permissions or [])
+    """判定给定 Role 是否为全平台超管角色。"""
+    return bool(role and str(getattr(role, "id", "")) == SUPERADMIN_ROLE_ID)
 
 
 async def playbook_ids_for_user(account, tenant_id: str, permission: str = "r") -> set:
     """返回当前账户在指定租户下、对剧本拥有 `permission` 权限的 pb_id 集合。
 
     与 PlaybookPermissions 的 users(Account FK)/roles(Role FK) 结构对齐：
-    用户被授权 或 用户所属任一角色被授权，视为授权命中。超管(*:*)不额外调用本函数——
+    用户被授权 或 用户所属任一角色被授权，视为授权命中。全平台超管不额外调用本函数——
     调用方应先判断 is_superadmin 走全量分支，本函数只负责普通用户按记录过滤。
     """
     if has_uncontrolled_playbook_permission(account, [permission], tenant_id):
@@ -366,7 +365,7 @@ async def check_action_execute_permission(
     """判定账户是否对 (tool, action, resource) 拥有执行权。写侧（add_timed/update_timed
     等）用它把前端下拉过滤对应的授权关卡落到 API 层——纯前端过滤是 UX，不是安全边界。
 
-    - 超管(*:*)豁免。
+    - 全平台超管豁免。
     - 资源模型要求资源时，空 resource 拒绝；无需资源的工具允许空 resource。
     - resource 支持逗号分隔多值；要求账户对**每个** resource 都有权，任一缺失即失败。
     - tool_name / action_func 缺失时直接判定失败——上层应保证参数完备再调用。

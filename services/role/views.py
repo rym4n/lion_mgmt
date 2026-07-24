@@ -801,12 +801,12 @@ async def delete_role(request):
 
     role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
     if not role:
-        # 保留原有跨租户保护：请求命中的若是超管角色（在默认租户里），返回不可删除而非"不存在"
+        # 保留原有跨租户保护：请求命中的若是全平台超管角色，返回不可删除而非"不存在"
         cross_tenant = await Role.get_or_none(id=role_id, deleted=False)
         if cross_tenant and is_superadmin_role(cross_tenant):
             raise CustomError(ErrorCode.ROLE_CANNOT_DELETE)
         raise CustomError(ErrorCode.ROLE_NOT_FOUND)
-    # 超管角色（拥有 *:* 权限的那条）不允许被删除——按权限本质判定而非硬编码 id
+    # 全平台超管角色不允许被删除。
     if is_superadmin_role(role):
         raise CustomError(ErrorCode.ROLE_CANNOT_DELETE)
     role.deleted = True

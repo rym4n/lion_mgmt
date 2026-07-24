@@ -432,14 +432,29 @@ PROCESS_CONFIGS = {
         ],
         "enums": {"action": POLICY_ACTIONS, "parse_status": {"parsed", "unparsed"}},
         "keyword": [
+            "accessory_project_id",
+            "device_ci_id",
             "device_key",
             "device_name",
+            "device_type",
+            "collection_run_id",
             "policy_key",
+            "policy_type",
             "rule_name",
+            "source_zone",
             "raw_rule_id",
             "source_address",
+            "target_zone",
             "target_address",
+            "protocol",
+            "port",
+            "action",
+            "raw_text",
+            "parse_status",
+            "creator",
+            "updater",
         ],
+        "keyword_all_fields": True,
         "order": ["-utime"],
     },
     "policy-change": {
@@ -471,13 +486,23 @@ PROCESS_CONFIGS = {
             "risk_level": RISK_STATUSES - {"normal"},
         },
         "keyword": [
+            "accessory_project_id",
+            "device_ci_id",
             "device_key",
+            "actual_policy_id",
             "policy_key",
             "policy_name",
             "batch_id",
+            "change_type",
+            "sync_source",
             "diff_text",
             "external_approve_ref",
+            "external_approve_result",
+            "review_issue_id",
+            "creator",
+            "updater",
         ],
+        "keyword_all_fields": True,
         "order": ["-detected_at", "-utime"],
     },
     "policy-compare-run": {
@@ -665,6 +690,23 @@ def normalize_page(data: dict) -> tuple[int, int, int]:
     page = max(1, int(data.get("page", 1) or 1))
     size = max(1, min(100, int(data.get("size", data.get("page_size", 20)) or 20)))
     return page, size, (page - 1) * size
+
+
+def value_matches_keyword(value, keyword: str) -> bool:
+    if value in (None, ""):
+        return False
+    if isinstance(value, dict):
+        return any(value_matches_keyword(item, keyword) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(value_matches_keyword(item, keyword) for item in value)
+    return keyword in str(value).casefold()
+
+
+def json_matches_keyword(data: dict, keyword: str) -> bool:
+    folded = keyword.strip().casefold()
+    if not folded:
+        return True
+    return value_matches_keyword(data, folded)
 
 
 def validate_key(value: str | None, field: str = "key") -> str:
@@ -3400,7 +3442,19 @@ async def list_process_records(tenant: str, domain: str, data: dict) -> dict:
     for field in PROCESS_FILTER_FIELDS:
         if field in config["fields"] and data.get(field) not in (None, ""):
             condition &= Q(**{field: data[field]})
-    keyword = data.get("keyword")
+    keyword = str(data.get("keyword") or "").strip()
+    queryset = config["model"].filter(condition)
+    if keyword and config.get("keyword_all_fields"):
+        records = await queryset.order_by(*config.get("order", ["-utime"])).all()
+        items = [
+            item.json for item in records if json_matches_keyword(item.json, keyword)
+        ]
+        return {
+            "total": len(items),
+            "items": items[offset : offset + size],
+            "page": page,
+            "size": size,
+        }
     keyword_fields = config.get("keyword", [])
     if keyword and keyword_fields:
         keyword_condition = Q()

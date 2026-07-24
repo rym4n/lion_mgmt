@@ -1069,7 +1069,7 @@ async def update_user(request):
 async def _ensure_can_manage_target_user(request, target: Account) -> None:
     """租户隔离 + 超管保护，防止租户管理员越权操作平台级/其他租户账号。
 
-    - 目标账号必须是操作者所在租户的成员（member M2M），超管(*:*)例外可跨租户；
+    - 目标账号必须是操作者所在租户的成员（member M2M），全平台超管例外可跨租户；
       账号列表本就按 member 过滤，编辑/删除必须对齐，否则可直接按用户名越权。
     - 非超管不得禁用或删除超管账号（含内置 admin），避免租户管理员停用全平台超管。
     """
@@ -1768,7 +1768,7 @@ async def init_account_list(request):
                     "id": user.id,
                     "username": user.username,
                     "display_name": user.display_name,
-                    "is_superadmin": is_superadmin(user, tenant_id=tenant_id),
+                    "is_superadmin": is_superadmin(user),
                 }
             )
     return response_ok({"users": data})

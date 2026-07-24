@@ -1956,7 +1956,7 @@ async def transforms_update(request):
         config.type = type_
 
     if shared is not None:
-        # shared 是全局共享位，只有超管（*:*）能设置——按权限本质判定而非硬编码角色 id
+        # shared 是全局共享位，只有全平台超管能设置。
         if not is_superadmin(request.ctx.session.get("account_info")):
             raise CustomError(ErrorCode.FORBIDDEN)
 
