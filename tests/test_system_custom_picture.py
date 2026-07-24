@@ -51,10 +51,10 @@ def _run_get_picture(monkeypatch, pic_type, config):
     return asyncio.run(inspect.unwrap(views.get_bgpic)(request))
 
 
-def test_picture_payload_exposes_default_logo_and_customization_state():
+def test_picture_payload_exposes_empty_defaults_and_customization_state():
     assert views._picture_payload("logo") == {
         "type": "logo",
-        "url": "/logo.svg",
+        "url": "",
         "customized": False,
     }
     assert views._picture_payload("background", "/files/user/custom/bg.png") == {
@@ -64,10 +64,10 @@ def test_picture_payload_exposes_default_logo_and_customization_state():
     }
 
 
-def test_get_picture_returns_default_logo_when_no_customization_exists(monkeypatch):
+def test_get_picture_returns_empty_logo_when_no_customization_exists(monkeypatch):
     assert _run_get_picture(monkeypatch, "logo", None) == {
         "type": "logo",
-        "url": "/logo.svg",
+        "url": "",
         "customized": False,
     }
 
@@ -107,7 +107,7 @@ def test_delete_picture_removes_config_and_owned_object(monkeypatch):
     assert deleted_objects == [("user", "logo.svg", "custom")]
     assert payload == {
         "type": "logo",
-        "url": "/logo.svg",
+        "url": "",
         "customized": False,
     }
 

@@ -25,7 +25,12 @@ from libs.security.authentication import (
     validate_password,
     validate_username,
 )
-from libs.security.authorization import check_permissions, is_superadmin, requires_permission
+from libs.security.authorization import (
+    check_permissions,
+    is_superadmin,
+    is_superadmin_role,
+    requires_permission,
+)
 from libs.utils import (
     get_client_ip,
     get_expiration_date,
@@ -388,6 +393,7 @@ async def all_users(request):
                                             "properties": {
                                                 "id": {"type": "string"},
                                                 "name": {"type": "string"},
+                                                "is_superadmin": {"type": "boolean"},
                                                 "description": {"type": "string"},
                                             },
                                         },
@@ -1797,8 +1803,19 @@ async def init_account_list(request):
 async def init_role_list(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
-    roles = await Role.filter(deleted=False, tenant_id=tenant_id).all().values_list("id", "name")
-    return response_ok({"roles": [{"id": role[0], "name": role[1]} for role in roles]})
+    roles = await Role.filter(deleted=False, tenant_id=tenant_id).all()
+    return response_ok(
+        {
+            "roles": [
+                {
+                    "id": role.id,
+                    "name": role.name,
+                    "is_superadmin": is_superadmin_role(role),
+                }
+                for role in roles
+            ]
+        }
+    )
 
 
 @user_bp.post("/default-tenant")

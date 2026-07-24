@@ -50,7 +50,7 @@ _OUTGOING_CONFIG_LOCK = asyncio.Lock()
 _DEFAULT_PICTURE_URLS = {
     "background": "",
     "webico": "",
-    "logo": "/logo.svg",
+    "logo": "",
 }
 
 
@@ -201,7 +201,7 @@ async def upload_image(request):
 @system_bp.get("/picture")
 @openapi.definition(
     summary="获取系统图片设置",
-    description="获取图片地址及是否为自定义设置；未设置 Logo 时返回系统默认 Logo",
+    description="获取图片地址及是否为自定义设置；未设置时返回空地址",
     parameter=[
         {
             "name": "type",
@@ -246,7 +246,7 @@ async def get_bgpic(request):
 @system_bp.delete("/picture")
 @openapi.definition(
     summary="删除自定义图片",
-    description="删除个性化设置中的自定义背景图、网页图标或系统 Logo，并恢复默认设置",
+    description="删除个性化设置中的自定义背景图、网页图标或系统 Logo，并恢复为空设置",
     parameter=[
         {
             "name": "type",
