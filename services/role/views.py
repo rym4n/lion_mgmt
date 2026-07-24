@@ -10,6 +10,7 @@ from libs.security.authorization import (
     PLAYBOOK_MODULE_TO_FINE_PERMISSIONS,
     PLAYBOOK_UNCONTROLLED_PERMISSION,
     SUPERADMIN_PERMISSION,
+    TOOL_RESOURCE_UNCONTROLLED_PERMISSION,
     check_wildcard,
     is_superadmin_role,
     load_license,
@@ -195,6 +196,16 @@ def _playbook_permission_controls(role_permissions: list[str] | None) -> dict[st
         for action in workflow_uncontrolled_actions(normalized):
             controls[action] = "uncontrolled"
     return controls
+
+
+def _tool_resource_permission_control(role_permissions: list[str] | None) -> str:
+    for permission_value in role_permissions or []:
+        normalized = _normalize_permission_value(permission_value)
+        if normalized == SUPERADMIN_PERMISSION:
+            return "uncontrolled"
+        if normalized == TOOL_RESOURCE_UNCONTROLLED_PERMISSION:
+            return "uncontrolled"
+    return "controlled"
 
 
 def _normalize_permission_value(permission_value: object) -> str | None:
@@ -728,6 +739,11 @@ async def find_all(request):
                                         },
                                         "description": "按剧本管理具体权限项配置的单剧本细粒度权限控制模式",
                                     },
+                                    "tool_resource_permission_control": {
+                                        "type": "string",
+                                        "enum": ["controlled", "uncontrolled"],
+                                        "description": "应用资源执行权限控制模式",
+                                    },
                                 },
                             },
                         },
@@ -755,6 +771,9 @@ async def find_role(request):
         role.permissions
     )
     data["playbook_permission_controls"] = _playbook_permission_controls(
+        role.permissions
+    )
+    data["tool_resource_permission_control"] = _tool_resource_permission_control(
         role.permissions
     )
     return response_ok(data)

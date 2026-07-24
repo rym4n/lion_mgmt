@@ -17,6 +17,7 @@ from services.role.views import (  # noqa: E402
     _playbook_permission_control,
     _playbook_permission_controls,
     _preserve_superadmin_permission,
+    _tool_resource_permission_control,
     _with_implicit_tool_view_permission,
 )
 
@@ -180,6 +181,18 @@ def test_platform_wildcard_has_uncontrolled_playbook_permission():
         "u": "uncontrolled",
         "d": "uncontrolled",
     }
+
+
+def test_role_details_exposes_tool_resource_permission_control():
+    assert (
+        _tool_resource_permission_control(
+            ["dashboard:r", "tool:r", "tool:resource:uncontrolled"]
+        )
+        == "uncontrolled"
+    )
+    assert _tool_resource_permission_control(["tool:r"]) == "controlled"
+    assert _tool_resource_permission_control(["tool:*"]) == "controlled"
+    assert _tool_resource_permission_control(["*:*"]) == "uncontrolled"
 
 
 def test_role_details_normalizes_legacy_nested_permission_codes():

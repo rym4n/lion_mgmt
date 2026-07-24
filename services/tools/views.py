@@ -32,9 +32,11 @@ from libs.security.authorization import (
     action_permission_hits,
     check_action_execute_permission,
     check_permissions,
+    has_uncontrolled_tool_resource_permission,
     is_superadmin,
     load_license,
     requires_permission,
+    tool_resources_exist,
 )
 from libs.utils import gen_run_id
 from models import (
@@ -103,6 +105,119 @@ async def _ensure_action_permission(tool_name, action_name, action_description, 
             "users": [],
         },
     )
+
+
+def _resource_permission_subject_map(value):
+    if isinstance(value, list):
+        subject_map_list = [
+            item.copy() if isinstance(item, dict) else {}
+            for item in value
+        ]
+    elif isinstance(value, str):
+        try:
+            parsed = orjson.loads(value)
+        except orjson.JSONDecodeError:
+            parsed = []
+        subject_map_list = [
+            item.copy() if isinstance(item, dict) else {}
+            for item in parsed
+        ] if isinstance(parsed, list) else []
+    else:
+        subject_map_list = []
+
+    if not subject_map_list:
+        subject_map_list = [{}]
+    return subject_map_list
+
+
+def _grant_resource_subject(permission, field_name, resource_id, subject_id):
+    subject_map_list = _resource_permission_subject_map(
+        getattr(permission, field_name, None)
+    )
+    subject_ids = [
+        str(item)
+        for item in subject_map_list[0].get(resource_id, [])
+        if str(item)
+    ]
+    if str(subject_id) not in subject_ids:
+        subject_ids.append(str(subject_id))
+        subject_map_list[0][resource_id] = subject_ids
+        setattr(permission, field_name, subject_map_list)
+        return True
+    return False
+
+
+async def _tool_action_permission_specs(tool_name, tenant_id):
+    specs = []
+    seen = set()
+    actions = await ToolAction.filter(
+        tool_name=tool_name,
+        deleted=False,
+        tenant_id=tenant_id,
+    ).values("action")
+    for item in actions:
+        action = item.get("action") or {}
+        action_name = action.get("func")
+        if not action_name or action_name in seen:
+            continue
+        seen.add(action_name)
+        specs.append((action_name, action.get("name") or ""))
+
+    if "all" not in seen:
+        specs.append(("all", "动作全部动作权限"))
+    return specs
+
+
+async def _grant_resource_creator_action_permissions(
+    tool_name,
+    resource_id,
+    creator_id,
+    tenant_id,
+):
+    if not creator_id:
+        return
+
+    permissions = []
+    for action_name, action_description in await _tool_action_permission_specs(
+        tool_name,
+        tenant_id,
+    ):
+        permission, _created = await _ensure_action_permission(
+            tool_name,
+            action_name,
+            action_description,
+            tenant_id,
+        )
+        if _grant_resource_subject(
+            permission,
+            "users",
+            str(resource_id),
+            str(creator_id),
+        ):
+            permissions.append(permission)
+
+    if permissions:
+        await ActionPermissions.bulk_update(permissions, fields=["users"])
+
+
+async def _resource_permission_action_names(tool_name, action_name, tenant_id):
+    names = [action_name]
+    if not action_name:
+        return names
+
+    matched_actions = await ToolAction.filter(
+        tool_name=tool_name,
+        deleted=False,
+        tenant_id=tenant_id,
+    ).values("action")
+    for item in matched_actions:
+        action = item.get("action") or {}
+        if action.get("name") == action_name or action.get("func") == action_name:
+            func = action.get("func")
+            if func and func not in names:
+                names.append(func)
+
+    return names
 
 
 def _should_reject_tool_version_delete(tool):
@@ -1600,6 +1715,9 @@ async def add_tool_resource(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    creator_account = request.ctx.session.get("account_info")
+    if not creator_account or not getattr(creator_account, "id", None):
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
 
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     existing_resource = await ToolResources.get_or_none(
@@ -1612,16 +1730,23 @@ async def add_tool_resource(request):
     if existing_resource:
         raise CustomError(ErrorCode.RESOURCES_NAME_EXISTS_ERROR)
 
-    tr = await ToolResources.create(
-        tool_name=tool_name,
-        name=name,
-        engine=engine,
-        resources=orjson.dumps(resources).decode(),
-        internal=maintenance_mode if maintenance_mode else False,
-        creator=request.ctx.session["account_info"].username,
-        updater=request.ctx.session["account_info"].username,
-        tenant_id=tenant_id,
-    )
+    async with in_transaction():
+        tr = await ToolResources.create(
+            tool_name=tool_name,
+            name=name,
+            engine=engine,
+            resources=orjson.dumps(resources).decode(),
+            internal=maintenance_mode if maintenance_mode else False,
+            creator=creator_account.username,
+            updater=creator_account.username,
+            tenant_id=tenant_id,
+        )
+        await _grant_resource_creator_action_permissions(
+            tool_name,
+            str(tr.id),
+            str(creator_account.id),
+            tenant_id,
+        )
 
     r = {k: resources[k].get("value") or resources[k].get("default_value", "") for k in resources}
     r[tr.id + "_name"] = name
@@ -1713,7 +1838,13 @@ async def tool_resources_detailed(request):
     # 返回全部资源，并按 (tool, action) 标记资源级授权；超管全部放行。
     if filter_by_permission and action_name:
         user = request.ctx.session.get("account_info")
-        if is_superadmin(user, tenant_id=tenant_id):
+        if is_superadmin(
+            user,
+            tenant_id=tenant_id,
+        ) or has_uncontrolled_tool_resource_permission(
+            user,
+            tenant_id=tenant_id,
+        ):
             permission_by_resource = {str(resource.id): True for resource in resources}
         else:
             user_id = str(user.id)
@@ -1722,9 +1853,14 @@ async def tool_resources_detailed(request):
                 for role in (user.roles or [])
                 if getattr(role, "tenant_id", None) == tenant_id
             }
+            action_names = await _resource_permission_action_names(
+                tool_name,
+                action_name,
+                tenant_id,
+            )
             action_perms = await ActionPermissions.filter(
                 tool_name=tool_name,
-                action_name__in=[action_name, "all"],
+                action_name__in=[*action_names, "all"],
                 deleted=False,
                 tenant_id=tenant_id,
             ).all()
@@ -2332,7 +2468,18 @@ async def judge_permission(request):
         raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
 
     user_id = str(user.id)
-    role_ids = {str(role.id) for role in user.roles}
+    role_ids = {
+        str(role.id)
+        for role in (user.roles or [])
+        if getattr(role, "tenant_id", None) == tenant_id
+    }
+    resource_uncontrolled = is_superadmin(
+        user,
+        tenant_id=tenant_id,
+    ) or has_uncontrolled_tool_resource_permission(
+        user,
+        tenant_id=tenant_id,
+    )
 
     query_conditions = []
     for group in action_groups:
@@ -2345,7 +2492,9 @@ async def judge_permission(request):
 
         query_conditions.append(Q(tool_name=tool_name, action_name__in=actions))
 
-    permissions = await ActionPermissions.filter(reduce(operator.or_, query_conditions), deleted=False, tenant_id=tenant_id)
+    permissions = []
+    if query_conditions and not resource_uncontrolled:
+        permissions = await ActionPermissions.filter(reduce(operator.or_, query_conditions), deleted=False, tenant_id=tenant_id)
 
     perm_dict = defaultdict(dict)
     for p in permissions:
@@ -2356,6 +2505,20 @@ async def judge_permission(request):
         tool_name = group["tool_name"]
         resource_id = group["resource_id"]
         action_results = {}
+
+        if resource_uncontrolled and await tool_resources_exist(
+            tool_name,
+            [resource_id],
+            tenant_id,
+        ):
+            result.append(
+                {
+                    "tool_name": tool_name,
+                    "resource_id": resource_id,
+                    "permissions": {action: True for action in group["actions"]},
+                }
+            )
+            continue
 
         for action in group["actions"]:
             permission = perm_dict.get((tool_name, action))

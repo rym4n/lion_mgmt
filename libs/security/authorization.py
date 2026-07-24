@@ -21,6 +21,7 @@ from models import (
     PlaybookPermissions,
     PlaybookVersion,
     Role,
+    ToolResources,
     ToolResourcesModel,
 )
 from settings import AUTHENTICATION_SESSION_EXPIRATION, LICENSE_DIR
@@ -33,6 +34,8 @@ SUPERADMIN_PERMISSION = "*:*"
 TENANT_ADMIN_ROLE_NAME = "租户管理员"
 PLAYBOOK_UNCONTROLLED_PERMISSION = "workflow:uncontrolled"
 PLAYBOOK_UNCONTROLLED_ACTION = "uncontrolled"
+TOOL_VIEW_PERMISSION = "tool:r"
+TOOL_RESOURCE_UNCONTROLLED_PERMISSION = "tool:resource:uncontrolled"
 PLAYBOOK_FINE_PERMISSION_MAP = {
     "r": "workflow:r",
     "u": "workflow:u",
@@ -237,6 +240,34 @@ def has_uncontrolled_playbook_permission(
     )
 
 
+def has_explicit_tool_resource_uncontrolled_permission(
+    account, tenant_id: str | None = None
+) -> bool:
+    if not account or not getattr(account, "roles", None):
+        return False
+    for role in _roles_for_tenant(account.roles, tenant_id):
+        for role_permission in role.permissions or []:
+            if role_permission == SUPERADMIN_PERMISSION:
+                return True
+            if role_permission == TOOL_RESOURCE_UNCONTROLLED_PERMISSION:
+                return True
+    return False
+
+
+def has_uncontrolled_tool_resource_permission(
+    account, tenant_id: str | None = None
+) -> bool:
+    """角色显式配置资源执行不受控时，绕过 ActionPermissions 明细授权。
+
+    与剧本不受控保持同一边界：特殊标记只负责绕过横向明细记录，
+    仍要求角色具备应用市场模块查看权限。
+    """
+    return has_explicit_tool_resource_uncontrolled_permission(
+        account,
+        tenant_id=tenant_id,
+    ) and account_has_permission(account, TOOL_VIEW_PERMISSION, tenant_id=tenant_id)
+
+
 def is_superadmin(account, tenant_id: str | None = None) -> bool:
     """全平台超管身份判定：只认固定超管角色 id，不按 *:* 权限推导。"""
     return bool(
@@ -359,6 +390,21 @@ async def tool_requires_resource(tool_name, tenant_id) -> bool:
     return bool(resource_model and resource_model.status == 1)
 
 
+async def tool_resources_exist(tool_name, resource_ids, tenant_id) -> bool:
+    normalized_resource_ids = {str(item) for item in resource_ids or [] if str(item)}
+    if not normalized_resource_ids:
+        return False
+    existing_resource_ids = await ToolResources.filter(
+        id__in=list(normalized_resource_ids),
+        tool_name=tool_name,
+        deleted=False,
+        tenant_id=tenant_id,
+    ).values_list("id", flat=True)
+    return normalized_resource_ids.issubset(
+        {str(resource_id) for resource_id in existing_resource_ids}
+    )
+
+
 async def check_action_execute_permission(
     account, tool_name, action_func, resource, tenant_id
 ) -> bool:
@@ -380,6 +426,8 @@ async def check_action_execute_permission(
     resources = [item.strip() for item in resource.split(",") if item.strip()]
     if not resources:
         return not await tool_requires_resource(tool_name, tenant_id)
+    if has_uncontrolled_tool_resource_permission(account, tenant_id=tenant_id):
+        return await tool_resources_exist(tool_name, resources, tenant_id)
     user_id = str(account.id) if account and getattr(account, "id", None) else None
     if not user_id:
         return False

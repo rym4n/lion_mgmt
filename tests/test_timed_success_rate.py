@@ -382,6 +382,110 @@ async def test_check_action_execute_permission_superadmin_bypass(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_check_action_execute_permission_uncontrolled_role_bypasses_records_after_resource_check(monkeypatch):
+    calls = []
+
+    class _ResourceFilter:
+        async def values_list(self, field, flat=False):
+            assert field == "id"
+            assert flat is True
+            return ["res-1"]
+
+    class _ToolResources:
+        @staticmethod
+        def filter(**kwargs):
+            calls.append(kwargs)
+            return _ResourceFilter()
+
+    class _ActionPermissions:
+        @staticmethod
+        def filter(**_kwargs):
+            raise AssertionError("uncontrolled role must not query action grants")
+
+    monkeypatch.setattr("libs.security.authorization.ToolResources", _ToolResources)
+    monkeypatch.setattr("libs.security.authorization.ActionPermissions", _ActionPermissions)
+    account = SimpleNamespace(
+        id="user-1",
+        roles=[
+            SimpleNamespace(
+                id="role-1",
+                name="应用资源不受控",
+                permissions=["tool:r", "tool:resource:uncontrolled"],
+                tenant_id="t1",
+            )
+        ],
+    )
+
+    assert await check_action_execute_permission(
+        account,
+        "lion_mgmt",
+        "get_events_list",
+        "res-1",
+        "t1",
+    ) is True
+    assert await check_action_execute_permission(
+        account,
+        "lion_mgmt",
+        "get_events_list",
+        "res-2",
+        "t1",
+    ) is False
+    assert calls == [
+        {
+            "id__in": ["res-1"],
+            "tool_name": "lion_mgmt",
+            "deleted": False,
+            "tenant_id": "t1",
+        },
+        {
+            "id__in": ["res-2"],
+            "tool_name": "lion_mgmt",
+            "deleted": False,
+            "tenant_id": "t1",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_check_action_execute_permission_uncontrolled_marker_requires_tool_view(monkeypatch):
+    class _Filter:
+        async def all(self):
+            return []
+
+    class _ActionPermissions:
+        @staticmethod
+        def filter(**_kwargs):
+            return _Filter()
+
+    class _ToolResources:
+        @staticmethod
+        def filter(**_kwargs):
+            raise AssertionError("missing tool:r must keep normal grant path")
+
+    monkeypatch.setattr("libs.security.authorization.ActionPermissions", _ActionPermissions)
+    monkeypatch.setattr("libs.security.authorization.ToolResources", _ToolResources)
+    account = SimpleNamespace(
+        id="user-1",
+        roles=[
+            SimpleNamespace(
+                id="role-1",
+                name="缺少应用市场查看",
+                permissions=["tool:resource:uncontrolled"],
+                tenant_id="t1",
+            )
+        ],
+    )
+
+    assert await check_action_execute_permission(
+        account,
+        "lion_mgmt",
+        "get_events_list",
+        "res-1",
+        "t1",
+    ) is False
+
+
+@pytest.mark.asyncio
 async def test_check_action_execute_permission_empty_resource_follows_model(monkeypatch):
     account = SimpleNamespace(id="user-1", roles=[SimpleNamespace(id="r1", name="普通", permissions=["timed:r"], tenant_id="t1")])
 
