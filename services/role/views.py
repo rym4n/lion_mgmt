@@ -65,6 +65,14 @@ PERMISSION_RESOURCE_LABELS = {
     "supply_chain_review:topology": "网络拓扑",
 }
 
+TOOL_VIEW_PERMISSION = "tool:r"
+TOOL_LEGACY_ACTION_TO_FINE_PERMISSIONS = {
+    "c": {"tool:upload:c", "tool:resource:c"},
+    "r": {"tool:r", "tool:health:r", "tool:debug:r"},
+    "u": {"tool:health:r", "tool:resource:u", "tool:engine:u"},
+    "d": {"tool:app:d", "tool:resource:d"},
+}
+
 
 def _preserve_superadmin_permission(role, permissions: list[str]) -> list[str]:
     if permissions and is_superadmin_role(role) and SUPERADMIN_PERMISSION not in permissions:
@@ -94,6 +102,55 @@ def _normalize_permission_value(permission_value: object) -> str | None:
     if permission_value.startswith("agent:report:schedule:"):
         return f"agent_report_schedule:{permission_value.removeprefix('agent:report:schedule:')}"
     return LEGACY_PERMISSION_REMAP.get(permission_value, permission_value)
+
+
+def _needs_tool_view_permission(permission_value: object) -> bool:
+    normalized = _normalize_permission_value(permission_value)
+    return bool(
+        normalized
+        and normalized.startswith("tool:")
+        and normalized != TOOL_VIEW_PERMISSION
+        and normalized.count(":") >= 2
+    )
+
+
+def _with_implicit_tool_view_permission(permissions: list[str]) -> list[str]:
+    if not permissions or TOOL_VIEW_PERMISSION in permissions:
+        return permissions
+    if any(_needs_tool_view_permission(permission) for permission in permissions):
+        return [*permissions, TOOL_VIEW_PERMISSION]
+    return permissions
+
+
+def _legacy_tool_permission_matches(
+    role_permission: str,
+    actual_permission: str,
+) -> bool:
+    if (
+        not actual_permission.startswith("tool:")
+        or actual_permission == TOOL_VIEW_PERMISSION
+    ):
+        return False
+    normalized = _normalize_permission_value(role_permission)
+    if not normalized or not normalized.startswith("tool:"):
+        return False
+    legacy_actions = normalized.split(":", 1)[1].split(",")
+    if "*" in legacy_actions:
+        return True
+    return any(
+        actual_permission in TOOL_LEGACY_ACTION_TO_FINE_PERMISSIONS.get(action, set())
+        for action in legacy_actions
+    )
+
+
+def _role_permission_matches(role_permission: str, actual_permission: str) -> bool:
+    return check_wildcard(
+        role_permission,
+        actual_permission,
+    ) or _legacy_tool_permission_matches(
+        role_permission,
+        actual_permission,
+    )
 
 
 def _normalize_menu_action_value(permission_value: object) -> str | None:
@@ -246,7 +303,8 @@ def _build_structured_permissions(role_permissions: list[str] | None, permission
         for item in _normalize_menu_permissions(permission.get("Permissions"), model, description):
             actual_permission = item.get("permission") or f"{model}:{item['value']}"
             if any(
-                check_wildcard(role_permission, actual_permission) for role_permission in normalized_role_permissions
+                _role_permission_matches(role_permission, actual_permission)
+                for role_permission in normalized_role_permissions
             ):
                 action_value = item.get("permission") or item["value"]
                 append_action(model, description, action_value, item["label"])
@@ -309,7 +367,7 @@ def _build_structured_permissions(role_permissions: list[str] | None, permission
 async def add_role(request):
     name = request.json.get("name")
     description = request.json.get("description", "")
-    permissions = request.json.get("permissions", [])
+    permissions = _with_implicit_tool_view_permission(request.json.get("permissions", []))
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -588,7 +646,7 @@ async def update_role(request):
     role_id = request.json.get("role_id")
     name = request.json.get("name")
     description = request.json.get("description", "")
-    permissions = request.json.get("permissions", [])
+    permissions = _with_implicit_tool_view_permission(request.json.get("permissions", []))
 
     tenant_id = request.ctx.session.get("tenant_id")
 

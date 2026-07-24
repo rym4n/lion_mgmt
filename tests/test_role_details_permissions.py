@@ -1,4 +1,6 @@
 # coding=utf-8
+import asyncio
+import importlib
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +14,12 @@ from services.role.views import (  # noqa: E402
     _normalize_permission_menu,
     _playbook_permission_control,
     _preserve_superadmin_permission,
+    _with_implicit_tool_view_permission,
+)
+
+
+tool_permission_migration = importlib.import_module(
+    "migrations.models.90_20260724013000_refine_tool_market_permissions"
 )
 
 
@@ -42,6 +50,24 @@ PERMISSIONS_DATA = [
             {"label": "查看数字员工权限", "value": "r"},
         ],
     },
+]
+
+TOOL_PERMISSIONS_DATA = [
+    {
+        "model": "tool",
+        "description": "应用管理",
+        "Permissions": [
+            {"label": "查看页面", "value": "r"},
+            {"label": "资源健康报告", "value": "tool:health:r"},
+            {"label": "上传应用", "value": "tool:upload:c"},
+            {"label": "删除应用", "value": "tool:app:d"},
+            {"label": "新建资源", "value": "tool:resource:c"},
+            {"label": "编辑资源", "value": "tool:resource:u"},
+            {"label": "应用开发调试", "value": "tool:debug:r"},
+            {"label": "删除资源", "value": "tool:resource:d"},
+            {"label": "引擎修改", "value": "tool:engine:u"},
+        ],
+    }
 ]
 
 
@@ -256,6 +282,99 @@ def test_role_permission_all_labels_split_menu_actions_without_collapsing_granul
             "permission": "supply_chain_review:relation:r",
         },
     ]
+
+
+def test_role_permission_all_exposes_tool_market_fine_permissions():
+    normalized = _normalize_permission_menu(TOOL_PERMISSIONS_DATA[0])
+
+    assert normalized["Permissions"] == [
+        {"value": "r", "label": "查看页面"},
+        {"value": "r", "label": "资源健康报告", "permission": "tool:health:r"},
+        {"value": "c", "label": "上传应用", "permission": "tool:upload:c"},
+        {"value": "d", "label": "删除应用", "permission": "tool:app:d"},
+        {"value": "c", "label": "新建资源", "permission": "tool:resource:c"},
+        {"value": "u", "label": "编辑资源", "permission": "tool:resource:u"},
+        {"value": "r", "label": "应用开发调试", "permission": "tool:debug:r"},
+        {"value": "d", "label": "删除资源", "permission": "tool:resource:d"},
+        {"value": "u", "label": "引擎修改", "permission": "tool:engine:u"},
+    ]
+
+
+def test_role_details_expands_legacy_tool_crud_to_all_refined_permissions():
+    structured = _build_structured_permissions(
+        ["tool:c,d,u,r"],
+        TOOL_PERMISSIONS_DATA,
+    )
+
+    assert structured == [
+        {
+            "model": "tool",
+            "model_description": "应用管理",
+            "sp": [
+                {"r": "查看页面"},
+                {"tool:health:r": "资源健康报告"},
+                {"tool:upload:c": "上传应用"},
+                {"tool:app:d": "删除应用"},
+                {"tool:resource:c": "新建资源"},
+                {"tool:resource:u": "编辑资源"},
+                {"tool:debug:r": "应用开发调试"},
+                {"tool:resource:d": "删除资源"},
+                {"tool:engine:u": "引擎修改"},
+            ],
+        }
+    ]
+
+
+def test_tool_fine_permissions_keep_page_permission_when_saved():
+    assert _with_implicit_tool_view_permission(["tool:upload:c"]) == [
+        "tool:upload:c",
+        "tool:r",
+    ]
+    assert _with_implicit_tool_view_permission(["tool:r", "tool:upload:c"]) == [
+        "tool:r",
+        "tool:upload:c",
+    ]
+
+
+def test_tool_permission_migration_backfills_legacy_crud_roles():
+    upgrade_sql = asyncio.run(tool_permission_migration.upgrade(None))
+
+    assert "legacy.permission_value ~ '^tool:(\\*|[cdur](,[cdur])*)$'" in upgrade_sql
+    assert "parsed.action_text = '*'" in upgrade_sql
+    for permission in [
+        "tool:r",
+        "tool:health:r",
+        "tool:upload:c",
+        "tool:app:d",
+        "tool:resource:c",
+        "tool:resource:u",
+        "tool:debug:r",
+        "tool:resource:d",
+        "tool:engine:u",
+    ]:
+        assert permission in upgrade_sql
+
+
+def test_tool_permission_installer_seed_backfills_legacy_crud_roles():
+    upgrade_sql = asyncio.run(tool_permission_migration.upgrade(None))
+    init_sql = (ROOT.parent / "aioe_package/aioe_install/init.sql").read_text()
+
+    for sql in (upgrade_sql, init_sql):
+        assert "\"description\" = '应用管理'" in sql
+        assert "legacy.permission_value ~ '^tool:(\\*|[cdur](,[cdur])*)$'" in sql
+        assert "parsed.action_text = '*'" in sql
+        for permission in [
+            "tool:r",
+            "tool:health:r",
+            "tool:upload:c",
+            "tool:app:d",
+            "tool:resource:c",
+            "tool:resource:u",
+            "tool:debug:r",
+            "tool:resource:d",
+            "tool:engine:u",
+        ]:
+            assert permission in sql
 
 
 def test_role_details_groups_nested_permissions_under_split_menu_model():

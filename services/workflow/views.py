@@ -55,7 +55,7 @@ from models import (
     ToolResources,
 )
 from services.approvement.views import expire_pending_approvals
-from services.tools.views import upload_tool
+from services.tools.views import TOOL_UPLOAD_PERMISSION, upload_tool
 from services.tools.views import tool_action_playbook_delete, tool_action_update
 from settings import TASK_TOPIC, TZ, RY_AI_API_BASE, LLM_KEY
 
@@ -225,30 +225,7 @@ async def create_workflow(request):
         tenant_admin = await Role.create(
             name=TENANT_ADMIN_ROLE_NAME,
             description=TENANT_ADMIN_ROLE_NAME,
-            permissions=[
-                "dashboard:r",
-                "logs:r,d",
-                "status:r",
-                "sso:r,u",
-                "audit:r",
-                "ingestion:c,d,u,r",
-                "warroom:c,u,r",
-                "lic:c,r",
-                "timed:c,d,u,r",
-                "scene:c,d,u,r",
-                "system:c,d,u,r",
-                "inspection:c,d,u,r",
-                "large_screen:c,d,u,r",
-                "tenant:c,d,u,r",
-                "secure:c,d,u,r",
-                "workflow:c,d,u,r",
-                "tool:c,d,u,r",
-                "approve:u,r",
-                "var:c,d,u,r",
-                "event:c,d,u,r",
-                "role:c,d,u,r",
-                "user:c,d,u,r",
-            ],
+            permissions=["*:*"],
             tenant_id=tenant_id,
         )
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
@@ -2259,7 +2236,7 @@ async def dashboard_statistics(request):
     },
 )
 @requires_permission("workflow:c")
-@requires_permission("tool:c")
+@requires_permission(TOOL_UPLOAD_PERMISSION)
 async def import_workflow(request):
     file_obj = request.files.get("file")
     if not file_obj:

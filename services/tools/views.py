@@ -31,6 +31,7 @@ from libs.kafka import aproduce
 from libs.security.authorization import (
     action_permission_hits,
     check_action_execute_permission,
+    check_permissions,
     is_superadmin,
     load_license,
     requires_permission,
@@ -75,6 +76,17 @@ ACTION_TYPE_MAP = {
 
 TERMINAL_RUNLOG_STATUSES = {-1, 0, 3}
 IN_PROGRESS_RESULT = "执行中"
+
+TOOL_VIEW_PERMISSION = "tool:r"
+TOOL_HEALTH_REPORT_PERMISSION = "tool:health:r"
+TOOL_HEALTH_CONFIG_PERMISSION = TOOL_HEALTH_REPORT_PERMISSION
+TOOL_UPLOAD_PERMISSION = "tool:upload:c"
+TOOL_DELETE_APP_PERMISSION = "tool:app:d"
+TOOL_CREATE_RESOURCE_PERMISSION = "tool:resource:c"
+TOOL_UPDATE_RESOURCE_PERMISSION = "tool:resource:u"
+TOOL_DELETE_RESOURCE_PERMISSION = "tool:resource:d"
+TOOL_DEBUG_PERMISSION = "tool:debug:r"
+TOOL_ENGINE_UPDATE_PERMISSION = "tool:engine:u"
 
 connected_clients = {}
 
@@ -294,7 +306,7 @@ def check_file_size(file_obj, max_size_kb=5):
         }
     },
 )
-@requires_permission("tool:c")
+@requires_permission(TOOL_UPLOAD_PERMISSION)
 async def upload_and_extract_zip(request):
     resp = await request.respond(
         content_type="text/event-stream",
@@ -1384,7 +1396,7 @@ async def update_tool_status(request):
         }
     },
 )
-@requires_permission("tool:d")
+@requires_permission(TOOL_DELETE_APP_PERMISSION)
 async def delete_tool(request):
     name = request.json.get("name")
     version = request.json.get("version")
@@ -1455,7 +1467,7 @@ async def delete_tool(request):
         }
     },
 )
-@requires_permission("tool:d")
+@requires_permission(TOOL_DELETE_APP_PERMISSION)
 async def delete_tool_all(request):
     name = request.json.get("name")
     if not name:
@@ -1578,7 +1590,7 @@ async def tool_resource_model(request):
         }
     },
 )
-@requires_permission("tool:c")
+@requires_permission(TOOL_CREATE_RESOURCE_PERMISSION)
 async def add_tool_resource(request):
     tool_name = request.json.get("tool_name")
     name = request.json.get("name")
@@ -1780,7 +1792,10 @@ async def tool_resources_detailed(request):
         }
     },
 )
-@requires_permission("tool:u")
+@requires_permission(
+    TOOL_UPDATE_RESOURCE_PERMISSION,
+    TOOL_ENGINE_UPDATE_PERMISSION,
+)
 async def update_tool_resource(request):
     tool_name = request.json.get("tool_name")
     name = request.json.get("name")
@@ -1803,10 +1818,23 @@ async def update_tool_resource(request):
     if not tool_resource:
         raise CustomError(ErrorCode.RESOURCES_NOT_FOUND_ERROR)
 
-    if engine:
+    engine_requested = engine is not None
+    resources_requested = bool(resources)
+    if resources_requested:
+        await check_permissions(
+            request,
+            TOOL_UPDATE_RESOURCE_PERMISSION,
+        )
+    if engine_requested:
+        await check_permissions(
+            request,
+            TOOL_ENGINE_UPDATE_PERMISSION,
+        )
+
+    if engine_requested:
         tool_resource.engine = engine
 
-    if resources:
+    if resources_requested:
         resources_old = tool_resource.resources_json
         for key, resource in resources.items():
             if resource.get("data_type") == "password" and resource.get("value") == "******":
@@ -1818,9 +1846,9 @@ async def update_tool_resource(request):
 
     tool_resource.updater = request.ctx.session["account_info"].username
     update_fields = ["updater"]
-    if engine:
+    if engine_requested:
         update_fields.append("engine")
-    if resources:
+    if resources_requested:
         update_fields.append("resources")
     await tool_resource.save(update_fields=update_fields)
     await update_latest_tool_utime(tool_name, tenant_id, maintenance_mode)
@@ -1873,7 +1901,7 @@ def _contains_resource_id(value, resource_id):
         }
     },
 )
-@requires_permission("tool:d")
+@requires_permission(TOOL_DELETE_RESOURCE_PERMISSION)
 async def delete_tool_resource(request):
     tool_name = request.json.get("tool_name")
     name = request.json.get("name")
@@ -2028,7 +2056,7 @@ async def download_zip(request):
         }
     },
 )
-@requires_permission("tool:u")
+@requires_permission(TOOL_UPDATE_RESOURCE_PERMISSION)
 async def add_permission(request):
     name = request.json.get("name")
     resource_id = request.json.get("resource_id")
@@ -2528,7 +2556,7 @@ async def delete_tag(request):
         }
     },
 )
-@requires_permission("tool:c")
+@requires_permission(TOOL_HEALTH_CONFIG_PERMISSION)
 async def health_check_config(request):
     switch = request.json.get("switch")
     cron = request.json.get("cron")
@@ -2571,7 +2599,7 @@ async def health_check_config(request):
         }
     },
 )
-@requires_permission("tool:r")
+@requires_permission(TOOL_HEALTH_REPORT_PERMISSION)
 async def health_check_get(request):
     switch = await Config.get_or_none(key="health_check_switch")
     cron = await Config.get_or_none(key="health_check_cron")
@@ -2848,7 +2876,11 @@ async def remove_tag(request):
         }
     },
 )
-@requires_permission("tool:r")
+@requires_permission(
+    TOOL_ENGINE_UPDATE_PERMISSION,
+    TOOL_UPDATE_RESOURCE_PERMISSION,
+    TOOL_CREATE_RESOURCE_PERMISSION,
+)
 async def engine_list(request):
     c = caches.get("redis_action").client
     lion_keys = []
@@ -2914,7 +2946,7 @@ async def engine_list(request):
     },
     response={"200": {"description": "健康检查执行成功"}},
 )
-@requires_permission("tool:r")
+@requires_permission(TOOL_HEALTH_REPORT_PERMISSION)
 async def health_check(request):
     resp = await request.respond(
         content_type="text/event-stream",
@@ -2981,7 +3013,7 @@ async def health_check(request):
     },
     response={"200": {"description": "调试执行成功"}},
 )
-@requires_permission("tool:r")
+@requires_permission(TOOL_DEBUG_PERMISSION)
 async def tool_debug(request):
     data = request.json.get("data")
     if not data:
@@ -3061,7 +3093,7 @@ async def tool_debug(request):
         }
     },
 )
-@requires_permission("tool:u")
+@requires_permission(TOOL_UPDATE_RESOURCE_PERMISSION)
 async def add_config(request):
     data = request.json
     await Config.update_or_create(key=data["key"], module=data["module"], defaults={"value": data["value"]})
@@ -3089,7 +3121,7 @@ async def add_config(request):
         }
     },
 )
-@requires_permission("tool:u")
+@requires_permission(TOOL_HEALTH_REPORT_PERMISSION)
 async def get_health_check_result(request):
     result = await Config.get_or_none(key="health_check", module="tools")
     data = {}
@@ -3288,7 +3320,7 @@ async def get_available_actions(request):
         }
     },
 )
-@requires_permission("tool:u")
+@requires_permission(TOOL_HEALTH_CONFIG_PERMISSION)
 async def sync_health_status(request):
     """
     从Config表中获取健康检查数据并更新ToolResources的status字段
@@ -3466,7 +3498,7 @@ def _tool_name_from_payload(payload: dict) -> str:
         }
     },
 )
-@requires_permission("tool:c")
+@requires_permission(TOOL_UPLOAD_PERMISSION, TOOL_DEBUG_PERMISSION)
 async def upload_browser_document(request):
     """
     上传应用开发文档到当前租户的 lion_agent browser workspace。
@@ -3533,7 +3565,7 @@ async def upload_browser_document(request):
     },
     response={"200": {"description": "执行成功，返回 SSE 流（包含文本消息、截图数据和生成的代码）"}},
 )
-@requires_permission("tool:r")
+@requires_permission(TOOL_DEBUG_PERMISSION)
 async def browser_execute(request):
     """
     通过 lion_agent 执行智能任务
@@ -3706,7 +3738,7 @@ async def browser_execute(request):
         }
     },
 )
-@requires_permission("tool:d")
+@requires_permission(TOOL_DEBUG_PERMISSION)
 async def delete_browser_session(request):
     """
     删除浏览器自动化会话
