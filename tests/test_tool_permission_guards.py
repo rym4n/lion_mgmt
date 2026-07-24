@@ -145,6 +145,12 @@ def test_action_permission_migration_merges_grants_before_soft_delete():
     assert 'WHERE "deleted" = False' in sql
 
 
+def test_add_action_permission_requires_resource_update_permission():
+    source = inspect.getsource(tool_views.add_permission)
+
+    assert "@requires_permission(TOOL_UPDATE_RESOURCE_PERMISSION)" in source
+
+
 @pytest.mark.parametrize(("maintain", "internal", "expected"), [(False, True, False), (False, False, False), (True, True, True)])
 def test_tool_delete_only_protects_maintenance_applications(maintain, internal, expected):
     tool = SimpleNamespace(maintain=maintain, internal=internal)
