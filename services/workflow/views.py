@@ -35,6 +35,7 @@ from libs.security.authorization import (
     playbook_ids_for_user,
     playbook_permission,
     requires_permission,
+    uncontrolled_playbook_permissions,
 )
 from libs.utils import gen_run_id, strip_timezone_to_seconds, paginated_runlog_groups
 from models import (
@@ -533,12 +534,9 @@ async def list_workflow(request):
 async def list_published_versions(request):
     tenant_id = request.ctx.session.get("tenant_id")
     user = request.ctx.session.get("account_info")
-    user_id = str(user.id)
-    user_roles = set(str(role.id) for role in user.roles)
 
     # 获取用户有权限查看的剧本ID列表
-    permissions = await PlaybookPermissions.filter(Q(users__id=user_id) | Q(roles__id__in=user_roles), permissions__contains=["r"], tenant_id=tenant_id).values_list("pb_id", flat=True)
-    pb_ids = set(permissions)
+    pb_ids = await playbook_ids_for_user(user, tenant_id, permission="r")
 
     # 查询所有已发布的版本
     pv = (
@@ -1758,6 +1756,18 @@ async def select_my_permission(request):
     account_roles = [role.id for role in account.roles]
     account_pps = await PlaybookPermissions.filter(roles__id__in=account_roles, tenant_id=tenant_id, deleted=False).all()
     data = [{"id": pp.pb_id, "permissions": pp.permissions} for pp in account_pps] + [{"id": pp.pb_id, "permissions": pp.permissions} for pp in pps]
+    uncontrolled_permissions = uncontrolled_playbook_permissions(account, tenant_id)
+    if uncontrolled_permissions:
+        playbook_ids = await Playbook.filter(
+            deleted=False, tenant_id=tenant_id
+        ).values_list("id", flat=True)
+        data.extend(
+            {
+                "id": playbook_id,
+                "permissions": uncontrolled_permissions,
+            }
+            for playbook_id in playbook_ids
+        )
     merged_permissions = {}
     for item in data:
         pb_id = item["id"]

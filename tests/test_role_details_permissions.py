@@ -7,9 +7,10 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.role.views import (
+from services.role.views import (  # noqa: E402
     _build_structured_permissions,
     _normalize_permission_menu,
+    _playbook_permission_control,
     _preserve_superadmin_permission,
 )
 
@@ -103,6 +104,22 @@ def test_role_update_cannot_remove_platform_wildcard_permission():
     assert _preserve_superadmin_permission(
         SimpleNamespace(permissions=["role:r"]), ["screen:r"]
     ) == ["screen:r"]
+
+
+def test_role_details_exposes_playbook_permission_control_mode():
+    assert (
+        _playbook_permission_control(
+            ["dashboard:r", "workflow:r,u,uncontrolled"]
+        )
+        == "uncontrolled"
+    )
+    assert _playbook_permission_control(["workflow:r,u"]) == "controlled"
+    assert _playbook_permission_control(["workflow:*"]) == "controlled"
+    assert _playbook_permission_control(["*:*:"]) == "controlled"
+
+
+def test_platform_wildcard_has_uncontrolled_playbook_permission():
+    assert _playbook_permission_control(["*:*", "dashboard:r"]) == "uncontrolled"
 
 
 def test_role_details_normalizes_legacy_nested_permission_codes():

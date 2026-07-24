@@ -59,10 +59,19 @@ def _account(account_id, permissions, tenant_id="tenant-a"):
     return SimpleNamespace(id=account_id, roles=roles)
 
 
-def _playbook_account(account_id, role_ids):
+def _playbook_account(
+    account_id, role_ids, permissions=None, tenant_id="tenant-a"
+):
     return SimpleNamespace(
         id=account_id,
-        roles=[SimpleNamespace(id=role_id) for role_id in role_ids],
+        roles=[
+            SimpleNamespace(
+                id=role_id,
+                permissions=permissions or [],
+                tenant_id=tenant_id,
+            )
+            for role_id in role_ids
+        ],
     )
 
 
@@ -80,6 +89,42 @@ class _FakePlaybookVersionQuery:
             return None
 
         return _result().__await__()
+
+
+@pytest.mark.parametrize(
+    ("role_permissions", "expected"),
+    [
+        (["workflow:r,uncontrolled"], {"r"}),
+        (["workflow:u", "workflow:uncontrolled"], {"u", "e", "p"}),
+        (["workflow:d,uncontrolled"], {"d"}),
+        (
+            ["workflow:r,u,d", "workflow:uncontrolled"],
+            {"r", "u", "d", "e", "p"},
+        ),
+        (["workflow:*"], set()),
+        (["workflow:r"], set()),
+    ],
+)
+def test_uncontrolled_playbook_permissions_respect_module_permissions(
+    role_permissions, expected
+):
+    account = _playbook_account("account-1", ["role-1"], role_permissions)
+
+    assert (
+        authorization.uncontrolled_playbook_permissions(account, "tenant-a")
+        == expected
+    )
+
+
+def test_uncontrolled_playbook_permissions_ignore_other_tenant_roles():
+    account = _playbook_account(
+        "account-1",
+        ["role-1"],
+        ["workflow:r,uncontrolled"],
+        tenant_id="tenant-b",
+    )
+
+    assert authorization.uncontrolled_playbook_permissions(account, "tenant-a") == set()
 
 
 def test_check_permissions_refreshes_stale_session_account(monkeypatch):
@@ -235,6 +280,72 @@ def test_check_playbook_permission_merges_duplicate_user_grants(monkeypatch):
             "users_id": "account-1",
         }
     ]
+
+
+def test_check_playbook_permission_bypasses_records_for_uncontrolled_role(
+    monkeypatch,
+):
+    def unexpected_filter(**_kwargs):
+        raise AssertionError("uncontrolled permission must not query playbook grants")
+
+    monkeypatch.setattr(authorization.PlaybookPermissions, "filter", unexpected_filter)
+    request = SimpleNamespace(
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+        app=SimpleNamespace(ctx=SimpleNamespace(cache_client=_FakeCacheWithValues({}))),
+    )
+    account = _playbook_account(
+        "account-1",
+        ["role-1"],
+        ["workflow:u,uncontrolled"],
+    )
+
+    assert (
+        asyncio.run(
+            authorization.check_playbook_permission(
+                request,
+                account,
+                "playbook-1",
+                ("u", "e", "p"),
+            )
+        )
+        is True
+    )
+
+
+def test_check_playbook_permission_does_not_bypass_missing_module_permission(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        authorization.PlaybookPermissions,
+        "filter",
+        lambda **_kwargs: _FakePlaybookPermissionQuery([]),
+    )
+    monkeypatch.setattr(
+        authorization.PlaybookVersion,
+        "get_or_none",
+        lambda **_kwargs: _FakePlaybookVersionQuery(),
+    )
+    request = SimpleNamespace(
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+        app=SimpleNamespace(ctx=SimpleNamespace(cache_client=_FakeCacheWithValues({}))),
+    )
+    account = _playbook_account(
+        "account-1",
+        ["role-1"],
+        ["workflow:r,uncontrolled"],
+    )
+
+    assert (
+        asyncio.run(
+            authorization.check_playbook_permission(
+                request,
+                account,
+                "playbook-1",
+                ("d",),
+            )
+        )
+        is False
+    )
 
 
 def test_check_playbook_permission_merges_duplicate_role_grants(monkeypatch):

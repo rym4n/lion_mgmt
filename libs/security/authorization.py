@@ -17,6 +17,7 @@ from models import (
     Account,
     ActionPermissions,
     PermissionsMenu,
+    Playbook,
     PlaybookPermissions,
     PlaybookVersion,
     Role,
@@ -29,6 +30,14 @@ from settings import AUTHENTICATION_SESSION_EXPIRATION, LICENSE_DIR
 SUPERADMIN_PERMISSION = "*:*"
 # 租户管理员是租户维度的管理角色，各租户内以名称"租户管理员"唯一（见 services/tenant/views.py:125）。
 TENANT_ADMIN_ROLE_NAME = "租户管理员"
+PLAYBOOK_UNCONTROLLED_PERMISSION = "workflow:uncontrolled"
+PLAYBOOK_FINE_PERMISSION_MAP = {
+    "r": "workflow:r",
+    "u": "workflow:u",
+    "d": "workflow:d",
+    "e": "workflow:u",
+    "p": "workflow:u",
+}
 
 
 def _roles_have_any_permission(roles, required_permissions: tuple[str, ...]) -> bool:
@@ -152,6 +161,48 @@ def account_has_permission(
     return False
 
 
+def uncontrolled_playbook_permissions(
+    account, tenant_id: str | None = None
+) -> set[str]:
+    """返回角色不受控时可绕过的单剧本权限，仍以功能模块权限为边界。"""
+    if not has_explicit_playbook_uncontrolled_permission(account, tenant_id):
+        return set()
+    return {
+        playbook_permission
+        for playbook_permission, module_permission in PLAYBOOK_FINE_PERMISSION_MAP.items()
+        if account_has_permission(account, module_permission, tenant_id=tenant_id)
+    }
+
+
+def has_explicit_playbook_uncontrolled_permission(
+    account, tenant_id: str | None = None
+) -> bool:
+    if not account or not getattr(account, "roles", None):
+        return False
+    for role in _roles_for_tenant(account.roles, tenant_id):
+        for role_permission in role.permissions or []:
+            if role_permission == SUPERADMIN_PERMISSION:
+                return True
+            if role_permission == PLAYBOOK_UNCONTROLLED_PERMISSION:
+                return True
+            if (
+                isinstance(role_permission, str)
+                and role_permission.startswith("workflow:")
+                and "uncontrolled" in role_permission.split(":", 1)[1].split(",")
+            ):
+                return True
+    return False
+
+
+def has_uncontrolled_playbook_permission(
+    account, required_permissions, tenant_id: str | None = None
+) -> bool:
+    required = set(required_permissions or [])
+    return bool(required) and required.issubset(
+        uncontrolled_playbook_permissions(account, tenant_id=tenant_id)
+    )
+
+
 def is_superadmin(account, tenant_id: str | None = None) -> bool:
     """超管判定：拥有 *:* 通配权限即为超管，而非硬编码角色 id '111111'。"""
     return account_has_permission(account, SUPERADMIN_PERMISSION, tenant_id=tenant_id)
@@ -180,6 +231,12 @@ async def playbook_ids_for_user(account, tenant_id: str, permission: str = "r") 
     用户被授权 或 用户所属任一角色被授权，视为授权命中。超管(*:*)不额外调用本函数——
     调用方应先判断 is_superadmin 走全量分支，本函数只负责普通用户按记录过滤。
     """
+    if has_uncontrolled_playbook_permission(account, [permission], tenant_id):
+        pb_ids = await Playbook.filter(
+            deleted=False, tenant_id=tenant_id
+        ).values_list("id", flat=True)
+        return set(pb_ids)
+
     user_id = str(account.id) if account and getattr(account, "id", None) else None
     user_roles = {str(role.id) for role in (account.roles or [])} if account else set()
     if not user_id:
@@ -188,6 +245,7 @@ async def playbook_ids_for_user(account, tenant_id: str, permission: str = "r") 
         Q(users__id=user_id) | Q(roles__id__in=user_roles),
         permissions__contains=[permission],
         tenant_id=tenant_id,
+        deleted=False,
     ).values_list("pb_id", flat=True)
     return set(pb_ids)
 
@@ -392,11 +450,16 @@ async def check_playbook_permission(request, user, playbook_id, required_permiss
     :param data: 缓存中的权限数据(dict格式{"user":[...], "role":[...]})
     :return: bool 表示是否拥有权限
     """
+    tenant_id = request.ctx.session.get("tenant_id")
+    if has_uncontrolled_playbook_permission(
+        user, required_permissions, tenant_id=tenant_id
+    ):
+        return True
+
     user_id = str(user.id)
     user_roles = set(str(role.id) for role in user.roles)
     data = await request.app.ctx.cache_client.get((playbook_id, user_id))
 
-    tenant_id = request.ctx.session.get("tenant_id")
     playbook_ids = await _candidate_permission_playbook_ids(playbook_id, tenant_id)
 
     if not data:

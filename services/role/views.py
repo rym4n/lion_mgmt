@@ -6,7 +6,14 @@ from tortoise.transactions import in_transaction
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import SUPERADMIN_PERMISSION, check_wildcard, is_superadmin_role, load_license, requires_permission
+from libs.security.authorization import (
+    PLAYBOOK_UNCONTROLLED_PERMISSION,
+    SUPERADMIN_PERMISSION,
+    check_wildcard,
+    is_superadmin_role,
+    load_license,
+    requires_permission,
+)
 from libs.security.license_modules import is_licensed_module_active
 from models import Account, PermissionsMenu, Role
 
@@ -63,6 +70,22 @@ def _preserve_superadmin_permission(role, permissions: list[str]) -> list[str]:
     if permissions and is_superadmin_role(role) and SUPERADMIN_PERMISSION not in permissions:
         return [*permissions, SUPERADMIN_PERMISSION]
     return permissions
+
+
+def _playbook_permission_control(role_permissions: list[str] | None) -> str:
+    for permission_value in role_permissions or []:
+        normalized = _normalize_permission_value(permission_value)
+        if normalized == SUPERADMIN_PERMISSION:
+            return "uncontrolled"
+        if normalized == PLAYBOOK_UNCONTROLLED_PERMISSION:
+            return "uncontrolled"
+        if (
+            normalized
+            and normalized.startswith("workflow:")
+            and "uncontrolled" in normalized.split(":", 1)[1].split(",")
+        ):
+            return "uncontrolled"
+    return "controlled"
 
 
 def _normalize_permission_value(permission_value: object) -> str | None:
@@ -420,6 +443,11 @@ async def find_all(request):
                                             },
                                         },
                                     },
+                                    "playbook_permission_control": {
+                                        "type": "string",
+                                        "enum": ["controlled", "uncontrolled"],
+                                        "description": "单剧本细粒度权限控制模式",
+                                    },
                                 },
                             },
                         },
@@ -443,6 +471,9 @@ async def find_role(request):
 
     data = role.json
     data["permissions"] = _build_structured_permissions(role.permissions, permissions_data)
+    data["playbook_permission_control"] = _playbook_permission_control(
+        role.permissions
+    )
     return response_ok(data)
 
 
