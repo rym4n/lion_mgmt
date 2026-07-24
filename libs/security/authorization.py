@@ -31,12 +31,18 @@ SUPERADMIN_PERMISSION = "*:*"
 # 租户管理员是租户维度的管理角色，各租户内以名称"租户管理员"唯一（见 services/tenant/views.py:125）。
 TENANT_ADMIN_ROLE_NAME = "租户管理员"
 PLAYBOOK_UNCONTROLLED_PERMISSION = "workflow:uncontrolled"
+PLAYBOOK_UNCONTROLLED_ACTION = "uncontrolled"
 PLAYBOOK_FINE_PERMISSION_MAP = {
     "r": "workflow:r",
     "u": "workflow:u",
     "d": "workflow:d",
     "e": "workflow:u",
     "p": "workflow:u",
+}
+PLAYBOOK_MODULE_TO_FINE_PERMISSIONS = {
+    "r": {"r"},
+    "u": {"u", "e", "p"},
+    "d": {"d"},
 }
 
 
@@ -161,17 +167,48 @@ def account_has_permission(
     return False
 
 
+def workflow_uncontrolled_actions(role_permission: object) -> set[str]:
+    if not isinstance(role_permission, str) or not role_permission.startswith("workflow:"):
+        return set()
+
+    actions = set(role_permission.split(":", 1)[1].split(","))
+    if PLAYBOOK_UNCONTROLLED_ACTION not in actions:
+        return set()
+    if "*" in actions:
+        return set(PLAYBOOK_MODULE_TO_FINE_PERMISSIONS)
+    return actions.intersection(PLAYBOOK_MODULE_TO_FINE_PERMISSIONS)
+
+
 def uncontrolled_playbook_permissions(
     account, tenant_id: str | None = None
 ) -> set[str]:
     """返回角色不受控时可绕过的单剧本权限，仍以功能模块权限为边界。"""
-    if not has_explicit_playbook_uncontrolled_permission(account, tenant_id):
+    if not account or not getattr(account, "roles", None):
         return set()
-    return {
-        playbook_permission
-        for playbook_permission, module_permission in PLAYBOOK_FINE_PERMISSION_MAP.items()
-        if account_has_permission(account, module_permission, tenant_id=tenant_id)
-    }
+
+    permissions = set()
+    has_global_uncontrolled = False
+    for role in _roles_for_tenant(account.roles, tenant_id):
+        for role_permission in role.permissions or []:
+            if role_permission == SUPERADMIN_PERMISSION:
+                has_global_uncontrolled = True
+                continue
+            if role_permission == PLAYBOOK_UNCONTROLLED_PERMISSION:
+                has_global_uncontrolled = True
+                continue
+            for action in workflow_uncontrolled_actions(role_permission):
+                if account_has_permission(
+                    account, f"workflow:{action}", tenant_id=tenant_id
+                ):
+                    permissions.update(PLAYBOOK_MODULE_TO_FINE_PERMISSIONS[action])
+
+    if has_global_uncontrolled:
+        permissions.update(
+            playbook_permission
+            for playbook_permission, module_permission in PLAYBOOK_FINE_PERMISSION_MAP.items()
+            if account_has_permission(account, module_permission, tenant_id=tenant_id)
+        )
+    return permissions
 
 
 def has_explicit_playbook_uncontrolled_permission(
@@ -185,11 +222,7 @@ def has_explicit_playbook_uncontrolled_permission(
                 return True
             if role_permission == PLAYBOOK_UNCONTROLLED_PERMISSION:
                 return True
-            if (
-                isinstance(role_permission, str)
-                and role_permission.startswith("workflow:")
-                and "uncontrolled" in role_permission.split(":", 1)[1].split(",")
-            ):
+            if workflow_uncontrolled_actions(role_permission):
                 return True
     return False
 

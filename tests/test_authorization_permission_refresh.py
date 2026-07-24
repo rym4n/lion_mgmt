@@ -97,6 +97,7 @@ class _FakePlaybookVersionQuery:
         (["workflow:r,uncontrolled"], {"r"}),
         (["workflow:u", "workflow:uncontrolled"], {"u", "e", "p"}),
         (["workflow:d,uncontrolled"], {"d"}),
+        (["workflow:r", "workflow:u,uncontrolled"], {"u", "e", "p"}),
         (
             ["workflow:r,u,d", "workflow:uncontrolled"],
             {"r", "u", "d", "e", "p"},

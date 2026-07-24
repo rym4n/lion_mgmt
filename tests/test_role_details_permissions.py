@@ -12,7 +12,10 @@ sys.path.insert(0, str(ROOT))
 from services.role.views import (  # noqa: E402
     _build_structured_permissions,
     _normalize_permission_menu,
+    _ordered_permission_menus,
+    _permission_menu_is_licensed,
     _playbook_permission_control,
+    _playbook_permission_controls,
     _preserve_superadmin_permission,
     _with_implicit_tool_view_permission,
 )
@@ -56,6 +59,19 @@ TOOL_PERMISSIONS_DATA = [
     {
         "model": "tool",
         "description": "应用管理",
+        "bp": "tool_management_bp",
+        "url": {
+            "CN": {
+                "meta": {"rank": 30, "title": "应用市场"},
+                "path": "/toolManagement",
+                "children": [
+                    {
+                        "meta": {"title": "应用市场"},
+                        "path": "/toolManagement/index",
+                    }
+                ],
+            }
+        },
         "Permissions": [
             {"label": "查看页面", "value": "r"},
             {"label": "资源健康报告", "value": "tool:health:r"},
@@ -144,8 +160,23 @@ def test_role_details_exposes_playbook_permission_control_mode():
     assert _playbook_permission_control(["*:*:"]) == "controlled"
 
 
+def test_role_details_exposes_playbook_permission_control_by_action():
+    assert _playbook_permission_controls(
+        ["dashboard:r", "workflow:r", "workflow:u,uncontrolled"]
+    ) == {
+        "r": "controlled",
+        "u": "uncontrolled",
+        "d": "controlled",
+    }
+
+
 def test_platform_wildcard_has_uncontrolled_playbook_permission():
     assert _playbook_permission_control(["*:*", "dashboard:r"]) == "uncontrolled"
+    assert _playbook_permission_controls(["*:*", "dashboard:r"]) == {
+        "r": "uncontrolled",
+        "u": "uncontrolled",
+        "d": "uncontrolled",
+    }
 
 
 def test_role_details_normalizes_legacy_nested_permission_codes():
@@ -287,6 +318,7 @@ def test_role_permission_all_labels_split_menu_actions_without_collapsing_granul
 def test_role_permission_all_exposes_tool_market_fine_permissions():
     normalized = _normalize_permission_menu(TOOL_PERMISSIONS_DATA[0])
 
+    assert normalized["description"] == "应用市场"
     assert normalized["Permissions"] == [
         {"value": "r", "label": "查看页面"},
         {"value": "r", "label": "资源健康报告", "permission": "tool:health:r"},
@@ -309,7 +341,7 @@ def test_role_details_expands_legacy_tool_crud_to_all_refined_permissions():
     assert structured == [
         {
             "model": "tool",
-            "model_description": "应用管理",
+            "model_description": "应用市场",
             "sp": [
                 {"r": "查看页面"},
                 {"tool:health:r": "资源健康报告"},
@@ -360,7 +392,7 @@ def test_tool_permission_installer_seed_backfills_legacy_crud_roles():
     init_sql = (ROOT.parent / "aioe_package/aioe_install/init.sql").read_text()
 
     for sql in (upgrade_sql, init_sql):
-        assert "\"description\" = '应用管理'" in sql
+        assert "\"description\" = '应用市场'" in sql
         assert "legacy.permission_value ~ '^tool:(\\*|[cdur](,[cdur])*)$'" in sql
         assert "parsed.action_text = '*'" in sql
         for permission in [
@@ -375,6 +407,128 @@ def test_tool_permission_installer_seed_backfills_legacy_crud_roles():
             "tool:engine:u",
         ]:
             assert permission in sql
+
+
+def test_role_permission_all_sorts_and_labels_like_menu():
+    permissions = [
+        {
+            "model": "workflow",
+            "description": "可视化编排",
+            "url": {
+                "CN": {
+                    "meta": {"rank": 40, "title": "剧本管理"},
+                    "path": "/playbook",
+                    "children": [{"meta": {"title": "剧本管理"}, "path": "/playbook/index"}],
+                }
+            },
+            "Permissions": [],
+        },
+        {
+            "model": "tool",
+            "description": "应用管理",
+            "url": {
+                "CN": {
+                    "meta": {"rank": 30, "title": "应用市场"},
+                    "path": "/toolManagement",
+                    "children": [
+                        {"meta": {"title": "应用市场"}, "path": "/toolManagement/index"}
+                    ],
+                }
+            },
+            "Permissions": [],
+        },
+        {"model": "dashboard", "description": "仪表盘", "Permissions": []},
+        {
+            "model": "role",
+            "description": "角色管理",
+            "url": {
+                "CN": {
+                    "meta": {"rank": 99, "title": "系统设置"},
+                    "path": "/System",
+                    "children": [
+                        {"meta": {"title": "角色管理"}, "path": "/System/Role/Role"}
+                    ],
+                }
+            },
+            "Permissions": [],
+        },
+        {
+            "model": "user",
+            "description": "账号管理",
+            "url": {
+                "CN": {
+                    "meta": {"rank": 99, "title": "系统设置"},
+                    "path": "/System",
+                    "children": [
+                        {"meta": {"title": "账号管理"}, "path": "/System/User/User"}
+                    ],
+                }
+            },
+            "Permissions": [],
+        },
+        {
+            "model": "asset-management-catalog",
+            "description": "资产数据",
+            "url": {
+                "CN": {
+                    "meta": {"rank": 16, "title": "资产管理"},
+                    "path": "/asset-management",
+                    "children": [
+                        {
+                            "meta": {"title": "资产数据"},
+                            "path": "/asset-management/catalog",
+                        }
+                    ],
+                }
+            },
+            "Permissions": [],
+        },
+        {
+            "model": "asset-management-models",
+            "description": "资产模型",
+            "url": {
+                "CN": {
+                    "meta": {"rank": 16, "title": "资产管理"},
+                    "path": "/asset-management",
+                    "children": [
+                        {
+                            "meta": {"title": "资产模型"},
+                            "path": "/asset-management/models",
+                        }
+                    ],
+                }
+            },
+            "Permissions": [],
+        },
+    ]
+
+    ordered = [_normalize_permission_menu(item) for item in _ordered_permission_menus(permissions)]
+
+    assert [item["model"] for item in ordered] == [
+        "dashboard",
+        "asset-management-models",
+        "asset-management-catalog",
+        "tool",
+        "workflow",
+        "user",
+        "role",
+    ]
+    assert [item["description"] for item in ordered] == [
+        "仪表盘",
+        "资产模型",
+        "资产数据",
+        "应用市场",
+        "剧本管理",
+        "账号管理",
+        "角色管理",
+    ]
+
+
+def test_role_permission_license_filter_accepts_old_tool_names():
+    assert _permission_menu_is_licensed(
+        TOOL_PERMISSIONS_DATA[0],
+        {"自定义应用"},
+    )
 
 
 def test_role_details_groups_nested_permissions_under_split_menu_model():

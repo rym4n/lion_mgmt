@@ -42,7 +42,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
     return f"""
         UPDATE "permissions_menu"
         SET
-            "description" = '应用管理',
+            "description" = '应用市场',
             "Permissions" = '{TOOL_MARKET_PERMISSIONS}'::jsonb,
             "utime" = CURRENT_TIMESTAMP
         WHERE "model" = 'tool';

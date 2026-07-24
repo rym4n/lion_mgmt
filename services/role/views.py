@@ -7,12 +7,14 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import (
+    PLAYBOOK_MODULE_TO_FINE_PERMISSIONS,
     PLAYBOOK_UNCONTROLLED_PERMISSION,
     SUPERADMIN_PERMISSION,
     check_wildcard,
     is_superadmin_role,
     load_license,
     requires_permission,
+    workflow_uncontrolled_actions,
 )
 from libs.security.license_modules import is_licensed_module_active
 from models import Account, PermissionsMenu, Role
@@ -73,6 +75,98 @@ TOOL_LEGACY_ACTION_TO_FINE_PERMISSIONS = {
     "d": {"tool:app:d", "tool:resource:d"},
 }
 
+MENU_LANGUAGE = "CN"
+
+SYSTEM_MENU_CHILD_ORDER = {
+    "产品许可": 0,
+    "產品許可": 0,
+    "License": 0,
+    "账号管理": 1,
+    "賬號管理": 1,
+    "Account Management": 1,
+    "角色管理": 2,
+    "Role Management": 2,
+    "SSO集成": 3,
+    "SSO Integration": 3,
+    "审计日志": 4,
+    "審計日誌": 4,
+    "Audit Logs": 4,
+    "租户管理": 5,
+    "租戶管理": 5,
+    "Tenant": 5,
+    "个性化设置": 6,
+    "個性化設置": 6,
+    "Personalization": 6,
+    "系统状态": 7,
+    "系統狀態": 7,
+    "System Status": 7,
+    "安全设置": 8,
+    "安全設置": 8,
+    "Security Settings": 8,
+}
+
+EVENT_MENU_CHILD_ORDER = {
+    "事件列表": 0,
+    "事件清單": 0,
+    "Event List": 0,
+    "事件接入": 1,
+    "Event Ingestion": 1,
+}
+
+TOP_MENU_ORDER = {
+    "仪表盘": 0,
+    "儀表盤": 0,
+    "Dashboard": 0,
+    "作战室": 10,
+    "作戰室": 10,
+    "War Room": 10,
+    "专家团队": 15,
+    "專家團隊": 15,
+    "Expert Team": 15,
+    "指挥中心": 15,
+    "指揮中心": 15,
+    "Command Center": 15,
+    "资产管理": 16,
+    "資產管理": 16,
+    "Asset Management": 16,
+    "网络管理": 17,
+    "網絡管理": 17,
+    "Network Management": 17,
+    "事件管理": 20,
+    "Event Management": 20,
+}
+
+FIXED_CHILD_ROUTE_ORDER = {
+    "/command-center": [
+        "/command-center/board",
+        "/command-center/employees",
+        "/command-center/skills",
+        "/command-center/report-assistant",
+    ],
+    "/asset-management": [
+        "/asset-management/models",
+        "/asset-management/catalog",
+    ],
+    "/network-management": [
+        "/network-management/topology",
+        "/network-management/access-control",
+    ],
+}
+
+MODEL_MENU_FALLBACK_ORDER = {
+    "dashboard": (0, 0),
+    "warroom": (10, 0),
+    "command_center": (15, 0),
+    "digital_employee": (15, 1),
+    "digital_employee_skill": (15, 2),
+    "agent": (15, 3),
+    "agent_report_schedule": (15, 4),
+}
+
+PERMISSION_MENU_LICENSE_ALIASES = {
+    "tool": {"自定义应用", "应用管理", "应用市场"},
+}
+
 
 def _preserve_superadmin_permission(role, permissions: list[str]) -> list[str]:
     if permissions and is_superadmin_role(role) and SUPERADMIN_PERMISSION not in permissions:
@@ -81,19 +175,26 @@ def _preserve_superadmin_permission(role, permissions: list[str]) -> list[str]:
 
 
 def _playbook_permission_control(role_permissions: list[str] | None) -> str:
+    controls = _playbook_permission_controls(role_permissions)
+    if any(control == "uncontrolled" for control in controls.values()):
+        return "uncontrolled"
+    return "controlled"
+
+
+def _playbook_permission_controls(role_permissions: list[str] | None) -> dict[str, str]:
+    controls = {
+        action: "controlled"
+        for action in PLAYBOOK_MODULE_TO_FINE_PERMISSIONS
+    }
     for permission_value in role_permissions or []:
         normalized = _normalize_permission_value(permission_value)
         if normalized == SUPERADMIN_PERMISSION:
-            return "uncontrolled"
+            return {action: "uncontrolled" for action in controls}
         if normalized == PLAYBOOK_UNCONTROLLED_PERMISSION:
-            return "uncontrolled"
-        if (
-            normalized
-            and normalized.startswith("workflow:")
-            and "uncontrolled" in normalized.split(":", 1)[1].split(",")
-        ):
-            return "uncontrolled"
-    return "controlled"
+            return {action: "uncontrolled" for action in controls}
+        for action in workflow_uncontrolled_actions(normalized):
+            controls[action] = "uncontrolled"
+    return controls
 
 
 def _normalize_permission_value(permission_value: object) -> str | None:
@@ -226,12 +327,116 @@ def _normalize_menu_permissions(
     return normalized_permissions
 
 
+def _permission_menu_route(permission: dict) -> dict | None:
+    url = permission.get("url")
+    if not isinstance(url, dict) or not url:
+        return None
+    route = url.get(MENU_LANGUAGE)
+    if isinstance(route, dict):
+        return route
+    return next((item for item in url.values() if isinstance(item, dict)), None)
+
+
+def _menu_meta(node: dict | None) -> dict:
+    if not isinstance(node, dict):
+        return {}
+    meta = node.get("meta")
+    return meta if isinstance(meta, dict) else {}
+
+
+def _menu_title(node: dict | None) -> str | None:
+    title = _menu_meta(node).get("title")
+    return title if isinstance(title, str) and title else None
+
+
+def _menu_rank(node: dict | None, default: int = 99) -> int:
+    rank = _menu_meta(node).get("rank")
+    if isinstance(rank, bool):
+        return default
+    if isinstance(rank, int):
+        return rank
+    if isinstance(rank, float):
+        return int(rank)
+    if isinstance(rank, str) and rank.isdigit():
+        return int(rank)
+    return default
+
+
+def _permission_menu_child(route: dict | None) -> dict | None:
+    children = route.get("children") if isinstance(route, dict) else None
+    if not isinstance(children, list):
+        return None
+    return next((child for child in children if isinstance(child, dict)), None)
+
+
+def _permission_menu_display_description(permission: dict) -> str | None:
+    route = _permission_menu_route(permission)
+    child = _permission_menu_child(route)
+    description = permission.get("description")
+    return (
+        _menu_title(child)
+        or _menu_title(route)
+        or (description if isinstance(description, str) else None)
+    )
+
+
+def _permission_menu_child_order(route: dict | None, child: dict | None) -> int:
+    route_path = route.get("path") if isinstance(route, dict) else None
+    child_path = child.get("path") if isinstance(child, dict) else None
+    if isinstance(route_path, str) and isinstance(child_path, str):
+        fixed_order = FIXED_CHILD_ROUTE_ORDER.get(route_path)
+        if fixed_order and child_path in fixed_order:
+            return fixed_order.index(child_path)
+
+    child_title = _menu_title(child)
+    route_title = _menu_title(route)
+    if route_title in {"系统设置", "系統設置", "System Settings"}:
+        return SYSTEM_MENU_CHILD_ORDER.get(child_title, 99)
+    if route_title in {"事件管理", "Event Management"}:
+        return EVENT_MENU_CHILD_ORDER.get(child_title, 99)
+    return _menu_rank(child, 0)
+
+
+def _permission_menu_sort_key(permission: dict, index: int = 0) -> tuple:
+    model = permission.get("model")
+    route = _permission_menu_route(permission)
+    child = _permission_menu_child(route)
+    title = _permission_menu_display_description(permission) or ""
+
+    if not route:
+        top_rank, child_order = MODEL_MENU_FALLBACK_ORDER.get(model, (99, 99))
+        return top_rank, child_order, title, model or "", index
+
+    route_title = _menu_title(route)
+    top_rank = TOP_MENU_ORDER.get(route_title, _menu_rank(route))
+    child_order = _permission_menu_child_order(route, child)
+    child_path = child.get("path", "") if isinstance(child, dict) else ""
+    return top_rank, child_order, title, child_path, model or "", index
+
+
+def _ordered_permission_menus(permissions: list[dict]) -> list[dict]:
+    indexed_permissions = [
+        (index, permission)
+        for index, permission in enumerate(permissions)
+        if isinstance(permission, dict)
+    ]
+    return [
+        permission
+        for index, permission in sorted(
+            indexed_permissions,
+            key=lambda item: _permission_menu_sort_key(item[1], item[0]),
+        )
+    ]
+
+
 def _normalize_permission_menu(permission: dict) -> dict:
     normalized = dict(permission)
+    menu_description = _permission_menu_display_description(permission) or ""
+    normalized["description"] = menu_description
     normalized["Permissions"] = _normalize_menu_permissions(
         permission.get("Permissions"),
         permission.get("model"),
-        permission.get("description"),
+        menu_description,
     )
     return normalized
 
@@ -253,22 +458,31 @@ def _licensed_module_keys(license_data: dict) -> set[str]:
 
 
 def _permission_menu_is_licensed(permission: dict, valid_modules: set[str]) -> bool:
-    return permission.get("description") in valid_modules or permission.get("bp") in valid_modules
+    module_names = [
+        permission.get("description"),
+        permission.get("bp"),
+        _permission_menu_display_description(permission),
+    ]
+    model = permission.get("model")
+    if isinstance(model, str):
+        module_names.extend(PERMISSION_MENU_LICENSE_ALIASES.get(model, set()))
+    return any(name in valid_modules for name in module_names if isinstance(name, str))
 
 
 def _build_permission_map(permissions_data: list[dict]) -> dict:
     permission_map = {}
     for permission in permissions_data:
+        description = _permission_menu_display_description(permission) or ""
         values = {
             item["value"]: item["label"]
             for item in _normalize_menu_permissions(
                 permission.get("Permissions"),
                 permission.get("model"),
-                permission.get("description"),
+                description,
             )
         }
         permission_map[permission["model"]] = {
-            "description": permission["description"],
+            "description": description,
             "values": values,
         }
     return permission_map
@@ -299,7 +513,7 @@ def _build_structured_permissions(role_permissions: list[str] | None, permission
 
     for permission in permissions_data:
         model = permission["model"]
-        description = permission["description"]
+        description = _permission_menu_display_description(permission) or ""
         for item in _normalize_menu_permissions(permission.get("Permissions"), model, description):
             actual_permission = item.get("permission") or f"{model}:{item['value']}"
             if any(
@@ -506,6 +720,14 @@ async def find_all(request):
                                         "enum": ["controlled", "uncontrolled"],
                                         "description": "单剧本细粒度权限控制模式",
                                     },
+                                    "playbook_permission_controls": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                            "type": "string",
+                                            "enum": ["controlled", "uncontrolled"],
+                                        },
+                                        "description": "按剧本管理具体权限项配置的单剧本细粒度权限控制模式",
+                                    },
                                 },
                             },
                         },
@@ -530,6 +752,9 @@ async def find_role(request):
     data = role.json
     data["permissions"] = _build_structured_permissions(role.permissions, permissions_data)
     data["playbook_permission_control"] = _playbook_permission_control(
+        role.permissions
+    )
+    data["playbook_permission_controls"] = _playbook_permission_controls(
         role.permissions
     )
     return response_ok(data)
@@ -721,7 +946,7 @@ async def all_permission(request):
 
     permission_list = []
     permissions = await PermissionsMenu.all().values()
-    for permission in permissions:
+    for permission in _ordered_permission_menus(permissions):
         if _permission_menu_is_licensed(permission, valid_modules):
             permission_list.append(_normalize_permission_menu(permission))
     return response_ok(
