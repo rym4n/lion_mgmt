@@ -1679,13 +1679,14 @@ async def add_permission(request):
     superadmin_role = await get_superadmin_role()
     superadmin_id = superadmin_role.id if superadmin_role else None
     for rid, perms in roles.items():
-        if rid != superadmin_id:
-            await PlaybookPermissions.update_or_create(
-                pb_id=playbook_id,
-                roles_id=rid,
-                tenant_id=tenant_id,
-                defaults={"permissions": perms, "users_id": None},
-            )
+        if rid == superadmin_id:
+            continue
+        await PlaybookPermissions.update_or_create(
+            pb_id=playbook_id,
+            roles_id=rid,
+            tenant_id=tenant_id,
+            defaults={"permissions": perms, "users_id": None},
+        )
         await request.app.ctx.cache_client.set((playbook_id, rid), perms, ttl=2592000)
 
     return response_ok("权限更新成功")

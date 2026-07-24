@@ -393,7 +393,6 @@ async def all_users(request):
                                             "properties": {
                                                 "id": {"type": "string"},
                                                 "name": {"type": "string"},
-                                                "is_superadmin": {"type": "boolean"},
                                                 "description": {"type": "string"},
                                             },
                                         },
@@ -1744,6 +1743,7 @@ async def init_scene_list(request):
                                                 "id": {"type": "string"},
                                                 "username": {"type": "string"},
                                                 "display_name": {"type": "string"},
+                                                "is_superadmin": {"type": "boolean"},
                                             },
                                         },
                                     }
@@ -1757,11 +1757,20 @@ async def init_scene_list(request):
     },
 )
 async def init_account_list(request):
-    tenant = await Tenant.get_or_none(deleted=False, id=request.ctx.session["tenant_id"]).prefetch_related("member")
+    tenant_id = request.ctx.session["tenant_id"]
+    tenant = await Tenant.get_or_none(deleted=False, id=tenant_id).prefetch_related("member")
     data = []
     for user in tenant.member:
         if user.deleted is False and user.type == "user":
-            data.append({"id": user.id, "username": user.username, "display_name": user.display_name})
+            await user.fetch_related("roles")
+            data.append(
+                {
+                    "id": user.id,
+                    "username": user.username,
+                    "display_name": user.display_name,
+                    "is_superadmin": is_superadmin(user, tenant_id=tenant_id),
+                }
+            )
     return response_ok({"users": data})
 
 
@@ -1788,6 +1797,7 @@ async def init_account_list(request):
                                             "properties": {
                                                 "id": {"type": "string"},
                                                 "name": {"type": "string"},
+                                                "is_superadmin": {"type": "boolean"},
                                             },
                                         },
                                     }
