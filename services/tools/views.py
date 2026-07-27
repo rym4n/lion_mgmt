@@ -372,6 +372,10 @@ def check_file_size(file_obj, max_size_kb=5):
     return file_size_kb <= max_size_kb
 
 
+def _sse_json_event(data) -> str:
+    return f"data: {orjson.dumps(data).decode()}\n\n"
+
+
 @tools_bp.post("/upload")
 @openapi.definition(
     summary="上传工具接口",
@@ -456,7 +460,7 @@ async def upload_and_extract_zip(request):
         await resp.send(f"data: 解压进度：{progress}%\n\n")
 
     if resp:
-        await resp.send(f"data: {results}\n\n")
+        await resp.send(_sse_json_event(results))
         await resp.eof()
 
 
