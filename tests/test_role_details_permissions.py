@@ -25,6 +25,9 @@ from services.role.views import (  # noqa: E402
 tool_permission_migration = importlib.import_module(
     "migrations.models.90_20260724013000_refine_tool_market_permissions"
 )
+tool_resource_uncontrolled_migration = importlib.import_module(
+    "migrations.models.91_20260726103000_default_tool_resource_uncontrolled"
+)
 
 
 PERMISSIONS_DATA = [
@@ -423,6 +426,28 @@ def test_tool_permission_installer_seed_backfills_legacy_crud_roles():
             "tool:engine:u",
         ]:
             assert permission in sql
+
+
+def test_tool_resource_uncontrolled_migration_backfills_existing_tool_roles():
+    upgrade_sql = asyncio.run(tool_resource_uncontrolled_migration.upgrade(None))
+
+    assert "'tool:resource:uncontrolled'" in upgrade_sql
+    assert "COALESCE(r.\"permissions\", '[]'::jsonb) ? 'tool:r'" in upgrade_sql
+    assert (
+        "NOT (COALESCE(r.\"permissions\", '[]'::jsonb) ? 'tool:resource:uncontrolled')"
+        in upgrade_sql
+    )
+
+
+def test_tool_resource_uncontrolled_installer_seed_matches_migration_scope():
+    init_sql = (ROOT.parent / "aioe_package/aioe_install/init.sql").read_text()
+
+    assert "'tool:resource:uncontrolled'" in init_sql
+    assert "COALESCE(r.\"permissions\"::jsonb, '[]'::jsonb) ? 'tool:r'" in init_sql
+    assert (
+        "NOT (COALESCE(r.\"permissions\"::jsonb, '[]'::jsonb) ? 'tool:resource:uncontrolled')"
+        in init_sql
+    )
 
 
 def test_role_permission_all_sorts_and_labels_like_menu():
