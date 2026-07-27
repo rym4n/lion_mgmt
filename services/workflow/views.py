@@ -2216,6 +2216,13 @@ async def dashboard_statistics(request):
     return response_ok(final_result)
 
 
+def _open_workflow_archive(file_body: bytes) -> zipfile.ZipFile:
+    try:
+        return zipfile.ZipFile(io.BytesIO(file_body), "r", metadata_encoding="utf-8")
+    except (TypeError, ValueError, zipfile.BadZipFile):
+        raise CustomError(ErrorCode.ZIP_FILE_FORMAT_ERROR) from None
+
+
 @workflow_bp.post("/import")
 @openapi.definition(
     summary="导入剧本",
@@ -2267,8 +2274,7 @@ async def import_workflow(request):
 
     imported = {"playbooks": 0, "tools": 0, "resources": 0, "skipped_versions": 0, "skipped_resources": 0}
 
-    buf = io.BytesIO(file_obj.body)
-    with zipfile.ZipFile(buf, "r", metadata_encoding="utf-8") as zf:
+    with _open_workflow_archive(file_obj.body) as zf:
         names = zf.namelist()
 
         if "resources.json" in names:

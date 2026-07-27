@@ -324,6 +324,48 @@ def test_malformed_or_contradictory_decision_fails_closed(raw_response):
     assert decision.needs_clarification is False
 
 
+def test_non_json_dispatch_decision_is_retried_once_with_strict_contract():
+    dispatcher = _load_dispatcher()
+    selected = _agent("ops-1")
+    task = SimpleNamespace(
+        id="task-1",
+        tenant_id="tenant-1",
+        title="巡检",
+        description="检查磁盘容量",
+        source="manual",
+        priority=3,
+        status="pending_dispatch",
+        progress=0,
+        required_capabilities=[],
+        payload={},
+        requested_agent_id=None,
+        room_id=None,
+        creator_id=None,
+    )
+    calls = []
+
+    async def execute_prompt(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return "我将把任务分配给运维员工。"
+        return (
+            '{"needs_clarification":false,"clarification_question":null,'
+            '"agent_key":"ops-1","dispatch_status":"auto_assigned","reason":"能力匹配"}'
+        )
+
+    dispatcher.execute_prompt = execute_prompt
+
+    decision = asyncio.run(
+        dispatcher.choose_agent_with_lion_agent(task, [selected], coordinator=None)
+    )
+
+    assert decision.agent is selected
+    assert decision.dispatch_status == "auto_assigned"
+    assert len(calls) == 2
+    assert calls[1]["request_id"] == "task-1:dispatch-json-retry"
+    assert "仅重新输出完全符合 response_schema 的 JSON 对象" in calls[1]["message"]
+
+
 def test_dispatch_prompt_keeps_control_contract_outside_malicious_user_message():
     dispatcher = _load_dispatcher()
     task = SimpleNamespace(

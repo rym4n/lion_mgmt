@@ -296,6 +296,30 @@ async def choose_agent_with_lion_agent(
             system_prompt=system_prompt,
         )
         decision_payload = _extract_json_object(raw_response)
+    except ValueError:
+        try:
+            raw_response = await execute_prompt(
+                workspace_id=workspace_id_for(task.tenant_id, "command-center"),
+                session_id=session_key,
+                request_id=f"{task.id}:dispatch-json-retry",
+                message="\n\n".join(
+                    [
+                        message,
+                        "上一条调度回复未通过 JSON 解析。不要解释、不要执行任务；仅重新输出完全符合 response_schema 的 JSON 对象。",
+                    ]
+                ),
+                model=RY_AI_LITE_MODEL,
+                system_prompt=system_prompt,
+            )
+            decision_payload = _extract_json_object(raw_response)
+        except Exception as exc:
+            logger.error(f"lion_agent 调度决策失败: task_id={task.id}, error={exc}")
+            return DispatchDecision(
+                None,
+                "no_candidate",
+                f"lion_agent 调度决策失败: {exc}",
+                requested_agent_id=requested_agent_id,
+            )
     except Exception as exc:
         logger.error(f"lion_agent 调度决策失败: task_id={task.id}, error={exc}")
         return DispatchDecision(None, "no_candidate", f"lion_agent 调度决策失败: {exc}", requested_agent_id=requested_agent_id)

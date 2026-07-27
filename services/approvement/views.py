@@ -180,7 +180,7 @@ async def all_approvement(request):
     ctime = params.get("ctime")
 
     if keyword:
-        condition = Q(title__icontains=keyword) | Q(content__icontains=keyword)
+        condition = condition & (Q(title__icontains=keyword) | Q(content__icontains=keyword))
     if status:
         condition = condition & Q(status__in=status)
 
