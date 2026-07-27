@@ -11,6 +11,7 @@ from tortoise.contrib.sanic import register_tortoise
 from core.exception_handlers import BaseExcHandler, EXC_HDL_TUPLE
 from core.listeners import BaseListener, LISTENER_TUPLE
 from core.middlewares import BaseMiddleware, MIDDLEWARE_TUPLE
+from core.openapi import configure_openapi_responses
 from libs.security.license_modules import is_licensed_module_active
 from libs.security.authorization import load_license
 from services.agent.views import agent_bp
@@ -49,11 +50,19 @@ from services.user.views import user_bp
 from services.variables.views import var_bp
 from services.warroom.views import warroom_bp
 from services.workflow.views import workflow_bp
-from settings import BASE_LOGGING, HEALTH_MAX_MISSES, HEALTH_MISSED_THRESHHOLD, HEALTH_MONITOR, TORTOISE
+from settings import (
+    BASE_LOGGING,
+    HEALTH_MAX_MISSES,
+    HEALTH_MISSED_THRESHHOLD,
+    HEALTH_MONITOR,
+    TORTOISE,
+)
 
 
 def create_app() -> Sanic:
-    app: Sanic = Sanic("services", dumps=orjson.dumps, loads=orjson.loads, log_config=BASE_LOGGING)
+    app: Sanic = Sanic(
+        "services", dumps=orjson.dumps, loads=orjson.loads, log_config=BASE_LOGGING
+    )
     app.config.update_config("settings/__init__.py")
     app.extend(
         config={
@@ -67,6 +76,7 @@ def create_app() -> Sanic:
     register_middleware(app)
     register_exception_handler(app)
     register_blueprints(app)
+    configure_openapi_responses()
     return app
 
 
@@ -123,7 +133,9 @@ def register_blueprints(app: Sanic):
                     if not isinstance(blueprints, tuple):
                         blueprints = (blueprints,)
                     for blueprint in blueprints:
-                        blueprint_name = getattr(blueprint, "name", None) or id(blueprint)
+                        blueprint_name = getattr(blueprint, "name", None) or id(
+                            blueprint
+                        )
                         if blueprint_name in registered_blueprint_names:
                             continue
                         app.blueprint(blueprint)
