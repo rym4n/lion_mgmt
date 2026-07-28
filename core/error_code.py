@@ -213,7 +213,7 @@ class ErrorCode(BaseErrorCode):
         4170, "无法操作其他租户的用户"
     )
     CANNOT_OPERATE_SUPERADMIN = ErrorData(
-        4171, "无权禁用或删除超级管理员账号"
+        4171, "无权修改、禁用或删除超级管理员账号"
     )
     OUTBOUND_CONNECTION_TEST_FAILED = ErrorData(
         4172, "连接测试失败，请检查地址、端口或凭据"

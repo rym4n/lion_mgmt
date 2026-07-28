@@ -207,6 +207,18 @@ async def _get_agent(tenant_id: str, agent_id: str | None = None, agent_key: str
     return None
 
 
+async def _get_visible_agent(
+    tenant_id: str,
+    agent_key: str | None = None,
+) -> CommandAgent | None:
+    tenant_agent = await _get_agent(tenant_id, agent_key=agent_key)
+    if tenant_agent:
+        return tenant_agent
+    if agent_key:
+        return await CommandAgent.get_or_none(agent_key=agent_key, is_builtin=True, deleted=False)
+    return None
+
+
 async def disable_command_agent(agent: CommandAgent) -> None:
     agent.status = "offline"
     agent.load = 0
@@ -1871,7 +1883,7 @@ async def report_polish(request: Request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
-    agent = await _get_agent(tenant_id, agent_key="report_assistant")
+    agent = await _get_visible_agent(tenant_id, agent_key="report_assistant")
     if not agent:
         raise CustomError(ErrorCode.NOT_FOUND)
 

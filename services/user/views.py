@@ -1069,6 +1069,8 @@ async def update_user(request):
 async def _ensure_can_manage_target_user(request, target: Account) -> None:
     """租户隔离 + 超管保护，防止租户管理员越权操作平台级/其他租户账号。
 
+    - 内置 admin 是产品固定管理账号，只允许 admin 自己维护；其他账号即使拥有
+      全平台超管角色，也不能修改 admin 的资料、状态、认证方式或角色。
     - 目标账号必须是操作者所在租户的成员（member M2M），全平台超管例外可跨租户；
       账号列表本就按 member 过滤，编辑/删除必须对齐，否则可直接按用户名越权。
     - 非超管不得禁用或删除超管账号（含内置 admin），避免租户管理员停用全平台超管。
@@ -1076,6 +1078,9 @@ async def _ensure_can_manage_target_user(request, target: Account) -> None:
     operator = request.ctx.session["account_info"]
     tenant_id = request.ctx.session.get("tenant_id") or operator.tenant_id
     operator_is_superadmin = is_superadmin(operator)
+
+    if target.username == "admin" and target.id != operator.id:
+        raise CustomError(ErrorCode.CANNOT_OPERATE_SUPERADMIN)
 
     # 目标是超管而操作者不是 —— 直接拒绝（覆盖内置 admin 及任何自定义超管）。
     await target.fetch_related("roles")
@@ -1296,6 +1301,7 @@ async def refresh_mfa_key(request):
     account = await Account.get_or_none(username=username, deleted=False)
     if not account:
         raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+    await _ensure_can_manage_target_user(request, account)
     account.mfa_key = pyotp.random_base32(32)
     account.mfa_enable = True
     await account.save()
@@ -1364,6 +1370,7 @@ async def assign_role_to_user(request):
     account = await Account.get_or_none(username=username, deleted=False)
     if not account:
         raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+    await _ensure_can_manage_target_user(request, account)
 
     tenant_id = request.ctx.session.get("tenant_id")
 
