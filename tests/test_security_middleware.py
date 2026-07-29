@@ -184,3 +184,28 @@ def test_digital_employee_bootstrap_route_requires_session_auth(monkeypatch):
     _run(middleware.before_request(SimpleNamespace(path="/system/bootstrap/digital-employee/package/import")))
 
     assert called_paths == ["/system/bootstrap/digital-employee/package/import"]
+
+
+def test_audit_request_data_recursively_redacts_password_fields():
+    payload = {
+        "username": "operator",
+        "password": "new-secret",
+        "current_password": "old-secret",
+        "nested": [{"confirm_password": "new-secret", "safe": "visible"}],
+    }
+
+    redacted = orjson.loads(
+        security._redact_sensitive_request_data(orjson.dumps(payload))
+    )
+
+    assert redacted == {
+        "username": "operator",
+        "password": "******",
+        "current_password": "******",
+        "nested": [{"confirm_password": "******", "safe": "visible"}],
+    }
+    assert payload["password"] == "new-secret"
+
+
+def test_audit_request_data_preserves_non_json_payload():
+    assert security._redact_sensitive_request_data("plain text") == "plain text"

@@ -1020,6 +1020,10 @@ async def mfa_auth(request):
                 "properties": {
                     "email": {"type": "string", "description": "邮箱"},
                     "phone": {"type": "string", "description": "电话"},
+                    "current_password": {
+                        "type": "string",
+                        "description": "当前密码；非首次登录修改本人密码时必填",
+                    },
                     "password": {"type": "string", "description": "密码"},
                     "permit_ip": {
                         "type": "string",
@@ -1048,9 +1052,13 @@ async def mfa_auth(request):
 )
 async def update_user(request):
     data = dict()
+    account = request.ctx.session["account_info"]
     for field in ["email", "phone", "password", "permit_ip"]:
         if field in request.json:
             if field == "password":
+                _verify_current_password(
+                    account, request.json.get("current_password")
+                )
                 # 密码强度校验
                 password = request.json.get("password").strip() or ""
                 await validate_password(password)
@@ -1059,11 +1067,26 @@ async def update_user(request):
                 data[field] = request.json[field]
 
     # 如果是首次登录强制改密的话，需要刷新认证时间
-    if request.ctx.session["account_info"].last_login_time is None:
+    if account.last_login_time is None:
         data["last_login_time"] = datetime.now()
     await Account.filter(id=request.ctx.session.get("sub")).update(**data)
 
     return response_ok("success")
+
+
+def _verify_current_password(account: Account, current_password) -> None:
+    """普通自助改密必须验证当前密码；首次登录强制改密已通过登录验证。"""
+    if account.last_login_time is None:
+        return
+
+    current_password = str(current_password or "").strip()
+    if not current_password:
+        raise CustomError(ErrorCode.CREDENTIALS_ERROR)
+
+    try:
+        password_hasher.verify(account.password, current_password)
+    except (VerificationError, InvalidHashError):
+        raise CustomError(ErrorCode.CREDENTIALS_ERROR)
 
 
 async def _ensure_can_manage_target_user(request, target: Account) -> None:
@@ -1107,6 +1130,10 @@ async def _ensure_can_manage_target_user(request, target: Account) -> None:
                     "username": {"type": "string", "description": "用户名"},
                     "email": {"type": "string", "description": "邮箱"},
                     "phone": {"type": "string", "description": "手机号"},
+                    "current_password": {
+                        "type": "string",
+                        "description": "修改本人密码时必填；管理员重置他人密码时不传",
+                    },
                     "password": {"type": "string", "description": "密码"},
                     "mfa_enable": {
                         "type": "boolean",
@@ -1178,6 +1205,8 @@ async def edit_user(request):
     need_update = False
     mfa_uri = None
     for p in params:
+        if p == "current_password":
+            continue
         # 敏感属性不允许修改
         if p in ["id", "ctime", "utime", "deleted", "name", "mfa_key", "roles"]:
             raise CustomError(ErrorCode.CANNOT_EDIT_SENSITIVE_ATTRIBUTE)
@@ -1186,6 +1215,8 @@ async def edit_user(request):
             raise CustomError(ErrorCode.CANNOT_DISABLE_SELF)
         need_update = True
         if p == "password":
+            if request.ctx.session["sub"] == user.id:
+                _verify_current_password(user, params.get("current_password"))
             # 密码强度校验
             password = request.json.get("password").strip() or ""
             await validate_password(password)

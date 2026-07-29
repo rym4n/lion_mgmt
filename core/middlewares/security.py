@@ -19,6 +19,40 @@ from .base import BaseMiddleware
 
 
 UNSAFE_HTTP_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+SENSITIVE_REQUEST_FIELDS = frozenset(
+    {
+        "password",
+        "current_password",
+        "old_password",
+        "new_password",
+        "confirm_password",
+    }
+)
+
+
+def _redact_sensitive_request_data(value: str | bytes | None):
+    if not value:
+        return value
+    try:
+        payload = orjson.loads(value)
+    except orjson.JSONDecodeError:
+        return value.decode() if isinstance(value, bytes) else value
+
+    def redact(item):
+        if isinstance(item, dict):
+            return {
+                key: (
+                    "******"
+                    if str(key).casefold() in SENSITIVE_REQUEST_FIELDS
+                    else redact(child)
+                )
+                for key, child in item.items()
+            }
+        if isinstance(item, list):
+            return [redact(child) for child in item]
+        return item
+
+    return orjson.dumps(redact(payload)).decode()
 
 
 def _normalized_origin(value: str | None) -> tuple[str, str, int] | None:
@@ -124,8 +158,9 @@ class SecurityMiddleware(BaseMiddleware):
 
         if hasattr(request.ctx, "session"):
             param = None
-            if "multipart" not in request.content_type:
+            if "multipart" not in (getattr(request, "content_type", "") or ""):
                 param = request.body.decode() if isinstance(request.body, bytes) else request.body
+                param = _redact_sensitive_request_data(param)
             data = {
                 "username": request.ctx.session["name"],
                 "display_name": request.ctx.session["display_name"],
@@ -139,8 +174,6 @@ class SecurityMiddleware(BaseMiddleware):
             }
         elif request.path == "/user/login" and request.method == "POST":
             params = request.json
-            if params:
-                params["password"] = "******"
             data = {
                 "username": request.json.get("username", ""),
                 "display_name": request.json.get("username", ""),
@@ -149,7 +182,9 @@ class SecurityMiddleware(BaseMiddleware):
                 "result": "成功" if response.status == 200 else "失败",
                 "uri": request.path,
                 "client_ua": request.headers.get("User-Agent", ""),
-                "request_data": orjson.dumps(params).decode(),
+                "request_data": _redact_sensitive_request_data(
+                    orjson.dumps(params)
+                ),
                 "action": "登录",
             }
         elif request.path == "/user/oauth/callback":
