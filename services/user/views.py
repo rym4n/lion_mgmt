@@ -1067,24 +1067,19 @@ async def update_user(request):
 
 
 async def _ensure_can_manage_target_user(request, target: Account) -> None:
-    """租户隔离 + 超管保护，防止租户管理员越权操作平台级/其他租户账号。
+    """租户隔离 + 内置 admin 保护，防止越权操作平台级/其他租户账号。
 
     - 内置 admin 是产品固定管理账号，只允许 admin 自己维护；其他账号即使拥有
       全平台超管角色，也不能修改 admin 的资料、状态、认证方式或角色。
     - 目标账号必须是操作者所在租户的成员（member M2M），全平台超管例外可跨租户；
       账号列表本就按 member 过滤，编辑/删除必须对齐，否则可直接按用户名越权。
-    - 非超管不得禁用或删除超管账号（含内置 admin），避免租户管理员停用全平台超管。
+    - “系统管理员”是可分配角色，不会让普通自建账号变成受保护的内置账号。
     """
     operator = request.ctx.session["account_info"]
     tenant_id = request.ctx.session.get("tenant_id") or operator.tenant_id
     operator_is_superadmin = is_superadmin(operator)
 
     if target.username == "admin" and target.id != operator.id:
-        raise CustomError(ErrorCode.CANNOT_OPERATE_SUPERADMIN)
-
-    # 目标是超管而操作者不是 —— 直接拒绝（覆盖内置 admin 及任何自定义超管）。
-    await target.fetch_related("roles")
-    if is_superadmin(target) and not operator_is_superadmin:
         raise CustomError(ErrorCode.CANNOT_OPERATE_SUPERADMIN)
 
     # 超管可跨租户管理；普通管理员只能操作本租户成员。
@@ -1258,7 +1253,7 @@ async def delelte_user(request):
     target = await Account.get_or_none(username=username, deleted=False).prefetch_related("roles")
     if not target:
         return response_ok("success")
-    # 租户隔离 + 超管保护：与编辑一致，禁止跨租户删除或删除超管账号。
+    # 租户隔离 + 内置 admin 保护：与编辑一致；自建管理员仍按权限正常管理。
     await _ensure_can_manage_target_user(request, target)
 
     await Account.filter(id=target.id, deleted=False).update(deleted=True)

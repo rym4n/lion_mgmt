@@ -3270,7 +3270,7 @@ async def add_config(request):
 @tools_bp.post("/health-check-result")
 @openapi.definition(
     summary="获取健康检查结果",
-    description="获取健康检查结果（需要工具更新权限）",
+    description="按资源获取当前租户的健康检查结果（需要工具健康检查报告权限）",
     response={
         "200": {
             "description": "获取成功",
@@ -3290,12 +3290,48 @@ async def add_config(request):
 )
 @requires_permission(TOOL_HEALTH_REPORT_PERMISSION)
 async def get_health_check_result(request):
-    result = await Config.get_or_none(key="health_check", module="tools")
-    data = {}
-    if result:
-        data = result.json
-        data["value"] = result.json_value
-    return response_ok(data)
+    tenant_id = request.ctx.session.get("tenant_id")
+    resources = await ToolResources.filter(
+        deleted=False,
+        internal=False,
+        tenant_id=tenant_id,
+    ).all()
+    grouped = {
+        "available": [],
+        "unavailable": [],
+        "no_check_action": [],
+    }
+    status_groups = {
+        "available": "available",
+        "healthy": "available",
+        "unavailable": "unavailable",
+        "unhealthy": "unavailable",
+        "unknown": "no_check_action",
+    }
+    normalized_states = {
+        "available": "available",
+        "healthy": "available",
+        "unavailable": "unavailable",
+        "unhealthy": "unavailable",
+        "unknown": "unknown",
+    }
+
+    for resource in resources:
+        status = (resource.status or "").lower()
+        group = status_groups.get(status)
+        if not group:
+            continue
+        grouped[group].append(
+            {
+                "resource_id": str(resource.id),
+                "tool_name": resource.tool_name,
+                "resource": resource.name,
+                "state": normalized_states[status],
+                "time": utils.strip_timezone_to_seconds(resource.utime),
+            }
+        )
+
+    return response_ok({"value": grouped})
 
 
 @tools_bp.post("/resource-search")
@@ -3455,7 +3491,25 @@ async def get_available_actions(request):
 @tools_bp.post("/resource/sync-health-status")
 @openapi.definition(
     summary="同步资源健康状态",
-    description="从Config表中获取健康检查数据并更新ToolResources的status字段（需要工具更新权限）",
+    description="按资源保存健康检查结果（需要工具健康检查报告权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["results"],
+                "properties": {
+                    "results": {
+                        "type": "object",
+                        "properties": {
+                            "available": {"type": "array"},
+                            "unavailable": {"type": "array"},
+                            "no_check_action": {"type": "array"},
+                        },
+                    }
+                },
+            }
+        }
+    },
     response={
         "200": {
             "description": "同步成功",
@@ -3489,71 +3543,56 @@ async def get_available_actions(request):
 )
 @requires_permission(TOOL_HEALTH_CONFIG_PERMISSION)
 async def sync_health_status(request):
-    """
-    从Config表中获取健康检查数据并更新ToolResources的status字段
-    """
+    """按当前租户的资源身份保存批量健康检查结果。"""
     tenant_id = request.ctx.session.get("tenant_id")
-
-    # 从Config表获取健康检查数据
-    health_check_config = await Config.get_or_none(key="health_check", module="tools")
-    if not health_check_config:
+    payload = request.json
+    if not isinstance(payload, dict) or not isinstance(payload.get("results"), dict):
         raise CustomError(ErrorCode.PARAM_ERROR)
+    health_data = payload["results"]
 
-    # 解析健康检查数据
-    try:
-        health_data = orjson.loads(health_check_config.value)
-    except Exception:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    # 统计更新数量
     updated_count = 0
     status_counts = {
         "available": 0,
         "unavailable": 0,
         "unknown": 0,
     }
+    status_groups = (
+        ("available", "available", "available"),
+        ("unavailable", "unavailable", "unavailable"),
+        ("no_check_action", "unknown", "unknown"),
+    )
+    checked_at = datetime.datetime.now(TZ)
 
-    # 处理 available 列表
-    for item in health_data.get("available", []):
-        tool_name = item.get("tool_name")
-        resource_name = item.get("resource")
-        state = item.get("state", "available")
+    for group, state, count_key in status_groups:
+        items = health_data.get(group, [])
+        if not isinstance(items, list):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            lookup = {
+                "deleted": False,
+                "tenant_id": tenant_id,
+                "internal": False,
+            }
+            resource_id = item.get("resource_id") or item.get("id")
+            if resource_id:
+                lookup["id"] = str(resource_id)
+            else:
+                tool_name = item.get("tool_name")
+                resource_name = item.get("resource") or item.get("resource_name")
+                if not tool_name or not resource_name:
+                    continue
+                lookup.update(tool_name=tool_name, name=resource_name)
 
-        if tool_name and resource_name:
-            resource = await ToolResources.get_or_none(tool_name=tool_name, name=resource_name, deleted=False, tenant_id=tenant_id, internal=False)
-            if resource:
-                resource.status = state
-                await resource.save(update_fields=["status"])
-                updated_count += 1
-                status_counts["available"] += 1
-
-    # 处理 unavailable 列表
-    for item in health_data.get("unavailable", []):
-        tool_name = item.get("tool_name")
-        resource_name = item.get("resource")
-        state = item.get("state", "unavailable")
-
-        if tool_name and resource_name:
-            resource = await ToolResources.get_or_none(tool_name=tool_name, name=resource_name, deleted=False, tenant_id=tenant_id, internal=False)
-            if resource:
-                resource.status = state
-                await resource.save(update_fields=["status"])
-                updated_count += 1
-                status_counts["unavailable"] += 1
-
-    # 处理 no_check_action 列表
-    for item in health_data.get("no_check_action", []):
-        tool_name = item.get("tool_name")
-        resource_name = item.get("resource")
-        state = item.get("state", "unknown")
-
-        if tool_name and resource_name:
-            resource = await ToolResources.get_or_none(tool_name=tool_name, name=resource_name, deleted=False, tenant_id=tenant_id, internal=False)
-            if resource:
-                resource.status = state
-                await resource.save(update_fields=["status"])
-                updated_count += 1
-                status_counts["unknown"] += 1
+            resource = await ToolResources.get_or_none(**lookup)
+            if not resource:
+                continue
+            resource.status = state
+            resource.utime = checked_at
+            await resource.save(update_fields=["status", "utime"])
+            updated_count += 1
+            status_counts[count_key] += 1
 
     return response_ok(
         {
