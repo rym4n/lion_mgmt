@@ -1908,13 +1908,13 @@ async def start_inspection(request: Request):
     else:
         # 创建新的定时任务
         # 查找名为"自动化巡检"的剧本
-        playbook = await Playbook.filter(name="自动化巡检", deleted=False, tenant_id=tenant_id, internal=True).first()
+        playbook = await Playbook.filter(name="自动化巡检", deleted=False, internal=True).first()
 
         if not playbook:
             return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
 
         # 获取该剧本的最新发布版本
-        playbook_version = await PlaybookVersion.filter(playbook_id=playbook.id, tenant_id=tenant_id, status=1).order_by("-utime").first()  # 假设 status=1 表示已发布
+        playbook_version = await PlaybookVersion.filter(playbook_id=playbook.id, status=1).order_by("-utime").first()  # 假设 status=1 表示已发布
 
         if not playbook_version:
             return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
@@ -1937,7 +1937,6 @@ async def start_inspection(request: Request):
             enable=1,
             creator=request.ctx.session["account_info"],
             updator=request.ctx.session["account_info"],
-            tenant_id=tenant_id,
             internal=True,
         )
 
