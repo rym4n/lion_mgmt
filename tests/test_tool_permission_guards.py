@@ -18,6 +18,14 @@ permission_migration = importlib.import_module(
 )
 
 
+@pytest.fixture(autouse=True)
+def default_application_scope(monkeypatch):
+    async def current_scope(_request):
+        return False
+
+    monkeypatch.setattr(tool_views, "_current_maintenance_mode", current_scope)
+
+
 @pytest.mark.asyncio
 async def test_ensure_action_permission_is_idempotent(monkeypatch):
     calls = []
@@ -95,8 +103,12 @@ async def test_add_permission_locks_row_before_json_update(monkeypatch):
         async def bulk_update(items, fields):
             operations.append(("bulk_update", items, fields))
 
+    async def ensure_resource(*_args, **_kwargs):
+        return SimpleNamespace(id="resource-1")
+
     monkeypatch.setattr(tool_views, "ActionPermissions", FakeActionPermissions)
     monkeypatch.setattr(tool_views, "in_transaction", lambda: FakeTransaction())
+    monkeypatch.setattr(tool_views, "_ensure_resource_in_scope", ensure_resource)
     monkeypatch.setattr(tool_views, "response_ok", lambda data: data)
 
     request = SimpleNamespace(
@@ -186,7 +198,11 @@ async def test_tool_list_exposes_historical_group_internal_identity(monkeypatch)
 
     monkeypatch.setattr(tool_views, "Tool", FakeTool)
 
-    await tool_views._apply_tool_group_internal_flags(tools, "tenant-1")
+    await tool_views._apply_tool_group_internal_flags(
+        tools,
+        "tenant-1",
+        False,
+    )
 
     assert tools == [
         {"name": "builtin_tool", "internal": True},
@@ -196,19 +212,21 @@ async def test_tool_list_exposes_historical_group_internal_identity(monkeypatch)
         {
             "name__in": ["builtin_tool", "custom_tool"],
             "internal": True,
+            "maintain": False,
+            "deleted": False,
             "tenant_id": "tenant-1",
         }
     ]
 
 
-def test_tool_lists_do_not_hide_versions_by_maintenance_flag():
+def test_tool_lists_are_scoped_by_server_maintenance_mode():
     all_tools_source = inspect.getsource(inspect.unwrap(tool_views.all_tools))
     all_versions_source = inspect.getsource(inspect.unwrap(tool_views.all_versions))
 
-    assert "maintenance_mode" not in all_tools_source
-    assert "maintain=" not in all_tools_source
-    assert "maintenance_mode" not in all_versions_source
-    assert "maintain=" not in all_versions_source
+    assert "maintenance_mode = await _current_maintenance_mode(request)" in all_tools_source
+    assert "maintain=maintenance_mode" in all_tools_source
+    assert "maintenance_mode = await _current_maintenance_mode(request)" in all_versions_source
+    assert "maintain=maintenance_mode" in all_versions_source
 
 
 @pytest.mark.asyncio
@@ -222,6 +240,7 @@ async def test_tool_actions_returns_all_actions_when_legacy_filter_is_true(
                 "name": "sample_tool",
                 "version": "version-1",
                 "deleted": False,
+                "maintain": False,
                 "tenant_id": "tenant-1",
             }
             return SimpleNamespace(id="tool-1")
@@ -309,8 +328,14 @@ async def test_tool_resources_marks_permission_without_hiding_resources(
 
     class FakeToolActionQuery:
         async def values(self, *fields):
-            assert fields == ("action",)
-            return [{"action": {"func": "query", "name": "查询"}}]
+            assert fields == ("action", "tool_name", "version_number")
+            return [
+                {
+                    "action": {"func": "query", "name": "查询"},
+                    "tool_name": "sample_tool",
+                    "version_number": "version-1",
+                }
+            ]
 
     class FakeToolAction:
         @staticmethod
@@ -340,6 +365,9 @@ async def test_tool_resources_marks_permission_without_hiding_resources(
     async def cache_get(_key):
         return False
 
+    async def scoped_tool_pairs(*_args, **_kwargs):
+        return {("sample_tool", "version-1")}
+
     cache_client = SimpleNamespace(get=cache_get)
     account = SimpleNamespace(id="user-1", roles=[])
     request = SimpleNamespace(
@@ -361,6 +389,7 @@ async def test_tool_resources_marks_permission_without_hiding_resources(
     monkeypatch.setattr(tool_views, "ToolResources", FakeToolResources)
     monkeypatch.setattr(tool_views, "ToolAction", FakeToolAction)
     monkeypatch.setattr(tool_views, "ActionPermissions", FakeActionPermissions)
+    monkeypatch.setattr(tool_views, "_scoped_tool_pairs", scoped_tool_pairs)
     monkeypatch.setattr(tool_views, "is_superadmin", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(tool_views, "response_ok", lambda data: data)
 
@@ -403,8 +432,14 @@ async def test_tool_resources_accepts_action_display_name_for_permission(
 
     class FakeToolActionQuery:
         async def values(self, *fields):
-            assert fields == ("action",)
-            return [{"action": {"func": "query", "name": "查询"}}]
+            assert fields == ("action", "tool_name", "version_number")
+            return [
+                {
+                    "action": {"func": "query", "name": "查询"},
+                    "tool_name": "sample_tool",
+                    "version_number": "version-1",
+                }
+            ]
 
     class FakeToolAction:
         @staticmethod
@@ -434,6 +469,9 @@ async def test_tool_resources_accepts_action_display_name_for_permission(
     async def cache_get(_key):
         return False
 
+    async def scoped_tool_pairs(*_args, **_kwargs):
+        return {("sample_tool", "version-1")}
+
     request = SimpleNamespace(
         json={
             "name": "sample_tool",
@@ -453,6 +491,7 @@ async def test_tool_resources_accepts_action_display_name_for_permission(
     monkeypatch.setattr(tool_views, "ToolResources", FakeToolResources)
     monkeypatch.setattr(tool_views, "ToolAction", FakeToolAction)
     monkeypatch.setattr(tool_views, "ActionPermissions", FakeActionPermissions)
+    monkeypatch.setattr(tool_views, "_scoped_tool_pairs", scoped_tool_pairs)
     monkeypatch.setattr(tool_views, "is_superadmin", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(tool_views, "response_ok", lambda data: data)
 
@@ -497,10 +536,18 @@ async def test_add_tool_resource_grants_creator_all_action_permissions(
 
     class FakeToolActionQuery:
         async def values(self, *fields):
-            assert fields == ("action",)
+            assert fields == ("action", "tool_name", "version_number")
             return [
-                {"action": {"func": "query", "name": "查询"}},
-                {"action": {"func": "update", "name": "更新"}},
+                {
+                    "action": {"func": "query", "name": "查询"},
+                    "tool_name": "sample_tool",
+                    "version_number": "version-1",
+                },
+                {
+                    "action": {"func": "update", "name": "更新"},
+                    "tool_name": "sample_tool",
+                    "version_number": "version-1",
+                },
             ]
 
     class FakeToolAction:
@@ -538,6 +585,12 @@ async def test_add_tool_resource_grants_creator_all_action_permissions(
     async def update_utime(tool_name, tenant_id, maintenance_mode):
         utime_updates.append((tool_name, tenant_id, maintenance_mode))
 
+    async def ensure_tool(*_args, **_kwargs):
+        return SimpleNamespace(name="sample_tool")
+
+    async def scoped_tool_pairs(*_args, **_kwargs):
+        return {("sample_tool", "version-1")}
+
     request = SimpleNamespace(
         json={
             "tool_name": "sample_tool",
@@ -558,6 +611,8 @@ async def test_add_tool_resource_grants_creator_all_action_permissions(
     monkeypatch.setattr(tool_views, "ToolResources", FakeToolResources)
     monkeypatch.setattr(tool_views, "ToolAction", FakeToolAction)
     monkeypatch.setattr(tool_views, "ActionPermissions", FakeActionPermissions)
+    monkeypatch.setattr(tool_views, "_ensure_tool_in_scope", ensure_tool)
+    monkeypatch.setattr(tool_views, "_scoped_tool_pairs", scoped_tool_pairs)
     monkeypatch.setattr(tool_views, "in_transaction", lambda: FakeTransaction())
     monkeypatch.setattr(tool_views.caches, "get", lambda _name: FakeRedis())
     monkeypatch.setattr(tool_views, "update_latest_tool_utime", update_utime)
@@ -739,7 +794,11 @@ async def test_all_tool_versions_are_locked_in_stable_order(monkeypatch):
 
     monkeypatch.setattr(tool_views, "Tool", FakeTool)
 
-    versions = await tool_views._lock_tool_versions("sample_tool", "tenant-1")
+    versions = await tool_views._lock_tool_versions(
+        "sample_tool",
+        "tenant-1",
+        False,
+    )
 
     assert versions == ["version-1", "version-2"]
     assert operations == [
@@ -748,6 +807,7 @@ async def test_all_tool_versions_are_locked_in_stable_order(monkeypatch):
             {
                 "name": "sample_tool",
                 "tenant_id": "tenant-1",
+                "maintain": False,
             },
         ),
         "select_for_update",
@@ -776,6 +836,9 @@ async def test_warroom_action_run_rejects_ungranted_resource_before_dispatch(mon
     async def produce(*args):
         produced.append(args)
 
+    async def cache_get(_key):
+        return False
+
     monkeypatch.setattr(warroom_views, "check_action_execute_permission", deny)
     monkeypatch.setattr(warroom_views, "aproduce", produce)
 
@@ -792,9 +855,13 @@ async def test_warroom_action_run_rejects_ungranted_resource_before_dispatch(mon
         },
         ctx=SimpleNamespace(
             session={
+                "id": "session-1",
                 "account_info": user,
                 "tenant_id": "tenant-1",
             }
+        ),
+        app=SimpleNamespace(
+            ctx=SimpleNamespace(cache_client=SimpleNamespace(get=cache_get))
         ),
     )
 
@@ -803,7 +870,15 @@ async def test_warroom_action_run_rejects_ungranted_resource_before_dispatch(mon
 
     assert exc_info.value.enum is ErrorCode.UNAUTH
     assert permission_args == [
-        (user, "sample_tool", "query", "resource-1", "tenant-1")
+        (
+            user,
+            "sample_tool",
+            "query",
+            "resource-1",
+            "tenant-1",
+            False,
+            None,
+        )
     ]
     assert produced == []
 
@@ -834,6 +909,9 @@ async def test_workflow_action_debug_rejects_ungranted_resource_before_dispatch(
     async def produce(*args):
         produced.append(args)
 
+    async def cache_get(_key):
+        return False
+
     monkeypatch.setattr(workflow_views, "check_action_execute_permission", deny)
     monkeypatch.setattr(workflow_views, "aproduce", produce)
 
@@ -847,9 +925,13 @@ async def test_workflow_action_debug_rejects_ungranted_resource_before_dispatch(
         },
         ctx=SimpleNamespace(
             session={
+                "id": "session-1",
                 "account_info": SimpleNamespace(id="user-1"),
                 "tenant_id": "tenant-1",
             }
+        ),
+        app=SimpleNamespace(
+            ctx=SimpleNamespace(cache_client=SimpleNamespace(get=cache_get))
         ),
     )
 
@@ -957,6 +1039,9 @@ async def test_legacy_warroom_execution_checks_action_permission_before_room_cre
     async def produce(*args):
         produced.append(args)
 
+    async def cache_get(_key):
+        return False
+
     monkeypatch.setattr(warroom_views, "Events", FakeEvents)
     monkeypatch.setattr(warroom_views, "ToolAction", FakeToolAction)
     monkeypatch.setattr(warroom_views, "Tool", FakeTool)
@@ -974,9 +1059,13 @@ async def test_legacy_warroom_execution_checks_action_permission_before_room_cre
         },
         ctx=SimpleNamespace(
             session={
+                "id": "session-1",
                 "account_info": SimpleNamespace(id="user-1"),
                 "tenant_id": "tenant-1",
             }
+        ),
+        app=SimpleNamespace(
+            ctx=SimpleNamespace(cache_client=SimpleNamespace(get=cache_get))
         ),
     )
 

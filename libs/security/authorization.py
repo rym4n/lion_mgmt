@@ -21,6 +21,7 @@ from models import (
     PlaybookPermissions,
     PlaybookVersion,
     Role,
+    Tool,
     ToolResources,
     ToolResourcesModel,
 )
@@ -381,16 +382,26 @@ def action_permission_hits(
     return not user_role_ids.isdisjoint(granted_roles)
 
 
-async def tool_requires_resource(tool_name, tenant_id) -> bool:
+async def tool_requires_resource(
+    tool_name,
+    tenant_id,
+    maintenance_mode=False,
+) -> bool:
     resource_model = await ToolResourcesModel.get_or_none(
         tool_name=tool_name,
         deleted=False,
+        internal=maintenance_mode,
         tenant_id=tenant_id,
     )
     return bool(resource_model and resource_model.status == 1)
 
 
-async def tool_resources_exist(tool_name, resource_ids, tenant_id) -> bool:
+async def tool_resources_exist(
+    tool_name,
+    resource_ids,
+    tenant_id,
+    maintenance_mode=False,
+) -> bool:
     normalized_resource_ids = {str(item) for item in resource_ids or [] if str(item)}
     if not normalized_resource_ids:
         return False
@@ -398,6 +409,7 @@ async def tool_resources_exist(tool_name, resource_ids, tenant_id) -> bool:
         id__in=list(normalized_resource_ids),
         tool_name=tool_name,
         deleted=False,
+        internal=maintenance_mode,
         tenant_id=tenant_id,
     ).values_list("id", flat=True)
     return normalized_resource_ids.issubset(
@@ -406,7 +418,13 @@ async def tool_resources_exist(tool_name, resource_ids, tenant_id) -> bool:
 
 
 async def check_action_execute_permission(
-    account, tool_name, action_func, resource, tenant_id
+    account,
+    tool_name,
+    action_func,
+    resource,
+    tenant_id,
+    maintenance_mode=False,
+    tool_version=None,
 ) -> bool:
     """判定账户是否对 (tool, action, resource) 拥有执行权。写侧（add_timed/update_timed
     等）用它把前端下拉过滤对应的授权关卡落到 API 层——纯前端过滤是 UX，不是安全边界。
@@ -417,17 +435,43 @@ async def check_action_execute_permission(
     - tool_name / action_func 缺失时直接判定失败——上层应保证参数完备再调用。
     - 命中条件复用 action_permission_hits：查 action_name 自身 + "all" 兜底两类 ActionPermissions。
     """
-    if is_superadmin(account, tenant_id=tenant_id):
-        return True
     if not tool_name or not action_func:
+        return False
+    if tool_version and not await Tool.filter(
+        name=tool_name,
+        version=tool_version,
+        deleted=False,
+        maintain=maintenance_mode,
+        tenant_id=tenant_id,
+    ).exists():
         return False
     if not isinstance(resource, str):
         resource = ""
     resources = [item.strip() for item in resource.split(",") if item.strip()]
+    if tool_version and resources and not await tool_resources_exist(
+        tool_name,
+        resources,
+        tenant_id,
+        maintenance_mode,
+    ):
+        return False
+    if is_superadmin(account, tenant_id=tenant_id):
+        return True
     if not resources:
-        return not await tool_requires_resource(tool_name, tenant_id)
+        return not await tool_requires_resource(
+            tool_name,
+            tenant_id,
+            maintenance_mode,
+        )
     if has_uncontrolled_tool_resource_permission(account, tenant_id=tenant_id):
-        return await tool_resources_exist(tool_name, resources, tenant_id)
+        if tool_version:
+            return True
+        return await tool_resources_exist(
+            tool_name,
+            resources,
+            tenant_id,
+            maintenance_mode,
+        )
     user_id = str(account.id) if account and getattr(account, "id", None) else None
     if not user_id:
         return False

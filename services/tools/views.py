@@ -147,15 +147,29 @@ def _grant_resource_subject(permission, field_name, resource_id, subject_id):
     return False
 
 
-async def _tool_action_permission_specs(tool_name, tenant_id):
+async def _tool_action_permission_specs(
+    tool_name,
+    tenant_id,
+    maintenance_mode=False,
+):
     specs = []
     seen = set()
+    scoped_tool_pairs = await _scoped_tool_pairs(
+        tenant_id,
+        maintenance_mode,
+        tool_names=[tool_name],
+    )
     actions = await ToolAction.filter(
         tool_name=tool_name,
         deleted=False,
         tenant_id=tenant_id,
-    ).values("action")
+    ).values("action", "tool_name", "version_number")
     for item in actions:
+        if (
+            item.get("tool_name", tool_name),
+            item.get("version_number"),
+        ) not in scoped_tool_pairs:
+            continue
         action = item.get("action") or {}
         action_name = action.get("func")
         if not action_name or action_name in seen:
@@ -173,6 +187,7 @@ async def _grant_resource_creator_action_permissions(
     resource_id,
     creator_id,
     tenant_id,
+    maintenance_mode=False,
 ):
     if not creator_id:
         return
@@ -181,6 +196,7 @@ async def _grant_resource_creator_action_permissions(
     for action_name, action_description in await _tool_action_permission_specs(
         tool_name,
         tenant_id,
+        maintenance_mode,
     ):
         permission, _created = await _ensure_action_permission(
             tool_name,
@@ -200,17 +216,29 @@ async def _grant_resource_creator_action_permissions(
         await ActionPermissions.bulk_update(permissions, fields=["users"])
 
 
-async def _resource_permission_action_names(tool_name, action_name, tenant_id):
+async def _resource_permission_action_names(
+    tool_name,
+    action_name,
+    tenant_id,
+    maintenance_mode=False,
+):
     names = [action_name]
     if not action_name:
         return names
 
+    scoped_tool_pairs = await _scoped_tool_pairs(
+        tenant_id,
+        maintenance_mode,
+        tool_names=[tool_name],
+    )
     matched_actions = await ToolAction.filter(
         tool_name=tool_name,
         deleted=False,
         tenant_id=tenant_id,
-    ).values("action")
+    ).values("action", "tool_name", "version_number")
     for item in matched_actions:
+        if (item["tool_name"], item["version_number"]) not in scoped_tool_pairs:
+            continue
         action = item.get("action") or {}
         if action.get("name") == action_name or action.get("func") == action_name:
             func = action.get("func")
@@ -224,7 +252,7 @@ def _should_reject_tool_version_delete(tool):
     return bool(tool.maintain)
 
 
-async def _apply_tool_group_internal_flags(tools, tenant_id):
+async def _apply_tool_group_internal_flags(tools, tenant_id, maintenance_mode):
     tool_names = sorted({tool["name"] for tool in tools})
     if not tool_names:
         return
@@ -233,6 +261,8 @@ async def _apply_tool_group_internal_flags(tools, tenant_id):
         await Tool.filter(
             name__in=tool_names,
             internal=True,
+            maintain=maintenance_mode,
+            deleted=False,
             tenant_id=tenant_id,
         ).values_list("name", flat=True)
     )
@@ -240,10 +270,11 @@ async def _apply_tool_group_internal_flags(tools, tenant_id):
         tool["internal"] = tool["name"] in internal_tool_names
 
 
-async def _lock_tool_versions(tool_name, tenant_id):
+async def _lock_tool_versions(tool_name, tenant_id, maintenance_mode):
     return await Tool.filter(
         name=tool_name,
         tenant_id=tenant_id,
+        maintain=maintenance_mode,
     ).select_for_update().order_by("id").all()
 
 
@@ -316,6 +347,71 @@ def _as_bool(value, default=False):
     if isinstance(value, str):
         return value.strip().lower() not in {"0", "false", "no", "off"}
     return bool(value)
+
+
+async def _current_maintenance_mode(request) -> bool:
+    """Return the trusted application scope stored for the current session."""
+    value = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    return _as_bool(value, False)
+
+
+async def _scoped_tool_pairs(tenant_id, maintenance_mode, tool_names=None):
+    filters = {
+        "deleted": False,
+        "maintain": maintenance_mode,
+        "tenant_id": tenant_id,
+    }
+    if tool_names is not None:
+        filters["name__in"] = tool_names
+    rows = await Tool.filter(**filters).values("name", "version")
+    return {(row["name"], row["version"]) for row in rows}
+
+
+async def _ensure_tool_in_scope(
+    tenant_id,
+    maintenance_mode,
+    *,
+    name=None,
+    version=None,
+    tool_id=None,
+):
+    filters = {
+        "deleted": False,
+        "maintain": maintenance_mode,
+        "tenant_id": tenant_id,
+    }
+    if name is not None:
+        filters["name"] = name
+    if version is not None:
+        filters["version"] = version
+    if tool_id is not None:
+        filters["id"] = tool_id
+    if version is not None or tool_id is not None:
+        tool = await Tool.get_or_none(**filters)
+    else:
+        tool = await Tool.filter(**filters).order_by("-ctime").first()
+    if not tool:
+        raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
+    return tool
+
+
+async def _ensure_resource_in_scope(
+    tenant_id,
+    maintenance_mode,
+    *,
+    tool_name,
+    resource_id,
+):
+    resource = await ToolResources.get_or_none(
+        id=resource_id,
+        tool_name=tool_name,
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    )
+    if not resource:
+        raise CustomError(ErrorCode.RESOURCES_NOT_FOUND_ERROR)
+    return resource
 
 
 def _normalize_search_text(value):
@@ -436,6 +532,7 @@ async def upload_and_extract_zip(request):
     )
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
     creator = request.ctx.session["account_info"].username
     if "file" not in request.files:
@@ -453,7 +550,14 @@ async def upload_and_extract_zip(request):
         raise CustomError(ErrorCode.INVALID_LICENSE_ERROR)
 
     for index, zip_file in enumerate(zip_files):
-        result = await upload_tool(zip_file, lic, creator, tenant_id, request)
+        result = await upload_tool(
+            zip_file,
+            lic,
+            creator,
+            tenant_id,
+            request,
+            maintenance_mode=maintenance_mode,
+        )
         results.append(result)
 
         progress = int(((index + 1) / total_files) * 100)
@@ -478,14 +582,23 @@ def _is_compatible_type_change(old_type, new_type) -> bool:
     return new_type in _COMPATIBLE_RESOURCE_TYPE_CHANGES.get(old_type, set())
 
 
-async def _resource_keys_in_use(tool_name: str, tenant_id: str) -> set[str]:
+async def _resource_keys_in_use(
+    tool_name: str,
+    tenant_id: str,
+    maintenance_mode: bool,
+) -> set[str]:
     """返回当前租户下该工具所有资源实例实际持有的 key 集合。
 
     用于判断“删除某个资源 key”是否会影响存量实例：
     只要任意实例的 resources 快照里还带着该 key，就视为仍被使用。
     """
     used: set[str] = set()
-    instances = await ToolResources.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).all()
+    instances = await ToolResources.filter(
+        tool_name=tool_name,
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).all()
     for inst in instances:
         resources = inst.resources_json
         if isinstance(resources, dict):
@@ -493,7 +606,12 @@ async def _resource_keys_in_use(tool_name: str, tenant_id: str) -> set[str]:
     return used
 
 
-async def _rewrite_instance_data_types(tool_name: str, tenant_id: str, type_migrations: dict[str, str]) -> None:
+async def _rewrite_instance_data_types(
+    tool_name: str,
+    tenant_id: str,
+    maintenance_mode: bool,
+    type_migrations: dict[str, str],
+) -> None:
     """把存量资源实例内联的 data_type 同步为模板的新类型。
 
     脱敏逻辑（ToolResources.json）读的是实例内联的 data_type，不是模板。
@@ -502,7 +620,12 @@ async def _rewrite_instance_data_types(tool_name: str, tenant_id: str, type_migr
     """
     if not type_migrations:
         return
-    instances = await ToolResources.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).all()
+    instances = await ToolResources.filter(
+        tool_name=tool_name,
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).all()
     for inst in instances:
         resources = inst.resources_json
         if not isinstance(resources, dict):
@@ -519,10 +642,26 @@ async def _rewrite_instance_data_types(tool_name: str, tenant_id: str, type_migr
             await inst.save(update_fields=["resources", "utime"])
 
 
-async def upload_tool(zip_file, lic, creator, tenant_id, request):
-    # 按工具名称去重统计应用数量（同一工具的多个版本只算一个应用）
-    tool_names = await Tool.filter(deleted=False, maintain=False).values_list("name", flat=True)
-    total_count = len(set(tool_names))
+async def upload_tool(
+    zip_file,
+    lic,
+    creator,
+    tenant_id,
+    request,
+    maintenance_mode=None,
+):
+    if maintenance_mode is None:
+        maintenance_mode = await _current_maintenance_mode(request)
+
+    # 许可证应用数只约束当前租户的用户模式；维护模式是独立后台范围。
+    total_count = 0
+    if not maintenance_mode:
+        tool_names = await Tool.filter(
+            deleted=False,
+            maintain=False,
+            tenant_id=tenant_id,
+        ).values_list("name", flat=True)
+        total_count = len(set(tool_names))
     zip_filename = zip_file.name
 
     total_up_value = 99999
@@ -531,10 +670,21 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
             if int(lic["grouplist"][item.get("group")]["expireTime"]) > int(time.time() * 1000):
                 total_up_value = int(lic["grouplist"][item.get("group")]["value"])
 
-    if total_up_value != 99999 and total_count >= total_up_value:
+    if (
+        not maintenance_mode
+        and total_up_value != 99999
+        and total_count >= total_up_value
+    ):
         return {"tool": zip_filename, "msg": "应用数量已达到上限", "tool_name": ""}
 
-    config_data, version, tool_name, tool_description, msg = await unzip(zip_file.body, creator, request.app.ctx.cache_client, request.ctx.session["id"], tenant_id)
+    config_data, version, tool_name, tool_description, msg = await unzip(
+        zip_file.body,
+        creator,
+        request.app.ctx.cache_client,
+        request.ctx.session["id"],
+        tenant_id,
+        maintenance_mode,
+    )
     if msg != "success":
         return {"tool": zip_filename, "msg": msg, "tool_name": tool_description or ""}
 
@@ -560,13 +710,19 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
         "动作全部动作权限",
         tenant_id,
     )
-    configuration = await ToolResourcesModel.get_or_none(tool_name=tool_name, deleted=False, tenant_id=tenant_id)
+    configuration = await ToolResourcesModel.get_or_none(
+        tool_name=tool_name,
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    )
     if not configuration:
         trm = await ToolResourcesModel.create(
             tool_name=tool_name,
             resources=config_data.get("resource") or {},
             status=(1 if (config_data.get("resource") and any(field.get("required") is True for field in config_data.get("resource").values())) else 0),
             health_check=health_check,
+            internal=maintenance_mode,
             tenant_id=tenant_id,
         )
         if health_check == 1:
@@ -596,7 +752,12 @@ async def upload_tool(zip_file, lic, creator, tenant_id, request):
         async with in_transaction():
             await configuration.save()
             if type_migrations:
-                await _rewrite_instance_data_types(tool_name, tenant_id, type_migrations)
+                await _rewrite_instance_data_types(
+                    tool_name,
+                    tenant_id,
+                    maintenance_mode,
+                    type_migrations,
+                )
 
     return {
         "tool": zip_filename,
@@ -679,16 +840,25 @@ def convert_logo_to_ico(logo_data):
         return logo_data
 
 
-def generate_tool_version(file_hash, tenant_id):
-    """基于文件 hash 和租户 ID 生成租户隔离的版本号。"""
+def generate_tool_version(file_hash, tenant_id, maintenance_mode=False):
+    """基于文件、租户和维护范围生成隔离的版本号。"""
     version_hasher = hashlib.sha1()
     version_hasher.update(file_hash.encode())
     version_hasher.update(b":tenant_id:")
     version_hasher.update(str(tenant_id or "").encode())
+    if maintenance_mode:
+        version_hasher.update(b":maintenance_mode:true")
     return version_hasher.hexdigest()
 
 
-async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
+async def unzip(
+    zip_data,
+    creator,
+    redis_client,
+    token_id,
+    tenant_id,
+    maintenance_mode,
+):
     config_data = None
     tool_name = None
     tool_description = None
@@ -871,7 +1041,12 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
             if any(f"def {class_name}(" not in py_data for class_name in class_name_list):
                 return config_data, version, tool_name, tool_description, "Python文件内容错误"
 
-            configuration = await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).first().values("resources")
+            configuration = await ToolResourcesModel.filter(
+                tool_name=name,
+                deleted=False,
+                internal=maintenance_mode,
+                tenant_id=tenant_id,
+            ).first().values("resources")
             if configuration and configuration["resources"] != config_data.get("resource", {}):
                 old_resources = configuration["resources"] or {}
                 new_resources = config_data.get("resource", {}) or {}
@@ -901,7 +1076,11 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                 # 删除资源 key：仅当该工具在当前租户下无实例仍持有该 key 时才允许
                 removed_keys = set(old_resources.keys()) - set(new_resources.keys())
                 if removed_keys:
-                    used_keys = await _resource_keys_in_use(name, tenant_id)
+                    used_keys = await _resource_keys_in_use(
+                        name,
+                        tenant_id,
+                        maintenance_mode,
+                    )
                     blocked = removed_keys & used_keys
                     if blocked:
                         return (
@@ -913,22 +1092,37 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                         )
 
             file_hash = hasher.hexdigest()
-            version = generate_tool_version(file_hash, tenant_id)
+            version = generate_tool_version(
+                file_hash,
+                tenant_id,
+                maintenance_mode,
+            )
 
-            if await Tool.filter(name=name, deleted=False, tenant_id=tenant_id, version=version).exists():
+            if await Tool.filter(
+                name=name,
+                version=version,
+                deleted=False,
+                maintain=maintenance_mode,
+                tenant_id=tenant_id,
+            ).exists():
                 return config_data, version, tool_name, tool_description, "工具已存在"
 
             suffix = logo_name.split(".")[-1]
             save_path = await utils.upload_to_s3(zip_data, "system", f"{tool_name}/{version}.zip", "tools")
-            logo_path = await utils.upload_to_s3(logo_data, "user", f"{tool_name}.{suffix}", "tools")
+            logo_object_name = f"{tool_name}/{version}.{suffix}"
+            logo_path = await utils.upload_to_s3(
+                logo_data,
+                "user",
+                logo_object_name,
+                "tools",
+            )
             if not save_path or not logo_path:
                 if save_path:
                     await utils.delete_from_s3("system", f"{tool_name}/{version}.zip", "tools")
                 if logo_path:
-                    await utils.delete_from_s3("user", f"{tool_name}.{suffix}", "tools")
+                    await utils.delete_from_s3("user", logo_object_name, "tools")
                 return config_data, version, tool_name, tool_description, "工具包上传失败，请检查文件存储服务"
 
-            maintenance_mode = await redis_client.get(token_id)
             tool = await Tool.create(
                 name=name,
                 version=version,
@@ -940,7 +1134,7 @@ async def unzip(zip_data, creator, redis_client, token_id, tenant_id):
                 hash_value=version,
                 internal=config_data.get("internal", False),
                 main=py_file_name,
-                maintain=maintenance_mode if maintenance_mode else False,
+                maintain=maintenance_mode,
                 tenant_id=tenant_id,
             )
 
@@ -1038,8 +1232,13 @@ async def all_tools(request):
     #     raise CustomError(ErrorCode.REQUEST_TOO_MANY_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
-    subquery = Tool.filter(deleted=False, tenant_id=tenant_id).annotate(latest_ctime=Max("ctime")).group_by("name")
+    subquery = Tool.filter(
+        deleted=False,
+        maintain=maintenance_mode,
+        tenant_id=tenant_id,
+    ).annotate(latest_ctime=Max("ctime")).group_by("name")
     if req_json.get("tag"):
         subquery = subquery.filter(tag__contains=[req_json.get("tag")])
     subquery_results = await subquery.values("name", "latest_ctime")
@@ -1047,13 +1246,26 @@ async def all_tools(request):
         tool_names_from_actions = set()
 
         if search_actions:
+            scoped_tool_pairs = await _scoped_tool_pairs(
+                tenant_id,
+                maintenance_mode,
+            )
             actions = await ToolAction.filter(deleted=False, tenant_id=tenant_id).values("tool_name", "version_number", "action")
             for act in actions:
-                if _action_matches_search_key(act["action"], key):
+                if (
+                    (act["tool_name"], act["version_number"])
+                    in scoped_tool_pairs
+                    and _action_matches_search_key(act["action"], key)
+                ):
                     tool_names_from_actions.add(act["tool_name"])
 
         tool_names = [pair["name"] for pair in subquery_results]
-        tool_rows_query = Tool.filter(name__in=tool_names, deleted=False, tenant_id=tenant_id)
+        tool_rows_query = Tool.filter(
+            name__in=tool_names,
+            deleted=False,
+            maintain=maintenance_mode,
+            tenant_id=tenant_id,
+        )
         if req_json.get("tag"):
             tool_rows_query = tool_rows_query.filter(tag__contains=[req_json.get("tag")])
         matching_tool_rows = await tool_rows_query.values("name", "description", "main", "tag")
@@ -1067,13 +1279,23 @@ async def all_tools(request):
     if available_only:
         # 获取所有工具的资源模型
         tool_names = [pair["name"] for pair in subquery_results]
-        tool_resources_model = await ToolResourcesModel.filter(tool_name__in=tool_names, deleted=False, tenant_id=tenant_id).values("tool_name", "status")
+        tool_resources_model = await ToolResourcesModel.filter(
+            tool_name__in=tool_names,
+            deleted=False,
+            internal=maintenance_mode,
+            tenant_id=tenant_id,
+        ).values("tool_name", "status")
 
         # 构建工具资源状态映射
         tool_resource_map = {tr["tool_name"]: tr["status"] for tr in tool_resources_model}
 
         # 获取所有实际存在的资源（用于判断status=1的工具是否有资源）
-        actual_resources = await ToolResources.filter(tool_name__in=tool_names, deleted=False, tenant_id=tenant_id).values_list("tool_name", flat=True)
+        actual_resources = await ToolResources.filter(
+            tool_name__in=tool_names,
+            deleted=False,
+            internal=maintenance_mode,
+            tenant_id=tenant_id,
+        ).values_list("tool_name", flat=True)
         tools_with_resources = set(actual_resources)
 
         # 过滤出可用的工具
@@ -1100,19 +1322,38 @@ async def all_tools(request):
     # 使用扁平 OR 条件，避免 reduce(operator.or_, ...) 构造左深 Q 树导致递归深度超限
     condition = _build_latest_tool_condition(subquery_results)
 
-    latest_tools = await Tool.filter(condition, deleted=False, tenant_id=tenant_id).order_by("-utime", "-ctime").offset((page - 1) * size).limit(size).values()
-    await _apply_tool_group_internal_flags(latest_tools, tenant_id)
+    latest_tools = await Tool.filter(
+        condition,
+        deleted=False,
+        maintain=maintenance_mode,
+        tenant_id=tenant_id,
+    ).order_by("-utime", "-ctime").offset((page - 1) * size).limit(size).values()
+    await _apply_tool_group_internal_flags(
+        latest_tools,
+        tenant_id,
+        maintenance_mode,
+    )
     for tool in latest_tools:
         if int(req_json.get("logo", 1)) == 1 and tool["logo_path"]:
             tool["logo"] = tool["logo_path"]
         tool.pop("path", None)
-        trm = await ToolResourcesModel.get_or_none(deleted=False, tool_name=tool["name"], tenant_id=tenant_id)
+        trm = await ToolResourcesModel.get_or_none(
+            deleted=False,
+            tool_name=tool["name"],
+            internal=maintenance_mode,
+            tenant_id=tenant_id,
+        )
         if trm:
             tool["required"] = trm.status
             tool["health_check"] = trm.health_check
             tool["health_check_version"] = trm.version
 
-    total_count = await Tool.filter(condition, deleted=False, tenant_id=tenant_id).count()
+    total_count = await Tool.filter(
+        condition,
+        deleted=False,
+        maintain=maintenance_mode,
+        tenant_id=tenant_id,
+    ).count()
 
     return response_ok(
         {
@@ -1129,7 +1370,7 @@ async def update_latest_tool_utime(tool_name, tenant_id, maintenance_mode=False)
     latest_tool = await Tool.filter(
         name=tool_name,
         deleted=False,
-        maintain=maintenance_mode if maintenance_mode else False,
+        maintain=maintenance_mode,
         tenant_id=tenant_id,
     ).order_by("-ctime").first()
     if not latest_tool:
@@ -1191,11 +1432,13 @@ async def all_versions(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
     tools = (
         await Tool.filter(
             name=name,
             deleted=False,
+            maintain=maintenance_mode,
             tenant_id=tenant_id,
         )
         .order_by("-ctime")
@@ -1293,10 +1536,14 @@ async def tool_actions(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
-    tool = await Tool.get_or_none(name=name, version=version, deleted=False, tenant_id=tenant_id)
-    if not tool:
-        raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
+    await _ensure_tool_in_scope(
+        tenant_id,
+        maintenance_mode,
+        name=name,
+        version=version,
+    )
 
     actions = await ToolAction.filter(tool_name=name, version_number=version, tenant_id=tenant_id).values("action", "id", "playbook")
 
@@ -1307,6 +1554,8 @@ async def tool_actions(request):
         if action.get("playbook"):
             for pv_id in action.get("playbook"):
                 pv = await PlaybookVersion.get_or_none(id=pv_id, deleted=False, tenant_id=tenant_id).prefetch_related("playbook")
+                if not pv or bool(pv.playbook.internal) != maintenance_mode:
+                    continue
                 pv_list.append(
                     {
                         "id": pv.playbook.id,
@@ -1400,10 +1649,18 @@ async def tool_actions_filter(request):
     classify = request.json.get("classify")
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
+    scoped_tool_pairs = await _scoped_tool_pairs(
+        tenant_id,
+        maintenance_mode,
+    )
 
     actions = await ToolAction.filter(tenant_id=tenant_id, deleted=False).values("action", "id", "tool_name", "version_number")
     action_list = []
     for action in actions:
+        tool_pair = (action.get("tool_name"), action.get("version_number"))
+        if tool_pair not in scoped_tool_pairs:
+            continue
         act_data = action.get("action")
         if classify and act_data.get("classify") != classify:
             continue
@@ -1411,7 +1668,13 @@ async def tool_actions_filter(request):
         act_data["id"] = action.get("id")
         act_data["tool_name"] = action.get("tool_name")
         act_data["version"] = action.get("version_number")
-        tool = await Tool.get_or_none(name=action.get("tool_name"), version=action.get("version_number"), deleted=False, tenant_id=tenant_id)
+        tool = await Tool.get_or_none(
+            name=action.get("tool_name"),
+            version=action.get("version_number"),
+            deleted=False,
+            maintain=maintenance_mode,
+            tenant_id=tenant_id,
+        )
         act_data["description"] = tool.description
         act_data["tool_main"] = tool.main
         action_list.append(act_data)
@@ -1468,10 +1731,14 @@ async def update_tool_status(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
-    tool = await Tool.get_or_none(name=name, version=version, deleted=False, tenant_id=tenant_id)
-    if not tool:
-        raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
+    tool = await _ensure_tool_in_scope(
+        tenant_id,
+        maintenance_mode,
+        name=name,
+        version=version,
+    )
 
     tool.status = status
     await tool.save()
@@ -1523,9 +1790,14 @@ async def delete_tool(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
     async with in_transaction():
-        tool_versions = await _lock_tool_versions(name, tenant_id)
+        tool_versions = await _lock_tool_versions(
+            name,
+            tenant_id,
+            maintenance_mode,
+        )
         active_tools = [item for item in tool_versions if not item.deleted]
         tool = next((item for item in active_tools if item.version == version), None)
         if not tool:
@@ -1538,9 +1810,29 @@ async def delete_tool(request):
             raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
 
         if len(active_tools) == 1:
-            await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
-            await ToolResources.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
-            await ActionPermissions.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
+            await ToolResourcesModel.filter(
+                tool_name=name,
+                deleted=False,
+                internal=maintenance_mode,
+                tenant_id=tenant_id,
+            ).update(deleted=True)
+            await ToolResources.filter(
+                tool_name=name,
+                deleted=False,
+                internal=maintenance_mode,
+                tenant_id=tenant_id,
+            ).update(deleted=True)
+            other_scope_exists = await Tool.filter(
+                name=name,
+                deleted=False,
+                tenant_id=tenant_id,
+            ).exclude(maintain=maintenance_mode).exists()
+            if not other_scope_exists:
+                await ActionPermissions.filter(
+                    tool_name=name,
+                    deleted=False,
+                    tenant_id=tenant_id,
+                ).update(deleted=True)
 
         await utils.delete_from_s3("system", f"{name}/{version}.zip", "tools")
 
@@ -1593,9 +1885,14 @@ async def delete_tool_all(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
     async with in_transaction():
-        tool_versions = await _lock_tool_versions(name, tenant_id)
+        tool_versions = await _lock_tool_versions(
+            name,
+            tenant_id,
+            maintenance_mode,
+        )
         active_tools = [item for item in tool_versions if not item.deleted]
         if any(tool.maintain for tool in active_tools):
             raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
@@ -1605,11 +1902,42 @@ async def delete_tool_all(request):
         for tool in active_tools:
             await utils.delete_from_s3("system", f"{name}/{tool.version}.zip", "tools")
 
-        await ToolAction.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
-        await ToolResourcesModel.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
-        await ToolResources.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
-        await ActionPermissions.filter(tool_name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
-        await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).update(deleted=True)
+        active_versions = [tool.version for tool in active_tools]
+        await ToolAction.filter(
+            tool_name=name,
+            version_number__in=active_versions,
+            deleted=False,
+            tenant_id=tenant_id,
+        ).update(deleted=True)
+        await ToolResourcesModel.filter(
+            tool_name=name,
+            deleted=False,
+            internal=maintenance_mode,
+            tenant_id=tenant_id,
+        ).update(deleted=True)
+        await ToolResources.filter(
+            tool_name=name,
+            deleted=False,
+            internal=maintenance_mode,
+            tenant_id=tenant_id,
+        ).update(deleted=True)
+        other_scope_exists = await Tool.filter(
+            name=name,
+            deleted=False,
+            tenant_id=tenant_id,
+        ).exclude(maintain=maintenance_mode).exists()
+        if not other_scope_exists:
+            await ActionPermissions.filter(
+                tool_name=name,
+                deleted=False,
+                tenant_id=tenant_id,
+            ).update(deleted=True)
+        await Tool.filter(
+            name=name,
+            deleted=False,
+            maintain=maintenance_mode,
+            tenant_id=tenant_id,
+        ).update(deleted=True)
 
     return response_ok({"message": "全部工具删除成功"})
 
@@ -1660,8 +1988,20 @@ async def tool_resource_model(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
-    resources = await ToolResourcesModel.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).first().values()
+    await _ensure_tool_in_scope(
+        tenant_id,
+        maintenance_mode,
+        name=tool_name,
+    )
+
+    resources = await ToolResourcesModel.filter(
+        tool_name=tool_name,
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).first().values()
     if not resources:
         raise CustomError(ErrorCode.RESOURCES_MODEL_NOT_FOUND_ERROR)
 
@@ -1723,12 +2063,17 @@ async def add_tool_resource(request):
     if not creator_account or not getattr(creator_account, "id", None):
         raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
 
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    maintenance_mode = await _current_maintenance_mode(request)
+    await _ensure_tool_in_scope(
+        tenant_id,
+        maintenance_mode,
+        name=tool_name,
+    )
     existing_resource = await ToolResources.get_or_none(
         name=name,
         deleted=False,
         tool_name=tool_name,
-        internal=maintenance_mode if maintenance_mode else False,
+        internal=maintenance_mode,
         tenant_id=tenant_id,
     )
     if existing_resource:
@@ -1740,7 +2085,7 @@ async def add_tool_resource(request):
             name=name,
             engine=engine,
             resources=orjson.dumps(resources).decode(),
-            internal=maintenance_mode if maintenance_mode else False,
+            internal=maintenance_mode,
             creator=creator_account.username,
             updater=creator_account.username,
             tenant_id=tenant_id,
@@ -1750,6 +2095,7 @@ async def add_tool_resource(request):
             str(tr.id),
             str(creator_account.id),
             tenant_id,
+            maintenance_mode,
         )
 
     r = {k: resources[k].get("value") or resources[k].get("default_value", "") for k in resources}
@@ -1830,11 +2176,11 @@ async def tool_resources_detailed(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    maintenance_mode = await _current_maintenance_mode(request)
     resources = await ToolResources.filter(
         tool_name=tool_name,
         deleted=False,
-        internal=maintenance_mode if maintenance_mode else False,
+        internal=maintenance_mode,
         tenant_id=tenant_id,
     ).all()
 
@@ -1861,6 +2207,7 @@ async def tool_resources_detailed(request):
                 tool_name,
                 action_name,
                 tenant_id,
+                maintenance_mode,
             )
             action_perms = await ActionPermissions.filter(
                 tool_name=tool_name,
@@ -1946,12 +2293,12 @@ async def update_tool_resource(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    maintenance_mode = await _current_maintenance_mode(request)
     tool_resource = await ToolResources.get_or_none(
         tool_name=tool_name,
         name=name,
         deleted=False,
-        internal=maintenance_mode if maintenance_mode else False,
+        internal=maintenance_mode,
         tenant_id=tenant_id,
     )
 
@@ -2050,19 +2397,30 @@ async def delete_tool_resource(request):
 
     tenant_id = request.ctx.session.get("tenant_id")
 
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    maintenance_mode = await _current_maintenance_mode(request)
     tool_resource = await ToolResources.get_or_none(
         tool_name=tool_name,
         name=name,
         deleted=False,
-        internal=maintenance_mode if maintenance_mode else False,
+        internal=maintenance_mode,
         tenant_id=tenant_id,
     )
 
     if not tool_resource:
         raise CustomError(ErrorCode.RESOURCES_NOT_FOUND_ERROR)
 
-    playbooks = await ToolAction.filter(tool_name=tool_name, deleted=False, tenant_id=tenant_id).all().values("playbook")
+    scoped_tool_pairs = await _scoped_tool_pairs(
+        tenant_id,
+        maintenance_mode,
+        tool_names=[tool_name],
+    )
+    scoped_versions = [version for _name, version in scoped_tool_pairs]
+    playbooks = await ToolAction.filter(
+        tool_name=tool_name,
+        version_number__in=scoped_versions,
+        deleted=False,
+        tenant_id=tenant_id,
+    ).all().values("playbook")
 
     playbook_ids = []
     for playbook in playbooks:
@@ -2071,11 +2429,17 @@ async def delete_tool_resource(request):
     playbooks = await PlaybookVersion.filter(id__in=playbook_ids, deleted=False, tenant_id=tenant_id).all().prefetch_related("playbook")
 
     for playbook in playbooks:
+        if bool(playbook.playbook.internal) != maintenance_mode:
+            continue
         if playbook.flow_json:
             if tool_resource.id in str(playbook.flow_json):
                 return response_ok({"message": f"当前资源已被剧本{playbook.playbook.name}使用，请仔细检查后再删除！"})
 
-    timeds = await Timed.filter(deleted=False, tenant_id=tenant_id).all().prefetch_related("playbook")
+    timeds = await Timed.filter(
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).all().prefetch_related("playbook")
 
     for timed in timeds:
         if timed.type == 0:
@@ -2127,10 +2491,13 @@ async def download_zip(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
-    tool = await Tool.get_or_none(id=tool_id, deleted=False, tenant_id=tenant_id)
-    if not tool:
-        raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
+    tool = await _ensure_tool_in_scope(
+        tenant_id,
+        maintenance_mode,
+        tool_id=tool_id,
+    )
 
     if tool.maintain:
         raise CustomError(ErrorCode.INTERNAL_TOOL_ERROR)
@@ -2203,12 +2570,19 @@ async def add_permission(request):
     actions = request.json.get("actions", ["all"])
     users_id = list(set(request.json.get("users_id", [])))
     roles_id = list(set(request.json.get("roles_id", [])))
-    if not name:
+    if not name or not resource_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
     if not isinstance(users_id, list) or not isinstance(roles_id, list) or not isinstance(actions, list):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
+    await _ensure_resource_in_scope(
+        tenant_id,
+        maintenance_mode,
+        tool_name=name,
+        resource_id=resource_id,
+    )
 
     async with in_transaction():
         if "all" in actions:
@@ -2333,10 +2707,17 @@ async def select_permission_all(request):
     name = request.json.get("name")
     resource_id = request.json.get("resource_id")
     actions = request.json.get("actions", ["all"])
-    if not name:
+    if not name or not resource_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
+    await _ensure_resource_in_scope(
+        tenant_id,
+        maintenance_mode,
+        tool_name=name,
+        resource_id=resource_id,
+    )
 
     if "all" in actions:
         await _ensure_action_permission(
@@ -2466,6 +2847,7 @@ async def judge_permission(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
     user = request.ctx.session.get("account_info")
     if not user:
@@ -2485,13 +2867,32 @@ async def judge_permission(request):
         tenant_id=tenant_id,
     )
 
+    requested_resource_ids = [
+        str(group.get("resource_id"))
+        for group in action_groups
+        if group.get("resource_id")
+    ]
+    scoped_resources = await ToolResources.filter(
+        id__in=requested_resource_ids,
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).values("id", "tool_name")
+    scoped_resource_keys = {
+        (item["tool_name"], str(item["id"]))
+        for item in scoped_resources
+    }
+
     query_conditions = []
     for group in action_groups:
         tool_name = group.get("tool_name")
         resource_id = group.get("resource_id")
         actions = group.get("actions", [])
 
-        if not all([tool_name, resource_id, isinstance(actions, list)]):
+        if (
+            not all([tool_name, resource_id, isinstance(actions, list)])
+            or (tool_name, str(resource_id)) not in scoped_resource_keys
+        ):
             continue
 
         query_conditions.append(Q(tool_name=tool_name, action_name__in=actions))
@@ -2507,13 +2908,26 @@ async def judge_permission(request):
     result = []
     for group in action_groups:
         tool_name = group["tool_name"]
-        resource_id = group["resource_id"]
+        resource_id = str(group["resource_id"])
         action_results = {}
+
+        if (tool_name, resource_id) not in scoped_resource_keys:
+            result.append(
+                {
+                    "tool_name": tool_name,
+                    "resource_id": resource_id,
+                    "permissions": {
+                        action: False for action in group["actions"]
+                    },
+                }
+            )
+            continue
 
         if resource_uncontrolled and await tool_resources_exist(
             tool_name,
             [resource_id],
             tenant_id,
+            maintenance_mode,
         ):
             result.append(
                 {
@@ -2608,8 +3022,14 @@ async def add_tag(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
-    tools = await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all()
+    tools = await Tool.filter(
+        name=name,
+        deleted=False,
+        maintain=maintenance_mode,
+        tenant_id=tenant_id,
+    ).all()
 
     if not tools:
         raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
@@ -2670,8 +3090,14 @@ async def delete_tag(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
-    tools = await Tool.filter(name=name, deleted=False, tenant_id=tenant_id).all()
+    tools = await Tool.filter(
+        name=name,
+        deleted=False,
+        maintain=maintenance_mode,
+        tenant_id=tenant_id,
+    ).all()
 
     if not tools:
         raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
@@ -2826,10 +3252,17 @@ async def tool_action_input(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
     action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
     if not action:
         raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
+    await _ensure_tool_in_scope(
+        tenant_id,
+        maintenance_mode,
+        name=action.tool_name,
+        version=action.version_number,
+    )
 
     input_data = action.action["input"]
 
@@ -2843,9 +3276,26 @@ async def tool_action_update(data, tenant_id):
     affected_tools = set()
 
     for playbook_version_id, action_ids in data.items():
+        playbook_version = await PlaybookVersion.get_or_none(
+            id=playbook_version_id,
+            deleted=False,
+            tenant_id=tenant_id,
+        ).prefetch_related("playbook")
+        if not playbook_version:
+            continue
+        maintenance_mode = bool(playbook_version.playbook.internal)
         for action_id in action_ids:
             action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
             if not action:
+                continue
+            scoped_tool = await Tool.get_or_none(
+                name=action.tool_name,
+                version=action.version_number,
+                deleted=False,
+                maintain=maintenance_mode,
+                tenant_id=tenant_id,
+            )
+            if not scoped_tool:
                 continue
 
             if not isinstance(action.playbook, list):
@@ -2855,10 +3305,18 @@ async def tool_action_update(data, tenant_id):
                 action.playbook.append(playbook_version_id)
                 await action.save()
 
-                affected_tools.add((action.tool_name, action.version_number))
+                affected_tools.add(
+                    (action.tool_name, action.version_number, maintenance_mode)
+                )
 
-    for tool_name, version in affected_tools:
-        tool = await Tool.get_or_none(name=tool_name, version=version, deleted=False, tenant_id=tenant_id)
+    for tool_name, version, maintenance_mode in affected_tools:
+        tool = await Tool.get_or_none(
+            name=tool_name,
+            version=version,
+            deleted=False,
+            maintain=maintenance_mode,
+            tenant_id=tenant_id,
+        )
         if tool and tool.status != 1:
             tool.status = 1
             await tool.save()
@@ -2880,23 +3338,48 @@ async def tool_action_playbook_delete(data, tenant_id):
 
     affected_tools = set()
 
-    for playbook_id, action_ids in data.items():
+    for playbook_version_id, action_ids in data.items():
+        playbook_version = await PlaybookVersion.get_or_none(
+            id=playbook_version_id,
+            deleted=False,
+            tenant_id=tenant_id,
+        ).prefetch_related("playbook")
+        if not playbook_version:
+            continue
+        maintenance_mode = bool(playbook_version.playbook.internal)
         for action_id in action_ids:
             action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
             if not action:
                 continue
+            scoped_tool = await Tool.get_or_none(
+                name=action.tool_name,
+                version=action.version_number,
+                deleted=False,
+                maintain=maintenance_mode,
+                tenant_id=tenant_id,
+            )
+            if not scoped_tool:
+                continue
             if not isinstance(action.playbook, list):
                 action.playbook = []
 
-            if playbook_id in action.playbook:
-                action.playbook.remove(playbook_id)
+            if playbook_version_id in action.playbook:
+                action.playbook.remove(playbook_version_id)
                 await action.save()
-            affected_tools.add((action.tool_name, action.version_number))
+            affected_tools.add(
+                (action.tool_name, action.version_number, maintenance_mode)
+            )
 
-    for tool_name, version in affected_tools:
+    for tool_name, version, maintenance_mode in affected_tools:
         actions = await ToolAction.filter(tool_name=tool_name, version_number=version, deleted=False, tenant_id=tenant_id).all()
         has_playbook = any(action.playbook for action in actions)
-        tool = await Tool.get_or_none(name=tool_name, version=version, deleted=False, tenant_id=tenant_id)
+        tool = await Tool.get_or_none(
+            name=tool_name,
+            version=version,
+            deleted=False,
+            maintain=maintenance_mode,
+            tenant_id=tenant_id,
+        )
         if tool:
             tool.status = 1 if has_playbook else 0
             await tool.save()
@@ -3132,6 +3615,8 @@ async def health_check(request):
             message.get("action"),
             message.get("resource"),
             tenant_id,
+            await _current_maintenance_mode(request),
+            message.get("app_ver"),
         ):
             await resp.send("data: 缺少动作资源执行权限，执行失败\n\n")
             await resp.eof()
@@ -3187,12 +3672,23 @@ async def tool_debug(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
-    tool = await Tool.filter(name="lion_mgmt", deleted=False).order_by("-ctime").first()
+    tool = await Tool.filter(
+        name="lion_mgmt",
+        deleted=False,
+        maintain=maintenance_mode,
+        tenant_id=tenant_id,
+    ).order_by("-ctime").first()
     if not tool:
         return response_ok("工具开发运行APP缺失，请联系管理员处理")
 
-    resource = await ToolResources.filter(tool_name="lion_mgmt", deleted=False).order_by("-ctime").first()
+    resource = await ToolResources.filter(
+        tool_name="lion_mgmt",
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).order_by("-ctime").first()
     if not resource:
         return response_ok("工具开发运行资源不存在，请联系管理员处理")
 
@@ -3384,7 +3880,13 @@ async def resource_search(request):
     if not keyword:
         return response_ok([])
 
-    resources = await ToolResources.filter(name__icontains=keyword, deleted=False, internal=False, tenant_id=tenant_id).all()
+    maintenance_mode = await _current_maintenance_mode(request)
+    resources = await ToolResources.filter(
+        name__icontains=keyword,
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).all()
     result = []
     for res in resources:
         result.append(res.json)
@@ -3431,28 +3933,43 @@ async def get_available_actions(request):
     可用定义为：
     1. 无需资源（status=0 或不存在资源模型）
     2. 存在资源（status=1 且 ToolResources 中存在该工具的资源）
-    且工具的maintain字段为False
+    且工具、资源模板和资源实例属于当前维护范围
     """
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
 
-    # 获取所有 maintain=False 的工具名称
-    available_tool_names = await Tool.filter(deleted=False, maintain=False, tenant_id=tenant_id).values_list("name", flat=True)
+    scoped_tool_pairs = await _scoped_tool_pairs(
+        tenant_id,
+        maintenance_mode,
+    )
+    available_tool_names = sorted({name for name, _version in scoped_tool_pairs})
 
-    # 获取所有工具资源模型
-    tool_resources = await ToolResourcesModel.filter(deleted=False, tenant_id=tenant_id).all()
+    # 获取当前维护范围内的工具资源模型
+    tool_resources = await ToolResourcesModel.filter(
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).all()
 
     # 构建工具名称到资源状态的映射
     tool_resource_status = {tr.tool_name: tr.status for tr in tool_resources}
 
     # 获取所有实际存在的资源（用于判断status=1的工具是否有资源）
-    actual_resources = await ToolResources.filter(deleted=False, tenant_id=tenant_id, tool_name__in=available_tool_names).values_list("tool_name", flat=True)
+    actual_resources = await ToolResources.filter(
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+        tool_name__in=available_tool_names,
+    ).values_list("tool_name", flat=True)
     tools_with_resources = set(actual_resources)
 
-    # 获取这些工具的动作（只查询 maintain=False 的工具）
+    # ToolAction 没有单独的模式字段，以所属工具的名称和版本做范围校验。
     actions = await ToolAction.filter(deleted=False, tenant_id=tenant_id, tool_name__in=available_tool_names).all()
 
     result = []
     for action in actions:
+        if (action.tool_name, action.version_number) not in scoped_tool_pairs:
+            continue
         # 检查该动作的工具是否可用
         # 可用条件：
         # 1. 工具没有资源模型（不需要资源）
@@ -3545,6 +4062,7 @@ async def get_available_actions(request):
 async def sync_health_status(request):
     """按当前租户的资源身份保存批量健康检查结果。"""
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await _current_maintenance_mode(request)
     payload = request.json
     if not isinstance(payload, dict) or not isinstance(payload.get("results"), dict):
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -3573,7 +4091,7 @@ async def sync_health_status(request):
             lookup = {
                 "deleted": False,
                 "tenant_id": tenant_id,
-                "internal": False,
+                "internal": maintenance_mode,
             }
             resource_id = item.get("resource_id") or item.get("id")
             if resource_id:

@@ -1181,12 +1181,17 @@ async def run(request):
     if not params:
         raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await request.app.ctx.cache_client.get(
+        request.ctx.session["id"]
+    )
     if run_type == "action" and not await check_action_execute_permission(
         user,
         params.get("app_name"),
         params.get("action"),
         params.get("resource"),
         tenant_id,
+        bool(maintenance_mode),
+        params.get("app_ver"),
     ):
         raise CustomError(ErrorCode.UNAUTH)
     params["executor"] = user.id
@@ -1315,6 +1320,8 @@ async def execution(request):
         params.get("action"),
         params.get("resource"),
         tenant_id,
+        bool(await request.app.ctx.cache_client.get(request.ctx.session["id"])),
+        params.get("app_ver"),
     ):
         raise CustomError(ErrorCode.UNAUTH)
     if not event.room:

@@ -387,8 +387,26 @@ def test_fetch_action_checks_server_permission_before_kafka(monkeypatch):
             self.id = "user-1"
             self.roles = []
 
-    async def deny_permission(account, app_name, action_name, resource, tenant_id):
-        permission_calls.append((account.id, app_name, action_name, resource, tenant_id))
+    async def deny_permission(
+        account,
+        app_name,
+        action_name,
+        resource,
+        tenant_id,
+        maintenance_mode,
+        tool_version,
+    ):
+        permission_calls.append(
+            (
+                account.id,
+                app_name,
+                action_name,
+                resource,
+                tenant_id,
+                maintenance_mode,
+                tool_version,
+            )
+        )
         return False
 
     async def fake_publish(*args, **kwargs):
@@ -413,7 +431,15 @@ def test_fetch_action_checks_server_permission_before_kafka(monkeypatch):
 
     assert exc_info.value.enum == ErrorCode.UNAUTH
     assert permission_calls == [
-        ("user-1", "security_tool", "query_alarm", "resource-1", "tenant-1")
+        (
+            "user-1",
+            "security_tool",
+            "query_alarm",
+            "resource-1",
+            "tenant-1",
+            False,
+            None,
+        )
     ]
     assert published == []
 

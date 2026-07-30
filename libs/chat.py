@@ -12,7 +12,6 @@ from sanic.exceptions import WebsocketClosed
 from sanic.log import logger
 from websockets import ConnectionClosed
 from tortoise.expressions import Q
-from tortoise.functions import Max
 from tortoise.transactions import in_transaction
 from aiocache import caches
 from datetime import datetime
@@ -24,6 +23,7 @@ from models import (
     Playbook,
     PlaybookVersion,
     Runlog,
+    Tool,
     ToolAction,
     ToolResources,
     ToolResourcesModel,
@@ -77,13 +77,22 @@ async def fetch_completion(host, api_key, model, messages):
 
 
 # 获取动作推荐列表
-async def get_prompt_words(prompt_word, tenant_id):
+async def get_prompt_words(prompt_word, tenant_id, maintenance_mode=False):
     tool_names = []
-    actions = await ToolResourcesModel.filter(deleted=False, status=0, tenant_id=tenant_id).all().values("tool_name")
+    actions = await ToolResourcesModel.filter(
+        deleted=False,
+        status=0,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).all().values("tool_name")
     for action in actions:
         if action["tool_name"] not in tool_names:
             tool_names.append(action["tool_name"])
-    tools = await ToolResources.filter(deleted=False, tenant_id=tenant_id).all().values("tool_name")
+    tools = await ToolResources.filter(
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).all().values("tool_name")
     for tool in tools:
         if tool["tool_name"] not in tool_names:
             tool_names.append(tool["tool_name"])
@@ -92,9 +101,19 @@ async def get_prompt_words(prompt_word, tenant_id):
     if not tool_names:
         return prompt_word, {}, {}
 
-    latest_versions = await ToolAction.filter(deleted=False, tool_name__in=tool_names, tenant_id=tenant_id).annotate(latest_version=Max("version_number")).group_by("tool_name").values("tool_name", "latest_version")
-
-    pairs = [(row["tool_name"], row["latest_version"]) for row in latest_versions]
+    scoped_tools = await Tool.filter(
+        deleted=False,
+        maintain=maintenance_mode,
+        name__in=tool_names,
+        tenant_id=tenant_id,
+    ).order_by("name", "-ctime").values("name", "version")
+    pairs = []
+    seen_names = set()
+    for tool in scoped_tools:
+        if tool["name"] in seen_names:
+            continue
+        seen_names.add(tool["name"])
+        pairs.append((tool["name"], tool["version"]))
     if not pairs:
         return prompt_word, {}, {}
 
@@ -124,8 +143,12 @@ async def get_prompt_words(prompt_word, tenant_id):
 
 
 # 获取剧本推荐列表
-async def get_playbook_prompt_words(prompt_word, tenant_id):
-    playbooks = await Playbook.filter(deleted=False, internal=False, tenant_id=tenant_id).all()
+async def get_playbook_prompt_words(prompt_word, tenant_id, maintenance_mode=False):
+    playbooks = await Playbook.filter(
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).all()
 
     a = 0
     playbooks_desc = {}

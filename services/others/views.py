@@ -72,8 +72,15 @@ async def playbook_list(request):
     offset = (page - 1) * size
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = bool(
+        await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    )
 
-    pvs = await PlaybookVersion.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(size).prefetch_related("playbook", "creator", "updator", "playbook__scenes", "playbook__tags")
+    pvs = await PlaybookVersion.filter(
+        deleted=False,
+        playbook__internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).offset(offset).limit(size).prefetch_related("playbook", "creator", "updator", "playbook__scenes", "playbook__tags")
 
     content = []
     for pv in pvs:
@@ -99,7 +106,11 @@ async def playbook_list(request):
             "labelList": [{"id": tag.id, "name": tag.name} for tag in pv.playbook.tags],
         }
         content.append(data)
-    total = await PlaybookVersion.filter(deleted=False, tenant_id=tenant_id).count()
+    total = await PlaybookVersion.filter(
+        deleted=False,
+        playbook__internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).count()
 
     return response.json(
         {
@@ -125,13 +136,30 @@ async def all_apps(request):
     offset = (page - 1) * size
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = bool(
+        await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    )
 
-    tools = await Tool.filter(deleted=False, tenant_id=tenant_id).offset(offset).limit(size)
+    tools = await Tool.filter(
+        deleted=False,
+        maintain=maintenance_mode,
+        tenant_id=tenant_id,
+    ).offset(offset).limit(size)
     content = []
     for tool in tools:
         actions = await ToolAction.filter(tool_name=tool.name, version_number=tool.version, deleted=False, tenant_id=tenant_id).all()
-        resource_model = await ToolResourcesModel.get(tool_name=tool.name, deleted=False, tenant_id=tenant_id)
-        resources = await ToolResources.filter(tool_name=tool.name, deleted=False, tenant_id=tenant_id).all()
+        resource_model = await ToolResourcesModel.get(
+            tool_name=tool.name,
+            deleted=False,
+            internal=maintenance_mode,
+            tenant_id=tenant_id,
+        )
+        resources = await ToolResources.filter(
+            tool_name=tool.name,
+            deleted=False,
+            internal=maintenance_mode,
+            tenant_id=tenant_id,
+        ).all()
         data = {
             "id": tool.id,
             "name": tool.name,
@@ -234,7 +262,11 @@ async def all_apps(request):
             "actionEngineType": None,
         }
         content.append(data)
-    total = await Tool.filter(deleted=False, tenant_id=tenant_id).count()
+    total = await Tool.filter(
+        deleted=False,
+        maintain=maintenance_mode,
+        tenant_id=tenant_id,
+    ).count()
     return response.json(
         {
             "code": 0,

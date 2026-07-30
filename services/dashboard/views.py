@@ -309,7 +309,15 @@ async def count_mttr(request):
 @requires_permission("dashboard:r")
 async def count_playbooks(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    result = await PlaybookVersion.filter(status=1, tenant_id=tenant_id).annotate(counts=Count("playbook_id", distinct=True)).values("counts")
+    maintenance_mode = bool(
+        await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    )
+    result = await PlaybookVersion.filter(
+        status=1,
+        deleted=False,
+        playbook__internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).annotate(counts=Count("playbook_id", distinct=True)).values("counts")
     return response_ok(result[0].get("counts"))
 
 
@@ -337,7 +345,14 @@ async def count_playbooks(request):
 @requires_permission("dashboard:r")
 async def count_apps(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    result = await ToolResources.filter(tenant_id=tenant_id).annotate(counts=Count("tool_name", distinct=True)).values("counts")
+    maintenance_mode = bool(
+        await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    )
+    result = await ToolResources.filter(
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    ).annotate(counts=Count("tool_name", distinct=True)).values("counts")
     return response_ok(result[0].get("counts"))
 
 

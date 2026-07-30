@@ -2120,7 +2120,15 @@ async def _execute_fetch_action(action_cfg: dict, tenant_id: str, operator_id) -
     app_name = action_cfg.get("app_name") or action_cfg.get("tool_name") or ""
     action_name = action_cfg.get("action") or action_cfg.get("func") or ""
     resource = action_cfg.get("resource") or ""
-    if not await check_action_execute_permission(operator, app_name, action_name, resource, tenant_id):
+    if not await check_action_execute_permission(
+        operator,
+        app_name,
+        action_name,
+        resource,
+        tenant_id,
+        False,
+        action_cfg.get("app_ver") or action_cfg.get("version"),
+    ):
         logger.warning(
             "拒绝无动作执行权的报告取数配置 tenant_id=%s operator_id=%s app_name=%s action=%s resource=%s",
             tenant_id,

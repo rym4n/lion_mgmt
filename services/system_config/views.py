@@ -2063,34 +2063,37 @@ async def init_data(request):
                 self.name = name
                 self.body = body
 
-        # 如果是维护模式，将标识写入 Redis，供 upload_tool 内部的 unzip 函数读取
-        session_id = request.ctx.session["id"]
-        if maintenance_mode:
-            await request.app.ctx.cache_client.set(session_id, True, 300)  # 5分钟过期
+        for fn in names:
+            if not fn.endswith(".zip"):
+                continue
 
-        try:
-            for fn in names:
-                if not fn.endswith(".zip"):
-                    continue
+            content = zf.read(fn)
+            mock_file = MockFile(name=fn, body=content)
+            result = await upload_tool(
+                mock_file,
+                mock_lic,
+                creator.username,
+                tenant_id,
+                request,
+                maintenance_mode=maintenance_mode,
+            )
 
-                content = zf.read(fn)
-                mock_file = MockFile(name=fn, body=content)
-                result = await upload_tool(mock_file, mock_lic, creator.username, tenant_id, request)
-
-                if result and result.get("msg") == "success":
-                    imported["tools"] += 1
-                elif result and result.get("msg") == "工具已存在":
-                    imported["skipped_versions"] += 1
-        finally:
-            if maintenance_mode:
-                await request.app.ctx.cache_client.delete(session_id)
+            if result and result.get("msg") == "success":
+                imported["tools"] += 1
+            elif result and result.get("msg") == "工具已存在":
+                imported["skipped_versions"] += 1
 
         # 导入剧本
         if "workflow.json" in names:
             flows = orjson.loads(zf.read("workflow.json"))
             for item in flows:
                 ver = item.get("version")
-                if await PlaybookVersion.filter(version=ver, deleted=False, tenant_id=tenant_id).exists():
+                if await PlaybookVersion.filter(
+                    version=ver,
+                    deleted=False,
+                    playbook__internal=maintenance_mode,
+                    tenant_id=tenant_id,
+                ).exists():
                     imported["skipped_versions"] += 1
                     continue
                 name = item.get("name")
@@ -2098,7 +2101,12 @@ async def init_data(request):
                 change_desc = item.get("change_desc", "")
                 flow_json = item.get("flow_json") or {}
                 async with in_transaction():
-                    pb = await Playbook.get_or_none(name=name, deleted=False, tenant_id=tenant_id)
+                    pb = await Playbook.get_or_none(
+                        name=name,
+                        deleted=False,
+                        internal=maintenance_mode,
+                        tenant_id=tenant_id,
+                    )
                     if not pb:
                         pb = await Playbook.create(
                             id=str(uuid.uuid4()),
