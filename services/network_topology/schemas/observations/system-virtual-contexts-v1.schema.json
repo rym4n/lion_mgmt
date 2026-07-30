@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/system.virtual_contexts/v1",
+  "x-max-bytes": 1048576,
+  "x-allowed-source-methods": ["cli", "netconf", "restconf", "gnmi", "vendor_api"],
+  "x-fact-planes": ["inventory", "configured"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "system.virtual_contexts"},
+        "source_method": {"enum": ["cli", "netconf", "restconf", "gnmi", "vendor_api"]},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/system.virtual_contexts/v1"},
+        "fact_plane": {"enum": ["inventory", "configured"]}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["contexts"],
+            "properties": {
+              "contexts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["local_id", "context_type", "name", "parent_context"],
+                  "properties": {
+                    "local_id": {"type": "string", "minLength": 1},
+                    "context_type": {"enum": ["physical", "vdom", "vsys", "virtual_router", "logical_system", "other"]},
+                    "name": {"type": "string", "minLength": 1},
+                    "parent_context": {"type": ["string", "null"]}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "examples": [
+    {
+      "observation_id": "synthetic-router-1:contexts:1",
+      "kind": "system.virtual_contexts",
+      "observation_status": "success",
+      "source_method": "vendor_api",
+      "content_type": "application/json",
+      "data_schema": "aioe.network-topology.observation/system.virtual_contexts/v1",
+      "fact_plane": "inventory",
+      "command_or_api": "synthetic contexts API",
+      "observed_at": "2026-07-28T00:00:30Z",
+      "data": {"contexts": []},
+      "raw_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "content_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

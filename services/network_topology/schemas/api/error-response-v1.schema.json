@@ -1,0 +1,5 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/error-response/v1",
+  "$ref": "https://schemas.aioe.local/aioe.network-topology.api/common/v1#/$defs/apiError",
+  "examples": [{"code": 4000, "message": "Network topology contract rejected", "data": {"error_code": "SCHEMA_INVALID", "retryable": false}}]
+}

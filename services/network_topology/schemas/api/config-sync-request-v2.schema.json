@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/config-sync-request/v2",
+  "type": "object", "additionalProperties": false, "required": ["id", "snapshot"],
+  "properties": {"id": {"type": "string", "minLength": 1}, "snapshot": {"$ref": "https://schemas.aioe.local/aioe.network-topology.collection/v2"}},
+  "examples": []
+}

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/routing.first_hop_redundancy/v1",
+  "x-max-bytes": 1048576,
+  "x-allowed-source-methods": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"],
+  "x-fact-planes": ["operational"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "routing.first_hop_redundancy"},
+        "source_method": {"enum": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"]},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/routing.first_hop_redundancy/v1"},
+        "fact_plane": {"const": "operational"}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["groups"],
+            "properties": {
+              "groups": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["protocol", "group_id", "vip", "interface", "member_state"],
+                  "properties": {
+                    "protocol": {"enum": ["vrrp", "hsrp", "glbp"]},
+                    "group_id": {"type": "string", "minLength": 1},
+                    "vip": {"type": "string", "minLength": 1},
+                    "interface": {"type": "string", "minLength": 1},
+                    "member_state": {"enum": ["active", "standby", "backup", "unknown"]}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/manifest-response/v1",
+  "type": "object", "additionalProperties": false, "required": ["code", "data"],
+  "properties": {"code": {"const": 0}, "data": {"type": "object", "additionalProperties": false, "required": ["target_manifest"], "properties": {"target_manifest": {"allOf": [{"$ref": "https://schemas.aioe.local/aioe.network-topology.collection/v2#/$defs/targetManifest"}, {"required": ["profile_revision", "expires_at"], "properties": {"issued_at": {"pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"}, "expires_at": {"pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"}}}]}}}},
+  "examples": [{"code": 0, "data": {"target_manifest": {"manifest_id": "manifest-1", "manifest_hash": "sha256:b7be7adeb29da0638681f2eef908561ef9d451f9ce87771d909673370fc1e3cf", "collection_sequence": 1, "base_graph_revision": 0, "base_publication_revision": 0, "profile_revision": 1, "issued_at": "2026-07-28T00:00:00Z", "expires_at": "2026-07-28T00:05:00Z", "expected_resources": [{"resource_id": "synthetic-router-1", "capability_profile": "aioe.router.basic/v1", "required_kinds": ["system.identity", "interface.inventory"], "optional_kinds": []}]}}}]
+}

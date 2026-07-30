@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/l2.stp_summary/v1",
+  "x-max-bytes": 2097152,
+  "x-allowed-source-methods": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"],
+  "x-fact-planes": ["configured", "operational"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "l2.stp_summary"},
+        "source_method": {"enum": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"]},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/l2.stp_summary/v1"},
+        "fact_plane": {"enum": ["configured", "operational"]}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["instances"],
+            "properties": {
+              "instances": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["instance_id", "vlan_ids", "root_id", "local_role", "root_port", "state"],
+                  "properties": {
+                    "instance_id": {"type": "string", "minLength": 1},
+                    "vlan_ids": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 4094}, "uniqueItems": true},
+                    "root_id": {"type": "string", "minLength": 1},
+                    "local_role": {"enum": ["root", "designated", "alternate", "backup", "disabled", "unknown"]},
+                    "root_port": {"type": ["string", "null"]},
+                    "state": {"enum": ["forwarding", "learning", "blocking", "discarding", "disabled", "unknown"]}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "examples": [
+    {
+      "observation_id": "synthetic-switch-1:stp:1",
+      "kind": "l2.stp_summary",
+      "observation_status": "success",
+      "source_method": "snmp",
+      "content_type": "application/json",
+      "data_schema": "aioe.network-topology.observation/l2.stp_summary/v1",
+      "fact_plane": "operational",
+      "command_or_api": "synthetic STP API",
+      "observed_at": "2026-07-28T00:00:30Z",
+      "data": {"instances": []},
+      "raw_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "content_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

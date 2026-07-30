@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/overlay.tunnels/v1",
+  "x-max-bytes": 2097152,
+  "x-allowed-source-methods": ["cli", "netconf", "restconf", "gnmi", "vendor_api"],
+  "x-fact-planes": ["configured", "operational"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "overlay.tunnels"},
+        "source_method": {"enum": ["cli", "netconf", "restconf", "gnmi", "vendor_api"]},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/overlay.tunnels/v1"},
+        "fact_plane": {"enum": ["configured", "operational"]}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tunnels"],
+            "properties": {
+              "tunnels": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["tunnel_id", "tunnel_type", "context", "local_endpoint", "remote_endpoint", "interface", "protected_prefixes", "state"],
+                  "properties": {
+                    "tunnel_id": {"type": "string", "minLength": 1},
+                    "tunnel_type": {"enum": ["gre", "ipsec", "vpn", "sdwan", "other_registered"]},
+                    "context": {"type": "string", "minLength": 1},
+                    "local_endpoint": {"type": "string", "minLength": 1},
+                    "remote_endpoint": {"type": "string", "minLength": 1},
+                    "interface": {"type": ["string", "null"]},
+                    "protected_prefixes": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+                    "state": {"enum": ["up", "down", "unknown"]}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

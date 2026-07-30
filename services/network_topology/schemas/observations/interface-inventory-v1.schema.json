@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/interface.inventory/v1",
+  "x-max-bytes": 4194304,
+  "x-allowed-source-methods": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"],
+  "x-fact-planes": ["configured", "operational"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "interface.inventory"},
+        "source_method": {"enum": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"]},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/interface.inventory/v1"},
+        "fact_plane": {"enum": ["configured", "operational"]}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["interfaces"],
+            "properties": {
+              "interfaces": {
+                "type": "array",
+                "maxItems": 20000,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "raw_name", "interface_type", "admin_state", "oper_state", "addresses"],
+                  "properties": {
+                    "name": {"type": "string", "minLength": 1},
+                    "raw_name": {"type": "string", "minLength": 1},
+                    "if_index": {"type": ["integer", "null"], "minimum": 0},
+                    "interface_type": {"type": "string", "minLength": 1},
+                    "parent": {"type": ["string", "null"]},
+                    "lag_id": {"type": ["string", "null"]},
+                    "mac": {"type": ["string", "null"]},
+                    "admin_state": {"enum": ["up", "down", "unknown"]},
+                    "oper_state": {"enum": ["up", "down", "unknown"]},
+                    "speed_bps": {"type": ["integer", "null"], "minimum": 0},
+                    "mtu": {"type": ["integer", "null"], "minimum": 0},
+                    "vrf": {"type": ["string", "null"]},
+                    "zone": {"type": ["string", "null"]},
+                    "vlan_refs": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+                    "addresses": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["prefix", "role"],
+                        "properties": {
+                          "prefix": {"type": "string", "minLength": 1},
+                          "role": {"enum": ["primary", "secondary", "virtual", "management"]}
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

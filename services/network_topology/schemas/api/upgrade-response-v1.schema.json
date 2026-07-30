@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/upgrade-response/v1",
+  "type": "object", "additionalProperties": false, "required": ["code", "data"],
+  "properties": {"code": {"const": 0}, "data": {"type": "object", "additionalProperties": false, "required": ["upgrade_intent_id", "status", "expected_legacy_revision", "expires_at"], "properties": {"upgrade_intent_id": {"type": "string", "minLength": 1}, "status": {"const": "ACTIVE"}, "expected_legacy_revision": {"type": "integer", "minimum": 1}, "expires_at": {"type": "string", "format": "date-time"}}}},
+  "examples": [{"code": 0, "data": {"upgrade_intent_id": "upgrade-1", "status": "ACTIVE", "expected_legacy_revision": 3, "expires_at": "2026-07-28T01:00:00Z"}}]
+}

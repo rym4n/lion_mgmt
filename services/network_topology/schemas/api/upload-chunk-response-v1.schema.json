@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/upload-chunk-response/v1",
+  "type": "object", "additionalProperties": false, "required": ["code", "data"],
+  "properties": {"code": {"const": 0}, "data": {"type": "object", "additionalProperties": false, "required": ["upload_session_id", "observation_id", "status", "duplicate"], "properties": {"upload_session_id": {"type": "string", "minLength": 1}, "observation_id": {"type": "string", "minLength": 1}, "status": {"const": "ACCEPTED"}, "duplicate": {"type": "boolean"}}}},
+  "examples": [{"code": 0, "data": {"upload_session_id": "upload-1", "observation_id": "synthetic-router-1:identity:1", "status": "ACCEPTED", "duplicate": false}}]
+}

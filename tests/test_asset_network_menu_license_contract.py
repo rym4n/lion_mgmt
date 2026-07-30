@@ -406,7 +406,11 @@ def test_network_topology_installer_uses_crud_and_migrates_legacy_write_permissi
 
     assert (
         '["network_topology:c","network_topology:r",'
-        '"network_topology:u","network_topology:d"]'
+        '"network_topology:u","network_topology:d",'
+        '{"label":"同步拓扑","value":"network_topology:sync"},'
+        '{"label":"重新分析拓扑","value":"network_topology:reanalyze"},'
+        '{"label":"管理拓扑 Profile",'
+        '"value":"network_topology:profile_admin"}]'
     ) in menu_row
     assert "network_topology:w" not in menu_row
 

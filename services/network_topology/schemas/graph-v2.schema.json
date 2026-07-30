@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.graph/v2",
+  "$comment": "Entity refs are read-only deterministic projections. Canonical entities and relations remain single stored facts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "root_scope_id", "scopes", "entities", "relations"],
+  "properties": {
+    "schema_version": {"const": "aioe.network-topology.graph/v2"},
+    "root_scope_id": {"type": "string", "minLength": 1},
+    "scopes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/scope"}},
+    "entities": {"type": "array", "items": {"$ref": "#/$defs/entity"}},
+    "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}}
+  },
+  "$defs": {
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "parent_scope_id", "scope_type", "name", "summary", "provenance"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "parent_scope_id": {"type": ["string", "null"]},
+        "scope_type": {"enum": ["organization", "region", "site", "network_domain", "security_zone", "network_context", "sub_topology", "custom"]},
+        "name": {"type": "string", "minLength": 1},
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key_device_count", "network_segment_count", "child_scope_count", "cross_scope_relation_count"],
+          "properties": {
+            "key_device_count": {"type": "integer", "minimum": 0},
+            "network_segment_count": {"type": "integer", "minimum": 0},
+            "child_scope_count": {"type": "integer", "minimum": 0},
+            "cross_scope_relation_count": {"type": "integer", "minimum": 0}
+          }
+        },
+        "provenance": {"type": "array", "minItems": 1, "items": {"$ref": "https://schemas.aioe.local/aioe.network-topology.provenance/v1"}}
+      }
+    },
+    "entityAttributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "management_ip": {"type": "string"}, "vendor": {"type": "string"}, "model": {"type": "string"}, "serial": {"type": "string"},
+        "network_prefixes": {"type": "array", "items": {"type": "string"}},
+        "virtual_addresses": {"type": "array", "items": {"type": "string"}},
+        "protocols": {"type": "array", "items": {"type": "string"}},
+        "ports": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 65535}},
+        "boundary_type": {"type": "string"}
+      }
+    },
+    "serviceBoundaryAttributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boundary_type"],
+      "properties": {
+        "boundary_type": {"type": "string", "minLength": 1},
+        "network_prefixes": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "virtual_addresses": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "protocols": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "ports": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 65535}, "uniqueItems": true}
+      }
+    },
+    "serviceBoundaryDerivedProvenance": {
+      "allOf": [
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.provenance/v1#/$defs/derived"},
+        {
+          "anyOf": [
+            {"properties": {"rule_id": {"pattern": "^profile\\.(explicit_asset_exception|service_boundary_exception)/v[1-9][0-9]*$"}}},
+            {"required": ["manual_override_ref"]}
+          ]
+        }
+      ]
+    },
+    "serviceBoundaryProvenance": {
+      "oneOf": [
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.provenance/v1#/$defs/authoritative"},
+        {"$ref": "#/$defs/serviceBoundaryDerivedProvenance"}
+      ]
+    },
+    "logicalDependencyDerivedProvenance": {
+      "allOf": [
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.provenance/v1#/$defs/derived"},
+        {"required": ["manual_override_ref"]}
+      ]
+    },
+    "logicalDependencyProvenance": {
+      "oneOf": [
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.provenance/v1#/$defs/authoritative"},
+        {"$ref": "#/$defs/logicalDependencyDerivedProvenance"}
+      ]
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "scope_id", "scope_memberships", "kind", "name", "role", "representation", "importance", "importance_reasons", "attributes", "provenance"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "scope_id": {"type": "string", "minLength": 1},
+        "scope_memberships": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "kind": {"enum": ["device", "network_segment", "external", "service_boundary"]},
+        "name": {"type": "string", "minLength": 1},
+        "role": {"type": "string", "minLength": 1},
+        "representation": {"type": "string", "minLength": 1},
+        "importance": {"enum": ["critical", "important", "normal"]},
+        "importance_reasons": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "attributes": {"$ref": "#/$defs/entityAttributes"},
+        "provenance": {"type": "array", "minItems": 1, "items": {"$ref": "https://schemas.aioe.local/aioe.network-topology.provenance/v1"}}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "service_boundary"}}, "required": ["kind"]},
+          "then": {
+            "properties": {
+              "role": {"const": "service_boundary"},
+              "representation": {"const": "service_boundary"},
+              "importance_reasons": {"contains": {"const": "authoritative_profile_exception"}},
+              "attributes": {"$ref": "#/$defs/serviceBoundaryAttributes"},
+              "provenance": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"$ref": "#/$defs/serviceBoundaryProvenance"}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "relationEndpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref_type", "ref_id"],
+      "properties": {
+        "ref_type": {"enum": ["entity", "scope"]},
+        "ref_id": {"type": "string", "minLength": 1},
+        "attachment": {"type": "string"}
+      }
+    },
+    "multiEdgeIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoint_key", "layer", "relation_type", "attachment_key", "context_key"],
+      "properties": {
+        "endpoint_key": {"type": "string", "minLength": 1},
+        "layer": {"type": "string", "minLength": 1},
+        "relation_type": {"type": "string", "minLength": 1},
+        "attachment_key": {"type": "string"},
+        "context_key": {"type": "string"}
+      }
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "multi_edge_identity", "relation_type", "layer", "direction", "endpoints", "owner_scope_id", "attributes", "member_fact_ids", "member_relation_ids", "configured_state", "operational_state", "provenance"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "multi_edge_identity": {"$ref": "#/$defs/multiEdgeIdentity"},
+        "relation_type": {"enum": ["physical_link", "l2_trunk", "l3_connectivity", "routing_adjacency", "security_boundary", "wan_connection", "tunnel", "gateway_for", "collapsed_path", "aggregated_connectivity", "logical_dependency", "service_boundary"]},
+        "layer": {"enum": ["physical", "l2", "l3", "routing", "security", "overlay", "service"]},
+        "direction": {"enum": ["bidirectional", "unidirectional"]},
+        "endpoints": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/$defs/relationEndpoint"}},
+        "owner_scope_id": {"type": "string", "minLength": 1},
+        "attributes": {"type": "object"},
+        "member_fact_ids": {"type": "array", "items": {"type": "string"}},
+        "member_relation_ids": {"type": "array", "items": {"type": "string"}},
+        "configured_state": {"enum": ["present", "absent", "unknown"]},
+        "operational_state": {"enum": ["up", "down", "degraded", "unknown"]},
+        "provenance": {"type": "array", "minItems": 1, "items": {"$ref": "https://schemas.aioe.local/aioe.network-topology.provenance/v1"}}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"relation_type": {"const": "logical_dependency"}}, "required": ["relation_type"]},
+          "then": {
+            "properties": {
+              "provenance": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"$ref": "#/$defs/logicalDependencyProvenance"}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "entityRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "scope_id", "canonical_entity_id", "read_only"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^entity-ref:"},
+        "scope_id": {"type": "string", "minLength": 1},
+        "canonical_entity_id": {"type": "string", "minLength": 1},
+        "read_only": {"const": true}
+      },
+      "not": {"anyOf": [{"required": ["provenance"]}, {"required": ["attributes"]}]}
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "aioe.network-topology.graph/v2",
+      "root_scope_id": "scope:organization:root",
+      "scopes": [
+        {
+          "id": "scope:organization:root", "parent_scope_id": null, "scope_type": "organization", "name": "Synthetic Organization",
+          "summary": {"key_device_count": 0, "network_segment_count": 0, "child_scope_count": 0, "cross_scope_relation_count": 0},
+          "provenance": [{"type": "derived", "rule_id": "profile.root/v1", "profile_revision": 1, "member_ids": ["synthetic-snapshot-1"]}]
+        }
+      ],
+      "entities": [], "relations": []
+    }
+  ]
+}

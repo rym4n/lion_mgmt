@@ -1,469 +1,83 @@
 # coding=utf-8
 
 from datetime import datetime
-import hashlib
-import math
 
-import orjson
-from sanic import Blueprint, json as sanic_json
+from sanic import Blueprint
 from sanic.request import Request
 from sanic_ext import openapi
-from tortoise.expressions import RawSQL
+from tortoise.expressions import Q, RawSQL
 from tortoise.functions import Count
 from tortoise.transactions import in_transaction
 
+import settings
 from core.response import response_ok
 from libs.security.authorization import check_permissions, requires_permission
 from libs.utils import strip_timezone_to_seconds
 from models.network_topology import NetworkTopology, NetworkTopologyVersion
+from services.network_topology import analysis_runs
+from services.network_topology import compatibility_manager as compatibility
+from services.network_topology import config_sync_views
+from services.network_topology import manifest as topology_manifest
 from services.network_topology.analyzer import analyze_topology
-from settings import TZ
+from services.network_topology.graph_helpers import (
+    _SNAPSHOT_SCHEMA,
+    _config_sync_shape,
+    _normalize_graph,
+    _normalize_layout,
+    _parse_layout_request,
+    _parse_pagination,
+    _parse_revision,
+    _parse_topology_id,
+    _parse_topology_name,
+    _require_topology_node,
+    _source_config,
+    _validate_snapshot_shape,
+)
+from services.network_topology.manifest_request import (
+    _ManifestRequestError,
+    _analysis_error_response,
+    _manifest_error_response,
+    _manifest_request_data,
+)
+from services.network_topology.view_helpers import (
+    _actor_id,
+    _build_change_summary,
+    _capabilities,
+    _compatibility_error,
+    _err,
+    _legacy_write_error,
+    _name_exists,
+    _request_data,
+    _tenant_id,
+    _tenant_topology,
+    _topology_payload,
+    _topology_state,
+    _v2_view_disabled,
+    _version_generation_source,
+)
 
 topology_bp = Blueprint("network_topology", url_prefix="/network-topology")
 __all__ = ["topology_bp"]
 
-_MAX_LAYOUT_NODES = 2000
-_MAX_GRAPH_EDGES = 10000
-_MAX_LAYOUT_COORDINATE = 10_000_000
-_MAX_GRAPH_BYTES = 8 * 1024 * 1024
-_MAX_GRAPH_DEPTH = 8
-_MAX_COLLECTION_ITEMS = 10000
-_MAX_OBJECT_FIELDS = 200
-_MAX_STRING_LENGTH = 2 * 1024 * 1024
-_MAX_GRAPH_ID_LENGTH = 200
-_MAX_SOURCE_CONFIG_BYTES = 8 * 1024 * 1024
+_DEFAULT_TOPOLOGY_GRAPH = compatibility.DEFAULT_TOPOLOGY_GRAPH
+_DEFAULT_TOPOLOGY_LAYOUT = compatibility.DEFAULT_TOPOLOGY_LAYOUT
 
-_DEFAULT_TOPOLOGY_NODE = {
-    "id": "node-1",
-    "type": "process",
-    "position": {"x": 0.0, "y": 0.0},
-    "data": {
-        "title": "新节点",
-        "deviceType": "switch",
-        "icon": "switch",
-        "ip": "",
-        "model": "",
-        "version": "",
-        "status": "",
-        "statusColor": "#42B983",
-        "isGroup": False,
-        "customFields": {},
-    },
-}
-_DEFAULT_TOPOLOGY_GRAPH = {"nodes": [_DEFAULT_TOPOLOGY_NODE], "edges": []}
-_DEFAULT_TOPOLOGY_LAYOUT = {"node-1": {"x": 0.0, "y": 0.0}}
-
-
-def _err(message: str, status: int = 400):
-    return sanic_json(
-        {"code": 4000, "message": message}, status=status, dumps=orjson.dumps
-    )
-
-
-def _request_data(request: Request) -> dict:
-    data = request.json or {}
-    if not isinstance(data, dict):
-        raise ValueError("请求参数必须是对象")
-    return data
-
-
-def _tenant_id(request: Request) -> str:
-    tenant_id = request.ctx.session.get("tenant_id")
-    if not tenant_id:
-        raise ValueError("租户不存在")
-    return tenant_id
-
-
-def _parse_pagination(data: dict) -> tuple[int, int]:
-    try:
-        page = max(int(data.get("page", 1)), 1)
-        page_size = min(max(int(data.get("page_size", 15)), 1), 100)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("分页参数不合法") from exc
-    return page, page_size
-
-
-def _parse_topology_name(data: dict, *, required: bool = True) -> str | None:
-    if "name" not in data and not required:
-        return None
-    name = str(data.get("name") or "").strip()
-    if not name:
-        raise ValueError("拓扑名称不能为空")
-    if len(name) > 200:
-        raise ValueError("拓扑名称不能超过 200 个字符")
-    return name
-
-
-def _parse_topology_id(data: dict) -> str:
-    raw_id = data.get("id") or data.get("topology_id")
-    if not isinstance(raw_id, str) or not raw_id.strip():
-        raise ValueError("拓扑ID不能为空")
-    return raw_id.strip()
-
-
-def _parse_revision(value, *, required: bool = True) -> int | None:
-    if value is None and not required:
-        return None
-    try:
-        if isinstance(value, bool):
-            raise ValueError
-        revision = int(value)
-        if revision < 1:
-            raise ValueError
-    except (TypeError, ValueError) as exc:
-        raise ValueError("拓扑版本不合法") from exc
-    return revision
-
-
-def _normalize_bounded_json(value, *, path: str, depth: int = 0):
-    if depth > _MAX_GRAPH_DEPTH:
-        raise ValueError(f"{path} 嵌套层级过深")
-    if value is None or isinstance(value, (str, bool, int)):
-        if isinstance(value, str) and len(value) > _MAX_STRING_LENGTH:
-            raise ValueError(f"{path} 文本过长")
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise ValueError(f"{path} 数值必须是有限数字")
-        return value
-    if isinstance(value, list):
-        if len(value) > _MAX_COLLECTION_ITEMS:
-            raise ValueError(f"{path} 数组元素过多")
-        return [
-            _normalize_bounded_json(
-                item,
-                path=f"{path}[{index}]",
-                depth=depth + 1,
-            )
-            for index, item in enumerate(value)
-        ]
-    if isinstance(value, dict):
-        if len(value) > _MAX_OBJECT_FIELDS:
-            raise ValueError(f"{path} 对象字段过多")
-        normalized = {}
-        for key, item in value.items():
-            if not isinstance(key, str) or not key or len(key) > _MAX_GRAPH_ID_LENGTH:
-                raise ValueError(f"{path} 包含不合法的字段名")
-            normalized[key] = _normalize_bounded_json(
-                item,
-                path=f"{path}.{key}",
-                depth=depth + 1,
-            )
-        return normalized
-    raise ValueError(f"{path} 包含不支持的数据类型")
-
-
-def _normalize_graph_identifier(value, *, label: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"{label} 必须是字符串")
-    identifier = value.strip()
-    if not identifier:
-        raise ValueError(f"{label} 不能为空")
-    if len(identifier) > _MAX_GRAPH_ID_LENGTH:
-        raise ValueError(f"{label} 不能超过 {_MAX_GRAPH_ID_LENGTH} 个字符")
-    return identifier
-
-
-def _normalize_position(value, *, label: str) -> dict | None:
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        raise ValueError(f"{label} 的坐标格式错误")
-    x = value.get("x")
-    y = value.get("y")
-    if (
-        isinstance(x, bool)
-        or isinstance(y, bool)
-        or not isinstance(x, (int, float))
-        or not isinstance(y, (int, float))
-    ):
-        raise ValueError(f"{label} 的坐标必须是数字")
-    x_value = float(x)
-    y_value = float(y)
-    if (
-        not math.isfinite(x_value)
-        or not math.isfinite(y_value)
-        or abs(x_value) > _MAX_LAYOUT_COORDINATE
-        or abs(y_value) > _MAX_LAYOUT_COORDINATE
-    ):
-        raise ValueError(f"{label} 的坐标超出有效范围")
-    return {"x": x_value, "y": y_value}
-
-
-def _normalize_layout(layout_json: dict, topology_json: dict) -> dict:
-    if not isinstance(layout_json, dict):
-        raise ValueError("layout_json 必须是对象")
-    nodes = topology_json.get("nodes", [])
-    if len(nodes) > _MAX_LAYOUT_NODES or len(layout_json) > _MAX_LAYOUT_NODES:
-        raise ValueError(f"拓扑节点不能超过 {_MAX_LAYOUT_NODES} 个")
-    node_ids = {str(node.get("id") or "").strip() for node in nodes}
-    if set(layout_json) != node_ids:
-        raise ValueError("布局节点与当前拓扑不一致，请重新打开拓扑后重试")
-    normalized_layout = {}
-    for node_id, position in layout_json.items():
-        normalized_position = _normalize_position(position, label=f"节点 {node_id}")
-        if normalized_position is None:
-            raise ValueError(f"节点 {node_id} 的坐标不能为空")
-        normalized_layout[node_id] = normalized_position
-    return normalized_layout
-
-
-def _layout_for_graph(
-    nodes: list[dict],
-    layout_json: dict | None,
-    fallback_layout: dict | None,
-) -> dict:
-    node_ids = [node["id"] for node in nodes]
-    if layout_json is not None:
-        return _normalize_layout(layout_json, {"nodes": nodes})
-
-    fallback_layout = fallback_layout if isinstance(fallback_layout, dict) else {}
-    layout = {}
-    for index, node in enumerate(nodes):
-        node_id = node_ids[index]
-        position = _normalize_position(node.get("position"), label=f"节点 {node_id}")
-        if position is None and node_id in fallback_layout:
-            position = _normalize_position(
-                fallback_layout[node_id], label=f"节点 {node_id}"
-            )
-        layout[node_id] = position or {
-            "x": float((index % 6) * 300),
-            "y": float((index // 6) * 150),
-        }
-    return layout
-
-
-def _normalize_graph(
-    topology_json: dict,
-    layout_json: dict | None = None,
-    *,
-    fallback_layout: dict | None = None,
-) -> tuple[dict, dict]:
-    if not isinstance(topology_json, dict):
-        raise ValueError("topology_json 必须是对象")
-    bounded_graph = _normalize_bounded_json(topology_json, path="topology_json")
-    nodes = bounded_graph.get("nodes")
-    edges = bounded_graph.get("edges")
-    if not isinstance(nodes, list) or not isinstance(edges, list):
-        raise ValueError("topology_json 必须包含 nodes 和 edges 数组")
-    if len(nodes) > _MAX_LAYOUT_NODES:
-        raise ValueError(f"拓扑节点不能超过 {_MAX_LAYOUT_NODES} 个")
-    if len(edges) > _MAX_GRAPH_EDGES:
-        raise ValueError(f"拓扑连线不能超过 {_MAX_GRAPH_EDGES} 条")
-
-    normalized_nodes = []
-    node_ids = set()
-    for index, raw_node in enumerate(nodes):
-        if not isinstance(raw_node, dict):
-            raise ValueError(f"第 {index + 1} 个拓扑节点必须是对象")
-        node = dict(raw_node)
-        node_id = _normalize_graph_identifier(
-            node.get("id"), label=f"第 {index + 1} 个拓扑节点ID"
-        )
-        if node_id in node_ids:
-            raise ValueError(f"拓扑节点ID重复：{node_id}")
-        if "data" in node and not isinstance(node["data"], dict):
-            raise ValueError(f"节点 {node_id} 的 data 必须是对象")
-        node["id"] = node_id
-        node_ids.add(node_id)
-        normalized_nodes.append(node)
-
-    normalized_edges = []
-    edge_ids = set()
-    link_identities = set()
-    for index, raw_edge in enumerate(edges):
-        if not isinstance(raw_edge, dict):
-            raise ValueError(f"第 {index + 1} 条拓扑连线必须是对象")
-        edge = dict(raw_edge)
-        edge_id = _normalize_graph_identifier(
-            edge.get("id"), label=f"第 {index + 1} 条拓扑连线ID"
-        )
-        source = _normalize_graph_identifier(
-            edge.get("source"), label=f"连线 {edge_id} 的 source"
-        )
-        target = _normalize_graph_identifier(
-            edge.get("target"), label=f"连线 {edge_id} 的 target"
-        )
-        if edge_id in edge_ids:
-            raise ValueError(f"拓扑连线ID重复：{edge_id}")
-        if source not in node_ids or target not in node_ids:
-            raise ValueError(f"连线 {edge_id} 引用了不存在的拓扑节点")
-        if source == target:
-            raise ValueError(f"连线 {edge_id} 不能连接同一个拓扑节点")
-        link_identity = tuple(sorted((source, target)))
-        if link_identity in link_identities:
-            raise ValueError(f"拓扑连线重复：{source} <-> {target}")
-        if (
-            "data" in edge
-            and edge["data"] is not None
-            and not isinstance(edge["data"], dict)
-        ):
-            raise ValueError(f"连线 {edge_id} 的 data 必须是对象")
-        edge.update({"id": edge_id, "source": source, "target": target})
-        edge_ids.add(edge_id)
-        link_identities.add(link_identity)
-        normalized_edges.append(edge)
-
-    normalized_layout = _layout_for_graph(
-        normalized_nodes, layout_json, fallback_layout
-    )
-    for node in normalized_nodes:
-        node["position"] = normalized_layout[node["id"]]
-    normalized_graph = {"nodes": normalized_nodes, "edges": normalized_edges}
-    graph_size = len(orjson.dumps(normalized_graph)) + len(
-        orjson.dumps(normalized_layout)
-    )
-    if graph_size > _MAX_GRAPH_BYTES:
-        raise ValueError("拓扑图数据过大")
-    return normalized_graph, normalized_layout
-
-
-def _require_topology_node(topology_json: dict) -> None:
-    if not topology_json["nodes"]:
-        raise ValueError("拓扑图至少需要一个节点")
-
-
-def _source_config(data: dict) -> tuple[str, str]:
-    sentinel = object()
-    raw_config = sentinel
-    for key in (
-        "config",
-        "source_config",
-        "device_config",
-        "configs",
-        "device_configs",
-    ):
-        if key in data:
-            raw_config = data[key]
-            break
-    if raw_config is sentinel:
-        raise ValueError("设备配置不能为空")
-    normalized = _normalize_bounded_json(raw_config, path="config")
-    if isinstance(normalized, str):
-        config_text = normalized.strip()
-        canonical = config_text.encode("utf-8")
-    else:
-        canonical = orjson.dumps(normalized, option=orjson.OPT_SORT_KEYS)
-        config_text = orjson.dumps(
-            normalized, option=orjson.OPT_INDENT_2 | orjson.OPT_SORT_KEYS
-        ).decode("utf-8")
-    if not config_text:
-        raise ValueError("设备配置不能为空")
-    if len(canonical) > _MAX_SOURCE_CONFIG_BYTES:
-        raise ValueError("设备配置数据过大")
-    return config_text, hashlib.sha256(canonical).hexdigest()
-
-
-async def _tenant_topology(
-    topology_id: str,
-    tenant_id: str,
-    *,
-    connection=None,
-    lock: bool = False,
-):
-    query = NetworkTopology.filter(id=topology_id, deleted=False, tenant_id=tenant_id)
-    if connection is not None:
-        query = query.using_db(connection)
-    if lock:
-        query = query.select_for_update()
-    return await query.first()
-
-
-async def _name_exists(
-    name: str, tenant_id: str, *, exclude_id: str | None = None, connection=None
-) -> bool:
-    query = NetworkTopology.filter(name=name, deleted=False, tenant_id=tenant_id)
-    if exclude_id:
-        query = query.exclude(id=exclude_id)
-    if connection is not None:
-        query = query.using_db(connection)
-    return await query.exists()
-
-
-def _topology_state(topology: NetworkTopology) -> dict:
-    return {
-        "name": topology.name,
-        "topology_json": topology.topology_json or {"nodes": [], "edges": []},
-        "layout_json": topology.layout_json or {},
-        "source_hash": topology.source_hash,
+_DYNAMIC_SETTING_NAMES = frozenset(
+    {
+        "TOPOLOGY_LEGACY_SYNC_ENABLED",
+        "TOPOLOGY_V2_ANALYSIS_ENABLED",
+        "TOPOLOGY_V2_INGRESS_ENABLED",
+        "TOPOLOGY_V2_PRESENTATION_WRITE_ENABLED",
+        "TOPOLOGY_V2_PUBLISH_ENABLED",
+        "TOPOLOGY_V2_VIEW_ENABLED",
     }
+)
 
 
-def _graph_items_by_id(graph: dict, key: str, *, ignore_position: bool = False) -> dict:
-    result = {}
-    for item in graph.get(key, []):
-        if not isinstance(item, dict):
-            continue
-        item_id = str(item.get("id") or "").strip()
-        if not item_id:
-            continue
-        value = dict(item)
-        if ignore_position:
-            value.pop("position", None)
-        result[item_id] = value
-    return result
-
-
-def _build_change_summary(
-    before: dict | None,
-    after: dict,
-    *,
-    change_type: str,
-) -> str:
-    before_graph = (before or {}).get("topology_json") or {"nodes": [], "edges": []}
-    after_graph = after.get("topology_json") or {"nodes": [], "edges": []}
-    parts = []
-
-    if before is not None and before.get("name") != after.get("name"):
-        parts.append("名称变更")
-
-    labels = (("nodes", "节点", True), ("edges", "连线", False))
-    for key, label, ignore_position in labels:
-        before_items = _graph_items_by_id(
-            before_graph, key, ignore_position=ignore_position
-        )
-        after_items = _graph_items_by_id(
-            after_graph, key, ignore_position=ignore_position
-        )
-        before_ids = set(before_items)
-        after_ids = set(after_items)
-        added = len(after_ids - before_ids)
-        removed = len(before_ids - after_ids)
-        modified = sum(
-            before_items[item_id] != after_items[item_id]
-            for item_id in before_ids & after_ids
-        )
-        if added:
-            parts.append(f"新增{label} {added} 个")
-        if removed:
-            parts.append(f"删除{label} {removed} 个")
-        if modified:
-            parts.append(f"修改{label} {modified} 个")
-
-    if before is not None:
-        before_layout = before.get("layout_json") or {}
-        after_layout = after.get("layout_json") or {}
-        common_node_ids = set(_graph_items_by_id(before_graph, "nodes")) & set(
-            _graph_items_by_id(after_graph, "nodes")
-        )
-        adjusted = sum(
-            before_layout.get(node_id) != after_layout.get(node_id)
-            for node_id in common_node_ids
-        )
-        if adjusted:
-            parts.append(f"调整 {adjusted} 个节点布局")
-        if before.get("source_hash") != after.get("source_hash"):
-            parts.append("设备配置已同步")
-
-    if parts:
-        return "；".join(parts)
-    return {
-        "create": "创建拓扑",
-        "manual_save": "手动保存拓扑",
-        "update": "更新拓扑",
-        "config_sync": "同步设备配置",
-        "layout": "保存拓扑布局",
-    }.get(change_type, "拓扑已更新")
+def __getattr__(name: str):
+    if name in _DYNAMIC_SETTING_NAMES:
+        return getattr(settings, name)
+    raise AttributeError(name)
 
 
 async def _append_topology_version(
@@ -474,7 +88,7 @@ async def _append_topology_version(
     before: dict | None,
 ) -> NetworkTopologyVersion:
     after = _topology_state(topology)
-    return await NetworkTopologyVersion.create(
+    version = await NetworkTopologyVersion.create(
         using_db=connection,
         topology=topology,
         version=topology.revision,
@@ -488,8 +102,15 @@ async def _append_topology_version(
             after,
             change_type=change_type,
         ),
+        document_schema_version=getattr(topology, "document_schema_version", None),
         tenant_id=topology.tenant_id,
     )
+    pointer_fields = compatibility.bind_current_legacy_version(topology, version)
+    await topology.save(
+        using_db=connection,
+        update_fields=[*pointer_fields, "utime"],
+    )
+    return version
 
 
 async def _save_graph(request: Request):
@@ -510,27 +131,17 @@ async def _save_graph(request: Request):
         request, "network_topology:u" if topology_id else "network_topology:c"
     )
     if not topology_id:
-        async with in_transaction() as connection:
-            if await _name_exists(name, tenant_id, connection=connection):
-                return _err("拓扑名称已存在")
-            topology = await NetworkTopology.create(
-                using_db=connection,
+        try:
+            result = await compatibility.create_compatible_topology(
+                tenant_id=tenant_id,
                 name=name,
-                source_config="",
+                created_by=_actor_id(request),
                 topology_json=topology_json,
                 layout_json=layout_json,
-                source_hash=None,
-                revision=1,
-                last_sync_at=None,
-                tenant_id=tenant_id,
             )
-            await _append_topology_version(
-                connection,
-                topology,
-                change_type="create",
-                before=None,
-            )
-        return response_ok(topology.json)
+        except compatibility.CompatibilityError as exc:
+            return _compatibility_error(exc)
+        return response_ok(result.topology.json)
 
     try:
         expected_revision = _parse_revision(data.get("revision"))
@@ -542,6 +153,8 @@ async def _save_graph(request: Request):
         )
         if not topology:
             return _err("拓扑数据不存在", status=404)
+        if write_error := _legacy_write_error(topology):
+            return write_error
         if topology.revision != expected_revision:
             return _err("拓扑已被更新，请重新打开后保存", status=409)
         if await _name_exists(
@@ -553,6 +166,7 @@ async def _save_graph(request: Request):
         topology.topology_json = topology_json
         topology.layout_json = layout_json
         topology.revision += 1
+        revision_fields = compatibility.apply_legacy_write_revision(topology)
         await topology.save(
             using_db=connection,
             update_fields=[
@@ -560,6 +174,7 @@ async def _save_graph(request: Request):
                 "topology_json",
                 "layout_json",
                 "revision",
+                *revision_fields,
                 "utime",
             ],
         )
@@ -587,41 +202,25 @@ async def create_topology(request: Request):
         data = _request_data(request)
         tenant_id = _tenant_id(request)
         name = _parse_topology_name(data)
-        uses_default_graph = "topology_json" not in data
-        topology_input = (
-            _DEFAULT_TOPOLOGY_GRAPH if uses_default_graph else data["topology_json"]
-        )
-        layout_input = data.get("layout_json")
-        if uses_default_graph and "layout_json" not in data:
-            layout_input = _DEFAULT_TOPOLOGY_LAYOUT
-        topology_json, layout_json = _normalize_graph(
-            topology_input,
-            layout_input,
-        )
-        _require_topology_node(topology_json)
+        topology_json = layout_json = None
+        if "topology_json" in data or "layout_json" in data:
+            topology_json, layout_json = _normalize_graph(
+                data.get("topology_json"), data.get("layout_json")
+            )
+            _require_topology_node(topology_json)
     except ValueError as exc:
         return _err(str(exc))
-    async with in_transaction() as connection:
-        if await _name_exists(name, tenant_id, connection=connection):
-            return _err("拓扑名称已存在")
-        topology = await NetworkTopology.create(
-            using_db=connection,
+    try:
+        result = await compatibility.create_compatible_topology(
+            tenant_id=tenant_id,
             name=name,
-            source_config="",
+            created_by=_actor_id(request),
             topology_json=topology_json,
             layout_json=layout_json,
-            source_hash=None,
-            revision=1,
-            last_sync_at=None,
-            tenant_id=tenant_id,
         )
-        await _append_topology_version(
-            connection,
-            topology,
-            change_type="create",
-            before=None,
-        )
-    return response_ok(topology.json)
+    except compatibility.CompatibilityError as exc:
+        return _compatibility_error(exc)
+    return response_ok(result.topology.json)
 
 
 @topology_bp.post("/update")
@@ -643,6 +242,10 @@ async def update_topology(request: Request):
         )
         if not topology:
             return _err("拓扑数据不存在", status=404)
+        try:
+            compatibility.require_legacy_write_allowed(topology)
+        except compatibility.CompatibilityError as exc:
+            return _compatibility_error(exc)
         if topology.revision != expected_revision:
             return _err("拓扑已被更新，请重新打开后保存", status=409)
         if name and await _name_exists(
@@ -679,6 +282,7 @@ async def update_topology(request: Request):
         if len(update_fields) == 2:
             return _err("没有可更新的数据")
         topology.revision += 1
+        update_fields.extend(compatibility.apply_legacy_write_revision(topology))
         await topology.save(
             using_db=connection,
             update_fields=list(dict.fromkeys(update_fields)),
@@ -692,30 +296,47 @@ async def update_topology(request: Request):
     return response_ok(topology.json)
 
 
-@topology_bp.post("/config-sync")
-@openapi.definition(
-    summary="写入设备配置并更新网络拓扑",
-    description="由剧本在完成设备配置采集后调用；本接口只负责解析、存储和渲染数据。",
-)
-@requires_permission("network_topology:u")
-async def sync_topology_config(request: Request):
+async def _sync_v2_topology_snapshot(
+    request, data=None, tenant_id=None, topology_id=None
+):
+    await check_permissions(request, "network_topology:sync")
+    if not settings.TOPOLOGY_V2_INGRESS_ENABLED:
+        return _err("v2 拓扑同步入口未启用", status=503)
     try:
-        data = _request_data(request)
-        tenant_id = _tenant_id(request)
-        topology_id = _parse_topology_id(data)
+        if data is None:
+            data = _request_data(request)
+            tenant_id = _tenant_id(request)
+            topology_id = _parse_topology_id(data)
+            _config_sync_shape(data)
+        _validate_snapshot_shape(data)
+    except ValueError as exc:
+        return _err(str(exc))
+    topology = await _tenant_topology(topology_id, tenant_id)
+    if not topology:
+        return _err("拓扑数据不存在", status=404)
+    return _err("v2 快照同步处理尚未启用", status=503)
+
+
+async def _sync_legacy_topology_config(request, data, tenant_id, topology_id):
+    await check_permissions(request, "network_topology:u")
+    if not settings.TOPOLOGY_LEGACY_SYNC_ENABLED:
+        return _err("legacy 拓扑同步入口已关闭", status=503)
+    try:
         expected_revision = _parse_revision(data.get("revision"), required=False)
         config_text, source_hash = _source_config(data)
     except ValueError as exc:
         return _err(str(exc))
-
     topology = await _tenant_topology(topology_id, tenant_id)
     if not topology:
         return _err("拓扑数据不存在", status=404)
+    try:
+        compatibility.require_legacy_write_allowed(topology)
+    except compatibility.CompatibilityError as exc:
+        return _compatibility_error(exc)
     if expected_revision is not None and topology.revision != expected_revision:
         return _err("拓扑已被更新，请重新获取后同步", status=409)
     if topology.source_hash == source_hash and data.get("force") is not True:
-        return response_ok({**topology.json, "changed": False})
-
+        return response_ok({**topology.json, "changed": False, "deprecated": True})
     base_revision = topology.revision
     try:
         analyzed_graph = await analyze_topology(config_text, tenant_id=tenant_id)
@@ -724,22 +345,40 @@ async def sync_topology_config(request: Request):
         )
     except (RuntimeError, ValueError) as exc:
         return _err(f"设备配置解析失败：{exc}", status=422)
+    return await _commit_legacy_config_sync(
+        tenant_id,
+        topology_id,
+        base_revision,
+        config_text,
+        source_hash,
+        topology_json,
+        layout_json,
+    )
 
+
+async def _commit_legacy_config_sync(
+    tenant_id, topology_id, base_revision, config_text, source_hash, graph, layout
+):
     async with in_transaction() as connection:
         topology = await _tenant_topology(
             topology_id, tenant_id, connection=connection, lock=True
         )
         if not topology:
             return _err("拓扑数据不存在", status=404)
+        try:
+            compatibility.require_legacy_write_allowed(topology)
+        except compatibility.CompatibilityError as exc:
+            return _compatibility_error(exc)
         if topology.revision != base_revision:
             return _err("拓扑在解析期间已被更新，请重试", status=409)
         before = _topology_state(topology)
         topology.source_config = config_text
         topology.source_hash = source_hash
-        topology.topology_json = topology_json
-        topology.layout_json = layout_json
-        topology.last_sync_at = datetime.now(TZ)
+        topology.topology_json = graph
+        topology.layout_json = layout
+        topology.last_sync_at = datetime.now(settings.TZ)
         topology.revision += 1
+        revision_fields = compatibility.apply_legacy_write_revision(topology)
         await topology.save(
             using_db=connection,
             update_fields=[
@@ -749,6 +388,7 @@ async def sync_topology_config(request: Request):
                 "layout_json",
                 "last_sync_at",
                 "revision",
+                *revision_fields,
                 "utime",
             ],
         )
@@ -758,7 +398,76 @@ async def sync_topology_config(request: Request):
             change_type="config_sync",
             before=before,
         )
-    return response_ok({**topology.json, "changed": True})
+    return response_ok({**topology.json, "changed": True, "deprecated": True})
+
+
+@topology_bp.post("/config-sync/manifest")
+@requires_permission("network_topology:sync")
+async def issue_topology_manifest(request: Request):
+    return await config_sync_views.issue_topology_manifest(
+        request,
+        topology_manifest=topology_manifest,
+        parse_request=_manifest_request_data,
+        request_error_type=_ManifestRequestError,
+        error_response=_manifest_error_response,
+        response_ok=response_ok,
+    )
+
+
+@topology_bp.post("/config-sync/status")
+@requires_permission("network_topology:sync", "network_topology:reanalyze")
+async def analysis_status(request: Request):
+    return await config_sync_views.analysis_status(
+        request,
+        analysis_runs=analysis_runs,
+        tenant_id=_tenant_id,
+        error_response=_analysis_error_response,
+        response_ok=response_ok,
+    )
+
+
+@topology_bp.post("/config-sync/reanalyze")
+@requires_permission("network_topology:reanalyze")
+async def reanalyze_snapshot(request: Request):
+    return await config_sync_views.reanalyze_snapshot(
+        request,
+        analysis_runs=analysis_runs,
+        tenant_id=_tenant_id,
+        actor_id=_actor_id,
+        error_response=_analysis_error_response,
+    )
+
+
+@topology_bp.post("/config-sync/cancel")
+@requires_permission("network_topology:sync", "network_topology:reanalyze")
+async def cancel_analysis(request: Request):
+    return await config_sync_views.cancel_analysis(
+        request,
+        analysis_runs=analysis_runs,
+        tenant_id=_tenant_id,
+        actor_id=_actor_id,
+        error_response=_analysis_error_response,
+        response_ok=response_ok,
+    )
+
+
+@topology_bp.post("/config-sync")
+@openapi.definition(
+    summary="写入设备配置并更新网络拓扑",
+    description="由剧本在完成设备配置采集后调用；本接口只负责解析、存储和渲染数据。",
+)
+@requires_permission("network_topology:u", "network_topology:sync")
+async def sync_topology_config(request: Request):
+    try:
+        data = _request_data(request)
+        tenant_id = _tenant_id(request)
+        topology_id = _parse_topology_id(data)
+        shape = _config_sync_shape(data)
+    except ValueError as exc:
+        return _err(str(exc))
+    if shape == "snapshot":
+        return await _sync_v2_topology_snapshot(request, data, tenant_id, topology_id)
+    return await _sync_legacy_topology_config(request, data, tenant_id, topology_id)
 
 
 @topology_bp.post("/list")
@@ -772,6 +481,11 @@ async def list_topology(request: Request):
     except ValueError as exc:
         return _err(str(exc))
     queryset = NetworkTopology.filter(deleted=False, tenant_id=tenant_id)
+    if not settings.TOPOLOGY_V2_VIEW_ENABLED:
+        queryset = queryset.filter(
+            Q(document_schema_version__isnull=True)
+            | ~Q(document_schema_version=compatibility.V2_SCHEMA_VERSION)
+        )
     name = str(data.get("name") or "").strip()
     if name:
         queryset = queryset.filter(name__icontains=name)
@@ -796,6 +510,8 @@ async def list_topology(request: Request):
             "node_count",
             "edge_count",
             "revision",
+            "document_schema_version",
+            "generation_source",
             "last_sync_at",
             "ctime",
             "utime",
@@ -819,6 +535,7 @@ async def list_topology(request: Request):
         }
     for item in item_data:
         item["version_count"] = version_count_by_topology.get(item["id"], 0)
+        item["capabilities"] = _capabilities(item)
         for field in ("last_sync_at", "ctime", "utime"):
             item[field] = strip_timezone_to_seconds(item.get(field))
     return response_ok(
@@ -844,7 +561,9 @@ async def get_topology(request: Request):
     topology = await _tenant_topology(topology_id, tenant_id)
     if not topology:
         return _err("拓扑数据不存在", status=404)
-    return response_ok(topology.json)
+    if _v2_view_disabled(topology):
+        return _err("v2 拓扑查看入口未启用", status=503)
+    return response_ok(_topology_payload(topology))
 
 
 @topology_bp.post("/versions")
@@ -860,6 +579,8 @@ async def list_topology_versions(request: Request):
     topology = await _tenant_topology(topology_id, tenant_id)
     if not topology:
         return _err("拓扑数据不存在", status=404)
+    if _v2_view_disabled(topology):
+        return _err("v2 拓扑查看入口未启用", status=503)
 
     versions = await (
         NetworkTopologyVersion.filter(
@@ -882,6 +603,7 @@ async def list_topology_versions(request: Request):
             "id",
             "topology_id",
             "version",
+            "document_schema_version",
             "change_type",
             "change_summary",
             "node_count",
@@ -891,6 +613,9 @@ async def list_topology_versions(request: Request):
     )
     for item in versions:
         item["version_id"] = item["id"]
+        item["generation_source"] = _version_generation_source(
+            item.get("document_schema_version")
+        )
         item["ctime"] = strip_timezone_to_seconds(item.get("ctime"))
     return response_ok(versions)
 
@@ -912,6 +637,8 @@ async def get_topology_version_detail(request: Request):
     topology = await _tenant_topology(topology_id, tenant_id)
     if not topology:
         return _err("拓扑数据不存在", status=404)
+    if _v2_view_disabled(topology):
+        return _err("v2 拓扑查看入口未启用", status=503)
 
     version = await NetworkTopologyVersion.filter(
         id=version_id,
@@ -929,12 +656,7 @@ async def get_topology_version_detail(request: Request):
 @requires_permission("network_topology:u")
 async def update_layout(request: Request):
     try:
-        data = _request_data(request)
-        topology_id = _parse_topology_id(data)
-        tenant_id = _tenant_id(request)
-        if "layout_json" not in data:
-            raise ValueError("layout_json 不能为空")
-        expected_revision = _parse_revision(data.get("revision"), required=False)
+        data, topology_id, tenant_id, expected_revision = _parse_layout_request(request)
     except ValueError as exc:
         return _err(str(exc))
     async with in_transaction() as connection:
@@ -943,6 +665,8 @@ async def update_layout(request: Request):
         )
         if not topology:
             return _err("拓扑数据不存在", status=404)
+        if write_error := _legacy_write_error(topology):
+            return write_error
         if expected_revision is not None and topology.revision != expected_revision:
             return _err("拓扑已被更新，请重新打开后保存布局", status=409)
         if "source_hash" in data and (data.get("source_hash") or "") != (
@@ -957,9 +681,15 @@ async def update_layout(request: Request):
         except ValueError as exc:
             return _err(str(exc))
         topology.revision += 1
+        revision_fields = compatibility.apply_legacy_write_revision(topology)
         await topology.save(
             using_db=connection,
-            update_fields=["layout_json", "revision", "utime"],
+            update_fields=[
+                "layout_json",
+                "revision",
+                *revision_fields,
+                "utime",
+            ],
         )
         await _append_topology_version(
             connection,

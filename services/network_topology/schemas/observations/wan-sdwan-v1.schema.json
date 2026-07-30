@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/wan.sdwan/v1",
+  "x-max-bytes": 2097152,
+  "x-allowed-source-methods": ["cli", "netconf", "restconf", "gnmi", "vendor_api"],
+  "x-fact-planes": ["configured", "operational"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "wan.sdwan"},
+        "source_method": {"enum": ["cli", "netconf", "restconf", "gnmi", "vendor_api"]},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/wan.sdwan/v1"},
+        "fact_plane": {"enum": ["configured", "operational"]}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sites", "peers"],
+            "properties": {
+              "sites": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["site_id", "system_id", "vpn_segments", "transports"],
+                  "properties": {
+                    "site_id": {"type": "string", "minLength": 1},
+                    "system_id": {"type": "string", "minLength": 1},
+                    "vpn_segments": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+                    "transports": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+                  }
+                }
+              },
+              "peers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["local_system_id", "remote_system_id", "transport", "state"],
+                  "properties": {
+                    "local_system_id": {"type": "string", "minLength": 1},
+                    "remote_system_id": {"type": "string", "minLength": 1},
+                    "transport": {"type": "string", "minLength": 1},
+                    "state": {"enum": ["up", "down", "unknown"]}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

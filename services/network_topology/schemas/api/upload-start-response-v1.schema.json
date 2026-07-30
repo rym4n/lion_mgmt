@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/upload-start-response/v1",
+  "type": "object", "additionalProperties": false, "required": ["code", "data"],
+  "properties": {"code": {"const": 0}, "data": {"type": "object", "additionalProperties": false, "required": ["upload_session_id", "status", "expires_at"], "properties": {"upload_session_id": {"type": "string", "minLength": 1}, "status": {"const": "OPEN"}, "expires_at": {"type": "string", "format": "date-time"}}}},
+  "examples": [{"code": 0, "data": {"upload_session_id": "upload-1", "status": "OPEN", "expires_at": "2026-07-28T01:00:00Z"}}]
+}

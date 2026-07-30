@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/vendor-extension/v1",
+  "$comment": "A vendor extension is accepted only when its kind, data_schema and parser profile are registered by a later registry contract.",
+  "x-max-bytes": 4194304,
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "required": ["parser_context"],
+      "properties": {
+        "kind": {"type": "string", "pattern": "^vendor\\.[a-z0-9_-]+\\.[a-z0-9_.-]+$"},
+        "data_schema": {"type": "string", "pattern": "^aioe\\.network-topology\\.observation/vendor\\.[a-z0-9_-]+\\.[a-z0-9_.-]+/v[1-9][0-9]*$"},
+        "data": {"type": ["object", "array", "string", "null"]}
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

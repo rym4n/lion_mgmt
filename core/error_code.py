@@ -219,3 +219,4 @@ class ErrorCode(BaseErrorCode):
         4172, "连接测试失败，请检查地址、端口或凭据"
     )
     ROOM_MEMBER_ACCESS_DENIED = ErrorData(4173, "仅作战室成员可查看成员列表")
+    SENSITIVE_MFA_REQUIRED = ErrorData(4174, "敏感操作需要MFA验证")

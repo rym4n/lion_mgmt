@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.provenance/v1",
+  "oneOf": [
+    {"$ref": "#/$defs/observed"},
+    {"$ref": "#/$defs/authoritative"},
+    {"$ref": "#/$defs/derived"}
+  ],
+  "$defs": {
+    "observed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "resource_id", "observation_id", "redacted_sha256", "locator"],
+      "properties": {
+        "type": {"const": "observed"},
+        "resource_id": {"type": "string", "minLength": 1},
+        "observation_id": {"type": "string", "minLength": 1},
+        "redacted_sha256": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/sha256"},
+        "locator": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/locator"}
+      }
+    },
+    "authoritative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "source_system", "source_record_id", "source_revision", "as_of", "field_locator"],
+      "properties": {
+        "type": {"const": "authoritative"},
+        "source_system": {"type": "string", "minLength": 1},
+        "source_record_id": {"type": "string", "minLength": 1},
+        "source_revision": {"type": "string", "minLength": 1},
+        "as_of": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/timestamp"},
+        "field_locator": {"type": "string", "minLength": 1, "maxLength": 1024}
+      }
+    },
+    "derived": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "rule_id", "profile_revision", "member_ids"],
+      "properties": {
+        "type": {"const": "derived"},
+        "rule_id": {"type": "string", "minLength": 1},
+        "profile_revision": {"type": "integer", "minimum": 1},
+        "member_ids": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "manual_override_ref": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "examples": [
+    {
+      "type": "observed",
+      "resource_id": "synthetic-router-1",
+      "observation_id": "synthetic-router-1:identity:1",
+      "redacted_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "locator": {"type": "json_pointer", "pointer": "/hostname"}
+    },
+    {
+      "type": "authoritative",
+      "source_system": "synthetic-cmdb",
+      "source_record_id": "site-1",
+      "source_revision": "rev-1",
+      "as_of": "2026-07-28T00:00:00Z",
+      "field_locator": "/site"
+    },
+    {
+      "type": "derived",
+      "rule_id": "profile.important/v1",
+      "profile_revision": 1,
+      "member_ids": ["fact-1"],
+      "manual_override_ref": "override-1"
+    }
+  ]
+}

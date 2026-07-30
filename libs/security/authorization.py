@@ -12,6 +12,7 @@ from core.error_code import ErrorCode
 from libs.error_code.enum import ErrorData
 from libs.error_code.exception import CustomError
 from libs.security.authentication import token_decode
+from libs.security.mfa import require_sensitive_mfa_proof
 from libs.utils import verify_license
 from models import (
     Account,
@@ -21,6 +22,7 @@ from models import (
     PlaybookPermissions,
     PlaybookVersion,
     Role,
+    Tool,
     ToolResources,
     ToolResourcesModel,
 )
@@ -98,8 +100,9 @@ async def check_permissions(request: Request, *required_permissions: str) -> boo
     #     raise CustomError(ErrorCode.SESSION_INVALID)
     # request.ctx.session['account_info'] = account
     # roles = await account.roles.filter(deleted=False).all()
-    account = request.ctx.session["account_info"]
-    tenant_id = request.ctx.session.get("tenant_id")
+    session = request.ctx.session
+    account = session["account_info"]
+    tenant_id = session.get("tenant_id")
     if _roles_have_any_permission(
         _roles_for_tenant(account.roles, tenant_id), required_permissions
     ):
@@ -159,20 +162,23 @@ def account_has_permission(
     命中失败即 raise。业务代码需要「有没有权限」的布尔判断时用本函数，
     避免各接口自行遍历 roles/permissions 或硬编码角色 id/name。
     """
-    if not account or not getattr(account, "roles", None):
+    if not required_permissions or not account or not getattr(account, "roles", None):
         return False
-    for role in _roles_for_tenant(account.roles, tenant_id):
-        for role_permission in role.permissions or []:
-            if all(
-                check_wildcard(role_permission, pattern)
-                for pattern in required_permissions
-            ):
-                return True
-    return False
+    grants = [
+        role_permission
+        for role in _roles_for_tenant(account.roles, tenant_id)
+        for role_permission in role.permissions or []
+    ]
+    return all(
+        any(check_wildcard(grant, required) for grant in grants)
+        for required in required_permissions
+    )
 
 
 def workflow_uncontrolled_actions(role_permission: object) -> set[str]:
-    if not isinstance(role_permission, str) or not role_permission.startswith("workflow:"):
+    if not isinstance(role_permission, str) or not role_permission.startswith(
+        "workflow:"
+    ):
         return set()
 
     actions = set(role_permission.split(":", 1)[1].split(","))
@@ -295,9 +301,9 @@ async def playbook_ids_for_user(account, tenant_id: str, permission: str = "r") 
     调用方应先判断 is_superadmin 走全量分支，本函数只负责普通用户按记录过滤。
     """
     if has_uncontrolled_playbook_permission(account, [permission], tenant_id):
-        pb_ids = await Playbook.filter(
-            deleted=False, tenant_id=tenant_id
-        ).values_list("id", flat=True)
+        pb_ids = await Playbook.filter(deleted=False, tenant_id=tenant_id).values_list(
+            "id", flat=True
+        )
         return set(pb_ids)
 
     user_id = str(account.id) if account and getattr(account, "id", None) else None
@@ -381,16 +387,26 @@ def action_permission_hits(
     return not user_role_ids.isdisjoint(granted_roles)
 
 
-async def tool_requires_resource(tool_name, tenant_id) -> bool:
+async def tool_requires_resource(
+    tool_name,
+    tenant_id,
+    maintenance_mode=False,
+) -> bool:
     resource_model = await ToolResourcesModel.get_or_none(
         tool_name=tool_name,
         deleted=False,
+        internal=maintenance_mode,
         tenant_id=tenant_id,
     )
     return bool(resource_model and resource_model.status == 1)
 
 
-async def tool_resources_exist(tool_name, resource_ids, tenant_id) -> bool:
+async def tool_resources_exist(
+    tool_name,
+    resource_ids,
+    tenant_id,
+    maintenance_mode=False,
+) -> bool:
     normalized_resource_ids = {str(item) for item in resource_ids or [] if str(item)}
     if not normalized_resource_ids:
         return False
@@ -398,6 +414,7 @@ async def tool_resources_exist(tool_name, resource_ids, tenant_id) -> bool:
         id__in=list(normalized_resource_ids),
         tool_name=tool_name,
         deleted=False,
+        internal=maintenance_mode,
         tenant_id=tenant_id,
     ).values_list("id", flat=True)
     return normalized_resource_ids.issubset(
@@ -406,7 +423,13 @@ async def tool_resources_exist(tool_name, resource_ids, tenant_id) -> bool:
 
 
 async def check_action_execute_permission(
-    account, tool_name, action_func, resource, tenant_id
+    account,
+    tool_name,
+    action_func,
+    resource,
+    tenant_id,
+    maintenance_mode=False,
+    tool_version=None,
 ) -> bool:
     """判定账户是否对 (tool, action, resource) 拥有执行权。写侧（add_timed/update_timed
     等）用它把前端下拉过滤对应的授权关卡落到 API 层——纯前端过滤是 UX，不是安全边界。
@@ -417,17 +440,43 @@ async def check_action_execute_permission(
     - tool_name / action_func 缺失时直接判定失败——上层应保证参数完备再调用。
     - 命中条件复用 action_permission_hits：查 action_name 自身 + "all" 兜底两类 ActionPermissions。
     """
-    if is_superadmin(account, tenant_id=tenant_id):
-        return True
     if not tool_name or not action_func:
+        return False
+    if tool_version and not await Tool.filter(
+        name=tool_name,
+        version=tool_version,
+        deleted=False,
+        maintain=maintenance_mode,
+        tenant_id=tenant_id,
+    ).exists():
         return False
     if not isinstance(resource, str):
         resource = ""
     resources = [item.strip() for item in resource.split(",") if item.strip()]
+    if tool_version and resources and not await tool_resources_exist(
+        tool_name,
+        resources,
+        tenant_id,
+        maintenance_mode,
+    ):
+        return False
+    if is_superadmin(account, tenant_id=tenant_id):
+        return True
     if not resources:
-        return not await tool_requires_resource(tool_name, tenant_id)
+        return not await tool_requires_resource(
+            tool_name,
+            tenant_id,
+            maintenance_mode,
+        )
     if has_uncontrolled_tool_resource_permission(account, tenant_id=tenant_id):
-        return await tool_resources_exist(tool_name, resources, tenant_id)
+        if tool_version:
+            return True
+        return await tool_resources_exist(
+            tool_name,
+            resources,
+            tenant_id,
+            maintenance_mode,
+        )
     user_id = str(account.id) if account and getattr(account, "id", None) else None
     if not user_id:
         return False
@@ -476,6 +525,11 @@ def requires_permission(*required_permissions: str):
         @functools.wraps(func)
         async def wrapper(request, *args, **kwargs):
             await check_permissions(request, *required_permissions)
+            if any(
+                permission.split(":", 1)[0] in {"user", "secure"}
+                for permission in required_permissions
+            ):
+                await require_sensitive_mfa_proof(request)
             return await func(request, *args, **kwargs)
 
         return wrapper

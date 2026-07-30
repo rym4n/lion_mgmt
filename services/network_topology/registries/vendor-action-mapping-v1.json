@@ -1,0 +1,124 @@
+{
+  "schema_version": "aioe.network-topology.registry/vendor-action-mapping/v1",
+  "audited_source": {
+    "repository": "../aioe_apps",
+    "revision": "4e1193792428e888a94c94af9c196ed2d65c009e",
+    "semantic_versions_declared": false,
+    "observation_v2_compatible_actions": 0
+  },
+  "mappings": [
+    {
+      "capability_profile_id": "aioe.huawei.switch.generic/v1",
+      "target_package": "aioe-huawei_switch",
+      "planned_action_id": "collect_topology_observations_v2",
+      "delivery_status": "planned",
+      "planned_minimum_package_version": "1.0.0",
+      "verified_current_package_version": null,
+      "kind_action_map": {
+        "system.identity": "collect_topology_observations_v2", "interface.inventory": "collect_topology_observations_v2",
+        "l2.vlans": "collect_topology_observations_v2", "l2.link_aggregation": "collect_topology_observations_v2", "l2.neighbors": "collect_topology_observations_v2",
+        "system.virtual_contexts": "collect_topology_observations_v2", "system.cluster_members": "collect_topology_observations_v2", "l2.stp_summary": "collect_topology_observations_v2",
+        "l3.vrfs": "collect_topology_observations_v2", "l3.connected_networks": "collect_topology_observations_v2", "routing.connected_static_default": "collect_topology_observations_v2",
+        "routing.dynamic_neighbors": "collect_topology_observations_v2", "routing.first_hop_redundancy": "collect_topology_observations_v2", "overlay.vxlan_evpn": "collect_topology_observations_v2",
+        "l3.neighbor_cache": "collect_topology_observations_v2", "legacy.running_config": "collect_topology_observations_v2"
+      },
+      "connector_evidence": [
+        {"action_id": "back_config", "config_path": "aioe-huawei_switch/config.json", "classification": "connector_material_only"}
+      ]
+    },
+    {
+      "capability_profile_id": "aioe.h3c.switch.generic/v1",
+      "target_package": "aioe-h3c_switch",
+      "planned_action_id": "collect_topology_observations_v2",
+      "delivery_status": "planned",
+      "planned_minimum_package_version": "1.0.0",
+      "verified_current_package_version": null,
+      "kind_action_map": {
+        "system.identity": "collect_topology_observations_v2", "interface.inventory": "collect_topology_observations_v2",
+        "l2.vlans": "collect_topology_observations_v2", "l2.link_aggregation": "collect_topology_observations_v2", "l2.neighbors": "collect_topology_observations_v2",
+        "system.virtual_contexts": "collect_topology_observations_v2", "system.cluster_members": "collect_topology_observations_v2", "l2.stp_summary": "collect_topology_observations_v2",
+        "l3.vrfs": "collect_topology_observations_v2", "l3.connected_networks": "collect_topology_observations_v2", "routing.connected_static_default": "collect_topology_observations_v2",
+        "routing.dynamic_neighbors": "collect_topology_observations_v2", "routing.first_hop_redundancy": "collect_topology_observations_v2", "overlay.vxlan_evpn": "collect_topology_observations_v2",
+        "l3.neighbor_cache": "collect_topology_observations_v2", "legacy.running_config": "collect_topology_observations_v2"
+      },
+      "connector_evidence": [
+        {"action_id": "back_config", "config_path": "aioe-h3c_switch/config.json", "classification": "connector_material_only"},
+        {"action_id": "get_mac_address", "config_path": "aioe-h3c_switch/config.json", "classification": "connector_material_only"}
+      ]
+    },
+    {
+      "capability_profile_id": "aioe.cisco.switch.generic/v1",
+      "target_package": "aioe-cisco_switch",
+      "planned_action_id": "collect_topology_observations_v2",
+      "delivery_status": "planned",
+      "planned_minimum_package_version": "1.0.0",
+      "verified_current_package_version": null,
+      "kind_action_map": {
+        "system.identity": "collect_topology_observations_v2", "interface.inventory": "collect_topology_observations_v2",
+        "l2.vlans": "collect_topology_observations_v2", "l2.link_aggregation": "collect_topology_observations_v2", "l2.neighbors": "collect_topology_observations_v2",
+        "system.virtual_contexts": "collect_topology_observations_v2", "system.cluster_members": "collect_topology_observations_v2", "l2.stp_summary": "collect_topology_observations_v2",
+        "l3.vrfs": "collect_topology_observations_v2", "l3.connected_networks": "collect_topology_observations_v2", "routing.connected_static_default": "collect_topology_observations_v2",
+        "routing.dynamic_neighbors": "collect_topology_observations_v2", "routing.first_hop_redundancy": "collect_topology_observations_v2", "overlay.vxlan_evpn": "collect_topology_observations_v2",
+        "l3.neighbor_cache": "collect_topology_observations_v2", "legacy.running_config": "collect_topology_observations_v2"
+      },
+      "connector_evidence": [
+        {"action_id": "show_version", "config_path": "aioe-cisco_switch/config.json", "classification": "connector_material_only"},
+        {"action_id": "show_interface_status", "config_path": "aioe-cisco_switch/config.json", "classification": "connector_material_only"},
+        {"action_id": "show_mac_address_table", "config_path": "aioe-cisco_switch/config.json", "classification": "connector_material_only"}
+      ]
+    },
+    {
+      "capability_profile_id": "aioe.fortinet.firewall.generic/v1",
+      "target_package": "aioe-fortiGate_fw_api",
+      "planned_action_id": "collect_topology_observations_v2",
+      "delivery_status": "planned",
+      "planned_minimum_package_version": "1.0.0",
+      "verified_current_package_version": null,
+      "kind_action_map": {
+        "system.identity": "collect_topology_observations_v2", "interface.inventory": "collect_topology_observations_v2", "l3.connected_networks": "collect_topology_observations_v2",
+        "security.zones": "collect_topology_observations_v2", "security.zone_bindings": "collect_topology_observations_v2", "system.virtual_contexts": "collect_topology_observations_v2",
+        "system.cluster_members": "collect_topology_observations_v2", "l3.vrfs": "collect_topology_observations_v2", "routing.connected_static_default": "collect_topology_observations_v2",
+        "routing.dynamic_neighbors": "collect_topology_observations_v2", "routing.first_hop_redundancy": "collect_topology_observations_v2", "overlay.tunnels": "collect_topology_observations_v2",
+        "wan.sdwan": "collect_topology_observations_v2", "service.virtual_addresses": "collect_topology_observations_v2", "l3.neighbor_cache": "collect_topology_observations_v2",
+        "legacy.running_config": "collect_topology_observations_v2"
+      },
+      "connector_evidence": [
+        {"action_id": "vip_ip_query", "config_path": "aioe-fortiGate_fw_api/config.json", "classification": "connector_material_only"}
+      ]
+    },
+    {
+      "capability_profile_id": "aioe.f5.load_balancer.generic/v1",
+      "target_package": "aioe-f5_big_ip_api",
+      "planned_action_id": "collect_topology_observations_v2",
+      "delivery_status": "planned",
+      "planned_minimum_package_version": "1.0.0",
+      "verified_current_package_version": null,
+      "kind_action_map": {
+        "system.identity": "collect_topology_observations_v2", "interface.inventory": "collect_topology_observations_v2", "system.cluster_members": "collect_topology_observations_v2",
+        "l3.connected_networks": "collect_topology_observations_v2", "service.virtual_addresses": "collect_topology_observations_v2", "system.virtual_contexts": "collect_topology_observations_v2",
+        "l3.vrfs": "collect_topology_observations_v2", "routing.connected_static_default": "collect_topology_observations_v2", "routing.dynamic_neighbors": "collect_topology_observations_v2",
+        "overlay.tunnels": "collect_topology_observations_v2", "l3.neighbor_cache": "collect_topology_observations_v2", "legacy.running_config": "collect_topology_observations_v2"
+      },
+      "connector_evidence": [
+        {"action_id": "pull_virtual_services", "config_path": "aioe-f5_big_ip_api/config.json", "classification": "connector_material_only"}
+      ]
+    },
+    {
+      "capability_profile_id": "aioe.synthetic.switch.deletion/v1",
+      "target_package": "fixture-only:no-runtime-package",
+      "planned_action_id": "fixture_contract_only",
+      "delivery_status": "contract_only",
+      "planned_minimum_package_version": "0.0.0",
+      "verified_current_package_version": null,
+      "kind_action_map": {
+        "system.identity": "fixture_contract_only",
+        "interface.inventory": "fixture_contract_only",
+        "l2.vlans": "fixture_contract_only",
+        "l2.link_aggregation": "fixture_contract_only",
+        "l2.neighbors": "fixture_contract_only",
+        "l3.connected_networks": "fixture_contract_only"
+      },
+      "connector_evidence": []
+    }
+  ]
+}

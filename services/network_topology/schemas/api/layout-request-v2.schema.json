@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/layout-request/v2",
+  "type": "object", "additionalProperties": false,
+  "required": ["id", "scope_id", "expected_scope_layout_revision", "graph_revision", "items", "viewport", "algorithm"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1}, "scope_id": {"type": "string", "minLength": 1},
+    "expected_scope_layout_revision": {"type": "integer", "minimum": 0}, "graph_revision": {"type": "integer", "minimum": 1},
+    "items": {"type": "object", "additionalProperties": {"type": "object", "additionalProperties": false, "required": ["x", "y", "pinned"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "pinned": {"type": "boolean"}}}},
+    "viewport": {"type": "object", "additionalProperties": false, "required": ["x", "y", "zoom"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "zoom": {"type": "number", "exclusiveMinimum": 0}}},
+    "algorithm": {"enum": ["dagre", "manual"]}
+  },
+  "examples": [{"id": "topology-1", "scope_id": "scope:organization:root", "expected_scope_layout_revision": 0, "graph_revision": 1, "items": {}, "viewport": {"x": 0, "y": 0, "zoom": 1}, "algorithm": "dagre"}]
+}

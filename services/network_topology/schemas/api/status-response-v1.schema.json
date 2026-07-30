@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.api/status-response/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "data"],
+  "properties": {
+    "code": {"const": 0},
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sync_id", "state", "terminal", "stage", "blocked_by", "attempt",
+        "retryable", "next_retry_at", "published", "graph_revision",
+        "publication_revision", "error_code", "error_summary"
+      ],
+      "properties": {
+        "sync_id": {"type": "string", "minLength": 1},
+        "state": {"$ref": "https://schemas.aioe.local/aioe.network-topology.api/common/v1#/$defs/syncState"},
+        "terminal": {"type": "boolean"},
+        "stage": {"$ref": "https://schemas.aioe.local/aioe.network-topology.api/common/v1#/$defs/syncStage"},
+        "blocked_by": {"type": ["string", "null"], "enum": [null, "ANALYSIS_GATE", "PUBLISH_GATE"]},
+        "attempt": {"type": "integer", "minimum": 0},
+        "retryable": {"type": "boolean"},
+        "next_retry_at": {"type": ["string", "null"], "format": "date-time"},
+        "published": {"type": "boolean"},
+        "graph_revision": {"type": "integer", "minimum": 0},
+        "publication_revision": {"type": "integer", "minimum": 0},
+        "error_code": {"$ref": "https://schemas.aioe.local/aioe.network-topology.api/common/v1#/$defs/errorCode"},
+        "error_summary": {"type": ["string", "null"], "maxLength": 512}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "state": {"const": "RECEIVED"},
+            "terminal": {"const": false},
+            "blocked_by": {"enum": [null, "ANALYSIS_GATE"]},
+            "next_retry_at": {"type": "null"},
+            "published": {"const": false}
+          },
+          "required": ["state"],
+          "oneOf": [
+            {
+              "properties": {
+                "retryable": {"const": true},
+                "error_code": {"type": "null"},
+                "error_summary": {"type": "null"}
+              }
+            },
+            {
+              "properties": {
+                "retryable": {"const": true},
+                "blocked_by": {"type": "null"},
+                "error_code": {"const": "WORKER_UNAVAILABLE"},
+                "error_summary": {"type": "string", "minLength": 1}
+              }
+            }
+          ]
+        },
+        {
+          "properties": {
+            "state": {"const": "RUNNING"},
+            "terminal": {"const": false},
+            "blocked_by": {"type": "null"},
+            "retryable": {"const": true},
+            "next_retry_at": {"type": "null"},
+            "published": {"const": false},
+            "error_code": {"type": "null"},
+            "error_summary": {"type": "null"}
+          },
+          "required": ["state"]
+        },
+        {
+          "properties": {
+            "state": {"const": "RETRY_WAIT"},
+            "terminal": {"const": false},
+            "blocked_by": {"type": "null"},
+            "retryable": {"const": true},
+            "next_retry_at": {"type": "string", "format": "date-time"},
+            "published": {"const": false},
+            "error_code": {"$ref": "https://schemas.aioe.local/aioe.network-topology.api/common/v1#/$defs/temporaryErrorCode"},
+            "error_summary": {"type": "string", "minLength": 1}
+          },
+          "required": ["state"]
+        },
+        {
+          "properties": {
+            "state": {"const": "WAITING_FOR_PUBLISH"},
+            "terminal": {"const": false},
+            "stage": {"const": "FACTS_READY"},
+            "blocked_by": {"const": "PUBLISH_GATE"},
+            "retryable": {"const": false},
+            "next_retry_at": {"type": "null"},
+            "published": {"const": false},
+            "error_code": {"type": "null"},
+            "error_summary": {"type": "null"}
+          },
+          "required": ["state"]
+        },
+        {
+          "properties": {
+            "state": {"const": "SUCCEEDED"},
+            "terminal": {"const": true},
+            "blocked_by": {"type": "null"},
+            "retryable": {"const": false},
+            "next_retry_at": {"type": "null"},
+            "published": {"const": true},
+            "error_code": {"type": "null"},
+            "error_summary": {"type": "null"}
+          },
+          "required": ["state"]
+        },
+        {
+          "properties": {
+            "state": {"const": "FAILED"},
+            "terminal": {"const": true},
+            "blocked_by": {"type": "null"},
+            "retryable": {"const": false},
+            "next_retry_at": {"type": "null"},
+            "published": {"const": false},
+            "error_code": {"$ref": "https://schemas.aioe.local/aioe.network-topology.api/common/v1#/$defs/failedErrorCode"},
+            "error_summary": {"type": "string", "minLength": 1}
+          },
+          "required": ["state"]
+        },
+        {
+          "properties": {
+            "state": {"const": "SUPERSEDED"},
+            "terminal": {"const": true},
+            "blocked_by": {"type": "null"},
+            "retryable": {"const": false},
+            "next_retry_at": {"type": "null"},
+            "published": {"const": false},
+            "error_code": {"$ref": "https://schemas.aioe.local/aioe.network-topology.api/common/v1#/$defs/supersededErrorCode"},
+            "error_summary": {"type": "string", "minLength": 1}
+          },
+          "required": ["state"]
+        },
+        {
+          "properties": {
+            "state": {"const": "CANCELLED"},
+            "terminal": {"const": true},
+            "blocked_by": {"type": "null"},
+            "retryable": {"const": false},
+            "next_retry_at": {"type": "null"},
+            "published": {"const": false},
+            "error_code": {"const": "CANCELLED_BY_REQUEST"},
+            "error_summary": {"type": "string", "minLength": 1}
+          },
+          "required": ["state"]
+        }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "code": 0,
+      "data": {
+        "sync_id": "analysis-running", "state": "RUNNING", "terminal": false,
+        "stage": "PARSING", "blocked_by": null, "attempt": 1, "retryable": true,
+        "next_retry_at": null, "published": false, "graph_revision": 0,
+        "publication_revision": 0, "error_code": null, "error_summary": null
+      }
+    },
+    {
+      "code": 0,
+      "data": {
+        "sync_id": "analysis-waiting", "state": "WAITING_FOR_PUBLISH", "terminal": false,
+        "stage": "FACTS_READY", "blocked_by": "PUBLISH_GATE", "attempt": 1,
+        "retryable": false, "next_retry_at": null, "published": false,
+        "graph_revision": 12, "publication_revision": 15, "error_code": null,
+        "error_summary": null
+      }
+    },
+    {
+      "code": 0,
+      "data": {
+        "sync_id": "analysis-succeeded", "state": "SUCCEEDED", "terminal": true,
+        "stage": "PUBLISHING", "blocked_by": null, "attempt": 1, "retryable": false,
+        "next_retry_at": null, "published": true, "graph_revision": 13,
+        "publication_revision": 16, "error_code": null, "error_summary": null
+      }
+    },
+    {
+      "code": 0,
+      "data": {
+        "sync_id": "analysis-failed", "state": "FAILED", "terminal": true,
+        "stage": "VALIDATING_FACTS", "blocked_by": null, "attempt": 1,
+        "retryable": false, "next_retry_at": null, "published": false,
+        "graph_revision": 12, "publication_revision": 15,
+        "error_code": "EVIDENCE_INVALID", "error_summary": "Evidence validation failed"
+      }
+    }
+  ]
+}

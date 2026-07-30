@@ -580,6 +580,9 @@ def test_role_details_groups_nested_permissions_under_split_menu_model():
             "network_topology:r",
             "network_topology:u",
             "network_topology:d",
+            "network_topology:sync",
+            "network_topology:reanalyze",
+            "network_topology:profile_admin",
         ],
         [
             {
@@ -598,6 +601,15 @@ def test_role_details_groups_nested_permissions_under_split_menu_model():
                     {"label": "查看网络拓扑权限", "value": "network_topology:r"},
                     {"label": "修改网络拓扑权限", "value": "network_topology:u"},
                     {"label": "删除网络拓扑权限", "value": "network_topology:d"},
+                    {"label": "同步拓扑", "value": "network_topology:sync"},
+                    {
+                        "label": "重新分析拓扑",
+                        "value": "network_topology:reanalyze",
+                    },
+                    {
+                        "label": "管理拓扑 Profile",
+                        "value": "network_topology:profile_admin",
+                    },
                 ],
             },
         ],
@@ -611,6 +623,9 @@ def test_role_details_groups_nested_permissions_under_split_menu_model():
         {"network_topology:r": "查看网络拓扑权限"},
         {"network_topology:u": "修改网络拓扑权限"},
         {"network_topology:d": "删除网络拓扑权限"},
+        {"network_topology:sync": "同步拓扑"},
+        {"network_topology:reanalyze": "重新分析拓扑"},
+        {"network_topology:profile_admin": "管理拓扑 Profile"},
     ]
 
 

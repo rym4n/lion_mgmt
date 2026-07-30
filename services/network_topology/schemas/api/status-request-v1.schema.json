@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/status-request/v1",
+  "type": "object", "additionalProperties": false, "required": ["sync_id"],
+  "properties": {"sync_id": {"type": "string", "minLength": 1}},
+  "examples": [{"sync_id": "analysis-1"}]
+}

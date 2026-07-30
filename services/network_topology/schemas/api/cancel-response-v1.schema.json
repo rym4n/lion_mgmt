@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/cancel-response/v1",
+  "type": "object", "additionalProperties": false, "required": ["code", "data"],
+  "properties": {"code": {"const": 0}, "data": {"type": "object", "additionalProperties": false, "required": ["sync_id", "state", "cancellation_requested"], "properties": {"sync_id": {"type": "string", "minLength": 1}, "state": {"$ref": "https://schemas.aioe.local/aioe.network-topology.api/common/v1#/$defs/syncState"}, "cancellation_requested": {"const": true}}}},
+  "examples": [{"code": 0, "data": {"sync_id": "analysis-1", "state": "RUNNING", "cancellation_requested": true}}]
+}

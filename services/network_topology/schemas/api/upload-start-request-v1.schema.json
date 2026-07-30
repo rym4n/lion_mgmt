@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/upload-start-request/v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["id", "manifest_id", "snapshot_envelope_without_observations", "client_expected_input_hash"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1}, "manifest_id": {"type": "string", "minLength": 1},
+    "snapshot_envelope_without_observations": {"$ref": "https://schemas.aioe.local/aioe.network-topology.api/common/v1#/$defs/uploadEnvelope"},
+    "client_expected_input_hash": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/sha256"}
+  },
+  "examples": []
+}

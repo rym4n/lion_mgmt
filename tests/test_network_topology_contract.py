@@ -22,8 +22,12 @@ ROOT = Path(__file__).resolve().parents[1]
 def _request(body=None, *, tenant_id="tenant-1"):
     return SimpleNamespace(
         json={} if body is None else body,
-        ctx=SimpleNamespace(session={"tenant_id": tenant_id}),
+        ctx=SimpleNamespace(session={"tenant_id": tenant_id, "sub": "account-1"}),
     )
+
+
+async def _async_true():
+    return True
 
 
 def _route_contracts():
@@ -66,7 +70,26 @@ def test_network_topology_exposes_data_crud_and_external_config_sync_only():
         ),
         "/create": ("create_topology", ("network_topology:c",)),
         "/update": ("update_topology", ("network_topology:u",)),
-        "/config-sync": ("sync_topology_config", ("network_topology:u",)),
+        "/config-sync": (
+            "sync_topology_config",
+            ("network_topology:u", "network_topology:sync"),
+        ),
+        "/config-sync/manifest": (
+            "issue_topology_manifest",
+            ("network_topology:sync",),
+        ),
+        "/config-sync/status": (
+            "analysis_status",
+            ("network_topology:sync", "network_topology:reanalyze"),
+        ),
+        "/config-sync/reanalyze": (
+            "reanalyze_snapshot",
+            ("network_topology:reanalyze",),
+        ),
+        "/config-sync/cancel": (
+            "cancel_analysis",
+            ("network_topology:sync", "network_topology:reanalyze"),
+        ),
         "/list": ("list_topology", ("network_topology:r",)),
         "/detail": ("get_topology", ("network_topology:r",)),
         "/versions": ("list_topology_versions", ("network_topology:r",)),
@@ -84,9 +107,8 @@ def test_topology_write_paths_append_versions_and_list_counts_real_snapshots():
 
     functions = {
         views._save_graph: 'change_type="manual_save"',
-        inspect.unwrap(views.create_topology): 'change_type="create"',
         inspect.unwrap(views.update_topology): 'change_type="update"',
-        inspect.unwrap(views.sync_topology_config): 'change_type="config_sync"',
+        views._commit_legacy_config_sync: 'change_type="config_sync"',
         inspect.unwrap(views.update_layout): 'change_type="layout"',
     }
     for function, change_type in functions.items():
@@ -94,6 +116,9 @@ def test_topology_write_paths_append_versions_and_list_counts_real_snapshots():
         assert "async with in_transaction() as connection" in source
         assert "await _append_topology_version(" in source
         assert change_type in source
+
+    create_source = inspect.getsource(inspect.unwrap(views.create_topology))
+    assert "await compatibility.create_compatible_topology(" in create_source
 
     list_source = inspect.getsource(inspect.unwrap(views.list_topology))
     assert "version_count=Count(" in list_source
@@ -171,6 +196,8 @@ def test_network_topology_json_never_leaks_collected_config():
         layout_json={"core": {"x": 1, "y": 2}},
         source_hash="hash-1",
         revision=3,
+        document_schema_version="graph/v2",
+        generation_source="playbook",
         last_sync_at=datetime(2026, 7, 20, 1, 2, 3, tzinfo=timezone.utc),
         ctime=datetime(2026, 7, 20, 1, 2, 3, tzinfo=timezone.utc),
         utime=datetime(2026, 7, 20, 1, 2, 4, tzinfo=timezone.utc),
@@ -183,6 +210,8 @@ def test_network_topology_json_never_leaks_collected_config():
     assert payload["node_count"] == 1
     assert payload["edge_count"] == 0
     assert payload["revision"] == 3
+    assert payload["document_schema_version"] == "graph/v2"
+    assert payload["generation_source"] == "playbook"
     assert payload["last_sync_at"].endswith("09:02:03")
 
 
@@ -197,6 +226,7 @@ def test_network_topology_version_json_is_a_read_only_graph_snapshot():
         source_hash="hash-1",
         change_type="manual_save",
         change_summary="修改节点 1 个",
+        document_schema_version="legacy/v1",
         ctime=datetime(2026, 7, 21, 1, 2, 3, tzinfo=timezone.utc),
         utime=datetime(2026, 7, 21, 1, 2, 3, tzinfo=timezone.utc),
     )
@@ -207,6 +237,8 @@ def test_network_topology_version_json_is_a_read_only_graph_snapshot():
     assert payload["version_id"] == "version-1"
     assert payload["topology_id"] == "topology-1"
     assert payload["version"] == 3
+    assert payload["document_schema_version"] == "legacy/v1"
+    assert payload["generation_source"] == "manual"
     assert payload["node_count"] == 1
     assert payload["edge_count"] == 0
     assert "source_config" not in payload
@@ -380,29 +412,29 @@ def test_create_topology_defaults_to_one_blank_data_resource(monkeypatch):
     from services.network_topology import views
 
     created = []
-    versions = []
-    filters = []
 
-    class FakeNetworkTopology:
-        @classmethod
-        def filter(cls, **kwargs):
-            filters.append(kwargs)
-            return _ExistsQuery()
+    async def create_compatible_topology(**kwargs):
+        created.append(kwargs)
+        graph = kwargs["topology_json"] or views._DEFAULT_TOPOLOGY_GRAPH
+        layout = kwargs["layout_json"] or views._DEFAULT_TOPOLOGY_LAYOUT
+        topology = _TopologyRow(
+            id=f"topology-{len(created)}",
+            name=kwargs["name"],
+            source_config="",
+            topology_json=graph,
+            layout_json=layout,
+            source_hash=None,
+            revision=1,
+            last_sync_at=None,
+            tenant_id=kwargs["tenant_id"],
+        )
+        return SimpleNamespace(topology=topology)
 
-        @classmethod
-        async def create(cls, using_db=None, **kwargs):
-            created.append(kwargs)
-            return _TopologyRow(id="topology-1", **kwargs)
-
-    class FakeNetworkTopologyVersion:
-        @classmethod
-        async def create(cls, using_db=None, **kwargs):
-            versions.append({"using_db": using_db, **kwargs})
-            return SimpleNamespace(**kwargs)
-
-    monkeypatch.setattr(views, "NetworkTopology", FakeNetworkTopology)
-    monkeypatch.setattr(views, "NetworkTopologyVersion", FakeNetworkTopologyVersion)
-    monkeypatch.setattr(views, "in_transaction", lambda: _Transaction())
+    monkeypatch.setattr(
+        views.compatibility,
+        "create_compatible_topology",
+        create_compatible_topology,
+    )
     monkeypatch.setattr(views, "response_ok", lambda data: data)
 
     result = asyncio.run(
@@ -419,18 +451,16 @@ def test_create_topology_defaults_to_one_blank_data_resource(monkeypatch):
     )
 
     assert result["id"] == "topology-1"
-    assert filters == [{"name": "总部网络", "deleted": False, "tenant_id": "tenant-1"}]
-    assert created[0]["name"] == "总部网络"
-    assert created[0]["source_config"] == ""
-    assert created[0]["revision"] == 1
-    assert created[0]["topology_json"]["nodes"][0]["id"] == "node-1"
-    assert created[0]["topology_json"]["nodes"][0]["data"]["title"] == "新节点"
-    assert created[0]["layout_json"] == {"node-1": {"x": 0.0, "y": 0.0}}
-    assert versions[0]["using_db"] == "connection-1"
-    assert versions[0]["version"] == 1
-    assert versions[0]["change_type"] == "create"
-    assert versions[0]["change_summary"] == "新增节点 1 个"
-    assert "source_config" not in versions[0]
+    assert created[0] == {
+        "tenant_id": "tenant-1",
+        "name": "总部网络",
+        "created_by": "account-1",
+        "topology_json": None,
+        "layout_json": None,
+    }
+    assert result["topology_json"]["nodes"][0]["id"] == "node-1"
+    assert result["topology_json"]["nodes"][0]["data"]["title"] == "新节点"
+    assert result["layout_json"] == {"node-1": {"x": 0.0, "y": 0.0}}
 
     custom_result = asyncio.run(
         inspect.unwrap(views.create_topology)(
@@ -461,7 +491,6 @@ def test_create_topology_defaults_to_one_blank_data_resource(monkeypatch):
     assert empty_response.status == 400
     assert "拓扑图至少需要一个节点" in orjson.loads(empty_response.body)["message"]
     assert len(created) == 2
-    assert len(versions) == 2
 
 
 def test_update_topology_rejects_zero_nodes(monkeypatch):
@@ -551,6 +580,7 @@ def test_config_sync_is_idempotent_for_same_config_and_scoped_to_tenant(monkeypa
 
     monkeypatch.setattr(views, "_tenant_topology", tenant_topology)
     monkeypatch.setattr(views, "analyze_topology", unexpected_analysis)
+    monkeypatch.setattr(views, "check_permissions", lambda *_args: _async_true())
     monkeypatch.setattr(views, "response_ok", lambda data: data)
 
     result = asyncio.run(
@@ -595,12 +625,15 @@ def test_config_sync_analyzes_then_commits_graph_with_revision_cas(monkeypatch):
         @classmethod
         async def create(cls, using_db=None, **kwargs):
             versions.append({"using_db": using_db, **kwargs})
-            return SimpleNamespace(**kwargs)
+            return SimpleNamespace(
+                id="version-3", topology_id=kwargs["topology"].id, **kwargs
+            )
 
     monkeypatch.setattr(views, "_tenant_topology", tenant_topology)
     monkeypatch.setattr(views, "NetworkTopologyVersion", FakeNetworkTopologyVersion)
     monkeypatch.setattr(views, "analyze_topology", analyze)
     monkeypatch.setattr(views, "in_transaction", lambda: _Transaction())
+    monkeypatch.setattr(views, "check_permissions", lambda *_args: _async_true())
     monkeypatch.setattr(views, "response_ok", lambda data: data)
 
     result = asyncio.run(
@@ -635,6 +668,13 @@ def test_config_sync_analyzes_then_commits_graph_with_revision_cas(monkeypatch):
     assert versions[0]["change_type"] == "config_sync"
     assert versions[0]["change_summary"] == "新增节点 1 个；设备配置已同步"
     assert "source_config" not in versions[0]
+    assert row.current_graph_version_row_id == "version-3"
+    assert row.current_graph_revision == 3
+    assert row.saved[1]["update_fields"] == [
+        "current_graph_version_row_id",
+        "current_graph_revision",
+        "utime",
+    ]
 
 
 def test_topology_version_routes_validate_parent_and_scope_queries_to_tenant(

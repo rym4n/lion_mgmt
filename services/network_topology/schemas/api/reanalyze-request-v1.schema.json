@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.api/reanalyze-request/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id", "snapshot_id", "target_profile_revision", "publish_as_current",
+    "expected_publication_revision", "expected_current_graph_revision"
+  ],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "snapshot_id": {"type": "string", "minLength": 1},
+    "target_profile_revision": {"type": "integer", "minimum": 1},
+    "publish_as_current": {"type": "boolean"},
+    "expected_publication_revision": {"type": "integer", "minimum": 0},
+    "expected_current_graph_revision": {"type": "integer", "minimum": 0}
+  },
+  "examples": [
+    {
+      "id": "topology-1",
+      "snapshot_id": "run-20260727-001",
+      "target_profile_revision": 8,
+      "publish_as_current": true,
+      "expected_publication_revision": 15,
+      "expected_current_graph_revision": 12
+    }
+  ]
+}

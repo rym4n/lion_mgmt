@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/l2.neighbors/v1",
+  "x-max-bytes": 4194304,
+  "x-allowed-source-methods": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"],
+  "x-fact-planes": ["operational"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "l2.neighbors"},
+        "source_method": {"enum": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"]},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/l2.neighbors/v1"},
+        "fact_plane": {"const": "operational"}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["neighbors"],
+            "properties": {
+              "neighbors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["protocol", "local_interface", "remote_chassis_id", "remote_port_id", "state"],
+                  "properties": {
+                    "protocol": {"enum": ["lldp", "cdp"]},
+                    "local_interface": {"type": "string", "minLength": 1},
+                    "remote_chassis_id": {"type": "string", "minLength": 1},
+                    "remote_chassis_subtype": {"type": ["string", "null"]},
+                    "remote_port_id": {"type": "string", "minLength": 1},
+                    "remote_system_name": {"type": ["string", "null"]},
+                    "state": {"enum": ["up", "down", "unknown"]}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

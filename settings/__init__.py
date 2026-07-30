@@ -4,7 +4,11 @@ import os
 
 import pytz
 
-from libs.sanic_worker import resolve_health_max_misses, resolve_health_missed_threshold, resolve_worker_ack_timeout
+from libs.sanic_worker import (
+    resolve_health_max_misses,
+    resolve_health_missed_threshold,
+    resolve_worker_ack_timeout,
+)
 
 # 项目根路径
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -34,7 +38,9 @@ REPORT_USER_BASE = os.path.join(BASE_DIR, "data/user-reports")
 os.makedirs(REPORT_USER_BASE, exist_ok=True)
 
 # 数字员工资源目录
-DIGITAL_EMPLOYEE_RESOURCES = os.environ.get("RY_DIGITAL_EMPLOYEE_RESOURCES") or os.path.join(BASE_DIR, "data/digital-employee")
+DIGITAL_EMPLOYEE_RESOURCES = os.environ.get(
+    "RY_DIGITAL_EMPLOYEE_RESOURCES"
+) or os.path.join(BASE_DIR, "data/digital-employee")
 os.makedirs(DIGITAL_EMPLOYEE_RESOURCES, exist_ok=True)
 
 if os.environ.get("RY_ENV") == "DEV":
@@ -42,10 +48,34 @@ if os.environ.get("RY_ENV") == "DEV":
         from dotenv import load_dotenv
 
         load_dotenv(os.path.join(BASE_DIR, "settings/.env"))
-    except:
+    except Exception:
         pass
 
 TZ = pytz.timezone(os.environ.get("TZ", "Asia/Shanghai"))
+
+
+def _strict_env_bool(name: str, default: bool) -> bool:
+    """Read one explicit true/false environment switch."""
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    raise ValueError(f"{name} must be true or false")
+
+
+# Topology v2 remains fail-closed until its global gates are open.
+TOPOLOGY_V2_INGRESS_ENABLED = _strict_env_bool("TOPOLOGY_V2_INGRESS_ENABLED", False)
+TOPOLOGY_V2_ANALYSIS_ENABLED = _strict_env_bool("TOPOLOGY_V2_ANALYSIS_ENABLED", False)
+TOPOLOGY_V2_PUBLISH_ENABLED = _strict_env_bool("TOPOLOGY_V2_PUBLISH_ENABLED", False)
+TOPOLOGY_V2_VIEW_ENABLED = _strict_env_bool("TOPOLOGY_V2_VIEW_ENABLED", False)
+TOPOLOGY_V2_PRESENTATION_WRITE_ENABLED = _strict_env_bool(
+    "TOPOLOGY_V2_PRESENTATION_WRITE_ENABLED", False
+)
+TOPOLOGY_LEGACY_SYNC_ENABLED = _strict_env_bool("TOPOLOGY_LEGACY_SYNC_ENABLED", True)
 
 # 透传真实客户端IP的请求头
 REAL_IP_HEADER = os.environ.get("RY_REAL_IP_HEADER") or "x-real-ip"
@@ -244,7 +274,10 @@ CACHE = {
     },
     "redis_chat": {
         "cache": "aiocache.RedisCache",
-        "serializer": {"class": "aiocache.serializers.MsgPackSerializer", "encoding": None},
+        "serializer": {
+            "class": "aiocache.serializers.MsgPackSerializer",
+            "encoding": None,
+        },
         "timeout": 2,
         "endpoint": os.environ.get("RY_REDIS_HOST"),
         "port": os.environ.get("RY_REDIS_PORT"),
@@ -254,7 +287,10 @@ CACHE = {
     },
     "redis_action": {
         "cache": "aiocache.RedisCache",
-        "serializer": {"class": "aiocache.serializers.MsgPackSerializer", "encoding": None},
+        "serializer": {
+            "class": "aiocache.serializers.MsgPackSerializer",
+            "encoding": None,
+        },
         "namespace": "lion_mgmt",
         "timeout": 2,
         "endpoint": os.environ.get("RY_REDIS_HOST"),
@@ -271,30 +307,46 @@ RY_AGENT_SERVER = os.environ.get("RY_AGENT_SERVER", "http://192.168.12.254:8283"
 # 数字员工运行时服务
 LION_AGENT_ENDPOINT = os.environ.get("RY_LION_AGENT_ENDPOINT", "http://lion-agent:8000")
 LION_AGENT_INTERNAL_TOKEN = os.environ.get("RY_LION_AGENT_INTERNAL_TOKEN", "")
-RY_AI_LITE_MODEL = (os.environ.get("RY_AI_LITE_MODEL") or "aioe-lite").strip() or "aioe-lite"
-LION_ACTION_INTERNAL_TOKEN = os.environ.get("RY_INTERNAL_TOKEN") or os.environ.get("RY_LION_ACTION_INTERNAL_TOKEN", "")
+RY_AI_LITE_MODEL = (
+    os.environ.get("RY_AI_LITE_MODEL") or "aioe-lite"
+).strip() or "aioe-lite"
+LION_ACTION_INTERNAL_TOKEN = os.environ.get("RY_INTERNAL_TOKEN") or os.environ.get(
+    "RY_LION_ACTION_INTERNAL_TOKEN", ""
+)
 
 # 指挥中心任务派单超时：pending_dispatch 超过该秒数仍未调度成功则自动置为失败
-COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS = int(os.environ.get("RY_COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS") or 300)
+COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS = int(
+    os.environ.get("RY_COMMAND_TASK_DISPATCH_TIMEOUT_SECONDS") or 300
+)
 # 派单超时清扫器的扫描间隔（秒）
-COMMAND_TASK_SWEEP_INTERVAL_SECONDS = int(os.environ.get("RY_COMMAND_TASK_SWEEP_INTERVAL_SECONDS") or 60)
+COMMAND_TASK_SWEEP_INTERVAL_SECONDS = int(
+    os.environ.get("RY_COMMAND_TASK_SWEEP_INTERVAL_SECONDS") or 60
+)
 
 # lion_agent 的 aioe-cli 工具回调 AIOE OpenAPI 的内部地址（容器网络内可达）
 AIOE_INTERNAL_URL = os.environ.get("RY_AIOE_INTERNAL_URL", "http://lion-mgmt:8000")
 
 # 数字员工长期记忆服务
-LION_MEMORY_ENDPOINT = os.environ.get("RY_LION_MEMORY_ENDPOINT", "http://lion-memory:8000")
-LION_MEMORY_ADMIN_EMAIL = os.environ.get("RY_LION_MEMORY_ADMIN_EMAIL", "admin@aioe.internal")
+LION_MEMORY_ENDPOINT = os.environ.get(
+    "RY_LION_MEMORY_ENDPOINT", "http://lion-memory:8000"
+)
+LION_MEMORY_ADMIN_EMAIL = os.environ.get(
+    "RY_LION_MEMORY_ADMIN_EMAIL", "admin@aioe.internal"
+)
 LION_MEMORY_ADMIN_PASSWORD = os.environ.get("RY_LION_MEMORY_ADMIN_PASSWORD", "")
 
 # 服务基础 URL（用于构造回调地址）
 RY_SERVICE_URL = os.environ.get("RY_SERVICE_URL", "http://localhost:8000")
 
 # Embedding 服务配置
-RY_EMBEDDING_PROVIDER = os.environ.get("RY_EMBEDDING_PROVIDER", "openai")  # openai | local
+RY_EMBEDDING_PROVIDER = os.environ.get(
+    "RY_EMBEDDING_PROVIDER", "openai"
+)  # openai | local
 RY_EMBEDDING_MODEL = os.environ.get("RY_EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-4B")
 RY_EMBEDDING_API_KEY = os.environ.get("RY_EMBEDDING_API_KEY", "")
-RY_EMBEDDING_API_BASE = os.environ.get("RY_EMBEDDING_API_BASE", "https://api-inference.modelscope.cn/v1")
+RY_EMBEDDING_API_BASE = os.environ.get(
+    "RY_EMBEDDING_API_BASE", "https://api-inference.modelscope.cn/v1"
+)
 
 # Agent 默认配置
 RY_AGENT_DEFAULT_LLM = os.environ.get("RY_AGENT_MODEL", "openai-proxy/gpt-4o")

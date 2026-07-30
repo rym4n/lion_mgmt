@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/layout-response/v2",
+  "type": "object", "additionalProperties": false, "required": ["code", "data"],
+  "properties": {"code": {"const": 0}, "data": {"type": "object", "additionalProperties": false, "required": ["scope_layout_revision", "layout_set_revision", "graph_revision"], "properties": {"scope_layout_revision": {"type": "integer", "minimum": 1}, "layout_set_revision": {"type": "integer", "minimum": 1}, "graph_revision": {"type": "integer", "minimum": 1}}}},
+  "examples": [{"code": 0, "data": {"scope_layout_revision": 1, "layout_set_revision": 1, "graph_revision": 1}}]
+}

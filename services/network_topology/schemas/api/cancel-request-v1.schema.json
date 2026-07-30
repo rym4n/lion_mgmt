@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/cancel-request/v1",
+  "type": "object", "additionalProperties": false, "required": ["sync_id", "reason"],
+  "properties": {"sync_id": {"type": "string", "minLength": 1}, "reason": {"type": "string", "minLength": 1, "maxLength": 512}},
+  "examples": [{"sync_id": "analysis-1", "reason": "Operator cancelled synthetic run"}]
+}

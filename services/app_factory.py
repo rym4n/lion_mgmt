@@ -8,20 +8,30 @@ from sanic.log import logger
 from sanic_ext import openapi  # noqa: F401
 from tortoise.contrib.sanic import register_tortoise
 
-from core.exception_handlers import BaseExcHandler, EXC_HDL_TUPLE
-from core.listeners import BaseListener, LISTENER_TUPLE
-from core.middlewares import BaseMiddleware, MIDDLEWARE_TUPLE
+import services.large_screen.views  # noqa: F401
+from core.exception_handlers import EXC_HDL_TUPLE, BaseExcHandler
+from core.listeners import LISTENER_TUPLE, BaseListener
+from core.middlewares import MIDDLEWARE_TUPLE, BaseMiddleware
 from core.openapi import configure_openapi_responses
-from libs.security.license_modules import is_licensed_module_active
 from libs.security.authorization import load_license
+from libs.security.license_modules import is_licensed_module_active
 from services.agent.views import agent_bp
 from services.ai.views import ai_bp
 from services.approvement.views import approve_bp
+from services.command_center.views import command_bp
 from services.dashboard.views import dashboard_bp
 from services.digital_employee.views import digital_employee_bp
 from services.event.views import event_bp
 from services.event_ingestion.views import event_ingestion_bp
+from services.inspection.views import inspection_bp
+from services.license.views import license_bp
+from services.log_view.views import logs_bp
+from services.mcp.views import mcp_bp
 from services.network_topology.views import topology_bp
+from services.others.views import activity, all_apps, playbook_list
+from services.role.views import role_bp
+from services.scene.views import scene_bp
+from services.secure.views import secure_bp
 from services.supply_chain_review.views import (
     SUPPLY_CHAIN_REVIEW_BLUEPRINTS,
     asset_management_bp,
@@ -32,16 +42,6 @@ from services.supply_chain_review.views import (
     supply_chain_review_ledger_bp,
     supply_chain_review_process_bp,
 )
-from services.inspection.views import inspection_bp
-import services.large_screen.views  # noqa: F401
-from services.command_center.views import command_bp
-from services.license.views import license_bp
-from services.log_view.views import logs_bp
-from services.mcp.views import mcp_bp
-from services.others.views import activity, all_apps, playbook_list
-from services.role.views import role_bp
-from services.scene.views import scene_bp
-from services.secure.views import secure_bp
 from services.system_config.views import system_bp
 from services.tenant.views import tenant_bp
 from services.timed.views import timed_bp
@@ -80,67 +80,76 @@ def create_app() -> Sanic:
     return app
 
 
+def _licensed_blueprints() -> dict:
+    return {
+        "event_bp": event_bp,
+        "event_ingestion_bp": event_ingestion_bp,
+        "role_bp": role_bp,
+        "timed_bp": timed_bp,
+        "tool_management_bp": tools_bp,
+        "var_bp": var_bp,
+        "workflow_bp": workflow_bp,
+        "logs_bp": logs_bp,
+        "ai_bp": ai_bp,
+        "agent_bp": agent_bp,
+        "mcp_bp": mcp_bp,
+        "command_bp": command_bp,
+        "digital_employee_bp": digital_employee_bp,
+        "asset_management_bp": asset_management_bp,
+        "network_access_control_bp": network_access_control_module_bp,
+        "topology_bp": topology_bp,
+        "supply_chain_review_bp": SUPPLY_CHAIN_REVIEW_BLUEPRINTS,
+        "supply_chain_review_cmdb_bp": supply_chain_review_cmdb_bp,
+        "supply_chain_review_ledger_bp": supply_chain_review_ledger_bp,
+        "supply_chain_review_process_bp": supply_chain_review_process_bp,
+        "supply_chain_review_action_bp": supply_chain_review_action_bp,
+        "supply_chain_review_attachment_bp": supply_chain_review_attachment_bp,
+    }
+
+
+def _register_licensed_blueprints(app: Sanic, license_data: dict) -> None:
+    bp_dict = _licensed_blueprints()
+    registered_modules = set()
+    registered_blueprint_names = set()
+    for item in license_data["moduleList"]:
+        module = item.get("module")
+        if not module or module not in bp_dict or module in registered_modules:
+            continue
+        if not is_licensed_module_active(license_data, item):
+            continue
+        blueprints = bp_dict[module]
+        if not isinstance(blueprints, tuple):
+            blueprints = (blueprints,)
+        for blueprint in blueprints:
+            blueprint_name = getattr(blueprint, "name", None) or id(blueprint)
+            if blueprint_name in registered_blueprint_names:
+                continue
+            app.blueprint(blueprint)
+            registered_blueprint_names.add(blueprint_name)
+        registered_modules.add(module)
+
+
 def register_blueprints(app: Sanic):
     app.add_route(activity, "/activity/<activityId>")
     app.add_route(playbook_list, "/playbooks", methods=["POST"])
     app.add_route(all_apps, "/apps", methods=["POST"])
-    app.blueprint(license_bp)
-    app.blueprint(user_bp)
-    app.blueprint(scene_bp)
-    app.blueprint(dashboard_bp)
-    app.blueprint(system_bp)
-    app.blueprint(secure_bp)
-    app.blueprint(warroom_bp)
-    app.blueprint(approve_bp)
-    app.blueprint(tenant_bp)
-    app.blueprint(inspection_bp)
-
+    for blueprint in (
+        license_bp,
+        user_bp,
+        scene_bp,
+        dashboard_bp,
+        system_bp,
+        secure_bp,
+        warroom_bp,
+        approve_bp,
+        tenant_bp,
+        inspection_bp,
+    ):
+        app.blueprint(blueprint)
     try:
-        bp_dict = {
-            "event_bp": event_bp,
-            "event_ingestion_bp": event_ingestion_bp,
-            "role_bp": role_bp,
-            "timed_bp": timed_bp,
-            "tool_management_bp": tools_bp,
-            "var_bp": var_bp,
-            "workflow_bp": workflow_bp,
-            "logs_bp": logs_bp,
-            "ai_bp": ai_bp,
-            "agent_bp": agent_bp,
-            "mcp_bp": mcp_bp,
-            "command_bp": command_bp,
-            "digital_employee_bp": digital_employee_bp,
-            "asset_management_bp": asset_management_bp,
-            "network_access_control_bp": network_access_control_module_bp,
-            "topology_bp": topology_bp,
-            "supply_chain_review_bp": SUPPLY_CHAIN_REVIEW_BLUEPRINTS,
-            "supply_chain_review_cmdb_bp": supply_chain_review_cmdb_bp,
-            "supply_chain_review_ledger_bp": supply_chain_review_ledger_bp,
-            "supply_chain_review_process_bp": supply_chain_review_process_bp,
-            "supply_chain_review_action_bp": supply_chain_review_action_bp,
-            "supply_chain_review_attachment_bp": supply_chain_review_attachment_bp,
-        }
         license_data = load_license()
         if license_data and "moduleList" in license_data:
-            registered_modules = set()
-            registered_blueprint_names = set()
-            for item in license_data["moduleList"]:
-                module = item.get("module")
-                if not module or module not in bp_dict or module in registered_modules:
-                    continue
-                if is_licensed_module_active(license_data, item):
-                    blueprints = bp_dict[module]
-                    if not isinstance(blueprints, tuple):
-                        blueprints = (blueprints,)
-                    for blueprint in blueprints:
-                        blueprint_name = getattr(blueprint, "name", None) or id(
-                            blueprint
-                        )
-                        if blueprint_name in registered_blueprint_names:
-                            continue
-                        app.blueprint(blueprint)
-                        registered_blueprint_names.add(blueprint_name)
-                    registered_modules.add(module)
+            _register_licensed_blueprints(app, license_data)
     except Exception as ex:
         logger.info(f"{ex} | {traceback.format_exc()}")
 
