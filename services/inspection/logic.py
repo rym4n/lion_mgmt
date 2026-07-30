@@ -6,29 +6,54 @@
 Inspection Module Business Logic Layer
 """
 
-import orjson
 import ast
 import io
 import os
 import re
 import uuid
-
-from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
+
+import orjson
+from croniter import croniter
 from docxtpl import DocxTemplate
-from sanic.log import logger
-from libs.utils import upload_to_s3
-from tortoise.expressions import Q
 from litellm import acompletion
-from models import InspectionSchedule, InspectionCategory, InspectionTarget, InspectionResult, Tool, ToolAction, Timed, Playbook, PlaybookVersion
+from sanic.log import logger
+from tortoise.expressions import Q
+
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from services.digital_employee.lion_agent_adapter import execute_prompt, workspace_id_for
-from settings import RY_AI_MODEL, RY_AI_API_BASE, LLM_KEY
+from libs.utils import upload_to_s3
+from models import (
+    InspectionCategory,
+    InspectionResult,
+    InspectionSchedule,
+    InspectionTarget,
+    Playbook,
+    PlaybookVersion,
+    Timed,
+    Tool,
+    ToolAction,
+)
+from services.digital_employee.lion_agent_adapter import (
+    execute_prompt,
+    workspace_id_for,
+)
+from settings import LLM_KEY, RY_AI_API_BASE, RY_AI_MODEL
 
 INSPECTION_CATEGORY_TYPE_ACTION = "action"
 INSPECTION_CATEGORY_TYPE_PLAYBOOK = "playbook"
 INSPECTION_CATEGORY_TYPES = {INSPECTION_CATEGORY_TYPE_ACTION, INSPECTION_CATEGORY_TYPE_PLAYBOOK}
+
+
+def is_valid_schedule_cron(value: Any) -> bool:
+    """校验执行引擎支持的宏、5 段或秒在首位的 6 段 Cron。"""
+    fields = str(value or "").strip().split()
+    if len(fields) == 6:
+        return croniter.is_valid(" ".join(fields), second_at_beginning=True)
+    if len(fields) in (1, 5):
+        return croniter.is_valid(" ".join(fields))
+    return False
 
 
 def normalize_category_type(value: Any = None) -> str:
@@ -230,6 +255,9 @@ async def save_schedule(data: Dict[str, Any], tenant_id: str) -> InspectionSched
     创建或更新巡检调度配置
     Create or update inspection schedule configuration
     """
+    if not is_valid_schedule_cron(data.get("schedule_cron")):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
     schedule_id = data.get("id")
 
     if schedule_id:
