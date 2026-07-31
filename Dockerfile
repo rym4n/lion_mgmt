@@ -74,7 +74,7 @@ COPY services/inspection/inspection_template_model.xlsx ./services/inspection/in
 COPY services/network_topology/schemas/ ./services/network_topology/schemas/
 COPY services/network_topology/registries/ ./services/network_topology/registries/
 
-RUN python -m services.network_topology.contract_smoke
+RUN python -c "from services.network_topology.contract_smoke import main; main()"
 RUN chmod +x docker-entrypoint.sh
 
 # 在镜像构建时初始化 aerich 配置（不需要数据库连接）

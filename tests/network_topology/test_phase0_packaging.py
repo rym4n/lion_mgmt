@@ -10,7 +10,9 @@ SCHEMAS_COPY = (
 REGISTRIES_COPY = (
     "COPY services/network_topology/registries/ ./services/network_topology/registries/"
 )
-CONTRACT_SMOKE = "RUN python -m services.network_topology.contract_smoke"
+CONTRACT_SMOKE = (
+    'RUN python -c "from services.network_topology.contract_smoke import main; main()"'
+)
 
 
 def runtime_stage_lines() -> list[str]:
