@@ -2655,10 +2655,13 @@ async def add_permission(request):
         "application/json": {
             "schema": {
                 "type": "object",
-                "required": ["name", "resource_id"],
+                "required": ["name"],
                 "properties": {
                     "name": {"type": "string", "description": "工具名称"},
-                    "resource_id": {"type": "string", "description": "资源id"},
+                    "resource_id": {
+                        "type": "string",
+                        "description": "资源id；新增资源尚无id时可省略，此时授权回显为空",
+                    },
                     "actions": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -2707,11 +2710,42 @@ async def select_permission_all(request):
     name = request.json.get("name")
     resource_id = request.json.get("resource_id")
     actions = request.json.get("actions", ["all"])
-    if not name or not resource_id:
+    if not name:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
     maintenance_mode = await _current_maintenance_mode(request)
+
+    if not resource_id:
+        await _ensure_tool_in_scope(
+            tenant_id,
+            maintenance_mode,
+            name=name,
+        )
+        permission_specs = await _tool_action_permission_specs(
+            name,
+            tenant_id,
+            maintenance_mode,
+        )
+        if "all" not in actions:
+            selected_actions = set(actions)
+            permission_specs = [
+                item for item in permission_specs if item[0] in selected_actions
+            ]
+        if not permission_specs:
+            raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
+        return response_ok(
+            [
+                {
+                    "name": action_name,
+                    "description": action_description,
+                    "users_id": [],
+                    "roles_id": [],
+                }
+                for action_name, action_description in permission_specs
+            ]
+        )
+
     await _ensure_resource_in_scope(
         tenant_id,
         maintenance_mode,
