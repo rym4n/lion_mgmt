@@ -312,13 +312,18 @@ async def count_playbooks(request):
     maintenance_mode = bool(
         await request.app.ctx.cache_client.get(request.ctx.session["id"])
     )
-    result = await PlaybookVersion.filter(
-        status=1,
-        deleted=False,
-        playbook__internal=maintenance_mode,
-        tenant_id=tenant_id,
-    ).annotate(counts=Count("playbook_id", distinct=True)).values("counts")
-    return response_ok(result[0].get("counts"))
+    result = (
+        await PlaybookVersion.filter(
+            status=1,
+            deleted=False,
+            playbook__internal=maintenance_mode,
+            tenant_id=tenant_id,
+        )
+        .annotate(counts=Count("playbook_id", distinct=True))
+        .values("counts")
+    )
+    counts = result[0].get("counts") if result else 0
+    return response_ok(counts or 0)
 
 
 @dashboard_bp.post("/apps")
@@ -348,12 +353,17 @@ async def count_apps(request):
     maintenance_mode = bool(
         await request.app.ctx.cache_client.get(request.ctx.session["id"])
     )
-    result = await ToolResources.filter(
-        deleted=False,
-        internal=maintenance_mode,
-        tenant_id=tenant_id,
-    ).annotate(counts=Count("tool_name", distinct=True)).values("counts")
-    return response_ok(result[0].get("counts"))
+    result = (
+        await ToolResources.filter(
+            deleted=False,
+            internal=maintenance_mode,
+            tenant_id=tenant_id,
+        )
+        .annotate(counts=Count("tool_name", distinct=True))
+        .values("counts")
+    )
+    counts = result[0].get("counts") if result else 0
+    return response_ok(counts or 0)
 
 
 @dashboard_bp.post("/success-rate")

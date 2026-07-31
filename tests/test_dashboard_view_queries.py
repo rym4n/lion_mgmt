@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import orjson
 import pytest
 
+from services.dashboard import views as dashboard_views
 from services.dashboard.views import (
     _DASHBOARD_MATERIALIZED_VIEWS,
     _DASHBOARD_REFRESH_CACHE_KEY,
@@ -15,6 +16,8 @@ from services.dashboard.views import (
     _DASHBOARD_REFRESH_TASK_NAME,
     _refresh_dashboard_materialized_views,
     _schedule_dashboard_materialized_view_refresh,
+    count_apps,
+    count_playbooks,
     view_dashboard,
 )
 
@@ -50,6 +53,88 @@ CASES = {
         "sql_parts": ("FROM runlog_action", "day >= $1", "day <= $2", "tenant_id = $3"),
     },
 }
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "model_name", "expected_filters"),
+    [
+        (
+            count_playbooks,
+            "PlaybookVersion",
+            {
+                "status": 1,
+                "deleted": False,
+                "playbook__internal": False,
+                "tenant_id": "tenant-1",
+            },
+        ),
+        (
+            count_apps,
+            "ToolResources",
+            {
+                "deleted": False,
+                "internal": False,
+                "tenant_id": "tenant-1",
+            },
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    ("rows", "expected"),
+    [
+        ([], 0),
+        ([{"counts": None}], 0),
+        ([{"counts": 3}], 3),
+    ],
+)
+def test_dashboard_count_aggregates_handle_empty_scopes(
+    monkeypatch,
+    endpoint,
+    model_name,
+    expected_filters,
+    rows,
+    expected,
+):
+    captured = {}
+
+    class FakeAggregateQuery:
+        def annotate(self, **annotations):
+            captured["annotations"] = annotations
+            return self
+
+        async def values(self, *fields):
+            captured["value_fields"] = fields
+            return rows
+
+    def filter_rows(**filters):
+        captured["filters"] = filters
+        return FakeAggregateQuery()
+
+    async def get_mode(session_id):
+        assert session_id == "session-1"
+        return False
+
+    request = SimpleNamespace(
+        ctx=SimpleNamespace(session={"id": "session-1", "tenant_id": "tenant-1"}),
+        app=SimpleNamespace(
+            ctx=SimpleNamespace(
+                cache_client=SimpleNamespace(get=get_mode),
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        dashboard_views,
+        model_name,
+        SimpleNamespace(filter=filter_rows),
+    )
+    monkeypatch.setattr(dashboard_views, "response_ok", lambda data: data)
+
+    result = asyncio.run(inspect.unwrap(endpoint)(request))
+
+    assert result == expected
+    assert captured["filters"] == expected_filters
+    assert set(captured["annotations"]) == {"counts"}
+    assert captured["value_fields"] == ("counts",)
 
 
 class FakeScheduledTask:
