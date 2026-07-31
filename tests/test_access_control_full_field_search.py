@@ -1,5 +1,5 @@
 # coding=utf-8
-from services.supply_chain_review import manager
+from services.network_access_control import manager
 
 
 def test_access_control_keyword_search_matches_nested_policy_data():

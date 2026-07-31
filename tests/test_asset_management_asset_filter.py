@@ -7,10 +7,10 @@ import pytest
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from services.supply_chain_review import views
+from services.asset_management import views
 
 
-class _CiRecord(SimpleNamespace):
+class _AssetRecord(SimpleNamespace):
     @property
     def json(self):
         return {"id": self.id, "attributes": self.attributes}
@@ -56,7 +56,7 @@ def _field(data_type, *, field_key="field", enum_options=None):
 
 
 def _filter(data_type, payload, **field_kwargs):
-    return views._normalize_ci_field_filter(
+    return views._normalize_asset_field_filter(
         _field(data_type, **field_kwargs),
         {"field_key": field_kwargs.get("field_key", "field"), **payload},
     )
@@ -68,15 +68,15 @@ def _assert_param_error(callback):
     assert error.value.enum == ErrorCode.PARAM_ERROR
 
 
-def _run_ci_list(monkeypatch, data, records, fields, reference_labels=None):
+def _run_asset_list(monkeypatch, data, records, fields, reference_labels=None):
     operations = []
     query = _CiQuery(records, operations)
-    ci_type = SimpleNamespace(id="type-1")
+    asset_model = SimpleNamespace(id="type-1")
 
-    async def get_ci_type(tenant, model_ref):
+    async def get_asset_model(tenant, model_ref):
         assert tenant == "tenant-a"
         assert model_ref == "type-1"
-        return ci_type
+        return asset_model
 
     async def get_fields(tenant, model_ref):
         assert (tenant, model_ref) == ("tenant-a", "type-1")
@@ -88,11 +88,11 @@ def _run_ci_list(monkeypatch, data, records, fields, reference_labels=None):
         assert field_defs == fields
         return reference_labels or {}
 
-    monkeypatch.setattr(views, "get_ci_type_or_404", get_ci_type)
-    monkeypatch.setattr(views, "fields_for_type", get_fields)
-    monkeypatch.setattr(views, "reference_labels_for_cis", get_reference_labels)
+    monkeypatch.setattr(views, "get_asset_model_or_404", get_asset_model)
+    monkeypatch.setattr(views, "fields_for_model", get_fields)
+    monkeypatch.setattr(views, "reference_labels_for_assets", get_reference_labels)
     monkeypatch.setattr(
-        views.SupplyChainCi,
+        views.AssetInstance,
         "filter",
         staticmethod(lambda *_args, **_kwargs: query),
     )
@@ -101,7 +101,7 @@ def _run_ci_list(monkeypatch, data, records, fields, reference_labels=None):
         json=data,
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
-    payload = asyncio.run(inspect.unwrap(views.ci_list)(request))
+    payload = asyncio.run(inspect.unwrap(views.asset_list)(request))
     return payload, operations
 
 
@@ -109,10 +109,10 @@ def test_text_filters_are_case_insensitive_and_type_strict():
     contains = _filter("text", {"operator": "contains", "value": "DB-01"})
     exact = _filter("text", {"operator": "eq", "value": "DB-01"})
 
-    assert views._matches_ci_field_filter("primary-db-01-node", contains)
-    assert views._matches_ci_field_filter("db-01", exact)
-    assert not views._matches_ci_field_filter("db-010", exact)
-    assert not views._matches_ci_field_filter(101, contains)
+    assert views._matches_asset_field_filter("primary-db-01-node", contains)
+    assert views._matches_asset_field_filter("db-01", exact)
+    assert not views._matches_asset_field_filter("db-010", exact)
+    assert not views._matches_asset_field_filter(101, contains)
 
 
 def test_number_filter_supports_zero_inclusive_and_open_bounds():
@@ -123,13 +123,13 @@ def test_number_filter_supports_zero_inclusive_and_open_bounds():
     lower_only = _filter("number", {"operator": "between", "lower": 10})
     upper_only = _filter("number", {"operator": "between", "upper": 0})
 
-    assert views._matches_ci_field_filter(0, closed)
-    assert views._matches_ci_field_filter(10, closed)
-    assert not views._matches_ci_field_filter(-1, closed)
-    assert not views._matches_ci_field_filter(11, closed)
-    assert not views._matches_ci_field_filter(False, closed)
-    assert views._matches_ci_field_filter(11, lower_only)
-    assert views._matches_ci_field_filter(-1, upper_only)
+    assert views._matches_asset_field_filter(0, closed)
+    assert views._matches_asset_field_filter(10, closed)
+    assert not views._matches_asset_field_filter(-1, closed)
+    assert not views._matches_asset_field_filter(11, closed)
+    assert not views._matches_asset_field_filter(False, closed)
+    assert views._matches_asset_field_filter(11, lower_only)
+    assert views._matches_asset_field_filter(-1, upper_only)
 
 
 def test_date_and_datetime_filters_are_closed_ranges_and_ignore_dirty_values():
@@ -150,12 +150,12 @@ def test_date_and_datetime_filters_are_closed_ranges_and_ignore_dirty_values():
         },
     )
 
-    assert views._matches_ci_field_filter("2026-07-01", date_filter)
-    assert views._matches_ci_field_filter("2026-07-20", date_filter)
-    assert not views._matches_ci_field_filter("2026/07/10", date_filter)
-    assert views._matches_ci_field_filter("2026-07-20 09:00:00", datetime_filter)
-    assert views._matches_ci_field_filter("2026-07-20 18:00:00", datetime_filter)
-    assert not views._matches_ci_field_filter("invalid", datetime_filter)
+    assert views._matches_asset_field_filter("2026-07-01", date_filter)
+    assert views._matches_asset_field_filter("2026-07-20", date_filter)
+    assert not views._matches_asset_field_filter("2026/07/10", date_filter)
+    assert views._matches_asset_field_filter("2026-07-20 09:00:00", datetime_filter)
+    assert views._matches_asset_field_filter("2026-07-20 18:00:00", datetime_filter)
+    assert not views._matches_asset_field_filter("invalid", datetime_filter)
 
 
 def test_enum_bool_and_ref_filters_use_exact_typed_values():
@@ -165,15 +165,15 @@ def test_enum_bool_and_ref_filters_use_exact_typed_values():
         enum_options=[{"label": "Production", "value": "prod"}, "test"],
     )
     bool_filter = _filter("bool", {"operator": "eq", "value": False})
-    ref_filter = _filter("ref", {"operator": "eq", "value": "ci-1"})
+    ref_filter = _filter("ref", {"operator": "eq", "value": "asset-1"})
 
-    assert views._matches_ci_field_filter("prod", enum_filter)
-    assert not views._matches_ci_field_filter("Production", enum_filter)
-    assert views._matches_ci_field_filter(False, bool_filter)
-    assert not views._matches_ci_field_filter(0, bool_filter)
-    assert not views._matches_ci_field_filter("false", bool_filter)
-    assert views._matches_ci_field_filter("ci-1", ref_filter)
-    assert not views._matches_ci_field_filter("CI-1", ref_filter)
+    assert views._matches_asset_field_filter("prod", enum_filter)
+    assert not views._matches_asset_field_filter("Production", enum_filter)
+    assert views._matches_asset_field_filter(False, bool_filter)
+    assert not views._matches_asset_field_filter(0, bool_filter)
+    assert not views._matches_asset_field_filter("false", bool_filter)
+    assert views._matches_asset_field_filter("asset-1", ref_filter)
+    assert not views._matches_asset_field_filter("ASSET-1", ref_filter)
 
 
 @pytest.mark.parametrize(
@@ -194,7 +194,7 @@ def test_enum_bool_and_ref_filters_use_exact_typed_values():
         ("datetime", {"operator": "between", "lower": "2026-07-01"}, {}),
         ("enum", {"operator": "eq", "value": "missing"}, {"enum_options": ["known"]}),
         ("bool", {"operator": "eq", "value": "false"}, {}),
-        ("ref", {"operator": "contains", "value": "ci"}, {}),
+        ("ref", {"operator": "contains", "value": "asset"}, {}),
         ("attachment", {"operator": "eq", "value": "file-1"}, {}),
         ("unknown", {"operator": "eq", "value": "value"}, {}),
     ],
@@ -228,9 +228,9 @@ def test_invalid_type_specific_filters_are_rejected(data_type, payload, field_kw
 )
 def test_invalid_filter_request_shapes_are_rejected(data):
     def normalize_request():
-        request = views._ci_field_filter_request(data)
+        request = views._asset_field_filter_request(data)
         if request is not None:
-            views._normalize_ci_field_filter(_field("text"), request)
+            views._normalize_asset_field_filter(_field("text"), request)
 
     _assert_param_error(normalize_request)
 
@@ -238,28 +238,28 @@ def test_invalid_filter_request_shapes_are_rejected(data):
 def test_retired_field_filter_contract_is_rejected():
     for payload in (
         {"field_key": "field", "field_keyword": "DB-01"},
-        {"field_key": "owner", "field_keyword": "ci-1", "match_mode": "exact"},
+        {"field_key": "owner", "field_keyword": "asset-1", "match_mode": "exact"},
         {"match_mode": "fuzzy"},
     ):
         _assert_param_error(
-            lambda payload=payload: views._ci_field_filter_request(payload)
+            lambda payload=payload: views._asset_field_filter_request(payload)
         )
 
 
-def test_ci_list_filters_before_paginating_and_preserves_filtered_total(monkeypatch):
+def test_asset_list_filters_before_paginating_and_preserves_filtered_total(monkeypatch):
     records = [
-        _CiRecord(id="zero", attributes={"port": 0}),
-        _CiRecord(id="five", attributes={"port": 5}),
-        _CiRecord(id="ten", attributes={"port": 10}),
-        _CiRecord(id="eleven", attributes={"port": 11}),
-        _CiRecord(id="dirty", attributes={"port": "5"}),
-        _CiRecord(id="boolean", attributes={"port": False}),
+        _AssetRecord(id="zero", attributes={"port": 0}),
+        _AssetRecord(id="five", attributes={"port": 5}),
+        _AssetRecord(id="ten", attributes={"port": 10}),
+        _AssetRecord(id="eleven", attributes={"port": 11}),
+        _AssetRecord(id="dirty", attributes={"port": "5"}),
+        _AssetRecord(id="boolean", attributes={"port": False}),
     ]
 
-    payload, operations = _run_ci_list(
+    payload, operations = _run_asset_list(
         monkeypatch,
         {
-            "ci_type_id": "type-1",
+            "asset_model_id": "type-1",
             "field_filter": {
                 "field_key": "port",
                 "operator": "between",
@@ -278,17 +278,17 @@ def test_ci_list_filters_before_paginating_and_preserves_filtered_total(monkeypa
     assert operations == [("order_by", ("-utime",)), "all"]
 
 
-def test_ci_list_rejects_retired_text_filter(monkeypatch):
+def test_asset_list_rejects_retired_text_filter(monkeypatch):
     records = [
-        _CiRecord(id="match", attributes={"hostname": "Primary-DB"}),
-        _CiRecord(id="miss", attributes={"hostname": "web-01"}),
+        _AssetRecord(id="match", attributes={"hostname": "Primary-DB"}),
+        _AssetRecord(id="miss", attributes={"hostname": "web-01"}),
     ]
 
     _assert_param_error(
-        lambda: _run_ci_list(
+        lambda: _run_asset_list(
             monkeypatch,
             {
-                "ci_type_id": "type-1",
+                "asset_model_id": "type-1",
                 "field_key": "hostname",
                 "field_keyword": "db",
                 "match_mode": "fuzzy",
@@ -299,12 +299,12 @@ def test_ci_list_rejects_retired_text_filter(monkeypatch):
     )
 
 
-def test_ci_list_rejects_unknown_filter_field(monkeypatch):
+def test_asset_list_rejects_unknown_filter_field(monkeypatch):
     def run():
-        _run_ci_list(
+        _run_asset_list(
             monkeypatch,
             {
-                "ci_type_id": "type-1",
+                "asset_model_id": "type-1",
                 "field_filter": {
                     "field_key": "missing",
                     "operator": "eq",
@@ -318,9 +318,9 @@ def test_ci_list_rejects_unknown_filter_field(monkeypatch):
     _assert_param_error(run)
 
 
-def test_ci_list_rejects_filter_without_model(monkeypatch):
+def test_asset_list_rejects_filter_without_model(monkeypatch):
     monkeypatch.setattr(
-        views.SupplyChainCi,
+        views.AssetInstance,
         "filter",
         staticmethod(lambda *_args, **_kwargs: _CiQuery([], [])),
     )
@@ -335,15 +335,15 @@ def test_ci_list_rejects_filter_without_model(monkeypatch):
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
 
-    _assert_param_error(lambda: asyncio.run(inspect.unwrap(views.ci_list)(request)))
+    _assert_param_error(lambda: asyncio.run(inspect.unwrap(views.asset_list)(request)))
 
 
-def test_ci_list_without_field_filter_uses_database_pagination(monkeypatch):
-    records = [_CiRecord(id=str(index), attributes={}) for index in range(1, 6)]
+def test_asset_list_without_field_filter_uses_database_pagination(monkeypatch):
+    records = [_AssetRecord(id=str(index), attributes={}) for index in range(1, 6)]
 
-    payload, operations = _run_ci_list(
+    payload, operations = _run_asset_list(
         monkeypatch,
-        {"ci_type_id": "type-1", "page": 2, "size": 2},
+        {"asset_model_id": "type-1", "page": 2, "size": 2},
         records,
         [],
     )
@@ -359,14 +359,14 @@ def test_ci_list_without_field_filter_uses_database_pagination(monkeypatch):
     ]
 
 
-def test_ci_list_includes_batch_resolved_reference_labels(monkeypatch):
+def test_asset_list_includes_batch_resolved_reference_labels(monkeypatch):
     records = [
-        _CiRecord(id="project-1", attributes={"manager": "employee-1"}),
+        _AssetRecord(id="project-1", attributes={"manager": "employee-1"}),
     ]
 
-    payload, _operations = _run_ci_list(
+    payload, _operations = _run_asset_list(
         monkeypatch,
-        {"ci_type_id": "type-1", "page": 1, "size": 15},
+        {"asset_model_id": "type-1", "page": 1, "size": 15},
         records,
         [_field("ref", field_key="manager")],
         {"project-1": {"manager": "张三"}},

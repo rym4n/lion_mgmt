@@ -136,7 +136,7 @@ def check_wildcard(wildcard: str, pattern: str):
         pattern: role:create
         False
 
-        平台级 *:* 代表全部权限，也覆盖 supply_chain_review:model:r
+        平台级 *:* 代表全部权限，也覆盖 asset_management:r
         这类带资源层级的权限；模块级通配符仍按原有分段规则匹配。
     """
     if wildcard == SUPERADMIN_PERMISSION:

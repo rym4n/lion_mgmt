@@ -27,17 +27,8 @@ from services.role.views import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
-split_menus = importlib.import_module(
-    "migrations.models.59_20260706150000_split_asset_network_management_menus"
-)
-fix_menus = importlib.import_module(
-    "migrations.models.60_20260706165000_fix_asset_network_menu_permissions"
-)
-route_auth_meta = importlib.import_module(
-    "migrations.models.63_20260708183000_add_asset_network_route_auth_meta"
-)
-asset_reference_fields = importlib.import_module(
-    "migrations.models.95_20260730183000_replace_asset_relations_with_references"
+destructive_asset_network_rename = importlib.import_module(
+    "migrations.models.96_20260731203000_destructive_asset_network_rename"
 )
 asset_data_menu_label = importlib.import_module(
     "migrations.models.70_20260712181000_rename_asset_catalog_to_asset_data"
@@ -88,8 +79,8 @@ def test_license_menu_permission_matching_supports_split_menu_models():
     asset_menu = {
         "model": "asset-management-models",
         "Permissions": [
-            "supply_chain_review:model:c",
-            "supply_chain_review:model:r",
+            "asset_management:c",
+            "asset_management:r",
         ],
     }
     legacy_menu = {
@@ -97,33 +88,42 @@ def test_license_menu_permission_matching_supports_split_menu_models():
         "Permissions": [{"label": "查看系统设置权限", "value": "r"}],
     }
 
-    assert _role_can_open_menu(["supply_chain_review:model:r"], asset_menu) is True
+    assert _role_can_open_menu(["asset_management:r"], asset_menu) is True
     assert _role_can_open_menu(["asset-management-models:r"], asset_menu) is False
     assert _role_can_open_menu(["system:c,d,u,r"], legacy_menu) is True
-    assert _role_can_open_menu(
-        ["command_center:r"],
-        {
-            "model": "command_center",
-            "Permissions": ["command_center:c", "command_center:r"],
-        },
-    ) is True
-    assert _role_can_open_menu(
-        ["large_screen:c,d,u,r"],
-        {
-            "model": "large_screen",
-            "Permissions": [
-                {"label": "新增大屏权限", "value": "c"},
-                {"label": "查看大屏权限", "value": "r"},
-            ],
-        },
-    ) is True
-    assert _role_can_open_menu(
-        ["screen:r"],
-        {
-            "model": "large_screen",
-            "Permissions": [{"label": "查看大屏权限", "value": "r"}],
-        },
-    ) is False
+    assert (
+        _role_can_open_menu(
+            ["command_center:r"],
+            {
+                "model": "command_center",
+                "Permissions": ["command_center:c", "command_center:r"],
+            },
+        )
+        is True
+    )
+    assert (
+        _role_can_open_menu(
+            ["large_screen:c,d,u,r"],
+            {
+                "model": "large_screen",
+                "Permissions": [
+                    {"label": "新增大屏权限", "value": "c"},
+                    {"label": "查看大屏权限", "value": "r"},
+                ],
+            },
+        )
+        is True
+    )
+    assert (
+        _role_can_open_menu(
+            ["screen:r"],
+            {
+                "model": "large_screen",
+                "Permissions": [{"label": "查看大屏权限", "value": "r"}],
+            },
+        )
+        is False
+    )
 
 
 def test_license_menu_scopes_roles_to_the_session_tenant():
@@ -147,12 +147,18 @@ def test_license_menu_scopes_roles_to_the_session_tenant():
     assert tenant_guard in source
     assert "raise CustomError(ErrorCode.SESSION_INVALID)" in source
     assert scoped_loop in source
-    assert source.index(tenant_lookup) < source.index(tenant_guard) < source.index(scoped_loop)
+    assert (
+        source.index(tenant_lookup)
+        < source.index(tenant_guard)
+        < source.index(scoped_loop)
+    )
     assert "for role in user.roles:" not in source
 
 
 def test_get_license_rejects_a_missing_tenant_before_the_no_license_fallback():
-    request = SimpleNamespace(json={}, ctx=SimpleNamespace(session={"sub": "account-1"}))
+    request = SimpleNamespace(
+        json={}, ctx=SimpleNamespace(session={"sub": "account-1"})
+    )
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(inspect.unwrap(get_license)(request))
@@ -167,7 +173,9 @@ def test_get_license_does_not_use_another_tenants_superuser_role(monkeypatch):
         def __init__(self):
             self.roles = [
                 SimpleNamespace(tenant_id="tenant-default", permissions=["*:*"]),
-                SimpleNamespace(tenant_id="tenant-current", permissions=["dashboard:r"]),
+                SimpleNamespace(
+                    tenant_id="tenant-current", permissions=["dashboard:r"]
+                ),
             ]
 
     class AwaitableAccount:
@@ -240,8 +248,8 @@ def test_role_permission_menu_keeps_full_permission_values_for_split_modules():
         "model": "asset-management-models",
         "description": "资产模型",
         "Permissions": [
-            "supply_chain_review:model:c",
-            "supply_chain_review:model:r",
+            "asset_management:c",
+            "asset_management:r",
         ],
     }
 
@@ -250,13 +258,13 @@ def test_role_permission_menu_keeps_full_permission_values_for_split_modules():
     assert normalized["Permissions"] == [
         {
             "value": "c",
-            "label": "新增资产模型权限",
-            "permission": "supply_chain_review:model:c",
+            "label": "新增资产管理权限",
+            "permission": "asset_management:c",
         },
         {
             "value": "r",
-            "label": "查看资产模型权限",
-            "permission": "supply_chain_review:model:r",
+            "label": "查看资产管理权限",
+            "permission": "asset_management:r",
         },
     ]
 
@@ -294,9 +302,12 @@ def test_license_menu_matching_uses_active_license_module_bp_for_split_menus():
     assert _menu_is_licensed(
         {"description": "资产数据", "bp": "asset_management_bp"}, valid_modules
     )
-    assert _menu_is_licensed(
-        {"description": "网络拓扑", "bp": "topology_bp"}, valid_modules
-    ) is False
+    assert (
+        _menu_is_licensed(
+            {"description": "网络拓扑", "bp": "topology_bp"}, valid_modules
+        )
+        is False
+    )
     assert _menu_is_licensed(
         {"description": "访问控制", "bp": "network_access_control_bp"}, valid_modules
     )
@@ -340,72 +351,51 @@ def test_role_permission_list_matching_uses_active_license_module_bp_for_split_m
     assert _permission_menu_is_licensed(
         {"description": "访问控制", "bp": "network_access_control_bp"}, valid_modules
     )
-    assert _permission_menu_is_licensed(
-        {"description": "网络拓扑", "bp": "topology_bp"}, valid_modules
-    ) is False
+    assert (
+        _permission_menu_is_licensed(
+            {"description": "网络拓扑", "bp": "topology_bp"}, valid_modules
+        )
+        is False
+    )
 
 
-def test_split_menu_migration_replaces_security_management_menu():
-    upgrade_sql = asyncio.run(split_menus.upgrade(None))
+def test_installer_uses_only_current_asset_and_network_access_menu_contracts():
+    init_sql = (ROOT / "aioe_package/aioe_install/init.sql").read_text()
 
-    assert "description\" = '安全管理'" in upgrade_sql
-    assert "asset-management-models" in upgrade_sql
-    assert "asset-management-catalog" in upgrade_sql
-    assert "network-management-topology" in upgrade_sql
-    assert "network-management-access-control" in upgrade_sql
-    assert "asset_management_bp" in upgrade_sql
-    assert "topology_bp" in upgrade_sql
-    assert "network_access_control_bp" in upgrade_sql
-    menu_ids = re.findall(r"VALUES\s*\(\s*'([^']+)'", upgrade_sql)
-    assert menu_ids
-    assert all(len(menu_id) <= 36 for menu_id in menu_ids)
-    assert '"icon":"ri:database-2-line"' in upgrade_sql
-    assert '"icon":"ri:router-line"' in upgrade_sql
-    assert '"icon":"ri:mind-map"' in upgrade_sql
-    assert '"icon":"ri:shield-keyhole-line"' in upgrade_sql
+    assert "asset-management-models" in init_sql
+    assert "asset-management-catalog" in init_sql
+    assert "network-management-access-control" in init_sql
+    assert "asset_management_bp" in init_sql
+    assert "network_access_control_bp" in init_sql
+    assert "views/assetManagement/index.vue" in init_sql
+    assert "views/networkManagement/index.vue" in init_sql
+    assert "security-management" not in init_sql
+    assert "securityManagement" not in init_sql
 
 
-def test_fix_menu_migration_removes_legacy_topology_and_backfills_admin_roles():
-    upgrade_sql = asyncio.run(fix_menus.upgrade(None))
+def test_destructive_rename_migration_removes_old_menu_and_permission_contracts():
+    upgrade_sql = asyncio.run(destructive_asset_network_rename.upgrade(None))
 
-    assert "'network-topology'" in upgrade_sql
-    assert "'/network-topology'" in upgrade_sql
-    assert "'topology'" in upgrade_sql
-    assert "'/topology'" in upgrade_sql
-    assert "'/security-management'" in upgrade_sql
-    assert "supply_chain_review:model:r" in upgrade_sql
-    assert "supply_chain_review:ci:r" in upgrade_sql
-    assert "network_topology:r" in upgrade_sql
-    assert "supply_chain_review:policy:r" in upgrade_sql
-    assert "'*:*'" in upgrade_sql
+    assert 'DELETE FROM "permissions_menu"' in upgrade_sql
+    assert "WHERE \"model\" = 'supply-chain-review'" in upgrade_sql
+    assert "asset_management:r" in upgrade_sql
+    assert "network_access_control:r" in upgrade_sql
+    assert "WHERE permission NOT LIKE 'supply_chain_review:%'" in upgrade_sql
     assert "租户管理员" in upgrade_sql
-    assert "空间管理员" in upgrade_sql
-    assert "'role:c,d,u,r'" not in upgrade_sql
 
 
 def test_asset_network_route_meta_carries_menu_read_permissions():
-    upgrade_sql = asyncio.run(route_auth_meta.upgrade(None))
-    replacement_sql = asyncio.run(asset_reference_fields.upgrade(None))
+    upgrade_sql = asyncio.run(destructive_asset_network_rename.upgrade(None))
     init_sql = (ROOT / "aioe_package/aioe_install/init.sql").read_text()
 
     for text in (upgrade_sql, init_sql):
-        assert "jsonb_set" in text
-        assert "'permissions'" in text
-        assert "'auths'" in text
-        assert "supply_chain_review:model:r" in text
-        assert "supply_chain_review:field:r" in text
-        assert "supply_chain_review:ci:r" in text
-        assert "network_topology:r" in text
-        assert "supply_chain_review:policy:r" in text
+        assert "asset_management:r" in text
+        assert "network_access_control:r" in text
 
-    assert "supply_chain_review:relation:r" in upgrade_sql
-    assert "supply_chain_review:relation:r" not in init_sql
-    assert "JSONB_TYPEOF(permission) = 'string'" in replacement_sql
-    assert "LIKE 'supply_chain_review:relation:%'" in replacement_sql
-    assert (
-        "'[\"supply_chain_review:model:r\",\"supply_chain_review:field:r\"]'::jsonb"
-        in replacement_sql
-    )
+    assert "views/assetManagement/index.vue" in upgrade_sql
+    assert "views/networkManagement/index.vue" in upgrade_sql
+    assert "supply_chain_review:" not in init_sql
+    assert "views/securityManagement" not in init_sql
 
 
 def test_network_topology_installer_uses_crud_and_migrates_legacy_write_permission():
@@ -504,9 +494,9 @@ def test_command_center_migration_splits_expert_team_license_modules():
 def test_report_schedule_permission_has_a_distinct_label():
     upgrade_sql = asyncio.run(tenant_admin_and_report_labels.upgrade(None))
 
-    assert 'WHERE "model" = \'agent_report_schedule\'' in upgrade_sql
-    assert '"description" = \'汇报任务\'' in upgrade_sql
-    assert 'AND "description" = \'汇报助手\'' in upgrade_sql
+    assert "WHERE \"model\" = 'agent_report_schedule'" in upgrade_sql
+    assert "\"description\" = '汇报任务'" in upgrade_sql
+    assert "AND \"description\" = '汇报助手'" in upgrade_sql
 
 
 def test_skill_management_permission_menu_is_split_from_digital_employee():

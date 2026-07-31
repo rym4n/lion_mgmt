@@ -59,12 +59,8 @@ PERMISSION_RESOURCE_LABELS = {
     "digital_employee": "数字员工",
     "digital_employee_skill": "技能管理",
     "network_topology": "网络拓扑",
-    "supply_chain_review:ci": "资产数据",
-    "supply_chain_review:collection": "采集任务",
-    "supply_chain_review:field": "资产字段",
-    "supply_chain_review:model": "资产模型",
-    "supply_chain_review:policy": "访问控制策略",
-    "supply_chain_review:topology": "网络拓扑",
+    "asset_management": "资产管理",
+    "network_access_control": "网络访问控制",
 }
 
 TOOL_VIEW_PERMISSION = "tool:r"

@@ -8,7 +8,7 @@ import pytest
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from services.supply_chain_review import manager, views
+from services.asset_management import manager, views
 
 
 class _FakeQuery:
@@ -87,7 +87,9 @@ class _FakeQuery:
         return self.row if isinstance(self.row, list) else [self.row]
 
     async def values_list(self, *fields, flat=False):
-        rows = self.row if isinstance(self.row, list) else [self.row] if self.row else []
+        rows = (
+            self.row if isinstance(self.row, list) else [self.row] if self.row else []
+        )
         if flat:
             return [getattr(row, fields[0]) for row in rows]
         return [tuple(getattr(row, field) for field in fields) for row in rows]
@@ -139,14 +141,14 @@ def _install_structure_write_tenant(monkeypatch):
         staticmethod(lambda **_kwargs: _FakeQuery(tenant)),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiModelGroup,
+        manager.AssetModelGroup,
         "filter",
         staticmethod(lambda *_args, **_kwargs: _FakeQuery(group)),
     )
 
     async def ensure_catalog(*_args, **_kwargs):
         return SimpleNamespace(
-            catalog_version="bklite-2026.07-v1",
+            catalog_version="aioe-assets-2026.07-v2",
             revision=0,
         )
 
@@ -170,16 +172,16 @@ class _FakeRecord(SimpleNamespace):
         self.delete_calls.append(kwargs)
 
 
-def _field(field_id, field_key, ci_type_key="server", **overrides):
+def _field(field_id, field_key, asset_model_key="server", **overrides):
     payload = {
         "id": field_id,
         "tenant_id": "tenant-a",
-        "ci_type_key": ci_type_key,
+        "asset_model_key": asset_model_key,
         "field_key": field_key,
         "label": field_key,
         "data_type": "text",
         "enum_options": [],
-        "ref_ci_type": None,
+        "referenced_asset_model_key": None,
         "required": False,
         "unique": False,
         "default_value": None,
@@ -192,7 +194,7 @@ def _field(field_id, field_key, ci_type_key="server", **overrides):
     return _FakeRecord(_json=payload, **payload)
 
 
-def _ci_type(primary_field="name", **overrides):
+def _asset_model(primary_field="name", **overrides):
     payload = {
         "id": "type-1",
         "tenant_id": "tenant-a",
@@ -216,7 +218,7 @@ def _ci_type(primary_field="name", **overrides):
 
 def _field_payload(field_key, **overrides):
     payload = {
-        "ci_type_key": "server",
+        "asset_model_key": "server",
         "field_key": field_key,
         "label": field_key,
         "data_type": "text",
@@ -225,29 +227,31 @@ def _field_payload(field_key, **overrides):
     return payload
 
 
-def _v1_package(package):
-    ci_types = [{"group_key": "custom", **item} for item in package.get("ci_types", [])]
+def _v2_package(package):
+    asset_models = [
+        {"group_key": "custom", **item} for item in package.get("asset_models", [])
+    ]
     return {
-        "schema_version": 1,
-        "model_groups": [{"key": "custom", "name": "自定义模型", "sort": 1}],
-        "ci_types": ci_types,
-        "fields": package.get("fields", []),
-        "unique_rules": package.get("unique_rules", []),
+        "schema_version": 2,
+        "asset_model_groups": [{"key": "custom", "name": "自定义模型", "sort": 1}],
+        "asset_models": asset_models,
+        "asset_fields": package.get("asset_fields", []),
+        "asset_unique_rules": package.get("asset_unique_rules", []),
     }
 
 
-def _install_field_save_fakes(monkeypatch, ci_type, existing=None, created=None):
+def _install_field_save_fakes(monkeypatch, asset_model, existing=None, created=None):
     transaction = _FakeTransaction()
     filter_calls = []
     create_kwargs = {}
 
-    def ci_type_filter(**kwargs):
+    def asset_model_filter(**kwargs):
         assert kwargs == {
             "tenant_id": "tenant-a",
             "key": "server",
             "deleted": False,
         }
-        return _FakeQuery(ci_type)
+        return _FakeQuery(asset_model)
 
     def field_filter(**kwargs):
         filter_calls.append(kwargs)
@@ -259,69 +263,69 @@ def _install_field_save_fakes(monkeypatch, ci_type, existing=None, created=None)
 
     monkeypatch.setattr(manager, "in_transaction", lambda: transaction)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(ci_type_filter),
+        staticmethod(asset_model_filter),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef, "filter", staticmethod(field_filter)
+        manager.AssetFieldDefinition, "filter", staticmethod(field_filter)
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef, "create", staticmethod(create_field)
+        manager.AssetFieldDefinition, "create", staticmethod(create_field)
     )
     return transaction, filter_calls, create_kwargs
 
 
-def _install_ci_create_fakes(monkeypatch, ci_type):
+def _install_asset_create_fakes(monkeypatch, asset_model):
     operations = []
     transaction = _FakeTransaction(operations)
     create_kwargs = {}
 
-    def ci_type_filter(**kwargs):
+    def asset_model_filter(**kwargs):
         assert kwargs == {
             "tenant_id": "tenant-a",
-            "key": ci_type.key,
+            "key": asset_model.key,
             "deleted": False,
         }
-        return _FakeQuery(ci_type, operations)
+        return _FakeQuery(asset_model, operations)
 
-    async def create_ci(**kwargs):
+    async def create_asset(**kwargs):
         create_kwargs.update(kwargs)
         operations.append(("create", kwargs["using_db"]))
-        return _FakeRecord(_json=kwargs, id="ci-1", **kwargs)
+        return _FakeRecord(_json=kwargs, id="asset-1", **kwargs)
 
     monkeypatch.setattr(manager, "in_transaction", lambda: transaction)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(ci_type_filter),
+        staticmethod(asset_model_filter),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCi,
+        manager.AssetInstance,
         "create",
-        staticmethod(create_ci),
+        staticmethod(create_asset),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiReference,
+        manager.AssetReference,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery()),
     )
     return transaction, operations, create_kwargs
 
 
-def _install_ci_update_fakes(monkeypatch, ci_type, existing):
+def _install_asset_update_fakes(monkeypatch, asset_model, existing):
     operations = []
     transaction = _FakeTransaction(operations)
 
-    def ci_type_filter(**kwargs):
+    def asset_model_filter(**kwargs):
         assert kwargs == {
             "tenant_id": "tenant-a",
             "deleted": False,
-            "key": ci_type.key,
+            "key": asset_model.key,
         }
-        return _FakeQuery(ci_type, operations)
+        return _FakeQuery(asset_model, operations)
 
-    def ci_filter(**kwargs):
+    def asset_filter(**kwargs):
         assert kwargs == {
             "id": existing.id,
             "tenant_id": "tenant-a",
@@ -331,17 +335,17 @@ def _install_ci_update_fakes(monkeypatch, ci_type, existing):
 
     monkeypatch.setattr(manager, "in_transaction", lambda: transaction)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(ci_type_filter),
+        staticmethod(asset_model_filter),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCi,
+        manager.AssetInstance,
         "filter",
-        staticmethod(ci_filter),
+        staticmethod(asset_filter),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiReference,
+        manager.AssetReference,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery()),
     )
@@ -350,12 +354,12 @@ def _install_ci_update_fakes(monkeypatch, ci_type, existing):
 
 def _install_empty_field_reference_cleanup(monkeypatch):
     monkeypatch.setattr(
-        manager.SupplyChainCi,
+        manager.AssetInstance,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery()),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiReference,
+        manager.AssetReference,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery()),
     )
@@ -409,7 +413,7 @@ def test_generated_field_key_uses_a_numeric_suffix_for_a_collision(monkeypatch):
         return _FakeQuery(SimpleNamespace(id="occupied") if occupied else None)
 
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(field_filter),
     )
@@ -432,11 +436,11 @@ def test_generated_field_key_uses_a_numeric_suffix_for_a_collision(monkeypatch):
 
 
 def test_save_field_creates_single_character_key(monkeypatch):
-    ci_type = _ci_type(primary_field="")
+    asset_model = _asset_model(primary_field="")
     created = _field("field-1", "a")
     transaction, _, create_kwargs = _install_field_save_fakes(
         monkeypatch,
-        ci_type,
+        asset_model,
         created=created,
     )
 
@@ -455,11 +459,11 @@ def test_save_field_creates_single_character_key(monkeypatch):
 
 
 def test_save_field_generates_an_internal_key_when_the_api_omits_it(monkeypatch):
-    ci_type = _ci_type(primary_field="")
+    asset_model = _asset_model(primary_field="")
     created = _field("field-1", "fuwuqi")
     _, _, create_kwargs = _install_field_save_fakes(
         monkeypatch,
-        ci_type,
+        asset_model,
         created=created,
     )
     payload = _field_payload("unused", label="服务器")
@@ -479,18 +483,18 @@ def test_save_field_generates_an_internal_key_when_the_api_omits_it(monkeypatch)
 
 
 def test_reorder_fields_persists_the_complete_order_atomically(monkeypatch):
-    ci_type = _ci_type(primary_field="hostname")
+    asset_model = _asset_model(primary_field="hostname")
     hostname = _field("field-1", "hostname", sort=1)
     address = _field("field-2", "ip_address", sort=2)
     transaction = _install_transaction(monkeypatch)
 
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery(ci_type)),
+        staticmethod(lambda **_kwargs: _FakeQuery(asset_model)),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery([hostname, address])),
     )
@@ -516,19 +520,19 @@ def test_reorder_fields_persists_the_complete_order_atomically(monkeypatch):
 
 
 def test_reorder_fields_rejects_an_incomplete_field_set(monkeypatch):
-    ci_type = _ci_type()
+    asset_model = _asset_model()
     fields = [
         _field("field-1", "hostname", sort=1),
         _field("field-2", "ip_address", sort=2),
     ]
     _install_transaction(monkeypatch)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery(ci_type)),
+        staticmethod(lambda **_kwargs: _FakeQuery(asset_model)),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery(fields)),
     )
@@ -548,16 +552,16 @@ def test_reorder_fields_rejects_an_incomplete_field_set(monkeypatch):
 
 
 def test_reorder_fields_ignores_legacy_locked_state(monkeypatch):
-    ci_type = _ci_type(is_locked=True)
+    asset_model = _asset_model(is_locked=True)
     field = _field("field-1", "hostname", sort=1)
     _install_transaction(monkeypatch)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery(ci_type)),
+        staticmethod(lambda **_kwargs: _FakeQuery(asset_model)),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery([field])),
     )
@@ -576,28 +580,28 @@ def test_reorder_fields_ignores_legacy_locked_state(monkeypatch):
 
 
 def test_field_reorder_endpoint_forwards_the_requested_order(monkeypatch):
-    ci_type = _ci_type(primary_field="hostname")
+    asset_model = _asset_model(primary_field="hostname")
     fields = [
         _field("field-2", "ip_address", sort=1),
         _field("field-1", "hostname", sort=2),
     ]
     reorder_calls = []
 
-    async def reorder(tenant, ci_type_ref, field_ids, operator):
-        reorder_calls.append((tenant, ci_type_ref, field_ids, operator))
+    async def reorder(tenant, asset_model_ref, field_ids, operator):
+        reorder_calls.append((tenant, asset_model_ref, field_ids, operator))
         return fields
 
-    async def get_ci_type(tenant, ci_type_ref):
-        assert (tenant, ci_type_ref) == ("tenant-a", "type-1")
-        return ci_type
+    async def get_asset_model(tenant, asset_model_ref):
+        assert (tenant, asset_model_ref) == ("tenant-a", "type-1")
+        return asset_model
 
     monkeypatch.setattr(views, "reorder_fields", reorder)
-    monkeypatch.setattr(views, "get_ci_type_or_404", get_ci_type)
+    monkeypatch.setattr(views, "get_asset_model_or_404", get_asset_model)
     monkeypatch.setattr(views, "response_ok", lambda payload: payload)
 
     request = SimpleNamespace(
         json={
-            "ci_type_id": "type-1",
+            "asset_model_id": "type-1",
             "field_ids": ["field-2", "field-1"],
         },
         ctx=SimpleNamespace(
@@ -607,31 +611,31 @@ def test_field_reorder_endpoint_forwards_the_requested_order(monkeypatch):
             }
         ),
     )
-    payload = asyncio.run(inspect.unwrap(views.ci_field_reorder)(request))
+    payload = asyncio.run(inspect.unwrap(views.asset_field_reorder)(request))
 
     assert reorder_calls == [("tenant-a", "type-1", ["field-2", "field-1"], "admin")]
     assert [item["id"] for item in payload["items"]] == ["field-2", "field-1"]
     assert payload["total"] == 2
 
 
-def test_ci_import_prefers_selected_model_over_record_model(monkeypatch):
+def test_asset_import_prefers_selected_model_over_record_model(monkeypatch):
     save_calls = []
 
-    async def save_ci(tenant, record, operator):
+    async def save_asset_instance(tenant, record, operator):
         save_calls.append((tenant, record, operator))
-        return _FakeRecord(_json={"id": f"ci-{len(save_calls)}"})
+        return _FakeRecord(_json={"id": f"asset-{len(save_calls)}"})
 
-    monkeypatch.setattr(views, "save_ci", save_ci)
+    monkeypatch.setattr(views, "save_asset_instance", save_asset_instance)
     monkeypatch.setattr(views, "response_ok", lambda payload: payload)
 
     request = SimpleNamespace(
         json={
-            "ci_type_id": "target-type",
+            "asset_model_id": "target-type",
             "items": [
                 {
-                    "id": "source-ci",
-                    "ci_type_id": "source-type",
-                    "ci_type_key": "source-key",
+                    "id": "source-asset",
+                    "asset_model_id": "source-type",
+                    "asset_model_key": "source-key",
                     "attributes": {"name": "server-1"},
                 }
             ],
@@ -644,14 +648,14 @@ def test_ci_import_prefers_selected_model_over_record_model(monkeypatch):
         ),
     )
 
-    payload = asyncio.run(inspect.unwrap(views.ci_import)(request))
+    payload = asyncio.run(inspect.unwrap(views.asset_import)(request))
 
-    assert payload == {"total": 1, "items": [{"id": "ci-1"}]}
+    assert payload == {"total": 1, "items": [{"id": "asset-1"}]}
     assert save_calls == [
         (
             "tenant-a",
             {
-                "ci_type_id": "target-type",
+                "asset_model_id": "target-type",
                 "attributes": {"name": "server-1"},
             },
             "admin",
@@ -660,9 +664,9 @@ def test_ci_import_prefers_selected_model_over_record_model(monkeypatch):
 
 
 def test_save_field_rejects_create_intent_for_existing_key(monkeypatch):
-    ci_type = _ci_type(primary_field="")
+    asset_model = _asset_model(primary_field="")
     existing = _field("field-1", "a")
-    _install_field_save_fakes(monkeypatch, ci_type, existing=existing)
+    _install_field_save_fakes(monkeypatch, asset_model, existing=existing)
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
@@ -679,11 +683,11 @@ def test_save_field_rejects_create_intent_for_existing_key(monkeypatch):
 
 
 def test_save_field_sets_new_field_as_model_primary(monkeypatch):
-    ci_type = _ci_type()
+    asset_model = _asset_model()
     created = _field("field-1", "hostname")
     transaction, _, create_kwargs = _install_field_save_fakes(
         monkeypatch,
-        ci_type,
+        asset_model,
         created=created,
     )
 
@@ -698,9 +702,9 @@ def test_save_field_sets_new_field_as_model_primary(monkeypatch):
     assert item is created
     assert create_kwargs["tenant_id"] == "tenant-a"
     assert create_kwargs["using_db"] is transaction.connection
-    assert ci_type.primary_field == "hostname"
-    assert ci_type.updater == "admin"
-    assert ci_type.save_calls == [
+    assert asset_model.primary_field == "hostname"
+    assert asset_model.updater == "admin"
+    assert asset_model.save_calls == [
         {
             "using_db": transaction.connection,
             "update_fields": ["primary_field", "updater", "utime"],
@@ -709,11 +713,11 @@ def test_save_field_sets_new_field_as_model_primary(monkeypatch):
 
 
 def test_save_field_sets_existing_field_as_model_primary(monkeypatch):
-    ci_type = _ci_type(primary_field="name")
+    asset_model = _asset_model(primary_field="name")
     existing = _field("field-2", "serial_number")
     transaction, filter_calls, _ = _install_field_save_fakes(
         monkeypatch,
-        ci_type,
+        asset_model,
         existing=existing,
     )
 
@@ -732,13 +736,13 @@ def test_save_field_sets_existing_field_as_model_primary(monkeypatch):
         "deleted": False,
     }
     assert existing.save_calls == [{"using_db": transaction.connection}]
-    assert ci_type.primary_field == "serial_number"
+    assert asset_model.primary_field == "serial_number"
 
 
 def test_false_does_not_clear_current_primary_field(monkeypatch):
-    ci_type = _ci_type(primary_field="hostname")
+    asset_model = _asset_model(primary_field="hostname")
     existing = _field("field-1", "hostname")
-    _install_field_save_fakes(monkeypatch, ci_type, existing=existing)
+    _install_field_save_fakes(monkeypatch, asset_model, existing=existing)
 
     asyncio.run(
         manager.save_field(
@@ -748,16 +752,16 @@ def test_false_does_not_clear_current_primary_field(monkeypatch):
         )
     )
 
-    assert ci_type.primary_field == "hostname"
-    assert ci_type.save_calls == []
+    assert asset_model.primary_field == "hostname"
+    assert asset_model.save_calls == []
 
 
 def test_non_text_field_cannot_be_selected_as_primary(monkeypatch):
-    ci_type = _ci_type(primary_field="name")
+    asset_model = _asset_model(primary_field="name")
     created = _field("field-1", "port", data_type="number")
     _, _, create_kwargs = _install_field_save_fakes(
         monkeypatch,
-        ci_type,
+        asset_model,
         created=created,
     )
 
@@ -772,14 +776,14 @@ def test_non_text_field_cannot_be_selected_as_primary(monkeypatch):
 
     assert exc_info.value.enum is ErrorCode.PARAM_ERROR
     assert create_kwargs == {}
-    assert ci_type.primary_field == "name"
-    assert ci_type.save_calls == []
+    assert asset_model.primary_field == "name"
+    assert asset_model.save_calls == []
 
 
 def test_text_primary_field_cannot_change_to_non_text(monkeypatch):
-    ci_type = _ci_type(primary_field="hostname")
+    asset_model = _asset_model(primary_field="hostname")
     existing = _field("field-1", "hostname", data_type="text")
-    _install_field_save_fakes(monkeypatch, ci_type, existing=existing)
+    _install_field_save_fakes(monkeypatch, asset_model, existing=existing)
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
@@ -798,14 +802,14 @@ def test_text_primary_field_cannot_change_to_non_text(monkeypatch):
     assert exc_info.value.enum is ErrorCode.PARAM_ERROR
     assert existing.data_type == "text"
     assert existing.save_calls == []
-    assert ci_type.primary_field == "hostname"
+    assert asset_model.primary_field == "hostname"
 
 
 def test_legacy_non_text_primary_can_be_saved_without_type_change(monkeypatch):
-    ci_type = _ci_type(primary_field="port")
+    asset_model = _asset_model(primary_field="port")
     existing = _field("field-1", "port", data_type="number")
     transaction, _, _ = _install_field_save_fakes(
-        monkeypatch, ci_type, existing=existing
+        monkeypatch, asset_model, existing=existing
     )
 
     asyncio.run(
@@ -817,16 +821,16 @@ def test_legacy_non_text_primary_can_be_saved_without_type_change(monkeypatch):
     )
 
     assert existing.save_calls == [{"using_db": transaction.connection}]
-    assert ci_type.primary_field == "port"
-    assert ci_type.save_calls == []
+    assert asset_model.primary_field == "port"
+    assert asset_model.save_calls == []
 
 
 def test_renaming_current_primary_field_preserves_internal_key_and_model_reference(
     monkeypatch,
 ):
-    ci_type = _ci_type(primary_field="hostname")
+    asset_model = _asset_model(primary_field="hostname")
     existing = _field("field-1", "hostname")
-    _install_field_save_fakes(monkeypatch, ci_type, existing=existing)
+    _install_field_save_fakes(monkeypatch, asset_model, existing=existing)
 
     asyncio.run(
         manager.save_field(
@@ -838,13 +842,13 @@ def test_renaming_current_primary_field_preserves_internal_key_and_model_referen
 
     assert existing.field_key == "hostname"
     assert existing.label == "display_name"
-    assert ci_type.primary_field == "hostname"
+    assert asset_model.primary_field == "hostname"
 
 
 def test_field_without_primary_flag_keeps_model_package_primary_field(monkeypatch):
-    ci_type = _ci_type(primary_field="hostname")
+    asset_model = _asset_model(primary_field="hostname")
     created = _field("field-1", "hostname")
-    _install_field_save_fakes(monkeypatch, ci_type, created=created)
+    _install_field_save_fakes(monkeypatch, asset_model, created=created)
 
     asyncio.run(
         manager.save_field(
@@ -854,37 +858,39 @@ def test_field_without_primary_flag_keeps_model_package_primary_field(monkeypatc
         )
     )
 
-    assert ci_type.primary_field == "hostname"
-    assert ci_type.save_calls == []
+    assert asset_model.primary_field == "hostname"
+    assert asset_model.save_calls == []
 
 
-def test_ci_field_list_and_type_detail_mark_only_primary_field(monkeypatch):
-    ci_type = _ci_type(primary_field="hostname")
+def test_asset_field_list_and_type_detail_mark_only_primary_field(monkeypatch):
+    asset_model = _asset_model(primary_field="hostname")
     fields = [_field("field-1", "hostname"), _field("field-2", "ip_address")]
 
-    async def get_ci_type(tenant, key_or_id):
+    async def get_asset_model(tenant, key_or_id):
         assert tenant == "tenant-a"
         assert key_or_id in {"server", "type-1"}
-        return ci_type
+        return asset_model
 
-    async def get_fields(tenant, ci_type_key):
-        assert (tenant, ci_type_key) == ("tenant-a", "server")
+    async def get_fields(tenant, asset_model_key):
+        assert (tenant, asset_model_key) == ("tenant-a", "server")
         return fields
 
-    monkeypatch.setattr(views, "get_ci_type_or_404", get_ci_type)
-    monkeypatch.setattr(views, "fields_for_type", get_fields)
+    monkeypatch.setattr(views, "get_asset_model_or_404", get_asset_model)
+    monkeypatch.setattr(views, "fields_for_model", get_fields)
     monkeypatch.setattr(views, "response_ok", lambda payload: payload)
 
     list_request = SimpleNamespace(
-        json={"ci_type_key": "server"},
+        json={"asset_model_key": "server"},
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
     detail_request = SimpleNamespace(
         json={"id": "type-1"},
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
-    list_payload = asyncio.run(inspect.unwrap(views.ci_field_list)(list_request))
-    detail_payload = asyncio.run(inspect.unwrap(views.ci_type_detail)(detail_request))
+    list_payload = asyncio.run(inspect.unwrap(views.asset_field_list)(list_request))
+    detail_payload = asyncio.run(
+        inspect.unwrap(views.asset_model_detail)(detail_request)
+    )
 
     expected_flags = {"hostname": True, "ip_address": False}
     assert {
@@ -896,7 +902,7 @@ def test_ci_field_list_and_type_detail_mark_only_primary_field(monkeypatch):
 
 
 def test_delete_primary_field_is_forbidden_within_current_tenant(monkeypatch):
-    ci_type = _ci_type(primary_field="hostname")
+    asset_model = _asset_model(primary_field="hostname")
     field = _field("field-1", "hostname")
     filter_calls = []
     type_calls = []
@@ -905,19 +911,19 @@ def test_delete_primary_field_is_forbidden_within_current_tenant(monkeypatch):
         filter_calls.append(kwargs)
         return _FakeQuery(field)
 
-    def ci_type_filter(**kwargs):
+    def asset_model_filter(**kwargs):
         type_calls.append(kwargs)
-        return _FakeQuery(ci_type)
+        return _FakeQuery(asset_model)
 
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(field_filter),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(ci_type_filter),
+        staticmethod(asset_model_filter),
     )
     monkeypatch.setattr(manager, "in_transaction", _FakeTransaction)
 
@@ -934,19 +940,19 @@ def test_delete_primary_field_is_forbidden_within_current_tenant(monkeypatch):
 
 
 def test_delete_non_primary_field_uses_same_model_and_field_lock_order(monkeypatch):
-    ci_type = _ci_type(primary_field="hostname")
+    asset_model = _asset_model(primary_field="hostname")
     field = _field("field-2", "ip_address")
     transaction = _FakeTransaction()
 
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery(field)),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery(ci_type)),
+        staticmethod(lambda **_kwargs: _FakeQuery(asset_model)),
     )
     monkeypatch.setattr(manager, "in_transaction", lambda: transaction)
     _install_empty_field_reference_cleanup(monkeypatch)
@@ -964,18 +970,18 @@ def test_delete_non_primary_field_uses_same_model_and_field_lock_order(monkeypat
 
 
 def test_model_edit_uses_only_formal_v1_fields(monkeypatch):
-    ci_type = _ci_type(
+    asset_model = _asset_model(
         primary_field="hostname", category="master_data", color="#abcdef"
     )
     transaction = _install_transaction(monkeypatch)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda *_args, **_kwargs: _FakeQuery(ci_type)),
+        staticmethod(lambda *_args, **_kwargs: _FakeQuery(asset_model)),
     )
 
     asyncio.run(
-        manager.save_ci_type(
+        manager.save_asset_model(
             "tenant-a",
             {
                 "id": "type-1",
@@ -988,11 +994,11 @@ def test_model_edit_uses_only_formal_v1_fields(monkeypatch):
         )
     )
 
-    assert ci_type.name == "服务器模型"
-    assert ci_type.icon == "server"
-    assert ci_type.primary_field == "hostname"
-    assert ci_type.sort == 0
-    assert ci_type.save_calls == [
+    assert asset_model.name == "服务器模型"
+    assert asset_model.icon == "server"
+    assert asset_model.primary_field == "hostname"
+    assert asset_model.sort == 0
+    assert asset_model.save_calls == [
         {
             "using_db": transaction.connection,
             "update_fields": [
@@ -1006,27 +1012,27 @@ def test_model_edit_uses_only_formal_v1_fields(monkeypatch):
 
 
 def test_new_model_starts_without_implicit_primary_field(monkeypatch):
-    created = _ci_type(primary_field="")
+    created = _asset_model(primary_field="")
     create_kwargs = {}
     transaction = _install_transaction(monkeypatch)
 
-    async def create_ci_type(**kwargs):
+    async def create_asset_model(**kwargs):
         create_kwargs.update(kwargs)
         return created
 
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery()),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "create",
-        staticmethod(create_ci_type),
+        staticmethod(create_asset_model),
     )
 
     item = asyncio.run(
-        manager.save_ci_type(
+        manager.save_asset_model(
             "tenant-a",
             {
                 "key": "server",
@@ -1053,7 +1059,7 @@ def test_new_model_can_select_a_product_builtin_group(monkeypatch):
         is_builtin=True,
         is_locked=False,
     )
-    created = _ci_type(
+    created = _asset_model(
         primary_field="",
         group_id=group.id,
         group_key=group.key,
@@ -1065,28 +1071,28 @@ def test_new_model_can_select_a_product_builtin_group(monkeypatch):
         def filter(self, *_args, **_kwargs):
             return self
 
-    async def create_ci_type(**kwargs):
+    async def create_asset_model(**kwargs):
         create_kwargs.update(kwargs)
         return created
 
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery()),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "create",
-        staticmethod(create_ci_type),
+        staticmethod(create_asset_model),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiModelGroup,
+        manager.AssetModelGroup,
         "filter",
         staticmethod(lambda **_kwargs: GroupQuery(group)),
     )
 
     result = asyncio.run(
-        manager.save_ci_type(
+        manager.save_asset_model(
             "tenant-a",
             {
                 "key": "server",
@@ -1114,13 +1120,13 @@ def test_generated_group_key_is_not_filtered_as_a_model_group_id(monkeypatch):
             return self
 
     monkeypatch.setattr(
-        manager.SupplyChainCiModelGroup,
+        manager.AssetModelGroup,
         "filter",
         staticmethod(lambda **_kwargs: GroupQuery(group)),
     )
 
     result = asyncio.run(
-        manager.resolve_ci_model_group("tenant-a", group_key, object())
+        manager.resolve_asset_model_group("tenant-a", group_key, object())
     )
 
     assert result is group
@@ -1131,7 +1137,7 @@ def test_generated_group_key_is_not_filtered_as_a_model_group_id(monkeypatch):
 @pytest.mark.parametrize("sort", [-1, 1.5, True, "not-a-number", []])
 def test_model_payload_rejects_invalid_sort(sort):
     with pytest.raises(CustomError) as exc_info:
-        manager.payload_ci_type(
+        manager.payload_asset_model(
             {"key": "server", "name": "服务器", "sort": sort},
             "admin",
         )
@@ -1140,16 +1146,16 @@ def test_model_payload_rejects_invalid_sort(sort):
 
 
 def test_regular_model_save_cannot_overwrite_drag_order(monkeypatch):
-    ci_type = _ci_type(sort=7)
+    asset_model = _asset_model(sort=7)
     transaction = _install_transaction(monkeypatch)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda *_args, **_kwargs: _FakeQuery(ci_type)),
+        staticmethod(lambda *_args, **_kwargs: _FakeQuery(asset_model)),
     )
 
     asyncio.run(
-        manager.save_ci_type(
+        manager.save_asset_model(
             "tenant-a",
             {
                 "id": "type-1",
@@ -1161,8 +1167,8 @@ def test_regular_model_save_cannot_overwrite_drag_order(monkeypatch):
         )
     )
 
-    assert ci_type.sort == 7
-    assert ci_type.save_calls == [
+    assert asset_model.sort == 7
+    assert asset_model.save_calls == [
         {
             "using_db": transaction.connection,
             "update_fields": ["key", "name", "updater", "utime"],
@@ -1170,18 +1176,18 @@ def test_regular_model_save_cannot_overwrite_drag_order(monkeypatch):
     ]
 
 
-def test_reorder_ci_types_persists_the_complete_order_atomically(monkeypatch):
-    server = _ci_type(id="type-1", key="server", sort=1)
-    database = _ci_type(id="type-2", key="database", sort=2)
+def test_reorder_asset_models_persists_the_complete_order_atomically(monkeypatch):
+    server = _asset_model(id="type-1", key="server", sort=1)
+    database = _asset_model(id="type-2", key="database", sort=2)
     transaction = _install_transaction(monkeypatch)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery([server, database])),
     )
 
     result = asyncio.run(
-        manager.reorder_ci_types(
+        manager.reorder_asset_models(
             "tenant-a",
             ["type-2", "type-1"],
             "admin",
@@ -1198,21 +1204,21 @@ def test_reorder_ci_types_persists_the_complete_order_atomically(monkeypatch):
     assert server.save_calls == [expected_save]
 
 
-def test_reorder_ci_types_rejects_an_incomplete_model_set(monkeypatch):
+def test_reorder_asset_models_rejects_an_incomplete_model_set(monkeypatch):
     models = [
-        _ci_type(id="type-1", key="server", sort=1),
-        _ci_type(id="type-2", key="database", sort=2),
+        _asset_model(id="type-1", key="server", sort=1),
+        _asset_model(id="type-2", key="database", sort=2),
     ]
     _install_transaction(monkeypatch)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery(models)),
     )
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
-            manager.reorder_ci_types(
+            manager.reorder_asset_models(
                 "tenant-a",
                 ["type-1"],
                 "admin",
@@ -1223,21 +1229,21 @@ def test_reorder_ci_types_rejects_an_incomplete_model_set(monkeypatch):
     assert all(model.save_calls == [] for model in models)
 
 
-def test_ci_type_reorder_endpoint_forwards_the_requested_order(monkeypatch):
+def test_asset_model_reorder_endpoint_forwards_the_requested_order(monkeypatch):
     models = [
-        _ci_type(id="type-2", key="database", sort=1),
-        _ci_type(id="type-1", key="server", sort=2),
+        _asset_model(id="type-2", key="database", sort=1),
+        _asset_model(id="type-1", key="server", sort=2),
     ]
     reorder_calls = []
 
-    async def reorder(tenant, ci_type_ids, operator):
-        reorder_calls.append((tenant, ci_type_ids, operator))
+    async def reorder(tenant, asset_model_ids, operator):
+        reorder_calls.append((tenant, asset_model_ids, operator))
         return models
 
-    monkeypatch.setattr(views, "reorder_ci_types", reorder)
+    monkeypatch.setattr(views, "reorder_asset_models", reorder)
     monkeypatch.setattr(views, "response_ok", lambda payload: payload)
     request = SimpleNamespace(
-        json={"ci_type_ids": ["type-2", "type-1"]},
+        json={"asset_model_ids": ["type-2", "type-1"]},
         ctx=SimpleNamespace(
             session={
                 "tenant_id": "tenant-a",
@@ -1246,21 +1252,21 @@ def test_ci_type_reorder_endpoint_forwards_the_requested_order(monkeypatch):
         ),
     )
 
-    payload = asyncio.run(inspect.unwrap(views.ci_type_reorder)(request))
+    payload = asyncio.run(inspect.unwrap(views.asset_model_reorder)(request))
 
     assert reorder_calls == [("tenant-a", ["type-2", "type-1"], "admin")]
     assert [item["id"] for item in payload["items"]] == ["type-2", "type-1"]
     assert payload["total"] == 2
 
 
-def test_ci_type_list_orders_models_by_persisted_sort(monkeypatch):
+def test_asset_model_list_orders_models_by_persisted_sort(monkeypatch):
     operations = []
     models = [
-        _ci_type(id="type-2", key="database", sort=1),
-        _ci_type(id="type-1", key="server", sort=2),
+        _asset_model(id="type-2", key="database", sort=1),
+        _asset_model(id="type-1", key="server", sort=2),
     ]
     monkeypatch.setattr(
-        views.SupplyChainCiType,
+        views.AssetModel,
         "filter",
         staticmethod(lambda *_args, **_kwargs: _FakeQuery(models, operations)),
     )
@@ -1270,22 +1276,22 @@ def test_ci_type_list_orders_models_by_persisted_sort(monkeypatch):
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
 
-    payload = asyncio.run(inspect.unwrap(views.ci_type_list)(request))
+    payload = asyncio.run(inspect.unwrap(views.asset_model_list)(request))
 
     assert [item["id"] for item in payload["items"]] == ["type-2", "type-1"]
     assert ("order_by", ("sort", "key")) in operations
 
 
-def test_ci_type_list_optionally_aggregates_instance_counts(monkeypatch):
+def test_asset_model_list_optionally_aggregates_instance_counts(monkeypatch):
     models = [
-        _ci_type(id="type-1", key="server", sort=1),
-        _ci_type(id="type-2", key="database", sort=2),
+        _asset_model(id="type-1", key="server", sort=1),
+        _asset_model(id="type-2", key="database", sort=2),
     ]
     aggregate_operations = []
     instance_filter_calls = []
 
     monkeypatch.setattr(
-        views.SupplyChainCiType,
+        views.AssetModel,
         "filter",
         staticmethod(lambda *_args, **_kwargs: _FakeQuery(models)),
     )
@@ -1293,12 +1299,12 @@ def test_ci_type_list_optionally_aggregates_instance_counts(monkeypatch):
     def instance_filter(**kwargs):
         instance_filter_calls.append(kwargs)
         return _FakeQuery(
-            [{"ci_type_id": "type-1", "instance_count": 3}],
+            [{"asset_model_id": "type-1", "instance_count": 3}],
             aggregate_operations,
         )
 
     monkeypatch.setattr(
-        views.SupplyChainCi,
+        views.AssetInstance,
         "filter",
         staticmethod(instance_filter),
     )
@@ -1308,33 +1314,33 @@ def test_ci_type_list_optionally_aggregates_instance_counts(monkeypatch):
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
 
-    payload = asyncio.run(inspect.unwrap(views.ci_type_list)(request))
+    payload = asyncio.run(inspect.unwrap(views.asset_model_list)(request))
 
     assert instance_filter_calls == [
         {
             "tenant_id": "tenant-a",
-            "ci_type_id__in": ["type-1", "type-2"],
+            "asset_model_id__in": ["type-1", "type-2"],
             "deleted": False,
         }
     ]
     assert [item["instance_count"] for item in payload["items"]] == [3, 0]
     assert ("annotate", ("instance_count",)) in aggregate_operations
-    assert ("group_by", ("ci_type_id",)) in aggregate_operations
-    assert ("values", ("ci_type_id", "instance_count")) in aggregate_operations
+    assert ("group_by", ("asset_model_id",)) in aggregate_operations
+    assert ("values", ("asset_model_id", "instance_count")) in aggregate_operations
 
 
-def test_ci_type_list_skips_instance_query_without_count_option(monkeypatch):
+def test_asset_model_list_skips_instance_query_without_count_option(monkeypatch):
     monkeypatch.setattr(
-        views.SupplyChainCiType,
+        views.AssetModel,
         "filter",
-        staticmethod(lambda *_args, **_kwargs: _FakeQuery([_ci_type()])),
+        staticmethod(lambda *_args, **_kwargs: _FakeQuery([_asset_model()])),
     )
 
     def unexpected_instance_query(**_kwargs):
         raise AssertionError("instance counts must remain opt-in")
 
     monkeypatch.setattr(
-        views.SupplyChainCi,
+        views.AssetInstance,
         "filter",
         staticmethod(unexpected_instance_query),
     )
@@ -1344,7 +1350,7 @@ def test_ci_type_list_skips_instance_query_without_count_option(monkeypatch):
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
 
-    payload = asyncio.run(inspect.unwrap(views.ci_type_list)(request))
+    payload = asyncio.run(inspect.unwrap(views.asset_model_list)(request))
 
     assert "instance_count" not in payload["items"][0]
 
@@ -1368,7 +1374,7 @@ def test_required_ref_ignores_historical_default_when_target_has_no_instances():
         "field-1",
         "application",
         data_type="ref",
-        ref_ci_type_id="application-type",
+        referenced_asset_model_id="application-type",
         required=True,
         default_value="默认",
     )
@@ -1389,7 +1395,7 @@ def test_ref_field_payload_discards_defaults_and_table_type_is_rejected():
             "field_key": "application",
             "label": "应用",
             "data_type": "ref",
-            "ref_ci_type_id": "application-type",
+            "referenced_asset_model_id": "application-type",
             "default_value": "默认",
         }
     )
@@ -1402,33 +1408,31 @@ def test_ref_field_payload_discards_defaults_and_table_type_is_rejected():
     assert exc_info.value.enum is ErrorCode.PARAM_ERROR
 
 
-def test_ci_type_sort_migration_backfills_and_indexes_the_new_order():
+def test_destructive_rename_migration_creates_asset_model_sort_contract():
     migration = importlib.import_module(
-        "migrations.models.80_20260719120000_add_ci_type_sort"
+        "migrations.models.96_20260731203000_destructive_asset_network_rename"
     )
 
     upgrade_sql = asyncio.run(migration.upgrade(None))
-    downgrade_sql = asyncio.run(migration.downgrade(None))
+    asset_model_sql = upgrade_sql[upgrade_sql.index('CREATE TABLE "asset_model"') :]
 
-    assert 'ADD COLUMN "sort" INT NOT NULL DEFAULT 0' in upgrade_sql
-    assert 'PARTITION BY "tenant_id"' in upgrade_sql
-    assert 'ORDER BY "deleted", "key", "ctime", "id"' in upgrade_sql
-    assert "idx_supply_chain_ci_type_tenant_sort" in upgrade_sql
-    assert 'DROP COLUMN "sort"' in downgrade_sql
+    assert '"sort" INT NOT NULL DEFAULT 0' in asset_model_sql
+    assert 'CREATE INDEX "idx_asset_model_tenant__6ca4a7"' in asset_model_sql
+    assert '("tenant_id", "group_id", "sort")' in asset_model_sql
 
 
 def test_model_save_rejects_create_to_update_race(monkeypatch):
-    existing = _ci_type(primary_field="hostname")
+    existing = _asset_model(primary_field="hostname")
     _install_transaction(monkeypatch)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery(existing)),
     )
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
-            manager.save_ci_type(
+            manager.save_asset_model(
                 "tenant-a",
                 {"key": "server", "name": "服务器"},
                 "admin",
@@ -1441,23 +1445,23 @@ def test_model_save_rejects_create_to_update_race(monkeypatch):
 
 
 def test_model_save_maps_deleted_key_tombstone_to_already_exists(monkeypatch):
-    tombstone = _ci_type(primary_field="", deleted=True)
+    tombstone = _asset_model(primary_field="", deleted=True)
     filter_calls = []
     _install_transaction(monkeypatch)
 
-    def filter_ci_type(**kwargs):
+    def filter_asset_model(**kwargs):
         filter_calls.append(kwargs)
         return _FakeQuery(tombstone)
 
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(filter_ci_type),
+        staticmethod(filter_asset_model),
     )
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
-            manager.save_ci_type(
+            manager.save_asset_model(
                 "tenant-a",
                 {"key": "server", "name": "服务器"},
                 "admin",
@@ -1471,21 +1475,21 @@ def test_model_save_maps_deleted_key_tombstone_to_already_exists(monkeypatch):
 
 
 def test_instance_name_does_not_fall_back_to_unselected_name_attribute(monkeypatch):
-    ci_type = _ci_type(primary_field="")
-    transaction, operations, create_kwargs = _install_ci_create_fakes(
+    asset_model = _asset_model(primary_field="")
+    transaction, operations, create_kwargs = _install_asset_create_fakes(
         monkeypatch,
-        ci_type,
+        asset_model,
     )
 
     async def validate_attributes(*_args):
         return []
 
-    monkeypatch.setattr(manager, "validate_ci_attributes", validate_attributes)
+    monkeypatch.setattr(manager, "validate_asset_attributes", validate_attributes)
 
     asyncio.run(
-        manager.save_ci(
+        manager.save_asset_instance(
             "tenant-a",
-            {"ci_type_key": "server", "attributes": {"name": "未勾选名称"}},
+            {"asset_model_key": "server", "attributes": {"name": "未勾选名称"}},
             "admin",
         )
     )
@@ -1503,21 +1507,21 @@ def test_instance_name_does_not_fall_back_to_unselected_name_attribute(monkeypat
 
 
 def test_legacy_numeric_primary_value_is_converted_to_display_text(monkeypatch):
-    ci_type = _ci_type(primary_field="port")
-    transaction, _, create_kwargs = _install_ci_create_fakes(
+    asset_model = _asset_model(primary_field="port")
+    transaction, _, create_kwargs = _install_asset_create_fakes(
         monkeypatch,
-        ci_type,
+        asset_model,
     )
 
     async def validate_attributes(*_args):
         return []
 
-    monkeypatch.setattr(manager, "validate_ci_attributes", validate_attributes)
+    monkeypatch.setattr(manager, "validate_asset_attributes", validate_attributes)
 
     asyncio.run(
-        manager.save_ci(
+        manager.save_asset_instance(
             "tenant-a",
-            {"ci_type_key": "server", "attributes": {"port": 443}},
+            {"asset_model_key": "server", "attributes": {"port": 443}},
             "admin",
         )
     )
@@ -1526,12 +1530,14 @@ def test_legacy_numeric_primary_value_is_converted_to_display_text(monkeypatch):
     assert create_kwargs["using_db"] is transaction.connection
 
 
-def test_save_ci_update_locks_instance_and_rechecks_soft_delete(monkeypatch):
-    ci_type = _ci_type(primary_field="hostname")
+def test_save_asset_instance_update_locks_instance_and_rechecks_soft_delete(
+    monkeypatch,
+):
+    asset_model = _asset_model(primary_field="hostname")
     existing = _FakeRecord(
         _json={},
-        id="ci-1",
-        ci_type_key="server",
+        id="asset-1",
+        asset_model_key="server",
         name="old",
         project_area_id=None,
         accessory_project_id=None,
@@ -1539,23 +1545,23 @@ def test_save_ci_update_locks_instance_and_rechecks_soft_delete(monkeypatch):
         status="active",
         risk_status="normal",
     )
-    transaction, operations = _install_ci_update_fakes(
+    transaction, operations = _install_asset_update_fakes(
         monkeypatch,
-        ci_type,
+        asset_model,
         existing,
     )
 
     async def validate_attributes(*_args, **_kwargs):
         return []
 
-    monkeypatch.setattr(manager, "validate_ci_attributes", validate_attributes)
+    monkeypatch.setattr(manager, "validate_asset_attributes", validate_attributes)
 
     result = asyncio.run(
-        manager.save_ci(
+        manager.save_asset_instance(
             "tenant-a",
             {
-                "id": "ci-1",
-                "ci_type_key": "server",
+                "id": "asset-1",
+                "asset_model_key": "server",
                 "attributes": {"hostname": "new"},
             },
             "admin",
@@ -1583,41 +1589,41 @@ def test_model_package_is_only_path_that_can_restore_primary_field(monkeypatch):
 
     async def save_type(tenant, data, operator, **_kwargs):
         save_calls.append((tenant, data["key"], operator))
-        return _ci_type(primary_field="")
+        return _asset_model(primary_field="")
 
     async def save_package_field(*_args, **_kwargs):
         return _field("field-1", "hostname")
 
     async def set_primary(
         tenant,
-        ci_type_key,
+        asset_model_key,
         primary_field,
         operator,
         **_kwargs,
     ):
-        primary_calls.append((tenant, ci_type_key, primary_field, operator))
-        return _ci_type(primary_field=primary_field)
+        primary_calls.append((tenant, asset_model_key, primary_field, operator))
+        return _asset_model(primary_field=primary_field)
 
-    monkeypatch.setattr(manager, "save_ci_type", save_type)
+    monkeypatch.setattr(manager, "save_asset_model", save_type)
     monkeypatch.setattr(manager, "save_field", save_package_field)
     monkeypatch.setattr(manager, "set_package_primary_field", set_primary)
     monkeypatch.setattr(manager, "in_transaction", lambda: _FakeTransaction())
 
     result = asyncio.run(
-        manager.import_model_package(
+        manager.import_asset_model_package(
             "tenant-a",
-            _v1_package(
+            _v2_package(
                 {
-                    "ci_types": [
+                    "asset_models": [
                         {
                             "key": "server",
                             "name": "服务器",
                             "primary_field": "hostname",
                         }
                     ],
-                    "fields": [
+                    "asset_fields": [
                         {
-                            "ci_type_key": "server",
+                            "asset_model_key": "server",
                             "field_key": "hostname",
                             "label": "主机名",
                             "data_type": "text",
@@ -1630,43 +1636,43 @@ def test_model_package_is_only_path_that_can_restore_primary_field(monkeypatch):
     )
 
     assert result == {
-        "model_groups": 1,
-        "ci_types": 1,
-        "fields": 1,
-        "unique_rules": 0,
+        "asset_model_groups": 1,
+        "asset_models": 1,
+        "asset_fields": 1,
+        "asset_unique_rules": 0,
     }
     assert save_calls == [("tenant-a", "server", "package-import")]
     assert primary_calls == [("tenant-a", "server", "hostname", "package-import")]
 
 
 def test_imported_export_package_upserts_by_business_key(monkeypatch):
-    saved = {"ci_types": [], "fields": []}
+    saved = {"asset_models": [], "asset_fields": []}
     expected_flags = {}
 
     async def save_type(_tenant, data, _operator, **kwargs):
-        saved["ci_types"].append(data)
-        expected_flags["ci_types"] = kwargs["expected_exists"]
-        return _ci_type(primary_field="")
+        saved["asset_models"].append(data)
+        expected_flags["asset_models"] = kwargs["expected_exists"]
+        return _asset_model(primary_field="")
 
     async def save_package_field(_tenant, data, _operator, **kwargs):
-        saved["fields"].append(data)
-        expected_flags["fields"] = kwargs["expected_exists"]
+        saved["asset_fields"].append(data)
+        expected_flags["asset_fields"] = kwargs["expected_exists"]
         return _field("target-field", data["field_key"])
 
     async def set_primary(*_args, **_kwargs):
-        return _ci_type(primary_field="hostname")
+        return _asset_model(primary_field="hostname")
 
-    monkeypatch.setattr(manager, "save_ci_type", save_type)
+    monkeypatch.setattr(manager, "save_asset_model", save_type)
     monkeypatch.setattr(manager, "save_field", save_package_field)
     monkeypatch.setattr(manager, "set_package_primary_field", set_primary)
     monkeypatch.setattr(manager, "in_transaction", lambda: _FakeTransaction())
 
     result = asyncio.run(
-        manager.import_model_package(
+        manager.import_asset_model_package(
             "target-tenant",
-            _v1_package(
+            _v2_package(
                 {
-                    "ci_types": [
+                    "asset_models": [
                         {
                             "id": "source-type",
                             "tenant_id": "source-tenant",
@@ -1680,13 +1686,13 @@ def test_imported_export_package_upserts_by_business_key(monkeypatch):
                             "primary_field": "hostname",
                         }
                     ],
-                    "fields": [
+                    "asset_fields": [
                         {
                             "id": "source-field",
                             "tenant_id": "source-tenant",
                             "creator": "source-user",
                             "is_primary": True,
-                            "ci_type_key": "server",
+                            "asset_model_key": "server",
                             "field_key": "hostname",
                             "label": "主机名",
                             "data_type": "text",
@@ -1696,21 +1702,21 @@ def test_imported_export_package_upserts_by_business_key(monkeypatch):
             ),
             "package-import",
             expected_existing={
-                "model_groups": {"custom"},
-                "ci_types": {"server"},
-                "fields": set(),
-                "unique_rules": set(),
+                "asset_model_groups": {"custom"},
+                "asset_models": {"server"},
+                "asset_fields": set(),
+                "asset_unique_rules": set(),
             },
         )
     )
 
     assert result == {
-        "model_groups": 1,
-        "ci_types": 1,
-        "fields": 1,
-        "unique_rules": 0,
+        "asset_model_groups": 1,
+        "asset_models": 1,
+        "asset_fields": 1,
+        "asset_unique_rules": 0,
     }
-    assert saved["ci_types"] == [
+    assert saved["asset_models"] == [
         {
             "group_key": "custom",
             "key": "server",
@@ -1718,17 +1724,17 @@ def test_imported_export_package_upserts_by_business_key(monkeypatch):
             "primary_field": "hostname",
         }
     ]
-    assert saved["fields"] == [
+    assert saved["asset_fields"] == [
         {
-            "ci_type_key": "server",
+            "asset_model_key": "server",
             "field_key": "hostname",
             "label": "主机名",
             "data_type": "text",
         }
     ]
     assert expected_flags == {
-        "ci_types": True,
-        "fields": False,
+        "asset_models": True,
+        "asset_fields": False,
     }
 
 
@@ -1737,7 +1743,7 @@ def test_model_package_switches_primary_before_updating_old_primary(monkeypatch)
 
     async def save_type(_tenant, data, _operator, **_kwargs):
         events.append(("model", data["key"]))
-        return _ci_type(primary_field="name")
+        return _asset_model(primary_field="name")
 
     async def save_package_field(_tenant, data, _operator, **_kwargs):
         events.append(("field", data["field_key"], data["data_type"]))
@@ -1745,39 +1751,39 @@ def test_model_package_switches_primary_before_updating_old_primary(monkeypatch)
 
     async def set_primary(
         _tenant,
-        ci_type_key,
+        asset_model_key,
         primary_field,
         _operator,
         **_kwargs,
     ):
-        events.append(("primary", ci_type_key, primary_field))
-        return _ci_type(primary_field=primary_field)
+        events.append(("primary", asset_model_key, primary_field))
+        return _asset_model(primary_field=primary_field)
 
-    monkeypatch.setattr(manager, "save_ci_type", save_type)
+    monkeypatch.setattr(manager, "save_asset_model", save_type)
     monkeypatch.setattr(manager, "save_field", save_package_field)
     monkeypatch.setattr(manager, "set_package_primary_field", set_primary)
     monkeypatch.setattr(manager, "in_transaction", lambda: _FakeTransaction())
 
     asyncio.run(
-        manager.import_model_package(
+        manager.import_asset_model_package(
             "tenant-a",
-            _v1_package(
+            _v2_package(
                 {
-                    "ci_types": [
+                    "asset_models": [
                         {
                             "key": "server",
                             "name": "服务器",
                             "primary_field": "hostname",
                         }
                     ],
-                    "fields": [
+                    "asset_fields": [
                         {
-                            "ci_type_key": "server",
+                            "asset_model_key": "server",
                             "field_key": "name",
                             "data_type": "number",
                         },
                         {
-                            "ci_type_key": "server",
+                            "asset_model_key": "server",
                             "field_key": "hostname",
                             "data_type": "text",
                         },
@@ -1813,38 +1819,38 @@ def test_model_package_reuses_one_tenant_locked_connection(monkeypatch):
 
     async def save_type(_tenant, data, _operator, **kwargs):
         connection_calls.append(("model", data["key"], kwargs["connection"]))
-        return _ci_type(key=data["key"], primary_field="")
+        return _asset_model(key=data["key"], primary_field="")
 
     async def save_package_field(_tenant, data, _operator, **kwargs):
         connection_calls.append(("field", data["field_key"], kwargs["connection"]))
-        return _field("field-2", data["field_key"], data["ci_type_key"])
+        return _field("field-2", data["field_key"], data["asset_model_key"])
 
     async def set_primary(
         _tenant,
-        ci_type_key,
+        asset_model_key,
         primary_field,
         _operator,
         **kwargs,
     ):
-        connection_calls.append(("primary", ci_type_key, kwargs["connection"]))
-        return _ci_type(key=ci_type_key, primary_field=primary_field)
+        connection_calls.append(("primary", asset_model_key, kwargs["connection"]))
+        return _asset_model(key=asset_model_key, primary_field=primary_field)
 
     monkeypatch.setattr(manager.Tenant, "filter", staticmethod(tenant_filter))
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery(existing_primary, field_operations)),
     )
-    monkeypatch.setattr(manager, "save_ci_type", save_type)
+    monkeypatch.setattr(manager, "save_asset_model", save_type)
     monkeypatch.setattr(manager, "save_field", save_package_field)
     monkeypatch.setattr(manager, "set_package_primary_field", set_primary)
 
     result = asyncio.run(
-        manager.import_model_package(
+        manager.import_asset_model_package(
             "tenant-a",
-            _v1_package(
+            _v2_package(
                 {
-                    "ci_types": [
+                    "asset_models": [
                         {
                             "key": "server",
                             "name": "服务器",
@@ -1852,9 +1858,9 @@ def test_model_package_reuses_one_tenant_locked_connection(monkeypatch):
                         },
                         {"key": "app", "name": "应用"},
                     ],
-                    "fields": [
+                    "asset_fields": [
                         {
-                            "ci_type_key": "app",
+                            "asset_model_key": "app",
                             "field_key": "name",
                             "data_type": "text",
                         }
@@ -1866,10 +1872,10 @@ def test_model_package_reuses_one_tenant_locked_connection(monkeypatch):
     )
 
     assert result == {
-        "model_groups": 1,
-        "ci_types": 2,
-        "fields": 1,
-        "unique_rules": 0,
+        "asset_model_groups": 1,
+        "asset_models": 2,
+        "asset_fields": 1,
+        "asset_unique_rules": 0,
     }
     assert tenant_filter_calls == [{"id": "tenant-a", "deleted": False}]
     assert all(
@@ -1884,21 +1890,21 @@ def test_model_package_reuses_one_tenant_locked_connection(monkeypatch):
 
 def test_model_package_discards_legacy_locked_metadata(monkeypatch):
     transaction = _install_transaction(monkeypatch)
-    imported_ci_type = _ci_type(is_locked=False)
+    imported_asset_model = _asset_model(is_locked=False)
     saved_payloads = []
 
     async def save_type(_tenant, data, _operator, **kwargs):
         saved_payloads.append((data, kwargs))
-        return imported_ci_type
+        return imported_asset_model
 
-    monkeypatch.setattr(manager, "save_ci_type", save_type)
+    monkeypatch.setattr(manager, "save_asset_model", save_type)
 
     result = asyncio.run(
-        manager.import_model_package(
+        manager.import_asset_model_package(
             "tenant-a",
-            _v1_package(
+            _v2_package(
                 {
-                    "ci_types": [
+                    "asset_models": [
                         {
                             "key": "server",
                             "name": "服务器",
@@ -1912,15 +1918,15 @@ def test_model_package_discards_legacy_locked_metadata(monkeypatch):
     )
 
     assert result == {
-        "model_groups": 1,
-        "ci_types": 1,
-        "fields": 0,
-        "unique_rules": 0,
+        "asset_model_groups": 1,
+        "asset_models": 1,
+        "asset_fields": 0,
+        "asset_unique_rules": 0,
     }
     assert "is_locked" not in saved_payloads[0][0]
     assert saved_payloads[0][1]["allow_sort_update"] is True
     assert saved_payloads[0][1]["connection"] is transaction.connection
-    assert imported_ci_type.save_calls == []
+    assert imported_asset_model.save_calls == []
 
 
 def test_model_package_rolls_back_outer_transaction_on_late_failure(monkeypatch):
@@ -1943,32 +1949,32 @@ def test_model_package_rolls_back_outer_transaction_on_late_failure(monkeypatch)
 
     async def save_type(*_args, **_kwargs):
         save_calls.append("model")
-        return _ci_type(primary_field="")
+        return _asset_model(primary_field="")
 
     async def fail_field(*_args, **_kwargs):
         save_calls.append("field")
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     monkeypatch.setattr(manager, "in_transaction", lambda: transaction)
-    monkeypatch.setattr(manager, "save_ci_type", save_type)
+    monkeypatch.setattr(manager, "save_asset_model", save_type)
     monkeypatch.setattr(manager, "save_field", fail_field)
 
     with pytest.raises(CustomError):
         asyncio.run(
-            manager.import_model_package(
+            manager.import_asset_model_package(
                 "tenant-a",
-                _v1_package(
+                _v2_package(
                     {
-                        "ci_types": [
+                        "asset_models": [
                             {
                                 "key": "server",
                                 "name": "服务器",
                                 "primary_field": "hostname",
                             }
                         ],
-                        "fields": [
+                        "asset_fields": [
                             {
-                                "ci_type_key": "server",
+                                "asset_model_key": "server",
                                 "field_key": "hostname",
                                 "data_type": "text",
                             }
@@ -1985,17 +1991,17 @@ def test_model_package_rolls_back_outer_transaction_on_late_failure(monkeypatch)
 
 
 def test_package_primary_restore_locks_model_and_field(monkeypatch):
-    ci_type = _ci_type(primary_field="")
+    asset_model = _asset_model(primary_field="")
     field = _field("field-1", "hostname")
     transaction = _FakeTransaction()
 
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery(ci_type)),
+        staticmethod(lambda **_kwargs: _FakeQuery(asset_model)),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery(field)),
     )
@@ -2010,9 +2016,9 @@ def test_package_primary_restore_locks_model_and_field(monkeypatch):
         )
     )
 
-    assert result is ci_type
-    assert ci_type.primary_field == "hostname"
-    assert ci_type.save_calls == [
+    assert result is asset_model
+    assert asset_model.primary_field == "hostname"
+    assert asset_model.save_calls == [
         {
             "using_db": transaction.connection,
             "update_fields": ["primary_field", "updater", "utime"],
@@ -2021,16 +2027,16 @@ def test_package_primary_restore_locks_model_and_field(monkeypatch):
 
 
 def test_package_primary_restore_rejects_non_text_field(monkeypatch):
-    ci_type = _ci_type(primary_field="")
+    asset_model = _asset_model(primary_field="")
     field = _field("field-1", "port", data_type="number")
 
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery(ci_type)),
+        staticmethod(lambda **_kwargs: _FakeQuery(asset_model)),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery(field)),
     )
@@ -2047,14 +2053,14 @@ def test_package_primary_restore_rejects_non_text_field(monkeypatch):
         )
 
     assert exc_info.value.enum is ErrorCode.PARAM_ERROR
-    assert ci_type.primary_field == ""
+    assert asset_model.primary_field == ""
 
 
 def test_model_package_rejects_dangling_primary_field_before_writes(monkeypatch):
     save_calls = []
     _install_transaction(monkeypatch)
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery()),
     )
@@ -2062,15 +2068,15 @@ def test_model_package_rejects_dangling_primary_field_before_writes(monkeypatch)
     async def unexpected_save(*_args, **_kwargs):
         save_calls.append((_args, _kwargs))
 
-    monkeypatch.setattr(manager, "save_ci_type", unexpected_save)
+    monkeypatch.setattr(manager, "save_asset_model", unexpected_save)
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
-            manager.import_model_package(
+            manager.import_asset_model_package(
                 "tenant-a",
-                _v1_package(
+                _v2_package(
                     {
-                        "ci_types": [
+                        "asset_models": [
                             {
                                 "key": "server",
                                 "name": "服务器",
@@ -2094,25 +2100,25 @@ def test_model_package_rejects_non_text_primary_before_writes(monkeypatch):
     async def unexpected_save(*_args, **_kwargs):
         save_calls.append((_args, _kwargs))
 
-    monkeypatch.setattr(manager, "save_ci_type", unexpected_save)
+    monkeypatch.setattr(manager, "save_asset_model", unexpected_save)
     monkeypatch.setattr(manager, "save_field", unexpected_save)
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
-            manager.import_model_package(
+            manager.import_asset_model_package(
                 "tenant-a",
-                _v1_package(
+                _v2_package(
                     {
-                        "ci_types": [
+                        "asset_models": [
                             {
                                 "key": "server",
                                 "name": "服务器",
                                 "primary_field": "port",
                             }
                         ],
-                        "fields": [
+                        "asset_fields": [
                             {
-                                "ci_type_key": "server",
+                                "asset_model_key": "server",
                                 "field_key": "port",
                                 "data_type": "number",
                             }
@@ -2170,33 +2176,34 @@ def test_model_package_permissions_require_every_create_and_update_scope(
     permission_calls = []
 
     monkeypatch.setattr(
-        views.SupplyChainCiModelGroup,
+        views.AssetModelGroup,
         "filter",
         staticmethod(lambda **_kwargs: RowsQuery([SimpleNamespace(key="custom")])),
     )
     monkeypatch.setattr(
-        views.SupplyChainCiType,
+        views.AssetModel,
         "filter",
         staticmethod(lambda **_kwargs: RowsQuery([SimpleNamespace(key="server")])),
     )
     monkeypatch.setattr(
-        views.SupplyChainCiFieldDef,
+        views.AssetFieldDefinition,
         "filter",
         staticmethod(
             lambda **_kwargs: RowsQuery(
-                [SimpleNamespace(ci_type_key="server", field_key="hostname")]
+                [SimpleNamespace(asset_model_key="server", field_key="hostname")]
             )
         ),
     )
     monkeypatch.setattr(
-        views.SupplyChainCiUniqueRule,
+        views.AssetUniqueRule,
         "filter",
         staticmethod(
             lambda **_kwargs: RowsQuery(
-                [SimpleNamespace(ci_type_key="server", key="hostname_unique")]
+                [SimpleNamespace(asset_model_key="server", key="hostname_unique")]
             )
         ),
     )
+
     async def check_permission(_request, permission):
         permission_calls.append(permission)
         return True
@@ -2206,28 +2213,28 @@ def test_model_package_permissions_require_every_create_and_update_scope(
         views._require_model_package_permissions(
             SimpleNamespace(),
             "tenant-a",
-            _v1_package(
+            _v2_package(
                 {
-                    "ci_types": [
+                    "asset_models": [
                         {"id": "source-server", "key": " server "},
                         {"id": "source-app", "key": "app"},
                     ],
-                    "fields": [
+                    "asset_fields": [
                         {
                             "id": "source-hostname",
-                            "ci_type_key": " server ",
+                            "asset_model_key": " server ",
                             "field_key": " hostname ",
                         },
                         {
                             "id": "source-name",
-                            "ci_type_key": "app",
+                            "asset_model_key": "app",
                             "field_key": "name",
                         },
                     ],
-                    "unique_rules": [
+                    "asset_unique_rules": [
                         {
                             "id": "source-hostname-unique",
-                            "ci_type_key": "server",
+                            "asset_model_key": "server",
                             "key": "hostname_unique",
                             "field_keys": ["hostname"],
                         }
@@ -2238,43 +2245,43 @@ def test_model_package_permissions_require_every_create_and_update_scope(
     )
 
     assert permission_calls == [
-        "supply_chain_review:model:c",
-        "supply_chain_review:model:u",
-        "supply_chain_review:field:c",
-        "supply_chain_review:field:u",
+        "asset_management:c",
+        "asset_management:u",
+        "asset_management:c",
+        "asset_management:u",
     ]
-    assert [item["key"] for item in normalized["ci_types"]] == ["server", "app"]
-    assert normalized["fields"][0]["ci_type_key"] == "server"
-    assert normalized["fields"][0]["field_key"] == "hostname"
+    assert [item["key"] for item in normalized["asset_models"]] == ["server", "app"]
+    assert normalized["asset_fields"][0]["asset_model_key"] == "server"
+    assert normalized["asset_fields"][0]["field_key"] == "hostname"
     assert all(
         "id" not in item
         for resource in (
-            "model_groups",
-            "ci_types",
-            "fields",
-            "unique_rules",
+            "asset_model_groups",
+            "asset_models",
+            "asset_fields",
+            "asset_unique_rules",
         )
         for item in normalized[resource]
     )
     assert expected_existing == {
-        "model_groups": {"custom"},
-        "ci_types": {"server"},
-        "fields": {("server", "hostname")},
-        "unique_rules": {("server", "hostname_unique")},
+        "asset_model_groups": {"custom"},
+        "asset_models": {"server"},
+        "asset_fields": {("server", "hostname")},
+        "asset_unique_rules": {("server", "hostname_unique")},
     }
 
 
 def test_model_package_endpoint_passes_permission_snapshot_to_import(monkeypatch):
-    normalized = {"ci_types": [{"key": "server"}], "fields": []}
+    normalized = {"asset_models": [{"key": "server"}], "asset_fields": []}
     expected_existing = {
-        "ci_types": {"server"},
-        "fields": set(),
+        "asset_models": {"server"},
+        "asset_fields": set(),
     }
     import_calls = []
 
     async def require_permissions(_request, tenant, package):
         assert tenant == "tenant-a"
-        assert package == {"ci_types": [{"key": "server"}]}
+        assert package == {"asset_models": [{"key": "server"}]}
         return normalized, expected_existing
 
     async def import_package(
@@ -2284,45 +2291,42 @@ def test_model_package_endpoint_passes_permission_snapshot_to_import(monkeypatch
         expected_existing=None,
     ):
         import_calls.append((tenant, package, operator, expected_existing))
-        return {"ci_types": 1, "fields": 0}
+        return {"asset_models": 1, "asset_fields": 0}
 
     monkeypatch.setattr(
         views,
         "_require_model_package_permissions",
         require_permissions,
     )
-    monkeypatch.setattr(views, "import_model_package", import_package)
+    monkeypatch.setattr(views, "import_asset_model_package", import_package)
     monkeypatch.setattr(views, "response_ok", lambda payload: payload)
 
     request = SimpleNamespace(
-        json={"package": {"ci_types": [{"key": "server"}]}},
+        json={"package": {"asset_models": [{"key": "server"}]}},
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
-    payload = asyncio.run(inspect.unwrap(views.ci_type_import)(request))
+    payload = asyncio.run(inspect.unwrap(views.asset_model_import)(request))
 
-    assert payload == {"ci_types": 1, "fields": 0}
+    assert payload == {"asset_models": 1, "asset_fields": 0}
     assert import_calls == [
         ("tenant-a", normalized, None, expected_existing),
     ]
 
 
-def test_primary_field_migration_clears_only_dangling_references():
+def test_destructive_rename_migration_creates_asset_primary_field_contract():
     migration = importlib.import_module(
-        "migrations.models.72_20260713161000_unset_default_ci_primary_field"
+        "migrations.models.96_20260731203000_destructive_asset_network_rename"
     )
     sql = asyncio.run(migration.upgrade(None))
 
-    assert sql.index("ALTER TABLE") < sql.index('UPDATE "supply_chain_ci_type"')
-    assert "COALESCE(ci_type.\"primary_field\", '') <> ''" in sql
-    assert 'field_def."tenant_id" IS NOT DISTINCT FROM ci_type."tenant_id"' in sql
-    assert 'field_def."ci_type_key" = ci_type."key"' in sql
-    assert 'field_def."field_key" = ci_type."primary_field"' in sql
-    assert 'field_def."deleted" = False' in sql
+    asset_model_sql = sql[sql.index('CREATE TABLE "asset_model"') :]
+    assert "\"primary_field\" VARCHAR(64) NOT NULL DEFAULT ''" in asset_model_sql
+    assert 'CREATE TABLE "asset_field_definition"' in sql
 
 
 def test_field_save_endpoint_requires_update_permission_for_existing_id(monkeypatch):
     field = _field("field-1", "hostname")
-    ci_type = _ci_type(primary_field="hostname")
+    asset_model = _asset_model(primary_field="hostname")
     permission_calls = []
     expected_exists_calls = []
 
@@ -2338,36 +2342,36 @@ def test_field_save_endpoint_requires_update_permission_for_existing_id(monkeypa
         expected_exists_calls.append(kwargs["expected_exists"])
         return field
 
-    async def get_ci_type(*_args):
-        return ci_type
+    async def get_asset_model(*_args):
+        return asset_model
 
     monkeypatch.setattr(
-        views.SupplyChainCiFieldDef,
+        views.AssetFieldDefinition,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery(field)),
     )
     monkeypatch.setattr(views, "_require_save_permission", require_permission)
     monkeypatch.setattr(views, "save_field", save_field)
-    monkeypatch.setattr(views, "get_ci_type_or_404", get_ci_type)
+    monkeypatch.setattr(views, "get_asset_model_or_404", get_asset_model)
     monkeypatch.setattr(views, "response_ok", lambda payload: payload)
 
     request = SimpleNamespace(
         json={
             "id": "field-1",
-            "ci_type_key": "server",
+            "asset_model_key": "server",
             "field_key": "hostname",
             "data_type": "text",
             "is_primary": True,
         },
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
-    payload = asyncio.run(inspect.unwrap(views.ci_field_save)(request))
+    payload = asyncio.run(inspect.unwrap(views.asset_field_save)(request))
 
     assert permission_calls == [
         (
             True,
-            "supply_chain_review:field:c",
-            "supply_chain_review:field:u",
+            "asset_management:c",
+            "asset_management:u",
         )
     ]
     assert expected_exists_calls == [True]
@@ -2375,7 +2379,7 @@ def test_field_save_endpoint_requires_update_permission_for_existing_id(monkeypa
 
 
 def test_model_create_endpoint_uses_create_intent_even_when_key_exists(monkeypatch):
-    ci_type = _ci_type(primary_field="hostname")
+    asset_model = _asset_model(primary_field="hostname")
     permission_calls = []
     expected_exists_calls = []
 
@@ -2389,30 +2393,30 @@ def test_model_create_endpoint_uses_create_intent_even_when_key_exists(monkeypat
 
     async def save_type(*_args, **kwargs):
         expected_exists_calls.append(kwargs["expected_exists"])
-        return ci_type
+        return asset_model
 
     monkeypatch.setattr(views, "_require_save_permission", require_permission)
-    monkeypatch.setattr(views, "save_ci_type", save_type)
+    monkeypatch.setattr(views, "save_asset_model", save_type)
     monkeypatch.setattr(views, "response_ok", lambda payload: payload)
 
     request = SimpleNamespace(
         json={"key": " server ", "name": "服务器"},
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
-    asyncio.run(inspect.unwrap(views.ci_type_save)(request))
+    asyncio.run(inspect.unwrap(views.asset_model_save)(request))
 
     assert permission_calls == [
         (
             False,
-            "supply_chain_review:model:c",
-            "supply_chain_review:model:u",
+            "asset_management:c",
+            "asset_management:u",
         )
     ]
     assert expected_exists_calls == [False]
 
 
 def test_model_update_endpoint_uses_update_intent(monkeypatch):
-    ci_type = _ci_type(primary_field="hostname")
+    asset_model = _asset_model(primary_field="hostname")
     permission_calls = []
     expected_exists_calls = []
 
@@ -2426,23 +2430,23 @@ def test_model_update_endpoint_uses_update_intent(monkeypatch):
 
     async def save_type(*_args, **kwargs):
         expected_exists_calls.append(kwargs["expected_exists"])
-        return ci_type
+        return asset_model
 
     monkeypatch.setattr(views, "_require_save_permission", require_permission)
-    monkeypatch.setattr(views, "save_ci_type", save_type)
+    monkeypatch.setattr(views, "save_asset_model", save_type)
     monkeypatch.setattr(views, "response_ok", lambda payload: payload)
 
     request = SimpleNamespace(
         json={"id": "type-1", "key": "server", "name": "服务器"},
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
-    asyncio.run(inspect.unwrap(views.ci_type_save)(request))
+    asyncio.run(inspect.unwrap(views.asset_model_save)(request))
 
     assert permission_calls == [
         (
             True,
-            "supply_chain_review:model:c",
-            "supply_chain_review:model:u",
+            "asset_management:c",
+            "asset_management:u",
         )
     ]
     assert expected_exists_calls == [True]
@@ -2450,7 +2454,7 @@ def test_model_update_endpoint_uses_update_intent(monkeypatch):
 
 def test_field_create_endpoint_uses_create_intent_even_when_key_exists(monkeypatch):
     field = _field("field-1", "hostname")
-    ci_type = _ci_type(primary_field="hostname")
+    asset_model = _asset_model(primary_field="hostname")
     permission_calls = []
     expected_exists_calls = []
 
@@ -2466,29 +2470,29 @@ def test_field_create_endpoint_uses_create_intent_even_when_key_exists(monkeypat
         expected_exists_calls.append(kwargs["expected_exists"])
         return field
 
-    async def get_ci_type(*_args):
-        return ci_type
+    async def get_asset_model(*_args):
+        return asset_model
 
     monkeypatch.setattr(views, "_require_save_permission", require_permission)
     monkeypatch.setattr(views, "save_field", save_package_field)
-    monkeypatch.setattr(views, "get_ci_type_or_404", get_ci_type)
+    monkeypatch.setattr(views, "get_asset_model_or_404", get_asset_model)
     monkeypatch.setattr(views, "response_ok", lambda payload: payload)
 
     request = SimpleNamespace(
         json={
-            "ci_type_key": " server ",
+            "asset_model_key": " server ",
             "field_key": " hostname ",
             "data_type": "text",
         },
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
-    asyncio.run(inspect.unwrap(views.ci_field_save)(request))
+    asyncio.run(inspect.unwrap(views.asset_field_save)(request))
 
     assert permission_calls == [
         (
             False,
-            "supply_chain_review:field:c",
-            "supply_chain_review:field:u",
+            "asset_management:c",
+            "asset_management:u",
         )
     ]
     assert expected_exists_calls == [False]
@@ -2497,16 +2501,16 @@ def test_field_create_endpoint_uses_create_intent_even_when_key_exists(monkeypat
 def test_product_builtin_model_can_be_renamed_without_changing_lock_metadata(
     monkeypatch,
 ):
-    ci_type = _ci_type(is_locked=True, is_builtin=True, owner="product")
+    asset_model = _asset_model(is_locked=True, is_builtin=True, owner="product")
     transaction = _install_transaction(monkeypatch)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda *_args, **_kwargs: _FakeQuery(ci_type)),
+        staticmethod(lambda *_args, **_kwargs: _FakeQuery(asset_model)),
     )
 
     result = asyncio.run(
-        manager.save_ci_type(
+        manager.save_asset_model(
             "tenant-a",
             {
                 "id": "type-1",
@@ -2519,10 +2523,10 @@ def test_product_builtin_model_can_be_renamed_without_changing_lock_metadata(
         )
     )
 
-    assert result is ci_type
-    assert ci_type.name == "已修改的服务器模型"
-    assert ci_type.is_locked is True
-    assert ci_type.save_calls == [
+    assert result is asset_model
+    assert asset_model.name == "已修改的服务器模型"
+    assert asset_model.is_locked is True
+    assert asset_model.save_calls == [
         {
             "using_db": transaction.connection,
             "update_fields": ["key", "name", "updater", "utime"],
@@ -2539,12 +2543,12 @@ def test_product_builtin_model_can_be_renamed_without_changing_lock_metadata(
     ids=["create", "update"],
 )
 def test_legacy_locked_model_allows_field_create_and_update(monkeypatch, field_data):
-    ci_type = _ci_type(is_locked=True)
+    asset_model = _asset_model(is_locked=True)
     existing = _field("field-1", "hostname") if field_data.get("id") else None
     created = _field("field-2", "hostname") if existing is None else None
     _, _, create_kwargs = _install_field_save_fakes(
         monkeypatch,
-        ci_type,
+        asset_model,
         existing=existing,
         created=created,
     )
@@ -2556,15 +2560,15 @@ def test_legacy_locked_model_allows_field_create_and_update(monkeypatch, field_d
         assert existing.save_calls
     else:
         assert result is created
-        assert create_kwargs["ci_type_id"] == ci_type.id
+        assert create_kwargs["asset_model_id"] == asset_model.id
 
 
 def test_product_builtin_model_allows_tenant_overlay_field(monkeypatch):
-    ci_type = _ci_type(is_locked=True, is_builtin=True, owner="product")
+    asset_model = _asset_model(is_locked=True, is_builtin=True, owner="product")
     created = _field("overlay-field", "business_owner")
     _, _, create_kwargs = _install_field_save_fakes(
         monkeypatch,
-        ci_type,
+        asset_model,
         created=created,
     )
 
@@ -2577,14 +2581,14 @@ def test_product_builtin_model_allows_tenant_overlay_field(monkeypatch):
     )
 
     assert result is created
-    assert create_kwargs["ci_type_id"] == ci_type.id
-    assert create_kwargs["ci_type_key"] == ci_type.key
+    assert create_kwargs["asset_model_id"] == asset_model.id
+    assert create_kwargs["asset_model_key"] == asset_model.key
     assert "is_builtin" not in create_kwargs
     assert "owner" not in create_kwargs
 
 
 def test_product_builtin_field_can_be_updated_and_deleted(monkeypatch):
-    ci_type = _ci_type(is_locked=True, is_builtin=True, owner="product")
+    asset_model = _asset_model(is_locked=True, is_builtin=True, owner="product")
     field = _field(
         "field-1",
         "hostname",
@@ -2592,7 +2596,7 @@ def test_product_builtin_field_can_be_updated_and_deleted(monkeypatch):
         is_builtin=True,
         owner="product",
     )
-    _install_field_save_fakes(monkeypatch, ci_type, existing=field)
+    _install_field_save_fakes(monkeypatch, asset_model, existing=field)
 
     updated = asyncio.run(
         manager.save_field(
@@ -2602,9 +2606,9 @@ def test_product_builtin_field_can_be_updated_and_deleted(monkeypatch):
         )
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery(ci_type)),
+        staticmethod(lambda **_kwargs: _FakeQuery(asset_model)),
     )
     _install_empty_field_reference_cleanup(monkeypatch)
     deleted = asyncio.run(manager.delete_field("tenant-a", "field-1"))
@@ -2617,18 +2621,18 @@ def test_product_builtin_field_can_be_updated_and_deleted(monkeypatch):
 
 
 def test_legacy_locked_model_allows_field_delete_and_primary_change(monkeypatch):
-    ci_type = _ci_type(primary_field="hostname", is_locked=True)
+    asset_model = _asset_model(primary_field="hostname", is_locked=True)
     field = _field("field-2", "ip_address")
 
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery(field)),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery(ci_type)),
+        staticmethod(lambda **_kwargs: _FakeQuery(asset_model)),
     )
     monkeypatch.setattr(manager, "in_transaction", _FakeTransaction)
     _install_empty_field_reference_cleanup(monkeypatch)
@@ -2645,24 +2649,24 @@ def test_legacy_locked_model_allows_field_delete_and_primary_change(monkeypatch)
 
     assert deleted == {"id": "field-2"}
     assert field.deleted is True
-    assert primary is ci_type
-    assert ci_type.primary_field == "ip_address"
+    assert primary is asset_model
+    assert asset_model.primary_field == "ip_address"
     assert field.save_calls
-    assert ci_type.save_calls
+    assert asset_model.save_calls
 
 
 def test_legacy_locked_reference_model_allows_new_ref_field(monkeypatch):
-    owner_ci_type = _ci_type(key="application")
-    locked_ref_ci_type = _ci_type(key="server", is_locked=True)
+    owner_asset_model = _asset_model(key="application")
+    locked_referenced_asset_model_key = _asset_model(key="server", is_locked=True)
     create_calls = []
 
-    def ci_type_filter(**kwargs):
+    def asset_model_filter(**kwargs):
         if kwargs.get("key") == "application":
-            return _FakeQuery(owner_ci_type)
+            return _FakeQuery(owner_asset_model)
         if kwargs.get("key") == "server":
-            return _FakeQuery(locked_ref_ci_type)
+            return _FakeQuery(locked_referenced_asset_model_key)
         if kwargs.get("key__in") == ["server"]:
-            return _FakeQuery([locked_ref_ci_type])
+            return _FakeQuery([locked_referenced_asset_model_key])
         return _FakeQuery()
 
     async def create_field(**kwargs):
@@ -2670,17 +2674,17 @@ def test_legacy_locked_reference_model_allows_new_ref_field(monkeypatch):
 
     _install_transaction(monkeypatch)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(ci_type_filter),
+        staticmethod(asset_model_filter),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery()),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "create",
         staticmethod(create_field),
     )
@@ -2690,32 +2694,35 @@ def test_legacy_locked_reference_model_allows_new_ref_field(monkeypatch):
             "tenant-a",
             _field_payload(
                 "server_ref",
-                ci_type_key="application",
+                asset_model_key="application",
                 data_type="ref",
-                ref_ci_type="server",
+                referenced_asset_model_key="server",
             ),
             "admin",
         )
     )
 
-    assert create_calls[0]["ref_ci_type_id"] == locked_ref_ci_type.id
+    assert (
+        create_calls[0]["referenced_asset_model_id"]
+        == locked_referenced_asset_model_key.id
+    )
 
 
 def test_legacy_locked_reference_model_allows_ref_field_redirect(monkeypatch):
-    owner_ci_type = _ci_type(key="application")
-    locked_old_ref = _ci_type(key="server", is_locked=True)
-    new_ref = _ci_type(key="database")
+    owner_asset_model = _asset_model(key="application")
+    locked_old_ref = _asset_model(key="server", is_locked=True)
+    new_ref = _asset_model(key="database")
     existing = _field(
         "field-1",
         "target_ref",
         "application",
         data_type="ref",
-        ref_ci_type="server",
+        referenced_asset_model_key="server",
     )
 
-    def ci_type_filter(**kwargs):
+    def asset_model_filter(**kwargs):
         if kwargs.get("key") == "application":
-            return _FakeQuery(owner_ci_type)
+            return _FakeQuery(owner_asset_model)
         if kwargs.get("key") == "database":
             return _FakeQuery(new_ref)
         if kwargs.get("key__in") == ["database", "server"]:
@@ -2724,12 +2731,12 @@ def test_legacy_locked_reference_model_allows_ref_field_redirect(monkeypatch):
 
     _install_transaction(monkeypatch)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(ci_type_filter),
+        staticmethod(asset_model_filter),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery(existing)),
     )
@@ -2741,57 +2748,55 @@ def test_legacy_locked_reference_model_allows_ref_field_redirect(monkeypatch):
             _field_payload(
                 "target_ref",
                 id="field-1",
-                ci_type_key="application",
+                asset_model_key="application",
                 data_type="ref",
-                ref_ci_type="database",
+                referenced_asset_model_key="database",
             ),
             "admin",
         )
     )
 
     assert result is existing
-    assert existing.ref_ci_type == "database"
+    assert existing.referenced_asset_model_key == "database"
     assert existing.save_calls
 
 
 def test_save_field_reports_incompatible_existing_scalar_for_multiple_ref(
     monkeypatch,
 ):
-    ci_type = _ci_type(key="application")
-    ref_ci_type = _ci_type(key="employee", id="employee-model")
+    asset_model = _asset_model(key="application")
+    referenced_asset_model_key = _asset_model(key="employee", id="employee-model")
     existing = _field(
         "field-1",
         "owner",
         "application",
         data_type="ref",
-        ref_ci_type="employee",
-        ref_ci_type_id="employee-model",
+        referenced_asset_model_key="employee",
+        referenced_asset_model_id="employee-model",
         options={"multiple": False, "reverse_unique": False},
     )
-    _install_field_save_fakes(monkeypatch, ci_type, existing=existing)
+    _install_field_save_fakes(monkeypatch, asset_model, existing=existing)
 
-    def ci_type_filter(**kwargs):
+    def asset_model_filter(**kwargs):
         if kwargs.get("key") == "employee":
-            return _FakeQuery(ref_ci_type)
+            return _FakeQuery(referenced_asset_model_key)
         if kwargs.get("key__in") == ["employee"]:
-            return _FakeQuery([ref_ci_type])
-        return _FakeQuery(ci_type)
+            return _FakeQuery([referenced_asset_model_key])
+        return _FakeQuery(asset_model)
 
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(ci_type_filter),
+        staticmethod(asset_model_filter),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCi,
+        manager.AssetInstance,
         "filter",
         staticmethod(
             lambda **_kwargs: _FakeQuery(
                 SimpleNamespace(
                     id="application-1",
-                    attributes={
-                        "owner": "00000000-0000-0000-0000-000000000001"
-                    },
+                    attributes={"owner": "00000000-0000-0000-0000-000000000001"},
                 )
             )
         ),
@@ -2804,9 +2809,9 @@ def test_save_field_reports_incompatible_existing_scalar_for_multiple_ref(
                 _field_payload(
                     "owner",
                     id="field-1",
-                    ci_type_key="application",
+                    asset_model_key="application",
                     data_type="ref",
-                    ref_ci_type="employee",
+                    referenced_asset_model_key="employee",
                     options={"multiple": True},
                 ),
                 "admin",
@@ -2819,42 +2824,42 @@ def test_save_field_reports_incompatible_existing_scalar_for_multiple_ref(
 
 
 def test_save_field_preserves_existing_reference_unique_violation(monkeypatch):
-    ci_type = _ci_type(key="application")
-    ref_ci_type = _ci_type(key="employee", id="employee-model")
+    asset_model = _asset_model(key="application")
+    referenced_asset_model_key = _asset_model(key="employee", id="employee-model")
     existing = _field(
         "field-1",
         "owners",
         "application",
         data_type="ref",
-        ref_ci_type="employee",
-        ref_ci_type_id="employee-model",
+        referenced_asset_model_key="employee",
+        referenced_asset_model_id="employee-model",
         options={"multiple": True, "reverse_unique": False},
     )
-    _install_field_save_fakes(monkeypatch, ci_type, existing=existing)
+    _install_field_save_fakes(monkeypatch, asset_model, existing=existing)
 
-    def ci_type_filter(**kwargs):
+    def asset_model_filter(**kwargs):
         if kwargs.get("key") == "employee":
-            return _FakeQuery(ref_ci_type)
+            return _FakeQuery(referenced_asset_model_key)
         if kwargs.get("key__in") == ["employee"]:
-            return _FakeQuery([ref_ci_type])
-        return _FakeQuery(ci_type)
+            return _FakeQuery([referenced_asset_model_key])
+        return _FakeQuery(asset_model)
 
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(ci_type_filter),
+        staticmethod(asset_model_filter),
     )
     instances = [
         SimpleNamespace(id="application-1", attributes={"owners": ["employee-1"]}),
         SimpleNamespace(id="application-2", attributes={"owners": ["employee-1"]}),
     ]
 
-    def ci_filter(**kwargs):
-        if kwargs.get("ci_type_id") == ci_type.id:
+    def asset_filter(**kwargs):
+        if kwargs.get("asset_model_id") == asset_model.id:
             return _FakeQuery(instances)
         return _FakeQuery(SimpleNamespace(id="employee-1"))
 
-    monkeypatch.setattr(manager.SupplyChainCi, "filter", staticmethod(ci_filter))
+    monkeypatch.setattr(manager.AssetInstance, "filter", staticmethod(asset_filter))
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
@@ -2863,9 +2868,9 @@ def test_save_field_preserves_existing_reference_unique_violation(monkeypatch):
                 _field_payload(
                     "owners",
                     id="field-1",
-                    ci_type_key="application",
+                    asset_model_key="application",
                     data_type="ref",
-                    ref_ci_type="employee",
+                    referenced_asset_model_key="employee",
                     options={"multiple": True},
                     unique=True,
                 ),
@@ -2885,9 +2890,9 @@ def test_save_field_preserves_unrelated_ref_request_shape_error():
                 _field_payload(
                     "owners",
                     id="field-1",
-                    ci_type_key="application",
+                    asset_model_key="application",
                     data_type="ref",
-                    ref_ci_type="employee",
+                    referenced_asset_model_key="employee",
                     options={"multiple": "true"},
                 ),
                 "admin",
@@ -2898,31 +2903,31 @@ def test_save_field_preserves_unrelated_ref_request_shape_error():
 
 
 def test_legacy_locked_reference_model_allows_ref_field_delete(monkeypatch):
-    owner_ci_type = _ci_type(key="application")
-    locked_ref_ci_type = _ci_type(key="server", is_locked=True)
+    owner_asset_model = _asset_model(key="application")
+    locked_referenced_asset_model_key = _asset_model(key="server", is_locked=True)
     field = _field(
         "field-1",
         "server_ref",
         "application",
         data_type="ref",
-        ref_ci_type="server",
+        referenced_asset_model_key="server",
     )
 
-    def ci_type_filter(**kwargs):
+    def asset_model_filter(**kwargs):
         if kwargs.get("key") == "application":
-            return _FakeQuery(owner_ci_type)
+            return _FakeQuery(owner_asset_model)
         if kwargs.get("key__in") == ["server"]:
-            return _FakeQuery([locked_ref_ci_type])
+            return _FakeQuery([locked_referenced_asset_model_key])
         return _FakeQuery()
 
     _install_transaction(monkeypatch)
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(ci_type_filter),
+        staticmethod(asset_model_filter),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(lambda **_kwargs: _FakeQuery(field)),
     )
@@ -2936,10 +2941,10 @@ def test_legacy_locked_reference_model_allows_ref_field_delete(monkeypatch):
 
 
 def test_model_package_normalization_discards_legacy_lock_metadata():
-    package = manager.normalize_model_package(
-        _v1_package(
+    package = manager.normalize_asset_model_package(
+        _v2_package(
             {
-                "ci_types": [
+                "asset_models": [
                     {
                         "key": "server",
                         "name": "服务器",
@@ -2950,14 +2955,14 @@ def test_model_package_normalization_discards_legacy_lock_metadata():
         )
     )
 
-    assert "is_locked" not in package["ci_types"][0]
+    assert "is_locked" not in package["asset_models"][0]
 
 
 def _install_model_delete_fakes(
     monkeypatch,
-    ci_type,
+    asset_model,
     *,
-    cis=None,
+    assets=None,
     referencing_fields=None,
 ):
     operations = []
@@ -2987,9 +2992,10 @@ def _install_model_delete_fakes(
 
     def field_filter(**kwargs):
         field_queries.append(kwargs)
-        if ("ref_ci_type" in kwargs or "ref_ci_type_id" in kwargs) and kwargs.get(
-            "deleted"
-        ) is not True:
+        if (
+            "referenced_asset_model_key" in kwargs
+            or "referenced_asset_model_id" in kwargs
+        ) and kwargs.get("deleted") is not True:
             return _FakeQuery(active_rows(referencing_fields or [], kwargs))
         return FieldUpdateQuery()
 
@@ -3028,42 +3034,42 @@ def _install_model_delete_fakes(
             operations.append(("update", kwargs, self.connection))
 
     async def delete_model(**kwargs):
-        ci_type.delete_calls.append(kwargs)
+        asset_model.delete_calls.append(kwargs)
         operations.append(("model_delete", kwargs["using_db"]))
 
-    ci_type.delete = delete_model
+    asset_model.delete = delete_model
 
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda *_args, **_kwargs: _FakeQuery(ci_type)),
+        staticmethod(lambda *_args, **_kwargs: _FakeQuery(asset_model)),
     )
 
-    def ci_filter(**kwargs):
-        rows = active_rows(cis or [], kwargs)
+    def asset_filter(**kwargs):
+        rows = active_rows(assets or [], kwargs)
         # Hard-delete path on empty / tombstone-only models: no deleted=False
-        # filter means purge all remaining CIs of this type. The same filter
+        # filter means purge all remaining assets of this type. The same filter
         # backs both the id lookup (values_list) that scopes edge cleanup and
-        # the subsequent bulk delete, so expose every remaining CI row.
+        # the subsequent bulk delete, so expose every remaining asset row.
         if "deleted" not in kwargs and "id" not in kwargs:
-            return BulkDeleteQuery("ci_delete", rows=cis or [])
+            return BulkDeleteQuery("asset_delete", rows=assets or [])
         return _FakeQuery(rows)
 
     def reference_filter(*_args, **_kwargs):
         return BulkDeleteQuery("reference_delete")
 
     monkeypatch.setattr(
-        manager.SupplyChainCi,
+        manager.AssetInstance,
         "filter",
-        staticmethod(ci_filter),
+        staticmethod(asset_filter),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(field_filter),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiReference,
+        manager.AssetReference,
         "filter",
         staticmethod(reference_filter),
     )
@@ -3071,85 +3077,85 @@ def _install_model_delete_fakes(
 
 
 def test_model_delete_ignores_legacy_locked_state(monkeypatch):
-    ci_type = _ci_type(key="application", is_locked=True)
-    _, operations, _ = _install_model_delete_fakes(monkeypatch, ci_type)
+    asset_model = _asset_model(key="application", is_locked=True)
+    _, operations, _ = _install_model_delete_fakes(monkeypatch, asset_model)
 
-    result = asyncio.run(manager.delete_ci_type("tenant-a", "application"))
+    result = asyncio.run(manager.delete_asset_model("tenant-a", "application"))
 
-    assert result == {"id": ci_type.id}
-    assert ci_type.delete_calls
+    assert result == {"id": asset_model.id}
+    assert asset_model.delete_calls
     assert any(operation[0] == "model_delete" for operation in operations)
 
 
-def test_model_delete_rejects_active_ci(monkeypatch):
-    ci_type = _ci_type(key="application")
-    ci = _FakeRecord(
+def test_model_delete_rejects_active_asset(monkeypatch):
+    asset_model = _asset_model(key="application")
+    asset = _FakeRecord(
         _json={},
-        id="ci-1",
-        ci_type_id=ci_type.id,
-        ci_type_key="application",
+        id="asset-1",
+        asset_model_id=asset_model.id,
+        asset_model_key="application",
         deleted=False,
     )
     _, operations, _ = _install_model_delete_fakes(
         monkeypatch,
-        ci_type,
-        cis=[ci],
+        asset_model,
+        assets=[asset],
     )
 
     with pytest.raises(CustomError) as exc_info:
-        asyncio.run(manager.delete_ci_type("tenant-a", "application"))
+        asyncio.run(manager.delete_asset_model("tenant-a", "application"))
 
     assert exc_info.value.enum is ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES
-    assert ci_type.save_calls == []
+    assert asset_model.save_calls == []
     assert operations == []
 
 
-def test_model_delete_purges_soft_deleted_cis(monkeypatch):
+def test_model_delete_purges_soft_deleted_assets(monkeypatch):
     """Soft-deleted instance tombstones must not block model deletion."""
-    ci_type = _ci_type(key="application")
+    asset_model = _asset_model(key="application")
     soft_deleted = _FakeRecord(
         _json={},
-        id="ci-soft",
-        ci_type_id=ci_type.id,
-        ci_type_key="application",
+        id="asset-soft",
+        asset_model_id=asset_model.id,
+        asset_model_key="application",
         deleted=True,
     )
     transaction, operations, field_queries = _install_model_delete_fakes(
         monkeypatch,
-        ci_type,
-        cis=[soft_deleted],
+        asset_model,
+        assets=[soft_deleted],
     )
 
-    result = asyncio.run(manager.delete_ci_type("tenant-a", "application"))
+    result = asyncio.run(manager.delete_asset_model("tenant-a", "application"))
 
     assert result == {"id": "type-1"}
     assert ("reference_delete", transaction.connection) in operations
-    assert ("ci_delete", transaction.connection) in operations
+    assert ("asset_delete", transaction.connection) in operations
     assert ("model_delete", transaction.connection) in operations
     assert field_queries  # field tombstone detach + own field purge still run
 
 
 def test_model_delete_rejects_external_inbound_ref(monkeypatch):
-    ci_type = _ci_type(key="application")
+    asset_model = _asset_model(key="application")
     inbound_ref = _field(
         "field-1",
         "application_ref",
         "server",
         data_type="ref",
-        ref_ci_type_id=ci_type.id,
-        ref_ci_type="application",
+        referenced_asset_model_id=asset_model.id,
+        referenced_asset_model_key="application",
     )
     _, operations, _ = _install_model_delete_fakes(
         monkeypatch,
-        ci_type,
+        asset_model,
         referencing_fields=[inbound_ref],
     )
 
     with pytest.raises(CustomError) as exc_info:
-        asyncio.run(manager.delete_ci_type("tenant-a", "application"))
+        asyncio.run(manager.delete_asset_model("tenant-a", "application"))
 
     assert exc_info.value.enum is ErrorCode.ASSET_MODEL_HAS_DEPENDENCIES
-    assert ci_type.save_calls == []
+    assert asset_model.save_calls == []
     assert operations == []
 
 
@@ -3157,81 +3163,81 @@ def test_model_delete_by_key_ignores_deleted_dependencies_and_detaches_id_only_f
     monkeypatch,
 ):
     model_id = "11111111-1111-1111-1111-111111111111"
-    ci_type = _ci_type(id=model_id, key="application")
+    asset_model = _asset_model(id=model_id, key="application")
     deleted_inbound_ref = _field(
         "field-1",
         "application_ref",
         "server",
-        ci_type_id="server-type",
+        asset_model_id="server-type",
         data_type="ref",
-        ref_ci_type_id=model_id,
-        ref_ci_type=None,
+        referenced_asset_model_id=model_id,
+        referenced_asset_model_key=None,
         deleted=True,
     )
     transaction, operations, field_queries = _install_model_delete_fakes(
         monkeypatch,
-        ci_type,
+        asset_model,
         referencing_fields=[deleted_inbound_ref],
     )
 
-    result = asyncio.run(manager.delete_ci_type("tenant-a", "application"))
+    result = asyncio.run(manager.delete_asset_model("tenant-a", "application"))
 
     assert result == {"id": model_id}
     assert field_queries == [
         {
             "tenant_id": "tenant-a",
             "deleted": False,
-            "ref_ci_type_id": model_id,
+            "referenced_asset_model_id": model_id,
         },
         {
             "tenant_id": "tenant-a",
             "deleted": True,
-            "ref_ci_type_id": model_id,
+            "referenced_asset_model_id": model_id,
         },
-        {"tenant_id": "tenant-a", "ci_type_id": model_id},
+        {"tenant_id": "tenant-a", "asset_model_id": model_id},
     ]
     # No live or tombstone instances exist, so reference-index cleanup is skipped.
     assert operations == [
         (
             "update",
-            {"ref_ci_type_id": None, "ref_ci_type": None},
+            {"referenced_asset_model_id": None, "referenced_asset_model_key": None},
             transaction.connection,
         ),
-        ("ci_delete", transaction.connection),
+        ("asset_delete", transaction.connection),
         ("delete", transaction.connection),
         ("model_delete", transaction.connection),
     ]
 
 
 def test_model_delete_allows_self_reference_field(monkeypatch):
-    ci_type = _ci_type(key="application")
+    asset_model = _asset_model(key="application")
     self_ref = _field(
         "field-1",
         "parent",
         "application",
         data_type="ref",
-        ref_ci_type_id=ci_type.id,
-        ref_ci_type="application",
+        referenced_asset_model_id=asset_model.id,
+        referenced_asset_model_key="application",
     )
     transaction, operations, _ = _install_model_delete_fakes(
         monkeypatch,
-        ci_type,
+        asset_model,
         referencing_fields=[self_ref],
     )
 
-    result = asyncio.run(manager.delete_ci_type("tenant-a", "application"))
+    result = asyncio.run(manager.delete_asset_model("tenant-a", "application"))
 
     assert result == {"id": "type-1"}
-    assert ci_type.save_calls == []
-    assert ci_type.delete_calls == [{"using_db": transaction.connection}]
+    assert asset_model.save_calls == []
+    assert asset_model.delete_calls == [{"using_db": transaction.connection}]
     # No instances exist for this model, so edge cleanup is skipped.
     assert operations == [
         (
             "update",
-            {"ref_ci_type_id": None, "ref_ci_type": None},
+            {"referenced_asset_model_id": None, "referenced_asset_model_key": None},
             transaction.connection,
         ),
-        ("ci_delete", transaction.connection),
+        ("asset_delete", transaction.connection),
         ("delete", transaction.connection),
         ("model_delete", transaction.connection),
     ]
@@ -3243,30 +3249,30 @@ def test_structure_model_locks_use_stable_key_order_and_transaction_connection(
     operations = []
     filter_calls = []
     connection = object()
-    ci_types = [
-        _ci_type(key="database"),
-        _ci_type(key="server"),
+    asset_models = [
+        _asset_model(key="database"),
+        _asset_model(key="server"),
     ]
 
-    def ci_type_filter(**kwargs):
+    def asset_model_filter(**kwargs):
         filter_calls.append(kwargs)
-        return _FakeQuery(ci_types, operations)
+        return _FakeQuery(asset_models, operations)
 
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(ci_type_filter),
+        staticmethod(asset_model_filter),
     )
 
     result = asyncio.run(
-        manager.lock_ci_type_keys_for_structure(
+        manager.lock_asset_model_keys_for_structure(
             "tenant-a",
             {"server", "database"},
             connection,
         )
     )
 
-    assert result == ci_types
+    assert result == asset_models
     assert filter_calls == [
         {
             "tenant_id": "tenant-a",
@@ -3323,7 +3329,7 @@ def test_structure_transaction_locks_tenant_once_before_nested_work(monkeypatch)
 def test_model_create_checks_business_key_after_tenant_lock(monkeypatch):
     operations = []
     transaction = _FakeTransaction(operations)
-    created = _ci_type(primary_field="")
+    created = _asset_model(primary_field="")
 
     def tenant_filter(**kwargs):
         operations.append(("tenant_filter", kwargs))
@@ -3332,29 +3338,29 @@ def test_model_create_checks_business_key_after_tenant_lock(monkeypatch):
             operations,
         )
 
-    def ci_type_filter(**kwargs):
-        operations.append(("ci_type_filter", kwargs))
+    def asset_model_filter(**kwargs):
+        operations.append(("asset_model_filter", kwargs))
         return _FakeQuery(None, operations)
 
-    async def create_ci_type(**kwargs):
+    async def create_asset_model(**kwargs):
         operations.append(("create", kwargs["using_db"]))
         return created
 
     monkeypatch.setattr(manager, "in_transaction", lambda: transaction)
     monkeypatch.setattr(manager.Tenant, "filter", staticmethod(tenant_filter))
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(ci_type_filter),
+        staticmethod(asset_model_filter),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "create",
-        staticmethod(create_ci_type),
+        staticmethod(create_asset_model),
     )
 
     result = asyncio.run(
-        manager.save_ci_type(
+        manager.save_asset_model(
             "tenant-a",
             {"key": "server", "name": "服务器"},
             "admin",
@@ -3365,34 +3371,34 @@ def test_model_create_checks_business_key_after_tenant_lock(monkeypatch):
     assert operations.index("select_for_update") < next(
         index
         for index, operation in enumerate(operations)
-        if isinstance(operation, tuple) and operation[0] == "ci_type_filter"
+        if isinstance(operation, tuple) and operation[0] == "asset_model_filter"
     )
     assert operations[-2] == ("create", transaction.connection)
     assert operations[-1] == ("transaction_exit", None)
 
 
-def test_save_ci_type_ignores_legacy_lock_state_after_waiting_for_row_lock(
+def test_save_asset_model_ignores_legacy_lock_state_after_waiting_for_row_lock(
     monkeypatch,
 ):
     operations = []
-    ci_type = _ci_type(is_locked=False)
+    asset_model = _asset_model(is_locked=False)
     transaction = _install_transaction(monkeypatch, operations)
 
     class ConcurrentLockQuery(_FakeQuery):
         def select_for_update(self):
-            ci_type.is_locked = True
+            asset_model.is_locked = True
             return super().select_for_update()
 
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
         staticmethod(
-            lambda *_args, **_kwargs: ConcurrentLockQuery(ci_type, operations)
+            lambda *_args, **_kwargs: ConcurrentLockQuery(asset_model, operations)
         ),
     )
 
     result = asyncio.run(
-        manager.save_ci_type(
+        manager.save_asset_model(
             "tenant-a",
             {
                 "id": "type-1",
@@ -3403,9 +3409,9 @@ def test_save_ci_type_ignores_legacy_lock_state_after_waiting_for_row_lock(
         )
     )
 
-    assert result is ci_type
-    assert ci_type.name == "并发修改"
-    assert ci_type.save_calls
+    assert result is asset_model
+    assert asset_model.name == "并发修改"
+    assert asset_model.save_calls
     assert operations == [
         "transaction_enter",
         ("using_db", transaction.connection),
@@ -3419,12 +3425,12 @@ def test_save_ci_type_ignores_legacy_lock_state_after_waiting_for_row_lock(
 @pytest.mark.parametrize(
     "operation",
     [
-        manager.save_ci_type,
+        manager.save_asset_model,
         manager.save_field,
         manager.delete_field,
         manager.set_package_primary_field,
-        manager.delete_ci,
-        manager.delete_ci_type,
+        manager.delete_asset_instance,
+        manager.delete_asset_model,
     ],
 )
 def test_every_model_structure_write_uses_tenant_transaction_helper(operation):
@@ -3439,13 +3445,13 @@ def test_every_model_structure_write_uses_tenant_transaction_helper(operation):
 def test_locked_model_allows_asset_instance_edit_and_integrity_cleanup_delete(
     monkeypatch,
 ):
-    ci_type = _ci_type(is_locked=True)
-    ci = _FakeRecord(
+    asset_model = _asset_model(is_locked=True)
+    asset = _FakeRecord(
         _json={},
-        id="ci-1",
+        id="asset-1",
         tenant_id="tenant-a",
-        ci_type_id="type-1",
-        ci_type_key="server",
+        asset_model_id="type-1",
+        asset_model_key="server",
         name="旧名称",
         project_area_id=None,
         accessory_project_id=None,
@@ -3459,8 +3465,8 @@ def test_locked_model_allows_asset_instance_edit_and_integrity_cleanup_delete(
     async def no_validation(*_args, **_kwargs):
         return None
 
-    async def get_ci_type(*_args):
-        return ci_type
+    async def get_asset_model(*_args):
+        return asset_model
 
     class ReferenceQuery:
         def __init__(self):
@@ -3476,46 +3482,46 @@ def test_locked_model_allows_asset_instance_edit_and_integrity_cleanup_delete(
         async def delete(self):
             reference_updates.append(("delete", self.connection))
 
-    monkeypatch.setattr(manager, "validate_ci_attributes", no_validation)
-    monkeypatch.setattr(manager, "sync_ci_references", no_validation)
-    monkeypatch.setattr(manager, "get_ci_type_or_404", get_ci_type)
+    monkeypatch.setattr(manager, "validate_asset_attributes", no_validation)
+    monkeypatch.setattr(manager, "sync_asset_references", no_validation)
+    monkeypatch.setattr(manager, "get_asset_model_or_404", get_asset_model)
     monkeypatch.setattr(views, "response_ok", lambda payload: payload)
     monkeypatch.setattr(
-        manager.SupplyChainCi,
+        manager.AssetInstance,
         "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery(ci)),
+        staticmethod(lambda **_kwargs: _FakeQuery(asset)),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda **_kwargs: _FakeQuery(ci_type)),
+        staticmethod(lambda **_kwargs: _FakeQuery(asset_model)),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiReference,
+        manager.AssetReference,
         "filter",
         staticmethod(lambda *_args, **_kwargs: ReferenceQuery()),
     )
 
     result = asyncio.run(
-        manager.save_ci(
+        manager.save_asset_instance(
             "tenant-a",
             {
-                "id": "ci-1",
-                "ci_type_key": "server",
+                "id": "asset-1",
+                "asset_model_key": "server",
                 "attributes": {"hostname": "new"},
             },
             "admin",
         )
     )
     delete_request = SimpleNamespace(
-        json={"id": "ci-1"},
+        json={"id": "asset-1"},
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
-    delete_result = asyncio.run(inspect.unwrap(views.ci_delete)(delete_request))
+    delete_result = asyncio.run(inspect.unwrap(views.asset_delete)(delete_request))
 
-    assert result is ci
-    assert ci.attributes == {"hostname": "new"}
+    assert result is asset
+    assert asset.attributes == {"hostname": "new"}
     # Instance deletion is hard-delete: no soft-delete flag, record.delete() called.
-    assert ci.delete_calls == [{"using_db": transaction.connection}]
-    assert delete_result == {"id": "ci-1"}
+    assert asset.delete_calls == [{"using_db": transaction.connection}]
+    assert delete_result == {"id": "asset-1"}
     assert reference_updates == [("delete", transaction.connection)]

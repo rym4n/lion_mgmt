@@ -130,7 +130,7 @@ def test_uncontrolled_playbook_permissions_ignore_other_tenant_roles():
 
 def test_check_permissions_refreshes_stale_session_account(monkeypatch):
     stale_account = _account("account-1", ["dashboard:r"])
-    fresh_account = _account("account-1", ["supply_chain_review:model:r"])
+    fresh_account = _account("account-1", ["asset_management:r"])
     cache = _FakeCache()
     request = SimpleNamespace(
         ctx=SimpleNamespace(
@@ -141,7 +141,7 @@ def test_check_permissions_refreshes_stale_session_account(monkeypatch):
             }
         ),
         app=SimpleNamespace(ctx=SimpleNamespace(cache_client=cache)),
-        path="/supply-chain-review/ci-type/list",
+        path="/asset-management/asset-model/list",
     )
 
     monkeypatch.setattr(
@@ -152,7 +152,7 @@ def test_check_permissions_refreshes_stale_session_account(monkeypatch):
 
     assert (
         asyncio.run(
-            authorization.check_permissions(request, "supply_chain_review:model:r")
+            authorization.check_permissions(request, "asset_management:r")
         )
         is True
     )
@@ -171,12 +171,12 @@ def test_platform_wildcard_authorizes_nested_asset_permissions():
             }
         ),
         app=SimpleNamespace(ctx=SimpleNamespace(cache_client=_FakeCache())),
-        path="/supply-chain-review/ci-type/list",
+        path="/asset-management/asset-model/list",
     )
 
     assert (
         asyncio.run(
-            authorization.check_permissions(request, "supply_chain_review:model:r")
+            authorization.check_permissions(request, "asset_management:r")
         )
         is True
     )

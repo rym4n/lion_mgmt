@@ -1,6 +1,7 @@
 # coding=utf-8
 import asyncio
 import importlib
+import re
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
@@ -8,8 +9,10 @@ import pytest
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from models import supply_chain_review as supply_chain_models
-from services.supply_chain_review import manager, views
+from models import asset_management as asset_models
+from models import network_access_control as network_models
+from services.asset_management import manager, views
+from tortoise.models import Model
 
 
 class _Query:
@@ -74,7 +77,7 @@ def _ref_field(
         field_key=field_key,
         label=field_key,
         data_type="ref",
-        ref_ci_type_id=target_model,
+        referenced_asset_model_id=target_model,
         required=False,
         unique=False,
         default_value=None,
@@ -88,10 +91,10 @@ def _ref_field(
 def test_reverse_unique_rejects_a_target_used_by_another_source(monkeypatch):
     field = _ref_field("manager", reverse_unique=True)
 
-    async def fields_for_type(*_args):
+    async def fields_for_model(*_args):
         return [field]
 
-    def ci_filter(**kwargs):
+    def asset_filter(**kwargs):
         if kwargs.get("id") == "employee-1":
             return _Query(SimpleNamespace(id="employee-1"))
         return _Query(
@@ -101,21 +104,21 @@ def test_reverse_unique_rejects_a_target_used_by_another_source(monkeypatch):
             )
         )
 
-    monkeypatch.setattr(manager, "fields_for_type", fields_for_type)
-    monkeypatch.setattr(manager.SupplyChainCi, "filter", staticmethod(ci_filter))
+    monkeypatch.setattr(manager, "fields_for_model", fields_for_model)
+    monkeypatch.setattr(manager.AssetInstance, "filter", staticmethod(asset_filter))
     monkeypatch.setattr(
-        manager.SupplyChainCiUniqueRule,
+        manager.AssetUniqueRule,
         "filter",
         staticmethod(lambda **_kwargs: _Query()),
     )
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
-            manager.validate_ci_attributes(
+            manager.validate_asset_attributes(
                 "tenant-a",
                 "project-model",
                 {"manager": "employee-1"},
-                current_ci_id="project-2",
+                current_asset_id="project-2",
             )
         )
 
@@ -125,7 +128,7 @@ def test_reverse_unique_rejects_a_target_used_by_another_source(monkeypatch):
 def test_reference_validation_locks_targets_inside_the_write_transaction(monkeypatch):
     target_query = _LockingQuery(SimpleNamespace(id="employee-1"))
     monkeypatch.setattr(
-        manager.SupplyChainCi,
+        manager.AssetInstance,
         "filter",
         staticmethod(lambda **_kwargs: target_query),
     )
@@ -152,18 +155,18 @@ def test_enabling_reverse_unique_rejects_existing_duplicate_targets(monkeypatch)
     )
     target_queries = []
 
-    def ci_filter(**kwargs):
-        if kwargs.get("ci_type_id") == "project-model":
+    def asset_filter(**kwargs):
+        if kwargs.get("asset_model_id") == "project-model":
             return source_query
         query = _LockingQuery(SimpleNamespace(id=kwargs.get("id")))
         target_queries.append(query)
         return query
 
-    monkeypatch.setattr(manager.SupplyChainCi, "filter", staticmethod(ci_filter))
+    monkeypatch.setattr(manager.AssetInstance, "filter", staticmethod(asset_filter))
     field = {
         "field_key": "manager",
         "data_type": "ref",
-        "ref_ci_type_id": "employee-model",
+        "referenced_asset_model_id": "employee-model",
         "required": False,
         "unique": False,
         "options": {"multiple": False, "reverse_unique": True},
@@ -194,7 +197,7 @@ def test_reference_options_require_json_booleans(option):
                 "field_key": "manager",
                 "label": "负责人",
                 "data_type": "ref",
-                "ref_ci_type_id": "employee-model",
+                "referenced_asset_model_id": "employee-model",
                 "options": {option: "false"},
             }
         )
@@ -202,7 +205,7 @@ def test_reference_options_require_json_booleans(option):
     assert exc_info.value.enum is ErrorCode.PARAM_ERROR
 
 
-def test_sync_ci_references_replaces_scalar_and_multiple_index_rows(monkeypatch):
+def test_sync_asset_references_replaces_scalar_and_multiple_index_rows(monkeypatch):
     deleted = []
     created = []
 
@@ -216,8 +219,8 @@ def test_sync_ci_references_replaces_scalar_and_multiple_index_rows(monkeypatch)
             created.extend(rows)
             assert kwargs["using_db"] == "connection"
 
-    monkeypatch.setattr(manager, "SupplyChainCiReference", ReferenceRecord)
-    ci = SimpleNamespace(
+    monkeypatch.setattr(manager, "AssetReference", ReferenceRecord)
+    asset = SimpleNamespace(
         id="project-1",
         attributes={
             "manager": "employee-1",
@@ -226,9 +229,9 @@ def test_sync_ci_references_replaces_scalar_and_multiple_index_rows(monkeypatch)
     )
 
     asyncio.run(
-        manager.sync_ci_references(
+        manager.sync_asset_references(
             "tenant-a",
-            ci,
+            asset,
             [
                 _ref_field("manager"),
                 _ref_field("members", multiple=True),
@@ -237,10 +240,8 @@ def test_sync_ci_references_replaces_scalar_and_multiple_index_rows(monkeypatch)
         )
     )
 
-    assert deleted == [{"tenant_id": "tenant-a", "source_ci_id": "project-1"}]
-    assert [
-        (row.field_key, row.target_ci_id, row.position) for row in created
-    ] == [
+    assert deleted == [{"tenant_id": "tenant-a", "source_asset_id": "project-1"}]
+    assert [(row.field_key, row.target_asset_id, row.position) for row in created] == [
         ("manager", "employee-1", 0),
         ("members", "employee-2", 0),
         ("members", "employee-3", 1),
@@ -249,7 +250,7 @@ def test_sync_ci_references_replaces_scalar_and_multiple_index_rows(monkeypatch)
 
 def test_reference_labels_preserve_scalar_and_multiple_shapes(monkeypatch):
     monkeypatch.setattr(
-        manager.SupplyChainCi,
+        manager.AssetInstance,
         "filter",
         staticmethod(
             lambda **_kwargs: _Query(
@@ -260,9 +261,9 @@ def test_reference_labels_preserve_scalar_and_multiple_shapes(monkeypatch):
             )
         ),
     )
-    ci = SimpleNamespace(
+    asset = SimpleNamespace(
         id="project-1",
-        ci_type_id="project-model",
+        asset_model_id="project-model",
         attributes={
             "manager": "employee-1",
             "members": ["employee-1", "employee-2"],
@@ -270,9 +271,9 @@ def test_reference_labels_preserve_scalar_and_multiple_shapes(monkeypatch):
     )
 
     labels = asyncio.run(
-        manager.reference_labels_for_ci(
+        manager.reference_labels_for_asset(
             "tenant-a",
-            ci,
+            asset,
             [
                 _ref_field("manager"),
                 _ref_field("members", multiple=True),
@@ -286,7 +287,7 @@ def test_reference_labels_preserve_scalar_and_multiple_shapes(monkeypatch):
 def test_reference_labels_for_page_batch_resolve_shapes_and_missing_ids(monkeypatch):
     queries = []
 
-    def ci_filter(**kwargs):
+    def asset_filter(**kwargs):
         queries.append(kwargs)
         return _Query(
             [
@@ -295,14 +296,14 @@ def test_reference_labels_for_page_batch_resolve_shapes_and_missing_ids(monkeypa
             ]
         )
 
-    monkeypatch.setattr(manager.SupplyChainCi, "filter", staticmethod(ci_filter))
+    monkeypatch.setattr(manager.AssetInstance, "filter", staticmethod(asset_filter))
     labels = asyncio.run(
-        manager.reference_labels_for_cis(
+        manager.reference_labels_for_assets(
             "tenant-a",
             [
                 SimpleNamespace(
                     id="project-1",
-                    ci_type_id="project-model",
+                    asset_model_id="project-model",
                     attributes={
                         "manager": "employee-1",
                         "members": ["employee-1", "employee-2"],
@@ -310,7 +311,7 @@ def test_reference_labels_for_page_batch_resolve_shapes_and_missing_ids(monkeypa
                 ),
                 SimpleNamespace(
                     id="project-2",
-                    ci_type_id="project-model",
+                    asset_model_id="project-model",
                     attributes={"manager": "missing-employee", "members": []},
                 ),
             ],
@@ -337,42 +338,42 @@ def test_reference_graph_uses_field_label_for_edges(monkeypatch):
     root = SimpleNamespace(
         id="project-1",
         name="项目A",
-        ci_type_id="project-model",
-        ci_type_key="project",
+        asset_model_id="project-model",
+        asset_model_key="project",
         json={"id": "project-1"},
     )
     target = SimpleNamespace(
         id="employee-1",
         name="张三",
-        ci_type_id="employee-model",
-        ci_type_key="user",
+        asset_model_id="employee-model",
+        asset_model_key="user",
         json={"id": "employee-1"},
     )
     reference = SimpleNamespace(
         id="reference-1",
-        source_ci_id=root.id,
-        target_ci_id=target.id,
+        source_asset_id=root.id,
+        target_asset_id=target.id,
         field_key="manager",
         json={"field_key": "manager"},
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiReference,
+        manager.AssetReference,
         "filter",
         staticmethod(lambda *_args, **_kwargs: _Query(reference)),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCi,
+        manager.AssetInstance,
         "filter",
         staticmethod(lambda **_kwargs: _Query([root, target])),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiFieldDef,
+        manager.AssetFieldDefinition,
         "filter",
         staticmethod(
             lambda *_args, **_kwargs: _Query(
                 SimpleNamespace(
-                    ci_type_id="project-model",
-                    ci_type_key="project",
+                    asset_model_id="project-model",
+                    asset_model_key="project",
                     field_key="manager",
                     label="负责人",
                 )
@@ -381,7 +382,7 @@ def test_reference_graph_uses_field_label_for_edges(monkeypatch):
     )
 
     graph = asyncio.run(
-        manager.build_reference_graph("tenant-a", root_ci_id=root.id, depth=1)
+        manager.build_reference_graph("tenant-a", root_asset_id=root.id, depth=1)
     )
 
     assert {node["id"] for node in graph["nodes"]} == {root.id, target.id}
@@ -396,9 +397,9 @@ def test_reference_graph_uses_field_label_for_edges(monkeypatch):
     ]
 
 
-def test_delete_ci_rejects_incoming_references(monkeypatch):
-    ci = SimpleNamespace(id="employee-1", ci_type_id="employee-model")
-    ci_type = SimpleNamespace(status="active")
+def test_delete_asset_instance_rejects_incoming_references(monkeypatch):
+    asset = SimpleNamespace(id="employee-1", asset_model_id="employee-model")
+    asset_model = SimpleNamespace(status="active")
 
     @asynccontextmanager
     async def transaction(*_args, **_kwargs):
@@ -406,75 +407,81 @@ def test_delete_ci_rejects_incoming_references(monkeypatch):
 
     monkeypatch.setattr(manager, "structure_write_transaction", transaction)
     monkeypatch.setattr(
-        manager.SupplyChainCi,
+        manager.AssetInstance,
         "filter",
-        staticmethod(lambda **_kwargs: _Query(ci)),
+        staticmethod(lambda **_kwargs: _Query(asset)),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiType,
+        manager.AssetModel,
         "filter",
-        staticmethod(lambda **_kwargs: _Query(ci_type)),
+        staticmethod(lambda **_kwargs: _Query(asset_model)),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiReference,
+        manager.AssetReference,
         "filter",
         staticmethod(lambda *_args, **_kwargs: _Query(SimpleNamespace(id="ref-1"))),
     )
 
     with pytest.raises(CustomError) as exc_info:
-        asyncio.run(manager.delete_ci("tenant-a", ci.id))
+        asyncio.run(manager.delete_asset_instance("tenant-a", asset.id))
 
     assert exc_info.value.enum is ErrorCode.ASSET_INSTANCE_HAS_REFERENCES
 
 
 def test_legacy_relation_models_and_handlers_are_removed():
-    assert not hasattr(supply_chain_models, "SupplyChainCiRelationType")
-    assert not hasattr(supply_chain_models, "SupplyChainCiRelation")
+    assert not hasattr(asset_models, "AssetInstanceRelationType")
+    assert not hasattr(asset_models, "AssetInstanceRelation")
     assert not hasattr(views, "ci_relation_type_list")
     assert not hasattr(views, "ci_relation_save")
     assert not hasattr(views, "ci_relation_graph")
 
 
-def test_relation_replacement_migration_is_transactional_and_fail_closed():
+def test_destructive_rename_migration_drops_legacy_tables_and_creates_new_tables():
     migration = importlib.import_module(
-        "migrations.models.95_20260730183000_replace_asset_relations_with_references"
+        "migrations.models.96_20260731203000_destructive_asset_network_rename"
     )
     sql = asyncio.run(migration.upgrade(None))
 
     assert migration.RUN_IN_TRANSACTION is True
-    assert 'CREATE TABLE "supply_chain_ci_reference"' in sql
-    assert 'FOREIGN KEY ("source_ci_id")' in sql
-    assert 'FOREIGN KEY ("target_ci_id")' in sql
-    assert sql.count("ON DELETE CASCADE") >= 2
-    assert 'UNIQUE ("tenant_id", "source_ci_id", "field_key", "target_ci_id")' in sql
-    assert "Asset relations with attributes must be migrated" in sql
-    assert "Asset relation instances with attributes must be migrated" in sql
-    assert "Asset relation type endpoints could not be mapped" in sql
-    assert "Asset relation instances could not be mapped" in sql
-    assert "Asset relation reference fields could not be created" in sql
-    assert sql.index('CREATE TABLE "supply_chain_ci_reference"') < sql.index(
-        'DROP TABLE "supply_chain_ci_relation"'
+    assert 'DROP TABLE IF EXISTS "supply_chain_ci_reference" CASCADE' in sql
+    assert 'DROP TABLE IF EXISTS "supply_chain_actual_policy" CASCADE' in sql
+    assert 'CREATE TABLE "asset_reference"' in sql
+    assert 'CREATE TABLE "asset_model"' in sql
+    assert 'CREATE TABLE "asset_instance"' in sql
+    assert 'CREATE TABLE "network_access_actual_policy"' in sql
+    assert sql.index('DROP TABLE IF EXISTS "supply_chain_ci_reference"') < sql.index(
+        'CREATE TABLE "asset_reference"'
     )
 
 
-def test_relation_replacement_migration_preserves_reference_semantics_and_values():
+def test_destructive_rename_migration_creates_exactly_the_renamed_orm_tables():
     migration = importlib.import_module(
-        "migrations.models.95_20260730183000_replace_asset_relations_with_references"
+        "migrations.models.96_20260731203000_destructive_asset_network_rename"
     )
     sql = asyncio.run(migration.upgrade(None))
 
-    assert "'multiple', mapping.source_to_target = 'many'" in sql
-    assert "'reverse_unique', mapping.target_to_source = 'one'" in sql
-    assert "JSONB_AGG(relation.\"target_ci_id\"" in sql
-    assert "WHEN multiple THEN target_ids ELSE target_ids -> 0" in sql
-    assert '"attributes" = COALESCE(source_ci."attributes", \'{}\'::jsonb) || patch.patch' in sql
-    assert "employee.\"attributes\" ->> 'employee_no'" in sql
-    assert "employee.\"attributes\" ->> 'person_name'" in sql
-    assert "WHEN resolved.target_ci_id IS NULL\n                    THEN COALESCE(project_ci.\"attributes\", '{}'::jsonb)" in sql
-    assert "- 'manager'" not in sql
-    assert sql.index('UPDATE "supply_chain_ci" AS project_ci') < sql.index(
-        'INSERT INTO "supply_chain_ci_reference"'
+    orm_tables = {
+        model._meta.db_table
+        for module in (asset_models, network_models)
+        for model in vars(module).values()
+        if isinstance(model, type)
+        and issubclass(model, Model)
+        and model.__module__ == module.__name__
+    }
+    created_tables = set(re.findall(r'CREATE TABLE "([^"]+)"', sql))
+
+    assert created_tables == orm_tables
+
+
+def test_destructive_rename_migration_does_not_copy_legacy_business_data():
+    migration = importlib.import_module(
+        "migrations.models.96_20260731203000_destructive_asset_network_rename"
     )
-    assert "FROM JSONB_ARRAY_ELEMENTS(" in sql
-    assert "permission ->> 'permission'" in sql
-    assert "permission ->> 'value'" in sql
+    sql = asyncio.run(migration.upgrade(None))
+
+    assert "INSERT INTO" not in sql
+    assert 'UPDATE "asset_' not in sql
+    assert 'UPDATE "network_access_' not in sql
+    assert 'FROM "supply_chain_' not in sql
+    assert "JSONB_AGG" not in sql
+    assert "JSONB_ARRAY_ELEMENTS" not in sql

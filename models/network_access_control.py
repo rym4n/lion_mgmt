@@ -6,28 +6,6 @@ from models.base import BaseModel
 from tortoise import fields
 
 
-CI_TYPE_STATUS_ACTIVE = "active"
-CI_TYPE_STATUS_DISABLED = "disabled"
-CI_STATUS_ACTIVE = "active"
-CI_STATUS_DISABLED = "disabled"
-CI_STATUS_ARCHIVED = "archived"
-CI_RISK_STATUS_NORMAL = "normal"
-
-FIELD_DATA_TYPES = {
-    "text",
-    "number",
-    "date",
-    "datetime",
-    "enum",
-    "bool",
-    "attachment",
-    "ref",
-    "organization",
-    "user",
-    "tag",
-}
-
-
 def _policy_data_value(data: dict, *keys: str, fallback=None):
     for key in keys:
         value = data.get(key)
@@ -36,490 +14,15 @@ def _policy_data_value(data: dict, *keys: str, fallback=None):
     return fallback
 
 
-class SupplyChainCiModelGroup(BaseModel):
-    """Tenant-visible grouping for builtin and custom CI models."""
-
-    key = fields.CharField(max_length=64, description="分组唯一标识")
-    name = fields.CharField(max_length=255, description="分组名称")
-    sort = fields.IntField(default=0, description="展示顺序")
-    is_builtin = fields.BooleanField(default=False, description="产品内置分组")
-    is_locked = fields.BooleanField(default=False, description="内置结构锁定")
-    builtin_version = fields.CharField(max_length=64, null=True, description="内置版本")
-    builtin_hash = fields.CharField(max_length=64, null=True, description="定义摘要")
-    creator = fields.CharField(max_length=255, null=True, description="创建人")
-    updater = fields.CharField(max_length=255, null=True, description="更新人")
-
-    @property
-    def json(self) -> dict:
-        return {
-            "id": self.id,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-            "utime": strip_timezone_to_seconds(self.utime),
-            "tenant_id": self.tenant_id,
-            "key": self.key,
-            "name": self.name,
-            "sort": self.sort,
-            "is_builtin": self.is_builtin,
-            "builtin_version": self.builtin_version,
-            "builtin_hash": self.builtin_hash,
-            "creator": self.creator,
-            "updater": self.updater,
-        }
-
-    class Meta:
-        table = "supply_chain_ci_model_group"
-        ordering = ["sort", "key"]
-        unique_together = (("tenant_id", "key"),)
-        indexes = (("tenant_id", "sort"), ("tenant_id", "is_builtin"))
-
-
-class SupplyChainCiType(BaseModel):
-    """CMDB model definition for supply-chain review assets."""
-
-    key = fields.CharField(max_length=64, description="模型唯一标识")
-    name = fields.CharField(max_length=255, description="模型名称")
-    icon = fields.CharField(max_length=100, null=True, description="图标")
-    group_id = fields.CharField(max_length=36, description="所属分组 ID")
-    group_key = fields.CharField(max_length=64, description="所属分组 key")
-    primary_field = fields.CharField(
-        max_length=64, default="", description="主展示字段"
-    )
-    status = fields.CharField(
-        max_length=20, default=CI_TYPE_STATUS_ACTIVE, description="active/disabled"
-    )
-    is_locked = fields.BooleanField(default=False, description="交付锁定标记")
-    is_builtin = fields.BooleanField(default=False, description="产品内置模型")
-    builtin_key = fields.CharField(max_length=64, null=True, description="内置稳定标识")
-    builtin_version = fields.CharField(max_length=64, null=True, description="内置版本")
-    builtin_hash = fields.CharField(max_length=64, null=True, description="定义摘要")
-    owner = fields.CharField(
-        max_length=20, default="tenant", description="product/tenant"
-    )
-    sort = fields.IntField(default=0, description="展示顺序")
-    creator = fields.CharField(max_length=255, null=True, description="创建人")
-    updater = fields.CharField(max_length=255, null=True, description="更新人")
-
-    @property
-    def json(self) -> dict:
-        return {
-            "id": self.id,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-            "utime": strip_timezone_to_seconds(self.utime),
-            "tenant_id": self.tenant_id,
-            "key": self.key,
-            "name": self.name,
-            "icon": self.icon,
-            "group_id": self.group_id,
-            "group_key": self.group_key,
-            "primary_field": self.primary_field,
-            "status": self.status,
-            "is_builtin": self.is_builtin,
-            "builtin_key": self.builtin_key,
-            "builtin_version": self.builtin_version,
-            "builtin_hash": self.builtin_hash,
-            "owner": self.owner,
-            "sort": self.sort,
-            "creator": self.creator,
-            "updater": self.updater,
-        }
-
-    class Meta:
-        table = "supply_chain_ci_type"
-        ordering = ["sort", "key"]
-        unique_together = (("tenant_id", "key"),)
-        indexes = (
-            ("tenant_id", "status"),
-            ("tenant_id", "group_id", "sort"),
-            ("tenant_id", "is_builtin"),
-        )
-
-
-class SupplyChainCiFieldDef(BaseModel):
-    """Dynamic field definition for a CI model."""
-
-    ci_type_id = fields.CharField(max_length=36, description="所属模型 ID")
-    ci_type_key = fields.CharField(max_length=64, description="所属模型 key")
-    field_key = fields.CharField(max_length=64, description="字段 key")
-    source_field_key = fields.CharField(
-        max_length=64, null=True, description="来源系统字段 key"
-    )
-    label = fields.CharField(max_length=255, description="字段名称")
-    data_type = fields.CharField(max_length=20, description="字段类型")
-    enum_options = fields.JSONField(default=list, description="枚举选项")
-    options = fields.JSONField(default=dict, description="类型选项")
-    ref_ci_type_id = fields.CharField(
-        max_length=36, null=True, description="引用模型 ID"
-    )
-    ref_ci_type = fields.CharField(max_length=64, null=True, description="引用模型 key")
-    required = fields.BooleanField(default=False, description="是否必填")
-    unique = fields.BooleanField(default=False, description="是否唯一")
-    editable = fields.BooleanField(default=True, description="是否可编辑")
-    is_derived = fields.BooleanField(default=False, description="派生展示字段")
-    field_group = fields.CharField(
-        max_length=255, default="其他", description="字段分组"
-    )
-    field_group_sort = fields.IntField(default=0, description="字段分组顺序")
-    user_prompt = fields.TextField(null=True, description="字段提示")
-    default_value = fields.JSONField(null=True, description="默认值")
-    sort = fields.IntField(default=0, description="排序")
-    is_locked = fields.BooleanField(default=False, description="锁定字段")
-    is_builtin = fields.BooleanField(default=False, description="产品内置字段")
-    builtin_key = fields.CharField(
-        max_length=160, null=True, description="内置稳定标识"
-    )
-    builtin_version = fields.CharField(max_length=64, null=True, description="内置版本")
-    builtin_hash = fields.CharField(max_length=64, null=True, description="定义摘要")
-    owner = fields.CharField(
-        max_length=20, default="tenant", description="product/tenant"
-    )
-    creator = fields.CharField(max_length=255, null=True, description="创建人")
-    updater = fields.CharField(max_length=255, null=True, description="更新人")
-
-    @property
-    def json(self) -> dict:
-        return {
-            "id": self.id,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-            "utime": strip_timezone_to_seconds(self.utime),
-            "tenant_id": self.tenant_id,
-            "ci_type_id": self.ci_type_id,
-            "ci_type_key": self.ci_type_key,
-            "field_key": self.field_key,
-            "source_field_key": self.source_field_key,
-            "label": self.label,
-            "data_type": self.data_type,
-            "enum_options": self.enum_options or [],
-            "options": self.options or {},
-            "ref_ci_type_id": self.ref_ci_type_id,
-            "ref_ci_type": self.ref_ci_type,
-            "required": self.required,
-            "unique": self.unique,
-            "editable": self.editable,
-            "is_derived": self.is_derived,
-            "user_prompt": self.user_prompt,
-            "default_value": self.default_value,
-            "sort": self.sort,
-            "is_builtin": self.is_builtin,
-            "builtin_key": self.builtin_key,
-            "builtin_version": self.builtin_version,
-            "builtin_hash": self.builtin_hash,
-            "owner": self.owner,
-            "creator": self.creator,
-            "updater": self.updater,
-        }
-
-    class Meta:
-        table = "supply_chain_ci_field_def"
-        ordering = ["sort", "ctime"]
-        unique_together = (("tenant_id", "ci_type_id", "field_key"),)
-        indexes = (
-            ("tenant_id", "ci_type_id"),
-            ("tenant_id", "data_type"),
-            ("tenant_id", "ci_type_id", "field_group_sort"),
-        )
-
-
-class SupplyChainCiUniqueRule(BaseModel):
-    """Model-level compound uniqueness rule."""
-
-    ci_type_id = fields.CharField(max_length=36, description="所属模型 ID")
-    ci_type_key = fields.CharField(max_length=64, description="所属模型 key")
-    key = fields.CharField(max_length=64, description="规则稳定标识")
-    field_keys = fields.JSONField(default=list, description="联合唯一字段")
-    sort = fields.IntField(default=0, description="规则顺序")
-    is_locked = fields.BooleanField(default=False, description="锁定规则")
-    is_builtin = fields.BooleanField(default=False, description="产品内置规则")
-    builtin_key = fields.CharField(
-        max_length=160, null=True, description="内置稳定标识"
-    )
-    builtin_version = fields.CharField(max_length=64, null=True, description="内置版本")
-    builtin_hash = fields.CharField(max_length=64, null=True, description="定义摘要")
-    owner = fields.CharField(
-        max_length=20, default="tenant", description="product/tenant"
-    )
-    creator = fields.CharField(max_length=255, null=True, description="创建人")
-    updater = fields.CharField(max_length=255, null=True, description="更新人")
-
-    @property
-    def json(self) -> dict:
-        return {
-            "id": self.id,
-            "tenant_id": self.tenant_id,
-            "ci_type_id": self.ci_type_id,
-            "ci_type_key": self.ci_type_key,
-            "key": self.key,
-            "field_keys": self.field_keys or [],
-            "sort": self.sort,
-            "is_builtin": self.is_builtin,
-            "builtin_key": self.builtin_key,
-            "builtin_version": self.builtin_version,
-            "builtin_hash": self.builtin_hash,
-            "owner": self.owner,
-        }
-
-    class Meta:
-        table = "supply_chain_ci_unique_rule"
-        ordering = ["sort", "key"]
-        unique_together = (("tenant_id", "ci_type_id", "key"),)
-        indexes = (("tenant_id", "ci_type_id"),)
-
-
-class SupplyChainBuiltinCatalogState(BaseModel):
-    """Installed builtin-catalog revision for one tenant."""
-
-    catalog_key = fields.CharField(max_length=64, description="目录标识")
-    catalog_version = fields.CharField(max_length=64, description="目录版本")
-    catalog_digest = fields.CharField(max_length=80, description="目录摘要")
-    revision = fields.IntField(default=0, description="租户目录状态版本")
-    status = fields.CharField(max_length=32, default="ready", description="目录状态")
-    onboarding_completed = fields.BooleanField(
-        default=False,
-        description="首次启用引导是否已完成",
-    )
-    updater = fields.CharField(max_length=255, null=True, description="更新人")
-
-    @property
-    def json(self) -> dict:
-        return {
-            "catalog_key": self.catalog_key,
-            "catalog_version": self.catalog_version,
-            "catalog_digest": self.catalog_digest,
-            "revision": self.revision,
-            "status": self.status,
-            "onboarding_completed": self.onboarding_completed,
-            "utime": strip_timezone_to_seconds(self.utime),
-        }
-
-    class Meta:
-        table = "supply_chain_builtin_catalog_state"
-        unique_together = (("tenant_id", "catalog_key"),)
-        indexes = (("tenant_id", "status"),)
-
-
-class SupplyChainBuiltinCatalogEvent(BaseModel):
-    """Audit event for builtin-catalog initialization and reconciliation."""
-
-    request_id = fields.CharField(max_length=64, description="协调请求 ID")
-    action = fields.CharField(
-        max_length=20, default="reconcile", description="协调动作"
-    )
-    status = fields.CharField(
-        max_length=20,
-        description="succeeded/unchanged/failed",
-    )
-    catalog_version = fields.CharField(max_length=64, description="目录版本")
-    catalog_digest = fields.CharField(max_length=80, description="目录摘要")
-    before_state = fields.JSONField(default=dict, description="协调前状态")
-    after_state = fields.JSONField(default=dict, description="协调后状态")
-    changes = fields.JSONField(default=dict, description="变更数量")
-    failure_reason = fields.CharField(
-        max_length=255,
-        null=True,
-        description="失败类型",
-    )
-    operator = fields.CharField(max_length=255, null=True, description="操作人")
-
-    @property
-    def json(self) -> dict:
-        return {
-            "request_id": self.request_id,
-            "action": self.action,
-            "status": self.status,
-            "catalog_version": self.catalog_version,
-            "catalog_digest": self.catalog_digest,
-            "before_state": self.before_state or {},
-            "after_state": self.after_state or {},
-            "changes": self.changes or {},
-            "failure_reason": self.failure_reason,
-            "operator": self.operator,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-        }
-
-    class Meta:
-        table = "supply_chain_builtin_catalog_event"
-        unique_together = (("tenant_id", "request_id"),)
-        indexes = (("tenant_id", "ctime"), ("tenant_id", "status"))
-
-
-class SupplyChainBuiltinActivation(BaseModel):
-    """Tenant-owned activation state separated from builtin definitions."""
-
-    subject_type = fields.CharField(max_length=20, default="model", description="model")
-    subject_key = fields.CharField(max_length=64, description="模型稳定标识")
-    enabled = fields.BooleanField(default=False, description="是否启用")
-    revision = fields.IntField(default=0, description="状态版本")
-    updater = fields.CharField(max_length=255, null=True, description="更新人")
-
-    class Meta:
-        table = "supply_chain_builtin_activation"
-        unique_together = (("tenant_id", "subject_type", "subject_key"),)
-        indexes = (("tenant_id", "enabled"),)
-
-
-class SupplyChainBuiltinActivationPreview(BaseModel):
-    """Short-lived impact preview required before activation changes."""
-
-    token = fields.CharField(max_length=64, description="一次性预览令牌")
-    action = fields.CharField(max_length=16, description="enable/disable")
-    scope = fields.CharField(max_length=16, description="model/group/selection/all")
-    subject_keys = fields.JSONField(default=list, description="操作对象")
-    catalog_version = fields.CharField(max_length=64, description="目录版本")
-    tenant_revision = fields.IntField(default=0, description="租户状态版本")
-    impact = fields.JSONField(default=dict, description="影响摘要")
-    expires_at = fields.DatetimeField(description="过期时间")
-    used = fields.BooleanField(default=False, description="是否已使用")
-    creator = fields.CharField(max_length=255, null=True, description="创建人")
-
-    class Meta:
-        table = "supply_chain_builtin_activation_preview"
-        unique_together = (("tenant_id", "token"),)
-        indexes = (("tenant_id", "expires_at"),)
-
-
-class SupplyChainBuiltinActivationEvent(BaseModel):
-    """Idempotent audit event for a tenant activation transaction."""
-
-    request_id = fields.CharField(max_length=64, description="幂等请求 ID")
-    action = fields.CharField(max_length=16, description="enable/disable")
-    scope = fields.CharField(max_length=16, description="model/group/selection/all")
-    subject_keys = fields.JSONField(default=list, description="操作对象")
-    before_state = fields.JSONField(default=dict, description="变更前状态")
-    after_state = fields.JSONField(default=dict, description="变更后状态")
-    impact = fields.JSONField(default=dict, description="影响摘要")
-    catalog_version = fields.CharField(max_length=64, description="目录版本")
-    tenant_revision = fields.IntField(default=0, description="变更后版本")
-    operator = fields.CharField(max_length=255, null=True, description="操作人")
-
-    @property
-    def json(self) -> dict:
-        return {
-            "request_id": self.request_id,
-            "action": self.action,
-            "scope": self.scope,
-            "subject_keys": self.subject_keys or [],
-            "before_state": self.before_state or {},
-            "after_state": self.after_state or {},
-            "impact": self.impact or {},
-            "catalog_version": self.catalog_version,
-            "tenant_revision": self.tenant_revision,
-            "operator": self.operator,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-        }
-
-    class Meta:
-        table = "supply_chain_builtin_activation_event"
-        unique_together = (("tenant_id", "request_id"),)
-        indexes = (("tenant_id", "ctime"),)
-
-
-class SupplyChainCi(BaseModel):
-    """CMDB instance with dynamic attributes."""
-
-    ci_type_id = fields.CharField(max_length=36, description="模型 ID")
-    ci_type_key = fields.CharField(max_length=64, description="模型 key")
-    name = fields.CharField(max_length=255, description="实例名称")
-    project_area_id = fields.CharField(
-        max_length=36, null=True, description="厂区/区域 CI"
-    )
-    accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
-    )
-    attributes = fields.JSONField(default=dict, description="动态属性")
-    status = fields.CharField(
-        max_length=20, default=CI_STATUS_ACTIVE, description="active/disabled/archived"
-    )
-    risk_status = fields.CharField(
-        max_length=20,
-        default=CI_RISK_STATUS_NORMAL,
-        description="normal/low/medium/high",
-    )
-    creator = fields.CharField(max_length=255, null=True, description="创建人")
-    updater = fields.CharField(max_length=255, null=True, description="更新人")
-
-    @property
-    def json(self) -> dict:
-        return {
-            "id": self.id,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-            "utime": strip_timezone_to_seconds(self.utime),
-            "tenant_id": self.tenant_id,
-            "ci_type_id": self.ci_type_id,
-            "ci_type_key": self.ci_type_key,
-            "name": self.name,
-            "project_area_id": self.project_area_id,
-            "accessory_project_id": self.accessory_project_id,
-            "attributes": self.attributes or {},
-            "status": self.status,
-            "risk_status": self.risk_status,
-            "creator": self.creator,
-            "updater": self.updater,
-        }
-
-    class Meta:
-        table = "supply_chain_ci"
-        ordering = ["-utime"]
-        indexes = (
-            ("tenant_id", "ci_type_id"),
-            ("tenant_id", "ci_type_id", "status"),
-            ("tenant_id", "project_area_id"),
-            ("tenant_id", "accessory_project_id"),
-            ("tenant_id", "ci_type_id", "project_area_id", "accessory_project_id"),
-        )
-
-
-class SupplyChainCiReference(BaseModel):
-    """Derived index for model-reference fields on CI instances."""
-
-    field_key = fields.CharField(max_length=64, description="引用字段 key")
-    source_ci = fields.ForeignKeyField(
-        "models.SupplyChainCi",
-        related_name="outgoing_references",
-        description="持有引用的 CI",
-        on_delete=fields.CASCADE,
-    )
-    target_ci = fields.ForeignKeyField(
-        "models.SupplyChainCi",
-        related_name="incoming_references",
-        description="被引用的 CI",
-        on_delete=fields.CASCADE,
-    )
-    position = fields.IntField(default=0, description="多值引用顺序")
-
-    @property
-    def json(self) -> dict:
-        return {
-            "id": self.id,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-            "utime": strip_timezone_to_seconds(self.utime),
-            "tenant_id": self.tenant_id,
-            "field_key": self.field_key,
-            "source_ci_id": self.source_ci_id,
-            "target_ci_id": self.target_ci_id,
-            "position": self.position,
-        }
-
-    class Meta:
-        table = "supply_chain_ci_reference"
-        ordering = ["source_ci_id", "field_key", "position"]
-        indexes = (
-            ("tenant_id", "source_ci_id"),
-            ("tenant_id", "target_ci_id"),
-            ("tenant_id", "source_ci_id", "field_key"),
-        )
-        unique_together = (
-            ("tenant_id", "source_ci_id", "field_key", "target_ci_id"),
-        )
-
-
-class SupplyChainProjectAuthorization(BaseModel):
+class NetworkAccessProjectAuthorization(BaseModel):
     """Personnel project authorization ledger."""
 
-    personnel_ci_id = fields.CharField(max_length=36, description="人员 CI")
+    personnel_asset_id = fields.CharField(max_length=36, description="人员资产 ID")
     project_area_id = fields.CharField(
-        max_length=36, null=True, description="厂区/区域 CI"
+        max_length=36, null=True, description="厂区/区域资产 ID"
     )
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
     secrecy_level = fields.CharField(
         max_length=20, default="medium", description="low/medium/high/critical"
@@ -540,7 +43,7 @@ class SupplyChainProjectAuthorization(BaseModel):
     @property
     def json(self) -> dict:
         return base_json(self) | {
-            "personnel_ci_id": self.personnel_ci_id,
+            "personnel_asset_id": self.personnel_asset_id,
             "project_area_id": self.project_area_id,
             "accessory_project_id": self.accessory_project_id,
             "secrecy_level": self.secrecy_level,
@@ -557,25 +60,25 @@ class SupplyChainProjectAuthorization(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_project_authorization"
+        table = "network_access_project_authorization"
         ordering = ["-utime"]
         indexes = (
             ("tenant_id", "project_area_id"),
             ("tenant_id", "accessory_project_id"),
-            ("tenant_id", "personnel_ci_id"),
+            ("tenant_id", "personnel_asset_id"),
             ("tenant_id", "status"),
         )
 
 
-class SupplyChainNdaRecord(BaseModel):
+class NetworkAccessNdaRecord(BaseModel):
     """Personnel NDA signing ledger."""
 
-    personnel_ci_id = fields.CharField(max_length=36, description="人员 CI")
+    personnel_asset_id = fields.CharField(max_length=36, description="人员资产 ID")
     project_area_id = fields.CharField(
-        max_length=36, null=True, description="厂区/区域 CI"
+        max_length=36, null=True, description="厂区/区域资产 ID"
     )
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
     nda_type = fields.CharField(max_length=50, null=True, description="NDA 类型")
     sign_status = fields.CharField(
@@ -598,7 +101,7 @@ class SupplyChainNdaRecord(BaseModel):
     @property
     def json(self) -> dict:
         return base_json(self) | {
-            "personnel_ci_id": self.personnel_ci_id,
+            "personnel_asset_id": self.personnel_asset_id,
             "project_area_id": self.project_area_id,
             "accessory_project_id": self.accessory_project_id,
             "nda_type": self.nda_type,
@@ -615,27 +118,27 @@ class SupplyChainNdaRecord(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_nda_record"
+        table = "network_access_nda_record"
         ordering = ["-utime"]
         indexes = (
             ("tenant_id", "project_area_id"),
             ("tenant_id", "accessory_project_id"),
-            ("tenant_id", "personnel_ci_id"),
+            ("tenant_id", "personnel_asset_id"),
             ("tenant_id", "sign_status"),
             ("tenant_id", "expires_at"),
         )
 
 
-class SupplyChainUnknownTerminal(BaseModel):
+class NetworkAccessUnknownTerminal(BaseModel):
     """Network-side unknown terminal discovery ledger."""
 
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
     mac_address = fields.CharField(max_length=64, description="MAC 地址")
     ip_address = fields.CharField(max_length=64, null=True, description="IP 地址")
-    network_device_ci_id = fields.CharField(
-        max_length=36, null=True, description="网络设备 CI"
+    network_device_asset_id = fields.CharField(
+        max_length=36, null=True, description="网络设备资产 ID"
     )
     port = fields.CharField(max_length=100, null=True, description="交换机端口")
     first_seen_at = fields.DatetimeField(null=True, description="首次发现")
@@ -646,7 +149,9 @@ class SupplyChainUnknownTerminal(BaseModel):
     status = fields.CharField(
         max_length=20, default="pending", description="pending/confirmed/converted"
     )
-    endpoint_ci_id = fields.CharField(max_length=36, null=True, description="终端 CI")
+    endpoint_asset_id = fields.CharField(
+        max_length=36, null=True, description="终端资产 ID"
+    )
     review_issue_id = fields.CharField(max_length=36, null=True, description="审查问题")
     remark = fields.TextField(null=True, description="备注")
     creator = fields.CharField(max_length=255, null=True, description="创建人")
@@ -658,13 +163,13 @@ class SupplyChainUnknownTerminal(BaseModel):
             "accessory_project_id": self.accessory_project_id,
             "mac_address": self.mac_address,
             "ip_address": self.ip_address,
-            "network_device_ci_id": self.network_device_ci_id,
+            "network_device_asset_id": self.network_device_asset_id,
             "port": self.port,
             "first_seen_at": strip_timezone_to_seconds(self.first_seen_at),
             "last_seen_at": strip_timezone_to_seconds(self.last_seen_at),
             "discovery_source": self.discovery_source,
             "status": self.status,
-            "endpoint_ci_id": self.endpoint_ci_id,
+            "endpoint_asset_id": self.endpoint_asset_id,
             "review_issue_id": self.review_issue_id,
             "remark": self.remark,
             "creator": self.creator,
@@ -672,7 +177,7 @@ class SupplyChainUnknownTerminal(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_unknown_terminal"
+        table = "network_access_unknown_terminal"
         ordering = ["-utime"]
         indexes = (
             ("tenant_id", "accessory_project_id"),
@@ -682,11 +187,11 @@ class SupplyChainUnknownTerminal(BaseModel):
         )
 
 
-class SupplyChainBoundaryLog(BaseModel):
+class NetworkAccessBoundaryLog(BaseModel):
     """Boundary file/mail/system access ledger."""
 
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
     log_category = fields.CharField(
         max_length=30, description="file_operation/mail_outbound/system_access"
@@ -697,8 +202,12 @@ class SupplyChainBoundaryLog(BaseModel):
     client_address = fields.CharField(
         max_length=100, null=True, description="客户端地址"
     )
-    personnel_ci_id = fields.CharField(max_length=36, null=True, description="人员 CI")
-    endpoint_ci_id = fields.CharField(max_length=36, null=True, description="终端 CI")
+    personnel_asset_id = fields.CharField(
+        max_length=36, null=True, description="人员资产 ID"
+    )
+    endpoint_asset_id = fields.CharField(
+        max_length=36, null=True, description="终端资产 ID"
+    )
     occurred_at = fields.DatetimeField(null=True, description="发生时间")
     source_type = fields.CharField(max_length=30, default="manual", description="来源")
     risk_flag = fields.BooleanField(default=False, description="风险标记")
@@ -713,8 +222,8 @@ class SupplyChainBoundaryLog(BaseModel):
             "log_category": self.log_category,
             "operator_account": self.operator_account,
             "client_address": self.client_address,
-            "personnel_ci_id": self.personnel_ci_id,
-            "endpoint_ci_id": self.endpoint_ci_id,
+            "personnel_asset_id": self.personnel_asset_id,
+            "endpoint_asset_id": self.endpoint_asset_id,
             "occurred_at": strip_timezone_to_seconds(self.occurred_at),
             "source_type": self.source_type,
             "risk_flag": self.risk_flag,
@@ -724,7 +233,7 @@ class SupplyChainBoundaryLog(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_boundary_log"
+        table = "network_access_boundary_log"
         ordering = ["-occurred_at", "-utime"]
         indexes = (
             ("tenant_id", "accessory_project_id"),
@@ -735,15 +244,21 @@ class SupplyChainBoundaryLog(BaseModel):
         )
 
 
-class SupplyChainExceptionDeviceLog(BaseModel):
+class NetworkAccessExceptionDeviceLog(BaseModel):
     """Exception device usage ledger."""
 
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
-    exception_device_ci_id = fields.CharField(max_length=36, description="例外设备 CI")
-    endpoint_ci_id = fields.CharField(max_length=36, null=True, description="终端 CI")
-    personnel_ci_id = fields.CharField(max_length=36, null=True, description="人员 CI")
+    exception_device_asset_id = fields.CharField(
+        max_length=36, description="例外设备资产 ID"
+    )
+    endpoint_asset_id = fields.CharField(
+        max_length=36, null=True, description="终端资产 ID"
+    )
+    personnel_asset_id = fields.CharField(
+        max_length=36, null=True, description="人员资产 ID"
+    )
     log_type = fields.CharField(
         max_length=20, default="use", description="insert/remove/use"
     )
@@ -768,9 +283,9 @@ class SupplyChainExceptionDeviceLog(BaseModel):
     def json(self) -> dict:
         return base_json(self) | {
             "accessory_project_id": self.accessory_project_id,
-            "exception_device_ci_id": self.exception_device_ci_id,
-            "endpoint_ci_id": self.endpoint_ci_id,
-            "personnel_ci_id": self.personnel_ci_id,
+            "exception_device_asset_id": self.exception_device_asset_id,
+            "endpoint_asset_id": self.endpoint_asset_id,
+            "personnel_asset_id": self.personnel_asset_id,
             "log_type": self.log_type,
             "detail": self.detail or {},
             "occurred_at": strip_timezone_to_seconds(self.occurred_at),
@@ -783,12 +298,12 @@ class SupplyChainExceptionDeviceLog(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_exception_device_log"
+        table = "network_access_exception_device_log"
         ordering = ["-occurred_at", "-utime"]
         indexes = (
             ("tenant_id", "accessory_project_id"),
-            ("tenant_id", "exception_device_ci_id"),
-            ("tenant_id", "personnel_ci_id"),
+            ("tenant_id", "exception_device_asset_id"),
+            ("tenant_id", "personnel_asset_id"),
             ("tenant_id", "occurred_at"),
             ("tenant_id", "accessory_project_id", "occurred_at"),
             ("tenant_id", "abnormal_type"),
@@ -796,11 +311,11 @@ class SupplyChainExceptionDeviceLog(BaseModel):
         )
 
 
-class SupplyChainCollectionTask(BaseModel):
+class NetworkAccessCollectionTask(BaseModel):
     """Business wrapper around host collection abilities."""
 
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
     domain = fields.CharField(
         max_length=30, description="network/personnel_nda/boundary/exception_device"
@@ -822,7 +337,7 @@ class SupplyChainCollectionTask(BaseModel):
         max_length=100, null=True, description="事件接入 ID"
     )
     target_type = fields.CharField(max_length=50, null=True, description="目标类型")
-    target_ci_ids = fields.JSONField(default=list, description="目标 CI")
+    target_asset_ids = fields.JSONField(default=list, description="目标资产 ID 列表")
     credential_ref = fields.CharField(max_length=255, null=True, description="凭据引用")
     input_params = fields.JSONField(default=dict, description="输入参数")
     parser_template_id = fields.CharField(
@@ -858,7 +373,7 @@ class SupplyChainCollectionTask(BaseModel):
             "timed_task_id": self.timed_task_id,
             "event_ingestion_id": self.event_ingestion_id,
             "target_type": self.target_type,
-            "target_ci_ids": self.target_ci_ids or [],
+            "target_asset_ids": self.target_asset_ids or [],
             "credential_ref": self.credential_ref,
             "input_params": self.input_params or {},
             "parser_template_id": self.parser_template_id,
@@ -874,7 +389,7 @@ class SupplyChainCollectionTask(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_collection_task"
+        table = "network_access_collection_task"
         ordering = ["-utime"]
         indexes = (
             ("tenant_id", "domain"),
@@ -883,12 +398,12 @@ class SupplyChainCollectionTask(BaseModel):
         )
 
 
-class SupplyChainCollectionRun(BaseModel):
+class NetworkAccessCollectionRun(BaseModel):
     """Collection run with run_id plumbing for external execution."""
 
     task_id = fields.CharField(max_length=36, null=True, description="采集任务")
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
     domain = fields.CharField(max_length=30, description="采集域")
     run_id = fields.CharField(max_length=64, description="运行 ID")
@@ -947,7 +462,7 @@ class SupplyChainCollectionRun(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_collection_run"
+        table = "network_access_collection_run"
         ordering = ["-ctime"]
         indexes = (
             ("tenant_id", "task_id"),
@@ -958,7 +473,7 @@ class SupplyChainCollectionRun(BaseModel):
         )
 
 
-class SupplyChainParseMappingTemplate(BaseModel):
+class NetworkAccessParseMappingTemplate(BaseModel):
     """Parser and mapping rules for collection results."""
 
     domain = fields.CharField(max_length=30, description="采集域")
@@ -990,18 +505,20 @@ class SupplyChainParseMappingTemplate(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_parse_mapping_template"
+        table = "network_access_parse_mapping_template"
         ordering = ["-utime"]
         indexes = (("tenant_id", "domain"), ("tenant_id", "enabled"))
 
 
-class SupplyChainPresetPolicy(BaseModel):
+class NetworkAccessPresetPolicy(BaseModel):
     """Expected network policy baseline."""
 
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
-    device_ci_id = fields.CharField(max_length=36, null=True, description="网络设备 CI")
+    device_asset_id = fields.CharField(
+        max_length=36, null=True, description="网络设备资产 ID"
+    )
     rule_name = fields.CharField(max_length=255, description="规则名称")
     source_zone = fields.CharField(max_length=100, null=True, description="源区域")
     source_address = fields.CharField(max_length=255, null=True, description="源地址")
@@ -1031,7 +548,7 @@ class SupplyChainPresetPolicy(BaseModel):
     def json(self) -> dict:
         return base_json(self) | {
             "accessory_project_id": self.accessory_project_id,
-            "device_ci_id": self.device_ci_id,
+            "device_asset_id": self.device_asset_id,
             "rule_name": self.rule_name,
             "source_zone": self.source_zone,
             "source_address": self.source_address,
@@ -1051,22 +568,24 @@ class SupplyChainPresetPolicy(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_preset_policy"
+        table = "network_access_preset_policy"
         ordering = ["-utime"]
         indexes = (
             ("tenant_id", "accessory_project_id"),
-            ("tenant_id", "device_ci_id"),
+            ("tenant_id", "device_asset_id"),
             ("tenant_id", "effective_status"),
         )
 
 
-class SupplyChainActualPolicy(BaseModel):
+class NetworkAccessActualPolicy(BaseModel):
     """Current firewall, switch, or other network-device policy."""
 
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
-    device_ci_id = fields.CharField(max_length=36, null=True, description="网络设备 CI")
+    device_asset_id = fields.CharField(
+        max_length=36, null=True, description="网络设备资产 ID"
+    )
     device_key = fields.CharField(max_length=255, description="外部设备稳定标识")
     device_name = fields.CharField(max_length=255, null=True, description="设备名称")
     device_type = fields.CharField(
@@ -1106,7 +625,7 @@ class SupplyChainActualPolicy(BaseModel):
         policy_data = self.policy_data or {}
         return base_json(self) | {
             "accessory_project_id": self.accessory_project_id,
-            "device_ci_id": self.device_ci_id,
+            "device_asset_id": self.device_asset_id,
             "device_key": self.device_key,
             "device_name": self.device_name,
             "device_type": self.device_type,
@@ -1157,11 +676,11 @@ class SupplyChainActualPolicy(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_actual_policy"
+        table = "network_access_actual_policy"
         ordering = ["-utime"]
         indexes = (
             ("tenant_id", "accessory_project_id"),
-            ("tenant_id", "device_ci_id"),
+            ("tenant_id", "device_asset_id"),
             ("tenant_id", "device_key"),
             ("tenant_id", "device_key", "policy_key"),
             ("tenant_id", "collection_run_id"),
@@ -1169,11 +688,11 @@ class SupplyChainActualPolicy(BaseModel):
         )
 
 
-class SupplyChainPolicyCompareRun(BaseModel):
+class NetworkAccessPolicyCompareRun(BaseModel):
     """Policy compare run summary."""
 
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
     collection_run_id = fields.CharField(
         max_length=36, null=True, description="采集运行"
@@ -1207,7 +726,7 @@ class SupplyChainPolicyCompareRun(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_policy_compare_run"
+        table = "network_access_policy_compare_run"
         ordering = ["-ctime"]
         indexes = (
             ("tenant_id", "accessory_project_id"),
@@ -1215,7 +734,7 @@ class SupplyChainPolicyCompareRun(BaseModel):
         )
 
 
-class SupplyChainPolicyCompareItem(BaseModel):
+class NetworkAccessPolicyCompareItem(BaseModel):
     """Single policy compare item."""
 
     compare_run_id = fields.CharField(max_length=36, description="比对运行")
@@ -1257,7 +776,7 @@ class SupplyChainPolicyCompareItem(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_policy_compare_item"
+        table = "network_access_policy_compare_item"
         ordering = ["-utime"]
         indexes = (
             ("tenant_id", "compare_run_id"),
@@ -1266,13 +785,15 @@ class SupplyChainPolicyCompareItem(BaseModel):
         )
 
 
-class SupplyChainPolicyChange(BaseModel):
+class NetworkAccessPolicyChange(BaseModel):
     """Immutable before/after history for access-control policy writes."""
 
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
-    device_ci_id = fields.CharField(max_length=36, null=True, description="网络设备 CI")
+    device_asset_id = fields.CharField(
+        max_length=36, null=True, description="网络设备资产 ID"
+    )
     device_key = fields.CharField(
         max_length=255, null=True, description="外部设备稳定标识"
     )
@@ -1308,7 +829,7 @@ class SupplyChainPolicyChange(BaseModel):
     def json(self) -> dict:
         return base_json(self) | {
             "accessory_project_id": self.accessory_project_id,
-            "device_ci_id": self.device_ci_id,
+            "device_asset_id": self.device_asset_id,
             "device_key": self.device_key,
             "actual_policy_id": self.actual_policy_id,
             "policy_key": self.policy_key,
@@ -1330,11 +851,11 @@ class SupplyChainPolicyChange(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_policy_change"
+        table = "network_access_policy_change"
         ordering = ["-detected_at", "-utime"]
         indexes = (
             ("tenant_id", "accessory_project_id"),
-            ("tenant_id", "device_ci_id"),
+            ("tenant_id", "device_asset_id"),
             ("tenant_id", "device_key"),
             ("tenant_id", "actual_policy_id"),
             ("tenant_id", "batch_id"),
@@ -1343,14 +864,14 @@ class SupplyChainPolicyChange(BaseModel):
         )
 
 
-class SupplyChainNetworkTopology(BaseModel):
+class NetworkAccessTopology(BaseModel):
     """Stored LogicFlow network topology."""
 
     project_area_id = fields.CharField(
-        max_length=36, null=True, description="厂区/区域 CI"
+        max_length=36, null=True, description="厂区/区域资产 ID"
     )
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
     name = fields.CharField(max_length=255, description="拓扑名称")
     version = fields.CharField(max_length=50, default="v1", description="版本")
@@ -1377,7 +898,7 @@ class SupplyChainNetworkTopology(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_network_topology"
+        table = "network_access_network_topology"
         ordering = ["-utime"]
         indexes = (
             ("tenant_id", "project_area_id"),
@@ -1386,11 +907,11 @@ class SupplyChainNetworkTopology(BaseModel):
         )
 
 
-class SupplyChainReviewIssue(BaseModel):
+class NetworkAccessReviewIssue(BaseModel):
     """Review issue and remediation closure workflow."""
 
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
     domain = fields.CharField(max_length=30, description="问题域")
     source_object_type = fields.CharField(
@@ -1440,7 +961,7 @@ class SupplyChainReviewIssue(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_review_issue"
+        table = "network_access_review_issue"
         ordering = ["-utime"]
         unique_together = (("tenant_id", "issue_no"),)
         indexes = (
@@ -1451,7 +972,7 @@ class SupplyChainReviewIssue(BaseModel):
         )
 
 
-class SupplyChainRemediationRecord(BaseModel):
+class NetworkAccessRemediationRecord(BaseModel):
     """Status transition and remediation evidence record."""
 
     review_issue_id = fields.CharField(max_length=36, description="审查问题")
@@ -1481,17 +1002,19 @@ class SupplyChainRemediationRecord(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_remediation_record"
+        table = "network_access_remediation_record"
         ordering = ["-operated_at", "-ctime"]
         indexes = (("tenant_id", "review_issue_id"), ("tenant_id", "action_type"))
 
 
-class SupplyChainDisposalRule(BaseModel):
+class NetworkAccessDisposalRule(BaseModel):
     """Manual-confirm disposal rule."""
 
-    project_area_id = fields.CharField(max_length=36, null=True, description="厂区 CI")
+    project_area_id = fields.CharField(
+        max_length=36, null=True, description="厂区资产 ID"
+    )
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
     trigger_type = fields.CharField(max_length=60, description="触发类型")
     enabled = fields.BooleanField(default=True, description="是否启用")
@@ -1530,7 +1053,7 @@ class SupplyChainDisposalRule(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_disposal_rule"
+        table = "network_access_disposal_rule"
         ordering = ["-utime"]
         indexes = (
             ("tenant_id", "project_area_id"),
@@ -1540,17 +1063,21 @@ class SupplyChainDisposalRule(BaseModel):
         )
 
 
-class SupplyChainDisposalTask(BaseModel):
+class NetworkAccessDisposalTask(BaseModel):
     """Manual-confirm disposal task with run_id tracking."""
 
     rule_id = fields.CharField(max_length=36, null=True, description="规则")
     trigger_type = fields.CharField(max_length=60, description="触发类型")
-    project_area_id = fields.CharField(max_length=36, null=True, description="厂区 CI")
-    accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+    project_area_id = fields.CharField(
+        max_length=36, null=True, description="厂区资产 ID"
     )
-    personnel_ci_id = fields.CharField(max_length=36, null=True, description="人员 CI")
-    related_ci_ids = fields.JSONField(default=list, description="关联 CI")
+    accessory_project_id = fields.CharField(
+        max_length=36, null=True, description="配件项目资产 ID"
+    )
+    personnel_asset_id = fields.CharField(
+        max_length=36, null=True, description="人员资产 ID"
+    )
+    related_asset_ids = fields.JSONField(default=list, description="关联资产 ID 列表")
     actions = fields.JSONField(default=list, description="动作")
     status = fields.CharField(
         max_length=30,
@@ -1572,8 +1099,8 @@ class SupplyChainDisposalTask(BaseModel):
             "trigger_type": self.trigger_type,
             "project_area_id": self.project_area_id,
             "accessory_project_id": self.accessory_project_id,
-            "personnel_ci_id": self.personnel_ci_id,
-            "related_ci_ids": self.related_ci_ids or [],
+            "personnel_asset_id": self.personnel_asset_id,
+            "related_asset_ids": self.related_asset_ids or [],
             "actions": self.actions or [],
             "status": self.status,
             "confirm_by": self.confirm_by,
@@ -1586,18 +1113,18 @@ class SupplyChainDisposalTask(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_disposal_task"
+        table = "network_access_disposal_task"
         ordering = ["-utime"]
         indexes = (
             ("tenant_id", "project_area_id"),
             ("tenant_id", "accessory_project_id"),
-            ("tenant_id", "personnel_ci_id"),
+            ("tenant_id", "personnel_asset_id"),
             ("tenant_id", "status"),
             ("tenant_id", "run_id"),
         )
 
 
-class SupplyChainAttachmentRef(BaseModel):
+class NetworkAccessAttachmentReference(BaseModel):
     """S3/RustFS object reference."""
 
     object_type = fields.CharField(max_length=80, description="对象类型")
@@ -1629,12 +1156,12 @@ class SupplyChainAttachmentRef(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_attachment_ref"
+        table = "network_access_attachment_ref"
         ordering = ["-uploaded_at", "-ctime"]
         indexes = (("tenant_id", "object_type", "object_id"), ("tenant_id", "file_id"))
 
 
-class SupplyChainNotificationEvent(BaseModel):
+class NetworkAccessNotificationEvent(BaseModel):
     """notify_config-compatible notification event payload."""
 
     event_type = fields.CharField(max_length=80, description="事件类型")
@@ -1643,9 +1170,11 @@ class SupplyChainNotificationEvent(BaseModel):
     risk_level = fields.CharField(max_length=20, null=True, description="风险等级")
     target_type = fields.CharField(max_length=80, null=True, description="目标类型")
     target_id = fields.CharField(max_length=36, null=True, description="目标 ID")
-    project_area_id = fields.CharField(max_length=36, null=True, description="厂区 CI")
+    project_area_id = fields.CharField(
+        max_length=36, null=True, description="厂区资产 ID"
+    )
     accessory_project_id = fields.CharField(
-        max_length=36, null=True, description="配件项目 CI"
+        max_length=36, null=True, description="配件项目资产 ID"
     )
     link = fields.CharField(max_length=255, null=True, description="链接")
     receivers = fields.JSONField(default=list, description="接收人")
@@ -1676,7 +1205,7 @@ class SupplyChainNotificationEvent(BaseModel):
         }
 
     class Meta:
-        table = "supply_chain_notification_event"
+        table = "network_access_notification_event"
         ordering = ["-ctime"]
         indexes = (
             ("tenant_id", "event_type"),

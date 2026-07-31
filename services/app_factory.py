@@ -17,6 +17,7 @@ from libs.security.authorization import load_license
 from libs.security.license_modules import is_licensed_module_active
 from services.agent.views import agent_bp
 from services.ai.views import ai_bp
+from services.asset_management.views import asset_management_bp
 from services.approvement.views import approve_bp
 from services.command_center.views import command_bp
 from services.dashboard.views import dashboard_bp
@@ -28,20 +29,11 @@ from services.license.views import license_bp
 from services.log_view.views import logs_bp
 from services.mcp.views import mcp_bp
 from services.network_topology.views import topology_bp
+from services.network_access_control.views import network_access_control_bp
 from services.others.views import activity, all_apps, playbook_list
 from services.role.views import role_bp
 from services.scene.views import scene_bp
 from services.secure.views import secure_bp
-from services.supply_chain_review.views import (
-    SUPPLY_CHAIN_REVIEW_BLUEPRINTS,
-    asset_management_bp,
-    network_access_control_module_bp,
-    supply_chain_review_action_bp,
-    supply_chain_review_attachment_bp,
-    supply_chain_review_cmdb_bp,
-    supply_chain_review_ledger_bp,
-    supply_chain_review_process_bp,
-)
 from services.system_config.views import system_bp
 from services.tenant.views import tenant_bp
 from services.timed.views import timed_bp
@@ -96,14 +88,8 @@ def _licensed_blueprints() -> dict:
         "command_bp": command_bp,
         "digital_employee_bp": digital_employee_bp,
         "asset_management_bp": asset_management_bp,
-        "network_access_control_bp": network_access_control_module_bp,
+        "network_access_control_bp": network_access_control_bp,
         "topology_bp": topology_bp,
-        "supply_chain_review_bp": SUPPLY_CHAIN_REVIEW_BLUEPRINTS,
-        "supply_chain_review_cmdb_bp": supply_chain_review_cmdb_bp,
-        "supply_chain_review_ledger_bp": supply_chain_review_ledger_bp,
-        "supply_chain_review_process_bp": supply_chain_review_process_bp,
-        "supply_chain_review_action_bp": supply_chain_review_action_bp,
-        "supply_chain_review_attachment_bp": supply_chain_review_attachment_bp,
     }
 
 

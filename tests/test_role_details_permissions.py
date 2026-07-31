@@ -118,9 +118,8 @@ def test_role_details_expands_platform_wildcard_for_nested_asset_permissions():
                 "model": "asset-management-models",
                 "description": "资产模型",
                 "Permissions": [
-                    "supply_chain_review:model:c",
-                    "supply_chain_review:model:r",
-                    "supply_chain_review:field:r",
+                    "asset_management:c",
+                    "asset_management:r",
                 ],
             }
         ],
@@ -131,9 +130,8 @@ def test_role_details_expands_platform_wildcard_for_nested_asset_permissions():
             "model": "asset-management-models",
             "model_description": "资产模型",
             "sp": [
-                {"supply_chain_review:model:c": "新增资产模型权限"},
-                {"supply_chain_review:model:r": "查看资产模型权限"},
-                {"supply_chain_review:field:r": "查看资产字段权限"},
+                {"asset_management:c": "新增资产管理权限"},
+                {"asset_management:r": "查看资产管理权限"},
             ],
         }
     ]
@@ -264,8 +262,8 @@ def test_role_permission_all_exposes_actual_nested_permission_code():
             "model": "asset-management-models",
             "description": "资产模型",
             "Permissions": [
-                {"label": "查看资产模型权限", "value": "supply_chain_review:model:r"},
-                {"label": "新增资产模型权限", "value": "supply_chain_review:model:c"},
+                {"label": "查看资产模型权限", "value": "asset_management:r"},
+                {"label": "新增资产模型权限", "value": "asset_management:c"},
             ],
         }
     )
@@ -274,12 +272,12 @@ def test_role_permission_all_exposes_actual_nested_permission_code():
         {
             "value": "r",
             "label": "查看资产模型权限",
-            "permission": "supply_chain_review:model:r",
+            "permission": "asset_management:r",
         },
         {
             "value": "c",
             "label": "新增资产模型权限",
-            "permission": "supply_chain_review:model:c",
+            "permission": "asset_management:c",
         },
     ]
 
@@ -290,10 +288,8 @@ def test_role_permission_all_labels_split_menu_actions_without_collapsing_granul
             "model": "asset-management-models",
             "description": "资产模型",
             "Permissions": [
-                "supply_chain_review:model:c",
-                "supply_chain_review:field:c",
-                "supply_chain_review:model:r",
-                "supply_chain_review:field:r",
+                "asset_management:c",
+                "asset_management:r",
             ],
         }
     )
@@ -301,23 +297,13 @@ def test_role_permission_all_labels_split_menu_actions_without_collapsing_granul
     assert normalized["Permissions"] == [
         {
             "value": "c",
-            "label": "新增资产模型权限",
-            "permission": "supply_chain_review:model:c",
-        },
-        {
-            "value": "c",
-            "label": "新增资产字段权限",
-            "permission": "supply_chain_review:field:c",
+            "label": "新增资产管理权限",
+            "permission": "asset_management:c",
         },
         {
             "value": "r",
-            "label": "查看资产模型权限",
-            "permission": "supply_chain_review:model:r",
-        },
-        {
-            "value": "r",
-            "label": "查看资产字段权限",
-            "permission": "supply_chain_review:field:r",
+            "label": "查看资产管理权限",
+            "permission": "asset_management:r",
         },
     ]
 
@@ -563,7 +549,7 @@ def test_role_permission_license_filter_accepts_old_tool_names():
 def test_role_details_groups_nested_permissions_under_split_menu_model():
     structured = _build_structured_permissions(
         [
-            "supply_chain_review:model:r",
+            "asset_management:r",
             "network_topology:c",
             "network_topology:r",
             "network_topology:u",
@@ -577,8 +563,8 @@ def test_role_details_groups_nested_permissions_under_split_menu_model():
                 "model": "asset-management-models",
                 "description": "资产模型",
                 "Permissions": [
-                    {"label": "查看资产模型权限", "value": "supply_chain_review:model:r"},
-                    {"label": "新增资产模型权限", "value": "supply_chain_review:model:c"},
+                    {"label": "查看资产模型权限", "value": "asset_management:r"},
+                    {"label": "新增资产模型权限", "value": "asset_management:c"},
                 ],
             },
             {
@@ -604,7 +590,7 @@ def test_role_details_groups_nested_permissions_under_split_menu_model():
     )
 
     assert _by_model(structured)["asset-management-models"]["sp"] == [
-        {"supply_chain_review:model:r": "查看资产模型权限"}
+        {"asset_management:r": "查看资产模型权限"}
     ]
     assert _by_model(structured)["network-management-topology"]["sp"] == [
         {"network_topology:c": "新增网络拓扑权限"},

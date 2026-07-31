@@ -248,7 +248,7 @@ def test_profile_revision_change_during_issue_is_rejected(monkeypatch):
 
 
 def test_resource_visibility_and_capability_failures_are_stable(monkeypatch):
-    calls = _fake_model(monkeypatch, "SupplyChainCi", [])
+    calls = _fake_model(monkeypatch, "AssetInstance", [])
     with pytest.raises(manifest.ManifestError) as missing:
         asyncio.run(
             manifest._locked_resources(
@@ -260,7 +260,7 @@ def test_resource_visibility_and_capability_failures_are_stable(monkeypatch):
 
     resource = SimpleNamespace(
         id="resource-1",
-        ci_type_key="network_device",
+        asset_model_key="network_device",
         attributes={
             "vendor": "generic",
             "platform": "unknown",

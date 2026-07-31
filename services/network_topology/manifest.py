@@ -15,9 +15,9 @@ from tortoise.transactions import in_transaction
 
 import settings
 from models import (
+    AssetInstance,
     NetworkTopology,
     NetworkTopologyVersion,
-    SupplyChainCi,
     TopologyCollectionManifest,
     TopologyProfileRevision,
     TopologyUpgradeIntent,
@@ -256,7 +256,7 @@ async def _locked_resources(connection, tenant_id, resource_ids, profile):
     if not resource_ids:
         raise ManifestError(MANIFEST_INVALID_REQUEST) from None
     rows = await (
-        SupplyChainCi.filter(
+        AssetInstance.filter(
             id__in=resource_ids,
             tenant_id=tenant_id,
             deleted=False,
@@ -276,7 +276,7 @@ async def _locked_resources(connection, tenant_id, resource_ids, profile):
 
 
 def _profile_excludes(resource, profile: Mapping[str, Any]) -> bool:
-    asset_type = str(getattr(resource, "ci_type_key", "") or "").strip()
+    asset_type = str(getattr(resource, "asset_model_key", "") or "").strip()
     excluded = set(profile.get("excluded_asset_types", []))
     exceptions = {
         item.get("asset_type")
@@ -319,7 +319,7 @@ def _resolve_resource_capability(resource) -> dict[str, Any]:
         raise ManifestError(MANIFEST_CAPABILITY_UNSUPPORTED) from None
     values = (
         _attribute(attributes, "device_type")
-        or _canonical_text(getattr(resource, "ci_type_key", None)),
+        or _canonical_text(getattr(resource, "asset_model_key", None)),
         _attribute(attributes, "vendor", "brand", "manu"),
         _attribute(attributes, "platform", "model") or "*",
         _attribute(attributes, "os_family") or "*",

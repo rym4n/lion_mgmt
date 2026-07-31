@@ -15,7 +15,7 @@ class AssetCatalogListener(BaseListener):
     async def after_server_start(self, app: Sanic, loop: BaseEventLoop) -> None:
         async def reconcile_catalogs() -> None:
             try:
-                from services.supply_chain_review.builtin_catalog import (
+                from services.asset_management.builtin_catalog import (
                     reconcile_all_tenant_builtin_catalogs,
                 )
 

@@ -439,7 +439,7 @@ def test_created_blank_topology_issues_manifest(compatibility_store, monkeypatch
         compatibility_store, "topology", compatibility_store.rows["topology"][0]
     )
     manifest_rows = _ManifestRows()
-    resource = SimpleNamespace(id="resource-1", ci_type_key="network_device")
+    resource = SimpleNamespace(id="resource-1", asset_model_key="network_device")
     expected = contracts.load_schema(manifest.MANIFEST_RESPONSE_SCHEMA)["examples"][0][
         "data"
     ]["target_manifest"]["expected_resources"]
@@ -453,7 +453,7 @@ def test_created_blank_topology_issues_manifest(compatibility_store, monkeypatch
     )
     monkeypatch.setattr(
         manifest,
-        "SupplyChainCi",
+        "AssetInstance",
         SimpleNamespace(filter=lambda **filters: _Query([resource], filters)),
     )
     monkeypatch.setattr(manifest, "TopologyCollectionManifest", manifest_rows)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the versioned asset builtin catalog from an exported CMDB snapshot."""
+"""Build the versioned asset builtin catalog from an exported asset snapshot."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import json
 from pathlib import Path
 
 
-CATALOG_KEY = "bklite-builtins"
-CATALOG_VERSION = "bklite-2026.07-v1"
+CATALOG_KEY = "aioe-asset-builtins"
+CATALOG_VERSION = "aioe-assets-2026.07-v2"
 EXPECTED_COUNTS = {
     "groups": 30,
     "models": 236,
@@ -106,7 +106,7 @@ DIRECTORY_MODELS = (
                 "field_key": "manager",
                 "label": "负责人",
                 "data_type": "ref",
-                "ref_ci_type_id": "user",
+                "referenced_asset_model_id": "user",
                 "options": {"multiple": False, "reverse_unique": False},
                 "sort": 50,
             },
@@ -440,8 +440,10 @@ def replace_directory_models(models: list[dict], fields: list[dict]) -> None:
                 "is_locked": True,
                 "owner": "product",
             }
-            if field.get("ref_ci_type_id"):
-                field_payload["ref_ci_type_id"] = field["ref_ci_type_id"]
+            if field.get("referenced_asset_model_id"):
+                field_payload["referenced_asset_model_id"] = field[
+                    "referenced_asset_model_id"
+                ]
             field_payload["builtin_hash"] = digest(field_payload)
             fields.append(field_payload)
 
@@ -644,7 +646,7 @@ def build_catalog(
                 "owner": "product",
             }
             if field.get("attr_type") in {"organization", "user"}:
-                field_payload["ref_ci_type_id"] = field["attr_type"]
+                field_payload["referenced_asset_model_id"] = field["attr_type"]
             field_payload["builtin_hash"] = digest(field_payload)
             fields.append(field_payload)
 
@@ -689,7 +691,11 @@ def build_catalog(
     model_names = {item["key"]: item["name"] for item in models}
     next_field_sort = {
         model_key: max(
-            (int(field.get("sort") or 0) for field in fields if field["model_key"] == model_key),
+            (
+                int(field.get("sort") or 0)
+                for field in fields
+                if field["model_key"] == model_key
+            ),
             default=0,
         )
         for model_key in model_keys
@@ -731,7 +737,7 @@ def build_catalog(
                 "derived_from_association": relation_key,
             },
             "enum_options": [],
-            "ref_ci_type_id": target_key,
+            "referenced_asset_model_id": target_key,
             "required": False,
             "unique": False,
             "editable": True,
@@ -785,7 +791,7 @@ def write_catalog(catalog: dict[str, list[dict]], output_dir: Path) -> None:
         "catalog_key": CATALOG_KEY,
         "catalog_version": CATALOG_VERSION,
         "source_snapshot_at": "2026-07-23",
-        "schema_version": 1,
+        "schema_version": 2,
         "group_count": len(catalog["groups"]),
         "model_count": len(catalog["models"]),
         "field_count": len(catalog["fields"]),

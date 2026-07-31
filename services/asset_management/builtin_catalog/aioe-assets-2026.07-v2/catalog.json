@@ -1,0 +1,11 @@
+{
+  "catalog_key": "aioe-asset-builtins",
+  "catalog_version": "aioe-assets-2026.07-v2",
+  "source_snapshot_at": "2026-07-23",
+  "schema_version": 2,
+  "group_count": 30,
+  "model_count": 236,
+  "field_count": 3433,
+  "unique_rule_count": 1,
+  "digest": "sha256:b0ea31b41871a14329d89cd4dd6f428a32e210fb94181f643fc297defffdb22e"
+}

@@ -812,7 +812,7 @@ def test_topology_version_routes_do_not_query_versions_for_foreign_parent(monkey
 
 def _source_aggregate(result):
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "sources": [
             {
                 "action_id": "action-1",

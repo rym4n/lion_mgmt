@@ -1,7 +1,10 @@
 import asyncio
 import importlib
 
-from services.supply_chain_review.manager import normalize_model_package, payload_ci_type
+from services.asset_management.manager import (
+    normalize_asset_model_package,
+    payload_asset_model,
+)
 
 
 migration = importlib.import_module(
@@ -9,7 +12,7 @@ migration = importlib.import_module(
 )
 
 
-def test_model_id_migration_backfills_every_runtime_reference_and_fails_closed():
+def test_legacy_model_id_migration_backfills_references_and_fails_closed():
     sql = asyncio.run(migration.upgrade(None))
 
     assert 'ADD COLUMN IF NOT EXISTS "ci_type_id"' in sql
@@ -20,44 +23,44 @@ def test_model_id_migration_backfills_every_runtime_reference_and_fails_closed()
     assert 'model."tenant_id" = ci."tenant_id"' in sql
     assert "CMDB model ID backfill failed" in sql
     assert 'FOREIGN KEY ("ci_type_id")' in sql
-    assert 'ON DELETE RESTRICT' in sql
+    assert "ON DELETE RESTRICT" in sql
 
 
 def test_new_model_key_is_internal_when_the_api_omits_it():
-    payload = payload_ci_type({"name": "服务器"}, "admin")
+    payload = payload_asset_model({"name": "服务器"}, "admin")
 
     assert payload["key"] is None
     assert payload["name"] == "服务器"
 
 
 def test_portable_model_package_discards_source_environment_model_ids():
-    package = normalize_model_package(
+    package = normalize_asset_model_package(
         {
-            "schema_version": 1,
-            "model_groups": [{"key": "asset", "name": "资产"}],
-            "ci_types": [
+            "schema_version": 2,
+            "asset_model_groups": [{"key": "asset", "name": "资产"}],
+            "asset_models": [
                 {
                     "key": "server",
                     "name": "服务器",
                     "group_key": "asset",
                 }
             ],
-            "fields": [
+            "asset_fields": [
                 {
-                    "ci_type_id": "source-model-id",
-                    "ci_type_key": "server",
+                    "asset_model_id": "source-model-id",
+                    "asset_model_key": "server",
                     "field_key": "peer",
                     "label": "关联设备",
                     "data_type": "ref",
-                    "ref_ci_type_id": "source-peer-id",
-                    "ref_ci_type": "server",
+                    "referenced_asset_model_id": "source-peer-id",
+                    "referenced_asset_model_key": "server",
                 }
             ],
-            "unique_rules": [],
+            "asset_unique_rules": [],
         }
     )
 
-    assert "ci_type_id" not in package["fields"][0]
-    assert "ref_ci_type_id" not in package["fields"][0]
-    assert package["fields"][0]["ref_ci_type"] == "server"
+    assert "asset_model_id" not in package["asset_fields"][0]
+    assert "referenced_asset_model_id" not in package["asset_fields"][0]
+    assert package["asset_fields"][0]["referenced_asset_model_key"] == "server"
     assert "relation_types" not in package

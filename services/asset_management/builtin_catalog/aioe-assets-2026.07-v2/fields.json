@@ -49,7 +49,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "2d0e0980e6b7a2db11b622351312f994ceb9518de6f70c833cd16b61749fe35d"
   },
   {
@@ -130,7 +130,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "9216d3c3824373fa72dda3430d975d9554d3a606c83154df8eada538b7e91eb7"
   },
   {
@@ -155,7 +155,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "fe5c12cc95949b182f197243ac0be01f369ab116c743802bae3372ebaf5119b2"
   },
   {
@@ -366,7 +366,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "49521130951712da855a0e6f91ce79ffff14994a2de3421a4cf0058a760b600c"
   },
   {
@@ -665,7 +665,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "61fadfb1840ea0c5240fc8595e342223bee71780dfff19386a78874c54f56092"
   },
   {
@@ -948,7 +948,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "50de5daa9d07ed48891538b0d2205fa99df47f0940271adfbc760f4dde93436a"
   },
   {
@@ -1477,7 +1477,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "e3abca4c950a76a26556a6fd309e7915eeb84658ba1bcf0f9fef0b5a18b2dcb5"
   },
   {
@@ -1728,7 +1728,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "ceb9bfe7f4afd5c5dafbb6aa9e09f0d016bb34179bb8218e73c2121b786b98e1"
   },
   {
@@ -1942,7 +1942,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "9f187663c41ef16843c5324a51b198bb9ce15f0de9e2e4851c3170cf4031c169"
   },
   {
@@ -2582,7 +2582,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "a8cbe71ace8d0eaa72b0a6d3c254fb493af1e163c40e65a952294a1e6a266c2e"
   },
   {
@@ -2970,7 +2970,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "e37d0e0147331bb368e11ae4878c2114af56489c81d80ebb5eb20711aeed2ce4"
   },
   {
@@ -3270,7 +3270,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "c85458e68bf155cec962f9a240678f2a7d5c471a9e4e037289e0b02a6e603403"
   },
   {
@@ -3402,7 +3402,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "14cd63a6f60eef9c5dced5d2c496315c6a26023b1e8f25c1cbad344627c37af8"
   },
   {
@@ -3980,7 +3980,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "a675ff9b6040073a6155eb6cdfd1000505397e80f781e2c0a3d792b8e0c999ac"
   },
   {
@@ -4390,7 +4390,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "afead926bf80dac1ce496f5e78d848ae8fdecd3ebda56b56976272c5aa7a532a"
   },
   {
@@ -5108,7 +5108,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "1d2a846c9e708f378e4a36595aed5a762171953153de3d05f9af615eb25e335b"
   },
   {
@@ -5826,7 +5826,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "cd60b95dd835d1f65de89fd11b3bb8a9400f3541c89b380334ca3fcfb9fa7c2a"
   },
   {
@@ -6494,7 +6494,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "391a4ae20bceae428db2238fc100a2e5453c86fb6dc466b068d6d71d029ee6fa"
   },
   {
@@ -7098,7 +7098,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "74ecf9aec66a640b4d48901c54d7df8173848ffcb60d4e0a19c9ca70d8dc1f8e"
   },
   {
@@ -7686,7 +7686,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "c078ef2710fceec1be7761eee95d09fc12e560c2e2d1826062062591ba350b0c"
   },
   {
@@ -8152,7 +8152,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "e651da904b29f59f32512cadc642adf50e3d9e5b6fe09c89b2b4db3c4d331ff1"
   },
   {
@@ -8373,7 +8373,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "11250f8dcb242e5ee4eaedb92d2650a6196d42689754fc36435963524f06815c"
   },
   {
@@ -8398,7 +8398,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "94fc53b18c86bceb3e4b989d18f6b858d2d657d46bd26759d369269280ccbb5a"
   },
   {
@@ -8805,7 +8805,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "a281cf49cb7d8cc6b5796d1e85c367dfb02f49cc91625b80576ab7272365c6b2"
   },
   {
@@ -9026,7 +9026,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "d4a73be6bd35810a59e1278679f1a8b7cb1cd8e8cbe6eb5f3a607b1d5721f2f3"
   },
   {
@@ -9051,7 +9051,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "18adbf9b749f1ede0e20f5e5f94e31cb795b4cb0d763f2c502e4f7337a89d29e"
   },
   {
@@ -9400,7 +9400,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "2f24a81fd7296d6612edd81e16c66466991315d1caf54660e7beb04572facc22"
   },
   {
@@ -9621,7 +9621,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "18de7d74fba391fe60a3bd1faf3614dcc439e574818d2b7ed602e0259ad675c2"
   },
   {
@@ -9646,7 +9646,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "c8128fe3b84557310ef9dcf0040e5808903c04684b0deef79032308bca29a972"
   },
   {
@@ -9995,7 +9995,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "c7ea2b8ddb17438f01a0a067ba39e7657697127f1cfc0da465a569c108bc9f72"
   },
   {
@@ -10216,7 +10216,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "1ee0a18aba725e8ff3e1fb0fcc19c339a8c568a76f3c599590eb86edbdf1940e"
   },
   {
@@ -10241,7 +10241,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "c5b7096df5bba238b84c618c69059faf0a2e1e41cd48cf4ef269914b9e92c6ca"
   },
   {
@@ -10562,7 +10562,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "49e97a9c58ca2a57071766637112884486a7d4fd3cbd7ce274e785c74335db25"
   },
   {
@@ -10727,7 +10727,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "3f00e2cd304226cdbfe6f14f9ede23a3bcad7a0a10162f5273f97e5f49e7ccaa"
   },
   {
@@ -11186,7 +11186,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "8013b3bf9d92b2eceea1176235c6d222f1466f44232feb6d9aa2a2b0082f524f"
   },
   {
@@ -11211,7 +11211,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "3def709b426619dfddc7119cb92854cbec85eb199992918d9cff3e7e3eb91671"
   },
   {
@@ -11559,7 +11559,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "23d5a4996e47f9b161f1939920fec21103c4cbe3369b1dee789184cf4025fe99"
   },
   {
@@ -11640,7 +11640,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "76a440bebb6e3867f254b805c357d11436bf907e9aafbdd4ab9c4dc36136f113"
   },
   {
@@ -11665,7 +11665,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "acd1806ea83ce236e979cb47aa38116cea5e8cd61c78d0a263fc6442086ea60c"
   },
   {
@@ -11690,7 +11690,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "53bac1f4e08c18acd9e22cbd106566bd92240d667bce68bbf85c88381edd64cb"
   },
   {
@@ -11715,7 +11715,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "2479ac4ff6e219f433dd33e590f9eccecaa004d0a11dfd01b09e6f63863cab45"
   },
   {
@@ -11846,7 +11846,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "04b020bedcaa8432a62f1e98099ddb82b54ee8f1294e67d0a68c9c9581d407c0"
   },
   {
@@ -11927,7 +11927,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "2bb353bfb792ceca06aacb3cce37b030869d5cbd06508a36d71f15979692b027"
   },
   {
@@ -11952,7 +11952,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "240effc3dfcc7a9035132132a997a8d17e4b89ae3a7d0503c4d511b393639e37"
   },
   {
@@ -12091,7 +12091,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "b7d1e0b0b44c9b238cf945d99e9b5dcdc6b9a410a98cc376a8a8846d3dca8159"
   },
   {
@@ -12620,7 +12620,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "0aad0dfd4fbde9de21e17d182ba27780e4656688480cb95680f5b2bf97945612"
   },
   {
@@ -12645,7 +12645,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "c5d5ef30c021a6705caa2cf64a41a7cb0612773807b0d4c869d391d1b96d406c"
   },
   {
@@ -12803,7 +12803,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "090a282f7da7ec974b5ad4914c322f8a1f7c9be21611cedf5113b765d3776422"
   },
   {
@@ -13248,7 +13248,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "fb95a836e0d93a2bac3e7537134439d7822d837397a7413209e60ce815793bdb"
   },
   {
@@ -13273,7 +13273,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "6ac3d8936411878c7fde8aff5a20769eccbfde9c9644c076654208fdb18979f7"
   },
   {
@@ -13431,7 +13431,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "2a763a75f19c2d77abe6eeecb40b7892a3940e6031f302645254cbeb5aacbbb5"
   },
   {
@@ -13708,7 +13708,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "e00e8068b804df0dd9f8183a15b83567c529cc362b1d5ea1892b4043e3ab2f00"
   },
   {
@@ -13733,7 +13733,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "512150f58ed05ffd8b2bb743cc955b8f9bbf5b330bb6fba29df9891c52713b34"
   },
   {
@@ -13891,7 +13891,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "4afd552a6f2fe86e720206fc64bbcf619e3722b3b19e567df75652318481027f"
   },
   {
@@ -14196,7 +14196,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "0d1c01adf5f6ef535e45eed68c88c3a45d91c87417dc6ff71315d33a5e9ca0e1"
   },
   {
@@ -14221,7 +14221,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "7cfc922c112daea3ea4d1159ec828b3a75b8d9578b409af3f25ea73ea8f55109"
   },
   {
@@ -14379,7 +14379,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "7b9413dd904325fcda98a4350ff5da03fbe5788f28571ce95b3851e0276e33a9"
   },
   {
@@ -14656,7 +14656,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "ca751a8df8e89c93a4775cc05d64c0b8a69f15bf781505c9da1e8c956d2c167b"
   },
   {
@@ -14681,7 +14681,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "2600261d5988e802991cf09b110e083b142fb556b6a7fb7ae74d95f02e7fe299"
   },
   {
@@ -14839,7 +14839,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "9d52cb64589ce079f166449a089e84dd40a76f7ae3ced43293380c7aebf81de5"
   },
   {
@@ -15228,7 +15228,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "e802f94262b718031bbbe2dc9afb740441f38525f5bfc1bb751785e3a182cfce"
   },
   {
@@ -15253,7 +15253,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "1e0ee9e6dc96977922df99e442bffb5739b9fd94b660d195105200db3ea58c1b"
   },
   {
@@ -15411,7 +15411,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "9913fdafa347d713e7f9a4f8f8e65d73a2f2551c79d77165a2dd6582c3576344"
   },
   {
@@ -15800,7 +15800,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "e96a3116d866cca0c048e5bb1534b28a50ea77e357b63472e6790a05d430a161"
   },
   {
@@ -15825,7 +15825,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "069686f1799abbe8208dbba30bd43acdabf31ca914814d91fbe61ea19ec68519"
   },
   {
@@ -15983,7 +15983,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "db6198be45e215bec2981041b907f47298daa5f629e4627094e546a04b0e818a"
   },
   {
@@ -16400,7 +16400,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "701dae1ec1c40aec12678e6ef6adab978322439d1c5b99e4f67cb8d335e79387"
   },
   {
@@ -16425,7 +16425,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "5d6a87d680702bc69722ec3bade19c1b487c0f742a310fe3df35d0f7b35b85c7"
   },
   {
@@ -16583,7 +16583,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "6c4b18a696740493728e6c849dd6d6df1e949498b8cf77302856a9425db73180"
   },
   {
@@ -16916,7 +16916,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "0ba22dc6bb2949f7634edeca1bf8979a06472384cbdd35df9997c4a35189b266"
   },
   {
@@ -16941,7 +16941,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "2c76d8c599bd3496cee3a02ed03392f6cfd15ac330ef3e3685ce374f5ad08ccf"
   },
   {
@@ -17099,7 +17099,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "2eef68c79785c28c486548e2848594be20a2cb921703d9de1fd98eb5a2d43e23"
   },
   {
@@ -17572,7 +17572,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "5c27ef06690b15e99e65efb84e55fd9903758ac908cb0738bb69cbd03ae64d09"
   },
   {
@@ -17597,7 +17597,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "0ace3afaf0f0d5096dc05a57808aabe124d0a8acfd693037866b84bcb3396406"
   },
   {
@@ -17755,7 +17755,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "06145b787637347090b381b9eeabdc68bae726f273e5892dc68879d032493859"
   },
   {
@@ -18144,7 +18144,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "d7d8f60952459b363d583ac75c75c8f9fc1705da87056f00bf942ea9747c34bf"
   },
   {
@@ -18169,7 +18169,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "ba190547385a53b8115502143a874c9b8103421ffd53446435c762a2ba8facdb"
   },
   {
@@ -18327,7 +18327,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "0ccb721c39115f5a25715ee3495f45662788f298d5ecdecad99a8db94f3f64a0"
   },
   {
@@ -18604,7 +18604,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "5db6e692cea1b9e93a33f8c2d068bae20066ce4b7dd6cf14469d3db1ceaa4972"
   },
   {
@@ -18629,7 +18629,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "452619f9195c6f55f6713ccdd5446f3eb4c55e3d722e1757f7fd43005c0e8010"
   },
   {
@@ -18787,7 +18787,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "ce628f16f115325fb84b0f9e4841f4e8fcf9734ca5f356f9fefa77d4925d6ab7"
   },
   {
@@ -19064,7 +19064,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "0898e3e97b45a6453b0a1b37a42b7e97608ed91bd758bc722d27b8478d4d822f"
   },
   {
@@ -19089,7 +19089,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "f63e6e79f421e9eac1bc30d9f2cb36a59b34b33ee4aa8a6ebc54a3aed0da2ce1"
   },
   {
@@ -19247,7 +19247,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "ed068315d82abf87d6e11580c432bba821104c8d7de898fd90490ce133a7d54f"
   },
   {
@@ -19468,7 +19468,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "e1fc83086b0b660f7673b69d67817fa838595bbc0cd8b13f0022895ee1a1e5a6"
   },
   {
@@ -19493,7 +19493,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "8511ce6844d8886582019df92cd355105c639088df0dee1d9449ed9682a3f230"
   },
   {
@@ -19651,7 +19651,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "3d14aa1fea589dcedd693a725ae433b7fb8260abbfba8203620688159ce2a603"
   },
   {
@@ -19928,7 +19928,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "aa3a0ed13317daeaac8520619231f3d9b156c36add85a45fae209edd25b699ef"
   },
   {
@@ -19953,7 +19953,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "a1b14ffede8f1bd5e3f016ec7304028c08d3eef171826582c24452bf052abd09"
   },
   {
@@ -20111,7 +20111,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "2c4f8c426c8a26170803943d30547180ed43d83be17ae0be70b9fb6d6f10c207"
   },
   {
@@ -20388,7 +20388,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "7204f4f12233fe73a808852fd9383d3e51e23b01d6316ed24261d1998117112c"
   },
   {
@@ -20413,7 +20413,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "881ba057b10e253b996ea555fa5312a881eb5f893c8e1cb44d02cbe3bd036f20"
   },
   {
@@ -20571,7 +20571,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "44dba70abcf48f989b70dbba9490bda307fcf71bcfc56f4b8982f5e29d6b53be"
   },
   {
@@ -20848,7 +20848,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "389c417485d0ea1c3e1def599e4c7c31cdab98abb91c62c6cc0d890d486d7309"
   },
   {
@@ -20873,7 +20873,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "50bd14695a1c0bcc9b95b0d6d641f9f3c682d727dc75195e5fb4d1b8bd14c2c4"
   },
   {
@@ -21031,7 +21031,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "beedd3c95f3fabbb3edd0a6a96a9fa060d42de739999a05e4ae132e61e3201e5"
   },
   {
@@ -21252,7 +21252,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "c6ac6d3e6e2f5980e739e4d50b0935f95b6976f870d9b405cf610ef6a7fef9f0"
   },
   {
@@ -21277,7 +21277,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "6bb125ff6229e14ed109cba97791e9e99b85909468ca51e8cccb3ff4fe41d510"
   },
   {
@@ -21435,7 +21435,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "32ed71d8f5aafc4b8dff334ea7cd70ea8da809270d7d7ce7d9b180156ee5ac2f"
   },
   {
@@ -21768,7 +21768,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "50b45c35bb212642b0aa492b4a1dcf5486d61745cf5fda6d3fbbf061ec30456e"
   },
   {
@@ -21793,7 +21793,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "50a60109acb7dd67639b8917667a7b166d61233c91a5fbcf80b2126df4f21caf"
   },
   {
@@ -21951,7 +21951,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "8cb97a5ce48e31f813458aca56dbbf7e344af5771dc855e063f76da8f9adc2da"
   },
   {
@@ -22312,7 +22312,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "a5d76ad0bc53c782a82617b26f38219d6109ab163eaa3d5b27eb251d1e76e248"
   },
   {
@@ -22337,7 +22337,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "05b9ff29e23c023718b5893a3e97df5e67ec6f36b756c4d7fb3c6df0babe5175"
   },
   {
@@ -22495,7 +22495,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "1ff542ec1dfff755f89c3d2b82a1caf3283c4fe6272c1b936f187ac139f61476"
   },
   {
@@ -22744,7 +22744,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "77b3f90d1f881d2a57abc2258d9cf42ff44c48af9791b4eb85187cb80d933074"
   },
   {
@@ -22769,7 +22769,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "2e88d76ed155f832ae2f30041c94f953d5bd67884c9466437553d7847aed6a36"
   },
   {
@@ -22927,7 +22927,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "638be974c663e0fc0a57ff251c076ace6a9098f4a8a75d74132fba83b0bf3a39"
   },
   {
@@ -23260,7 +23260,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "3e1323cc66d94a8e0b72b12a9ce3add52c6281d24d8ed143cc3982b77b734aca"
   },
   {
@@ -23285,7 +23285,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "55e2f4ca114eac11affade545636d4f98c3cb8d5e4c8651757d351d8b1373621"
   },
   {
@@ -23443,7 +23443,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "fe144a0ef3741c419cb0c1e26a25c10e03b4a34f612ce255097500756652b099"
   },
   {
@@ -23916,7 +23916,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "31e77bd00e814f45d7f78e5294f8461d8ff29e5da46b85f151e4b374dd260ceb"
   },
   {
@@ -23941,7 +23941,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "c97e12886d213804a305607004621659831c8bab4b9cf0e13c9b121c8e1f83f2"
   },
   {
@@ -24099,7 +24099,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "9388dd33983a3d38e54ab367691eac8c3e91295c4c619238253a5ae2a65c6151"
   },
   {
@@ -24572,7 +24572,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "a08e38937fda1dcfd05c9deeac5e242769b713d0b814d628ac5693e74b549c1d"
   },
   {
@@ -24597,7 +24597,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "e48f2692e483325c063168e6ae4eccb187019a6385e175c33ba0ec97a7bded74"
   },
   {
@@ -24783,7 +24783,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "90d02626a4da0b028b62298c926318faad4e0cb3795f9d4f0cb8f68afbb3fbd4"
   },
   {
@@ -24920,7 +24920,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "86febfe5c6f2eab99a2319832c34ba67eff7c6d289b876767d85ffa1ff8d65ce"
   },
   {
@@ -24945,7 +24945,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "95b656d79d3953c9827b0bcf540452504d8e535b1661f8f5b3ada4e04944bd48"
   },
   {
@@ -25172,7 +25172,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "cf96ed534568c8d79f9051aa5784fea243d56127836ca2b69210ebc6d95eb881"
   },
   {
@@ -25425,7 +25425,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "2ada2baa2165912a45cf6bf2eb6dcaf86e4ae917805bcfe28771c209d7bf65c6"
   },
   {
@@ -25450,7 +25450,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "8ddec8ac01aa97007b6a1a256c3697c86ff541b9f0262a82e18a8bac634113fb"
   },
   {
@@ -25693,7 +25693,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "9c5e75742b5e586c63c75f4730d28418d7dc56fab63a253e537aeff57355256a"
   },
   {
@@ -25801,7 +25801,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "b336779a4af6d5582ea2880e5ccd35e09975de622b5759f6530f2ef580bf87c8"
   },
   {
@@ -26379,7 +26379,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "dd7a0c780b69f28e7cb97cabb07ebce7eac81b7ed0c11a0d52127985b0180efe"
   },
   {
@@ -26845,7 +26845,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "9bedc56b5f7a44beaa35b60312e13d22d107a423f886ac6833a15d5ebe9faba4"
   },
   {
@@ -27293,7 +27293,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "05131313b43e8d7ea53487af12c6656e3fff30527d853497021662cd6995edbc"
   },
   {
@@ -28063,7 +28063,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "e7afd7206dd37cdfbe300954fd5e9b049048b661d3a4a9524bc6771157853609"
   },
   {
@@ -28834,7 +28834,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "93e6989ed5b3176a5743fdd2c5db1c2e4058793318c2ec69d694e2ac322669cf"
   },
   {
@@ -29493,7 +29493,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "f5da655c50f94082c1a97611d5e614b30576117202dbb40a17bad162b5b4add4"
   },
   {
@@ -30124,7 +30124,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "edc3fca45ac2840315db3ab95660b83f9285efd514eb6b46c34a1e3648ba1281"
   },
   {
@@ -30561,7 +30561,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "2fb608960904459b6b529e40c1a89b5d590b8593d3008c1c8197a9f06431043f"
   },
   {
@@ -30970,7 +30970,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "8c92211813e96d7e4e280bb75438232de02a2cfe964b10435630d4af052f0951"
   },
   {
@@ -31573,7 +31573,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "f5938af03baae9d0c1317c81f9b08556f537d226857a5389cfeb33158da97751"
   },
   {
@@ -32064,7 +32064,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "bbd1b582d5eab65a008b6e70a0aaa872ff9ef33ebf5a547479ef5ced80f7b35b"
   },
   {
@@ -32332,7 +32332,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "0125f0f27cd619da36b837e677285e96c41dbc1a4484fe0ed719ff056ed427e1"
   },
   {
@@ -32773,7 +32773,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "032699ec46b57852ddbd44a84b9413f32bc2cca28684606e8908c2d641c932d7"
   },
   {
@@ -33095,7 +33095,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "26d9742fe85619f74c8a7de0f922b0a53706582509f616fa22b6329c9749163c"
   },
   {
@@ -33203,7 +33203,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "f1b86c5b1c33bf708bb6732a81164a900c68d9852bae402ff82fe86006e9cc81"
   },
   {
@@ -33781,7 +33781,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "cc1e21dc2c09909152a9ec136521ac5d1274e241f64778e58b86b4b98b3cd86a"
   },
   {
@@ -33917,7 +33917,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "37dfc6c28bdfe2c6d790091b4116759bd90a665a5e933c311d878796a1ccc12f"
   },
   {
@@ -34277,7 +34277,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "8f308c768aa9c9435ecd74fe90b3e68b945a2e116d340a01661f6a66361eea8f"
   },
   {
@@ -34713,7 +34713,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "44bf99cccb9a9aabe66ae51e4a38bdcb026e52f7decccd3ad2848ad4acb2312a"
   },
   {
@@ -35041,7 +35041,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "0b0dee26d8dcfb887456d87116d1275c60e5befdd753ccaa54e33df3df2f74a1"
   },
   {
@@ -35313,7 +35313,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "12792fec7ca35ac552dd0513dff702efb0f53540e219a814bbce069d50da37d0"
   },
   {
@@ -35779,7 +35779,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "75d5f78e25baf5fb43041379661a3edeb6209a12ce5149229c5e2ee0d8556ec2"
   },
   {
@@ -36357,7 +36357,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "220724a03033b398ae0bde76d91dbc456b36364803509ffa2097eeb5f15f204d"
   },
   {
@@ -36767,7 +36767,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "9c88af6093b623ffb908d5f66a7563167ad868817e814efcefbfba6f9d5887bb"
   },
   {
@@ -37149,7 +37149,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "24aec96d9adef311d54a9303d1f0e2d18260a467c5581c3d7931f12bdcc78baf"
   },
   {
@@ -37475,7 +37475,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "549a48345fe1cecb246d3348d994c8cf9fabab9e180929c7b315067838ab80a8"
   },
   {
@@ -37885,7 +37885,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "4e9cda6a581b419a6cf32f02659cfd52239c9ab5fec5f18a3ae7b862320369d6"
   },
   {
@@ -38295,7 +38295,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "8547e6e805614deb49cf2f860b532416446990a6fbae0151e7f0626ce28f24de"
   },
   {
@@ -38565,7 +38565,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "951a5752b10f367e9021eb0922d3aab35d050af21f9f1a38c1e2fc0674492d12"
   },
   {
@@ -39003,7 +39003,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "1516e4b48deb7c40a7e6a811b2a331297c00f69a8f87eb0cdaa7c1f252d2af2f"
   },
   {
@@ -39469,7 +39469,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "083e147884feb4b84424cce9f290bbc64aefda8b64580e163dfdcb2ffe23b9a4"
   },
   {
@@ -39696,7 +39696,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "856d5a883708d341dbfa9c0921d4b781a40576a6a77769cedc71f0a5791686e6"
   },
   {
@@ -40137,7 +40137,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "8e655d6f5d91ec03791363b656af6ca8f66639e7d9266dce2357d495e441a7a0"
   },
   {
@@ -40358,7 +40358,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "0b0d9d44e0a26ef54a0f5bd3861fc70da0b49275df790082be52b92a410519a1"
   },
   {
@@ -40857,7 +40857,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "3aa0a4a83ffe03a5c9220bed5324843fc6d5ba84f574d7769dcef3f0d73bb8b5"
   },
   {
@@ -41060,7 +41060,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "a673064f97c331da48151a4a7ab59aa5c01b03291ff304271de57ae2318245a0"
   },
   {
@@ -41501,7 +41501,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "f14acc28a20086a399b0897caeb9fae170c361185104254ac52eeb92d18d4d28"
   },
   {
@@ -41609,7 +41609,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "143df1cc6e3f50dbaff1adcefc68ceeeb9fb3a239fd228b82dea408ceb0b3a07"
   },
   {
@@ -41941,7 +41941,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "09313832e8737a647c479833a4ca28f1710080bea79c804511faf83ee5d7e226"
   },
   {
@@ -42407,7 +42407,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "931cff96d58a673e044e8621fa6bf5d98c3159dd2b3ed6b174ab0f7438308111"
   },
   {
@@ -42763,7 +42763,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "04ca1ca95212d84ee87d91dee3b0389e07098d6d2ddf2103a3a7e15e0527d368"
   },
   {
@@ -43119,7 +43119,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "a94479e0caf185bf88c2234b5f274cd38063635b6f39d18800a7fc8e863661a4"
   },
   {
@@ -43227,7 +43227,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "468e8d3781f1ed6b2726a1707a341de3aec0f4c1c91d2bafc3f4a7e3fba0a13c"
   },
   {
@@ -43701,7 +43701,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "d072f878bf06e6786c61d8d2b0c0d4548000e8a3083ac77c8ab1fb0bca99cf1b"
   },
   {
@@ -44177,7 +44177,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "6a46ce760d489dfd8e8155b13594de3c01f6d77dbe7de16180f146deb24a37f3"
   },
   {
@@ -44535,7 +44535,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "7e3019e3ecae612e2a7cd1e363d0bb774ac0cc5ef2e23ef7c962c40c5fd2f323"
   },
   {
@@ -44779,7 +44779,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "77e1086f5bcbc317df705232b914b2fa98f2bfc2a7e077fe5d4b4003fca3dbb0"
   },
   {
@@ -44859,7 +44859,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "8b16b0ee5fdb34489faf245d4911f2d3fdeeb2377014284802c2309c1847902e"
   },
   {
@@ -45073,7 +45073,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "e8d63b084162a80fab89041b0d6eaf254f2e28887f1ecad2adf3ce884450dccf"
   },
   {
@@ -45455,7 +45455,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "41925927f55544ab8e593850bdf53cc3ece354fab91221a667afc2c9f7550895"
   },
   {
@@ -45806,7 +45806,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "c7b509f72a60bd61cc0e1dfc8eb9b02fbce942fbae4e9b0372a7a46a61eedcff"
   },
   {
@@ -45859,7 +45859,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "7f83877b2a0c3db72262784a2dd916ac37fce43335cd55d67f1a36e7e265f0a9"
   },
   {
@@ -46220,7 +46220,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "fcb53b97da656c3c9bdfdad9dad5333ed7aec3e581f41a5f1ff740ab3448edec"
   },
   {
@@ -46245,7 +46245,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "1bd6f93f18c1a69525f07514595b8a3e708b4806c24f1463cc4db3035e02ec2b"
   },
   {
@@ -46512,7 +46512,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "dd3a128d55cab1d62ac6f1b99c556aa7d4863ca004d9345bbfe9934e55163aa7"
   },
   {
@@ -46812,7 +46812,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "be282f89ffa3ca05a0a173ccc7033242e252358dbf664a521bb1b6868f52ff9d"
   },
   {
@@ -47140,7 +47140,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "93f3f8a43178d0fddeeedea1eedaa4b54903e247874efebbf7c0bbd9bb4c8fe6"
   },
   {
@@ -47494,7 +47494,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "f694e30e5fd5adcb005611bcabd843f86b56ae7728fd15e790aac9673439cf48"
   },
   {
@@ -47764,7 +47764,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "78ec86be30ab2776449958d1535fbecc78e391acd9354ea352c70083ff3e6eac"
   },
   {
@@ -48126,7 +48126,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "76dba99a70b16660b8d8147841e556dd617f40d3d4513246c73556948a97d6ec"
   },
   {
@@ -48809,7 +48809,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "3abafd30e1d8fda15105018217a2b041914452d5be306f116678c4eac63e2854"
   },
   {
@@ -48834,7 +48834,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "213f389832639265d3a21afd94f42c6cc88e3b03baa1dbac9506abbd91774dcd"
   },
   {
@@ -49122,7 +49122,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "9969154f1371d303ea21bb70d1dbadaad9decda8b298b8e51aa36e5dfbc8c5dc"
   },
   {
@@ -49455,7 +49455,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "4cead08594443d8262cd6fc4acee6b2d3e45bb4466aecc7e21e014c841e8e9f7"
   },
   {
@@ -49480,7 +49480,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "639521d082f80522b2cd9c91c818170f31d5f756f2e55a9dc01c00a0aa62547a"
   },
   {
@@ -49638,7 +49638,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "f9e571ea9de9ac45f843e9bdc835162e17149035b971f1b4794522135962fe82"
   },
   {
@@ -49943,7 +49943,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "2d108e99d10f5b86668928e1117bd7a89fd09c31355afa261f006812ab53c8d5"
   },
   {
@@ -49968,7 +49968,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "fecce793ba78340e2a80f432df6e128a241494dbc4ff6fdc51c82e9ed5ee35c6"
   },
   {
@@ -50126,7 +50126,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "a54acb0ab2ef7da47015b39800b8aec834cdc28c7aa5a98355681493b11867a9"
   },
   {
@@ -50375,7 +50375,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "5666e580bfff296ce9964a24398f75c4a459d7d025ea5927cb182f862481ebe3"
   },
   {
@@ -50400,7 +50400,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "1d5a2f8af91b78d971032e694fab757e919a37fd9bf7af0b4939289bca8d3a0a"
   },
   {
@@ -50558,7 +50558,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "64b750f799d1b43a9bf8c79b0f68a617ec2f25a949b0df09f759493ce30d5327"
   },
   {
@@ -50919,7 +50919,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "5824e4bc9cfb6bd441e21b0173bca52608361dbd43043477394e8da76d072887"
   },
   {
@@ -50944,7 +50944,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "865b3ddbcbc194a925c314f8ea7bdc87169e8a0f37d564df37aac0f619de471f"
   },
   {
@@ -51102,7 +51102,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "1172c449aebf2cbe5961b2266f75ba7bbee05ac2a4b43f9a29396a94be7be52a"
   },
   {
@@ -51379,7 +51379,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "329760e90defe6138c1cece2c01ceef9921042226fed34d3a86efb585005b461"
   },
   {
@@ -51404,7 +51404,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "b3a0b10f9dc14d5e24b95dd4729302710cc6e718410579bf124f0bad5c5dc650"
   },
   {
@@ -51562,7 +51562,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "b4a96789924b4cd9977709f73af926c1d3840abd9570b1f7cd1ec90eb840be8c"
   },
   {
@@ -51811,7 +51811,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "160edf2b165ef6b9131ae4bcac8757fa2ffd77bd073f3978d1fe03ed598cccd6"
   },
   {
@@ -51836,7 +51836,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "4f4fcba383f733f55e41f007e256ca3dd46b1fdc5c1b17a81b769b84e48576e1"
   },
   {
@@ -51994,7 +51994,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "b8a8dfe8c3e54e6bcfa97496adcaeab71d89f0ba1c1145d89671286a9339d87f"
   },
   {
@@ -52243,7 +52243,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "87c2e45e4ebdc191cce251d6aec602d44c3419a05f475b00c3118ad6cee6736f"
   },
   {
@@ -52268,7 +52268,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "95b64d679e70426c94aaeb34d01a1cc505fa5988fe00bad308bc3d848551c1e2"
   },
   {
@@ -52426,7 +52426,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "629699a09e88419b89f2bf55a8aab9905d59d1b8b81d8953631a8d6fe540cdc7"
   },
   {
@@ -52647,7 +52647,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "7bbd32db6848f44282b77f5eb3d068af51022cdb8ef0333c4a4a36cc50f7ac56"
   },
   {
@@ -52672,7 +52672,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "4dd82f351b7d3e26b4d2eaa0c1262891fdfe769d45088be6f346ea0aab023d7b"
   },
   {
@@ -52830,7 +52830,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "f5ed5054d078514e43a08d4108ff6fca60031d4e572035ba55bc61006297bade"
   },
   {
@@ -53135,7 +53135,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "8385ae3b7ef9a9c08c902d0f8afac92474214d228a8b1bee669615ac8a069748"
   },
   {
@@ -53160,7 +53160,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "e17da22a5b36e7ce6d5ea2ff799f6776e7d8b6ef7671c19405019a3e455b3fe7"
   },
   {
@@ -53318,7 +53318,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "3f57b897aa0ebc1710b1f39a10180e3cf04b65804a9d17c25122c6d2320eeda7"
   },
   {
@@ -53539,7 +53539,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "a842bbbcca767820a0e2d386c5c855a02e5ce505050d45f8da71aeb8195bf737"
   },
   {
@@ -53564,7 +53564,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "67d3e54bd4c6c3baff045d97a24d5c874584d107b4194cde9cf1e78db72f22e4"
   },
   {
@@ -53722,7 +53722,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "38d934cb952550c2b42388dc523b4f721f36365a4418969e03985db9f980060d"
   },
   {
@@ -54027,7 +54027,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "71111866d9db1a1538b01c897a7c1c05073842c6eba8186d0fd6f321abedd172"
   },
   {
@@ -54052,7 +54052,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "9f3117f9abe83ddb1416d2ea793d96282f61b15f76c4e6895ed525321f594d21"
   },
   {
@@ -54210,7 +54210,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "7b7571c4b7584f052bc8c49ebede1e01ef11977be2be8cafc834e293105923dd"
   },
   {
@@ -54571,7 +54571,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "8d37701c8f30ae189c5b92a68c9e73ee16df0b9bdae6f4aa8f16085adba80986"
   },
   {
@@ -54596,7 +54596,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "e7a642ff2715ffcd327cd13901b06b6a6cbd6a718f861813835ab645f2a2bacd"
   },
   {
@@ -54754,7 +54754,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "207a244ac18d43b9f7a81d532cc33e7d19bf373be70d9d28082e42eadee6754b"
   },
   {
@@ -55059,7 +55059,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "50432eae591f8e6076c703a9114361c75a6ea35ab50bf99f00ae9003e17854e4"
   },
   {
@@ -55084,7 +55084,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "fe6d1cd33f9b778d71709a261e7194de8fae119e29be23fdb0985ef0ae6653f5"
   },
   {
@@ -55242,7 +55242,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "8de7ec177f3eef69a57fff960635aa108a7800ebcfc925d203abddb57565e5e5"
   },
   {
@@ -55714,7 +55714,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "3c1bc93548c39dcf3b600052ae9f6c1ce1bf1969cf6b6bd9c1a2fc7d045afdf0"
   },
   {
@@ -56102,7 +56102,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "6847009b13572c3cd0a578d460946d59d5702c7b162e41526c03ea6d7fcfd474"
   },
   {
@@ -56540,7 +56540,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "5808269eab52e8da744f5d101fa5f6f97b4db2ff10af453454f5df34adab27a9"
   },
   {
@@ -56836,7 +56836,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "652de12e9573885d249c485333c6ee3f1a90765bb98d9d4ce36cbc1fe7075091"
   },
   {
@@ -57158,7 +57158,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "87baa104db92bf7e01df75ab8857d8652f07290788c86292158c8287d67362b8"
   },
   {
@@ -57512,7 +57512,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "0ac773ed004ecba5c5d3d34eb523e6de322cc29369e878b9b9b29ea2a0dc041d"
   },
   {
@@ -57894,7 +57894,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "dbd686a833179bd7006609cb45b30e6a1ed7cd6392b3a9e2354c203983a3d4d9"
   },
   {
@@ -58160,7 +58160,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "bbd85b104988d40fe79405c39e512a920680f5c686b023672d6f10584764bc88"
   },
   {
@@ -58540,7 +58540,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "53259738bb30a02d0da6f123aeefdf0535587ec4a8090532d4ee213e31a8b4f2"
   },
   {
@@ -59152,7 +59152,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "9a682ab5d30577043b1178363c26a36e0304d27d790a32680906f918197763a7"
   },
   {
@@ -59648,7 +59648,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "b564c0a1ea2c2afb8fbb55e92e233425b851c828d1403b28ad6365ace60b7a2c"
   },
   {
@@ -59946,7 +59946,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "fff9c02eb3cfe0d78fcf9df840835976bc3ba670602515d9f3c123fc512fc907"
   },
   {
@@ -60300,7 +60300,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "29dc4a2a876bacc0e39814a81bb3055e881aea759c3ab19c7ea14e8243c8c4c1"
   },
   {
@@ -60680,7 +60680,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "6c7e381aa205560e1451cb89d7e877ccbb3045ad79a22a0b272b01f5442d9972"
   },
   {
@@ -60976,7 +60976,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "ec8657918a8d87e8eb2f7a9fddbe9f7f6cfae6cb208908c7686fc94369fc9e92"
   },
   {
@@ -61246,7 +61246,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "a206b2525af70463530fef68c9d9bac984810199d00983f76d153594148f31c3"
   },
   {
@@ -61326,7 +61326,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "cd6ba3b279ede07af94178f2090786403f48342ecf6b402dad85f31bac435311"
   },
   {
@@ -61792,7 +61792,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "4654146502cf5f6b669790941f227e702a7771456732fecb2970daff7b3a3238"
   },
   {
@@ -62114,7 +62114,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "25bfe27e80e9f76846ab629d4f35eb431c245f53ebb0b042870bb21cea9bf9e2"
   },
   {
@@ -62580,7 +62580,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "de126aa6bda266b2df9983cfe18f5f9f8f6f228f8ae761529f9ba366d6236e9b"
   },
   {
@@ -63081,7 +63081,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "33f8ffe7787a7793698741578f44dc891a9e07a33732a5f361aa42f49dce7719"
   },
   {
@@ -63442,7 +63442,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "e86d1370e04b4227e3189a1a52b0d1b1dc6b2b7a605b96f8a51ce33d539bfd5b"
   },
   {
@@ -63887,7 +63887,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "902cf39d14f2899fe8a2f35f38afc4a27527c162408af771efc9a9518c3550fb"
   },
   {
@@ -64192,7 +64192,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "42e5616c814f80326b53c64f7499b85dc2bfc98c3dd6fae81f5a22ae8aaad205"
   },
   {
@@ -64609,7 +64609,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "6de5b21de1bdc6702bb13da9f45e7f3fada409ba4bd642324a906c04519af85d"
   },
   {
@@ -64914,7 +64914,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "6bb14639c679604a6d2fa536a06460e179496b7226b28c56613f2c885f0996b2"
   },
   {
@@ -64994,7 +64994,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "079be51bb1fff7f4af43469d28882bf350d0639cca6d558bd438b0928ffce2c1"
   },
   {
@@ -65404,7 +65404,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "a2a31cbab8439e0a04145595b3533b925500482a6272a4d85258094c7ddec672"
   },
   {
@@ -65814,7 +65814,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "469bb7e7e0c89aceb3e52fc213024a700abd0d42fe39a4558fd1ced27d3258b6"
   },
   {
@@ -66364,7 +66364,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "d2dff537d3ef010f71c5deaf5d10615fac060c0877ed0f74d49b7ebe698eb665"
   },
   {
@@ -66444,7 +66444,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "a72b112d62a57e33d734438d644bc9abcec73d32d5759c8e0df876f448e7d134"
   },
   {
@@ -66916,7 +66916,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "6e4aaaec72de6a542b8adeff37902002f5ff2694bd8367025698158199612d44"
   },
   {
@@ -67108,7 +67108,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "583125e13bae86f7d0da4061a8bb858633f30f6f9bf8ca4390b4d03e8ad190e6"
   },
   {
@@ -67328,7 +67328,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "f06c246a56d49b61ab3bd401f4db6fe8b14bb0019632ca752a8c455b8e263bda"
   },
   {
@@ -67660,7 +67660,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "589112b8cc78ec60e3a901a10a4cf2eaf0f8cfc547a5e87d175a9fd34d5521ee"
   },
   {
@@ -67852,7 +67852,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "5000c8dd54fdd8aabc16d0407617ae164b1f355774b4e16befff2bfb209d8014"
   },
   {
@@ -68016,7 +68016,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "d62ae1d919b4f1461f864960a899f7b54073597594b9a14b193874e25dc6a1fc"
   },
   {
@@ -68264,7 +68264,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "b994d5a0e10ad37c6e3c029208aa3af14b29ec9aa8c4e307d260df7298754fb0"
   },
   {
@@ -68646,7 +68646,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "8f2809df6fbd4af1dd98957cd4e9548f6f25a2990107dd5d8d395e0747d58a1d"
   },
   {
@@ -69028,7 +69028,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "1c1fb3b85c27b94c32b77d91650fab059392eb60667558065d825fb0b35ebe09"
   },
   {
@@ -69410,7 +69410,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "67ca6847f0b7995b39afd013802da688d831e1e1aff9eacf162fe974921fa307"
   },
   {
@@ -69792,7 +69792,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "97c2e6d19bb25821aabbacf83ff796d766d0c9291de8e6ad10c6cf2fdccafcd2"
   },
   {
@@ -75084,7 +75084,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "910639486c559e6848530dce652effd43559e12627dba9a4730170f837f245b7"
   },
   {
@@ -75418,7 +75418,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "eab025f9717832d81c9dc4651905c5276e0d17ddce11646e3ce09ba1492ae48f"
   },
   {
@@ -75752,7 +75752,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "f5bd91dc8d9cd6501b71541235315d84402c8cb330883ebffe912c65f6040de2"
   },
   {
@@ -76086,7 +76086,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "e6a60006d48019bd03e4ce93e0a6792bbd9a0a09153c9fc2cd1ef1564e90d507"
   },
   {
@@ -76420,7 +76420,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "cb9a61c6b4a9a5e070c74adb277fc640037b26aa09513209dbf84be186f89558"
   },
   {
@@ -76754,7 +76754,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "d1605265144f5d1413da5c3ab17007da169111f335c139b46d2fe153f8aad904"
   },
   {
@@ -77088,7 +77088,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "3210fd0ce9b7b24000a1fcecc9c440f2c097219155c232e3fdc7ec89aa49fd10"
   },
   {
@@ -77422,7 +77422,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "b95c7ecd041e28bd702dd836b29d7cf6344f7f21aeb3a2c252aea32a57f08348"
   },
   {
@@ -77756,7 +77756,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "b69dc5fb15c62e92e171b3fe528e18bc3c46952be22552ba8452714c355732e4"
   },
   {
@@ -78090,7 +78090,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "9fff033397f523a71bdbad979bb23e2447732d8d7ae7f9acbb2b6255d134e0e9"
   },
   {
@@ -78424,7 +78424,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "60f6d5e61ea1baa2eac5ac7d313f3e7dd95df2b694fc3d12daf5cdcb115669d1"
   },
   {
@@ -78758,7 +78758,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "20af88d25ddf5444714f5346bddeca291af8b3f13f04f72adb45e3df1114fb63"
   },
   {
@@ -79092,7 +79092,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "0d3cbf13183807014f8942444e78e422bb89bee3e9c4462713de309e7d9c3910"
   },
   {
@@ -79426,7 +79426,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "31fa5cb33ce92e6820207442171ee84f8883628a4d000c894d3a3eb9899c5945"
   },
   {
@@ -79760,7 +79760,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "e04121fb00896a58a3f878725da1c5451f04b668d0f2ccd3df77977f4ca1977f"
   },
   {
@@ -80067,7 +80067,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "1ab92f102a8e4a6c2fc3b3be594790619b59fe9b56892aa9a75320687736f22f"
   },
   {
@@ -80374,7 +80374,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "64eaade4c0b6e8065df90b6de40642fce5c8fda1794fd67e8dc2aea9a011071f"
   },
   {
@@ -80681,7 +80681,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "69752b19378dc6968de9c03d355341d6f3026a148ab1092a5f40ed5a8d521dfc"
   },
   {
@@ -81015,7 +81015,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "fb14d23745560625348727dbc589f06b07a068a1912e6901e54d266f419a23c1"
   },
   {
@@ -81349,7 +81349,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "2d2831b41265623fb45d88d78ea03b17b8b13619973df74ff9f71328072c6863"
   },
   {
@@ -81683,7 +81683,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "6efd47dc32f4733e8f217b41ad9bfba48f5908759e4f6c1fccd4af5e17cef756"
   },
   {
@@ -82017,7 +82017,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "d51583d0fc20a7f63febe38f99486b5aa9e51ee888928c99e8516e3ffa80cd1f"
   },
   {
@@ -82351,7 +82351,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "18e374793de2273f2266eea2d5a2f371636662e9b6ba70238537de285fb9fbb0"
   },
   {
@@ -82685,7 +82685,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "aad23590c2baf893db725da58b43a10b29cb62c8521a554e25f75a108ae5ff22"
   },
   {
@@ -83019,7 +83019,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "f25d527292b97312cf3ac7f9ee32012dd7098aa8dd04177244def1ce4de1c391"
   },
   {
@@ -83353,7 +83353,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "12df9dc2aea9caab90df16cd5ba113683a829873051ba4f15a878737738e5e90"
   },
   {
@@ -83687,7 +83687,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "45e8d0e39a5734443dd809475b794178027a29d4867c3f0cfc70e4c5e9f519a3"
   },
   {
@@ -84021,7 +84021,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "e81d80c6e87995110d5b402289a165d2006470ffa4b3503091dcf356465b1375"
   },
   {
@@ -84355,7 +84355,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "cfa5832eae3d6e3a5b46f41a4a91c28aedff8b47c0dfa82b512682f40224a5d8"
   },
   {
@@ -84689,7 +84689,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "0758d36ad996e04095f585e8c450b48a7b54a06a231155ee141a3c17495653b9"
   },
   {
@@ -85023,7 +85023,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "967b141144ab120c72f94b62240cdbd6980dfce4021962f08837d2112ea20843"
   },
   {
@@ -85357,7 +85357,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "cecaee7e00e1a11bfa48cca02b59ad6de467ee0563b2ebd79fb1f47ddcf0941e"
   },
   {
@@ -85691,7 +85691,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "0d28804142fcf349eaeb451fa10e2e0761dc3779eaf99b140aec152582d08ae2"
   },
   {
@@ -86025,7 +86025,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "401c6e5fa056608ca8742a8d3a0dbda49914f40c8fdef67768938f19ba756d43"
   },
   {
@@ -86359,7 +86359,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "8e3766d79dca647e8f8706f27f9260b82aba6f80230750aff2a50a7410625f8d"
   },
   {
@@ -86693,7 +86693,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "f4e045b6cdf29d087dc6ac91d62db91d7d60c57123964c3facc140ed4d2f18a0"
   },
   {
@@ -87027,7 +87027,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "6e07653079c9f44636e0c275a2b7bd389471385011a05bacbbf08d1ce98ebdfa"
   },
   {
@@ -87334,7 +87334,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "50c6d6188c41985276f462e746f65eee89225f042ac43f342594f80b7160818d"
   },
   {
@@ -87668,7 +87668,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "1a3bcad3337de7c378b7460bbb9b6671285f36a7c78ab8ee9827fe0b5ebd0a0c"
   },
   {
@@ -88002,7 +88002,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "46280140a942a2b71e7bba4d127868553f32dab92efb83d6b375da99a1429e1c"
   },
   {
@@ -88336,7 +88336,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "3b99028639b87993d9d7d88bcb9e6f60801da4867011a77c851955ae4db33d15"
   },
   {
@@ -88643,7 +88643,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "c8dfcc9d982cb77089281f3092e542046e53f6744a41200db2a2dd81d84002e5"
   },
   {
@@ -88950,7 +88950,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "organization",
+    "referenced_asset_model_id": "organization",
     "builtin_hash": "e497b2111b0f430b943ff5988173fca3dae3c4b23c853c4514abb4f9ad05fb90"
   },
   {
@@ -89418,7 +89418,7 @@
     "is_builtin": true,
     "is_locked": true,
     "owner": "product",
-    "ref_ci_type_id": "user",
+    "referenced_asset_model_id": "user",
     "builtin_hash": "45dfd9a579ed03a559cd3c32780fd53312a7ca08238da1ef1e48c78e0888df82"
   },
   {
@@ -90532,7 +90532,7 @@
       "derived_from_association": "aliyun_bucket_belong_aliyun_account"
     },
     "enum_options": [],
-    "ref_ci_type_id": "aliyun_account",
+    "referenced_asset_model_id": "aliyun_account",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90562,7 +90562,7 @@
       "derived_from_association": "aliyun_clb_belong_aliyun_account"
     },
     "enum_options": [],
-    "ref_ci_type_id": "aliyun_account",
+    "referenced_asset_model_id": "aliyun_account",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90592,7 +90592,7 @@
       "derived_from_association": "aliyun_ecs_belong_aliyun_account"
     },
     "enum_options": [],
-    "ref_ci_type_id": "aliyun_account",
+    "referenced_asset_model_id": "aliyun_account",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90622,7 +90622,7 @@
       "derived_from_association": "aliyun_kafka_inst_belong_aliyun_account"
     },
     "enum_options": [],
-    "ref_ci_type_id": "aliyun_account",
+    "referenced_asset_model_id": "aliyun_account",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90652,7 +90652,7 @@
       "derived_from_association": "aliyun_mongodb_belong_aliyun_account"
     },
     "enum_options": [],
-    "ref_ci_type_id": "aliyun_account",
+    "referenced_asset_model_id": "aliyun_account",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90682,7 +90682,7 @@
       "derived_from_association": "aliyun_mysql_belong_aliyun_account"
     },
     "enum_options": [],
-    "ref_ci_type_id": "aliyun_account",
+    "referenced_asset_model_id": "aliyun_account",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90712,7 +90712,7 @@
       "derived_from_association": "aliyun_pgsql_belong_aliyun_account"
     },
     "enum_options": [],
-    "ref_ci_type_id": "aliyun_account",
+    "referenced_asset_model_id": "aliyun_account",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90742,7 +90742,7 @@
       "derived_from_association": "aliyun_redis_belong_aliyun_account"
     },
     "enum_options": [],
-    "ref_ci_type_id": "aliyun_account",
+    "referenced_asset_model_id": "aliyun_account",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90772,7 +90772,7 @@
       "derived_from_association": "application_contains_host"
     },
     "enum_options": [],
-    "ref_ci_type_id": "host",
+    "referenced_asset_model_id": "host",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90802,7 +90802,7 @@
       "derived_from_association": "application_run_host"
     },
     "enum_options": [],
-    "ref_ci_type_id": "host",
+    "referenced_asset_model_id": "host",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90832,7 +90832,7 @@
       "derived_from_association": "datacenter_run_server_room"
     },
     "enum_options": [],
-    "ref_ci_type_id": "server_room",
+    "referenced_asset_model_id": "server_room",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90862,7 +90862,7 @@
       "derived_from_association": "fusioncompute_datastore_belong_fusioncompute_host"
     },
     "enum_options": [],
-    "ref_ci_type_id": "fusioncompute_host",
+    "referenced_asset_model_id": "fusioncompute_host",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90892,7 +90892,7 @@
       "derived_from_association": "fusioncompute_host_belong_fusioncompute"
     },
     "enum_options": [],
-    "ref_ci_type_id": "fusioncompute",
+    "referenced_asset_model_id": "fusioncompute",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90922,7 +90922,7 @@
       "derived_from_association": "fusioncompute_vm_belong_fusioncompute_datastore"
     },
     "enum_options": [],
-    "ref_ci_type_id": "fusioncompute_datastore",
+    "referenced_asset_model_id": "fusioncompute_datastore",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90952,7 +90952,7 @@
       "derived_from_association": "fusioncompute_vm_belong_fusioncompute_host"
     },
     "enum_options": [],
-    "ref_ci_type_id": "fusioncompute_host",
+    "referenced_asset_model_id": "fusioncompute_host",
     "required": false,
     "unique": false,
     "editable": true,
@@ -90982,7 +90982,7 @@
       "derived_from_association": "fusioninsight_cluster_belong_fusioninsight"
     },
     "enum_options": [],
-    "ref_ci_type_id": "fusioninsight",
+    "referenced_asset_model_id": "fusioninsight",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91012,7 +91012,7 @@
       "derived_from_association": "fusioninsight_host_belong_fusioninsight_cluster"
     },
     "enum_options": [],
-    "ref_ci_type_id": "fusioninsight_cluster",
+    "referenced_asset_model_id": "fusioninsight_cluster",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91042,7 +91042,7 @@
       "derived_from_association": "host_install_on_activemq"
     },
     "enum_options": [],
-    "ref_ci_type_id": "activemq",
+    "referenced_asset_model_id": "activemq",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91072,7 +91072,7 @@
       "derived_from_association": "host_install_on_apache"
     },
     "enum_options": [],
-    "ref_ci_type_id": "apache",
+    "referenced_asset_model_id": "apache",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91102,7 +91102,7 @@
       "derived_from_association": "host_install_on_dameng"
     },
     "enum_options": [],
-    "ref_ci_type_id": "dameng",
+    "referenced_asset_model_id": "dameng",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91132,7 +91132,7 @@
       "derived_from_association": "host_install_on_db2"
     },
     "enum_options": [],
-    "ref_ci_type_id": "db2",
+    "referenced_asset_model_id": "db2",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91162,7 +91162,7 @@
       "derived_from_association": "host_install_on_docker"
     },
     "enum_options": [],
-    "ref_ci_type_id": "docker",
+    "referenced_asset_model_id": "docker",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91192,7 +91192,7 @@
       "derived_from_association": "host_install_on_es"
     },
     "enum_options": [],
-    "ref_ci_type_id": "es",
+    "referenced_asset_model_id": "es",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91222,7 +91222,7 @@
       "derived_from_association": "host_install_on_etcd"
     },
     "enum_options": [],
-    "ref_ci_type_id": "etcd",
+    "referenced_asset_model_id": "etcd",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91252,7 +91252,7 @@
       "derived_from_association": "host_install_on_iis"
     },
     "enum_options": [],
-    "ref_ci_type_id": "iis",
+    "referenced_asset_model_id": "iis",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91282,7 +91282,7 @@
       "derived_from_association": "host_install_on_kafka"
     },
     "enum_options": [],
-    "ref_ci_type_id": "kafka",
+    "referenced_asset_model_id": "kafka",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91312,7 +91312,7 @@
       "derived_from_association": "host_install_on_keepalive"
     },
     "enum_options": [],
-    "ref_ci_type_id": "keepalive",
+    "referenced_asset_model_id": "keepalive",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91342,7 +91342,7 @@
       "derived_from_association": "host_install_on_mongodb"
     },
     "enum_options": [],
-    "ref_ci_type_id": "mongodb",
+    "referenced_asset_model_id": "mongodb",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91372,7 +91372,7 @@
       "derived_from_association": "host_install_on_mssql"
     },
     "enum_options": [],
-    "ref_ci_type_id": "mssql",
+    "referenced_asset_model_id": "mssql",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91402,7 +91402,7 @@
       "derived_from_association": "host_install_on_mysql"
     },
     "enum_options": [],
-    "ref_ci_type_id": "mysql",
+    "referenced_asset_model_id": "mysql",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91432,7 +91432,7 @@
       "derived_from_association": "host_install_on_nginx"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nginx",
+    "referenced_asset_model_id": "nginx",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91462,7 +91462,7 @@
       "derived_from_association": "host_install_on_oracle"
     },
     "enum_options": [],
-    "ref_ci_type_id": "oracle",
+    "referenced_asset_model_id": "oracle",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91492,7 +91492,7 @@
       "derived_from_association": "host_install_on_postgresql"
     },
     "enum_options": [],
-    "ref_ci_type_id": "postgresql",
+    "referenced_asset_model_id": "postgresql",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91522,7 +91522,7 @@
       "derived_from_association": "host_install_on_rabbitmq"
     },
     "enum_options": [],
-    "ref_ci_type_id": "rabbitmq",
+    "referenced_asset_model_id": "rabbitmq",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91552,7 +91552,7 @@
       "derived_from_association": "host_install_on_redis"
     },
     "enum_options": [],
-    "ref_ci_type_id": "redis",
+    "referenced_asset_model_id": "redis",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91582,7 +91582,7 @@
       "derived_from_association": "host_install_on_tidb"
     },
     "enum_options": [],
-    "ref_ci_type_id": "tidb",
+    "referenced_asset_model_id": "tidb",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91612,7 +91612,7 @@
       "derived_from_association": "host_install_on_tomcat"
     },
     "enum_options": [],
-    "ref_ci_type_id": "tomcat",
+    "referenced_asset_model_id": "tomcat",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91642,7 +91642,7 @@
       "derived_from_association": "host_install_on_tongweb"
     },
     "enum_options": [],
-    "ref_ci_type_id": "tongweb",
+    "referenced_asset_model_id": "tongweb",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91672,7 +91672,7 @@
       "derived_from_association": "host_install_on_weblogic"
     },
     "enum_options": [],
-    "ref_ci_type_id": "weblogic",
+    "referenced_asset_model_id": "weblogic",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91702,7 +91702,7 @@
       "derived_from_association": "host_install_on_websphere"
     },
     "enum_options": [],
-    "ref_ci_type_id": "websphere",
+    "referenced_asset_model_id": "websphere",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91732,7 +91732,7 @@
       "derived_from_association": "host_install_on_zookeeper"
     },
     "enum_options": [],
-    "ref_ci_type_id": "zookeeper",
+    "referenced_asset_model_id": "zookeeper",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91762,7 +91762,7 @@
       "derived_from_association": "host_run_activemq"
     },
     "enum_options": [],
-    "ref_ci_type_id": "activemq",
+    "referenced_asset_model_id": "activemq",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91792,7 +91792,7 @@
       "derived_from_association": "host_run_apache"
     },
     "enum_options": [],
-    "ref_ci_type_id": "apache",
+    "referenced_asset_model_id": "apache",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91822,7 +91822,7 @@
       "derived_from_association": "host_run_ceph"
     },
     "enum_options": [],
-    "ref_ci_type_id": "ceph",
+    "referenced_asset_model_id": "ceph",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91852,7 +91852,7 @@
       "derived_from_association": "host_run_dameng"
     },
     "enum_options": [],
-    "ref_ci_type_id": "dameng",
+    "referenced_asset_model_id": "dameng",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91882,7 +91882,7 @@
       "derived_from_association": "host_run_db2"
     },
     "enum_options": [],
-    "ref_ci_type_id": "db2",
+    "referenced_asset_model_id": "db2",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91912,7 +91912,7 @@
       "derived_from_association": "host_run_docker"
     },
     "enum_options": [],
-    "ref_ci_type_id": "docker",
+    "referenced_asset_model_id": "docker",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91942,7 +91942,7 @@
       "derived_from_association": "host_run_es"
     },
     "enum_options": [],
-    "ref_ci_type_id": "es",
+    "referenced_asset_model_id": "es",
     "required": false,
     "unique": false,
     "editable": true,
@@ -91972,7 +91972,7 @@
       "derived_from_association": "host_run_etcd"
     },
     "enum_options": [],
-    "ref_ci_type_id": "etcd",
+    "referenced_asset_model_id": "etcd",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92002,7 +92002,7 @@
       "derived_from_association": "host_run_haproxy"
     },
     "enum_options": [],
-    "ref_ci_type_id": "haproxy",
+    "referenced_asset_model_id": "haproxy",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92032,7 +92032,7 @@
       "derived_from_association": "host_run_hbase"
     },
     "enum_options": [],
-    "ref_ci_type_id": "hbase",
+    "referenced_asset_model_id": "hbase",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92062,7 +92062,7 @@
       "derived_from_association": "host_run_iis"
     },
     "enum_options": [],
-    "ref_ci_type_id": "iis",
+    "referenced_asset_model_id": "iis",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92092,7 +92092,7 @@
       "derived_from_association": "host_run_jboss"
     },
     "enum_options": [],
-    "ref_ci_type_id": "jboss",
+    "referenced_asset_model_id": "jboss",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92122,7 +92122,7 @@
       "derived_from_association": "host_run_jetty"
     },
     "enum_options": [],
-    "ref_ci_type_id": "jetty",
+    "referenced_asset_model_id": "jetty",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92152,7 +92152,7 @@
       "derived_from_association": "host_run_kafka"
     },
     "enum_options": [],
-    "ref_ci_type_id": "kafka",
+    "referenced_asset_model_id": "kafka",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92182,7 +92182,7 @@
       "derived_from_association": "host_run_keepalive"
     },
     "enum_options": [],
-    "ref_ci_type_id": "keepalive",
+    "referenced_asset_model_id": "keepalive",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92212,7 +92212,7 @@
       "derived_from_association": "host_run_memcached"
     },
     "enum_options": [],
-    "ref_ci_type_id": "memcached",
+    "referenced_asset_model_id": "memcached",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92242,7 +92242,7 @@
       "derived_from_association": "host_run_mongodb"
     },
     "enum_options": [],
-    "ref_ci_type_id": "mongodb",
+    "referenced_asset_model_id": "mongodb",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92272,7 +92272,7 @@
       "derived_from_association": "host_run_mssql"
     },
     "enum_options": [],
-    "ref_ci_type_id": "mssql",
+    "referenced_asset_model_id": "mssql",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92302,7 +92302,7 @@
       "derived_from_association": "host_run_mysql"
     },
     "enum_options": [],
-    "ref_ci_type_id": "mysql",
+    "referenced_asset_model_id": "mysql",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92332,7 +92332,7 @@
       "derived_from_association": "host_run_nginx"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nginx",
+    "referenced_asset_model_id": "nginx",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92362,7 +92362,7 @@
       "derived_from_association": "host_run_openresty"
     },
     "enum_options": [],
-    "ref_ci_type_id": "openresty",
+    "referenced_asset_model_id": "openresty",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92392,7 +92392,7 @@
       "derived_from_association": "host_run_oracle"
     },
     "enum_options": [],
-    "ref_ci_type_id": "oracle",
+    "referenced_asset_model_id": "oracle",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92422,7 +92422,7 @@
       "derived_from_association": "host_run_postgresql"
     },
     "enum_options": [],
-    "ref_ci_type_id": "postgresql",
+    "referenced_asset_model_id": "postgresql",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92452,7 +92452,7 @@
       "derived_from_association": "host_run_rabbitmq"
     },
     "enum_options": [],
-    "ref_ci_type_id": "rabbitmq",
+    "referenced_asset_model_id": "rabbitmq",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92482,7 +92482,7 @@
       "derived_from_association": "host_run_redis"
     },
     "enum_options": [],
-    "ref_ci_type_id": "redis",
+    "referenced_asset_model_id": "redis",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92512,7 +92512,7 @@
       "derived_from_association": "host_run_rocketmq"
     },
     "enum_options": [],
-    "ref_ci_type_id": "rocketmq",
+    "referenced_asset_model_id": "rocketmq",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92542,7 +92542,7 @@
       "derived_from_association": "host_run_spark"
     },
     "enum_options": [],
-    "ref_ci_type_id": "spark",
+    "referenced_asset_model_id": "spark",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92572,7 +92572,7 @@
       "derived_from_association": "host_run_squid"
     },
     "enum_options": [],
-    "ref_ci_type_id": "squid",
+    "referenced_asset_model_id": "squid",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92602,7 +92602,7 @@
       "derived_from_association": "host_run_tidb"
     },
     "enum_options": [],
-    "ref_ci_type_id": "tidb",
+    "referenced_asset_model_id": "tidb",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92632,7 +92632,7 @@
       "derived_from_association": "host_run_tomcat"
     },
     "enum_options": [],
-    "ref_ci_type_id": "tomcat",
+    "referenced_asset_model_id": "tomcat",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92662,7 +92662,7 @@
       "derived_from_association": "host_run_tongweb"
     },
     "enum_options": [],
-    "ref_ci_type_id": "tongweb",
+    "referenced_asset_model_id": "tongweb",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92692,7 +92692,7 @@
       "derived_from_association": "host_run_tuxedo"
     },
     "enum_options": [],
-    "ref_ci_type_id": "tuxedo",
+    "referenced_asset_model_id": "tuxedo",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92722,7 +92722,7 @@
       "derived_from_association": "host_run_vmware_vm"
     },
     "enum_options": [],
-    "ref_ci_type_id": "vmware_vm",
+    "referenced_asset_model_id": "vmware_vm",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92752,7 +92752,7 @@
       "derived_from_association": "host_run_weblogic"
     },
     "enum_options": [],
-    "ref_ci_type_id": "weblogic",
+    "referenced_asset_model_id": "weblogic",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92782,7 +92782,7 @@
       "derived_from_association": "host_run_websphere"
     },
     "enum_options": [],
-    "ref_ci_type_id": "websphere",
+    "referenced_asset_model_id": "websphere",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92812,7 +92812,7 @@
       "derived_from_association": "host_run_zookeeper"
     },
     "enum_options": [],
-    "ref_ci_type_id": "zookeeper",
+    "referenced_asset_model_id": "zookeeper",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92842,7 +92842,7 @@
       "derived_from_association": "hwcloud_dcs_belong_hwcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "hwcloud",
+    "referenced_asset_model_id": "hwcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92872,7 +92872,7 @@
       "derived_from_association": "hwcloud_ecs_belong_hwcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "hwcloud",
+    "referenced_asset_model_id": "hwcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92902,7 +92902,7 @@
       "derived_from_association": "hwcloud_eip_belong_hwcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "hwcloud",
+    "referenced_asset_model_id": "hwcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92932,7 +92932,7 @@
       "derived_from_association": "hwcloud_elb_belong_hwcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "hwcloud",
+    "referenced_asset_model_id": "hwcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92962,7 +92962,7 @@
       "derived_from_association": "hwcloud_evs_belong_hwcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "hwcloud",
+    "referenced_asset_model_id": "hwcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -92992,7 +92992,7 @@
       "derived_from_association": "hwcloud_evs_install_on_hwcloud_ecs"
     },
     "enum_options": [],
-    "ref_ci_type_id": "hwcloud_ecs",
+    "referenced_asset_model_id": "hwcloud_ecs",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93022,7 +93022,7 @@
       "derived_from_association": "hwcloud_obs_belong_hwcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "hwcloud",
+    "referenced_asset_model_id": "hwcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93052,7 +93052,7 @@
       "derived_from_association": "hwcloud_rds_belong_hwcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "hwcloud",
+    "referenced_asset_model_id": "hwcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93082,7 +93082,7 @@
       "derived_from_association": "hwcloud_sg_belong_hwcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "hwcloud",
+    "referenced_asset_model_id": "hwcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93112,7 +93112,7 @@
       "derived_from_association": "hwcloud_subnet_belong_hwcloud_vpc"
     },
     "enum_options": [],
-    "ref_ci_type_id": "hwcloud_vpc",
+    "referenced_asset_model_id": "hwcloud_vpc",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93142,7 +93142,7 @@
       "derived_from_association": "hwcloud_vpc_belong_hwcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "hwcloud",
+    "referenced_asset_model_id": "hwcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93172,7 +93172,7 @@
       "derived_from_association": "ibmmq_channel_belong_ibmmq"
     },
     "enum_options": [],
-    "ref_ci_type_id": "ibmmq",
+    "referenced_asset_model_id": "ibmmq",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93202,7 +93202,7 @@
       "derived_from_association": "ibmmq_listener_belong_ibmmq"
     },
     "enum_options": [],
-    "ref_ci_type_id": "ibmmq",
+    "referenced_asset_model_id": "ibmmq",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93232,7 +93232,7 @@
       "derived_from_association": "ibmmq_localqueue_belong_ibmmq"
     },
     "enum_options": [],
-    "ref_ci_type_id": "ibmmq",
+    "referenced_asset_model_id": "ibmmq",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93262,7 +93262,7 @@
       "derived_from_association": "ibmmq_remotequeue_belong_ibmmq"
     },
     "enum_options": [],
-    "ref_ci_type_id": "ibmmq",
+    "referenced_asset_model_id": "ibmmq",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93292,7 +93292,7 @@
       "derived_from_association": "inspurincloudrail_vm_belong_inspurincloudrail"
     },
     "enum_options": [],
-    "ref_ci_type_id": "inspurincloudrail",
+    "referenced_asset_model_id": "inspurincloudrail",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93322,7 +93322,7 @@
       "derived_from_association": "interface_belong_firewall"
     },
     "enum_options": [],
-    "ref_ci_type_id": "firewall",
+    "referenced_asset_model_id": "firewall",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93352,7 +93352,7 @@
       "derived_from_association": "interface_belong_loadbalance"
     },
     "enum_options": [],
-    "ref_ci_type_id": "loadbalance",
+    "referenced_asset_model_id": "loadbalance",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93382,7 +93382,7 @@
       "derived_from_association": "interface_belong_router"
     },
     "enum_options": [],
-    "ref_ci_type_id": "router",
+    "referenced_asset_model_id": "router",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93412,7 +93412,7 @@
       "derived_from_association": "interface_belong_switch"
     },
     "enum_options": [],
-    "ref_ci_type_id": "switch",
+    "referenced_asset_model_id": "switch",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93442,7 +93442,7 @@
       "derived_from_association": "interface_connect_interface"
     },
     "enum_options": [],
-    "ref_ci_type_id": "interface",
+    "referenced_asset_model_id": "interface",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93472,7 +93472,7 @@
       "derived_from_association": "ip_connect_host"
     },
     "enum_options": [],
-    "ref_ci_type_id": "host",
+    "referenced_asset_model_id": "host",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93502,7 +93502,7 @@
       "derived_from_association": "k8s_namespace_belong_k8s_cluster"
     },
     "enum_options": [],
-    "ref_ci_type_id": "k8s_cluster",
+    "referenced_asset_model_id": "k8s_cluster",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93532,7 +93532,7 @@
       "derived_from_association": "k8s_node_group_k8s_cluster"
     },
     "enum_options": [],
-    "ref_ci_type_id": "k8s_cluster",
+    "referenced_asset_model_id": "k8s_cluster",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93562,7 +93562,7 @@
       "derived_from_association": "k8s_pod_group_k8s_namespace"
     },
     "enum_options": [],
-    "ref_ci_type_id": "k8s_namespace",
+    "referenced_asset_model_id": "k8s_namespace",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93592,7 +93592,7 @@
       "derived_from_association": "k8s_pod_group_k8s_workload"
     },
     "enum_options": [],
-    "ref_ci_type_id": "k8s_workload",
+    "referenced_asset_model_id": "k8s_workload",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93622,7 +93622,7 @@
       "derived_from_association": "k8s_pod_run_k8s_node"
     },
     "enum_options": [],
-    "ref_ci_type_id": "k8s_node",
+    "referenced_asset_model_id": "k8s_node",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93652,7 +93652,7 @@
       "derived_from_association": "k8s_workload_belong_k8s_namespace"
     },
     "enum_options": [],
-    "ref_ci_type_id": "k8s_namespace",
+    "referenced_asset_model_id": "k8s_namespace",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93682,7 +93682,7 @@
       "derived_from_association": "manageone_cloud_belong_manageone"
     },
     "enum_options": [],
-    "ref_ci_type_id": "manageone",
+    "referenced_asset_model_id": "manageone",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93712,7 +93712,7 @@
       "derived_from_association": "manageone_ds_belong_manageone_cloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "manageone_cloud",
+    "referenced_asset_model_id": "manageone_cloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93742,7 +93742,7 @@
       "derived_from_association": "manageone_eip_belong_manageone_cloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "manageone_cloud",
+    "referenced_asset_model_id": "manageone_cloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93772,7 +93772,7 @@
       "derived_from_association": "manageone_host_belong_manageone_cloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "manageone_cloud",
+    "referenced_asset_model_id": "manageone_cloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93802,7 +93802,7 @@
       "derived_from_association": "manageone_host_install_on_manageone_server"
     },
     "enum_options": [],
-    "ref_ci_type_id": "manageone_server",
+    "referenced_asset_model_id": "manageone_server",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93832,7 +93832,7 @@
       "derived_from_association": "manageone_server_belong_manageone_cloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "manageone_cloud",
+    "referenced_asset_model_id": "manageone_cloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93862,7 +93862,7 @@
       "derived_from_association": "nacos_namespace_belong_nacos"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nacos",
+    "referenced_asset_model_id": "nacos",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93892,7 +93892,7 @@
       "derived_from_association": "nacos_node_belong_nacos"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nacos",
+    "referenced_asset_model_id": "nacos",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93922,7 +93922,7 @@
       "derived_from_association": "nacos_service_belong_nacos"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nacos",
+    "referenced_asset_model_id": "nacos",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93952,7 +93952,7 @@
       "derived_from_association": "nutanixhci_disk_belong_nutanixhci"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci",
+    "referenced_asset_model_id": "nutanixhci",
     "required": false,
     "unique": false,
     "editable": true,
@@ -93982,7 +93982,7 @@
       "derived_from_association": "nutanixhci_disk_belong_nutanixhci_host"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci_host",
+    "referenced_asset_model_id": "nutanixhci_host",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94012,7 +94012,7 @@
       "derived_from_association": "nutanixhci_disk_belong_nutanixhci_sp"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci_sp",
+    "referenced_asset_model_id": "nutanixhci_sp",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94042,7 +94042,7 @@
       "derived_from_association": "nutanixhci_host_belong_nutanixhci"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci",
+    "referenced_asset_model_id": "nutanixhci",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94072,7 +94072,7 @@
       "derived_from_association": "nutanixhci_sc_belong_nutanixhci"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci",
+    "referenced_asset_model_id": "nutanixhci",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94102,7 +94102,7 @@
       "derived_from_association": "nutanixhci_sc_belong_nutanixhci_sp"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci_sp",
+    "referenced_asset_model_id": "nutanixhci_sp",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94132,7 +94132,7 @@
       "derived_from_association": "nutanixhci_sp_belong_nutanixhci"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci",
+    "referenced_asset_model_id": "nutanixhci",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94162,7 +94162,7 @@
       "derived_from_association": "nutanixhci_vd_belong_nutanixhci"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci",
+    "referenced_asset_model_id": "nutanixhci",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94192,7 +94192,7 @@
       "derived_from_association": "nutanixhci_vd_belong_nutanixhci_sc"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci_sc",
+    "referenced_asset_model_id": "nutanixhci_sc",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94222,7 +94222,7 @@
       "derived_from_association": "nutanixhci_vd_belong_nutanixhci_vg"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci_vg",
+    "referenced_asset_model_id": "nutanixhci_vg",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94252,7 +94252,7 @@
       "derived_from_association": "nutanixhci_vd_belong_nutanixhci_vm"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci_vm",
+    "referenced_asset_model_id": "nutanixhci_vm",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94282,7 +94282,7 @@
       "derived_from_association": "nutanixhci_vg_belong_nutanixhci"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci",
+    "referenced_asset_model_id": "nutanixhci",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94312,7 +94312,7 @@
       "derived_from_association": "nutanixhci_vg_belong_nutanixhci_sc"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci_sc",
+    "referenced_asset_model_id": "nutanixhci_sc",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94342,7 +94342,7 @@
       "derived_from_association": "nutanixhci_vm_belong_nutanixhci"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci",
+    "referenced_asset_model_id": "nutanixhci",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94372,7 +94372,7 @@
       "derived_from_association": "nutanixhci_vm_belong_nutanixhci_host"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci_host",
+    "referenced_asset_model_id": "nutanixhci_host",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94402,7 +94402,7 @@
       "derived_from_association": "nutanixhci_vm_belong_nutanixhci_sc"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nutanixhci_sc",
+    "referenced_asset_model_id": "nutanixhci_sc",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94432,7 +94432,7 @@
       "derived_from_association": "oceanbase_server_belong_oceanbase"
     },
     "enum_options": [],
-    "ref_ci_type_id": "oceanbase",
+    "referenced_asset_model_id": "oceanbase",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94462,7 +94462,7 @@
       "derived_from_association": "oceanbase_server_belong_oceanbase_zone"
     },
     "enum_options": [],
-    "ref_ci_type_id": "oceanbase_zone",
+    "referenced_asset_model_id": "oceanbase_zone",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94492,7 +94492,7 @@
       "derived_from_association": "oceanbase_tenant_belong_oceanbase"
     },
     "enum_options": [],
-    "ref_ci_type_id": "oceanbase",
+    "referenced_asset_model_id": "oceanbase",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94522,7 +94522,7 @@
       "derived_from_association": "oceanbase_zone_belong_oceanbase"
     },
     "enum_options": [],
-    "ref_ci_type_id": "oceanbase",
+    "referenced_asset_model_id": "oceanbase",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94552,7 +94552,7 @@
       "derived_from_association": "openstack_eip_belong_openstack"
     },
     "enum_options": [],
-    "ref_ci_type_id": "openstack",
+    "referenced_asset_model_id": "openstack",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94582,7 +94582,7 @@
       "derived_from_association": "openstack_node_belong_openstack"
     },
     "enum_options": [],
-    "ref_ci_type_id": "openstack",
+    "referenced_asset_model_id": "openstack",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94612,7 +94612,7 @@
       "derived_from_association": "openstack_sg_belong_openstack"
     },
     "enum_options": [],
-    "ref_ci_type_id": "openstack",
+    "referenced_asset_model_id": "openstack",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94642,7 +94642,7 @@
       "derived_from_association": "openstack_sp_belong_openstack"
     },
     "enum_options": [],
-    "ref_ci_type_id": "openstack",
+    "referenced_asset_model_id": "openstack",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94672,7 +94672,7 @@
       "derived_from_association": "openstack_sp_belong_openstack_node"
     },
     "enum_options": [],
-    "ref_ci_type_id": "openstack_node",
+    "referenced_asset_model_id": "openstack_node",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94702,7 +94702,7 @@
       "derived_from_association": "openstack_subnet_belong_openstack_vpc"
     },
     "enum_options": [],
-    "ref_ci_type_id": "openstack_vpc",
+    "referenced_asset_model_id": "openstack_vpc",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94732,7 +94732,7 @@
       "derived_from_association": "openstack_vg_belong_openstack_node"
     },
     "enum_options": [],
-    "ref_ci_type_id": "openstack_node",
+    "referenced_asset_model_id": "openstack_node",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94762,7 +94762,7 @@
       "derived_from_association": "openstack_vg_belong_openstack_sp"
     },
     "enum_options": [],
-    "ref_ci_type_id": "openstack_sp",
+    "referenced_asset_model_id": "openstack_sp",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94792,7 +94792,7 @@
       "derived_from_association": "openstack_vg_belong_openstack_vm"
     },
     "enum_options": [],
-    "ref_ci_type_id": "openstack_vm",
+    "referenced_asset_model_id": "openstack_vm",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94822,7 +94822,7 @@
       "derived_from_association": "openstack_vm_belong_openstack_vm"
     },
     "enum_options": [],
-    "ref_ci_type_id": "openstack_vm",
+    "referenced_asset_model_id": "openstack_vm",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94852,7 +94852,7 @@
       "derived_from_association": "openstack_vpc_belong_openstack"
     },
     "enum_options": [],
-    "ref_ci_type_id": "openstack",
+    "referenced_asset_model_id": "openstack",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94882,7 +94882,7 @@
       "derived_from_association": "physcial_server_contains_disk"
     },
     "enum_options": [],
-    "ref_ci_type_id": "disk",
+    "referenced_asset_model_id": "disk",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94912,7 +94912,7 @@
       "derived_from_association": "physcial_server_contains_gpu"
     },
     "enum_options": [],
-    "ref_ci_type_id": "gpu",
+    "referenced_asset_model_id": "gpu",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94942,7 +94942,7 @@
       "derived_from_association": "physcial_server_contains_memory"
     },
     "enum_options": [],
-    "ref_ci_type_id": "memory",
+    "referenced_asset_model_id": "memory",
     "required": false,
     "unique": false,
     "editable": true,
@@ -94972,7 +94972,7 @@
       "derived_from_association": "physcial_server_contains_nic"
     },
     "enum_options": [],
-    "ref_ci_type_id": "nic",
+    "referenced_asset_model_id": "nic",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95002,7 +95002,7 @@
       "derived_from_association": "qcloud_bucket_belong_qcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "qcloud",
+    "referenced_asset_model_id": "qcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95032,7 +95032,7 @@
       "derived_from_association": "qcloud_clb_belong_qcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "qcloud",
+    "referenced_asset_model_id": "qcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95062,7 +95062,7 @@
       "derived_from_association": "qcloud_cvm_belong_qcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "qcloud",
+    "referenced_asset_model_id": "qcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95092,7 +95092,7 @@
       "derived_from_association": "qcloud_eip_belong_qcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "qcloud",
+    "referenced_asset_model_id": "qcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95122,7 +95122,7 @@
       "derived_from_association": "qcloud_filesystem_belong_qcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "qcloud",
+    "referenced_asset_model_id": "qcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95152,7 +95152,7 @@
       "derived_from_association": "qcloud_mongodb_belong_qcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "qcloud",
+    "referenced_asset_model_id": "qcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95182,7 +95182,7 @@
       "derived_from_association": "qcloud_mysql_belong_qcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "qcloud",
+    "referenced_asset_model_id": "qcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95212,7 +95212,7 @@
       "derived_from_association": "qcloud_pgsql_belong_qcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "qcloud",
+    "referenced_asset_model_id": "qcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95242,7 +95242,7 @@
       "derived_from_association": "qcloud_plusar_cluster_belong_qcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "qcloud",
+    "referenced_asset_model_id": "qcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95272,7 +95272,7 @@
       "derived_from_association": "qcloud_rocketmq_belong_qcloud"
     },
     "enum_options": [],
-    "ref_ci_type_id": "qcloud",
+    "referenced_asset_model_id": "qcloud",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95302,7 +95302,7 @@
       "derived_from_association": "rack_contains_firewall"
     },
     "enum_options": [],
-    "ref_ci_type_id": "firewall",
+    "referenced_asset_model_id": "firewall",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95332,7 +95332,7 @@
       "derived_from_association": "rack_contains_loadbalance"
     },
     "enum_options": [],
-    "ref_ci_type_id": "loadbalance",
+    "referenced_asset_model_id": "loadbalance",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95362,7 +95362,7 @@
       "derived_from_association": "rack_contains_physcial_server"
     },
     "enum_options": [],
-    "ref_ci_type_id": "physcial_server",
+    "referenced_asset_model_id": "physcial_server",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95392,7 +95392,7 @@
       "derived_from_association": "rack_contains_router"
     },
     "enum_options": [],
-    "ref_ci_type_id": "router",
+    "referenced_asset_model_id": "router",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95422,7 +95422,7 @@
       "derived_from_association": "rack_contains_switch"
     },
     "enum_options": [],
-    "ref_ci_type_id": "switch",
+    "referenced_asset_model_id": "switch",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95452,7 +95452,7 @@
       "derived_from_association": "sangforscp_vm_belong_sangforscp_host"
     },
     "enum_options": [],
-    "ref_ci_type_id": "sangforscp_host",
+    "referenced_asset_model_id": "sangforscp_host",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95482,7 +95482,7 @@
       "derived_from_association": "server_bmc_belong_physcial_server"
     },
     "enum_options": [],
-    "ref_ci_type_id": "physcial_server",
+    "referenced_asset_model_id": "physcial_server",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95512,7 +95512,7 @@
       "derived_from_association": "server_bmc_cpu_belong_server_bmc"
     },
     "enum_options": [],
-    "ref_ci_type_id": "server_bmc",
+    "referenced_asset_model_id": "server_bmc",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95542,7 +95542,7 @@
       "derived_from_association": "server_bmc_disk_belong_server_bmc"
     },
     "enum_options": [],
-    "ref_ci_type_id": "server_bmc",
+    "referenced_asset_model_id": "server_bmc",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95572,7 +95572,7 @@
       "derived_from_association": "server_bmc_memory_belong_server_bmc"
     },
     "enum_options": [],
-    "ref_ci_type_id": "server_bmc",
+    "referenced_asset_model_id": "server_bmc",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95602,7 +95602,7 @@
       "derived_from_association": "server_bmc_nic_belong_server_bmc"
     },
     "enum_options": [],
-    "ref_ci_type_id": "server_bmc",
+    "referenced_asset_model_id": "server_bmc",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95632,7 +95632,7 @@
       "derived_from_association": "server_bmc_vdisk_belong_server_bmc"
     },
     "enum_options": [],
-    "ref_ci_type_id": "server_bmc",
+    "referenced_asset_model_id": "server_bmc",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95662,7 +95662,7 @@
       "derived_from_association": "server_room_run_rack"
     },
     "enum_options": [],
-    "ref_ci_type_id": "rack",
+    "referenced_asset_model_id": "rack",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95692,7 +95692,7 @@
       "derived_from_association": "smartx_cluster_belong_smartx"
     },
     "enum_options": [],
-    "ref_ci_type_id": "smartx",
+    "referenced_asset_model_id": "smartx",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95722,7 +95722,7 @@
       "derived_from_association": "smartx_vm_belong_smartx_cluster"
     },
     "enum_options": [],
-    "ref_ci_type_id": "smartx_cluster",
+    "referenced_asset_model_id": "smartx_cluster",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95752,7 +95752,7 @@
       "derived_from_association": "smartx_vmvolume_belong_smartx_cluster"
     },
     "enum_options": [],
-    "ref_ci_type_id": "smartx_cluster",
+    "referenced_asset_model_id": "smartx_cluster",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95782,7 +95782,7 @@
       "derived_from_association": "storage_disk_belong_storage"
     },
     "enum_options": [],
-    "ref_ci_type_id": "storage",
+    "referenced_asset_model_id": "storage",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95812,7 +95812,7 @@
       "derived_from_association": "storage_pool_belong_storage"
     },
     "enum_options": [],
-    "ref_ci_type_id": "storage",
+    "referenced_asset_model_id": "storage",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95842,7 +95842,7 @@
       "derived_from_association": "storage_volume_belong_storage"
     },
     "enum_options": [],
-    "ref_ci_type_id": "storage",
+    "referenced_asset_model_id": "storage",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95872,7 +95872,7 @@
       "derived_from_association": "storage_volume_belong_storage_pool"
     },
     "enum_options": [],
-    "ref_ci_type_id": "storage_pool",
+    "referenced_asset_model_id": "storage_pool",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95902,7 +95902,7 @@
       "derived_from_association": "subnet_group_ip"
     },
     "enum_options": [],
-    "ref_ci_type_id": "ip",
+    "referenced_asset_model_id": "ip",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95932,7 +95932,7 @@
       "derived_from_association": "system_contains_application"
     },
     "enum_options": [],
-    "ref_ci_type_id": "application",
+    "referenced_asset_model_id": "application",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95962,7 +95962,7 @@
       "derived_from_association": "vmware_ds_connect_vmware_esxi"
     },
     "enum_options": [],
-    "ref_ci_type_id": "vmware_esxi",
+    "referenced_asset_model_id": "vmware_esxi",
     "required": false,
     "unique": false,
     "editable": true,
@@ -95992,7 +95992,7 @@
       "derived_from_association": "vmware_esxi_group_vmware_vc"
     },
     "enum_options": [],
-    "ref_ci_type_id": "vmware_vc",
+    "referenced_asset_model_id": "vmware_vc",
     "required": false,
     "unique": false,
     "editable": true,
@@ -96022,7 +96022,7 @@
       "derived_from_association": "vmware_vm_connect_vmware_ds"
     },
     "enum_options": [],
-    "ref_ci_type_id": "vmware_ds",
+    "referenced_asset_model_id": "vmware_ds",
     "required": false,
     "unique": false,
     "editable": true,
@@ -96052,7 +96052,7 @@
       "derived_from_association": "vmware_vm_run_vmware_esxi"
     },
     "enum_options": [],
-    "ref_ci_type_id": "vmware_esxi",
+    "referenced_asset_model_id": "vmware_esxi",
     "required": false,
     "unique": false,
     "editable": true,

@@ -1,6 +1,7 @@
 # coding=utf-8
 import asyncio
 import datetime
+import json
 from collections import Counter, defaultdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +11,7 @@ import pytest
 from core.error_code import ErrorCode
 from core.listeners import AssetCatalogListener, LISTENER_TUPLE
 from libs.error_code.exception import CustomError
-from services.supply_chain_review import builtin_catalog, manager
+from services.asset_management import builtin_catalog, manager
 from scripts import build_asset_builtin_catalog
 
 
@@ -89,20 +90,20 @@ def test_runtime_image_copies_builtin_catalog_assets():
     dockerfile = (repository / "Dockerfile").read_text(encoding="utf-8")
 
     assert (
-        "COPY services/supply_chain_review/builtin_catalog/ "
-        "./services/supply_chain_review/builtin_catalog/"
+        "COPY services/asset_management/builtin_catalog/ "
+        "./services/asset_management/builtin_catalog/"
     ) in dockerfile
     assert (
         repository
-        / "services/supply_chain_review/builtin_catalog/bklite-2026.07-v1/catalog.json"
+        / "services/asset_management/builtin_catalog/aioe-assets-2026.07-v2/catalog.json"
     ).is_file()
 
 
-def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
+def test_builtin_catalog_has_exact_v2_counts_digest_and_references():
     catalog = _catalog()
 
     assert catalog["metadata"]["digest"] == (
-        "sha256:c7695348729bba763449ae4a0a763db670a79c90b86144f3f3aacf809e82333e"
+        "sha256:b0ea31b41871a14329d89cd4dd6f428a32e210fb94181f643fc297defffdb22e"
     )
     assert {
         name: len(catalog[name]) for name in builtin_catalog.CATALOG_FILES
@@ -123,16 +124,16 @@ def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
     )
     assert all(item.get("source_data_type") != "table" for item in catalog["fields"])
     assert {
-        item.get("ref_ci_type_id")
+        item.get("referenced_asset_model_id")
         for item in catalog["fields"]
         if item.get("source_data_type") in {"organization", "user"}
     } == {"organization", "user"}
     ref_fields = [item for item in catalog["fields"] if item["data_type"] == "ref"]
     assert len(ref_fields) == 497
-    ref_targets = Counter(item["ref_ci_type_id"] for item in ref_fields)
+    ref_targets = Counter(item["referenced_asset_model_id"] for item in ref_fields)
     assert ref_targets["organization"] == 209
     assert ref_targets["user"] == 103
-    assert {item["ref_ci_type_id"] for item in ref_fields} <= model_keys
+    assert {item["referenced_asset_model_id"] for item in ref_fields} <= model_keys
     field_names = [
         (
             item["model_key"],
@@ -141,6 +142,28 @@ def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
         for item in catalog["fields"]
     ]
     assert len(field_names) == len(set(field_names))
+
+
+def test_catalog_builder_writes_schema_v2_metadata(tmp_path):
+    catalog = {name: [] for name in build_asset_builtin_catalog.EXPECTED_COUNTS}
+
+    build_asset_builtin_catalog.write_catalog(catalog, tmp_path)
+
+    metadata = json.loads((tmp_path / "catalog.json").read_text(encoding="utf-8"))
+    assert metadata["schema_version"] == 2
+    assert metadata["catalog_key"] == "aioe-asset-builtins"
+    assert metadata["catalog_version"] == "aioe-assets-2026.07-v2"
+
+
+def test_builtin_catalog_places_foundation_data_first():
+    first_group = _catalog()["groups"][0]
+
+    assert first_group == {
+        **first_group,
+        "key": "directory",
+        "name": "基础数据",
+        "sort": 1,
+    }
 
 
 def test_soc_foundation_models_and_employee_fields_match_product_definitions():
@@ -344,7 +367,7 @@ def test_association_definitions_are_reference_fields():
         if field["model_key"] == "project" and field["field_key"] == "manager"
     )
     assert project_manager["data_type"] == "ref"
-    assert project_manager["ref_ci_type_id"] == "user"
+    assert project_manager["referenced_asset_model_id"] == "user"
     assert project_manager["options"] == {
         "multiple": False,
         "reverse_unique": False,
@@ -412,18 +435,18 @@ def test_composite_unique_rule_is_enforced_for_instances(monkeypatch):
         ),
     ]
 
-    async def fields_for_type(*_args):
+    async def fields_for_model(*_args):
         return fields
 
-    monkeypatch.setattr(manager, "fields_for_type", fields_for_type)
+    monkeypatch.setattr(manager, "fields_for_model", fields_for_model)
     monkeypatch.setattr(
-        manager.SupplyChainCi,
+        manager.AssetInstance,
         "filter",
         staticmethod(
             lambda **_kwargs: _Query(
                 [
                     _Record(
-                        id="ci-existing",
+                        id="asset-existing",
                         attributes={"ip_addr": "10.0.0.1", "cloud": "aliyun"},
                     )
                 ]
@@ -431,7 +454,7 @@ def test_composite_unique_rule_is_enforced_for_instances(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        manager.SupplyChainCiUniqueRule,
+        manager.AssetUniqueRule,
         "filter",
         staticmethod(
             lambda **_kwargs: _Query([SimpleNamespace(field_keys=["ip_addr", "cloud"])])
@@ -440,7 +463,7 @@ def test_composite_unique_rule_is_enforced_for_instances(monkeypatch):
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
-            manager.validate_ci_attributes(
+            manager.validate_asset_attributes(
                 "tenant-a",
                 "host-model-id",
                 {"ip_addr": "10.0.0.1", "cloud": "aliyun"},
@@ -459,9 +482,12 @@ def test_composite_unique_rule_is_enforced_for_instances(monkeypatch):
 def test_scalar_and_multiple_reference_values_are_validated(
     monkeypatch, multiple, value
 ):
-    targets = [_Record(id=target_id) for target_id in ([value] if isinstance(value, str) else value)]
+    targets = [
+        _Record(id=target_id)
+        for target_id in ([value] if isinstance(value, str) else value)
+    ]
     monkeypatch.setattr(
-        manager.SupplyChainCi,
+        manager.AssetInstance,
         "filter",
         staticmethod(lambda **_kwargs: _Query(targets)),
     )
@@ -471,7 +497,7 @@ def test_scalar_and_multiple_reference_values_are_validated(
             "tenant-a",
             SimpleNamespace(
                 data_type="ref",
-                ref_ci_type_id="target-model",
+                referenced_asset_model_id="target-model",
                 required=True,
                 options={"multiple": multiple, "reverse_unique": False},
             ),
@@ -534,34 +560,34 @@ def test_activation_preview_apply_revision_expiry_and_idempotency(monkeypatch):
     monkeypatch.setattr(builtin_catalog, "_resolve_activation_models", resolve_models)
     monkeypatch.setattr(builtin_catalog, "_activation_impact", activation_impact)
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainBuiltinActivationPreview,
+        builtin_catalog.AssetBuiltinActivationPreview,
         "create",
         staticmethod(create_preview),
     )
     monkeypatch.setattr(builtin_catalog, "in_transaction", _Transaction)
     monkeypatch.setattr(builtin_catalog, "_lock_tenant", no_lock)
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainBuiltinActivationEvent,
+        builtin_catalog.AssetBuiltinActivationEvent,
         "filter",
         staticmethod(lambda **kwargs: _Query(events.get(kwargs["request_id"]))),
     )
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainBuiltinActivationEvent,
+        builtin_catalog.AssetBuiltinActivationEvent,
         "create",
         staticmethod(create_event),
     )
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainBuiltinActivationPreview,
+        builtin_catalog.AssetBuiltinActivationPreview,
         "filter",
         staticmethod(lambda **kwargs: _Query(previews.get(kwargs["token"]))),
     )
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainBuiltinCatalogState,
+        builtin_catalog.AssetBuiltinCatalogState,
         "filter",
         staticmethod(lambda **_kwargs: _Query(state)),
     )
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainBuiltinActivation,
+        builtin_catalog.AssetBuiltinActivation,
         "filter",
         staticmethod(lambda **_kwargs: _Query(activation)),
     )
@@ -645,7 +671,7 @@ def test_onboarding_can_be_completed_without_enabling_models(monkeypatch):
     monkeypatch.setattr(builtin_catalog, "in_transaction", _Transaction)
     monkeypatch.setattr(builtin_catalog, "_lock_tenant", no_lock)
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainBuiltinCatalogState,
+        builtin_catalog.AssetBuiltinCatalogState,
         "filter",
         staticmethod(lambda **_kwargs: _Query(state)),
     )
@@ -686,12 +712,12 @@ def test_unchanged_catalog_reconcile_is_audited(monkeypatch):
     monkeypatch.setattr(builtin_catalog, "in_transaction", _Transaction)
     monkeypatch.setattr(builtin_catalog, "_lock_tenant", no_lock)
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainBuiltinCatalogState,
+        builtin_catalog.AssetBuiltinCatalogState,
         "filter",
         staticmethod(lambda **_kwargs: _Query(state)),
     )
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainBuiltinCatalogEvent,
+        builtin_catalog.AssetBuiltinCatalogEvent,
         "create",
         staticmethod(create_event),
     )
@@ -755,7 +781,7 @@ def test_ready_catalog_version_change_adds_missing_definitions_without_overwrite
     monkeypatch.setattr(builtin_catalog, "in_transaction", _Transaction)
     monkeypatch.setattr(builtin_catalog, "_lock_tenant", no_lock)
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainBuiltinCatalogState,
+        builtin_catalog.AssetBuiltinCatalogState,
         "filter",
         staticmethod(lambda **_kwargs: _Query(state)),
     )
@@ -765,7 +791,7 @@ def test_ready_catalog_version_change_adds_missing_definitions_without_overwrite
     monkeypatch.setattr(builtin_catalog, "_upsert_builtin_unique_rules", upsert_rules)
     monkeypatch.setattr(builtin_catalog, "_ensure_activations", ensure_activations)
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainBuiltinCatalogEvent,
+        builtin_catalog.AssetBuiltinCatalogEvent,
         "create",
         staticmethod(create_event),
     )
@@ -824,7 +850,7 @@ def test_additive_catalog_reconcile_preserves_existing_field_edits(monkeypatch):
         return _Query([existing] if kwargs.get("is_builtin") else [])
 
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainCiFieldDef,
+        builtin_catalog.AssetFieldDefinition,
         "filter",
         staticmethod(field_filter),
     )
@@ -863,12 +889,12 @@ def test_product_builtin_group_can_be_renamed_and_deleted(monkeypatch):
     monkeypatch.setattr(builtin_catalog, "in_transaction", _Transaction)
     monkeypatch.setattr(builtin_catalog, "_lock_tenant", no_lock)
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainCiModelGroup,
+        builtin_catalog.AssetModelGroup,
         "filter",
         staticmethod(lambda **_kwargs: _Query(group)),
     )
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainCiType,
+        builtin_catalog.AssetModel,
         "filter",
         staticmethod(lambda **_kwargs: _Query()),
     )
@@ -919,12 +945,12 @@ def test_failed_catalog_reconcile_marks_state_and_records_failure_type(monkeypat
     monkeypatch.setattr(builtin_catalog, "in_transaction", _Transaction)
     monkeypatch.setattr(builtin_catalog, "_lock_tenant", no_lock)
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainBuiltinCatalogState,
+        builtin_catalog.AssetBuiltinCatalogState,
         "filter",
         staticmethod(lambda **_kwargs: _Query(state)),
     )
     monkeypatch.setattr(
-        builtin_catalog.SupplyChainBuiltinCatalogEvent,
+        builtin_catalog.AssetBuiltinCatalogEvent,
         "create",
         staticmethod(create_event),
     )

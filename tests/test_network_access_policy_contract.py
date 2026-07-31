@@ -6,13 +6,13 @@ from pathlib import Path
 import pytest
 
 from libs.error_code.exception import CustomError
-from models.supply_chain_review import SupplyChainActualPolicy
-from services.supply_chain_review import manager
+from models.network_access_control import NetworkAccessActualPolicy
+from services.network_access_control import manager
 
 
 SNAPSHOT_FIELDS = (
     "accessory_project_id",
-    "device_ci_id",
+    "device_asset_id",
     "device_key",
     "device_name",
     "device_type",
@@ -46,7 +46,7 @@ class _PolicyRow:
     def __init__(self, **values):
         defaults = {
             "accessory_project_id": None,
-            "device_ci_id": None,
+            "device_asset_id": None,
             "device_key": None,
             "device_name": None,
             "device_type": None,
@@ -210,8 +210,8 @@ class _Transaction:
 def fake_policy_store(monkeypatch):
     _FakePolicyModel.reset()
     _FakeHistoryModel.rows = []
-    monkeypatch.setattr(manager, "SupplyChainActualPolicy", _FakePolicyModel)
-    monkeypatch.setattr(manager, "SupplyChainPolicyChange", _FakeHistoryModel)
+    monkeypatch.setattr(manager, "NetworkAccessActualPolicy", _FakePolicyModel)
+    monkeypatch.setattr(manager, "NetworkAccessPolicyChange", _FakeHistoryModel)
     monkeypatch.setattr(manager, "in_transaction", lambda: _Transaction())
 
 
@@ -236,7 +236,7 @@ def _policy_payload(policy_key, *, device_key="device-a", action="permit"):
 
 
 def test_actual_policy_json_flattens_structured_policy_details():
-    policy = SupplyChainActualPolicy(
+    policy = NetworkAccessActualPolicy(
         tenant_id="tenant-1",
         device_key="device-a",
         policy_key="allow-api",
@@ -511,7 +511,7 @@ def test_policy_mutations_cannot_cross_tenant_boundary():
 
 
 def test_policy_identity_is_non_null_and_unique_for_active_inventory_rows():
-    fields_map = SupplyChainActualPolicy._meta.fields_map
+    fields_map = NetworkAccessActualPolicy._meta.fields_map
     migration = (
         ROOT / "migrations/models/83_20260720161000_access_policy_inventory_history.py"
     ).read_text()
