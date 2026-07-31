@@ -66,6 +66,7 @@ from services.supply_chain_review.manager import (
     overview_todo,
     policy_change_external_callback,
     reference_labels_for_ci,
+    reference_labels_for_cis,
     reorder_ci_types,
     reorder_fields,
     retry_collection_run,
@@ -872,6 +873,7 @@ async def ci_list(request: Request):
     filter_request = _ci_field_filter_request(data)
     tenant = tenant_id(request)
     ci_type = None
+    fields = None
     condition = Q(tenant_id=tenant, deleted=False)
     if data.get("ci_type_id") or data.get("ci_type_key"):
         ci_type = await get_ci_type_or_404(
@@ -905,21 +907,22 @@ async def ci_list(request: Request):
                 matched_items.append(item)
         total = len(matched_items)
         items = matched_items[offset : offset + size]
-        return response_ok(
-            {
-                "total": total,
-                "items": [item.json for item in items],
-                "page": page,
-                "size": size,
-            }
-        )
+    else:
+        total = await queryset.count()
+        items = await queryset.order_by("-utime").offset(offset).limit(size).all()
 
-    total = await queryset.count()
-    items = await queryset.order_by("-utime").offset(offset).limit(size).all()
+    if fields is None and ci_type is not None:
+        fields = await fields_for_type(tenant, str(ci_type.id))
+    labels_by_ci = await reference_labels_for_cis(tenant, items, fields)
+    payload_items = []
+    for item in items:
+        payload = dict(item.json)
+        payload["reference_labels"] = labels_by_ci.get(str(item.id), {})
+        payload_items.append(payload)
     return response_ok(
         {
             "total": total,
-            "items": [item.json for item in items],
+            "items": payload_items,
             "page": page,
             "size": size,
         }

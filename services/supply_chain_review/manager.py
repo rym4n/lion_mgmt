@@ -1020,37 +1020,90 @@ def reference_target_ids(field, attributes: dict) -> list[str]:
     return list(value) if options.get("multiple") else [value]
 
 
+async def reference_labels_for_cis(
+    tenant: str,
+    cis: list[SupplyChainCi],
+    field_defs: list[SupplyChainCiFieldDef] | None = None,
+) -> dict[str, dict[str, str | list[str]]]:
+    """Resolve reference labels for a page with one fields and one target query."""
+    if not cis:
+        return {}
+    if field_defs is None:
+        ci_type_ids = sorted({ci.ci_type_id for ci in cis})
+        reference_fields = await (
+            SupplyChainCiFieldDef.filter(
+                tenant_id=tenant,
+                ci_type_id__in=ci_type_ids,
+                data_type="ref",
+                deleted=False,
+            )
+            .order_by("sort", "ctime")
+            .all()
+        )
+        fields_by_type = {
+            ci_type_id: [
+                field
+                for field in reference_fields
+                if field.ci_type_id == ci_type_id
+            ]
+            for ci_type_id in ci_type_ids
+        }
+    else:
+        reference_fields = [
+            field
+            for field in field_defs
+            if field_attr(field, "data_type") == "ref"
+        ]
+        fields_by_type = None
+
+    def fields_for_ci(ci: SupplyChainCi) -> list[SupplyChainCiFieldDef]:
+        if fields_by_type is None:
+            return reference_fields
+        return fields_by_type.get(ci.ci_type_id, [])
+
+    target_ids = {
+        target_id
+        for ci in cis
+        for field in fields_for_ci(ci)
+        for target_id in reference_target_ids(field, ci.attributes or {})
+    }
+    targets = (
+        await SupplyChainCi.filter(
+            tenant_id=tenant,
+            id__in=sorted(target_ids),
+            deleted=False,
+        ).all()
+        if target_ids
+        else []
+    )
+    names = {str(target.id): target.name for target in targets}
+    labels_by_ci: dict[str, dict[str, str | list[str]]] = {}
+    for ci in cis:
+        labels: dict[str, str | list[str]] = {}
+        for field in fields_for_ci(ci):
+            ids = reference_target_ids(field, ci.attributes or {})
+            if not ids:
+                continue
+            resolved = [
+                names.get(str(target_id), str(target_id)) for target_id in ids
+            ]
+            labels[field_attr(field, "field_key")] = (
+                resolved
+                if (field_attr(field, "options", {}) or {}).get("multiple")
+                else resolved[0]
+            )
+        labels_by_ci[str(ci.id)] = labels
+    return labels_by_ci
+
+
 async def reference_labels_for_ci(
     tenant: str,
     ci: SupplyChainCi,
     field_defs: list[SupplyChainCiFieldDef] | None = None,
 ) -> dict[str, str | list[str]]:
-    """Resolve reference IDs to instance names without changing stored attributes."""
-    fields = field_defs or await fields_for_type(tenant, ci.ci_type_id)
-    reference_fields = [field for field in fields if field.data_type == "ref"]
-    target_ids = {
-        target_id
-        for field in reference_fields
-        for target_id in reference_target_ids(field, ci.attributes or {})
-    }
-    if not target_ids:
-        return {}
-    targets = await SupplyChainCi.filter(
-        tenant_id=tenant,
-        id__in=sorted(target_ids),
-        deleted=False,
-    ).all()
-    names = {target.id: target.name for target in targets}
-    labels: dict[str, str | list[str]] = {}
-    for field in reference_fields:
-        ids = reference_target_ids(field, ci.attributes or {})
-        if not ids:
-            continue
-        resolved = [names.get(target_id, target_id) for target_id in ids]
-        labels[field.field_key] = (
-            resolved if (field.options or {}).get("multiple") else resolved[0]
-        )
-    return labels
+    """Resolve one instance's reference IDs to their materialized names."""
+    labels_by_ci = await reference_labels_for_cis(tenant, [ci], field_defs)
+    return labels_by_ci.get(str(ci.id), {})
 
 
 async def sync_ci_references(
@@ -1626,12 +1679,19 @@ async def save_field(
             existing.data_type == "ref" or payload["data_type"] == "ref"
         ):
             if payload["data_type"] == "ref":
-                reference_instances = await validate_reference_field_instances(
-                    tenant,
-                    ci_type.id,
-                    payload,
-                    connection,
-                )
+                try:
+                    reference_instances = await validate_reference_field_instances(
+                        tenant,
+                        ci_type.id,
+                        payload,
+                        connection,
+                    )
+                except CustomError as exc:
+                    if exc.enum is ErrorCode.PARAM_ERROR:
+                        raise CustomError(
+                            ErrorCode.ASSET_FIELD_DATA_INCOMPATIBLE
+                        ) from exc
+                    raise
             else:
                 reference_instances = (
                     await SupplyChainCi.filter(

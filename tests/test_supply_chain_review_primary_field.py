@@ -2754,6 +2754,149 @@ def test_legacy_locked_reference_model_allows_ref_field_redirect(monkeypatch):
     assert existing.save_calls
 
 
+def test_save_field_reports_incompatible_existing_scalar_for_multiple_ref(
+    monkeypatch,
+):
+    ci_type = _ci_type(key="application")
+    ref_ci_type = _ci_type(key="employee", id="employee-model")
+    existing = _field(
+        "field-1",
+        "owner",
+        "application",
+        data_type="ref",
+        ref_ci_type="employee",
+        ref_ci_type_id="employee-model",
+        options={"multiple": False, "reverse_unique": False},
+    )
+    _install_field_save_fakes(monkeypatch, ci_type, existing=existing)
+
+    def ci_type_filter(**kwargs):
+        if kwargs.get("key") == "employee":
+            return _FakeQuery(ref_ci_type)
+        if kwargs.get("key__in") == ["employee"]:
+            return _FakeQuery([ref_ci_type])
+        return _FakeQuery(ci_type)
+
+    monkeypatch.setattr(
+        manager.SupplyChainCiType,
+        "filter",
+        staticmethod(ci_type_filter),
+    )
+    monkeypatch.setattr(
+        manager.SupplyChainCi,
+        "filter",
+        staticmethod(
+            lambda **_kwargs: _FakeQuery(
+                SimpleNamespace(
+                    id="application-1",
+                    attributes={
+                        "owner": "00000000-0000-0000-0000-000000000001"
+                    },
+                )
+            )
+        ),
+    )
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(
+            manager.save_field(
+                "tenant-a",
+                _field_payload(
+                    "owner",
+                    id="field-1",
+                    ci_type_key="application",
+                    data_type="ref",
+                    ref_ci_type="employee",
+                    options={"multiple": True},
+                ),
+                "admin",
+            )
+        )
+
+    assert exc_info.value.enum is ErrorCode.ASSET_FIELD_DATA_INCOMPATIBLE
+    assert "已有资产实例数据" in exc_info.value.enum.message
+    assert existing.save_calls == []
+
+
+def test_save_field_preserves_existing_reference_unique_violation(monkeypatch):
+    ci_type = _ci_type(key="application")
+    ref_ci_type = _ci_type(key="employee", id="employee-model")
+    existing = _field(
+        "field-1",
+        "owners",
+        "application",
+        data_type="ref",
+        ref_ci_type="employee",
+        ref_ci_type_id="employee-model",
+        options={"multiple": True, "reverse_unique": False},
+    )
+    _install_field_save_fakes(monkeypatch, ci_type, existing=existing)
+
+    def ci_type_filter(**kwargs):
+        if kwargs.get("key") == "employee":
+            return _FakeQuery(ref_ci_type)
+        if kwargs.get("key__in") == ["employee"]:
+            return _FakeQuery([ref_ci_type])
+        return _FakeQuery(ci_type)
+
+    monkeypatch.setattr(
+        manager.SupplyChainCiType,
+        "filter",
+        staticmethod(ci_type_filter),
+    )
+    instances = [
+        SimpleNamespace(id="application-1", attributes={"owners": ["employee-1"]}),
+        SimpleNamespace(id="application-2", attributes={"owners": ["employee-1"]}),
+    ]
+
+    def ci_filter(**kwargs):
+        if kwargs.get("ci_type_id") == ci_type.id:
+            return _FakeQuery(instances)
+        return _FakeQuery(SimpleNamespace(id="employee-1"))
+
+    monkeypatch.setattr(manager.SupplyChainCi, "filter", staticmethod(ci_filter))
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(
+            manager.save_field(
+                "tenant-a",
+                _field_payload(
+                    "owners",
+                    id="field-1",
+                    ci_type_key="application",
+                    data_type="ref",
+                    ref_ci_type="employee",
+                    options={"multiple": True},
+                    unique=True,
+                ),
+                "admin",
+            )
+        )
+
+    assert exc_info.value.enum is ErrorCode.DATA_ALREADY_EXISTS
+    assert existing.save_calls == []
+
+
+def test_save_field_preserves_unrelated_ref_request_shape_error():
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(
+            manager.save_field(
+                "tenant-a",
+                _field_payload(
+                    "owners",
+                    id="field-1",
+                    ci_type_key="application",
+                    data_type="ref",
+                    ref_ci_type="employee",
+                    options={"multiple": "true"},
+                ),
+                "admin",
+            )
+        )
+
+    assert exc_info.value.enum is ErrorCode.PARAM_ERROR
+
+
 def test_legacy_locked_reference_model_allows_ref_field_delete(monkeypatch):
     owner_ci_type = _ci_type(key="application")
     locked_ref_ci_type = _ci_type(key="server", is_locked=True)

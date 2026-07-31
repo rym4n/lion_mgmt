@@ -261,6 +261,7 @@ def test_reference_labels_preserve_scalar_and_multiple_shapes(monkeypatch):
         ),
     )
     ci = SimpleNamespace(
+        id="project-1",
         ci_type_id="project-model",
         attributes={
             "manager": "employee-1",
@@ -280,6 +281,56 @@ def test_reference_labels_preserve_scalar_and_multiple_shapes(monkeypatch):
     )
 
     assert labels == {"manager": "张三", "members": ["张三", "李四"]}
+
+
+def test_reference_labels_for_page_batch_resolve_shapes_and_missing_ids(monkeypatch):
+    queries = []
+
+    def ci_filter(**kwargs):
+        queries.append(kwargs)
+        return _Query(
+            [
+                SimpleNamespace(id="employee-1", name="张三"),
+                SimpleNamespace(id="employee-2", name="李四"),
+            ]
+        )
+
+    monkeypatch.setattr(manager.SupplyChainCi, "filter", staticmethod(ci_filter))
+    labels = asyncio.run(
+        manager.reference_labels_for_cis(
+            "tenant-a",
+            [
+                SimpleNamespace(
+                    id="project-1",
+                    ci_type_id="project-model",
+                    attributes={
+                        "manager": "employee-1",
+                        "members": ["employee-1", "employee-2"],
+                    },
+                ),
+                SimpleNamespace(
+                    id="project-2",
+                    ci_type_id="project-model",
+                    attributes={"manager": "missing-employee", "members": []},
+                ),
+            ],
+            [
+                _ref_field("manager"),
+                _ref_field("members", multiple=True),
+            ],
+        )
+    )
+
+    assert len(queries) == 1
+    assert queries[0]["id__in"] == [
+        "employee-1",
+        "employee-2",
+        "missing-employee",
+    ]
+    assert labels == {
+        "project-1": {"manager": "张三", "members": ["张三", "李四"]},
+        "project-2": {"manager": "missing-employee"},
+    }
 
 
 def test_reference_graph_uses_field_label_for_edges(monkeypatch):

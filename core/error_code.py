@@ -220,3 +220,6 @@ class ErrorCode(BaseErrorCode):
     )
     ROOM_MEMBER_ACCESS_DENIED = ErrorData(4173, "仅作战室成员可查看成员列表")
     SENSITIVE_MFA_REQUIRED = ErrorData(4174, "敏感操作需要MFA验证")
+    ASSET_FIELD_DATA_INCOMPATIBLE = ErrorData(
+        4175, "已有资产实例数据与修改后的字段类型或约束不兼容，请先调整实例数据后再保存字段"
+    )

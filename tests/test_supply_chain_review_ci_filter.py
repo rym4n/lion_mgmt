@@ -68,7 +68,7 @@ def _assert_param_error(callback):
     assert error.value.enum == ErrorCode.PARAM_ERROR
 
 
-def _run_ci_list(monkeypatch, data, records, fields):
+def _run_ci_list(monkeypatch, data, records, fields, reference_labels=None):
     operations = []
     query = _CiQuery(records, operations)
     ci_type = SimpleNamespace(id="type-1")
@@ -82,8 +82,15 @@ def _run_ci_list(monkeypatch, data, records, fields):
         assert (tenant, model_ref) == ("tenant-a", "type-1")
         return fields
 
+    async def get_reference_labels(tenant, items, field_defs):
+        assert tenant == "tenant-a"
+        assert all(item in records for item in items)
+        assert field_defs == fields
+        return reference_labels or {}
+
     monkeypatch.setattr(views, "get_ci_type_or_404", get_ci_type)
     monkeypatch.setattr(views, "fields_for_type", get_fields)
+    monkeypatch.setattr(views, "reference_labels_for_cis", get_reference_labels)
     monkeypatch.setattr(
         views.SupplyChainCi,
         "filter",
@@ -349,4 +356,26 @@ def test_ci_list_without_field_filter_uses_database_pagination(monkeypatch):
         ("offset", 2),
         ("limit", 2),
         "all",
+    ]
+
+
+def test_ci_list_includes_batch_resolved_reference_labels(monkeypatch):
+    records = [
+        _CiRecord(id="project-1", attributes={"manager": "employee-1"}),
+    ]
+
+    payload, _operations = _run_ci_list(
+        monkeypatch,
+        {"ci_type_id": "type-1", "page": 1, "size": 15},
+        records,
+        [_field("ref", field_key="manager")],
+        {"project-1": {"manager": "张三"}},
+    )
+
+    assert payload["items"] == [
+        {
+            "id": "project-1",
+            "attributes": {"manager": "employee-1"},
+            "reference_labels": {"manager": "张三"},
+        }
     ]
