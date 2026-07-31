@@ -270,3 +270,28 @@ def test_login_and_oauth_audit_classify_outcomes_without_secrets(
     if path == "/user/login":
         assert '"password":"******"' in events[0]["request_data"]
         assert secret not in events[0]["request_data"]
+
+
+def test_audit_request_data_recursively_redacts_password_fields():
+    payload = {
+        "username": "operator",
+        "password": "new-secret",
+        "current_password": "old-secret",
+        "nested": [{"confirm_password": "new-secret", "safe": "visible"}],
+    }
+
+    redacted = orjson.loads(
+        security._redact_sensitive_request_data(orjson.dumps(payload))
+    )
+
+    assert redacted == {
+        "username": "operator",
+        "password": "******",
+        "current_password": "******",
+        "nested": [{"confirm_password": "******", "safe": "visible"}],
+    }
+    assert payload["password"] == "new-secret"
+
+
+def test_audit_request_data_preserves_non_json_payload():
+    assert security._redact_sensitive_request_data("plain text") == "plain text"

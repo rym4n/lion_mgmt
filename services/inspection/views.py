@@ -1966,7 +1966,6 @@ async def start_inspection(request: Request):
             enable=1,
             creator=request.ctx.session["account_info"],
             updator=request.ctx.session["account_info"],
-            tenant_id=tenant_id,
             internal=True,
         )
 

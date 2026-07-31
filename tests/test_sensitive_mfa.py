@@ -252,8 +252,11 @@ async def test_change_password_rejects_wrong_old_password_before_write(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_profile_update_ignores_legacy_password_field(monkeypatch):
+async def test_legacy_profile_password_change_requires_current_password_and_mfa(
+    monkeypatch,
+):
     updates = []
+    calls = []
 
     class FilteredAccount:
         async def update(self, **kwargs):
@@ -266,10 +269,43 @@ async def test_profile_update_ignores_legacy_password_field(monkeypatch):
 
     monkeypatch.setattr(user_views, "Account", ProfileAccount)
     request = _request()
-    request.json = {"email": "user@example.com", "password": "bypass"}
+    account = request.ctx.session["account_info"]
+    account.password = "stored-hash"
+    account.last_login_time = object()
+    request.json = {
+        "email": "user@example.com",
+        "current_password": "current-password",
+        "password": "new-password",
+        "mfa_code": "123456",
+    }
+
+    monkeypatch.setattr(
+        user_views,
+        "password_hasher",
+        SimpleNamespace(
+            verify=lambda hashed, plain: calls.append(("old", hashed, plain)),
+            hash=lambda password: f"hash:{password}",
+        ),
+    )
+
+    async def validate(password):
+        calls.append(("policy", password))
+
+    async def verify_mfa(_request, code):
+        calls.append(("mfa", code))
+
+    monkeypatch.setattr(user_views, "validate_password", validate)
+    monkeypatch.setattr(user_views, "verify_session_mfa_code", verify_mfa)
 
     await inspect.unwrap(user_views.update_user)(request)
-    assert updates == [{"email": "user@example.com"}]
+    assert calls == [
+        ("old", "stored-hash", "current-password"),
+        ("policy", "new-password"),
+        ("mfa", "123456"),
+    ]
+    assert updates == [
+        {"email": "user@example.com", "password": "hash:new-password"}
+    ]
 
 
 @pytest.mark.parametrize(

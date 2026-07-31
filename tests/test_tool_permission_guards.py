@@ -142,6 +142,124 @@ async def test_add_permission_locks_row_before_json_update(monkeypatch):
     ]
 
 
+@pytest.mark.asyncio
+async def test_select_permissions_for_new_resource_returns_scoped_empty_grants(
+    monkeypatch,
+):
+    calls = []
+
+    async def ensure_tool(tenant_id, maintenance_mode, **kwargs):
+        calls.append(("tool", tenant_id, maintenance_mode, kwargs))
+
+    async def permission_specs(tool_name, tenant_id, maintenance_mode):
+        calls.append(("actions", tool_name, tenant_id, maintenance_mode))
+        return [
+            ("query", "查询"),
+            ("all", "动作全部动作权限"),
+        ]
+
+    async def reject_resource_lookup(*_args, **_kwargs):
+        raise AssertionError("new resources do not have an id to look up")
+
+    monkeypatch.setattr(tool_views, "_ensure_tool_in_scope", ensure_tool)
+    monkeypatch.setattr(
+        tool_views,
+        "_tool_action_permission_specs",
+        permission_specs,
+    )
+    monkeypatch.setattr(
+        tool_views,
+        "_ensure_resource_in_scope",
+        reject_resource_lookup,
+    )
+    monkeypatch.setattr(tool_views, "response_ok", lambda data: data)
+
+    request = SimpleNamespace(
+        json={"name": "sample_tool"},
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}),
+    )
+    result = await inspect.unwrap(tool_views.select_permission_all)(request)
+
+    assert result == [
+        {
+            "name": "query",
+            "description": "查询",
+            "users_id": [],
+            "roles_id": [],
+        },
+        {
+            "name": "all",
+            "description": "动作全部动作权限",
+            "users_id": [],
+            "roles_id": [],
+        },
+    ]
+    assert calls == [
+        ("tool", "tenant-1", False, {"name": "sample_tool"}),
+        ("actions", "sample_tool", "tenant-1", False),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_select_permissions_for_existing_resource_keeps_grant_readback(
+    monkeypatch,
+):
+    permission = SimpleNamespace(
+        action_name="query",
+        action_description="查询",
+        users=[{"resource-1": ["user-1"]}],
+        roles=[{"resource-1": ["role-1"]}],
+    )
+
+    class FakeQuery:
+        async def all(self):
+            return [permission]
+
+    class FakeActionPermissions:
+        @staticmethod
+        def filter(**kwargs):
+            assert kwargs == {
+                "tool_name": "sample_tool",
+                "deleted": False,
+                "tenant_id": "tenant-1",
+            }
+            return FakeQuery()
+
+    async def ensure_resource(*args, **kwargs):
+        assert args == ("tenant-1", False)
+        assert kwargs == {
+            "tool_name": "sample_tool",
+            "resource_id": "resource-1",
+        }
+
+    async def ensure_permission(*_args, **_kwargs):
+        return permission, False
+
+    monkeypatch.setattr(tool_views, "ActionPermissions", FakeActionPermissions)
+    monkeypatch.setattr(tool_views, "_ensure_resource_in_scope", ensure_resource)
+    monkeypatch.setattr(
+        tool_views,
+        "_ensure_action_permission",
+        ensure_permission,
+    )
+    monkeypatch.setattr(tool_views, "response_ok", lambda data: data)
+
+    request = SimpleNamespace(
+        json={"name": "sample_tool", "resource_id": "resource-1"},
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}),
+    )
+    result = await inspect.unwrap(tool_views.select_permission_all)(request)
+
+    assert result == [
+        {
+            "name": "query",
+            "description": "查询",
+            "users_id": ["user-1"],
+            "roles_id": ["role-1"],
+        }
+    ]
+
+
 def test_action_permission_migration_merges_grants_before_soft_delete():
     sql = asyncio.run(permission_migration.upgrade(None))
 

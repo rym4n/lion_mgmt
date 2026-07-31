@@ -167,30 +167,36 @@ def _build_http_server_source(payload, current_source=None):
         or 200
     )
 
-    headers = _normalize_list(
+    headers_value = (
         payload.get("http_server_headers")
-        or current_source.get("headers")
+        if "http_server_headers" in payload
+        else current_source.get("headers")
     )
+    headers = _normalize_list(headers_value)
     if headers:
         source["headers"] = headers
 
-    query_parameters = _normalize_list(
+    query_parameters_value = (
         payload.get("http_server_query_parameters")
-        or current_source.get("query_parameters")
+        if "http_server_query_parameters" in payload
+        else current_source.get("query_parameters")
     )
+    query_parameters = _normalize_list(query_parameters_value)
     if query_parameters:
         source["query_parameters"] = query_parameters
 
     host_key = (
         payload.get("http_server_host_key")
-        or current_source.get("host_key")
+        if "http_server_host_key" in payload
+        else current_source.get("host_key")
     )
     if host_key:
         source["host_key"] = host_key
 
     path_key = (
         payload.get("http_server_path_key")
-        or current_source.get("path_key")
+        if "http_server_path_key" in payload
+        else current_source.get("path_key")
     )
     if path_key:
         source["path_key"] = path_key
@@ -317,7 +323,12 @@ async def gen_vector_config(sources, topic, project_id):
                 "inputs": [f"{topic}_date_transforms"],
                 "source": r"""
 ._time = to_unix_timestamp(now()) * 1000000000
-._msg = to_string(.message) ?? ""
+message = to_string(.message) ?? ""
+if message == "" {
+  ._msg = encode_json(.)
+} else {
+  ._msg = message
+}
 ._stream = "vector"
 .message = encode_json(.)
 """,
@@ -342,6 +353,23 @@ async def gen_vector_config(sources, topic, project_id):
     }
 
     return config
+
+
+def _prepare_parse_sample(message, transforms_type):
+    message = "" if message is None else str(message)
+    if str(transforms_type or "").lower() != "json":
+        return message
+    try:
+        return orjson.dumps(orjson.loads(message)).decode("utf-8")
+    except orjson.JSONDecodeError:
+        return message
+
+
+async def _set_convert_health_status(event, status):
+    if event.convert_health_status == status:
+        return
+    event.convert_health_status = status
+    await event.save(update_fields=["convert_health_status", "utime"])
 
 
 @event_ingestion_bp.post("/new")
@@ -1643,13 +1671,14 @@ async def parse_log(request):
     tmp_data["transforms"]["tmp_transforms"]["inputs"] = ["tmp"]
     tmp_data["transforms"]["tmp_transforms"]["drop_on_error"] = False
 
-    config = await Config.get_or_none(Q(key=transforms_type, module="transforms") & (Q(tenant_id=tenant_id) | Q(shared=True)))
-    if not config:
-        raise CustomError(ErrorCode.TYPE_NOT_SUPPORTED_ERROR)
-
     event = await EventsIngestion.get_or_none(id=params.get("id"), deleted=False, tenant_id=tenant_id)
     if not event:
         raise CustomError(ErrorCode.PARAM_ERROR)
+
+    config = await Config.get_or_none(Q(key=transforms_type, module="transforms") & (Q(tenant_id=tenant_id) | Q(shared=True)))
+    if not config:
+        await _set_convert_health_status(event, None)
+        raise CustomError(ErrorCode.TYPE_NOT_SUPPORTED_ERROR)
 
     args = {
         "transformsconfig": transformsconfig,
@@ -1657,27 +1686,34 @@ async def parse_log(request):
         "key_delimiter_value": key_delimiter_value,
     }
     value = config.value
-    if any(
-        key in value
-        for key in [
-            "{transformsconfig}",
-            "{key_value_delimiter}",
-            "{key_delimiter_value}",
-        ]
-    ):
-        value = value.format(**args)
+    try:
+        if any(
+            key in value
+            for key in [
+                "{transformsconfig}",
+                "{key_value_delimiter}",
+                "{key_delimiter_value}",
+            ]
+        ):
+            value = value.format(**args)
+    except (KeyError, ValueError):
+        await _set_convert_health_status(event, None)
+        raise CustomError(ErrorCode.LOG_PARSE_ERROR)
 
     tmp_data["transforms"]["tmp_transforms"]["source"] = value
 
     result = check_vector_config(tmp_data)
     if not result:
+        await _set_convert_health_status(event, None)
         raise CustomError(ErrorCode.LOG_PARSE_ERROR)
 
     messages = await query_vlog("* | first 1 by (_time desc)", event.project_id)
 
     if not messages:
+        await _set_convert_health_status(event, None)
         return response_ok("当前不存在日志")
 
+    tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", encoding="utf-8", delete=False) as tmp_file:
 
@@ -1693,22 +1729,30 @@ async def parse_log(request):
                 stdout=subprocess.PIPE,
             )
 
-            proc.stdin.write((messages[0].get("_msg") + "\n").encode())
+            sample_message = _prepare_parse_sample(
+                messages[0].get("_msg"), transforms_type
+            )
+            proc.stdin.write((sample_message + "\n").encode())
             proc.stdin.flush()
 
             output = proc.stdout.readline().strip()
+    except Exception:
+        await _set_convert_health_status(event, None)
+        raise
     finally:
-        os.unlink(tmp_path)
+        if tmp_path:
+            os.unlink(tmp_path)
 
-    if orjson.loads(output).get("log"):
-        await EventsIngestion.update_or_create(
-            id=request.json.get("id"),
-            deleted=False,
-            tenant_id=tenant_id,
-            defaults={"convert_health_status": "healthy"},
-        )
-        log = orjson.loads(output).get("log")
+    try:
+        parsed_output = orjson.loads(output)
+    except orjson.JSONDecodeError:
+        parsed_output = {}
+
+    log = parsed_output.get("log")
+    if log:
+        await _set_convert_health_status(event, "healthy")
     else:
+        await _set_convert_health_status(event, None)
         log = "日志解析失败，请修改解析类型"
 
     return response_ok(log)

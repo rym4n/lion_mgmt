@@ -18,8 +18,47 @@ from settings import AUDIT_TOPIC, TZ
 from .base import BaseMiddleware
 
 UNSAFE_HTTP_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
 def _is_success_status(status: object) -> bool:
     return type(status) is int and 200 <= status < 300
+
+
+SENSITIVE_REQUEST_FIELDS = frozenset(
+    {
+        "password",
+        "current_password",
+        "old_password",
+        "new_password",
+        "confirm_password",
+        "mfa_code",
+    }
+)
+
+
+def _redact_sensitive_request_data(value: str | bytes | None):
+    if not value:
+        return value
+    try:
+        payload = orjson.loads(value)
+    except orjson.JSONDecodeError:
+        return value.decode() if isinstance(value, bytes) else value
+
+    def redact(item):
+        if isinstance(item, dict):
+            return {
+                key: (
+                    "******"
+                    if str(key).casefold() in SENSITIVE_REQUEST_FIELDS
+                    else redact(child)
+                )
+                for key, child in item.items()
+            }
+        if isinstance(item, list):
+            return [redact(child) for child in item]
+        return item
+
+    return orjson.dumps(redact(payload)).decode()
 
 
 def _normalized_origin(value: str | None) -> tuple[str, str, int] | None:
@@ -82,13 +121,13 @@ def _get_openapi_summary(request: Request) -> str:
 
 
 def _normal_request_data(request: Request) -> str | bytes | None:
-    if "multipart" in request.content_type:
+    if "multipart" in (getattr(request, "content_type", "") or ""):
         return None
     return request.body.decode() if isinstance(request.body, bytes) else request.body
 
 
 def _redacted_user_request_data(request: Request) -> str | bytes | None:
-    if request.path not in {
+    sensitive_user_paths = {
         "/user/change-password",
         "/user/edit",
         "/user/login",
@@ -96,29 +135,21 @@ def _redacted_user_request_data(request: Request) -> str | bytes | None:
         "/user/new",
         "/user/sensitive-mfa-auth",
         "/user/update",
-    }:
-        return _normal_request_data(request)
-    try:
-        payload = request.json
-    except Exception:  # noqa: BLE001 - malformed bodies are handled by the API layer.
-        return _normal_request_data(request)
-    if type(payload) is not dict:
-        return _normal_request_data(request)
-
-    redacted = dict(payload)
-    for field in (
-        "password",
-        "old_password",
-        "new_password",
-        "confirm_password",
-        "mfa_code",
-    ):
-        if field in redacted:
-            redacted[field] = "******"
-    if request.path in {"/user/mfa-auth", "/user/sensitive-mfa-auth"}:
-        if "code" in redacted:
-            redacted["code"] = "******"
-    return orjson.dumps(redacted).decode()
+    }
+    if request.path in sensitive_user_paths:
+        try:
+            payload = request.json
+        except Exception:  # noqa: BLE001 - malformed bodies are handled by the API layer.
+            payload = None
+        if type(payload) is dict:
+            redacted = orjson.loads(
+                _redact_sensitive_request_data(orjson.dumps(payload))
+            )
+            if request.path in {"/user/mfa-auth", "/user/sensitive-mfa-auth"}:
+                if "code" in redacted:
+                    redacted["code"] = "******"
+            return orjson.dumps(redacted).decode()
+    return _redact_sensitive_request_data(_normal_request_data(request))
 
 
 def _session_audit_projection(
@@ -159,7 +190,7 @@ def _login_audit_projection(
         "result": "成功" if _is_success_status(status) else "失败",
         "uri": uri,
         "client_ua": client_ua,
-        "request_data": orjson.dumps(params).decode(),
+        "request_data": _redact_sensitive_request_data(orjson.dumps(params)),
         "action": "登录",
     }
 
@@ -192,8 +223,6 @@ def _user_audit_projection(request: Request, response: HTTPResponse) -> dict | N
         )
     if request.path == "/user/login" and request.method == "POST":
         params = request.json
-        if params:
-            params["password"] = "******"
         return _login_audit_projection(
             params,
             client_ip=get_client_ip(request),

@@ -60,7 +60,34 @@ async def test_builtin_admin_can_manage_own_account(monkeypatch):
 
     await user_views._ensure_can_manage_target_user(_request(operator), target)
 
-    assert target.related_fetches == 1
+    assert target.related_fetches == 0
+
+
+@pytest.mark.asyncio
+async def test_assignable_system_admin_role_does_not_protect_custom_account(monkeypatch):
+    operator = SimpleNamespace(id="operator-id", username="root2", tenant_id="tenant-a")
+    target = _TargetAccount(account_id="custom-id", username="abc")
+
+    class _TenantQuery:
+        async def exists(self):
+            return True
+
+    class FakeAccount:
+        @staticmethod
+        def filter(**kwargs):
+            assert kwargs == {
+                "id": "custom-id",
+                "deleted": False,
+                "member__id__in": ["tenant-a"],
+            }
+            return _TenantQuery()
+
+    monkeypatch.setattr(user_views, "Account", FakeAccount)
+    monkeypatch.setattr(user_views, "is_superadmin", lambda account: False)
+
+    await user_views._ensure_can_manage_target_user(_request(operator), target)
+
+    assert target.related_fetches == 0
 
 
 @pytest.mark.asyncio
