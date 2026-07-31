@@ -26,6 +26,7 @@ from models import (
     PlaybookVersion,
     Runlog,
     Timed,
+    Tool,
     ToolAction,
 )
 from services.workflow.views import get_playbook_input
@@ -50,16 +51,13 @@ RUNNING_RUNLOG_STATUSES = {1, 2}
 
 
 def _current_timed_internal_scope(maintenance_mode):
-    return maintenance_mode if maintenance_mode else False
+    if isinstance(maintenance_mode, str):
+        return maintenance_mode.strip().lower() not in {"", "0", "false", "no", "off"}
+    return bool(maintenance_mode)
 
 
-def _timed_internal_scope_from_request(scope, maintenance_mode):
-    if scope in [0, "0"]:
-        return False
-    if scope in [1, "1"]:
-        return True
-    if scope in [2, "2"]:
-        return None
+def _timed_internal_scope_from_request(_scope, maintenance_mode):
+    """Keep the legacy scope parameter inert; the server session owns the mode."""
     return _current_timed_internal_scope(maintenance_mode)
 
 
@@ -75,6 +73,18 @@ async def get_current_timed_internal_scope(request):
 async def get_requested_timed_internal_scope(request):
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
     return _timed_internal_scope_from_request((request.json or {}).get("scope"), maintenance_mode)
+
+
+async def _action_belongs_to_timed_scope(action, tenant_id, internal):
+    if not action:
+        return False
+    return await Tool.filter(
+        name=action.tool_name,
+        version=action.version_number,
+        deleted=False,
+        maintain=bool(internal),
+        tenant_id=tenant_id,
+    ).exists()
 
 
 def _parse_dashboard_datetime_range(start, end):
@@ -232,9 +242,21 @@ async def add_timed(request):
     playbook_version = None
     timer_rule = {}
     if operate_type == 0:
-        playbook = await Playbook.get_or_none(id=playbook_id, deleted=False, tenant_id=tenant_id)
-        playbook_version = await PlaybookVersion.get_or_none(id=playbook_input.get("flow_id"), tenant_id=tenant_id)
+        playbook = await Playbook.get_or_none(
+            id=playbook_id,
+            deleted=False,
+            internal=bool(internal),
+            tenant_id=tenant_id,
+        )
         if not playbook:
+            raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
+        playbook_version = await PlaybookVersion.get_or_none(
+            id=playbook_input.get("flow_id"),
+            playbook_id=playbook.id,
+            deleted=False,
+            tenant_id=tenant_id,
+        )
+        if not playbook_version:
             raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
         # 前端下拉已按执行权(e)过滤，API 层做等价校验，避免直调 API 绕过前端约束
         creator_account = request.ctx.session["account_info"]
@@ -257,7 +279,7 @@ async def add_timed(request):
             timer_rule["crontab"] = tactics
     elif operate_type == 1:
         action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
-        if not action:
+        if not await _action_belongs_to_timed_scope(action, tenant_id, internal):
             raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
         action_input["executor"] = request.ctx.session.get("account_info").id
         if any(
@@ -286,6 +308,8 @@ async def add_timed(request):
             action_input.get("action"),
             action_input.get("resource") or "",
             tenant_id,
+            bool(internal),
+            action_input.get("app_ver"),
         ):
             raise CustomError(ErrorCode.UNAUTH)
         msg["run_type"] = "action"
@@ -357,7 +381,10 @@ def _timed_action_permissions(account, tenant_id: str | None = None):
                         "items": {"type": "string"},
                         "description": "更新时间范围（UTC格式：2025-01-01T00:00:00Z）",
                     },
-                    "scope": {"type": "integer", "description": "范围：0非内置，1内置，2全部；不传则按维护模式"},
+                    "scope": {
+                        "type": "integer",
+                        "description": "兼容旧客户端的保留字段；服务端始终按当前维护模式隔离",
+                    },
                 },
             }
         }
@@ -434,17 +461,14 @@ async def get_all(request):
     enable = req_json.get("enable")
     updator = (req_json.get("updator") or "").strip()
     utime = req_json.get("utime")
-    scope = req_json.get("scope")
     maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
 
     tenant_id = request.ctx.session.get("tenant_id")
 
     condition = Q(deleted=False, tenant_id=tenant_id)
 
-    internal = _timed_internal_scope_from_request(scope, maintenance_mode)
-
-    if internal is not None:
-        condition &= Q(internal=internal)
+    internal = _timed_internal_scope_from_request(req_json.get("scope"), maintenance_mode)
+    condition &= Q(internal=internal)
 
     if enable not in [None, ""]:
         try:
@@ -579,7 +603,13 @@ async def get_all(request):
 @requires_permission("timed:r")
 async def get_success_rate(request):
     tenant_id = request.ctx.session.get("tenant_id")
-    items = await Timed.filter(id__in=request.json.get("ids"), deleted=False, tenant_id=tenant_id).all()
+    internal = await get_current_timed_internal_scope(request)
+    items = await Timed.filter(
+        id__in=request.json.get("ids"),
+        deleted=False,
+        internal=internal,
+        tenant_id=tenant_id,
+    ).all()
     return response_ok([await timer_success_rate(item) for item in items])
 
 
@@ -652,7 +682,13 @@ async def dashboard_statistics(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
-    timed = await Timed.get_or_none(id=timed_id, deleted=False, tenant_id=tenant_id)
+    internal = await get_current_timed_internal_scope(request)
+    timed = await Timed.get_or_none(
+        id=timed_id,
+        deleted=False,
+        internal=internal,
+        tenant_id=tenant_id,
+    )
     if not timed:
         raise CustomError(ErrorCode.TIMED_NOT_FOUND)
 
@@ -788,8 +824,14 @@ async def get_timed_detail(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    internal = await get_current_timed_internal_scope(request)
 
-    timed = await Timed.get_or_none(id=timed_id, deleted=False, tenant_id=tenant_id).prefetch_related("action", "playbook", "creator", "updator")
+    timed = await Timed.get_or_none(
+        id=timed_id,
+        deleted=False,
+        internal=internal,
+        tenant_id=tenant_id,
+    ).prefetch_related("action", "playbook", "creator", "updator")
 
     if not timed:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -926,9 +968,15 @@ async def update_timed(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    internal = await get_current_timed_internal_scope(request)
 
     # 鉴权由 @requires_permission('timed:u') + 租户隔离守门，与全平台可见性/操作语义一致。
-    timed = await Timed.get_or_none(id=timed_id, deleted=False, tenant_id=tenant_id).prefetch_related("action", "playbook", "creator", "updator")
+    timed = await Timed.get_or_none(
+        id=timed_id,
+        deleted=False,
+        internal=internal,
+        tenant_id=tenant_id,
+    ).prefetch_related("action", "playbook", "creator", "updator")
     if not timed:
         raise CustomError(ErrorCode.TIMED_NOT_FOUND)
 
@@ -954,9 +1002,23 @@ async def update_timed(request):
                 playbook_input = timed.playbook_input
                 playbook_id = timed.playbook.id
 
-        timed.playbook = await Playbook.get_or_none(id=playbook_id, deleted=False, tenant_id=tenant_id)
-        playbook_version = await PlaybookVersion.get_or_none(id=playbook_input.get("flow_id"), tenant_id=tenant_id)
-        timed.playbook_version = playbook_version.version if playbook_version else None
+        timed.playbook = await Playbook.get_or_none(
+            id=playbook_id,
+            deleted=False,
+            internal=bool(timed.internal),
+            tenant_id=tenant_id,
+        )
+        if not timed.playbook:
+            raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
+        playbook_version = await PlaybookVersion.get_or_none(
+            id=playbook_input.get("flow_id"),
+            playbook_id=timed.playbook.id,
+            deleted=False,
+            tenant_id=tenant_id,
+        )
+        if not playbook_version:
+            raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
+        timed.playbook_version = playbook_version.version
 
         # 与 add 侧一致：写入前校验对目标剧本有执行权(e)，超管豁免
         editor_account = request.ctx.session["account_info"]
@@ -981,6 +1043,12 @@ async def update_timed(request):
         action_input = data.get("action_input", timed.action_input)
 
         timed.action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
+        if not await _action_belongs_to_timed_scope(
+            timed.action,
+            tenant_id,
+            timed.internal,
+        ):
+            raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
         editor_account = request.ctx.session["account_info"]
         action_input["executor"] = editor_account.id
@@ -1009,6 +1077,8 @@ async def update_timed(request):
             action_input.get("action"),
             action_input.get("resource") or "",
             tenant_id,
+            bool(timed.internal),
+            action_input.get("app_ver"),
         ):
             raise CustomError(ErrorCode.UNAUTH)
 
@@ -1080,8 +1150,14 @@ async def delete_timed(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
+    internal = await get_current_timed_internal_scope(request)
 
-    timed = await Timed.get_or_none(id=timed_id, deleted=False, tenant_id=tenant_id)
+    timed = await Timed.get_or_none(
+        id=timed_id,
+        deleted=False,
+        internal=internal,
+        tenant_id=tenant_id,
+    )
     if not timed:
         raise CustomError(ErrorCode.TIMED_NOT_FOUND)
     if timed.internal:
@@ -1205,7 +1281,17 @@ async def get_run_log(request):
     if not timed_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    condition = Q(timer_id=timed_id, deleted=False)
+    tenant_id = request.ctx.session.get("tenant_id")
+    internal = await get_current_timed_internal_scope(request)
+    if not await Timed.filter(
+        id=timed_id,
+        deleted=False,
+        internal=internal,
+        tenant_id=tenant_id,
+    ).exists():
+        raise CustomError(ErrorCode.TIMED_NOT_FOUND)
+
+    condition = Q(timer_id=timed_id, deleted=False, tenant_id=tenant_id)
 
     if start_time:
         start_dt = datetime.datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)

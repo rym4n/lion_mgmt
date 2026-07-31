@@ -102,16 +102,13 @@ def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
     catalog = _catalog()
 
     assert catalog["metadata"]["digest"] == (
-        "sha256:408a4b533d66bde953e05fd50ba2f05739cc64d7c84f276a42601b89f3ea4736"
+        "sha256:c7695348729bba763449ae4a0a763db670a79c90b86144f3f3aacf809e82333e"
     )
     assert {
         name: len(catalog[name]) for name in builtin_catalog.CATALOG_FILES
     } == builtin_catalog.CATALOG_COUNTS
     assert sum(item["is_derived"] for item in catalog["fields"]) == 0
-    assert Counter(
-        (item["source_to_target"], item["target_to_source"])
-        for item in catalog["relations"]
-    ) == Counter(builtin_catalog.RELATION_QUANTITY_COUNTS)
+    assert "relations" not in catalog
 
     model_keys = {item["key"] for item in catalog["models"]}
     assert "rex-test" not in model_keys
@@ -130,15 +127,12 @@ def test_builtin_catalog_has_exact_v1_counts_digest_and_references():
         for item in catalog["fields"]
         if item.get("source_data_type") in {"organization", "user"}
     } == {"organization", "user"}
-    assert all(
-        set(item["source_model_keys"] + item["target_model_keys"]) <= model_keys
-        for item in catalog["relations"]
-    )
     ref_fields = [item for item in catalog["fields"] if item["data_type"] == "ref"]
-    assert len(ref_fields) == 311
-    assert Counter(item["ref_ci_type_id"] for item in ref_fields) == Counter(
-        {"organization": 209, "user": 102}
-    )
+    assert len(ref_fields) == 497
+    ref_targets = Counter(item["ref_ci_type_id"] for item in ref_fields)
+    assert ref_targets["organization"] == 209
+    assert ref_targets["user"] == 103
+    assert {item["ref_ci_type_id"] for item in ref_fields} <= model_keys
     field_names = [
         (
             item["model_key"],
@@ -327,25 +321,34 @@ def test_catalog_builder_replaces_legacy_user_with_soc_foundation_models():
     )
 
 
-def test_reference_fields_and_relation_edges_have_distinct_contracts():
+def test_association_definitions_are_reference_fields():
     catalog = _catalog()
-    ref_pairs = {
-        (field["model_key"], field["ref_ci_type_id"])
+    association_fields = [
+        field
         for field in catalog["fields"]
-        if field["data_type"] == "ref"
-    }
-    relation_pairs = {
-        (source, target)
-        for relation in catalog["relations"]
-        for source in relation["source_model_keys"]
-        for target in relation["target_model_keys"]
-    }
+        if isinstance(field.get("options"), dict)
+        and field["options"].get("derived_from_association")
+    ]
 
-    assert len(catalog["relations"]) == 185
-    assert len(ref_pairs) == 262
-    assert len(relation_pairs) == 160
-    assert ref_pairs.isdisjoint(relation_pairs)
-    assert ref_pairs.isdisjoint({(target, source) for source, target in relation_pairs})
+    assert len(association_fields) == 185
+    assert len({field["builtin_key"] for field in association_fields}) == 185
+    assert all(field["data_type"] == "ref" for field in association_fields)
+    assert all(
+        isinstance(field["options"].get("multiple"), bool)
+        and isinstance(field["options"].get("reverse_unique"), bool)
+        for field in association_fields
+    )
+    project_manager = next(
+        field
+        for field in catalog["fields"]
+        if field["model_key"] == "project" and field["field_key"] == "manager"
+    )
+    assert project_manager["data_type"] == "ref"
+    assert project_manager["ref_ci_type_id"] == "user"
+    assert project_manager["options"] == {
+        "multiple": False,
+        "reverse_unique": False,
+    }
 
 
 def test_builtin_catalog_preserves_composite_unique_rule():
@@ -447,57 +450,34 @@ def test_composite_unique_rule_is_enforced_for_instances(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("source_to_target", "target_to_source", "expected_filter_keys"),
+    ("multiple", "value"),
     [
-        ("one", "one", {"source_ci_id", "target_ci_id"}),
-        ("many", "one", {"target_ci_id"}),
-        ("one", "many", {"source_ci_id"}),
-        ("many", "many", set()),
+        (False, "target-1"),
+        (True, ["target-1", "target-2"]),
     ],
 )
-def test_all_four_directional_relation_quantities_are_enforced(
-    monkeypatch,
-    source_to_target,
-    target_to_source,
-    expected_filter_keys,
+def test_scalar_and_multiple_reference_values_are_validated(
+    monkeypatch, multiple, value
 ):
-    filters = []
-
-    def relation_filter(**kwargs):
-        filters.append(kwargs)
-        return _Query()
-
+    targets = [_Record(id=target_id) for target_id in ([value] if isinstance(value, str) else value)]
     monkeypatch.setattr(
-        manager.SupplyChainCiRelation,
+        manager.SupplyChainCi,
         "filter",
-        staticmethod(relation_filter),
+        staticmethod(lambda **_kwargs: _Query(targets)),
     )
-    relation_type = SimpleNamespace(
-        key="depends_on",
-        source_ci_type_ids=["source-model"],
-        target_ci_type_ids=["target-model"],
-        source_ci_types=["source"],
-        target_ci_types=["target"],
-        source_to_target=source_to_target,
-        target_to_source=target_to_source,
-    )
+
     asyncio.run(
-        manager.validate_relation_ends(
+        manager.validate_field_value(
             "tenant-a",
-            relation_type,
-            SimpleNamespace(id="source-ci", ci_type_id="source-model"),
-            SimpleNamespace(id="target-ci", ci_type_id="target-model"),
-            connection=object(),
+            SimpleNamespace(
+                data_type="ref",
+                ref_ci_type_id="target-model",
+                required=True,
+                options={"multiple": multiple, "reverse_unique": False},
+            ),
+            value,
         )
     )
-
-    actual_filter_keys = {
-        key
-        for item in filters
-        for key in ("source_ci_id", "target_ci_id")
-        if key in item
-    }
-    assert actual_filter_keys == expected_filter_keys
 
 
 def test_activation_preview_apply_revision_expiry_and_idempotency(monkeypatch):
@@ -529,8 +509,8 @@ def test_activation_preview_apply_revision_expiry_and_idempotency(monkeypatch):
     async def activation_impact(*_args, **_kwargs):
         return {
             "affected_model_count": 1,
-            "activated_relation_count": 0,
-            "dormant_relation_count": 1,
+            "active_reference_field_count": 0,
+            "dormant_reference_field_count": 1,
             "existing_instance_count": 2,
             "blocking_reasons": [],
             "cross_group_dependencies": [],
@@ -764,10 +744,6 @@ def test_ready_catalog_version_change_adds_missing_definitions_without_overwrite
         calls.append(("unique_rules", preserve_existing))
         return 0
 
-    async def upsert_relations(*_args, preserve_existing=False):
-        calls.append(("relations", preserve_existing))
-        return 0
-
     async def ensure_activations(*_args):
         calls.append(("activations", True))
         return 2
@@ -787,7 +763,6 @@ def test_ready_catalog_version_change_adds_missing_definitions_without_overwrite
     monkeypatch.setattr(builtin_catalog, "_upsert_builtin_models", upsert_models)
     monkeypatch.setattr(builtin_catalog, "_upsert_builtin_fields", upsert_fields)
     monkeypatch.setattr(builtin_catalog, "_upsert_builtin_unique_rules", upsert_rules)
-    monkeypatch.setattr(builtin_catalog, "_upsert_builtin_relations", upsert_relations)
     monkeypatch.setattr(builtin_catalog, "_ensure_activations", ensure_activations)
     monkeypatch.setattr(
         builtin_catalog.SupplyChainBuiltinCatalogEvent,
@@ -809,7 +784,6 @@ def test_ready_catalog_version_change_adds_missing_definitions_without_overwrite
         "models": 2,
         "fields": 4,
         "unique_rules": 0,
-        "relations": 0,
         "activations": 2,
         "metadata": 1,
     }
@@ -818,7 +792,6 @@ def test_ready_catalog_version_change_adds_missing_definitions_without_overwrite
         ("models", True),
         ("fields", True),
         ("unique_rules", True),
-        ("relations", True),
         ("activations", True),
     ]
     assert state.catalog_version == builtin_catalog.CATALOG_VERSION

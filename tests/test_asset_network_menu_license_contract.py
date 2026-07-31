@@ -36,6 +36,9 @@ fix_menus = importlib.import_module(
 route_auth_meta = importlib.import_module(
     "migrations.models.63_20260708183000_add_asset_network_route_auth_meta"
 )
+asset_reference_fields = importlib.import_module(
+    "migrations.models.95_20260730183000_replace_asset_relations_with_references"
+)
 asset_data_menu_label = importlib.import_module(
     "migrations.models.70_20260712181000_rename_asset_catalog_to_asset_data"
 )
@@ -382,6 +385,7 @@ def test_fix_menu_migration_removes_legacy_topology_and_backfills_admin_roles():
 
 def test_asset_network_route_meta_carries_menu_read_permissions():
     upgrade_sql = asyncio.run(route_auth_meta.upgrade(None))
+    replacement_sql = asyncio.run(asset_reference_fields.upgrade(None))
     init_sql = (ROOT / "aioe_package/aioe_install/init.sql").read_text()
 
     for text in (upgrade_sql, init_sql):
@@ -390,10 +394,18 @@ def test_asset_network_route_meta_carries_menu_read_permissions():
         assert "'auths'" in text
         assert "supply_chain_review:model:r" in text
         assert "supply_chain_review:field:r" in text
-        assert "supply_chain_review:relation:r" in text
         assert "supply_chain_review:ci:r" in text
         assert "network_topology:r" in text
         assert "supply_chain_review:policy:r" in text
+
+    assert "supply_chain_review:relation:r" in upgrade_sql
+    assert "supply_chain_review:relation:r" not in init_sql
+    assert "JSONB_TYPEOF(permission) = 'string'" in replacement_sql
+    assert "LIKE 'supply_chain_review:relation:%'" in replacement_sql
+    assert (
+        "'[\"supply_chain_review:model:r\",\"supply_chain_review:field:r\"]'::jsonb"
+        in replacement_sql
+    )
 
 
 def test_network_topology_installer_uses_crud_and_migrates_legacy_write_permission():

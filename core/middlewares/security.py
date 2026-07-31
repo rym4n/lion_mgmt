@@ -17,8 +17,9 @@ from settings import AUDIT_TOPIC, TZ
 
 from .base import BaseMiddleware
 
-
 UNSAFE_HTTP_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+def _is_success_status(status: object) -> bool:
+    return type(status) is int and 200 <= status < 300
 
 
 def _normalized_origin(value: str | None) -> tuple[str, str, int] | None:
@@ -80,14 +81,149 @@ def _get_openapi_summary(request: Request) -> str:
     return summary or "访问"
 
 
+def _normal_request_data(request: Request) -> str | bytes | None:
+    if "multipart" in request.content_type:
+        return None
+    return request.body.decode() if isinstance(request.body, bytes) else request.body
+
+
+def _redacted_user_request_data(request: Request) -> str | bytes | None:
+    if request.path not in {
+        "/user/change-password",
+        "/user/edit",
+        "/user/login",
+        "/user/mfa-auth",
+        "/user/new",
+        "/user/sensitive-mfa-auth",
+        "/user/update",
+    }:
+        return _normal_request_data(request)
+    try:
+        payload = request.json
+    except Exception:  # noqa: BLE001 - malformed bodies are handled by the API layer.
+        return _normal_request_data(request)
+    if type(payload) is not dict:
+        return _normal_request_data(request)
+
+    redacted = dict(payload)
+    for field in (
+        "password",
+        "old_password",
+        "new_password",
+        "confirm_password",
+        "mfa_code",
+    ):
+        if field in redacted:
+            redacted[field] = "******"
+    if request.path in {"/user/mfa-auth", "/user/sensitive-mfa-auth"}:
+        if "code" in redacted:
+            redacted["code"] = "******"
+    return orjson.dumps(redacted).decode()
+
+
+def _session_audit_projection(
+    session: dict,
+    *,
+    status: object,
+    uri: str,
+    client_ua: str,
+    request_data: str | bytes | None,
+    action: str,
+) -> dict:
+    return {
+        "username": session["name"],
+        "display_name": session["display_name"],
+        "tenant_id": session.get("tenant_id", 0),
+        "client_ip": session["ip"],
+        "result": "成功" if _is_success_status(status) else "失败",
+        "uri": uri,
+        "client_ua": client_ua,
+        "request_data": request_data,
+        "action": action,
+    }
+
+
+def _login_audit_projection(
+    params: dict,
+    *,
+    client_ip: str,
+    status: object,
+    uri: str,
+    client_ua: str,
+) -> dict:
+    return {
+        "username": params.get("username", ""),
+        "display_name": params.get("username", ""),
+        "tenant_id": params.get("tenant_id", 0),
+        "client_ip": client_ip,
+        "result": "成功" if _is_success_status(status) else "失败",
+        "uri": uri,
+        "client_ua": client_ua,
+        "request_data": orjson.dumps(params).decode(),
+        "action": "登录",
+    }
+
+
+def _oauth_audit_projection(
+    *, client_ip: str, status: object, uri: str, client_ua: str
+) -> dict:
+    return {
+        "username": "",
+        "display_name": "",
+        "tenant_id": "",
+        "client_ip": client_ip,
+        "result": "成功" if _is_success_status(status) else "失败",
+        "uri": uri,
+        "client_ua": client_ua,
+        "request_data": "",
+        "action": "OAuth回调",
+    }
+
+
+def _user_audit_projection(request: Request, response: HTTPResponse) -> dict | None:
+    if hasattr(request.ctx, "session"):
+        return _session_audit_projection(
+            request.ctx.session,
+            status=response.status,
+            uri=request.path,
+            client_ua=request.headers.get("User-Agent", ""),
+            request_data=_redacted_user_request_data(request),
+            action=_get_openapi_summary(request),
+        )
+    if request.path == "/user/login" and request.method == "POST":
+        params = request.json
+        if params:
+            params["password"] = "******"
+        return _login_audit_projection(
+            params,
+            client_ip=get_client_ip(request),
+            status=response.status,
+            uri=request.path,
+            client_ua=request.headers.get("User-Agent", ""),
+        )
+    if request.path == "/user/oauth/callback":
+        return _oauth_audit_projection(
+            client_ip=get_client_ip(request),
+            status=response.status,
+            uri=request.path,
+            client_ua=request.headers.get("User-Agent", ""),
+        )
+    return None
+
+
+async def _publish_audit(data: dict) -> None:
+    data["ctime"] = datetime.now(TZ).strftime("%Y-%m-%dT%H:%M:%S%z")
+    data["id"] = str(uuid.uuid4())
+    data["log_type"] = "aioe_audit"
+    await aproduce(AUDIT_TOPIC, data)
+
+
 class SecurityMiddleware(BaseMiddleware):
     """安全相关的控制"""
 
     async def before_request(self, request: Request) -> HTTPResponse | None:
         if _is_cross_origin_unsafe_request(request):
             return response_fail(ErrorCode.FORBIDDEN, status=403)
-
-        # 判断请求URI是否需要身份验证
         white_urls = [
             "/user/login",
             "/health",
@@ -110,9 +246,7 @@ class SecurityMiddleware(BaseMiddleware):
         if (
             request.path not in white_urls
             and (request_method, request.path) not in white_method_urls
-            and not any(
-                request.path.startswith(prefix) for prefix in white_prefixes
-            )
+            and not any(request.path.startswith(prefix) for prefix in white_prefixes)
         ):
             await authenticate(request)
             if request.path == "/docs" or request.path.startswith("/docs/"):
@@ -120,52 +254,6 @@ class SecurityMiddleware(BaseMiddleware):
 
     async def before_response(self, request: Request, response: HTTPResponse) -> None:
         """统一记录操作日志"""
-        data = None
-
-        if hasattr(request.ctx, "session"):
-            param = None
-            if "multipart" not in request.content_type:
-                param = request.body.decode() if isinstance(request.body, bytes) else request.body
-            data = {
-                "username": request.ctx.session["name"],
-                "display_name": request.ctx.session["display_name"],
-                "tenant_id": (request.ctx.session["tenant_id"] if "tenant_id" in request.ctx.session else 0),
-                "client_ip": request.ctx.session["ip"],
-                "result": "成功" if response.status == 200 else "失败",
-                "uri": request.path,
-                "client_ua": request.headers.get("User-Agent", ""),
-                "request_data": param,
-                "action": _get_openapi_summary(request),
-            }
-        elif request.path == "/user/login" and request.method == "POST":
-            params = request.json
-            if params:
-                params["password"] = "******"
-            data = {
-                "username": request.json.get("username", ""),
-                "display_name": request.json.get("username", ""),
-                "tenant_id": request.json.get("tenant_id", 0),
-                "client_ip": get_client_ip(request),
-                "result": "成功" if response.status == 200 else "失败",
-                "uri": request.path,
-                "client_ua": request.headers.get("User-Agent", ""),
-                "request_data": orjson.dumps(params).decode(),
-                "action": "登录",
-            }
-        elif request.path == "/user/oauth/callback":
-            data = {
-                "username": "",
-                "display_name": "",
-                "tenant_id": "",
-                "client_ip": get_client_ip(request),
-                "result": "成功" if response.status < 400 else "失败",
-                "uri": request.path,
-                "client_ua": request.headers.get("User-Agent", ""),
-                "request_data": "",
-                "action": "OAuth回调",
-            }
+        data = _user_audit_projection(request, response)
         if data is not None:
-            data["ctime"] = datetime.now(TZ).strftime("%Y-%m-%dT%H:%M:%S%z")
-            data["id"] = str(uuid.uuid4())
-            data["log_type"] = "aioe_audit"
-            await aproduce(AUDIT_TOPIC, data)
+            await _publish_audit(data)

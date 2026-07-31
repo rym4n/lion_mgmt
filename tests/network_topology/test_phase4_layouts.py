@@ -100,8 +100,26 @@ class MemoryLayoutRepository:
         return row
 
 
+class PausingMemoryLayoutRepository(MemoryLayoutRepository):
+    def __init__(self):
+        super().__init__()
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+        self.pause_next_transaction = True
+
+    @asynccontextmanager
+    async def transaction(self):
+        async with self.lock:
+            if self.pause_next_transaction:
+                self.pause_next_transaction = False
+                self.entered.set()
+                await self.release.wait()
+            yield self
+
+
 def payload(scope_id, expected=0, graph=1, x=10):
     return {
+        "id": "topology-1",
         "scope_id": scope_id,
         "expected_scope_layout_revision": expected,
         "graph_revision": graph,
@@ -148,17 +166,27 @@ def test_cross_scope_concurrent_save_copy_on_write_retains_both_scopes():
 
 def test_graph_publish_and_drag_competition_preserves_committed_drag():
     async def scenario():
-        repo = MemoryLayoutRepository()
-        await layouts.save_scope_layout(
-            AUTHORITY, payload("scope:a", x=99), repository=repo
+        repo = PausingMemoryLayoutRepository()
+        drag_task = asyncio.create_task(
+            layouts.save_scope_layout(
+                AUTHORITY, payload("scope:a", x=99), repository=repo
+            )
         )
-        publish = await layouts.rebase_layouts_for_graph(
-            AUTHORITY,
-            expected_graph_revision=1,
-            graph_revision=2,
-            scope_items={"scope:a": {"device:a", "device:new"}},
-            repository=repo,
+        await repo.entered.wait()
+        publish_task = asyncio.create_task(
+            layouts.rebase_layouts_for_graph(
+                AUTHORITY,
+                expected_graph_revision=1,
+                graph_revision=2,
+                scope_items={"scope:a": {"device:a", "device:new"}},
+                aliases={},
+                repository=repo,
+            )
         )
+        await asyncio.sleep(0)
+        assert not publish_task.done()
+        repo.release.set()
+        _, publish = await asyncio.gather(drag_task, publish_task)
         current = repo.layout_sets[repo.topology.current_layout_set_row_id]
         entry = layouts.decode_scope_version_map(current.scope_version_map_json)["scope:a"]
         version = repo.layout_versions[entry["layout_version_row_id"]]
@@ -166,6 +194,38 @@ def test_graph_publish_and_drag_competition_preserves_committed_drag():
         assert publish.graph_revision == 2
         assert document["items"]["device:a"]["x"] == 99
         assert document["pending_item_ids"] == ["device:new"]
+
+    run(scenario())
+
+
+def test_graph_publish_winning_race_rejects_old_graph_drag():
+    async def scenario():
+        repo = PausingMemoryLayoutRepository()
+        publish_task = asyncio.create_task(
+            layouts.rebase_layouts_for_graph(
+                AUTHORITY,
+                expected_graph_revision=1,
+                graph_revision=2,
+                scope_items={"scope:a": {"device:a"}},
+                aliases={},
+                repository=repo,
+            )
+        )
+        await repo.entered.wait()
+        drag_task = asyncio.create_task(
+            layouts.save_scope_layout(
+                AUTHORITY, payload("scope:a", graph=1), repository=repo
+            )
+        )
+        await asyncio.sleep(0)
+        assert not drag_task.done()
+        repo.release.set()
+        publish, drag = await asyncio.gather(
+            publish_task, drag_task, return_exceptions=True
+        )
+        assert publish.graph_revision == 2
+        assert isinstance(drag, layouts.LayoutError)
+        assert drag.code == layouts.LAYOUT_GRAPH_CONFLICT
 
     run(scenario())
 
@@ -178,6 +238,7 @@ def test_old_graph_layout_save_is_rejected_after_publish():
             expected_graph_revision=1,
             graph_revision=2,
             scope_items={"scope:a": {"device:a"}},
+            aliases={},
             repository=repo,
         )
         with pytest.raises(layouts.LayoutError) as error:
@@ -188,6 +249,18 @@ def test_old_graph_layout_save_is_rejected_after_publish():
         assert error.value.code == layouts.LAYOUT_GRAPH_CONFLICT
 
     run(scenario())
+
+
+def test_layout_request_cannot_cross_authority_topology():
+    request = payload("scope:a")
+    request["id"] = "topology-other"
+    with pytest.raises(layouts.LayoutError) as error:
+        run(
+            layouts.save_scope_layout(
+                AUTHORITY, request, repository=MemoryLayoutRepository()
+            )
+        )
+    assert error.value.status == 400
 
 
 def test_graph_rebase_keeps_valid_items_and_marks_removed_items_orphan():
@@ -201,6 +274,7 @@ def test_graph_rebase_keeps_valid_items_and_marks_removed_items_orphan():
             expected_graph_revision=1,
             graph_revision=2,
             scope_items={"scope:a": {"device:a", "device:new"}},
+            aliases={},
             repository=repo,
         )
         current = repo.layout_sets[repo.topology.current_layout_set_row_id]
@@ -211,6 +285,44 @@ def test_graph_rebase_keeps_valid_items_and_marks_removed_items_orphan():
         assert set(document["items"]) == {"device:a"}
         assert document["orphan_items"]["device:removed"]["x"] == 30
         assert document["pending_item_ids"] == ["device:new"]
+
+    run(scenario())
+
+
+def test_graph_rebase_migrates_unique_alias_coordinates():
+    async def scenario():
+        repo = MemoryLayoutRepository()
+        await layouts.save_scope_layout(
+            AUTHORITY, payload("scope:a", x=77), repository=repo
+        )
+        await layouts.rebase_layouts_for_graph(
+            AUTHORITY,
+            expected_graph_revision=1,
+            graph_revision=2,
+            scope_items={"scope:a": {"device:new"}},
+            aliases={"device:a": "device:new"},
+            repository=repo,
+        )
+        current = repo.layout_sets[repo.topology.current_layout_set_row_id]
+        entry = layouts.decode_scope_version_map(current.scope_version_map_json)["scope:a"]
+        document = layouts.decode_layout_document(
+            repo.layout_versions[entry["layout_version_row_id"]].layout_json
+        )
+        assert document["items"]["device:new"]["x"] == 77
+        assert document["pending_item_ids"] == []
+        assert document["orphan_items"] == {}
+
+    run(scenario())
+
+
+def test_initial_null_layout_set_revision_is_preserved_in_cas_comparison():
+    async def scenario():
+        repo = MemoryLayoutRepository()
+        repo.topology.current_layout_set_revision = None
+        await layouts.save_scope_layout(
+            AUTHORITY, payload("scope:a"), repository=repo
+        )
+        assert repo.topology.current_layout_set_revision == 1
 
     run(scenario())
 

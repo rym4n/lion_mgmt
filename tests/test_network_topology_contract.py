@@ -99,6 +99,15 @@ def test_network_topology_exposes_data_crud_and_external_config_sync_only():
         ),
         "/layout": ("update_layout", ("network_topology:u",)),
         "/delete": ("delete_topology", ("network_topology:d",)),
+        "/view": ("view_topology_scope", ("network_topology:r",)),
+        "/search": ("search_topology", ("network_topology:r",)),
+        "/evidence": ("get_topology_evidence", ("network_topology:r",)),
+        "/profile": (
+            "save_topology_profile",
+            ("network_topology:profile_admin",),
+        ),
+        "/override": ("save_topology_override", ("network_topology:u",)),
+        "/upgrade-to-v2": ("upgrade_to_v2", ("network_topology:u",)),
     }
 
 

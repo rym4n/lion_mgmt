@@ -4,7 +4,9 @@ import datetime
 from sanic import Blueprint
 from sanic_ext import openapi
 
+from core.error_code import ErrorCode
 from core.response import response_ok
+from libs.error_code.exception import CustomError
 from libs.chat import chat_manager, get_playbook_prompt_words, get_prompt_words
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
@@ -263,11 +265,22 @@ async def publish_msg(request):
 @requires_permission("warroom:r")
 async def get_prompt_word(request):
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = bool(
+        await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    )
 
     if request.json.get("ai_type") == "action":
-        system_prompt, ai_dict, ai_desc = await get_prompt_words(request.json.get("prompt_word"), tenant_id)
+        system_prompt, ai_dict, ai_desc = await get_prompt_words(
+            request.json.get("prompt_word"),
+            tenant_id,
+            maintenance_mode,
+        )
     else:
-        system_prompt, ai_dict, ai_desc = await get_playbook_prompt_words(request.json.get("prompt_word"), tenant_id)
+        system_prompt, ai_dict, ai_desc = await get_playbook_prompt_words(
+            request.json.get("prompt_word"),
+            tenant_id,
+            maintenance_mode,
+        )
 
     return response_ok({"system_prompt": system_prompt, "ai_dict": ai_dict, "ai_desc": ai_desc})
 
@@ -326,9 +339,20 @@ async def get_prompt_word(request):
 @requires_permission("warroom:r")
 async def get_tool_action(request):
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = bool(
+        await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    )
     tool_actions = await ToolAction.filter(id__in=request.json.get("data"), deleted=False, tenant_id=tenant_id).all()
     data = []
     for tool_action in tool_actions:
+        if not await Tool.filter(
+            name=tool_action.tool_name,
+            version=tool_action.version_number,
+            deleted=False,
+            maintain=maintenance_mode,
+            tenant_id=tenant_id,
+        ).exists():
+            continue
         data.append(
             {
                 "action": tool_action.action,
@@ -382,15 +406,26 @@ async def get_tool_action(request):
 @requires_permission("warroom:r")
 async def get_tool_info(request):
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = bool(
+        await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    )
 
     tool = await Tool.get_or_none(
         name=request.json.get("tool_name"),
         version=request.json.get("version_number"),
         deleted=False,
+        maintain=maintenance_mode,
         tenant_id=tenant_id,
     )
+    if not tool:
+        raise CustomError(ErrorCode.TOOL_NOT_FOUND_ERROR)
 
-    resource = await ToolResourcesModel.get_or_none(tool_name=request.json.get("tool_name"), deleted=False, tenant_id=tenant_id)
+    resource = await ToolResourcesModel.get_or_none(
+        tool_name=request.json.get("tool_name"),
+        deleted=False,
+        internal=maintenance_mode,
+        tenant_id=tenant_id,
+    )
     return response_ok(
         {
             "description": tool.description,

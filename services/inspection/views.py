@@ -18,6 +18,7 @@ from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.transactions import in_transaction
 
+from core.maintenance import DEFAULT_TENANT_ID
 from core.response import response_ok
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
@@ -34,6 +35,37 @@ __all__ = ["inspection_bp"]
 
 CUSTOM_REPORT_PLACEHOLDER = "${自定义报告}"
 INSPECTION_RESULT_ALL_OUTPUT_REFS = ("all", "全部", "所有", "全部巡检项", "所有巡检项", "*")
+AUTOMATION_INSPECTION_PLAYBOOK_NAME = "自动化巡检"
+
+
+def _resolve_authenticated_tenant_id(request: Request, data: dict) -> str:
+    tenant_id = request.ctx.session.get("tenant_id")
+    if not tenant_id:
+        raise CustomError(ErrorCode.SESSION_INVALID)
+
+    requested_tenant_id = data.get("tenant_id")
+    if requested_tenant_id is not None and requested_tenant_id != tenant_id:
+        raise CustomError(ErrorCode.FORBIDDEN)
+    return tenant_id
+
+
+async def _get_automation_inspection_playbook():
+    playbook = await Playbook.filter(
+        name=AUTOMATION_INSPECTION_PLAYBOOK_NAME,
+        deleted=False,
+        tenant_id=DEFAULT_TENANT_ID,
+        internal=True,
+    ).first()
+    if not playbook:
+        return None, None
+
+    playbook_version = await PlaybookVersion.filter(
+        playbook_id=playbook.id,
+        tenant_id=DEFAULT_TENANT_ID,
+        deleted=False,
+        status=1,
+    ).order_by("-utime").first()
+    return playbook, playbook_version
 
 
 def _serialize_category(category):
@@ -1752,7 +1784,7 @@ async def get_all_configs(request: Request):
     if not schedule_ids:
         raise CustomError(ErrorCode.PARAM_ERROR)
     target_ids = data.get("target_id") if data.get("target_id") != "None" else None
-    tenant_id = data.get("tenant_id")
+    tenant_id = _resolve_authenticated_tenant_id(request, data)
     result = await logic.get_all_configs(tenant_id, schedule_ids, target_ids)
     return response_ok(data=result)
 
@@ -1907,14 +1939,11 @@ async def start_inspection(request: Request):
             await aproduce(TASK_TOPIC, msg)
     else:
         # 创建新的定时任务
-        # 查找名为"自动化巡检"的剧本
-        playbook = await Playbook.filter(name="自动化巡检", deleted=False, tenant_id=tenant_id, internal=True).first()
+        # 维护剧本只存在于 default 租户，业务数据仍由当前会话租户隔离。
+        playbook, playbook_version = await _get_automation_inspection_playbook()
 
         if not playbook:
             return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
-
-        # 获取该剧本的最新发布版本
-        playbook_version = await PlaybookVersion.filter(playbook_id=playbook.id, tenant_id=tenant_id, status=1).order_by("-utime").first()  # 假设 status=1 表示已发布
 
         if not playbook_version:
             return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
@@ -2081,13 +2110,10 @@ async def execute_inspection(request: Request):
     if not schedule:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    playbook = await Playbook.filter(name="自动化巡检", deleted=False, internal=True).first()
+    playbook, playbook_version = await _get_automation_inspection_playbook()
 
     if not playbook:
         return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
-
-    # 获取该剧本的最新发布版本
-    playbook_version = await PlaybookVersion.filter(playbook_id=playbook.id, status=1).order_by("-utime").first()  # 假设 status=1 表示已发布
 
     if not playbook_version:
         return response_ok("当前不存在自动化巡检剧本，请联系管理员进行处理")
@@ -2618,7 +2644,7 @@ async def add_result(request: Request):
     Add inspection result
     """
     request_data = request.json or {}
-    tenant_id = request_data.get("tenant_id")
+    tenant_id = _resolve_authenticated_tenant_id(request, request_data)
 
     result_data_array = request_data.get("result_data")
     start_time = request_data.get("start_time")

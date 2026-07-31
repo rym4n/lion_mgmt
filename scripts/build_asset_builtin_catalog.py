@@ -14,9 +14,8 @@ CATALOG_VERSION = "bklite-2026.07-v1"
 EXPECTED_COUNTS = {
     "groups": 30,
     "models": 236,
-    "fields": 3248,
+    "fields": 3433,
     "unique_rules": 1,
-    "relations": 185,
     "icon_aliases": 28,
 }
 RELATION_NAMES = {
@@ -103,7 +102,14 @@ DIRECTORY_MODELS = (
                 "sort": 30,
             },
             {"field_key": "owner_department", "label": "责任部门", "sort": 40},
-            {"field_key": "manager", "label": "负责人", "sort": 50},
+            {
+                "field_key": "manager",
+                "label": "负责人",
+                "data_type": "ref",
+                "ref_ci_type_id": "user",
+                "options": {"multiple": False, "reverse_unique": False},
+                "sort": 50,
+            },
             {
                 "field_key": "security_level",
                 "label": "安全等级",
@@ -434,6 +440,8 @@ def replace_directory_models(models: list[dict], fields: list[dict]) -> None:
                 "is_locked": True,
                 "owner": "product",
             }
+            if field.get("ref_ci_type_id"):
+                field_payload["ref_ci_type_id"] = field["ref_ci_type_id"]
             field_payload["builtin_hash"] = digest(field_payload)
             fields.append(field_payload)
 
@@ -678,7 +686,15 @@ def build_catalog(
                 continue
             source_relations.setdefault(relation["model_asst_id"], relation)
 
-    relations = []
+    model_names = {item["key"]: item["name"] for item in models}
+    next_field_sort = {
+        model_key: max(
+            (int(field.get("sort") or 0) for field in fields if field["model_key"] == model_key),
+            default=0,
+        )
+        for model_key in model_keys
+    }
+    reference_fields = []
     for relation in sorted(
         source_relations.values(), key=lambda value: value["model_asst_id"]
     ):
@@ -693,21 +709,43 @@ def build_catalog(
                 f"unsupported relation mapping: {relation['mapping']}"
             ) from exc
         semantic_key = relation["asst_id"]
+        relation_key = relation["model_asst_id"]
+        next_field_sort[source_key] += 1
         payload = {
-            "key": relation["model_asst_id"],
-            "name": RELATION_NAMES.get(semantic_key, semantic_key),
-            "semantic_key": semantic_key,
-            "source_model_keys": [source_key],
-            "target_model_keys": [target_key],
-            "source_to_target": source_to_target,
-            "target_to_source": target_to_source,
-            "relation_fields": [],
+            "builtin_key": f"{source_key}.{relation_key}",
+            "model_key": source_key,
+            "field_key": relation_key,
+            "source_field_key": relation_key,
+            "label": (
+                f"{RELATION_NAMES.get(semantic_key, semantic_key)}"
+                f"{model_names[target_key]}"
+            ),
+            "data_type": "ref",
+            "source_data_type": "association",
+            "field_group": "关联信息",
+            "field_group_sort": 1000,
+            "options": {
+                "multiple": source_to_target == "many",
+                "reverse_unique": target_to_source == "one",
+                "semantic_key": semantic_key,
+                "derived_from_association": relation_key,
+            },
+            "enum_options": [],
+            "ref_ci_type_id": target_key,
+            "required": False,
+            "unique": False,
+            "editable": True,
+            "is_derived": False,
+            "default_value": None,
+            "user_prompt": "",
+            "sort": next_field_sort[source_key],
             "is_builtin": True,
             "is_locked": True,
             "owner": "product",
         }
         payload["builtin_hash"] = digest(payload)
-        relations.append(payload)
+        reference_fields.append(payload)
+    fields.extend(reference_fields)
 
     icon_aliases = [
         {"source_icon": source_icon, "icon": target_icon}
@@ -725,7 +763,6 @@ def build_catalog(
         "models": models,
         "fields": fields,
         "unique_rules": unique_rules,
-        "relations": relations,
         "icon_aliases": icon_aliases,
     }
     actual_counts = {key: len(value) for key, value in catalog.items()}
@@ -753,7 +790,6 @@ def write_catalog(catalog: dict[str, list[dict]], output_dir: Path) -> None:
         "model_count": len(catalog["models"]),
         "field_count": len(catalog["fields"]),
         "unique_rule_count": len(catalog["unique_rules"]),
-        "relation_count": len(catalog["relations"]),
         "digest": f"sha256:{payload_digest}",
     }
     (output_dir / "catalog.json").write_text(

@@ -22,6 +22,7 @@ from sanic_ext import openapi
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
+from core.maintenance import can_enable_maintenance_mode
 from core.response import response_fail, response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import get_superadmin_role, requires_permission
@@ -1766,7 +1767,7 @@ async def get_outgoing_config(request):
 @system_bp.post("/up-mt")
 @openapi.definition(
     summary="更新维护模式状态",
-    description="更新维护模式状态，需要audit:r权限",
+    description="更新维护模式状态，仅默认租户的admin可开启，需要audit:r权限",
     body={
         "application/json": {
             "schema": {
@@ -1804,11 +1805,24 @@ async def update_maintenance_mode_status(request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     mt_status = int(request.json.get("mt_status"))
-    if request.ctx.session["account_info"].username == "admin":
+    username = request.ctx.session["account_info"].username
+    if username == "admin":
         if mt_status == 1:
-            await request.app.ctx.cache_client.set(request.ctx.session["id"], True, AUTHENTICATION_SESSION_EXPIRATION)
+            if not can_enable_maintenance_mode(
+                username, request.ctx.session.get("tenant_id")
+            ):
+                raise CustomError(ErrorCode.MAINTENANCE_MODE_ERROR)
+            await request.app.ctx.cache_client.set(
+                request.ctx.session["id"],
+                True,
+                AUTHENTICATION_SESSION_EXPIRATION,
+            )
         else:
-            await request.app.ctx.cache_client.set(request.ctx.session["id"], False, AUTHENTICATION_SESSION_EXPIRATION)
+            await request.app.ctx.cache_client.set(
+                request.ctx.session["id"],
+                False,
+                AUTHENTICATION_SESSION_EXPIRATION,
+            )
     else:
         raise CustomError(ErrorCode.MAINTENANCE_MODE_ERROR)
     return response_ok("更新成功")
@@ -2063,34 +2077,37 @@ async def init_data(request):
                 self.name = name
                 self.body = body
 
-        # 如果是维护模式，将标识写入 Redis，供 upload_tool 内部的 unzip 函数读取
-        session_id = request.ctx.session["id"]
-        if maintenance_mode:
-            await request.app.ctx.cache_client.set(session_id, True, 300)  # 5分钟过期
+        for fn in names:
+            if not fn.endswith(".zip"):
+                continue
 
-        try:
-            for fn in names:
-                if not fn.endswith(".zip"):
-                    continue
+            content = zf.read(fn)
+            mock_file = MockFile(name=fn, body=content)
+            result = await upload_tool(
+                mock_file,
+                mock_lic,
+                creator.username,
+                tenant_id,
+                request,
+                maintenance_mode=maintenance_mode,
+            )
 
-                content = zf.read(fn)
-                mock_file = MockFile(name=fn, body=content)
-                result = await upload_tool(mock_file, mock_lic, creator.username, tenant_id, request)
-
-                if result and result.get("msg") == "success":
-                    imported["tools"] += 1
-                elif result and result.get("msg") == "工具已存在":
-                    imported["skipped_versions"] += 1
-        finally:
-            if maintenance_mode:
-                await request.app.ctx.cache_client.delete(session_id)
+            if result and result.get("msg") == "success":
+                imported["tools"] += 1
+            elif result and result.get("msg") == "工具已存在":
+                imported["skipped_versions"] += 1
 
         # 导入剧本
         if "workflow.json" in names:
             flows = orjson.loads(zf.read("workflow.json"))
             for item in flows:
                 ver = item.get("version")
-                if await PlaybookVersion.filter(version=ver, deleted=False, tenant_id=tenant_id).exists():
+                if await PlaybookVersion.filter(
+                    version=ver,
+                    deleted=False,
+                    playbook__internal=maintenance_mode,
+                    tenant_id=tenant_id,
+                ).exists():
                     imported["skipped_versions"] += 1
                     continue
                 name = item.get("name")
@@ -2098,7 +2115,12 @@ async def init_data(request):
                 change_desc = item.get("change_desc", "")
                 flow_json = item.get("flow_json") or {}
                 async with in_transaction():
-                    pb = await Playbook.get_or_none(name=name, deleted=False, tenant_id=tenant_id)
+                    pb = await Playbook.get_or_none(
+                        name=name,
+                        deleted=False,
+                        internal=maintenance_mode,
+                        tenant_id=tenant_id,
+                    )
                     if not pb:
                         pb = await Playbook.create(
                             id=str(uuid.uuid4()),

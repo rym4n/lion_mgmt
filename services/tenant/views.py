@@ -8,6 +8,7 @@ from tortoise.functions import Count
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
+from core.maintenance import can_switch_tenant, should_clear_maintenance_mode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authentication import refresh_token
@@ -24,6 +25,16 @@ from settings import (
 
 tenant_bp = Blueprint("tenant", url_prefix="/tenant")
 __all__ = ["tenant_bp"]
+
+
+async def _clear_maintenance_mode_for_non_default_tenant(request, tenant_id):
+    if not should_clear_maintenance_mode(tenant_id):
+        return
+    await request.app.ctx.cache_client.set(
+        request.ctx.session["id"],
+        False,
+        AUTHENTICATION_SESSION_EXPIRATION,
+    )
 
 
 @tenant_bp.post("/list")
@@ -289,11 +300,18 @@ async def switch_tenant(request):
     if not tenant_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
+    maintenance_mode = await request.app.ctx.cache_client.get(
+        request.ctx.session["id"]
+    )
+    if not can_switch_tenant(maintenance_mode):
+        raise CustomError(ErrorCode.MAINTENANCE_MODE_ERROR)
+
     tenant = await Tenant.get_or_none(id=tenant_id).prefetch_related("member")
 
     if tenant is None:
         raise CustomError(ErrorCode.TENANT_NOT_FOUND)
 
+    await _clear_maintenance_mode_for_non_default_tenant(request, tenant.id)
     request.ctx.session["tenant_id"] = tenant.id
     new_token = refresh_token(request.ctx.session)
 

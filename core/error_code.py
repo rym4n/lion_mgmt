@@ -202,7 +202,7 @@ class ErrorCode(BaseErrorCode):
     DOCX_CONVERSION_BUSY = ErrorData(4164, "文档转换任务繁忙，请稍后重试")
     ASSET_MODEL_HAS_DEPENDENCIES = ErrorData(4165, "资产模型存在依赖，无法删除")
     ASSET_FIELD_NAME_EXISTS = ErrorData(4166, "同一模型内字段名称已存在")
-    ASSET_RELATION_NAME_EXISTS = ErrorData(4167, "同一模型内关系名称已存在")
+    ASSET_INSTANCE_HAS_REFERENCES = ErrorData(4167, "资产实例仍被引用，无法删除")
     EVENT_REPORT_PLAYBOOK_MISSING = ErrorData(
         4168, "事件报告生成剧本未配置或未启用，请联系管理员"
     )

@@ -18,8 +18,6 @@ from models.supply_chain_review import (
     SupplyChainCi,
     SupplyChainCiFieldDef,
     SupplyChainCiModelGroup,
-    SupplyChainCiRelation,
-    SupplyChainCiRelationType,
     SupplyChainCiType,
     SupplyChainCiUniqueRule,
     SupplyChainPolicyCompareItem,
@@ -38,7 +36,7 @@ from services.supply_chain_review.builtin_catalog import (
     save_model_group,
 )
 from services.supply_chain_review.manager import (
-    build_relation_graph,
+    build_reference_graph,
     build_project_tree,
     cancel_disposal_task,
     ci_directory_options,
@@ -51,9 +49,6 @@ from services.supply_chain_review.manager import (
     delete_field,
     delete_ledger_record,
     delete_process_record,
-    delete_relation,
-    delete_relation_type,
-    delete_relation_types,
     discover_unknown_terminals,
     export_model_package,
     fields_for_type,
@@ -61,7 +56,6 @@ from services.supply_chain_review.manager import (
     get_ci_type_or_404,
     get_ledger_record_or_404,
     get_process_record_or_404,
-    get_relation_type_or_404,
     import_model_package,
     list_ledger_records,
     list_process_records,
@@ -71,6 +65,7 @@ from services.supply_chain_review.manager import (
     overview_summary,
     overview_todo,
     policy_change_external_callback,
+    reference_labels_for_ci,
     reorder_ci_types,
     reorder_fields,
     retry_collection_run,
@@ -84,8 +79,6 @@ from services.supply_chain_review.manager import (
     save_ledger_record,
     save_process_record,
     save_review_issue as save_review_issue,
-    save_relation,
-    save_relation_type,
     serialize_ci_field,
     sync_actual_policies,
     tenant_id,
@@ -443,9 +436,6 @@ async def _require_model_package_permissions(
         )
         for item in normalized["fields"]
     }
-    relation_keys = {
-        validate_key(item.get("key")) for item in normalized["relation_types"]
-    }
     unique_rule_keys = {
         (
             validate_key(item.get("ci_type_key"), "ci_type_key"),
@@ -484,15 +474,6 @@ async def _require_model_package_permissions(
             (item.ci_type_key, item.field_key) for item in existing_fields
         } & field_keys
 
-    existing_relation_keys = set()
-    if relation_keys:
-        existing_relations = await SupplyChainCiRelationType.filter(
-            tenant_id=tenant,
-            key__in=list(relation_keys),
-            deleted=False,
-        ).all()
-        existing_relation_keys = {item.key for item in existing_relations}
-
     existing_unique_rule_keys = set()
     if unique_rule_keys:
         existing_unique_rules = await SupplyChainCiUniqueRule.filter(
@@ -510,11 +491,10 @@ async def _require_model_package_permissions(
         ("model", model_keys, existing_model_keys),
         ("model", unique_rule_keys, existing_unique_rule_keys),
         ("field", field_keys, existing_field_keys),
-        ("relation", relation_keys, existing_relation_keys),
     )
     permission_requirements = {
         resource: {"create": False, "update": False}
-        for resource in ("model", "field", "relation")
+        for resource in ("model", "field")
     }
     for resource, requested, existing in resources:
         if requested - existing:
@@ -531,7 +511,6 @@ async def _require_model_package_permissions(
         "ci_types": existing_model_keys,
         "fields": existing_field_keys,
         "unique_rules": existing_unique_rule_keys,
-        "relation_types": existing_relation_keys,
     }
 
 
@@ -776,7 +755,6 @@ async def ci_type_export(request: Request):
             tenant_id(request),
             ci_type_keys=data.get("ci_type_keys"),
             include_related=bool(data.get("include_related", False)),
-            include_relations=bool(data.get("include_relations", False)),
         )
     )
 
@@ -885,74 +863,6 @@ async def ci_field_delete(request: Request):
     )
 
 
-@supply_chain_review_cmdb_bp.post("/relation-type/list")
-@openapi.definition(summary="CMDB关系类型列表")
-@requires_permission("supply_chain_review:relation:r")
-async def relation_type_list(request: Request):
-    data = _json(request)
-    page, size, offset = normalize_page(data)
-    condition = Q(tenant_id=tenant_id(request), deleted=False) & _keyword_condition(
-        data.get("keyword")
-    )
-    queryset = SupplyChainCiRelationType.filter(condition)
-    total = await queryset.count()
-    items = await queryset.order_by("key").offset(offset).limit(size).all()
-    return response_ok(
-        {
-            "total": total,
-            "items": [item.json for item in items],
-            "page": page,
-            "size": size,
-        }
-    )
-
-
-@supply_chain_review_cmdb_bp.post("/relation-type/detail")
-@openapi.definition(summary="CMDB关系类型详情")
-@requires_permission("supply_chain_review:relation:r")
-async def relation_type_detail(request: Request):
-    data = _json(request)
-    relation_type = await get_relation_type_or_404(
-        tenant_id(request), data.get("id") or data.get("key")
-    )
-    return response_ok(relation_type.json)
-
-
-@supply_chain_review_cmdb_bp.post("/relation-type/save")
-@openapi.definition(summary="保存CMDB关系类型")
-@requires_permission("supply_chain_review:relation:c", "supply_chain_review:relation:u")
-async def relation_type_save(request: Request):
-    item = await save_relation_type(
-        tenant_id(request), _json(request), operator_name(request)
-    )
-    return response_ok(item.json)
-
-
-@supply_chain_review_cmdb_bp.post("/relation-type/delete")
-@openapi.definition(summary="删除CMDB关系类型")
-@requires_permission("supply_chain_review:relation:d")
-async def relation_type_delete(request: Request):
-    data = _json(request)
-    return response_ok(
-        await delete_relation_type(
-            tenant_id(request),
-            data.get("id") or data.get("key"),
-        )
-    )
-
-
-@supply_chain_review_cmdb_bp.post("/relation-type/batch-delete")
-@openapi.definition(summary="批量删除自定义CMDB关系类型")
-@requires_permission("supply_chain_review:relation:d")
-async def relation_type_batch_delete(request: Request):
-    return response_ok(
-        await delete_relation_types(
-            tenant_id(request),
-            _json(request).get("ids"),
-        )
-    )
-
-
 @supply_chain_review_cmdb_bp.post("/ci/list")
 @openapi.definition(summary="CI实例列表")
 @requires_permission("supply_chain_review:ci:r")
@@ -1026,6 +936,9 @@ async def ci_detail(request: Request):
     fields = await fields_for_type(ci.tenant_id, ci.ci_type_key)
     payload = ci.json
     payload["fields"] = [item.json for item in fields]
+    payload["reference_labels"] = await reference_labels_for_ci(
+        ci.tenant_id, ci, fields
+    )
     return response_ok(payload)
 
 
@@ -1106,91 +1019,16 @@ async def ci_import_template(request: Request):
     return response_ok({"ci_type": ci_type.json, "columns": columns})
 
 
-@supply_chain_review_cmdb_bp.post("/relation/list")
-@openapi.definition(summary="CI关系列表")
-@requires_permission("supply_chain_review:relation:r")
-async def relation_list(request: Request):
-    data = _json(request)
-    page, size, offset = normalize_page(data)
-    condition = Q(tenant_id=tenant_id(request), deleted=False)
-    for field in ["relation_type_key", "source_ci_id", "target_ci_id"]:
-        if data.get(field):
-            condition &= Q(**{field: data[field]})
-    queryset = SupplyChainCiRelation.filter(condition)
-    total = await queryset.count()
-    items = await queryset.order_by("-utime").offset(offset).limit(size).all()
-    return response_ok(
-        {
-            "total": total,
-            "items": [item.json for item in items],
-            "page": page,
-            "size": size,
-        }
-    )
-
-
-@supply_chain_review_cmdb_bp.post("/relation/detail")
-@openapi.definition(summary="CI关系详情")
-@requires_permission("supply_chain_review:relation:r")
-async def relation_detail(request: Request):
-    relation = await SupplyChainCiRelation.filter(
-        id=_json(request).get("id"), tenant_id=tenant_id(request), deleted=False
-    ).first()
-    if not relation:
-        raise CustomError(ErrorCode.NOT_FOUND)
-    return response_ok(relation.json)
-
-
-@supply_chain_review_cmdb_bp.post("/relation/save")
-@openapi.definition(summary="保存CI关系")
-@requires_permission("supply_chain_review:relation:c", "supply_chain_review:relation:u")
-async def relation_save(request: Request):
-    item = await save_relation(
-        tenant_id(request), _json(request), operator_name(request)
-    )
-    return response_ok(item.json)
-
-
-@supply_chain_review_cmdb_bp.post("/relation/delete")
-@openapi.definition(summary="删除CI关系")
-@requires_permission("supply_chain_review:relation:d")
-async def relation_delete(request: Request):
-    return response_ok(
-        await delete_relation(
-            tenant_id(request),
-            _json(request).get("id"),
-        )
-    )
-
-
-@supply_chain_review_cmdb_bp.post("/relation/graph")
-@openapi.definition(summary="CI关系拓扑")
-@requires_permission("supply_chain_review:relation:r")
-async def relation_graph(request: Request):
+@supply_chain_review_cmdb_bp.post("/ci/reference-graph")
+@openapi.definition(summary="CI引用拓扑")
+@requires_permission("supply_chain_review:ci:r")
+async def ci_reference_graph(request: Request):
     data = _json(request)
     return response_ok(
-        await build_relation_graph(
+        await build_reference_graph(
             tenant_id(request), data.get("ci_id"), data.get("depth", 1)
         )
     )
-
-
-@supply_chain_review_cmdb_bp.post("/relation/import")
-@openapi.definition(summary="批量导入CI关系")
-@requires_permission("supply_chain_review:relation:c")
-async def relation_import(request: Request):
-    data = _json(request)
-    records = data.get("items") or data.get("records") or []
-    if not isinstance(records, list):
-        raise CustomError(ErrorCode.PARAM_ERROR)
-    imported = []
-    for record in records:
-        imported.append(
-            (
-                await save_relation(tenant_id(request), record, operator_name(request))
-            ).json
-        )
-    return response_ok({"total": len(imported), "items": imported})
 
 
 @supply_chain_review_cmdb_bp.post("/project-view/tree")

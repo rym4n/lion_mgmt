@@ -191,26 +191,30 @@ def test_merge_split_replacement_are_audited_and_merge_calls_migrator():
             (source, target, audit.operation)
         ),
     )
-    registry.resolve_facts(_facts(_device("a"), _device("b")))
+    registry.resolve_facts(_facts(_device("a"), _device("b"), _device("c")))
 
     merge = registry.record_transition(
-        "merge", ("device:cmdb:a",), ("device:cmdb:b",), actor="operator"
+        "merge", ("device:cmdb:a", "device:cmdb:b"), ("device:cmdb:c",),
+        actor="operator",
     )
-    replacement = registry.record_transition(
-        "replacement", ("device:cmdb:b",), ("device:cmdb:c",), actor="operator"
+    registry.record_transition(
+        "replacement", ("device:cmdb:c",), ("device:cmdb:d",), actor="operator"
     )
-    split = registry.record_transition(
-        "split", ("device:cmdb:b",), ("device:cmdb:b1", "device:cmdb:b2"),
+    registry.record_transition(
+        "split", ("device:cmdb:c",), ("device:cmdb:c1", "device:cmdb:c2"),
         actor="operator",
     )
 
     assert merge.operation == "merge"
-    assert migrated == [("device:cmdb:a", "device:cmdb:b", "merge")]
+    assert migrated == [
+        ("device:cmdb:a", "device:cmdb:c", "merge"),
+        ("device:cmdb:b", "device:cmdb:c", "merge"),
+    ]
     assert {item.operation for item in registry.audits} >= {
         "merge", "replacement", "split"
     }
     with pytest.raises(IdentityTransitionError):
         registry.record_transition(
-            "merge", ("device:cmdb:a", "device:cmdb:b"),
-            ("device:cmdb:c",), actor="operator",
+            "merge", ("device:cmdb:a",),
+            ("device:cmdb:b", "device:cmdb:c"), actor="operator",
         )

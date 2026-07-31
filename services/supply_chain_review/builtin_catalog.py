@@ -15,7 +15,6 @@ from models.supply_chain_review import (
     CI_TYPE_STATUS_ACTIVE,
     CI_TYPE_STATUS_DISABLED,
     FIELD_DATA_TYPES,
-    RELATION_QUANTITIES,
     SupplyChainBuiltinActivation,
     SupplyChainBuiltinActivationEvent,
     SupplyChainBuiltinActivationPreview,
@@ -24,7 +23,6 @@ from models.supply_chain_review import (
     SupplyChainCi,
     SupplyChainCiFieldDef,
     SupplyChainCiModelGroup,
-    SupplyChainCiRelationType,
     SupplyChainCiType,
     SupplyChainCiUniqueRule,
 )
@@ -39,24 +37,16 @@ CATALOG_FILES = (
     "models",
     "fields",
     "unique_rules",
-    "relations",
     "icon_aliases",
 )
 CATALOG_COUNTS = {
     "groups": 30,
     "models": 236,
-    "fields": 3248,
+    "fields": 3433,
     "unique_rules": 1,
-    "relations": 185,
     "icon_aliases": 28,
 }
 DERIVED_FIELD_COUNT = 0
-RELATION_QUANTITY_COUNTS = {
-    ("one", "one"): 1,
-    ("many", "one"): 49,
-    ("one", "many"): 124,
-    ("many", "many"): 11,
-}
 ACTIVATION_ACTIONS = {"enable", "disable"}
 ACTIVATION_SCOPES = {"model", "group", "selection", "all"}
 GROUP_KEY_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$")
@@ -101,11 +91,10 @@ def load_builtin_catalog() -> dict:
         "models": metadata.get("model_count"),
         "fields": metadata.get("field_count"),
         "unique_rules": metadata.get("unique_rule_count"),
-        "relations": metadata.get("relation_count"),
     }
     if metadata_counts != {
         key: CATALOG_COUNTS[key]
-        for key in ("groups", "models", "fields", "unique_rules", "relations")
+        for key in ("groups", "models", "fields", "unique_rules")
     }:
         raise RuntimeError("builtin asset catalog metadata count mismatch")
 
@@ -156,31 +145,6 @@ def load_builtin_catalog() -> dict:
         ):
             raise RuntimeError(
                 "builtin asset catalog unique rule contains unknown fields"
-            )
-    relation_quantity_counts = {
-        quantities: sum(
-            relation["source_to_target"] == quantities[0]
-            and relation["target_to_source"] == quantities[1]
-            for relation in catalog["relations"]
-        )
-        for quantities in RELATION_QUANTITY_COUNTS
-    }
-    if relation_quantity_counts != RELATION_QUANTITY_COUNTS:
-        raise RuntimeError("builtin asset catalog relation quantity mismatch")
-    for relation in catalog["relations"]:
-        endpoints = set(relation["source_model_keys"]) | set(
-            relation["target_model_keys"]
-        )
-        if endpoints - model_keys:
-            raise RuntimeError(
-                "builtin asset catalog contains unknown relation endpoints"
-            )
-        if {
-            relation["source_to_target"],
-            relation["target_to_source"],
-        } - RELATION_QUANTITIES:
-            raise RuntimeError(
-                "builtin asset catalog contains invalid relation quantity"
             )
     source_icons = {
         item.get("source_icon") for item in catalog["models"] if item.get("source_icon")
@@ -366,6 +330,8 @@ async def _upsert_builtin_fields(
             "is_derived": definition["is_derived"],
             "user_prompt": definition["user_prompt"],
             "default_value": definition["default_value"],
+            "field_group": definition["field_group"],
+            "field_group_sort": definition["field_group_sort"],
             "sort": definition["sort"],
             "is_locked": False,
             "is_builtin": True,
@@ -461,82 +427,6 @@ async def _upsert_builtin_unique_rules(
             await item.save(using_db=connection, update_fields=[*values, "utime"])
             updated += 1
     await _bulk_create(SupplyChainCiUniqueRule, created, connection)
-    return len(created) + updated
-
-
-async def _upsert_builtin_relations(
-    tenant: str,
-    catalog: dict,
-    models: dict,
-    operator: str | None,
-    connection,
-    *,
-    preserve_existing: bool = False,
-) -> int:
-    existing = {
-        item.builtin_key: item
-        for item in await SupplyChainCiRelationType.filter(
-            tenant_id=tenant,
-            is_builtin=True,
-        )
-        .using_db(connection)
-        .all()
-        if item.builtin_key
-    }
-    occupied = {
-        item.key
-        for item in await SupplyChainCiRelationType.filter(
-            tenant_id=tenant,
-            deleted=False,
-        )
-        .using_db(connection)
-        .all()
-        if not item.is_builtin
-    }
-    created = []
-    updated = 0
-    for definition in catalog["relations"]:
-        source_models = [models[key] for key in definition["source_model_keys"]]
-        target_models = [models[key] for key in definition["target_model_keys"]]
-        values = {
-            "key": definition["key"],
-            "name": definition["name"],
-            "semantic_key": definition["semantic_key"],
-            "source_ci_type_ids": [item.id for item in source_models],
-            "target_ci_type_ids": [item.id for item in target_models],
-            "source_ci_types": [item.key for item in source_models],
-            "target_ci_types": [item.key for item in target_models],
-            "source_to_target": definition["source_to_target"],
-            "target_to_source": definition["target_to_source"],
-            "relation_fields": definition["relation_fields"],
-            "is_locked": False,
-            "is_builtin": True,
-            "builtin_key": definition["key"],
-            "builtin_version": CATALOG_VERSION,
-            "builtin_hash": definition["builtin_hash"],
-            "owner": "product",
-            "deleted": False,
-            "updater": operator,
-        }
-        item = existing.get(definition["key"])
-        if item is None:
-            if definition["key"] in occupied:
-                raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
-            created.append(
-                SupplyChainCiRelationType(
-                    tenant_id=tenant,
-                    creator=operator,
-                    **values,
-                )
-            )
-        elif not preserve_existing and (
-            item.builtin_hash != definition["builtin_hash"] or item.deleted
-        ):
-            for key, value in values.items():
-                setattr(item, key, value)
-            await item.save(using_db=connection, update_fields=[*values, "utime"])
-            updated += 1
-    await _bulk_create(SupplyChainCiRelationType, created, connection)
     return len(created) + updated
 
 
@@ -679,14 +569,6 @@ async def _reconcile_builtin_catalog_once(
             connection,
             preserve_existing=preserve_existing,
         )
-        relation_changes = await _upsert_builtin_relations(
-            tenant,
-            catalog,
-            models,
-            operator,
-            connection,
-            preserve_existing=preserve_existing,
-        )
         activation_changes = await _ensure_activations(
             tenant, catalog, operator, connection
         )
@@ -721,7 +603,6 @@ async def _reconcile_builtin_catalog_once(
             "models": model_changes,
             "fields": field_changes,
             "unique_rules": rule_changes,
-            "relations": relation_changes,
             "activations": activation_changes,
         }
         if metadata_changed:
@@ -1167,34 +1048,40 @@ async def _activation_impact(
     connection=None,
 ) -> dict:
     model_keys = {item.key for item in models}
-    query = SupplyChainCiRelationType.filter(tenant_id=tenant, deleted=False)
+    query = SupplyChainCiFieldDef.filter(
+        tenant_id=tenant,
+        data_type="ref",
+        deleted=False,
+    )
     if connection is not None:
         query = query.using_db(connection)
-    relations = await query.all()
+    reference_fields = await query.all()
     all_models_query = SupplyChainCiType.filter(tenant_id=tenant, deleted=False)
     if connection is not None:
         all_models_query = all_models_query.using_db(connection)
     all_models = await all_models_query.all()
+    model_key_by_ref = {
+        ref: item.key for item in all_models for ref in (item.id, item.key)
+    }
     target_enabled = {
         item.key: enabled
         if item.key in model_keys
         else item.status == CI_TYPE_STATUS_ACTIVE
         for item in all_models
     }
-    active_relations = 0
-    dormant_relations = 0
+    active_reference_fields = 0
+    dormant_reference_fields = 0
     cross_group_dependencies = []
     selected_group_keys = {item.group_key for item in models}
-    for relation in relations:
-        endpoints = set(relation.source_ci_types or []) | set(
-            relation.target_ci_types or []
-        )
+    for field in reference_fields:
+        target_key = model_key_by_ref.get(field.ref_ci_type_id or field.ref_ci_type)
+        endpoints = {field.ci_type_key, target_key} - {None}
         if not endpoints & model_keys:
             continue
         if all(target_enabled.get(key, False) for key in endpoints):
-            active_relations += 1
+            active_reference_fields += 1
         else:
-            dormant_relations += 1
+            dormant_reference_fields += 1
         for endpoint in sorted(endpoints - model_keys):
             endpoint_model = next(
                 (item for item in all_models if item.key == endpoint), None
@@ -1202,7 +1089,8 @@ async def _activation_impact(
             if endpoint_model and endpoint_model.group_key not in selected_group_keys:
                 cross_group_dependencies.append(
                     {
-                        "relation_key": relation.key,
+                        "field_key": field.field_key,
+                        "source_model_key": field.ci_type_key,
                         "model_key": endpoint,
                         "group_key": endpoint_model.group_key,
                         "enabled": endpoint_model.status == CI_TYPE_STATUS_ACTIVE,
@@ -1243,8 +1131,8 @@ async def _activation_impact(
         instance_query = instance_query.using_db(connection)
     return {
         "affected_model_count": len(models),
-        "activated_relation_count": active_relations,
-        "dormant_relation_count": dormant_relations,
+        "active_reference_field_count": active_reference_fields,
+        "dormant_reference_field_count": dormant_reference_fields,
         "existing_instance_count": await instance_query.count(),
         "blocking_reasons": blocking_reasons,
         "cross_group_dependencies": cross_group_dependencies,

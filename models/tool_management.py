@@ -92,6 +92,7 @@ class ToolResourcesModel(BaseModel):
     resources: list[str] = fields.JSONField(description="资源模板")
     status: int = fields.IntField(default=0, description="是否必填 1:必填 0:非必填")
     health_check: int = fields.IntField(default=0, description="是否支持健康检查 1:支持 0:不支持")
+    internal: bool = fields.BooleanField(default=False, description="是否为维护模式资源模板")
 
     def validate(self) -> None:
         raise NotImplementedError

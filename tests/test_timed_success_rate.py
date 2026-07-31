@@ -134,17 +134,18 @@ def test_timed_name_filter_scopes_by_visible_internal_state():
 @pytest.mark.parametrize(
     ("scope", "maintenance_mode", "expected"),
     [
-        (0, True, False),
-        ("0", True, False),
-        (1, False, True),
-        ("1", False, True),
-        (2, True, None),
-        ("2", False, None),
+        (0, True, True),
+        ("0", True, True),
+        (1, False, False),
+        ("1", False, False),
+        (2, True, True),
+        ("2", False, False),
         (None, True, True),
         (None, False, False),
+        (1, "false", False),
     ],
 )
-def test_timed_internal_scope_prefers_request_scope(scope, maintenance_mode, expected):
+def test_timed_internal_scope_ignores_request_scope(scope, maintenance_mode, expected):
     assert _timed_internal_scope_from_request(scope, maintenance_mode) is expected
 
 
@@ -298,13 +299,22 @@ async def test_dashboard_statistics_counts_status_one_as_failure(monkeypatch):
     def fake_response_ok(data):
         return data
 
+    async def cache_get(key):
+        assert key == "session-1"
+        return False
+
     request = SimpleNamespace(
         json={
             "id": "timer-1",
             "start": "2026-04-01T00:00:00Z",
             "end": "2026-04-30T00:00:00Z",
         },
-        ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}),
+        ctx=SimpleNamespace(
+            session={"id": "session-1", "tenant_id": "tenant-1"}
+        ),
+        app=SimpleNamespace(
+            ctx=SimpleNamespace(cache_client=SimpleNamespace(get=cache_get))
+        ),
     )
 
     monkeypatch.setattr("services.timed.views.Timed", FakeTimed)
@@ -318,6 +328,7 @@ async def test_dashboard_statistics_counts_status_one_as_failure(monkeypatch):
     assert captured["timed_filter"] == {
         "id": "timer-1",
         "deleted": False,
+        "internal": False,
         "tenant_id": "tenant-1",
     }
     assert captured["params"][2].isoformat() == "2026-04-30T23:59:59.999999+00:00"
@@ -435,12 +446,14 @@ async def test_check_action_execute_permission_uncontrolled_role_bypasses_record
             "id__in": ["res-1"],
             "tool_name": "lion_mgmt",
             "deleted": False,
+            "internal": False,
             "tenant_id": "t1",
         },
         {
             "id__in": ["res-2"],
             "tool_name": "lion_mgmt",
             "deleted": False,
+            "internal": False,
             "tenant_id": "t1",
         },
     ]

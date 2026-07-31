@@ -64,7 +64,6 @@ PERMISSION_RESOURCE_LABELS = {
     "supply_chain_review:field": "资产字段",
     "supply_chain_review:model": "资产模型",
     "supply_chain_review:policy": "访问控制策略",
-    "supply_chain_review:relation": "资产关系",
     "supply_chain_review:topology": "网络拓扑",
 }
 

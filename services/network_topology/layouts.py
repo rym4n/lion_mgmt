@@ -17,7 +17,7 @@ from models._network_topology_v2_presentation import (
     TopologyLayoutSet,
     TopologyScopeLayoutVersion,
 )
-from models.base import parse_encrypted_json
+from models.base import parse_encrypted_json, unwrap_encrypted_value
 from models.network_topology import NetworkTopology
 
 
@@ -218,6 +218,8 @@ async def save_scope_layout(
 ) -> LayoutSaveResult:
     _validate_authority(authority)
     request = _validate_layout_request(payload)
+    if request["id"] != authority.topology_id:
+        raise LayoutError(LAYOUT_INVALID_REQUEST)
     repo = repository or OrmLayoutRepository()
     async with repo.transaction() as connection:
         state = await _locked_state(repo, authority, connection)
@@ -240,6 +242,7 @@ class _LockedState:
     layout_set: Any
     scope_map: dict[str, dict[str, Any]]
     set_revision: int
+    set_cas_revision: int | None
     set_row_id: str | None
 
 
@@ -257,7 +260,8 @@ async def _locked_state(repo, authority, connection) -> _LockedState:
         connection=connection,
         lock=True,
     )
-    revision = int(getattr(topology, "current_layout_set_revision", 0) or 0)
+    raw_revision = getattr(topology, "current_layout_set_revision", None)
+    revision = int(raw_revision or 0)
     if (row_id is None) != (layout_set is None):
         raise LayoutError(LAYOUT_SET_CONFLICT)
     if layout_set is not None and int(layout_set.layout_set_revision) != revision:
@@ -265,7 +269,9 @@ async def _locked_state(repo, authority, connection) -> _LockedState:
     scope_map = {} if layout_set is None else decode_scope_version_map(
         layout_set.scope_version_map_json
     )
-    return _LockedState(topology, layout_set, scope_map, revision, row_id)
+    return _LockedState(
+        topology, layout_set, scope_map, revision, raw_revision, row_id
+    )
 
 
 async def _commit_scope_layout(repo, authority, state, request, document, connection):
@@ -321,7 +327,7 @@ async def _cas_or_conflict(repo, state, new_set, graph_revision, next_graph, con
     updated = await repo.cas_layout_pointer(
         state.topology,
         expected_row_id=state.set_row_id,
-        expected_set_revision=state.set_revision,
+        expected_set_revision=state.set_cas_revision,
         expected_graph_revision=graph_revision,
         new_set=new_set,
         next_graph_revision=next_graph,
@@ -337,15 +343,24 @@ async def rebase_layouts_for_graph(
     expected_graph_revision: int,
     graph_revision: int,
     scope_items: Mapping[str, Set[str]],
+    aliases: Mapping[str, str],
     repository: LayoutRepository | None = None,
 ) -> LayoutSaveResult:
-    _validate_rebase(authority, expected_graph_revision, graph_revision, scope_items)
+    _validate_rebase(
+        authority, expected_graph_revision, graph_revision, scope_items, aliases
+    )
     repo = repository or OrmLayoutRepository()
     async with repo.transaction() as connection:
         state = await _locked_state(repo, authority, connection)
         _require_graph(state.topology, expected_graph_revision)
         scope_map = await _rebase_scope_map(
-            repo, authority, state.scope_map, scope_items, graph_revision, connection
+            repo,
+            authority,
+            state.scope_map,
+            scope_items,
+            aliases,
+            graph_revision,
+            connection,
         )
         new_set = await repo.create_layout_set(
             _layout_set_values(authority, state.set_revision + 1, scope_map),
@@ -357,12 +372,16 @@ async def rebase_layouts_for_graph(
         return LayoutSaveResult(0, new_set.layout_set_revision, graph_revision)
 
 
-async def _rebase_scope_map(repo, authority, current, scope_items, graph_revision, connection):
+async def _rebase_scope_map(
+    repo, authority, current, scope_items, aliases, graph_revision, connection
+):
     result = {}
     for scope_id in sorted(set(current) | set(scope_items)):
         entry = current.get(scope_id)
         old_document = await _scope_document(repo, authority, entry, connection)
-        document = _rebase_document(old_document, scope_items.get(scope_id, set()))
+        document = _rebase_document(
+            old_document, scope_items.get(scope_id, set()), aliases
+        )
         revision = _scope_revision(current, scope_id) + 1
         request = {
             "scope_id": scope_id,
@@ -414,12 +433,19 @@ def _merge_saved_layout(old, request):
     }
 
 
-def _rebase_document(old, valid_ids):
+def _rebase_document(old, valid_ids, aliases):
     valid = set(valid_ids)
     old_items = old.get("items", {})
-    items = {key: dict(value) for key, value in old_items.items() if key in valid}
     orphans = dict(old.get("orphan_items", {}))
-    orphans.update({key: dict(value) for key, value in old_items.items() if key not in valid})
+    items = {key: dict(value) for key, value in old_items.items() if key in valid}
+    for stable_id, value in old_items.items():
+        target = _resolve_alias(stable_id, aliases)
+        if stable_id in valid:
+            continue
+        if target in valid and target not in items:
+            items[target] = dict(value)
+        else:
+            orphans[stable_id] = dict(value)
     for stable_id in valid:
         orphans.pop(stable_id, None)
     return {
@@ -456,11 +482,11 @@ def _validate_authority(authority):
 def _validate_layout_request(payload):
     if not isinstance(payload, Mapping):
         raise LayoutError(LAYOUT_INVALID_REQUEST)
-    required = {"scope_id", "expected_scope_layout_revision", "graph_revision", "items", "viewport", "algorithm"}
+    required = {"id", "scope_id", "expected_scope_layout_revision", "graph_revision", "items", "viewport", "algorithm"}
     if set(payload) != required:
         raise LayoutError(LAYOUT_INVALID_REQUEST)
     request = dict(payload)
-    if not _is_text(request["scope_id"]):
+    if not _is_text(request["id"]) or not _is_text(request["scope_id"]):
         raise LayoutError(LAYOUT_INVALID_REQUEST)
     _validate_revisions(request)
     _validate_items(request["items"])
@@ -502,7 +528,7 @@ def _validate_viewport(viewport):
         raise LayoutError(LAYOUT_INVALID_REQUEST)
 
 
-def _validate_rebase(authority, expected, graph, scope_items):
+def _validate_rebase(authority, expected, graph, scope_items, aliases):
     _validate_authority(authority)
     if type(expected) is not int or expected < 0:
         raise LayoutError(LAYOUT_INVALID_REQUEST)
@@ -515,23 +541,36 @@ def _validate_rebase(authority, expected, graph, scope_items):
             raise LayoutError(LAYOUT_INVALID_REQUEST)
         if not all(_is_text(stable_id) for stable_id in stable_ids):
             raise LayoutError(LAYOUT_INVALID_REQUEST)
+    if not isinstance(aliases, Mapping):
+        raise LayoutError(LAYOUT_INVALID_REQUEST)
+    if not all(_is_text(key) and _is_text(value) for key, value in aliases.items()):
+        raise LayoutError(LAYOUT_INVALID_REQUEST)
 
 
 def validate_override(kind: str, value: object, authorized_scope_ids: Set[str]):
     if kind not in ALLOWED_OVERRIDE_KINDS:
         raise LayoutError(OVERRIDE_KIND_FORBIDDEN)
-    if kind in {"display_name", "note"}:
-        if not isinstance(value, str) or not value.strip() or len(value) > 2000:
-            raise LayoutError(OVERRIDE_VALUE_INVALID)
-    elif kind in {"hidden", "highlighted"}:
-        if type(value) is not bool:
-            raise LayoutError(OVERRIDE_VALUE_INVALID)
-    elif kind == "color":
-        if not _valid_color(value):
-            raise LayoutError(OVERRIDE_VALUE_INVALID)
-    else:
+    if kind == "scope_mapping":
         _validate_scope_mapping(value, authorized_scope_ids)
+        return value
+    validators = {
+        "display_name": _valid_text_override,
+        "note": _valid_text_override,
+        "hidden": _valid_boolean_override,
+        "highlighted": _valid_boolean_override,
+        "color": _valid_color,
+    }
+    if not validators[kind](value):
+        raise LayoutError(OVERRIDE_VALUE_INVALID)
     return value
+
+
+def _valid_text_override(value):
+    return isinstance(value, str) and bool(value.strip()) and len(value) <= 2000
+
+
+def _valid_boolean_override(value):
+    return type(value) is bool
 
 
 def _valid_color(value):
@@ -562,22 +601,50 @@ async def reconcile_presentation_overrides(
 ) -> OverrideReconcileResult:
     _validate_authority(authority)
     repo = repository or OrmLayoutRepository()
-    migrated = orphaned = active = 0
+    counts = {"migrated": 0, "orphaned": 0, "active": 0}
     async with repo.transaction() as connection:
         rows = await repo.list_active_overrides(
             authority, connection=connection, lock=True
         )
         for row in rows:
-            target = _resolve_alias(row.target_stable_id, aliases)
-            if target in valid_stable_ids and target == row.target_stable_id:
-                active += 1
-            elif target in valid_stable_ids:
-                await _migrate_override(repo, row, target, connection)
-                migrated += 1
-            else:
-                await _orphan_override(repo, row, clock(), warn, connection)
-                orphaned += 1
-    return OverrideReconcileResult(migrated, orphaned, active)
+            outcome = await _reconcile_override(
+                repo, row, valid_stable_ids, aliases, authorized_scope_ids,
+                clock, warn, connection
+            )
+            counts[outcome] += 1
+    return OverrideReconcileResult(**counts)
+
+
+async def _reconcile_override(
+    repo, row, valid_ids, aliases, authorized_scopes, clock, warn, connection
+):
+    if not _override_is_valid(row, authorized_scopes):
+        await _orphan_override(repo, row, clock(), warn, connection)
+        return "orphaned"
+    target = _resolve_alias(row.target_stable_id, aliases)
+    if target not in valid_ids:
+        await _orphan_override(repo, row, clock(), warn, connection)
+        return "orphaned"
+    if target == row.target_stable_id:
+        return "active"
+    await _migrate_override(repo, row, target, connection)
+    return "migrated"
+
+
+def _override_is_valid(row, authorized_scope_ids):
+    try:
+        value = decode_json(row.override_value)
+        validate_override(row.override_kind, value, authorized_scope_ids)
+    except (LayoutError, TypeError, orjson.JSONDecodeError):
+        return False
+    return True
+
+
+def decode_json(value):
+    value = unwrap_encrypted_value(value)
+    if not isinstance(value, (str, bytes, bytearray)):
+        raise TypeError("JSON text required")
+    return orjson.loads(value)
 
 
 async def _migrate_override(repo, row, target, connection):
@@ -637,6 +704,7 @@ __all__ = [
     "OrmLayoutRepository",
     "OverrideReconcileResult",
     "decode_layout_document",
+    "decode_json",
     "decode_scope_version_map",
     "encode_json",
     "rebase_layouts_for_graph",

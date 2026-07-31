@@ -292,10 +292,8 @@ def test_role_permission_all_labels_split_menu_actions_without_collapsing_granul
             "Permissions": [
                 "supply_chain_review:model:c",
                 "supply_chain_review:field:c",
-                "supply_chain_review:relation:c",
                 "supply_chain_review:model:r",
                 "supply_chain_review:field:r",
-                "supply_chain_review:relation:r",
             ],
         }
     )
@@ -312,11 +310,6 @@ def test_role_permission_all_labels_split_menu_actions_without_collapsing_granul
             "permission": "supply_chain_review:field:c",
         },
         {
-            "value": "c",
-            "label": "新增资产关系权限",
-            "permission": "supply_chain_review:relation:c",
-        },
-        {
             "value": "r",
             "label": "查看资产模型权限",
             "permission": "supply_chain_review:model:r",
@@ -325,11 +318,6 @@ def test_role_permission_all_labels_split_menu_actions_without_collapsing_granul
             "value": "r",
             "label": "查看资产字段权限",
             "permission": "supply_chain_review:field:r",
-        },
-        {
-            "value": "r",
-            "label": "查看资产关系权限",
-            "permission": "supply_chain_review:relation:r",
         },
     ]
 

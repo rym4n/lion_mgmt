@@ -11,6 +11,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from ipaddress import ip_address
+import json
 from typing import Any, Callable, Iterable, Mapping, Protocol
 from urllib.parse import quote
 
@@ -104,6 +105,8 @@ class IdentityPersistence(Protocol):
         self, tenant_id: str, resolution: IdentityResolution
     ) -> None: ...
 
+    async def save_audit(self, tenant_id: str, audit: IdentityAudit) -> None: ...
+
 
 PresentationMigrator = Callable[[str, str, IdentityAudit], None]
 
@@ -187,7 +190,8 @@ class IdentityRegistry:
         )
         self._audits.append(audit)
         if operation == "merge" and self._presentation_migrator is not None:
-            self._presentation_migrator(source_ids[0], target_ids[0], audit)
+            for source_id in source_ids:
+                self._presentation_migrator(source_id, target_ids[0], audit)
         return audit
 
     def _index_existing(self) -> None:
@@ -350,6 +354,164 @@ async def resolve_with_persistence(
     return resolution
 
 
+class OrmIdentityPersistence:
+    """Tortoise adapter bound to one topology, run, and publication transaction."""
+
+    def __init__(
+        self, topology_id: Any, analysis_run_id: Any, *,
+        connection: Any, created_by: str = "identity-registry",
+    ) -> None:
+        self.topology_id = topology_id
+        self.analysis_run_id = analysis_run_id
+        self.connection = connection
+        self.created_by = created_by
+
+    async def load_identities(self, tenant_id: str) -> tuple[IdentityRecord, ...]:
+        registry_model, alias_model, _ = _identity_models()
+        rows = await registry_model.filter(
+            tenant_id=tenant_id, topology_row_id=self.topology_id,
+            status="ACTIVE", deleted=False,
+        ).using_db(self.connection).all()
+        aliases = await alias_model.filter(
+            tenant_id=tenant_id, topology_row_id=self.topology_id,
+            status="ACTIVE", deleted=False,
+        ).using_db(self.connection).all()
+        by_identity: dict[Any, list[IdentityAlias]] = defaultdict(list)
+        for row in aliases:
+            by_identity[row.identity_row_id].append(IdentityAlias(
+                row.alias_type, row.alias_namespace, row.alias_value
+            ))
+        return tuple(IdentityRecord(
+            tenant_id, row.canonical_id, row.entity_kind,
+            row.canonical_fingerprint,
+            tuple(sorted(by_identity[row.id], key=lambda item: item.key)),
+        ) for row in rows)
+
+    async def save_resolution(
+        self, tenant_id: str, resolution: IdentityResolution
+    ) -> None:
+        rows = await self._upsert_identities(tenant_id, resolution.identities)
+        await self._upsert_aliases(tenant_id, resolution.identities, rows)
+        for audit in resolution.audits:
+            await self._create_audit(tenant_id, audit, rows)
+
+    async def save_audit(self, tenant_id: str, audit: IdentityAudit) -> None:
+        rows = await self._registry_rows(tenant_id)
+        await self._create_audit(tenant_id, audit, rows)
+
+    async def _upsert_identities(self, tenant_id, identities):
+        registry_model, _, _ = _identity_models()
+        rows = await self._registry_rows(tenant_id)
+        for identity in identities:
+            row = rows.get(identity.canonical_id)
+            if row is None:
+                row = await registry_model.create(using_db=self.connection, **{
+                    "tenant_id": tenant_id, "topology_row_id": self.topology_id,
+                    "first_seen_analysis_run_row_id": self.analysis_run_id,
+                    "last_seen_analysis_run_row_id": self.analysis_run_id,
+                    "canonical_id": identity.canonical_id,
+                    "entity_kind": identity.entity_kind,
+                    "canonical_fingerprint": identity.canonical_fingerprint,
+                    "status": "ACTIVE", "created_by": self.created_by,
+                })
+                rows[identity.canonical_id] = row
+            else:
+                row.last_seen_analysis_run_row_id = self.analysis_run_id
+                await row.save(using_db=self.connection,
+                               update_fields=["last_seen_analysis_run_row_id", "utime"])
+        return rows
+
+    async def _upsert_aliases(self, tenant_id, identities, rows):
+        _, alias_model, _ = _identity_models()
+        existing = await alias_model.filter(
+            tenant_id=tenant_id, topology_row_id=self.topology_id,
+            status="ACTIVE", deleted=False,
+        ).using_db(self.connection).all()
+        known = {(row.identity_row_id, row.alias_type, row.alias_namespace,
+                  row.alias_value_hash): row for row in existing}
+        for identity in identities:
+            identity_row = rows[identity.canonical_id]
+            for alias in identity.aliases:
+                key = (identity_row.id, alias.alias_type,
+                       alias.namespace, alias.value_hash)
+                await self._upsert_alias(tenant_id, identity_row, alias, known.get(key))
+
+    async def _upsert_alias(self, tenant_id, identity_row, alias, row):
+        _, alias_model, _ = _identity_models()
+        if row is None:
+            await alias_model.create(using_db=self.connection, **{
+                "tenant_id": tenant_id, "topology_row_id": self.topology_id,
+                "identity_row_id": identity_row.id,
+                "first_seen_analysis_run_row_id": self.analysis_run_id,
+                "last_seen_analysis_run_row_id": self.analysis_run_id,
+                "alias_type": alias.alias_type,
+                "alias_namespace": alias.namespace,
+                "alias_value": alias.value,
+                "alias_value_hash": alias.value_hash, "status": "ACTIVE",
+            })
+            return
+        row.last_seen_analysis_run_row_id = self.analysis_run_id
+        await row.save(using_db=self.connection,
+                       update_fields=["last_seen_analysis_run_row_id", "utime"])
+
+    async def _registry_rows(self, tenant_id):
+        registry_model, _, _ = _identity_models()
+        rows = await registry_model.filter(
+            tenant_id=tenant_id, topology_row_id=self.topology_id,
+            deleted=False,
+        ).using_db(self.connection).all()
+        return {row.canonical_id: row for row in rows}
+
+    async def _create_audit(self, tenant_id, audit, rows):
+        _, _, audit_model = _identity_models()
+        incumbent = _first_audit_row(audit.source_ids, rows)
+        candidate = _first_audit_row(audit.target_ids, rows)
+        if incumbent is None:
+            raise IdentityResolutionError("audit incumbent identity is missing")
+        details = dict(audit.details)
+        await audit_model.create(using_db=self.connection, **{
+            "tenant_id": tenant_id, "topology_row_id": self.topology_id,
+            "analysis_run_row_id": self.analysis_run_id,
+            "incumbent_identity_row_id": incumbent.id,
+            "candidate_identity_row_id": candidate.id if candidate else None,
+            "alias_type": details.get("alias_type", "identity_transition"),
+            "alias_namespace": details.get("alias_namespace", audit.operation),
+            "alias_value_hash": details.get(
+                "alias_value_hash", _fingerprint("|".join(audit.source_ids + audit.target_ids))
+            ),
+            "status": audit.status,
+            "conflict_details": json.dumps(_audit_document(audit), sort_keys=True),
+        })
+
+
+def _identity_models():
+    from models import (
+        TopologyIdentityAlias,
+        TopologyIdentityConflictAudit,
+        TopologyIdentityRegistry,
+    )
+
+    return (
+        TopologyIdentityRegistry,
+        TopologyIdentityAlias,
+        TopologyIdentityConflictAudit,
+    )
+
+
+def _first_audit_row(canonical_ids, rows):
+    return next((rows[item] for item in sorted(canonical_ids) if item in rows), None)
+
+
+def _audit_document(audit):
+    return {
+        "operation": audit.operation,
+        "source_ids": audit.source_ids,
+        "target_ids": audit.target_ids,
+        "actor": audit.actor,
+        "details": dict(audit.details),
+    }
+
+
 def _logical_group(fact, namespace, fact_map):
     attributes = fact.get("attributes", {})
     group_type = attributes.get("group_type")
@@ -437,7 +599,7 @@ def _validate_transition(operation, sources, targets):
     if operation not in TRANSITION_TYPES:
         raise IdentityTransitionError("unsupported identity transition")
     valid = {
-        "merge": len(sources) == 1 and len(targets) == 1,
+        "merge": len(sources) >= 1 and len(targets) == 1,
         "replacement": len(sources) == 1 and len(targets) == 1,
         "split": len(sources) == 1 and len(targets) >= 2,
     }
@@ -446,8 +608,9 @@ def _validate_transition(operation, sources, targets):
 
 
 def _canonical_id(kind, namespace, local_id):
-    safe = lambda item: quote(_nonempty(item, kind), safe="-._~")
-    return f"{kind}:{safe(namespace)}:{safe(local_id)}"
+    safe_namespace = quote(_nonempty(namespace, kind), safe="-._~")
+    safe_local_id = quote(_nonempty(local_id, kind), safe="-._~")
+    return f"{kind}:{safe_namespace}:{safe_local_id}"
 
 
 def _fact_local_id(identifier, prefix):

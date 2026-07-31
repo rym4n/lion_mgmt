@@ -33,8 +33,15 @@ def test_new_model_key_is_internal_when_the_api_omits_it():
 def test_portable_model_package_discards_source_environment_model_ids():
     package = normalize_model_package(
         {
-            "version": 1,
-            "ci_types": [{"key": "server", "name": "服务器"}],
+            "schema_version": 1,
+            "model_groups": [{"key": "asset", "name": "资产"}],
+            "ci_types": [
+                {
+                    "key": "server",
+                    "name": "服务器",
+                    "group_key": "asset",
+                }
+            ],
             "fields": [
                 {
                     "ci_type_id": "source-model-id",
@@ -46,31 +53,11 @@ def test_portable_model_package_discards_source_environment_model_ids():
                     "ref_ci_type": "server",
                 }
             ],
-            "relation_types": [
-                {
-                    "key": "connects",
-                    "name": "连接",
-                    "source_ci_type_ids": ["source-model-id"],
-                    "target_ci_type_ids": ["source-peer-id"],
-                    "source_ci_types": ["server"],
-                    "target_ci_types": ["server"],
-                    "relation_fields": [
-                        {
-                            "field_key": "peer",
-                            "label": "关联设备",
-                            "data_type": "ref",
-                            "ref_ci_type_id": "source-peer-id",
-                            "ref_ci_type": "server",
-                        }
-                    ],
-                }
-            ],
+            "unique_rules": [],
         }
     )
 
     assert "ci_type_id" not in package["fields"][0]
     assert "ref_ci_type_id" not in package["fields"][0]
-    relation = package["relation_types"][0]
-    assert "source_ci_type_ids" not in relation
-    assert "target_ci_type_ids" not in relation
-    assert "ref_ci_type_id" not in relation["relation_fields"][0]
+    assert package["fields"][0]["ref_ci_type"] == "server"
+    assert "relation_types" not in package

@@ -26,7 +26,6 @@ FIELD_DATA_TYPES = {
     "user",
     "tag",
 }
-RELATION_QUANTITIES = {"one", "many"}
 
 
 def _policy_data_value(data: dict, *keys: str, fallback=None):
@@ -265,68 +264,6 @@ class SupplyChainCiUniqueRule(BaseModel):
         indexes = (("tenant_id", "ci_type_id"),)
 
 
-class SupplyChainCiRelationType(BaseModel):
-    """Relation type definition between CI models."""
-
-    key = fields.CharField(max_length=64, description="关系 key")
-    name = fields.CharField(max_length=255, description="关系名称")
-    source_ci_type_ids = fields.JSONField(default=list, description="源模型 ID 列表")
-    target_ci_type_ids = fields.JSONField(default=list, description="目标模型 ID 列表")
-    source_ci_types = fields.JSONField(default=list, description="源模型 key 列表")
-    target_ci_types = fields.JSONField(default=list, description="目标模型 key 列表")
-    source_to_target = fields.CharField(
-        max_length=10, default="many", description="one/many"
-    )
-    target_to_source = fields.CharField(
-        max_length=10, default="many", description="one/many"
-    )
-    semantic_key = fields.CharField(max_length=64, null=True, description="关系语义")
-    relation_fields = fields.JSONField(default=list, description="关系属性字段定义")
-    is_locked = fields.BooleanField(default=False, description="交付锁定标记")
-    is_builtin = fields.BooleanField(default=False, description="产品内置关系")
-    builtin_key = fields.CharField(
-        max_length=160, null=True, description="内置稳定标识"
-    )
-    builtin_version = fields.CharField(max_length=64, null=True, description="内置版本")
-    builtin_hash = fields.CharField(max_length=64, null=True, description="定义摘要")
-    owner = fields.CharField(
-        max_length=20, default="tenant", description="product/tenant"
-    )
-    creator = fields.CharField(max_length=255, null=True, description="创建人")
-    updater = fields.CharField(max_length=255, null=True, description="更新人")
-
-    @property
-    def json(self) -> dict:
-        return {
-            "id": self.id,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-            "utime": strip_timezone_to_seconds(self.utime),
-            "tenant_id": self.tenant_id,
-            "key": self.key,
-            "name": self.name,
-            "source_ci_type_ids": self.source_ci_type_ids or [],
-            "target_ci_type_ids": self.target_ci_type_ids or [],
-            "source_ci_types": self.source_ci_types or [],
-            "target_ci_types": self.target_ci_types or [],
-            "source_to_target": self.source_to_target,
-            "target_to_source": self.target_to_source,
-            "semantic_key": self.semantic_key,
-            "relation_fields": self.relation_fields or [],
-            "is_builtin": self.is_builtin,
-            "builtin_key": self.builtin_key,
-            "builtin_version": self.builtin_version,
-            "builtin_hash": self.builtin_hash,
-            "owner": self.owner,
-            "creator": self.creator,
-            "updater": self.updater,
-        }
-
-    class Meta:
-        table = "supply_chain_ci_relation_type"
-        ordering = ["-utime"]
-        unique_together = (("tenant_id", "key"),)
-
-
 class SupplyChainBuiltinCatalogState(BaseModel):
     """Installed builtin-catalog revision for one tenant."""
 
@@ -530,25 +467,23 @@ class SupplyChainCi(BaseModel):
         )
 
 
-class SupplyChainCiRelation(BaseModel):
-    """Relation instance between two CIs."""
+class SupplyChainCiReference(BaseModel):
+    """Derived index for model-reference fields on CI instances."""
 
-    relation_type_key = fields.CharField(max_length=64, description="关系类型 key")
+    field_key = fields.CharField(max_length=64, description="引用字段 key")
     source_ci = fields.ForeignKeyField(
         "models.SupplyChainCi",
-        related_name="source_relations",
-        description="源 CI",
+        related_name="outgoing_references",
+        description="持有引用的 CI",
         on_delete=fields.CASCADE,
     )
     target_ci = fields.ForeignKeyField(
         "models.SupplyChainCi",
-        related_name="target_relations",
-        description="目标 CI",
+        related_name="incoming_references",
+        description="被引用的 CI",
         on_delete=fields.CASCADE,
     )
-    attributes = fields.JSONField(default=dict, description="关系属性")
-    creator = fields.CharField(max_length=255, null=True, description="创建人")
-    updater = fields.CharField(max_length=255, null=True, description="更新人")
+    position = fields.IntField(default=0, description="多值引用顺序")
 
     @property
     def json(self) -> dict:
@@ -557,24 +492,22 @@ class SupplyChainCiRelation(BaseModel):
             "ctime": strip_timezone_to_seconds(self.ctime),
             "utime": strip_timezone_to_seconds(self.utime),
             "tenant_id": self.tenant_id,
-            "relation_type_key": self.relation_type_key,
+            "field_key": self.field_key,
             "source_ci_id": self.source_ci_id,
             "target_ci_id": self.target_ci_id,
-            "attributes": self.attributes or {},
-            "creator": self.creator,
-            "updater": self.updater,
+            "position": self.position,
         }
 
     class Meta:
-        table = "supply_chain_ci_relation"
-        ordering = ["-utime"]
+        table = "supply_chain_ci_reference"
+        ordering = ["source_ci_id", "field_key", "position"]
         indexes = (
-            ("tenant_id", "relation_type_key"),
             ("tenant_id", "source_ci_id"),
             ("tenant_id", "target_ci_id"),
+            ("tenant_id", "source_ci_id", "field_key"),
         )
         unique_together = (
-            ("tenant_id", "relation_type_key", "source_ci_id", "target_ci_id"),
+            ("tenant_id", "source_ci_id", "field_key", "target_ci_id"),
         )
 
 

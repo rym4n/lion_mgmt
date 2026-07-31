@@ -110,6 +110,8 @@ Keep edits inside the owning boundary unless the request truly crosses modules.
 
 Before claiming completion:
 
+- When appending to a long review log, anchor on the unique preceding round and verify the new round is the sole file tail.
+
 - For documentation-only changes, run `git diff --check` and inspect the diff.
 - For Python code changes, run the smallest relevant import/compile check, for example `python -m compileall <changed paths>`, plus targeted runtime checks when external services are not required.
 - For model changes, create and inspect an Aerich migration.
@@ -120,6 +122,7 @@ The repository currently does not expose a formal test suite in `tests/`; add fo
 
 ## Git And Workspace Safety
 
+- Pass only repository-local paths to Git commands; inspect parent workspace documents with direct filesystem checks.
 - The worktree may contain unrelated local files. Do not revert, delete or stage unrelated changes.
 - Do not commit secrets, `.env` files, real license files, runtime data, caches or local OMX state.
 - `.omx/` is locally excluded through `.git/info/exclude`; keep it out of commits.

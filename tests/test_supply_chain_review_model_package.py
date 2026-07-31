@@ -1,7 +1,6 @@
 # coding=utf-8
 import asyncio
 import inspect
-import json
 from types import SimpleNamespace
 
 from services.supply_chain_review import manager, views
@@ -62,6 +61,7 @@ def _install_export_fakes(monkeypatch, missing_ci_type_keys=()):
     ci_types = [item for item in ci_types if item.key not in missing_ci_type_keys]
     fields = [
         _PackageObject(
+            ci_type_id="app-id",
             ci_type_key="app",
             field_key="name",
             sort=1,
@@ -69,35 +69,56 @@ def _install_export_fakes(monkeypatch, missing_ci_type_keys=()):
             field_group="基础信息",
             field_group_sort=1,
         ),
-        _PackageObject(ci_type_key="server", field_key="hostname", sort=1),
-        _PackageObject(ci_type_key="team", field_key="name", sort=1),
-        _PackageObject(ci_type_key="user", field_key="name", sort=1),
-    ]
-    relation_types = [
         _PackageObject(
-            key="runs_on",
-            source_ci_types=["app"],
-            target_ci_types=["server"],
-            relation_fields=[],
+            ci_type_id="app-id",
+            ci_type_key="app",
+            field_key="server",
+            data_type="ref",
+            ref_ci_type_id="server-id",
+            ref_ci_type="server",
+            options={"multiple": False, "reverse_unique": False},
+            sort=2,
         ),
         _PackageObject(
-            key="runs_on_with_owner",
-            source_ci_types=["app"],
-            target_ci_types=["server"],
-            relation_fields=[
-                {
-                    "field_key": "owner",
-                    "ref_ci_type": "team",
-                    "is_locked": True,
-                    "field_group": "关系信息",
-                }
-            ],
+            ci_type_id="app-id",
+            ci_type_key="app",
+            field_key="owner",
+            data_type="ref",
+            ref_ci_type_id="team-id",
+            ref_ci_type="team",
+            options={"multiple": False, "reverse_unique": False},
+            sort=3,
         ),
         _PackageObject(
-            key="belongs_to",
-            source_ci_types=["user"],
-            target_ci_types=["team"],
-            relation_fields=[],
+            ci_type_id="server-id",
+            ci_type_key="server",
+            field_key="hostname",
+            data_type="text",
+            sort=1,
+        ),
+        _PackageObject(
+            ci_type_id="team-id",
+            ci_type_key="team",
+            field_key="name",
+            data_type="text",
+            sort=1,
+        ),
+        _PackageObject(
+            ci_type_id="user-id",
+            ci_type_key="user",
+            field_key="name",
+            data_type="text",
+            sort=1,
+        ),
+        _PackageObject(
+            ci_type_id="user-id",
+            ci_type_key="user",
+            field_key="team",
+            data_type="ref",
+            ref_ci_type_id="team-id",
+            ref_ci_type="team",
+            options={"multiple": False, "reverse_unique": False},
+            sort=2,
         ),
     ]
 
@@ -114,11 +135,14 @@ def _install_export_fakes(monkeypatch, missing_ci_type_keys=()):
 
     def field_filter(*args, **kwargs):
         key_filter = kwargs.get("ci_type_key__in")
+        data_type = kwargs.get("data_type")
         rows = (
             fields
             if key_filter is None
             else [item for item in fields if item.ci_type_key in key_filter]
         )
+        if data_type is not None:
+            rows = [item for item in rows if getattr(item, "data_type", None) == data_type]
         return _FakeQuery(rows)
 
     monkeypatch.setattr(
@@ -126,11 +150,6 @@ def _install_export_fakes(monkeypatch, missing_ci_type_keys=()):
     )
     monkeypatch.setattr(
         manager.SupplyChainCiFieldDef, "filter", staticmethod(field_filter)
-    )
-    monkeypatch.setattr(
-        manager.SupplyChainCiRelationType,
-        "filter",
-        staticmethod(lambda *args, **kwargs: _FakeQuery(relation_types)),
     )
     monkeypatch.setattr(
         manager.SupplyChainCiModelGroup,
@@ -148,7 +167,7 @@ def _install_export_fakes(monkeypatch, missing_ci_type_keys=()):
     )
 
 
-def test_export_model_package_respects_selected_model_relation_scope(monkeypatch):
+def test_export_model_package_respects_selected_model_reference_scope(monkeypatch):
     _install_export_fakes(monkeypatch)
 
     package = asyncio.run(
@@ -161,7 +180,13 @@ def test_export_model_package_respects_selected_model_relation_scope(monkeypatch
 
     assert [item["key"] for item in package["ci_types"]] == ["server"]
     assert [item["ci_type_key"] for item in package["fields"]] == ["server"]
-    assert package["relation_types"] == []
+    assert set(package) == {
+        "schema_version",
+        "model_groups",
+        "ci_types",
+        "fields",
+        "unique_rules",
+    }
 
     related_package = asyncio.run(
         manager.export_model_package(
@@ -171,14 +196,20 @@ def test_export_model_package_respects_selected_model_relation_scope(monkeypatch
         )
     )
 
-    assert [item["key"] for item in related_package["ci_types"]] == ["app", "server"]
-    assert [item["ci_type_key"] for item in related_package["fields"]] == [
+    assert [item["key"] for item in related_package["ci_types"]] == [
         "app",
         "server",
+        "team",
+        "user",
     ]
-    assert [item["key"] for item in related_package["relation_types"]] == [
-        "runs_on",
-        "runs_on_with_owner",
+    assert [item["ci_type_key"] for item in related_package["fields"]] == [
+        "app",
+        "app",
+        "app",
+        "server",
+        "team",
+        "user",
+        "user",
     ]
     internal_fields = {
         "is_locked",
@@ -192,67 +223,50 @@ def test_export_model_package_respects_selected_model_relation_scope(monkeypatch
         related_package["model_groups"],
         related_package["ci_types"],
         related_package["fields"],
-        related_package["relation_types"],
     ):
         assert all(internal_fields.isdisjoint(item) for item in collection)
-    relation_fields = related_package["relation_types"][1]["relation_fields"]
-    assert internal_fields.isdisjoint(relation_fields[0])
-    assert "bklite" not in json.dumps(related_package).lower()
-
-    relation_package = asyncio.run(
-        manager.export_model_package(
-            "tenant-a",
-            ci_type_keys=["app", "server"],
-            include_relations=True,
-        )
-    )
-
-    assert [item["key"] for item in relation_package["ci_types"]] == ["app", "server"]
-    assert [item["ci_type_key"] for item in relation_package["fields"]] == [
-        "app",
-        "server",
+    ref_fields = [
+        item for item in related_package["fields"] if item.get("data_type") == "ref"
     ]
-    assert [item["key"] for item in relation_package["relation_types"]] == ["runs_on"]
-
-    partial_relation_package = asyncio.run(
-        manager.export_model_package(
-            "tenant-a",
-            ci_type_keys=["server"],
-            include_relations=True,
-        )
-    )
-
-    assert [item["key"] for item in partial_relation_package["ci_types"]] == ["server"]
-    assert partial_relation_package["relation_types"] == []
+    assert {item["ref_ci_type"] for item in ref_fields} == {"server", "team"}
+    assert all("ref_ci_type_id" not in item for item in ref_fields)
 
 
-def test_export_model_package_filters_relations_against_existing_models(monkeypatch):
+def test_export_model_package_ignores_unknown_requested_models(monkeypatch):
     _install_export_fakes(monkeypatch, missing_ci_type_keys={"server"})
 
     package = asyncio.run(
         manager.export_model_package(
             "tenant-a",
             ci_type_keys=["app", "server"],
-            include_relations=True,
         )
     )
 
     assert [item["key"] for item in package["ci_types"]] == ["app"]
-    assert [item["ci_type_key"] for item in package["fields"]] == ["app"]
-    assert package["relation_types"] == []
+    assert [item["ci_type_key"] for item in package["fields"]] == [
+        "app",
+        "app",
+        "app",
+    ]
+    assert "relation_types" not in package
 
 
-def test_export_model_package_endpoint_forwards_relation_mode(monkeypatch):
+def test_export_model_package_endpoint_forwards_reference_scope(monkeypatch):
     export_calls = []
 
     async def export_package(
         tenant,
         ci_type_keys=None,
         include_related=False,
-        include_relations=False,
     ):
-        export_calls.append((tenant, ci_type_keys, include_related, include_relations))
-        return {"ci_types": [], "fields": [], "relation_types": []}
+        export_calls.append((tenant, ci_type_keys, include_related))
+        return {
+            "schema_version": 1,
+            "model_groups": [],
+            "ci_types": [],
+            "fields": [],
+            "unique_rules": [],
+        }
 
     monkeypatch.setattr(views, "export_model_package", export_package)
     monkeypatch.setattr(views, "response_ok", lambda payload: payload)
@@ -260,13 +274,19 @@ def test_export_model_package_endpoint_forwards_relation_mode(monkeypatch):
     request = SimpleNamespace(
         json={
             "ci_type_keys": ["app", "server"],
-            "include_relations": True,
+            "include_related": True,
         },
         ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
     )
     payload = asyncio.run(inspect.unwrap(views.ci_type_export)(request))
 
-    assert payload == {"ci_types": [], "fields": [], "relation_types": []}
+    assert payload == {
+        "schema_version": 1,
+        "model_groups": [],
+        "ci_types": [],
+        "fields": [],
+        "unique_rules": [],
+    }
     assert export_calls == [
-        ("tenant-a", ["app", "server"], False, True),
+        ("tenant-a", ["app", "server"], True),
     ]

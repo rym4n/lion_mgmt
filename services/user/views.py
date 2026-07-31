@@ -31,6 +31,11 @@ from libs.security.authorization import (
     is_superadmin_role,
     requires_permission,
 )
+from libs.security.mfa import (
+    issue_sensitive_mfa_proof,
+    session_requires_mfa,
+    verify_session_mfa_code,
+)
 from libs.utils import (
     get_client_ip,
     get_expiration_date,
@@ -1009,6 +1014,79 @@ async def mfa_auth(request):
     return resp
 
 
+@user_bp.post("/sensitive-mfa-auth")
+@openapi.definition(
+    summary="敏感操作MFA验证",
+    description="为当前登录会话签发短时有效的敏感操作MFA凭证",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["code"],
+                "properties": {
+                    "code": {"type": "string", "description": "MFA验证码"}
+                },
+            }
+        }
+    },
+)
+async def sensitive_mfa_auth(request):
+    await verify_session_mfa_code(request, (request.json or {}).get("code"))
+    proof, expires_in = issue_sensitive_mfa_proof(request)
+    return response_ok({"proof": proof, "expires_in": expires_in})
+
+
+@user_bp.post("/change-password")
+@openapi.definition(
+    summary="修改当前用户密码",
+    description="校验旧密码后修改当前用户密码；启用MFA时同时校验MFA验证码",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["old_password", "new_password"],
+                "properties": {
+                    "old_password": {"type": "string", "description": "旧密码"},
+                    "new_password": {"type": "string", "description": "新密码"},
+                    "mfa_code": {"type": "string", "description": "MFA验证码"},
+                },
+            }
+        }
+    },
+)
+async def change_password(request):
+    payload = request.json or {}
+    old_password = str(payload.get("old_password") or "")
+    new_password = str(payload.get("new_password") or "").strip()
+    if not old_password or not new_password:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    account = await Account.get_or_none(
+        id=request.ctx.session.get("sub"), deleted=False
+    )
+    if not account:
+        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+    try:
+        password_hasher.verify(account.password, old_password)
+    except (VerificationError, InvalidHashError):
+        raise CustomError(ErrorCode.CREDENTIALS_ERROR) from None
+
+    await validate_password(new_password)
+    if account.mfa_enable or session_requires_mfa(request):
+        await verify_session_mfa_code(request, payload.get("mfa_code"))
+
+    account.password = password_hasher.hash(new_password)
+    if account.last_login_time is None:
+        account.last_login_time = datetime.now()
+        await account.save(update_fields=["password", "last_login_time"])
+    else:
+        await account.save(update_fields=["password"])
+    await request.app.ctx.cache_client.set(
+        f"account_{account.id}", account, AUTHENTICATION_SESSION_EXPIRATION
+    )
+    return response_ok("success")
+
+
 @user_bp.post("/update")
 @openapi.definition(
     summary="修改用户个人信息",
@@ -1020,7 +1098,6 @@ async def mfa_auth(request):
                 "properties": {
                     "email": {"type": "string", "description": "邮箱"},
                     "phone": {"type": "string", "description": "电话"},
-                    "password": {"type": "string", "description": "密码"},
                     "permit_ip": {
                         "type": "string",
                         "description": "允许登录的IP地址，支持多个IP或CIDR格式（逗号分隔），例如 192.168.1.1,10.0.2.0/24",
@@ -1048,19 +1125,10 @@ async def mfa_auth(request):
 )
 async def update_user(request):
     data = dict()
-    for field in ["email", "phone", "password", "permit_ip"]:
+    for field in ["email", "phone", "permit_ip"]:
         if field in request.json:
-            if field == "password":
-                # 密码强度校验
-                password = request.json.get("password").strip() or ""
-                await validate_password(password)
-                data["password"] = password_hasher.hash(password)
-            else:
-                data[field] = request.json[field]
+            data[field] = request.json[field]
 
-    # 如果是首次登录强制改密的话，需要刷新认证时间
-    if request.ctx.session["account_info"].last_login_time is None:
-        data["last_login_time"] = datetime.now()
     await Account.filter(id=request.ctx.session.get("sub")).update(**data)
 
     return response_ok("success")

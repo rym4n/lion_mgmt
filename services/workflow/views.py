@@ -229,7 +229,9 @@ async def create_workflow(request):
             permissions=["*:*"],
             tenant_id=tenant_id,
         )
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    maintenance_mode = bool(
+        await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    )
     async with in_transaction():
         playbook = await Playbook.create(
             name=data.get("name"),
@@ -683,8 +685,16 @@ async def list_workflow_versions(request):
 async def export_workflow(request):
     tenant_id = request.ctx.session.get("tenant_id")
     playbook_ids = request.json.get("playbook_ids", [])
+    maintenance_mode = bool(
+        await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    )
 
-    pv = await PlaybookVersion.filter(playbook__id__in=playbook_ids, deleted=False, tenant_id=tenant_id).all().prefetch_related("playbook")
+    pv = await PlaybookVersion.filter(
+        playbook__id__in=playbook_ids,
+        playbook__internal=maintenance_mode,
+        deleted=False,
+        tenant_id=tenant_id,
+    ).all().prefetch_related("playbook")
 
     tool_keys = set()
     resource_ids = set()
@@ -724,7 +734,12 @@ async def export_workflow(request):
         zf.writestr("workflow.json", orjson.dumps(result))
 
         if resource_ids:
-            resources_objs = await ToolResources.filter(id__in=list(resource_ids), deleted=False).all()
+            resources_objs = await ToolResources.filter(
+                id__in=list(resource_ids),
+                deleted=False,
+                internal=maintenance_mode,
+                tenant_id=tenant_id,
+            ).all()
             resources_list = []
             for res in resources_objs:
                 resources_data = res.resources_json
@@ -1256,6 +1271,9 @@ async def execute_action(request):
     message = request.json
 
     tenant_id = request.ctx.session.get("tenant_id")
+    maintenance_mode = await request.app.ctx.cache_client.get(
+        request.ctx.session["id"]
+    )
 
     if message.get("type") in ("flow", "action", "code"):
         if message.get("type") == "flow":
@@ -1277,6 +1295,8 @@ async def execute_action(request):
             message.get("action"),
             message.get("resource"),
             tenant_id,
+            bool(maintenance_mode),
+            message.get("app_ver"),
         ):
             await resp.send("data: 缺少动作资源执行权限，执行失败\n\n")
             await resp.eof()
@@ -2270,7 +2290,9 @@ async def import_workflow(request):
     tenant_id = request.ctx.session.get("tenant_id")
     creator = request.ctx.session["account_info"]
     admin = await get_superadmin_role()
-    maintenance_mode = await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    maintenance_mode = bool(
+        await request.app.ctx.cache_client.get(request.ctx.session["id"])
+    )
 
     imported = {"playbooks": 0, "tools": 0, "resources": 0, "skipped_versions": 0, "skipped_resources": 0}
 
@@ -2289,7 +2311,7 @@ async def import_workflow(request):
                     name=name,
                     deleted=False,
                     tool_name=tool_name,
-                    internal=maintenance_mode if maintenance_mode else False,
+                    internal=maintenance_mode,
                     tenant_id=tenant_id,
                 )
                 if exist:
@@ -2301,7 +2323,7 @@ async def import_workflow(request):
                     name=name,
                     engine=engine,
                     resources=orjson.dumps(resources).decode(),
-                    internal=maintenance_mode if maintenance_mode else False,
+                    internal=maintenance_mode,
                     creator=creator.username,
                     updater=creator.username,
                     tenant_id=tenant_id,
@@ -2328,7 +2350,13 @@ async def import_workflow(request):
                 continue
             t_name = base[:idx]
             t_ver = base[idx + 1 :]
-            if await Tool.filter(name=t_name, deleted=False, tenant_id=tenant_id, version=t_ver).exists():
+            if await Tool.filter(
+                name=t_name,
+                version=t_ver,
+                deleted=False,
+                maintain=maintenance_mode,
+                tenant_id=tenant_id,
+            ).exists():
                 imported["skipped_versions"] += 1
                 continue
             content = zf.read(fn)
@@ -2336,7 +2364,14 @@ async def import_workflow(request):
             # 构造 MockFile 对象
             mock_file = MockFile(name=fn, body=content)
 
-            result = await upload_tool(mock_file, lic, creator.username, tenant_id, request)
+            result = await upload_tool(
+                mock_file,
+                lic,
+                creator.username,
+                tenant_id,
+                request,
+                maintenance_mode=maintenance_mode,
+            )
 
             if result and result.get("msg") == "success":
                 tool_version_map[(t_name, t_ver)] = result.get("version")
@@ -2346,7 +2381,12 @@ async def import_workflow(request):
             flows = orjson.loads(zf.read("workflow.json"))
             for item in flows:
                 ver = item.get("version")
-                if await PlaybookVersion.filter(version=ver, deleted=False, tenant_id=tenant_id).exists():
+                if await PlaybookVersion.filter(
+                    version=ver,
+                    deleted=False,
+                    playbook__internal=maintenance_mode,
+                    tenant_id=tenant_id,
+                ).exists():
                     imported["skipped_versions"] += 1
                     continue
                 name = item.get("name")
@@ -2355,14 +2395,19 @@ async def import_workflow(request):
                 flow_json = item.get("flow_json") or {}
                 flow_json = _rewrite_imported_action_versions(flow_json, tool_version_map)
                 async with in_transaction():
-                    pb = await Playbook.get_or_none(name=name, deleted=False, tenant_id=tenant_id)
+                    pb = await Playbook.get_or_none(
+                        name=name,
+                        deleted=False,
+                        internal=maintenance_mode,
+                        tenant_id=tenant_id,
+                    )
                     if not pb:
                         pb = await Playbook.create(
                             id=str(uuid.uuid4()),
                             name=name,
                             remark=remark,
                             creator=creator,
-                            internal=maintenance_mode if maintenance_mode else False,
+                            internal=maintenance_mode,
                             tenant_id=tenant_id,
                         )
                         await PlaybookPermissions.create(

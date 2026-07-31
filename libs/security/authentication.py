@@ -3,7 +3,6 @@
 import functools
 import re
 import time
-import traceback
 
 import jwt
 from aiocache import cached
@@ -14,7 +13,12 @@ from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from libs.utils import get_client_ip, ip_in_list
 from models import Account, Config, Tenant
-from settings import AUTHENTICATION_SESSION_EXPIRATION, SECRET, SECURE_CONFIG_DEFAULT, SESSION_ENCODING_ALGORITHM
+from settings import (
+    AUTHENTICATION_SESSION_EXPIRATION,
+    SECRET,
+    SECURE_CONFIG_DEFAULT,
+    SESSION_ENCODING_ALGORITHM,
+)
 
 
 async def authenticate(request: Request):
@@ -39,7 +43,11 @@ def validate_token(payload, request):
     if payload.get("exp", 0) < int(time.time()):
         raise CustomError(ErrorCode.SESSION_EXPIRED)
 
-    if not request.path.endswith("/user/mfa-auth") and payload.get("mfa_enable") is True and payload.get("mfa_auth") is not True:
+    if (
+        not request.path.endswith("/user/mfa-auth")
+        and payload.get("mfa_enable") is True
+        and payload.get("mfa_auth") is not True
+    ):
         raise CustomError(ErrorCode.SECOND_FACTOR_REQUIRED)
 
     client_ip = get_client_ip(request)
@@ -136,34 +144,44 @@ async def token_decode(request: Request) -> dict:
     """
     将token解码成数据字典
     """
-    if request.cookies.get("aioe-auth") and ":" not in request.cookies.get("aioe-auth"):
-        token = request.cookies.get("aioe-auth")
-    elif request.cookies.get("__Host-aioe-auth") and ":" not in request.cookies.get("__Host-aioe-auth"):
-        token = request.cookies.get("__Host-aioe-auth")
-    elif request.headers.get("aioe-auth") and ":" in request.headers.get("aioe-auth"):
-        token = request.headers.get("aioe-auth")
-    else:
-        raise CustomError(ErrorCode.SESSION_INVALID)
-
+    token = _select_user_credential(request)
     try:
         if ":" in token:
-            user_id = token.split(":")[0]
-            token = token.split(":")[1]
-            account = await request.app.ctx.cache_client.get(f"account_{user_id}")
-            if not account:
-                account = await Account.get(id=user_id, deleted=False).prefetch_related("roles")
-                await request.app.ctx.cache_client.set(f"account_{account.id}", account, 7 * 24 * 3600)
-            payload = jwt.decode(token, account.password, SESSION_ENCODING_ALGORITHM)
-            if request.headers.get("tenant_name"):
-                tenant = await Tenant.get_or_none(name=request.headers.get("tenant_name"))
-                if tenant:
-                    payload["tenant_id"] = tenant.id
-        else:
-            payload = jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
-        return payload
-    except Exception as e:
-        logger.warning(f"{token} | {e} | {traceback.format_exc()}")
-        raise CustomError(ErrorCode.SESSION_INVALID)
+            return await _decode_account_token(request, token)
+        return jwt.decode(token, SECRET, SESSION_ENCODING_ALGORITHM)
+    except Exception:
+        logger.warning("User authentication failed")
+        raise CustomError(ErrorCode.SESSION_INVALID) from None
+
+
+def _select_user_credential(request: Request) -> str:
+    cookie = request.cookies.get("aioe-auth")
+    host_cookie = request.cookies.get("__Host-aioe-auth")
+    header = request.headers.get("aioe-auth")
+    if cookie and ":" not in cookie:
+        return cookie
+    if host_cookie and ":" not in host_cookie:
+        return host_cookie
+    if header and ":" in header:
+        return header
+    raise CustomError(ErrorCode.SESSION_INVALID)
+
+
+async def _decode_account_token(request: Request, credential: str) -> dict:
+    user_id, token = credential.split(":")[:2]
+    account = await request.app.ctx.cache_client.get(f"account_{user_id}")
+    if not account:
+        account = await Account.get(id=user_id, deleted=False).prefetch_related("roles")
+        await request.app.ctx.cache_client.set(
+            f"account_{account.id}", account, 7 * 24 * 3600
+        )
+    payload = jwt.decode(token, account.password, SESSION_ENCODING_ALGORITHM)
+    tenant_name = request.headers.get("tenant_name")
+    if tenant_name:
+        tenant = await Tenant.get_or_none(name=tenant_name)
+        if tenant:
+            payload["tenant_id"] = tenant.id
+    return payload
 
 
 def validate_username(username: str) -> str:
@@ -185,19 +203,23 @@ async def get_secure_config_dict() -> dict:
     result = {}
     for key, default_value in SECURE_CONFIG_DEFAULT.items():
         value = config_dict.get(key)
-        if value is None:
-            result[key] = default_value
-        else:
-            if isinstance(default_value, bool):
-                result[key] = value.lower() == "true"
-            elif isinstance(default_value, int):
-                try:
-                    result[key] = int(value)
-                except ValueError:
-                    result[key] = default_value
-            else:
-                result[key] = value
+        result[key] = (
+            default_value
+            if value is None
+            else _coerce_secure_config_value(value, default_value)
+        )
     return result
+
+
+def _coerce_secure_config_value(value: str, default_value: object) -> object:
+    if isinstance(default_value, bool):
+        return value.lower() == "true"
+    if isinstance(default_value, int):
+        try:
+            return int(value)
+        except ValueError:
+            return default_value
+    return value
 
 
 def has_consecutive_both(s: str, n: int = 5) -> bool:
@@ -258,7 +280,10 @@ async def validate_password(password: str) -> str:
     config = await get_secure_config_dict()
 
     # 1. 长度校验
-    if len(password) < config["password_length_min"] or len(password) > config["password_length_max"]:
+    if (
+        len(password) < config["password_length_min"]
+        or len(password) > config["password_length_max"]
+    ):
         raise CustomError(ErrorCode.PASSWORD_LENGTH_ERROR)
 
     # 2. 包含字符类型校验

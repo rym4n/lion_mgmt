@@ -71,8 +71,10 @@ COPY docker-entrypoint.sh ./
 COPY services/supply_chain_review/builtin_catalog/ ./services/supply_chain_review/builtin_catalog/
 COPY services/inspection/inspection_report_template.docx ./services/inspection/inspection_report_template.docx
 COPY services/inspection/inspection_template_model.xlsx ./services/inspection/inspection_template_model.xlsx
+COPY services/network_topology/schemas/ ./services/network_topology/schemas/
+COPY services/network_topology/registries/ ./services/network_topology/registries/
 
-
+RUN python -m services.network_topology.contract_smoke
 RUN chmod +x docker-entrypoint.sh
 
 # 在镜像构建时初始化 aerich 配置（不需要数据库连接）
