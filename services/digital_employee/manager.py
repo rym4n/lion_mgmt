@@ -1,4 +1,5 @@
 # coding=utf-8
+import shutil
 import uuid
 from datetime import datetime
 
@@ -14,6 +15,7 @@ from .aioe_credential_manager import create_employee_api_account
 from .lion_agent_client import LionAgentClient
 from .prompt_builder import render_workspace_files, workspace_etag
 from .rbac import require_existing_platform_role
+from .skill_storage import relative_skill_dir, skill_storage_root, tenant_skill_root
 
 
 BUILTIN_TENANT_ID = "__builtin__"
@@ -185,3 +187,26 @@ async def ensure_employee_can_delete(employee: CommandAgent) -> None:
     ).exclude(status__in=TERMINAL_TASK_STATUS).count()
     if pending:
         raise CustomError(ErrorCode.EMPLOYEE_HAS_PENDING_TASKS)
+
+
+async def clone_builtin_skill_to_tenant(skill: DigitalEmployeeSkill, tenant_id: str) -> DigitalEmployeeSkill:
+    """把内置技能整目录复制到租户根下，返回租户自己的技能记录。内置目录本身不改动，保持只读基线。"""
+    source = (skill_storage_root() / skill.skill_dir).resolve()
+    target = tenant_skill_root(tenant_id) / skill.skill_key
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, target)
+    cloned, _ = await DigitalEmployeeSkill.update_or_create(
+        tenant_id=tenant_id,
+        skill_key=skill.skill_key,
+        defaults={
+            "name": skill.name,
+            "description": skill.description,
+            "skill_dir": relative_skill_dir(target),
+            "version": skill.version,
+            "is_builtin": False,
+            "enabled": True,
+            "deleted": False,
+        },
+    )
+    return cloned

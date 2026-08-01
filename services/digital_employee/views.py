@@ -19,6 +19,7 @@ from .employee_report import compose
 from .lion_agent_client import LionAgentClient
 from .manager import (
     BUILTIN_TENANT_ID,
+    clone_builtin_skill_to_tenant,
     create_employee,
     ensure_employee_can_delete,
     get_visible_role,
@@ -34,10 +35,12 @@ from .package_api import import_package_from_request
 from .package_importer import export_package_for_tenant, normalize_role_prompt_fields, require_role_identity
 from .rbac import require_existing_platform_role
 from .runtime_callbacks import fetch_runtime_transcript, save_runtime_report, save_runtime_transcript
+from .skill_storage import parse_skill_md, relative_skill_dir, resolve_skill_file, tenant_skill_root
 
 digital_employee_bp = Blueprint("digital_employee", url_prefix="/digital_employee")
 __all__ = ["digital_employee_bp"]
 _ROLE_UNSET = object()
+SKILL_FILE_MAX_BYTES = 512 * 1024
 
 
 def _json(request: Request) -> dict:
@@ -540,7 +543,7 @@ async def skill_save(request: Request):
         defaults={
             "name": data["name"],
             "description": data.get("description"),
-            "skill_dir": data.get("skill_dir") or "",
+            "skill_dir": relative_skill_dir(tenant_skill_root(tenant_id) / skill_key),
             "version": existing.version + 1 if existing and content_changed else (existing.version if existing else 1),
             "is_builtin": False,
             "enabled": existing.enabled if existing else True,
@@ -583,6 +586,60 @@ async def skill_delete(request: Request):
     tenant_id = _tenant_id(request)
     await _delete_skill_for_tenant(tenant_id, _json(request).get("skill_key"))
     return response_ok()
+
+
+@digital_employee_bp.post("/skill/files")
+@requires_permission("digital_employee_skill:r")
+async def skill_files(request: Request):
+    """列出技能目录下的文件（相对路径）。"""
+    tenant_id = _tenant_id(request)
+    skill = (await get_visible_skills(tenant_id, [_json(request).get("skill_key")], enabled=None))[0]
+    root = resolve_skill_file(skill.skill_dir, ".", tenant_id)
+    names = [
+        path.relative_to(root).as_posix()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    ]
+    return response_ok(data={"files": names, "is_builtin": skill.is_builtin})
+
+
+@digital_employee_bp.post("/skill/file/read")
+@requires_permission("digital_employee_skill:r")
+async def skill_file_read(request: Request):
+    data = _json(request)
+    tenant_id = _tenant_id(request)
+    skill = (await get_visible_skills(tenant_id, [data.get("skill_key")], enabled=None))[0]
+    target = resolve_skill_file(skill.skill_dir, str(data.get("path") or ""), tenant_id)
+    if not target.is_file() or target.stat().st_size > SKILL_FILE_MAX_BYTES:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    return response_ok(data={"path": str(data.get("path")), "content": target.read_text(encoding="utf-8")})
+
+
+@digital_employee_bp.post("/skill/file/write")
+@requires_permission("digital_employee_skill:u")
+async def skill_file_write(request: Request):
+    """写技能文件。内置技能先复制为租户技能再写，内置资产保持只读。"""
+    data = _json(request)
+    tenant_id = _tenant_id(request)
+    content = data.get("content")
+    if not isinstance(content, str) or len(content.encode("utf-8")) > SKILL_FILE_MAX_BYTES:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    skill = (await get_visible_skills(tenant_id, [data.get("skill_key")], enabled=None))[0]
+    if skill.is_builtin:
+        skill = await clone_builtin_skill_to_tenant(skill, tenant_id)
+
+    target = resolve_skill_file(skill.skill_dir, str(data.get("path") or ""), tenant_id, for_write=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+
+    if target.name == "SKILL.md":
+        name, description = parse_skill_md(target.parent)
+        skill.name = name
+        skill.description = description
+        skill.version += 1
+        await skill.save(update_fields=["name", "description", "version", "utime"])
+    return response_ok(data=skill.json)
 
 
 @digital_employee_bp.post("/package/import")
