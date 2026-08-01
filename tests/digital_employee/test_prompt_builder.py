@@ -2,7 +2,13 @@
 import importlib.util
 import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
+
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 def _load_module(name: str, relative_path: str):
@@ -13,7 +19,10 @@ def _load_module(name: str, relative_path: str):
     return module
 
 
-prompt_builder = _load_module("prompt_builder", "services/digital_employee/prompt_builder.py")
+prompt_builder = _load_module(
+    "services.digital_employee.prompt_builder",
+    "services/digital_employee/prompt_builder.py",
+)
 build_workspace_snapshots = prompt_builder.build_workspace_snapshots
 build_runtime_prompt = prompt_builder.build_runtime_prompt
 render_workspace_files = prompt_builder.render_workspace_files
@@ -36,8 +45,6 @@ def test_render_workspace_files_includes_role_skill_and_minimal_runtime_notice()
         version=1,
         name="告警分诊",
         description="判断告警优先级",
-        bindings={"action_keys": ["notify"], "mcp_tools": ["metrics.query"]},
-        require_approval=False,
     )
     employee = SimpleNamespace(
         id="employee-1",
@@ -59,14 +66,19 @@ def test_render_workspace_files_includes_role_skill_and_minimal_runtime_notice()
     assert "只用授权工具" not in files["system_prompt.md"]
     assert "以当前任务和平台强制访问控制为准。" in files["system_prompt.md"]
     assert "AgentScope Toolkit" not in files["system_prompt.md"]
-    assert "AIOE CLI: 内置 AIOE 平台操作技能" in files["manifest.json"]
-    assert "告警分诊: 判断告警优先级" in files["manifest.json"]
-    assert "alert_triage" in files["skills"]
-    assert "aioe-cli" in files["skills"]
-    assert "未配置 RBAC 角色时不得调用 AIOE 任何接口" in files["skills"]["aioe-cli"]["instructions.md"].replace("，", "")
-    assert "notify" not in files["skills"]["alert_triage"]["instructions.md"]
+    assert "内置 `aioe-cli` skill" not in files["system_prompt.md"]
+    assert files["skills"] == {}
     assert '"agent_key": "monitor-1"' in files["manifest.json"]
     manifest = json.loads(files["manifest.json"])
+    assert manifest["role"]["tool_usage_notes"] == "只用授权工具"
+    assert manifest["skills"] == [
+        {
+            "description": "判断告警优先级",
+            "name": "告警分诊",
+            "skill_key": "alert_triage",
+            "version": 1,
+        }
+    ]
     assert "description" not in manifest["employee"]
     assert "description" not in manifest["role"]
     assert '"workspace_etag":' in files["manifest.json"]
@@ -121,7 +133,7 @@ def test_render_workspace_files_coerces_legacy_prompt_arrays_to_text():
     assert "### 告警分诊" in files["system_prompt.md"]
     assert "- 输出严重性" in files["system_prompt.md"]
     assert "- 不直接执行破坏性变更" not in files["system_prompt.md"]
-    assert "AIOE CLI: 内置 AIOE 平台操作技能" in files["manifest.json"]
+    assert json.loads(files["manifest.json"])["skills"] == []
 
 
 def test_render_workspace_files_does_not_fallback_to_description_fields():
@@ -170,8 +182,7 @@ def test_render_workspace_files_denies_aioe_api_without_employee_rbac_role():
     manifest = json.loads(files["manifest.json"])
     policy = json.loads(files["policy.json"])
 
-    assert manifest["skills"][0]["skill_key"] == "aioe-cli"
-    assert manifest["skills"][0]["bindings"]["aioe_api"]["requires_rbac_role"] is True
+    assert manifest["skills"] == []
     assert policy["authorization"]["rbac_role_id"] is None
     assert policy["authorization"]["aioe_api"]["mode"] == "deny"
     assert "未配置平台 RBAC 角色时不得调用 AIOE 任何接口" in files["system_prompt.md"]
@@ -188,7 +199,7 @@ def test_workspace_etag_changes_with_skill_version():
 
 def test_workspace_etag_ignores_resource_scope_and_tracks_role_policy():
     role = SimpleNamespace(role_key="monitor", version=1, meta={})
-    skill = SimpleNamespace(skill_key="alert_triage", version=1, bindings={}, require_approval=False)
+    skill = SimpleNamespace(skill_key="alert_triage", version=1)
     employee_a = SimpleNamespace(resource_scope={"assets": ["db01"]}, metadata={}, runtime="lion_agent", rbac_role_id="role-1")
     employee_b = SimpleNamespace(resource_scope={"assets": ["db02"]}, metadata={}, runtime="lion_agent", rbac_role_id="role-1")
     employee_c = SimpleNamespace(
@@ -211,7 +222,7 @@ def test_workspace_etag_ignores_resource_scope_and_tracks_role_policy():
 
 def test_workspace_snapshots_match_rendered_files_without_recursive_etag():
     role = SimpleNamespace(role_key="monitor", version=1, meta={})
-    skill = SimpleNamespace(skill_key="alert_triage", version=1, bindings={}, require_approval=True)
+    skill = SimpleNamespace(skill_key="alert_triage", version=1)
     employee = SimpleNamespace(
         id="employee-1",
         tenant_id="tenant-1",
@@ -238,26 +249,22 @@ def test_workspace_snapshots_match_rendered_files_without_recursive_etag():
         },
     }
     assert "resource_scope" not in snapshots["policy_snapshot"]
-    assert snapshots["policy_snapshot"]["approval"]["skills"]["alert_triage"] == "approval_required"
+    assert snapshots["policy_snapshot"]["approval"] == {"default": "allow"}
 
 
-def test_approval_policy_allows_unspecified_tools_but_keeps_explicit_skill_approval():
+def test_approval_policy_keeps_global_default_without_skill_overrides():
     role = SimpleNamespace(role_key="monitor", version=1, meta={})
     safe_skill = SimpleNamespace(
         skill_key="capacity_read",
         version=1,
         name="容量查询",
         description="只读查询云主机数量",
-        bindings={},
-        require_approval=False,
     )
     risky_skill = SimpleNamespace(
         skill_key="restart_host",
         version=1,
         name="重启主机",
         description="变更主机运行状态",
-        bindings={},
-        require_approval=True,
     )
     employee = SimpleNamespace(
         id="employee-1",
@@ -273,10 +280,7 @@ def test_approval_policy_allows_unspecified_tools_but_keeps_explicit_skill_appro
     files = render_workspace_files(employee, role, [safe_skill, risky_skill])
     policy = json.loads(files["policy.json"])
 
-    assert policy["approval"]["default"] == "allow"
-    assert policy["approval"]["skills"]["capacity_read"] == "allow"
-    assert policy["approval"]["skills"]["aioe-cli"] == "allow"
-    assert policy["approval"]["skills"]["restart_host"] == "approval_required"
+    assert policy["approval"] == {"default": "allow"}
 
 
 def test_build_runtime_prompt_contains_payload():
@@ -296,3 +300,86 @@ def test_build_runtime_prompt_contains_payload():
     assert "dba-1" in prompt
     assert "db01" in prompt
     assert "_dispatch_scope" not in prompt
+
+
+def test_workspace_skills_are_verbatim_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("RY_SKILL_ROOT", str(tmp_path))
+    skill_dir = tmp_path / "tenant-1" / "db_backup_check"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: db-backup-check\ndescription: d\n---\n\n# 正文\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "references").mkdir()
+    (skill_dir / "references" / "note.md").write_text("ref", encoding="utf-8")
+
+    employee = SimpleNamespace(
+        id="e1",
+        tenant_id="tenant-1",
+        name="员工",
+        runtime="lion_agent",
+        rbac_role_id="r1",
+        agent_key="k",
+        metadata={},
+    )
+    role = SimpleNamespace(
+        role_key="monitor",
+        name="监控",
+        meta={"identity": "i", "responsibilities": "r"},
+        version=1,
+    )
+    skill = SimpleNamespace(
+        skill_key="db_backup_check",
+        name="备份检查",
+        description="d",
+        skill_dir="tenant-1/db_backup_check",
+        version=1,
+        enabled=True,
+    )
+
+    files = render_workspace_files(employee, role, [skill])
+
+    assert files["skills"]["db_backup_check"]["SKILL.md"].startswith("---")
+    assert files["skills"]["db_backup_check"]["references/note.md"] == "ref"
+    assert "instructions.md" not in files["skills"]["db_backup_check"]
+
+
+def test_system_prompt_has_no_skill_listing(tmp_path, monkeypatch):
+    """技能清单由 AgentScope 自动注入，system_prompt 不得重复拼接。"""
+    monkeypatch.setenv("RY_SKILL_ROOT", str(tmp_path))
+    skill_dir = tmp_path / "tenant-1" / "db_backup_check"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: db-backup-check\ndescription: d\n---\n\n# 正文\n",
+        encoding="utf-8",
+    )
+
+    employee = SimpleNamespace(
+        id="e1",
+        tenant_id="tenant-1",
+        name="员工",
+        runtime="lion_agent",
+        rbac_role_id="r1",
+        agent_key="k",
+        metadata={},
+    )
+    role = SimpleNamespace(
+        role_key="monitor",
+        name="监控",
+        meta={"identity": "i", "responsibilities": "r"},
+        version=1,
+    )
+    skill = SimpleNamespace(
+        skill_key="db_backup_check",
+        name="备份检查",
+        description="d",
+        skill_dir="tenant-1/db_backup_check",
+        version=1,
+        enabled=True,
+    )
+
+    prompt = render_workspace_files(employee, role, [skill])["system_prompt.md"]
+
+    assert "db-backup-check" not in prompt
+    assert "agent-skills" not in prompt
+    assert "## Runtime" in prompt

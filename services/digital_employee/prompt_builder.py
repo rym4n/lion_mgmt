@@ -3,28 +3,33 @@ import hashlib
 import json
 from typing import Any
 
+from .skill_storage import skill_storage_root
+
 
 WORKSPACE_TEXT_FILES = ("system_prompt.md",)
 WORKSPACE_JSON_FILES = ("manifest.json", "policy.json")
 AIOE_CLI_SKILL_KEY = "aioe-cli"
 AIOE_CLI_SKILL_VERSION = 2
-AIOE_CLI_DESCRIPTION = (
-    "内置 AIOE 平台操作技能，对应运行时工具 `aioe_cli`。负责按当前员工的 AIOE 平台 RBAC 角色授权，"
-    "调用 AIOE API 完成资产、告警、任务、剧本、报告、应用和系统配置等平台操作；"
-    "未配置 RBAC 角色时不得调用任何 AIOE API。"
-)
-PLATFORM_BINDING_KEYS = {
-    "tool_groups",
-    "tool_group_keys",
-    "tools",
-    "tool_keys",
-    "action_keys",
-    "playbook_ids",
-    "mcp_tools",
-    "aioe_api",
-    "aioe_apps",
-    "rbac_roles",
-}
+MAX_SKILL_FILE_BYTES = 512 * 1024
+
+
+def _read_skill_files(skill: Any) -> dict[str, str]:
+    """把技能目录下的文件原样读出。文件是权威，此处不做任何加工。"""
+    skill_dir = str(getattr(skill, "skill_dir", "") or "").strip()
+    if not skill_dir:
+        return {}
+    root = (skill_storage_root() / skill_dir).resolve()
+    if not root.is_dir() or skill_storage_root() not in root.parents:
+        return {}
+    files: dict[str, str] = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.stat().st_size > MAX_SKILL_FILE_BYTES:
+            continue
+        try:
+            files[path.relative_to(root).as_posix()] = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+    return files
 
 
 def _json_block(value: Any) -> str:
@@ -93,111 +98,19 @@ def _as_list(value: Any) -> list[str]:
     return []
 
 
-def _binding_values(bindings: dict, *keys: str) -> list[str]:
-    values: list[str] = []
-    for key in keys:
-        values.extend(_as_list(bindings.get(key)))
-    return sorted(set(values))
-
-
-def _derived_tool_usage_notes(skill_entries: list[dict]) -> str:
-    lines: list[str] = []
-    for skill in skill_entries:
-        name = skill.get("name") or skill.get("skill_key") or ""
-        description = skill.get("description") or ""
-        body = ": ".join(item for item in (name, description) if item)
-        if body:
-            lines.append(body)
-    return "\n".join(lines)
-
-
 def _skill_payload(skill: Any) -> dict:
-    raw_bindings = _public_payload(getattr(skill, "bindings", {}) or {})
-    bindings = {
-        key: value
-        for key, value in raw_bindings.items()
-        if key not in PLATFORM_BINDING_KEYS
-    }
-    meta = _public_payload(getattr(skill, "meta", {}) or {})
-    risk_level = getattr(skill, "risk_level", None) or meta.get("risk_level") or bindings.get("risk_level")
     return {
         "skill_key": getattr(skill, "skill_key", "skill"),
         "name": getattr(skill, "name", ""),
         "description": getattr(skill, "description", ""),
         "version": getattr(skill, "version", None),
-        "risk_level": risk_level or "medium",
-        "require_approval": bool(getattr(skill, "require_approval", False)),
-        "bindings": bindings,
-        "meta": meta,
     }
-
-
-def _builtin_aioe_cli_skill_payload(rbac_role_id: str | None) -> dict:
-    return {
-        "skill_key": AIOE_CLI_SKILL_KEY,
-        "name": "AIOE CLI",
-        "description": AIOE_CLI_DESCRIPTION,
-        "version": AIOE_CLI_SKILL_VERSION,
-        "risk_level": "high",
-        "require_approval": False,
-        "bindings": {
-            "runtime_skills": [AIOE_CLI_SKILL_KEY],
-            "aioe_api": {
-                "requires_rbac_role": True,
-                "rbac_role_id": rbac_role_id,
-            },
-        },
-        "meta": {
-            "builtin": True,
-            "authorization_source": "aioe_platform_role",
-            "runtime_tool": "aioe_cli",
-            "usage_contract": [
-                "所有 AIOE 平台 API 调用必须通过运行时工具 `aioe_cli`，凭当前员工绑定的 RBAC 角色授权。",
-                "未配置 RBAC 角色时，不得调用 AIOE 任何接口，只能说明缺少人工授权。",
-                "先用 `aioe_cli` 的 apps/actions/resources 子命令查询确认应用、动作与资源，不要臆造标识。",
-                "执行动作用 `action --app <应用> --action <动作> [--input '<JSON>'] [--resource <id或name>]`；应用有多个资源时必须指定 --resource。",
-                "高风险写操作先输出审批建议，调用前明确目标接口、参数、影响范围和审计证据。",
-            ],
-        },
-    }
-
-
-def _with_builtin_skills(skill_entries: list[dict], rbac_role_id: str | None) -> list[dict]:
-    entries = list(skill_entries)
-    if not any(item.get("skill_key") == AIOE_CLI_SKILL_KEY for item in entries):
-        entries.append(_builtin_aioe_cli_skill_payload(rbac_role_id))
-    return sorted(entries, key=lambda item: item["skill_key"])
-
-
-def _render_skill_instructions(skill: dict) -> str:
-    usage_contract = _prompt_text((skill.get("meta") or {}).get("usage_contract"), "")
-    return "\n".join(
-        [
-            f"# {skill.get('name') or ''}",
-            "",
-            skill.get("description") or "",
-            "",
-            "## Bindings",
-            _json_block(skill.get("bindings") or {}),
-            "",
-            "## Approval",
-            "Required" if skill.get("require_approval") else "Not required",
-            "",
-            "## Usage Contract",
-            usage_contract,
-            "",
-        ]
-    )
 
 
 def _merge_approval_policy(base: Any, skill_entries: list[dict]) -> dict:
     policy = dict(base) if isinstance(base, dict) else {}
-    skill_policy = dict(policy.get("skills") or {})
-    for skill in skill_entries:
-        skill_policy[skill["skill_key"]] = "approval_required" if skill["require_approval"] else "allow"
     if "default" not in policy:
         policy["default"] = "allow"
-    policy["skills"] = skill_policy
     return policy
 
 
@@ -207,8 +120,8 @@ def build_workspace_payload(employee: Any, role: Any | None = None, skills: list
     role_meta = _public_payload(getattr(role, "meta", {}) or {})
     employee_metadata = _public_payload(getattr(employee, "metadata", {}) or {})
     rbac_role_id = getattr(employee, "rbac_role_id", None)
-    skill_entries = _with_builtin_skills([_skill_payload(skill) for skill in skills], rbac_role_id)
-    tool_usage_notes = _derived_tool_usage_notes(skill_entries) or _prompt_text(role_meta.get("tools_notes"), "")
+    skill_entries = [_skill_payload(skill) for skill in skills]
+    tool_usage_notes = _prompt_text(role_meta.get("tools_notes"), "")
 
     context_config = role_meta.get("context_config") or role_meta.get("context") or employee_metadata.get("context_config") or {}
     manifest = {
@@ -303,7 +216,7 @@ def workspace_etag(role: Any, skills: list[Any], employee: Any | None = None) ->
     files = _render_workspace_files(employee, role, skills, payload)
     skill_versions = {
         skill["skill_key"]: skill.get("version")
-        for skill in _with_builtin_skills([_skill_payload(skill) for skill in skills or []], getattr(employee, "rbac_role_id", None))
+        for skill in [_skill_payload(skill) for skill in skills or []]
     }
     return _workspace_digest(_flatten_workspace_files(files), getattr(role, "version", None), skill_versions)
 
@@ -337,7 +250,7 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
         system_prompt.extend(["## Workflows", workflows, ""])
     runtime_lines = [
         "以当前任务和平台强制访问控制为准。",
-        f"AIOE 平台操作必须调用工具 `aioe_cli`（内置 `{AIOE_CLI_SKILL_KEY}` skill）；未配置平台 RBAC 角色时不得调用 AIOE 任何接口。",
+        "AIOE 平台操作必须调用工具 `aioe_cli`；未配置平台 RBAC 角色时不得调用 AIOE 任何接口。",
         "`aioe_cli` 的唯一参数 command 是命令行参数字符串，可用子命令：",
         "- `apps`：列出可见应用；",
         "- `actions --app <应用英文标识>`：列出应用的动作与入参；",
@@ -349,9 +262,10 @@ def _render_workspace_files(employee: Any, role: Any | None, skills: list[Any], 
     system_prompt.extend(["## Runtime", "\n".join(runtime_lines), ""])
 
     rendered_skills = {
-        skill["skill_key"]: {"instructions.md": _render_skill_instructions(skill)}
-        for skill in payload["manifest"].get("skills", [])
+        getattr(skill, "skill_key"): _read_skill_files(skill)
+        for skill in (skills or [])
     }
+    rendered_skills = {key: value for key, value in rendered_skills.items() if value}
 
     return {
         "system_prompt.md": "\n".join(system_prompt),
