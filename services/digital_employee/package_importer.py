@@ -26,12 +26,7 @@ MAX_ARCHIVE_ENTRIES = 2000
 ALLOWED_SKILL_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".py", ".sh", ".sql", ".csv", ".toml", ".ini", ""}
 
 ROLE_PROMPT_TEXT_FIELDS = ("identity", "responsibilities", "workflows", "tools_notes")
-AIOE_CLI_SKILL_KEY = "aioe-cli"
-AIOE_CLI_SKILL_DESCRIPTION = (
-    "内置 AIOE 平台操作技能。负责读取当前员工的 AIOE 平台 RBAC 角色授权，"
-    "按授权调用 AIOE API 完成资产、告警、任务、剧本、报告、应用和系统配置等平台操作；"
-    "未配置 RBAC 角色时不得调用任何 AIOE API。"
-)
+
 RBAC_PACKAGE_FIELDS = (
     "default_rbac_role",
     "default_rbac_role_id",
