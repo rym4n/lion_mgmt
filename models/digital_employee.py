@@ -48,18 +48,15 @@ class DigitalEmployeeRole(BaseModel):
 
 
 class DigitalEmployeeSkill(BaseModel):
-    """数字员工技能索引。"""
+    """数字员工技能索引。权威内容在 skill_dir 下的 SKILL.md，本表仅供列表与调度查询。"""
 
     skill_key = fields.CharField(max_length=64, description="技能逻辑标识")
     name = fields.CharField(max_length=255, description="技能名称")
     description = fields.TextField(null=True, description="技能说明")
-    skill_dir = fields.CharField(max_length=512, description="技能目录")
-    bindings = fields.JSONField(default=dict, description="技能绑定的剧本/动作/MCP/runtime skill")
-    require_approval = fields.BooleanField(default=False, description="是否高危需要审批")
+    skill_dir = fields.CharField(max_length=512, description="技能目录相对路径（相对技能根目录）")
     version = fields.IntField(default=1, description="技能版本")
     is_builtin = fields.BooleanField(default=False, description="是否内置")
     enabled = fields.BooleanField(default=True, description="是否启用")
-    meta = fields.JSONField(default=dict, description="扩展元数据")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -75,12 +72,9 @@ class DigitalEmployeeSkill(BaseModel):
             "name": self.name,
             "description": self.description,
             "skill_dir": self.skill_dir,
-            "bindings": self.bindings,
-            "require_approval": self.require_approval,
             "version": self.version,
             "is_builtin": self.is_builtin,
             "enabled": self.enabled,
-            "meta": self.meta,
         }
 
     class Meta:
