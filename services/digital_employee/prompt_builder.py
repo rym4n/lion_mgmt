@@ -8,8 +8,6 @@ from .skill_storage import skill_storage_root
 
 WORKSPACE_TEXT_FILES = ("system_prompt.md",)
 WORKSPACE_JSON_FILES = ("manifest.json", "policy.json")
-AIOE_CLI_SKILL_KEY = "aioe-cli"
-AIOE_CLI_SKILL_VERSION = 2
 MAX_SKILL_FILE_BYTES = 512 * 1024
 
 

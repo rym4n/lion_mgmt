@@ -25,9 +25,7 @@ def test_skill_save_maintains_version_and_lifecycle_fields_server_side():
     source = _source(VIEWS_PATH, "skill_save")
 
     assert "existing.version + 1 if existing and content_changed" in source
-    assert "(existing.meta or {}).get('files') != data.get('files')" in source
     assert "existing.enabled if existing else True" in source
-    assert "existing.require_approval if existing else False" in source
     assert "data.get('version')" not in source
     assert "skill_candidate_condition(tenant_id)" in source
     assert "prefer_tenant_records(candidates, tenant_id, 'skill_key')" in source
@@ -35,6 +33,8 @@ def test_skill_save_maintains_version_and_lifecycle_fields_server_side():
     assert "'is_builtin': False" in source
     assert "'deleted': False" in source
     assert "_visible_filter(tenant_id)" not in source
+    assert "require_approval" not in source
+    assert "meta" not in source
 
 
 def test_employee_and_skill_toggles_have_update_permissions():

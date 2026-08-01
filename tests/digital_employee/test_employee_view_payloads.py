@@ -1,9 +1,15 @@
 # coding=utf-8
 import asyncio
 import inspect
+from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from services.digital_employee import views
 
@@ -70,8 +76,6 @@ class FakeSkill(SimpleNamespace):
             "skill_key": self.skill_key,
             "name": self.name,
             "description": self.description,
-            "bindings": self.bindings,
-            "meta": self.meta,
         }
 
 
@@ -156,8 +160,6 @@ def test_employee_detail_resolves_visible_role_instead_of_employee_foreign_key(m
         skill_key="alert_triage",
         name="告警分诊",
         description="专家级告警分诊技能",
-        bindings={"tool_groups": ["monitoring", "logs"]},
-        meta={"checklist": ["确认影响范围"]},
     )
     calls = []
 
@@ -172,7 +174,7 @@ def test_employee_detail_resolves_visible_role_instead_of_employee_foreign_key(m
 
     async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
         calls.append(("skills", tenant_id, tuple(skill_keys), enabled))
-        return [skill, FakeSkill(skill_key="aioe-cli", name="AIOE CLI", description="内置平台技能", bindings={}, meta={})]
+        return [skill]
 
     class TaskModel:
         @classmethod
@@ -188,11 +190,11 @@ def test_employee_detail_resolves_visible_role_instead_of_employee_foreign_key(m
 
     out = asyncio.run(inspect.unwrap(views.employee_detail)(_request(body={"employee_id": "employee-1"})))
 
-    assert calls == [("role", "tenant-1", "monitor"), ("skills", "tenant-1", ("alert_triage", "aioe-cli"), None)]
+    assert calls == [("role", "tenant-1", "monitor"), ("skills", "tenant-1", ("alert_triage",), None)]
     assert out["role"]["id"] == "role-tenant"
     assert out["role"]["meta"]["responsibilities"] == "tenant expert responsibilities"
+    assert len(out["skills"]) == 1
     assert out["skills"][0]["description"] == "专家级告警分诊技能"
-    assert out["skills"][1]["skill_key"] == "aioe-cli"
 
 
 def test_skill_delete_checks_disabled_tenant_skill_usage_before_soft_delete(monkeypatch):
@@ -250,11 +252,8 @@ def test_builtin_skill_delete_creates_tenant_tombstone_without_mutating_baseline
         name="告警分诊",
         description="内置技能",
         skill_dir="/data/__builtin__/alert_triage",
-        bindings={"runtime_skills": ["alert_triage"]},
-        require_approval=False,
         version=3,
         enabled=True,
-        meta={"key": "alert_triage"},
         deleted=False,
     )
     upserts = []
@@ -293,12 +292,9 @@ def test_builtin_skill_delete_creates_tenant_tombstone_without_mutating_baseline
                 "name": "告警分诊",
                 "description": "内置技能",
                 "skill_dir": "/data/__builtin__/alert_triage",
-                "bindings": {"runtime_skills": ["alert_triage"]},
-                "require_approval": False,
                 "version": 3,
                 "is_builtin": False,
                 "enabled": True,
-                "meta": {"key": "alert_triage"},
                 "deleted": True,
             },
         }
@@ -325,11 +321,8 @@ def test_skill_save_restores_tenant_tombstone_as_custom_skill(monkeypatch):
         name="Builtin alert triage",
         description="builtin",
         skill_dir="/data/__builtin__/alert_triage",
-        bindings={},
-        require_approval=False,
         version=4,
         enabled=True,
-        meta={},
         deleted=False,
     )
     tombstone = SimpleNamespace(
@@ -338,11 +331,8 @@ def test_skill_save_restores_tenant_tombstone_as_custom_skill(monkeypatch):
         name="Old alert triage",
         description="old",
         skill_dir="/data/tenant-1/alert_triage",
-        bindings={},
-        require_approval=True,
         version=2,
         enabled=False,
-        meta={"files": []},
         deleted=True,
     )
     permission_checks = []
@@ -373,7 +363,6 @@ def test_skill_save_restores_tenant_tombstone_as_custom_skill(monkeypatch):
                     "skill_key": "alert_triage",
                     "name": "Restored alert triage",
                     "description": "tenant restored",
-                    "bindings": {},
                     "files": [],
                 }
             )
@@ -388,7 +377,6 @@ def test_skill_save_restores_tenant_tombstone_as_custom_skill(monkeypatch):
     assert upserts[0]["defaults"]["is_builtin"] is False
     assert upserts[0]["defaults"]["deleted"] is False
     assert upserts[0]["defaults"]["enabled"] is False
-    assert upserts[0]["defaults"]["require_approval"] is True
     assert upserts[0]["defaults"]["version"] == 3
 
 
@@ -463,6 +451,27 @@ def test_package_list_tenant_tombstone_hides_builtin(monkeypatch):
     out = asyncio.run(inspect.unwrap(views.package_list)(_request()))
 
     assert out == {"roles": [], "skills": []}
+
+
+def test_derive_capabilities_excludes_aioe_cli_and_skill_meta():
+    from services.digital_employee.manager import derive_capabilities
+
+    role = SimpleNamespace(
+        role_key="desktop_ops",
+        meta={"capabilities": ["endpoint_compliance", "baseline_gap"]},
+    )
+    skills = [
+        SimpleNamespace(skill_key="patch_dispatch"),
+        SimpleNamespace(skill_key="endpoint_hardening"),
+    ]
+
+    caps = derive_capabilities(role, skills)
+
+    assert "aioe-cli" not in caps
+    assert "desktop_ops" in caps
+    assert "patch_dispatch" in caps
+    assert "baseline_gap" in caps
+    assert caps == sorted(caps)
 
 
 async def _async_value(value):

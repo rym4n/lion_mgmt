@@ -126,8 +126,6 @@ def _load_manager(sync_calls: list[dict]):
     sys.modules["services.digital_employee.lion_agent_client"] = lion_agent_client_module
 
     prompt_builder_module = types.ModuleType("services.digital_employee.prompt_builder")
-    prompt_builder_module.AIOE_CLI_SKILL_KEY = "aioe-cli"
-    prompt_builder_module.AIOE_CLI_SKILL_VERSION = 1
     prompt_builder_module.workspace_etag = lambda role, skills, employee: "expected-etag"
     prompt_builder_module.render_workspace_files = lambda employee, role, skills: {"system_prompt.md": "role prompt"}
     sys.modules["services.digital_employee.prompt_builder"] = prompt_builder_module
@@ -185,7 +183,7 @@ def test_sync_employee_workspace_force_bypasses_matching_etag_shortcut():
                 "workspace_id": "employee-1",
                 "files": {"system_prompt.md": "role prompt"},
                 "role_version": 7,
-                "skill_versions": {"triage": 2, "aioe-cli": 1},
+                "skill_versions": {"triage": 2},
             }
         ]
         assert employee.workspace_etag == "runtime-etag"
@@ -245,7 +243,7 @@ def test_create_employee_does_not_inherit_role_default_rbac_and_persists_only_se
             default_rbac_role_id="role-from-package",
             meta={"capabilities": ["ops"]},
         )
-        skill = SimpleNamespace(skill_key="triage", version=2, meta={}, bindings={})
+        skill = SimpleNamespace(skill_key="triage", version=2)
         created = []
         checked_roles = []
 
@@ -279,7 +277,7 @@ def test_create_employee_does_not_inherit_role_default_rbac_and_persists_only_se
         assert checked_roles == [None]
         assert created[0]["rbac_role_id"] is None
         assert created[0]["skill_keys"] == ["triage"]
-        assert "aioe-cli" in created[0]["capabilities"]
+        assert "aioe-cli" not in created[0]["capabilities"]
         assert employee.workspace_etag == "runtime-etag"
     finally:
         _restore_modules(original_modules)
@@ -319,41 +317,6 @@ def test_prefer_tenant_records_keeps_tenant_customization_over_builtin_baseline(
         preferred = manager.prefer_tenant_records([builtin, other_builtin, customized], "tenant-1", "skill_key")
 
         assert preferred == [customized, other_builtin]
-    finally:
-        _restore_modules(original_modules)
-
-
-def test_get_visible_skills_supplies_builtin_aioe_cli_without_database_row():
-    manager, original_modules = _load_manager([])
-    try:
-        calls = []
-        stored_skill = SimpleNamespace(
-            tenant_id="tenant-1",
-            skill_key="triage",
-            name="Triage",
-            enabled=True,
-            meta={},
-            bindings={},
-        )
-
-        class Query:
-            async def all(self):
-                return [stored_skill]
-
-        class SkillModel:
-            @classmethod
-            def filter(cls, *args, **kwargs):
-                calls.append(kwargs)
-                return Query()
-
-        manager.DigitalEmployeeSkill = SkillModel
-
-        skills = asyncio.run(manager.get_visible_skills("tenant-1", ["triage", "aioe-cli"]))
-
-        assert calls == [{"skill_key__in": ["triage"]}]
-        assert [skill.skill_key for skill in skills] == ["triage", "aioe-cli"]
-        assert skills[1].json["skill_key"] == "aioe-cli"
-        assert skills[1].json["bindings"]["aioe_api"]["requires_rbac_role"] is True
     finally:
         _restore_modules(original_modules)
 

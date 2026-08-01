@@ -21,7 +21,6 @@ from .manager import (
     BUILTIN_TENANT_ID,
     create_employee,
     ensure_employee_can_delete,
-    effective_employee_skill_keys,
     get_visible_role,
     get_visible_skills,
     prefer_tenant_records,
@@ -118,12 +117,9 @@ async def _soft_delete_skill_for_tenant(tenant_id: str, skill: DigitalEmployeeSk
             "name": skill.name,
             "description": skill.description,
             "skill_dir": skill.skill_dir,
-            "bindings": skill.bindings,
-            "require_approval": skill.require_approval,
             "version": skill.version,
             "is_builtin": False,
             "enabled": skill.enabled,
-            "meta": skill.meta,
             "deleted": True,
         },
     )
@@ -258,7 +254,7 @@ async def employee_detail(request: Request):
     role = await get_visible_role(employee.tenant_id, employee.role_key)
     skills = await get_visible_skills(
         employee.tenant_id,
-        effective_employee_skill_keys(employee.skill_keys or []),
+        employee.skill_keys or [],
         enabled=None,
     )
     tasks = await CommandTask.filter(tenant_id=employee.tenant_id, assigned_agent_id=employee.id, deleted=False).order_by("-ctime").limit(10).all()
@@ -536,9 +532,6 @@ async def skill_save(request: Request):
         (
             existing.name != data["name"],
             existing.description != data.get("description"),
-            existing.skill_dir != (data.get("skill_dir") or ""),
-            existing.bindings != (data.get("bindings") or {}),
-            (existing.meta or {}).get("files") != data.get("files"),
         )
     )
     skill, _ = await DigitalEmployeeSkill.update_or_create(
@@ -548,12 +541,9 @@ async def skill_save(request: Request):
             "name": data["name"],
             "description": data.get("description"),
             "skill_dir": data.get("skill_dir") or "",
-            "bindings": data.get("bindings") or {},
-            "require_approval": existing.require_approval if existing else False,
             "version": existing.version + 1 if existing and content_changed else (existing.version if existing else 1),
             "is_builtin": False,
             "enabled": existing.enabled if existing else True,
-            "meta": data,
             "deleted": False,
         },
     )
@@ -575,12 +565,9 @@ async def skill_toggle(request: Request):
                 "name": skill.name,
                 "description": skill.description,
                 "skill_dir": skill.skill_dir,
-                "bindings": skill.bindings,
-                "require_approval": skill.require_approval,
                 "version": skill.version,
                 "enabled": bool(data.get("enabled")),
                 "is_builtin": False,
-                "meta": skill.meta,
                 "deleted": False,
             },
         )

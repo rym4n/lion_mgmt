@@ -1,7 +1,6 @@
 # coding=utf-8
 import uuid
 from datetime import datetime
-from types import SimpleNamespace
 
 from tortoise.expressions import Q
 
@@ -13,7 +12,7 @@ from settings import TZ
 
 from .aioe_credential_manager import create_employee_api_account
 from .lion_agent_client import LionAgentClient
-from .prompt_builder import AIOE_CLI_SKILL_KEY, AIOE_CLI_SKILL_VERSION, render_workspace_files, workspace_etag
+from .prompt_builder import render_workspace_files, workspace_etag
 from .rbac import require_existing_platform_role
 
 
@@ -53,45 +52,6 @@ def prefer_visible_skills(records: list, tenant_id: str) -> list:
     return [skill for skill in preferred if not bool(getattr(skill, "deleted", False))]
 
 
-class BuiltinAioeCliSkill(SimpleNamespace):
-    @property
-    def json(self) -> dict:
-        return {
-            "id": AIOE_CLI_SKILL_KEY,
-            "ctime": None,
-            "utime": None,
-            "tenant_id": BUILTIN_TENANT_ID,
-            "skill_key": self.skill_key,
-            "name": self.name,
-            "description": self.description,
-            "skill_dir": self.skill_dir,
-            "bindings": self.bindings,
-            "require_approval": self.require_approval,
-            "version": self.version,
-            "is_builtin": self.is_builtin,
-            "enabled": self.enabled,
-            "meta": self.meta,
-        }
-
-
-def _builtin_aioe_cli_skill() -> BuiltinAioeCliSkill:
-    return BuiltinAioeCliSkill(
-        skill_key=AIOE_CLI_SKILL_KEY,
-        name="AIOE CLI",
-        description="内置 AIOE 平台操作技能。",
-        skill_dir="",
-        bindings={
-            "runtime_skills": [AIOE_CLI_SKILL_KEY],
-            "aioe_api": {"requires_rbac_role": True},
-        },
-        require_approval=False,
-        version=AIOE_CLI_SKILL_VERSION,
-        is_builtin=True,
-        enabled=True,
-        meta={"builtin": True, "authorization_source": "aioe_platform_role"},
-    )
-
-
 async def get_visible_role(tenant_id: str, role_key: str) -> DigitalEmployeeRole:
     roles = await DigitalEmployeeRole.filter(_visible_condition(tenant_id), role_key=role_key, enabled=True).all()
     visible = prefer_tenant_records(roles, tenant_id, "role_key")
@@ -107,40 +67,30 @@ async def get_visible_skills(
     if not skill_keys:
         return []
     requested_keys = list(dict.fromkeys(skill_keys))
-    query_keys = [key for key in requested_keys if key != AIOE_CLI_SKILL_KEY]
-    skills = []
-    if query_keys:
-        skills = await DigitalEmployeeSkill.filter(skill_candidate_condition(tenant_id), skill_key__in=query_keys).all()
+    skills = await DigitalEmployeeSkill.filter(skill_candidate_condition(tenant_id), skill_key__in=requested_keys).all()
     preferred = prefer_visible_skills(skills, tenant_id)
     if enabled is not None:
         preferred = [skill for skill in preferred if bool(skill.enabled) is enabled]
     skills_by_key = {skill.skill_key: skill for skill in preferred}
-    if AIOE_CLI_SKILL_KEY in requested_keys and enabled is not False:
-        skills_by_key[AIOE_CLI_SKILL_KEY] = _builtin_aioe_cli_skill()
     if set(skills_by_key) != set(requested_keys):
         raise CustomError(ErrorCode.DIGITAL_EMPLOYEE_SKILL_NOT_FOUND)
     return [skills_by_key[key] for key in requested_keys]
 
 
 def derive_capabilities(role: DigitalEmployeeRole, skills: list[DigitalEmployeeSkill]) -> list[str]:
+    """能力集 = 岗位声明 + 岗位 key + 持有技能 key。技能侧不再提供细粒度标签（SKILL.md 严守规范、无 AIOE 私有字段），
+    细粒度标签统一在 role.yaml 的 capabilities 中声明。
+    aioe_cli 是工具不是技能，能否调用由 RBAC 角色决定，不进能力集。
+    """
     capabilities = set((role.meta or {}).get("capabilities") or [])
     capabilities.add(role.role_key)
-    capabilities.add(AIOE_CLI_SKILL_KEY)
     for skill in skills:
         capabilities.add(skill.skill_key)
-        capabilities.update((skill.meta or {}).get("capabilities") or [])
     return sorted(str(item) for item in capabilities if item)
 
 
-def effective_employee_skill_keys(skill_keys: list[str] | None) -> list[str]:
-    keys = [str(key) for key in (skill_keys or []) if key]
-    if AIOE_CLI_SKILL_KEY not in keys:
-        keys.append(AIOE_CLI_SKILL_KEY)
-    return keys
-
-
 def persisted_employee_skill_keys(skill_keys: list[str] | None) -> list[str]:
-    return [key for key in dict.fromkeys(str(item) for item in (skill_keys or []) if item) if key != AIOE_CLI_SKILL_KEY]
+    return [key for key in dict.fromkeys(str(item) for item in (skill_keys or []) if item) if key]
 
 
 async def create_employee(
@@ -198,10 +148,7 @@ async def sync_employee_workspace(
         employee.id,
         files,
         role_version=getattr(role, "version", None),
-        skill_versions={
-            **{skill.skill_key: skill.version for skill in skills},
-            AIOE_CLI_SKILL_KEY: AIOE_CLI_SKILL_VERSION,
-        },
+        skill_versions={skill.skill_key: skill.version for skill in skills},
     )
     employee.workspace_etag = result.get("etag") or etag
     employee.workspace_synced_at = datetime.now(TZ)
