@@ -7,7 +7,49 @@ import sys
 import types
 import zipfile
 
+import pytest
 import yaml
+
+
+STUB_MODULES = [
+    "sanic",
+    "sanic.log",
+    "core",
+    "core.error_code",
+    "libs",
+    "libs.utils",
+    "libs.error_code",
+    "libs.error_code.exception",
+    "libs.security",
+    "libs.security.authorization",
+    "models",
+    "models.digital_employee",
+    "models.user",
+    "settings",
+    "tortoise",
+    "tortoise.transactions",
+    "services",
+    "services.digital_employee",
+    "services.digital_employee.package_format",
+    "services.digital_employee.skill_storage",
+    "services.digital_employee.rbac",
+    "services.digital_employee.package_importer",
+    "services.tools",
+    "services.tools.views",
+    "services.workflow",
+    "services.workflow.views",
+]
+_MISSING_MODULE = object()
+_ORIGINAL_MODULES = {name: sys.modules.get(name, _MISSING_MODULE) for name in STUB_MODULES}
+
+
+def _restore_modules(modules):
+    for name in STUB_MODULES:
+        original = modules[name]
+        if original is _MISSING_MODULE:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = original
 
 
 def _load_module(name: str, relative_path: str):
@@ -178,6 +220,7 @@ package_format = _load_module("services.digital_employee.package_format", "servi
 inspect_package = package_format.inspect_package
 
 _install_importer_stubs()
+skill_storage = _load_module("services.digital_employee.skill_storage", "services/digital_employee/skill_storage.py")
 rbac = _load_module("services.digital_employee.rbac", "services/digital_employee/rbac.py")
 package_importer = _load_module("services.digital_employee.package_importer", "services/digital_employee/package_importer.py")
 export_package = package_importer.export_package
@@ -190,6 +233,24 @@ CustomError = sys.modules["libs.error_code.exception"].CustomError
 Role = sys.modules["models.user"].Role
 transaction_events = sys.modules["tortoise.transactions"].transaction_events
 deleted_from_s3 = sys.modules["libs.utils"].deleted_from_s3
+MAX_ARCHIVE_BYTES = package_importer.MAX_ARCHIVE_BYTES
+MAX_ARCHIVE_ENTRIES = package_importer.MAX_ARCHIVE_ENTRIES
+_safe_extract = package_importer._safe_extract
+_STUBBED_MODULES = {name: sys.modules.get(name, _MISSING_MODULE) for name in STUB_MODULES}
+_restore_modules(_ORIGINAL_MODULES)
+
+
+@pytest.fixture(autouse=True)
+def _restore_stubbed_modules():
+    original_modules = {name: sys.modules.get(name, _MISSING_MODULE) for name in STUB_MODULES}
+    for name in STUB_MODULES:
+        stubbed = _STUBBED_MODULES[name]
+        if stubbed is _MISSING_MODULE:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = stubbed
+    yield
+    _restore_modules(original_modules)
 
 
 def _zip_with(files: dict[str, str]) -> bytes:
@@ -295,21 +356,14 @@ def test_upsert_role_strips_package_rbac_defaults(tmp_path):
     assert Role.records == {}
 
 
-def test_upsert_skill_tenant_import_restores_tombstone(tmp_path):
+def test_upsert_skill_tenant_import_restores_tombstone(tmp_path, monkeypatch):
     skill_root = tmp_path / "alert_triage"
     skill_root.mkdir()
-    (skill_root / "manifest.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "key": "alert_triage",
-                "name": "告警分诊",
-                "version": 2,
-                "enabled": True,
-            },
-            allow_unicode=True,
-        ),
+    (skill_root / "SKILL.md").write_text(
+        "---\nname: 告警分诊\ndescription: 分析告警并输出分诊结论。\n---\n\n# 正文\n",
         encoding="utf-8",
     )
+    monkeypatch.setenv("RY_SKILL_ROOT", str(tmp_path))
     tombstone = types.SimpleNamespace(
         tenant_id="tenant-1",
         skill_key="alert_triage",
@@ -342,7 +396,6 @@ def test_upsert_skill_tenant_import_restores_tombstone(tmp_path):
         skill = asyncio.run(
             package_importer._upsert_skill(
                 skill_root,
-                {"type": "skill", "skill_key": "alert_triage", "version": 2},
                 "tenant-1",
                 False,
             )
@@ -353,24 +406,17 @@ def test_upsert_skill_tenant_import_restores_tombstone(tmp_path):
     assert skill is tombstone
     assert tombstone.deleted is False
     assert tombstone.is_builtin is False
-    assert tombstone.version == 2
+    assert tombstone.version == 1
 
 
-def test_upsert_skill_builtin_import_keeps_tenant_tombstone(tmp_path):
+def test_upsert_skill_builtin_import_keeps_tenant_tombstone(tmp_path, monkeypatch):
     skill_root = tmp_path / "alert_triage"
     skill_root.mkdir()
-    (skill_root / "manifest.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "key": "alert_triage",
-                "name": "告警分诊",
-                "version": 3,
-                "enabled": True,
-            },
-            allow_unicode=True,
-        ),
+    (skill_root / "SKILL.md").write_text(
+        "---\nname: 告警分诊\ndescription: 分析告警并输出分诊结论。\n---\n\n# 正文\n",
         encoding="utf-8",
     )
+    monkeypatch.setenv("RY_SKILL_ROOT", str(tmp_path))
     tenant_tombstone = types.SimpleNamespace(
         tenant_id="tenant-1",
         skill_key="alert_triage",
@@ -409,7 +455,6 @@ def test_upsert_skill_builtin_import_keeps_tenant_tombstone(tmp_path):
         asyncio.run(
             package_importer._upsert_skill(
                 skill_root,
-                {"type": "skill", "skill_key": "alert_triage", "version": 3},
                 "__builtin__",
                 True,
             )
@@ -422,7 +467,7 @@ def test_upsert_skill_builtin_import_keeps_tenant_tombstone(tmp_path):
     builtin = records[("__builtin__", "alert_triage")]
     assert builtin.is_builtin is True
     assert builtin.deleted is False
-    assert builtin.version == 3
+    assert builtin.version == 1
 
 
 def test_upsert_role_rejects_missing_identity(tmp_path):
@@ -674,11 +719,9 @@ def test_export_builtin_monitor_bundle_contains_role_and_skills(tmp_path):
     role_root = tmp_path / "resources" / "bundle" / "monitor" / "roles" / "monitor"
     alert_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "alert_triage"
     shift_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "shift_report_compose"
-    aioe_cli_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "aioe-cli"
     role_root.mkdir(parents=True)
     alert_root.mkdir(parents=True)
     shift_root.mkdir(parents=True)
-    aioe_cli_root.mkdir(parents=True)
     (role_root / "package.yaml").write_text(
         yaml.safe_dump({"type": "role", "role_key": "monitor", "default_skill_keys": ["alert_triage", "shift_report_compose"]}),
         encoding="utf-8",
@@ -688,22 +731,10 @@ def test_export_builtin_monitor_bundle_contains_role_and_skills(tmp_path):
         encoding="utf-8",
     )
     for skill_root, skill_key in [(alert_root, "alert_triage"), (shift_root, "shift_report_compose")]:
-        (skill_root / "package.yaml").write_text(
-            yaml.safe_dump({"type": "skill", "skill_key": skill_key, "version": 1}),
+        (skill_root / "SKILL.md").write_text(
+            f"---\nname: {skill_key}\ndescription: {skill_key} description\n---\n\n# {skill_key}\n",
             encoding="utf-8",
         )
-        (skill_root / "manifest.yaml").write_text(
-            yaml.safe_dump({"key": skill_key, "name": skill_key, "version": 1}),
-            encoding="utf-8",
-        )
-    (aioe_cli_root / "package.yaml").write_text(
-        yaml.safe_dump({"type": "skill", "skill_key": "aioe-cli", "version": 1}),
-        encoding="utf-8",
-    )
-    (aioe_cli_root / "manifest.yaml").write_text(
-        yaml.safe_dump({"key": "aioe-cli", "name": "AIOE CLI", "version": 1}),
-        encoding="utf-8",
-    )
 
     async def fake_get_visible_role(tenant_id, role_key):
         assert tenant_id == "__builtin__"
@@ -716,12 +747,11 @@ def test_export_builtin_monitor_bundle_contains_role_and_skills(tmp_path):
 
     async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
         assert tenant_id == "__builtin__"
-        assert skill_keys == ["alert_triage", "shift_report_compose", "aioe-cli"]
+        assert skill_keys == ["alert_triage", "shift_report_compose"]
         assert enabled is None
         return [
             types.SimpleNamespace(skill_key="alert_triage", skill_dir=str(alert_root)),
             types.SimpleNamespace(skill_key="shift_report_compose", skill_dir=str(shift_root)),
-            types.SimpleNamespace(skill_key="aioe-cli", skill_dir=str(aioe_cli_root)),
         ]
 
     manager_module = types.ModuleType("services.digital_employee.manager")
@@ -746,19 +776,17 @@ def test_export_builtin_monitor_bundle_contains_role_and_skills(tmp_path):
     assert meta["role_key"] == "monitor"
     assert "roles/monitor/package.yaml" in names
     assert "roles/monitor/role.yaml" in names
-    assert "skills/alert_triage/package.yaml" in names
-    assert "skills/shift_report_compose/manifest.yaml" in names
-    assert "skills/aioe-cli/manifest.yaml" in names
+    assert "skills/alert_triage/SKILL.md" in names
+    assert "skills/shift_report_compose/SKILL.md" in names
+    assert not any(name.startswith("skills/aioe-cli/") for name in names)
     assert "default_rbac_role" not in role_yaml
 
 
 def test_export_tenant_bundle_uses_imported_resource_dirs(tmp_path):
     role_root = tmp_path / "resources" / "bundle" / "monitor" / "roles" / "monitor"
     skill_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "alert_triage"
-    aioe_cli_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "aioe-cli"
     role_root.mkdir(parents=True)
     skill_root.mkdir(parents=True)
-    aioe_cli_root.mkdir(parents=True)
     (role_root / "package.yaml").write_text(
         yaml.safe_dump({"type": "role", "role_key": "monitor", "default_skill_keys": ["alert_triage"]}),
         encoding="utf-8",
@@ -767,20 +795,8 @@ def test_export_tenant_bundle_uses_imported_resource_dirs(tmp_path):
         yaml.safe_dump({"key": "monitor", "name": "Custom monitor", "default_skills": ["alert_triage"]}),
         encoding="utf-8",
     )
-    (skill_root / "package.yaml").write_text(
-        yaml.safe_dump({"type": "skill", "skill_key": "alert_triage", "version": 1}),
-        encoding="utf-8",
-    )
-    (skill_root / "manifest.yaml").write_text(
-        yaml.safe_dump({"key": "alert_triage", "name": "Custom alert triage", "version": 1}),
-        encoding="utf-8",
-    )
-    (aioe_cli_root / "package.yaml").write_text(
-        yaml.safe_dump({"type": "skill", "skill_key": "aioe-cli", "version": 1}),
-        encoding="utf-8",
-    )
-    (aioe_cli_root / "manifest.yaml").write_text(
-        yaml.safe_dump({"key": "aioe-cli", "name": "AIOE CLI", "version": 1}),
+    (skill_root / "SKILL.md").write_text(
+        "---\nname: Custom alert triage\ndescription: Custom alert triage description\n---\n\n# Alert triage\n",
         encoding="utf-8",
     )
 
@@ -795,11 +811,10 @@ def test_export_tenant_bundle_uses_imported_resource_dirs(tmp_path):
 
     async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
         assert tenant_id == "tenant-1"
-        assert skill_keys == ["alert_triage", "aioe-cli"]
+        assert skill_keys == ["alert_triage"]
         assert enabled is None
         return [
             types.SimpleNamespace(skill_key="alert_triage", skill_dir=str(skill_root)),
-            types.SimpleNamespace(skill_key="aioe-cli", skill_dir=str(aioe_cli_root)),
         ]
 
     manager_module = types.ModuleType("services.digital_employee.manager")
@@ -819,7 +834,7 @@ def test_export_tenant_bundle_uses_imported_resource_dirs(tmp_path):
     with zipfile.ZipFile(io.BytesIO(package)) as archive:
         names = set(archive.namelist())
         role_yaml = yaml.safe_load(archive.read("roles/monitor/role.yaml")) or {}
-        skill_yaml = yaml.safe_load(archive.read("skills/alert_triage/manifest.yaml")) or {}
+        skill_md = archive.read("skills/alert_triage/SKILL.md").decode("utf-8")
 
     assert package_type == "bundle"
     assert meta["role_key"] == "monitor"
@@ -827,75 +842,11 @@ def test_export_tenant_bundle_uses_imported_resource_dirs(tmp_path):
         "package.yaml",
         "roles/monitor/package.yaml",
         "roles/monitor/role.yaml",
-        "skills/alert_triage/package.yaml",
-        "skills/alert_triage/manifest.yaml",
-        "skills/aioe-cli/package.yaml",
-        "skills/aioe-cli/manifest.yaml",
+        "skills/alert_triage/SKILL.md",
     }.issubset(names)
     assert role_yaml["name"] == "Custom monitor"
     assert "default_rbac_role" not in role_yaml
-    assert skill_yaml["name"] == "Custom alert triage"
-
-
-def test_export_bundle_writes_builtin_aioe_cli_when_resource_dir_missing(tmp_path):
-    role_root = tmp_path / "resources" / "bundle" / "monitor" / "roles" / "monitor"
-    skill_root = tmp_path / "resources" / "bundle" / "monitor" / "skills" / "alert_triage"
-    role_root.mkdir(parents=True)
-    skill_root.mkdir(parents=True)
-    (role_root / "package.yaml").write_text(
-        yaml.safe_dump({"type": "role", "role_key": "monitor", "default_skill_keys": ["alert_triage"]}),
-        encoding="utf-8",
-    )
-    (role_root / "role.yaml").write_text(
-        yaml.safe_dump({"key": "monitor", "name": "Custom monitor", "default_skills": ["alert_triage"]}),
-        encoding="utf-8",
-    )
-    (skill_root / "package.yaml").write_text(
-        yaml.safe_dump({"type": "skill", "skill_key": "alert_triage", "version": 1}),
-        encoding="utf-8",
-    )
-    (skill_root / "manifest.yaml").write_text(
-        yaml.safe_dump({"key": "alert_triage", "name": "Custom alert triage", "version": 1}),
-        encoding="utf-8",
-    )
-
-    async def fake_get_visible_role(tenant_id, role_key):
-        return types.SimpleNamespace(
-            role_key="monitor",
-            template_dir=str(role_root),
-            meta={"default_skills": ["alert_triage"]},
-        )
-
-    async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
-        assert skill_keys == ["alert_triage", "aioe-cli"]
-        assert enabled is None
-        return [
-            types.SimpleNamespace(skill_key="alert_triage", skill_dir=str(skill_root)),
-            types.SimpleNamespace(skill_key="aioe-cli", skill_dir=""),
-        ]
-
-    manager_module = types.ModuleType("services.digital_employee.manager")
-    manager_module.get_visible_role = fake_get_visible_role
-    manager_module.get_visible_skills = fake_get_visible_skills
-    old_manager = sys.modules.get("services.digital_employee.manager")
-    sys.modules["services.digital_employee.manager"] = manager_module
-    try:
-        package = asyncio.run(export_package_for_tenant("tenant-1", role_key="monitor", bundle=True))
-    finally:
-        if old_manager is None:
-            sys.modules.pop("services.digital_employee.manager", None)
-        else:
-            sys.modules["services.digital_employee.manager"] = old_manager
-
-    with zipfile.ZipFile(io.BytesIO(package)) as archive:
-        names = set(archive.namelist())
-        aioe_cli_manifest = yaml.safe_load(archive.read("skills/aioe-cli/manifest.yaml")) or {}
-
-    assert "skills/aioe-cli/package.yaml" in names
-    assert "skills/aioe-cli/manifest.yaml" in names
-    assert "skills/aioe-cli/instructions.md" in names
-    assert aioe_cli_manifest["key"] == "aioe-cli"
-    assert aioe_cli_manifest["bindings"]["aioe_api"]["requires_rbac_role"] is True
+    assert "name: Custom alert triage" in skill_md
 
 
 def test_export_tenant_skill_includes_disabled_management_record(tmp_path):
@@ -1028,7 +979,7 @@ def test_export_bundle_fails_when_default_skill_template_is_missing(tmp_path):
 
     async def fake_get_visible_skills(tenant_id, skill_keys, enabled=True):
         assert tenant_id == "__builtin__"
-        assert skill_keys == ["missing_skill", "aioe-cli"]
+        assert skill_keys == ["missing_skill"]
         assert enabled is None
         raise CustomError("PACKAGE_INVALID")
 
@@ -1239,33 +1190,84 @@ def test_import_package_strips_rbac_fields_from_staged_resource_dir(tmp_path):
     assert "default_rbac_role" not in role_yaml
 
 
-def test_import_package_separates_builtin_and_tenant_resource_dirs(tmp_path):
-    resources_root = tmp_path / "resources"
-    package_importer.DIGITAL_EMPLOYEE_RESOURCES = str(resources_root)
+def test_import_package_separates_builtin_and_tenant_resource_dirs(tmp_path, monkeypatch):
+    skill_root = tmp_path / "skill-storage"
+    monkeypatch.setenv("RY_SKILL_ROOT", str(skill_root))
     package = _zip_with(
         {
             "package.yaml": yaml.safe_dump({"type": "skill", "skill_key": "alert_triage", "version": 1}),
-            "manifest.yaml": yaml.safe_dump({"key": "alert_triage", "name": "Alert triage", "version": 1}),
+            "SKILL.md": "---\nname: Alert triage\ndescription: Triage alerts\n---\n\n# Alert triage\n",
+        }
+    )
+    builtin_package = _zip_with(
+        {
+            "package.yaml": yaml.safe_dump(
+                {"type": "skill", "skill_key": "alert_triage", "version": 1, "is_builtin": True}
+            ),
+            "SKILL.md": "---\nname: Alert triage\ndescription: Builtin alert triage\n---\n\n# Alert triage\n",
         }
     )
     original_upsert_skill = package_importer._upsert_skill
     calls = []
 
-    async def fake_upsert_skill(root_path, package, tenant_id, is_builtin):
+    async def fake_upsert_skill(root_path, tenant_id, is_builtin):
         calls.append((root_path, tenant_id, is_builtin))
-        return types.SimpleNamespace(skill_key=package["skill_key"], id=f"{tenant_id}:{package['skill_key']}")
+        return types.SimpleNamespace(skill_key=root_path.name, id=f"{tenant_id}:{root_path.name}")
 
     package_importer._upsert_skill = fake_upsert_skill
     try:
         asyncio.run(import_package(package, tenant_id="tenant-1"))
-        (resources_root / "tenant-1" / "skill" / "alert_triage" / "tenant.txt").write_text("custom", encoding="utf-8")
-        asyncio.run(import_package(package, tenant_id="tenant-1", is_builtin=True))
+        (skill_root / "tenant-1" / "alert_triage" / "tenant.txt").write_text("custom", encoding="utf-8")
+        asyncio.run(import_package(builtin_package, tenant_id="tenant-1"))
     finally:
         package_importer._upsert_skill = original_upsert_skill
 
     assert calls == [
-        (resources_root / "tenant-1" / "skill" / "alert_triage", "tenant-1", False),
-        (resources_root / "__builtin__" / "skill" / "alert_triage", "__builtin__", True),
+        (skill_root / "tenant-1" / "alert_triage", "tenant-1", False),
+        (skill_root / "__builtin__" / "alert_triage", "__builtin__", True),
     ]
-    assert (resources_root / "tenant-1" / "skill" / "alert_triage" / "tenant.txt").read_text(encoding="utf-8") == "custom"
-    assert (resources_root / "__builtin__" / "skill" / "alert_triage" / "manifest.yaml").exists()
+    assert (skill_root / "tenant-1" / "alert_triage" / "tenant.txt").read_text(encoding="utf-8") == "custom"
+    assert (skill_root / "__builtin__" / "alert_triage" / "SKILL.md").exists()
+
+
+def test_archive_limits_are_defined():
+    assert MAX_ARCHIVE_BYTES > 0
+    assert MAX_ARCHIVE_ENTRIES > 0
+
+
+def test_safe_extract_rejects_too_many_entries(tmp_path):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for index in range(MAX_ARCHIVE_ENTRIES + 1):
+            archive.writestr(f"skills/s{index}/SKILL.md", "x")
+    with zipfile.ZipFile(buffer) as archive:
+        with pytest.raises(CustomError):
+            _safe_extract(archive, tmp_path)
+
+
+def test_safe_extract_rejects_disallowed_suffix(tmp_path):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("skills/demo/payload.so", "binary")
+    with zipfile.ZipFile(buffer) as archive:
+        with pytest.raises(CustomError):
+            _safe_extract(archive, tmp_path)
+
+
+def test_safe_extract_still_blocks_path_traversal(tmp_path):
+    """既有 Zip Slip 防护不得在加限额时被改坏。"""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("../escaped.md", "x")
+    with zipfile.ZipFile(buffer) as archive:
+        with pytest.raises(CustomError):
+            _safe_extract(archive, tmp_path)
+
+
+def test_safe_extract_accepts_valid_skill_package(tmp_path):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("log-triage/SKILL.md", "---\nname: log-triage\ndescription: d\n---\n\n# 正文\n")
+    with zipfile.ZipFile(buffer) as archive:
+        _safe_extract(archive, tmp_path)
+    assert (tmp_path / "log-triage" / "SKILL.md").is_file()

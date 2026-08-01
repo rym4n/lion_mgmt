@@ -19,6 +19,11 @@ from models.digital_employee import DigitalEmployeeRole, DigitalEmployeeSkill
 from models import Tool
 from settings import DIGITAL_EMPLOYEE_RESOURCES
 from .package_format import PackageFormatError, UnsupportedPackageTypeError, inspect_package
+from .skill_storage import parse_skill_md, relative_skill_dir
+
+MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
+MAX_ARCHIVE_ENTRIES = 2000
+ALLOWED_SKILL_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".py", ".sh", ".sql", ".csv", ".toml", ".ini", ""}
 
 ROLE_PROMPT_TEXT_FIELDS = ("identity", "responsibilities", "workflows", "tools_notes")
 AIOE_CLI_SKILL_KEY = "aioe-cli"
@@ -148,9 +153,18 @@ def _inspect_or_error(file_bytes: bytes) -> tuple[str, dict]:
 
 def _safe_extract(archive: zipfile.ZipFile, destination: Path) -> None:
     root = destination.resolve()
-    for member in archive.infolist():
+    members = archive.infolist()
+    if len(members) > MAX_ARCHIVE_ENTRIES:
+        raise CustomError(ErrorCode.PACKAGE_INVALID)
+    total = 0
+    for member in members:
         member_path = (destination / member.filename).resolve()
         if root != member_path and root not in member_path.parents:
+            raise CustomError(ErrorCode.PACKAGE_INVALID)
+        total += member.file_size
+        if total > MAX_ARCHIVE_BYTES:
+            raise CustomError(ErrorCode.PACKAGE_INVALID)
+        if not member.is_dir() and member_path.suffix.lower() not in ALLOWED_SKILL_SUFFIXES:
             raise CustomError(ErrorCode.PACKAGE_INVALID)
     archive.extractall(destination)
 
@@ -216,46 +230,7 @@ def _strip_rbac_payload(root: Path) -> None:
 
 
 def _package_skill_keys(skill_keys: list[Any]) -> list[str]:
-    keys = [str(key) for key in skill_keys if key]
-    if AIOE_CLI_SKILL_KEY not in keys:
-        keys.append(AIOE_CLI_SKILL_KEY)
-    return keys
-
-
-def _write_builtin_aioe_cli_skill(archive: zipfile.ZipFile, archive_root: str = "") -> None:
-    root = archive_root.rstrip("/")
-    prefix = f"{root}/" if root else ""
-    package = {"type": "skill", "skill_key": AIOE_CLI_SKILL_KEY, "version": 1, "vendor": "aioe"}
-    manifest = {
-        "key": AIOE_CLI_SKILL_KEY,
-        "name": "AIOE CLI",
-        "description": AIOE_CLI_SKILL_DESCRIPTION,
-        "bindings": {
-            "runtime_skills": [AIOE_CLI_SKILL_KEY],
-            "aioe_api": {"requires_rbac_role": True},
-        },
-        "capabilities": ["aioe_api_operation", "aioe_cli", "platform_workflow"],
-        "risk_level": "high",
-        "require_approval": False,
-        "enabled": True,
-        "version": 1,
-    }
-    instructions = "\n".join(
-        [
-            "# AIOE CLI",
-            "",
-            AIOE_CLI_SKILL_DESCRIPTION,
-            "",
-            "## Usage Contract",
-            "- AIOE API 调用权限只来自员工实例绑定的 RBAC 角色，不来自数字员工角色或其他 skill。",
-            "- 未配置 RBAC 角色时，停止 API 调用并提示需要人工配置平台角色。",
-            "- 不把剧本、应用、平台角色或 AIOE 工具当成数字员工 skill 授权。",
-            "",
-        ]
-    )
-    archive.writestr(f"{prefix}package.yaml", yaml.safe_dump(package, allow_unicode=True, sort_keys=False))
-    archive.writestr(f"{prefix}manifest.yaml", yaml.safe_dump(manifest, allow_unicode=True, sort_keys=False))
-    archive.writestr(f"{prefix}instructions.md", instructions)
+    return [str(key) for key in skill_keys if key]
 
 
 def _iter_child_dirs(path: Path) -> list[Path]:
@@ -283,6 +258,10 @@ def _zip_directory_bytes(source: Path) -> bytes:
 
 def _package_resource_root(package_type: str, package_name: str, tenant_id: str, is_builtin: bool) -> Path:
     scope = "__builtin__" if is_builtin else tenant_id
+    if package_type == "skill":
+        from .skill_storage import skill_storage_root
+
+        return skill_storage_root() / scope / package_name
     return Path(DIGITAL_EMPLOYEE_RESOURCES) / scope / package_type / package_name
 
 
@@ -356,31 +335,25 @@ async def _upsert_role(root: Path, package: dict, tenant_id: str, is_builtin: bo
     return role
 
 
-async def _upsert_skill(root: Path, package: dict, tenant_id: str, is_builtin: bool) -> DigitalEmployeeSkill:
-    manifest = _read_yaml(root / "manifest.yaml")
-    skill_key = str(package.get("skill_key") or manifest.get("key") or "").strip()
+async def _upsert_skill(root: Path, tenant_id: str, is_builtin: bool) -> DigitalEmployeeSkill:
+    """SKILL.md 是权威，本函数只写索引字段。skill_key 取目录名，不由 name 推导。"""
+    skill_key = root.name.strip()
     if not skill_key:
         raise CustomError(ErrorCode.PACKAGE_INVALID)
-    version = int(package.get("version") or manifest.get("version") or 1)
+    name, description = parse_skill_md(root)
     existing = await DigitalEmployeeSkill.get_or_none(tenant_id=tenant_id, skill_key=skill_key, deleted=False)
-    if existing and existing.version > version:
-        raise CustomError(ErrorCode.PACKAGE_VERSION_LOWER)
-    defaults = {
-        "name": manifest.get("name") or package.get("name") or skill_key,
-        "description": manifest.get("description") or package.get("description"),
-        "skill_dir": str(root),
-        "bindings": manifest.get("bindings") or {},
-        "require_approval": bool(manifest.get("require_approval") or False),
-        "version": version,
-        "is_builtin": is_builtin,
-        "enabled": bool(manifest.get("enabled", True)),
-        "meta": manifest,
-        "deleted": False,
-    }
     skill, _ = await DigitalEmployeeSkill.update_or_create(
         tenant_id=tenant_id,
         skill_key=skill_key,
-        defaults=defaults,
+        defaults={
+            "name": name,
+            "description": description,
+            "skill_dir": relative_skill_dir(root),
+            "version": (existing.version + 1) if existing else 1,
+            "is_builtin": is_builtin,
+            "enabled": existing.enabled if existing else True,
+            "deleted": False,
+        },
     )
     return skill
 
@@ -489,8 +462,7 @@ async def _import_bundle(root: Path, package: dict, tenant_id: str, is_builtin: 
             imported.append({"type": "role", "role_key": role.role_key, "id": role.id})
 
         for skill_root in _iter_child_dirs(root / "skills"):
-            skill_package = _read_yaml(skill_root / "package.yaml")
-            skill = await _upsert_skill(skill_root, skill_package, package_tenant_id, is_builtin)
+            skill = await _upsert_skill(skill_root, package_tenant_id, is_builtin)
             imported.append({"type": "skill", "skill_key": skill.skill_key, "id": skill.id})
 
         rbac_root = root / "rbac_roles"
@@ -568,6 +540,8 @@ async def _auto_create_employees(role_keys: list[str], tenant_id: str) -> tuple[
 
 async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = False, operator_id: str | None = None, request=None) -> ImportResult:
     package_type, package = _inspect_or_error(file_bytes)
+    declared_builtin = bool(package.get("is_builtin", False))
+    is_builtin = is_builtin or declared_builtin
     package_tenant_id = "__builtin__" if is_builtin else tenant_id
     package_name = package.get("role_key") or package.get("skill_key") or package.get("bundle_key") or "package"
     target_root = _package_resource_root(package_type, str(package_name), tenant_id, is_builtin)
@@ -600,7 +574,7 @@ async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = F
                     result.skipped.extend(skipped)
                 return result
             if package_type == "skill":
-                skill = await _upsert_skill(target_root, package, package_tenant_id, is_builtin)
+                skill = await _upsert_skill(target_root, package_tenant_id, is_builtin)
                 return ImportResult(package_type="skill", imported=[{"type": "skill", "skill_key": skill.skill_key, "id": skill.id}])
             if package_type == "bundle":
                 result = await _import_bundle(target_root, package, tenant_id, is_builtin, request=request)
@@ -694,9 +668,6 @@ async def export_package_for_tenant(
             _archive_package_directory(archive, role_source, f"roles/{role_key}")
             for default_skill_key in skill_keys:
                 skill_source = skill_sources.get(str(default_skill_key))
-                if str(default_skill_key) == AIOE_CLI_SKILL_KEY and (not skill_source or not skill_source.exists()):
-                    _write_builtin_aioe_cli_skill(archive, f"skills/{default_skill_key}")
-                    continue
                 if not skill_source or not skill_source.exists():
                     raise CustomError(ErrorCode.PACKAGE_INVALID)
                 _archive_package_directory(archive, skill_source, f"skills/{default_skill_key}")
