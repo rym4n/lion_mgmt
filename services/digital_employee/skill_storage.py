@@ -55,9 +55,10 @@ def parse_skill_md(root: Path) -> tuple[str, str]:
     return name, description
 
 
-def resolve_skill_file(skill_dir: str, relative_path: str, tenant_id: str) -> Path:
+def resolve_skill_file(skill_dir: str, relative_path: str, tenant_id: str, *, for_write: bool = False) -> Path:
     """把 (技能目录, 目录内相对路径) 解析为绝对路径，越界即拒。双层校验：先确认落在该技能目录内，再确认该技能目录落在允许的根内
     （租户自己的根，或内置根——内置只读，由调用方另行拦写）。
+    `for_write=True` 时收紧到仅租户根，防止写操作误落到共享的内置目录。
     """
     if not skill_dir or Path(skill_dir).is_absolute() or not relative_path:
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -71,7 +72,9 @@ def resolve_skill_file(skill_dir: str, relative_path: str, tenant_id: str) -> Pa
     if skill_root != target and skill_root not in target.parents:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    allowed_roots = (tenant_skill_root(tenant_id), (storage_root / BUILTIN_SCOPE).resolve())
+    allowed_roots = [tenant_skill_root(tenant_id)]
+    if not for_write:
+        allowed_roots.append((storage_root / BUILTIN_SCOPE).resolve())
     if not any(root == skill_root or root in skill_root.parents for root in allowed_roots):
         raise CustomError(ErrorCode.FORBIDDEN)
     return target
