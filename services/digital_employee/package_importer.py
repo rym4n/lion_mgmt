@@ -19,7 +19,7 @@ from models.digital_employee import DigitalEmployeeRole, DigitalEmployeeSkill
 from models import Tool
 from settings import DIGITAL_EMPLOYEE_RESOURCES
 from .package_format import PackageFormatError, UnsupportedPackageTypeError, inspect_package
-from .skill_storage import parse_skill_md, relative_skill_dir
+from .skill_storage import parse_skill_md, relative_skill_dir, tenant_skill_root
 
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 2000
@@ -46,6 +46,12 @@ class ImportResult:
     @property
     def json(self) -> dict:
         return {"package_type": self.package_type, "imported": self.imported, "skipped": self.skipped}
+
+
+@dataclass
+class _StagedSkillDirectory:
+    target: Path
+    backup: Path | None = None
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -260,6 +266,50 @@ def _package_resource_root(package_type: str, package_name: str, tenant_id: str,
     return Path(DIGITAL_EMPLOYEE_RESOURCES) / scope / package_type / package_name
 
 
+def _remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
+
+
+def _restore_staged_skill_directories(staged: list[_StagedSkillDirectory]) -> None:
+    for item in reversed(staged):
+        _remove_path(item.target)
+        if item.backup is not None and (item.backup.exists() or item.backup.is_symlink()):
+            item.target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(item.backup), str(item.target))
+
+
+def _stage_bundle_skill_directories(
+    bundle_root: Path,
+    scope: str,
+    backup_root: Path,
+) -> list[_StagedSkillDirectory]:
+    source_roots = _iter_child_dirs(bundle_root / "skills")
+    for source_root in source_roots:
+        parse_skill_md(source_root)
+
+    scope_root = tenant_skill_root(scope)
+    staged: list[_StagedSkillDirectory] = []
+    try:
+        for index, source_root in enumerate(source_roots):
+            target = scope_root / source_root.name
+            backup = None
+            if target.exists() or target.is_symlink():
+                backup_root.mkdir(parents=True, exist_ok=True)
+                backup = backup_root / str(index)
+                shutil.move(str(target), str(backup))
+            item = _StagedSkillDirectory(target=target, backup=backup)
+            staged.append(item)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(source_root, target)
+    except Exception:
+        _restore_staged_skill_directories(staged)
+        raise
+    return staged
+
+
 async def _cleanup_imported_action_artifacts(actions: list[dict]) -> None:
     if not actions:
         return
@@ -445,7 +495,14 @@ async def _import_bundle_playbooks(root: Path, request) -> tuple[list[dict], lis
     return imported, []
 
 
-async def _import_bundle(root: Path, package: dict, tenant_id: str, is_builtin: bool, request=None) -> ImportResult:
+async def _import_bundle(
+    root: Path,
+    package: dict,
+    tenant_id: str,
+    is_builtin: bool,
+    request=None,
+    skill_roots: list[Path] | None = None,
+) -> ImportResult:
     package_tenant_id = "__builtin__" if is_builtin else tenant_id
     imported: list[dict] = []
     skipped: list[dict] = []
@@ -456,7 +513,7 @@ async def _import_bundle(root: Path, package: dict, tenant_id: str, is_builtin: 
             role = await _upsert_role(role_root, role_package, package_tenant_id, is_builtin)
             imported.append({"type": "role", "role_key": role.role_key, "id": role.id})
 
-        for skill_root in _iter_child_dirs(root / "skills"):
+        for skill_root in skill_roots if skill_roots is not None else _iter_child_dirs(root / "skills"):
             skill = await _upsert_skill(skill_root, package_tenant_id, is_builtin)
             imported.append({"type": "skill", "skill_key": skill.skill_key, "id": skill.id})
 
@@ -546,6 +603,7 @@ async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = F
         tmp_root = tmp_base / "extract"
         tmp_root.mkdir()
         backup_root = tmp_base / "target-backup"
+        staged_skill_directories: list[_StagedSkillDirectory] = []
         try:
             with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
                 _safe_extract(archive, tmp_root)
@@ -572,7 +630,19 @@ async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = F
                 skill = await _upsert_skill(target_root, package_tenant_id, is_builtin)
                 return ImportResult(package_type="skill", imported=[{"type": "skill", "skill_key": skill.skill_key, "id": skill.id}])
             if package_type == "bundle":
-                result = await _import_bundle(target_root, package, tenant_id, is_builtin, request=request)
+                staged_skill_directories = _stage_bundle_skill_directories(
+                    target_root,
+                    package_tenant_id,
+                    tmp_base / "skill-backups",
+                )
+                result = await _import_bundle(
+                    target_root,
+                    package,
+                    tenant_id,
+                    is_builtin,
+                    request=request,
+                    skill_roots=[item.target for item in staged_skill_directories],
+                )
                 if not is_builtin:
                     role_keys = [item["role_key"] for item in result.imported if item.get("type") == "role" and item.get("role_key")]
                     created, skipped = await _auto_create_employees(role_keys, tenant_id)
@@ -580,6 +650,7 @@ async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = F
                     result.skipped.extend(skipped)
                 return result
         except Exception:
+            _restore_staged_skill_directories(staged_skill_directories)
             if target_root.exists():
                 shutil.rmtree(target_root)
             if had_existing_target and backup_root.exists():

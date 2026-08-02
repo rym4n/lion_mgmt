@@ -1145,6 +1145,146 @@ def test_import_package_restores_existing_resource_directory_on_failure(tmp_path
     assert not (target_root / "role.yaml").exists()
 
 
+@pytest.mark.parametrize(
+    ("is_builtin", "expected_scope"),
+    [(False, "tenant-1"), (True, "__builtin__")],
+)
+def test_import_package_stages_standard_bundle_skills_in_scoped_storage(
+    tmp_path,
+    monkeypatch,
+    is_builtin,
+    expected_scope,
+):
+    resources_root = tmp_path / "resources"
+    skill_root = tmp_path / "skill-storage"
+    package_importer.DIGITAL_EMPLOYEE_RESOURCES = str(resources_root)
+    monkeypatch.setenv("RY_SKILL_ROOT", str(skill_root))
+    package = _zip_with(
+        {
+            "package.yaml": yaml.safe_dump(
+                {
+                    "type": "bundle",
+                    "bundle_key": "aioe-digital-employees-builtin-cloud-ops",
+                    "role_key": "cloud_ops",
+                    "version": 1,
+                }
+            ),
+            "roles/cloud_ops/package.yaml": yaml.safe_dump(
+                {
+                    "type": "role",
+                    "role_key": "cloud_ops",
+                    "version": 1,
+                    "default_skill_keys": ["cloud_config_audit"],
+                }
+            ),
+            "roles/cloud_ops/role.yaml": yaml.safe_dump(
+                {
+                    "key": "cloud_ops",
+                    "name": "云平台运维工程师",
+                    "identity": "负责云资源配置审计与容量治理。",
+                    "default_skills": ["cloud_config_audit"],
+                },
+                allow_unicode=True,
+            ),
+            "skills/cloud_config_audit/SKILL.md": (
+                "---\n"
+                "name: 云配置审计\n"
+                "description: 审核云资源配置并识别风险。\n"
+                "---\n\n"
+                "# 云配置审计\n"
+            ),
+        }
+    )
+
+    class StubDigitalEmployeeRole:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            return None
+
+        @classmethod
+        async def update_or_create(cls, **kwargs):
+            return types.SimpleNamespace(id="role-1", role_key=kwargs["role_key"]), True
+
+    class StubDigitalEmployeeSkill:
+        records = {}
+
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            return cls.records.get((kwargs["tenant_id"], kwargs["skill_key"]))
+
+        @classmethod
+        async def update_or_create(cls, **kwargs):
+            record = types.SimpleNamespace(
+                id="skill-1",
+                tenant_id=kwargs["tenant_id"],
+                skill_key=kwargs["skill_key"],
+                **kwargs["defaults"],
+            )
+            cls.records[(kwargs["tenant_id"], kwargs["skill_key"])] = record
+            return record, True
+
+    original_role_model = package_importer.DigitalEmployeeRole
+    original_skill_model = package_importer.DigitalEmployeeSkill
+    original_auto_create = package_importer._auto_create_employees
+
+    async def fake_auto_create(role_keys, tenant_id):
+        assert role_keys == ["cloud_ops"]
+        assert tenant_id == "tenant-1"
+        return [], []
+
+    package_importer.DigitalEmployeeRole = StubDigitalEmployeeRole
+    package_importer.DigitalEmployeeSkill = StubDigitalEmployeeSkill
+    package_importer._auto_create_employees = fake_auto_create
+    try:
+        result = asyncio.run(import_package(package, tenant_id="tenant-1", is_builtin=is_builtin))
+    finally:
+        package_importer.DigitalEmployeeRole = original_role_model
+        package_importer.DigitalEmployeeSkill = original_skill_model
+        package_importer._auto_create_employees = original_auto_create
+
+    stored_skill = skill_root / expected_scope / "cloud_config_audit"
+    skill_record = StubDigitalEmployeeSkill.records[(expected_scope, "cloud_config_audit")]
+    assert (stored_skill / "SKILL.md").exists()
+    assert skill_record.skill_dir == f"{expected_scope}/cloud_config_audit"
+    assert {item["type"] for item in result.imported} == {"role", "skill"}
+
+
+def test_import_package_restores_bundle_skill_directory_on_failure(tmp_path, monkeypatch):
+    resources_root = tmp_path / "resources"
+    skill_storage_root = tmp_path / "skill-storage"
+    package_importer.DIGITAL_EMPLOYEE_RESOURCES = str(resources_root)
+    monkeypatch.setenv("RY_SKILL_ROOT", str(skill_storage_root))
+    existing_bundle_root = resources_root / "tenant-1" / "bundle" / "cloud-ops"
+    existing_bundle_root.mkdir(parents=True)
+    (existing_bundle_root / "existing.txt").write_text("old bundle", encoding="utf-8")
+    existing_skill_root = skill_storage_root / "tenant-1" / "cloud_config_audit"
+    existing_skill_root.mkdir(parents=True)
+    (existing_skill_root / "SKILL.md").write_text(
+        "---\nname: 旧技能\ndescription: 旧技能内容。\n---\n",
+        encoding="utf-8",
+    )
+    package = _zip_with(
+        {
+            "package.yaml": yaml.safe_dump({"type": "bundle", "bundle_key": "cloud-ops"}),
+            "roles/cloud_ops/package.yaml": yaml.safe_dump({"type": "role", "role_key": "cloud_ops"}),
+            "roles/cloud_ops/role.yaml": yaml.safe_dump({"key": "cloud_ops", "name": "云平台运维工程师"}),
+            "skills/cloud_config_audit/SKILL.md": (
+                "---\nname: 新技能\ndescription: 新技能内容。\n---\n"
+            ),
+            "skills/cloud_config_audit/new.txt": "new",
+        }
+    )
+
+    with pytest.raises(CustomError) as exc_info:
+        asyncio.run(import_package(package, tenant_id="tenant-1"))
+
+    assert exc_info.value.enum == "PACKAGE_INVALID"
+    assert (existing_bundle_root / "existing.txt").read_text(encoding="utf-8") == "old bundle"
+    assert not (existing_bundle_root / "package.yaml").exists()
+    assert "name: 旧技能" in (existing_skill_root / "SKILL.md").read_text(encoding="utf-8")
+    assert not (existing_skill_root / "new.txt").exists()
+
+
 def test_import_package_strips_rbac_fields_from_staged_resource_dir(tmp_path):
     resources_root = tmp_path / "resources"
     package_importer.DIGITAL_EMPLOYEE_RESOURCES = str(resources_root)
