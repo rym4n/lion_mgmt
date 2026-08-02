@@ -68,8 +68,8 @@ def _read_json(path: Path) -> Any:
 
 def _strip_rbac_fields(data: dict[str, Any]) -> dict[str, Any]:
     sanitized = dict(data or {})
-    for field in RBAC_PACKAGE_FIELDS:
-        sanitized.pop(field, None)
+    for field_name in RBAC_PACKAGE_FIELDS:
+        sanitized.pop(field_name, None)
     return sanitized
 
 
@@ -124,9 +124,9 @@ def normalize_role_prompt_fields(role_data: dict[str, Any]) -> dict[str, Any]:
     if merged_workflows:
         normalized["workflows"] = merged_workflows
     normalized.pop("safety_rules", None)
-    for field in ROLE_PROMPT_TEXT_FIELDS:
-        if field in normalized:
-            normalized[field] = _format_prompt_text(normalized[field])
+    for field_name in ROLE_PROMPT_TEXT_FIELDS:
+        if field_name in normalized:
+            normalized[field_name] = _format_prompt_text(normalized[field_name])
     return normalized
 
 
