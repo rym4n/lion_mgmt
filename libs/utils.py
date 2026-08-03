@@ -463,6 +463,34 @@ async def query_vlog(query, project_id, start=None, end=None, account_id=0, limi
             logger.error(f"VictoriaLogs query error: {e}")
             return None
 
+
+async def delete_vlog(project_id, account_id=0):
+    """Start an asynchronous VictoriaLogs task deleting one log project."""
+    header = {
+        "AccountID": str(account_id),
+        "ProjectID": str(project_id),
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.post(
+                f"{VL_HOST}/delete/run_task",
+                headers=header,
+                params={"filter": "*"},
+            )
+            resp.raise_for_status()
+            result = orjson.loads(resp.content)
+            task_id = result.get("task_id") if isinstance(result, dict) else None
+            return {"task_id": str(task_id)} if task_id else None
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"VictoriaLogs delete HTTP error: {e.response.status_code} - {e.response.text}"
+            )
+            return None
+        except Exception as e:
+            logger.error(f"VictoriaLogs delete error: {e}")
+            return None
+
 async def upload_to_s3(
     file_content: bytes,
     bucket_name: str,

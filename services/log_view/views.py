@@ -11,7 +11,7 @@ from core.error_code import ErrorCode
 from core.response import response_fail, response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import query_vlog
+from libs.utils import delete_vlog, query_vlog
 from models.event import EventsIngestion
 
 logs_bp = Blueprint("logs", url_prefix="/logs")
@@ -167,13 +167,13 @@ async def get_index_list(request):
         projects = await EventsIngestion.filter(
             project_id__isnull=False,
             tenant_id=tenant_id,
-            deleted=False,
-        ).values("project_id", "event_ingestion_name")
+        ).values("project_id", "event_ingestion_name", "deleted")
 
         result = [
             {
                 "id": p["project_id"],
                 "name": p["event_ingestion_name"] or f"Project {p['project_id']}",
+                "deleted": p["deleted"],
             }
             for p in projects
         ]
@@ -181,6 +181,43 @@ async def get_index_list(request):
     except Exception as e:
         logger.error(f"Get project list error: {e}")
         return response_ok([])
+
+
+@logs_bp.route("/delete", methods=["POST"])
+@openapi.definition(
+    summary="删除日志项目的存量日志",
+    description="为当前租户下指定日志项目创建 VictoriaLogs 异步删除任务",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["project_id"],
+                "properties": {
+                    "project_id": {"type": "integer", "description": "日志项目ID"}
+                },
+            }
+        }
+    },
+)
+@requires_permission("logs:d")
+async def delete_project_logs(request):
+    params = request.json or {}
+    project_id = params.get("project_id")
+    if isinstance(project_id, bool) or not isinstance(project_id, int) or project_id <= 0:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    project_exists = await EventsIngestion.filter(
+        project_id=project_id,
+        tenant_id=tenant_id,
+    ).exists()
+    if not project_exists:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    result = await delete_vlog(project_id)
+    if result is None:
+        return response_fail(ErrorCode.VICTORIA_LOGS_DELETE_ERROR)
+    return response_ok(result)
 
 
 @logs_bp.route("/fields", methods=["POST"])

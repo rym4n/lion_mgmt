@@ -223,3 +223,4 @@ class ErrorCode(BaseErrorCode):
     ASSET_FIELD_DATA_INCOMPATIBLE = ErrorData(
         4175, "已有资产实例数据与修改后的字段类型或约束不兼容，请先调整实例数据后再保存字段"
     )
+    VICTORIA_LOGS_DELETE_ERROR = ErrorData(4176, "日志删除任务创建失败")
