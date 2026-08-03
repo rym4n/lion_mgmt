@@ -14,6 +14,7 @@ from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
+from libs.runlog_pagination import paginated_runlog_summaries, runlog_node_page
 from libs.security.authorization import (
     account_has_permission,
     check_action_execute_permission,
@@ -1302,9 +1303,62 @@ async def get_run_log(request):
     if status in [0, 1]:
         condition &= Q(status=int(status))
 
-    total, run_logs = await paginated_runlog_groups(Runlog, condition, page, size)
+    if req_json.get("summary_only"):
+        total, run_logs = await paginated_runlog_summaries(Runlog, condition, page, size)
+    else:
+        total, run_logs = await paginated_runlog_groups(Runlog, condition, page, size)
 
     return response_ok({"page": page, "size": size, "total": total, "data": run_logs})
+
+
+async def _require_timed_run_scope(request, timed_id: str, run_id: str) -> str:
+    tenant_id = request.ctx.session.get("tenant_id")
+    internal = await get_current_timed_internal_scope(request)
+    if not await Timed.filter(id=timed_id, deleted=False, internal=internal, tenant_id=tenant_id).exists():
+        raise CustomError(ErrorCode.TIMED_NOT_FOUND)
+    if not await Runlog.filter(timer_id=timed_id, run_id=run_id, tenant_id=tenant_id, deleted=False).exists():
+        raise CustomError(ErrorCode.NOT_FOUND)
+    return tenant_id
+
+
+@timed_bp.post("/runlog/nodes")
+@openapi.definition(summary="分页获取定时任务单次执行的节点摘要")
+@requires_permission("timed:r")
+async def get_run_log_nodes(request):
+    data = request.json or {}
+    timed_id = str(data.get("id") or "").strip()
+    run_id = str(data.get("run_id") or "").strip()
+    if not timed_id or not run_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = await _require_timed_run_scope(request, timed_id, run_id)
+    return response_ok(
+        await runlog_node_page(
+            Runlog,
+            Q(timer_id=timed_id, tenant_id=tenant_id, deleted=False),
+            run_id=run_id,
+            cursor=data.get("cursor"),
+            limit=data.get("limit"),
+            cursor_kind="timed-node",
+            cursor_scope={"timed_id": timed_id},
+        )
+    )
+
+
+@timed_bp.post("/runlog/detail")
+@openapi.definition(summary="获取定时任务单条运行日志详情")
+@requires_permission("timed:r")
+async def get_run_log_detail(request):
+    data = request.json or {}
+    timed_id = str(data.get("id") or "").strip()
+    run_id = str(data.get("run_id") or "").strip()
+    runlog_id = str(data.get("runlog_id") or "").strip()
+    if not timed_id or not run_id or not runlog_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = await _require_timed_run_scope(request, timed_id, run_id)
+    runlog = await Runlog.get_or_none(id=runlog_id, timer_id=timed_id, run_id=run_id, tenant_id=tenant_id, deleted=False)
+    if not runlog:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    return response_ok(runlog.json)
 
 
 async def timer_success_rate(timed: Timed):

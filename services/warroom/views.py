@@ -15,6 +15,7 @@ from core.response import response_ok
 from libs.chat import chat_manager, get_or_create_private_chat_room
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
+from libs.runlog_pagination import runlog_batch_summaries, runlog_node_page
 from libs.security.authorization import check_action_execute_permission, check_wildcard, requires_permission
 from libs.utils import gen_random_code, gen_run_id
 from models import Events, Runlog, Tool, ToolAction
@@ -888,6 +889,7 @@ async def query_messages(request: Request):
     keyword = request.json.get("keyword", "")
     limit = request.json.get("limit", 20)
     offset = request.json.get("offset", 0)
+    compact_runlogs = bool(request.json.get("compact_runlogs"))
     tenant_id = request.ctx.session.get("tenant_id")
     # 群聊历史. 先查询后创建消息发送
     if not room_id:
@@ -931,14 +933,26 @@ async def query_messages(request: Request):
     messages = await Message.filter(condition).order_by("-ctime").offset(offset).limit(limit).prefetch_related("sender")
     message_list = []
     run_id_list = []
+    for msg in messages:
+        if msg.type != "runlog":
+            continue
+        run_id = msg.content.split(":")[0]
+        if run_id and run_id not in run_id_list:
+            run_id_list.append(run_id)
+    compact_summaries = await runlog_batch_summaries(Runlog, Q(tenant_id=tenant_id, deleted=False), run_id_list) if compact_runlogs else {}
+    emitted_run_ids = set()
     for msg in reversed(messages):
         if msg.type == "runlog":
             run_id = msg.content.split(":")[0]
-            if run_id not in run_id_list:
-                run_id_list.append(run_id)
-                runlogs = await Runlog.filter(run_id=run_id, deleted=False).order_by("ctime").all()
-                run_logs = await runlog_list(runlogs)
-                content = "[已撤回]" if msg.is_recalled else run_logs
+            if run_id not in emitted_run_ids:
+                emitted_run_ids.add(run_id)
+                if msg.is_recalled:
+                    content = "[已撤回]"
+                elif compact_runlogs:
+                    content = {"run_id": run_id, "runlog_summary": compact_summaries.get(run_id)}
+                else:
+                    runlogs = await Runlog.filter(run_id=run_id, tenant_id=tenant_id, deleted=False).order_by("ctime").all()
+                    content = await runlog_list(runlogs)
             else:
                 continue
         else:
@@ -963,6 +977,59 @@ async def query_messages(request: Request):
             "pagination": {"total": total_count, "offset": offset, "limit": limit},
         }
     )
+
+
+async def _require_warroom_run_scope(room_id: str, run_id: str, tenant_id: str) -> None:
+    room = await Room.get_or_none(id=room_id, tenant_id=tenant_id, deleted=False)
+    if not room:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    linked = run_id in (room.run_id or [])
+    if not linked:
+        linked = await Message.filter(room_id=room_id, tenant_id=tenant_id, type="runlog", content__startswith=run_id).exists()
+    if not linked or not await Runlog.filter(run_id=run_id, tenant_id=tenant_id, deleted=False).exists():
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+
+@warroom_bp.post("/runlog/nodes")
+@openapi.definition(summary="分页获取作战室单次执行的节点摘要")
+@requires_permission("warroom:r")
+async def get_warroom_runlog_nodes(request):
+    data = request.json or {}
+    room_id = str(data.get("room_id") or "").strip()
+    run_id = str(data.get("run_id") or "").strip()
+    if not room_id or not run_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
+    await _require_warroom_run_scope(room_id, run_id, tenant_id)
+    return response_ok(
+        await runlog_node_page(
+            Runlog,
+            Q(tenant_id=tenant_id, deleted=False),
+            run_id=run_id,
+            cursor=data.get("cursor"),
+            limit=data.get("limit"),
+            cursor_kind="warroom-node",
+            cursor_scope={"room_id": room_id},
+        )
+    )
+
+
+@warroom_bp.post("/runlog/detail")
+@openapi.definition(summary="获取作战室单条运行日志详情")
+@requires_permission("warroom:r")
+async def get_warroom_runlog_detail(request):
+    data = request.json or {}
+    room_id = str(data.get("room_id") or "").strip()
+    run_id = str(data.get("run_id") or "").strip()
+    runlog_id = str(data.get("runlog_id") or "").strip()
+    if not room_id or not run_id or not runlog_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
+    await _require_warroom_run_scope(room_id, run_id, tenant_id)
+    runlog = await Runlog.get_or_none(id=runlog_id, run_id=run_id, tenant_id=tenant_id, deleted=False)
+    if not runlog:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    return response_ok(runlog.json)
 
 
 @warroom_bp.post("/get/list")

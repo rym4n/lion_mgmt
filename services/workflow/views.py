@@ -25,6 +25,7 @@ from core.response import response_ok
 from libs import utils
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
+from libs.runlog_pagination import paginated_runlog_summaries, runlog_node_page
 from libs.security.authorization import (
     TENANT_ADMIN_ROLE_NAME,
     check_action_execute_permission,
@@ -2775,6 +2776,18 @@ async def list_ai_config(request):
     return response_ok(data)
 
 
+async def _require_version_runlog_scope(request, flow_id: str) -> tuple[PlaybookVersion, str]:
+    tenant_id = request.ctx.session.get("tenant_id")
+    pv = await PlaybookVersion.get_or_none(id=flow_id, deleted=False, tenant_id=tenant_id)
+    if not pv:
+        raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
+    user = request.ctx.session.get("account_info")
+    has_access = await check_playbook_permission(request=request, user=user, playbook_id=pv.playbook_id, required_permissions=["r"])
+    if not has_access:
+        raise CustomError(ErrorCode.PLAYBOOK_UNAUTHORIZED)
+    return pv, tenant_id
+
+
 @workflow_bp.post("/version-runlog")
 @openapi.definition(
     summary="获取剧本版本的执行记录",
@@ -2829,26 +2842,13 @@ async def get_version_runlog(request):
 
     page = int(request.json.get("page", 1)) if request.json.get("page") else 1
     size = int(request.json.get("size", 20)) if request.json.get("size") else 20
-    tenant_id = request.ctx.session.get("tenant_id")
-
-    # 验证剧本版本是否存在
-    pv = await PlaybookVersion.get_or_none(id=flow_id, deleted=False, tenant_id=tenant_id)
-    if not pv:
-        raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
-
-    # 检查权限
-    user = request.ctx.session.get("account_info")
-    has_access = await check_playbook_permission(
-        request=request,
-        user=user,
-        playbook_id=pv.playbook_id,
-        required_permissions=["r"],
-    )
-    if not has_access:
-        raise CustomError(ErrorCode.PLAYBOOK_UNAUTHORIZED)
+    _, tenant_id = await _require_version_runlog_scope(request, flow_id)
 
     condition = Q(playbook_version_id=flow_id, deleted=False, tenant_id=tenant_id)
-    total, run_logs = await paginated_runlog_groups(Runlog, condition, page, size)
+    if request.json.get("summary_only"):
+        total, run_logs = await paginated_runlog_summaries(Runlog, condition, page, size)
+    else:
+        total, run_logs = await paginated_runlog_groups(Runlog, condition, page, size)
 
     return response_ok(
         {
@@ -2858,6 +2858,49 @@ async def get_version_runlog(request):
             "run_logs": run_logs,
         }
     )
+
+
+@workflow_bp.post("/version-runlog/nodes")
+@openapi.definition(summary="分页获取剧本单次执行的节点摘要")
+@requires_permission("workflow:r")
+async def get_version_runlog_nodes(request):
+    data = request.json or {}
+    flow_id = str(data.get("flow_id") or "").strip()
+    run_id = str(data.get("run_id") or "").strip()
+    if not flow_id or not run_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    _, tenant_id = await _require_version_runlog_scope(request, flow_id)
+    condition = Q(playbook_version_id=flow_id, run_id=run_id, tenant_id=tenant_id, deleted=False)
+    if not await Runlog.filter(condition).exists():
+        raise CustomError(ErrorCode.NOT_FOUND)
+    return response_ok(
+        await runlog_node_page(
+            Runlog,
+            condition,
+            run_id=run_id,
+            cursor=data.get("cursor"),
+            limit=data.get("limit"),
+            cursor_kind="workflow-node",
+            cursor_scope={"flow_id": flow_id},
+        )
+    )
+
+
+@workflow_bp.post("/version-runlog/detail")
+@openapi.definition(summary="获取剧本单条运行日志详情")
+@requires_permission("workflow:r")
+async def get_version_runlog_detail(request):
+    data = request.json or {}
+    flow_id = str(data.get("flow_id") or "").strip()
+    run_id = str(data.get("run_id") or "").strip()
+    runlog_id = str(data.get("runlog_id") or "").strip()
+    if not flow_id or not run_id or not runlog_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    _, tenant_id = await _require_version_runlog_scope(request, flow_id)
+    runlog = await Runlog.get_or_none(id=runlog_id, playbook_version_id=flow_id, run_id=run_id, tenant_id=tenant_id, deleted=False)
+    if not runlog:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    return response_ok(runlog.json)
 
 
 @workflow_bp.post("/ai-chat")

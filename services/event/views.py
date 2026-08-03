@@ -6,12 +6,14 @@ import orjson
 import pytz
 from sanic import Blueprint, response
 from sanic_ext import openapi
+from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
+from libs.runlog_pagination import paginated_runlog_summaries, parse_bounded_int, runlog_node_page
 from libs.security.authorization import check_permissions, requires_permission
 from libs.utils import gen_random_code, gen_run_id, runlog_list, strip_timezone_to_seconds
 from models import Account, Events, EventsIngestion, PlaybookVersion, Role, Room, Runlog, Tool, ToolAction, ToolResources
@@ -666,9 +668,9 @@ async def get_event_detail(request):
 
     event_dict = {"created_name": event.creator.username if event.creator else ""}
 
-    run_logs = await Runlog.filter(event_id=event_id, deleted=False).order_by("ctime").all().prefetch_related("playbook_version")
-    run_logs_grouped = await runlog_list(run_logs)
-    event_dict["data"] = run_logs_grouped
+    if request.json.get("include_runlogs", True):
+        run_logs = await Runlog.filter(event_id=event_id, tenant_id=tenant_id, deleted=False).order_by("ctime").all().prefetch_related("playbook_version")
+        event_dict["data"] = await runlog_list(run_logs)
 
     event_dict["room_users"] = [user.username if user else "" for user in await event.room.users.all()] if event.room else []
     role_list = []
@@ -689,6 +691,77 @@ async def get_event_detail(request):
     event_dict["first"] = first
 
     return response_ok(event_dict)
+
+
+async def _require_event_run_scope(event_id: str, run_id: str, tenant_id: str) -> None:
+    if not await Events.filter(id=event_id, tenant_id=tenant_id, deleted=False).exists():
+        raise CustomError(ErrorCode.NOT_FOUND)
+    if not await Runlog.filter(event_id=event_id, run_id=run_id, tenant_id=tenant_id, deleted=False).exists():
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+
+@event_bp.post("/runlogs")
+@openapi.definition(summary="分页获取事件关联的执行批次摘要")
+@requires_permission("event:r")
+async def get_event_runlogs(request):
+    data = request.json or {}
+    event_id = str(data.get("id") or "").strip()
+    if not event_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
+    if not await Events.filter(id=event_id, tenant_id=tenant_id, deleted=False).exists():
+        raise CustomError(ErrorCode.NOT_FOUND)
+    page = parse_bounded_int(data.get("page"), default=1, maximum=1_000_000)
+    size = parse_bounded_int(data.get("size"), default=10, maximum=50)
+    total, items = await paginated_runlog_summaries(
+        Runlog,
+        Q(event_id=event_id, tenant_id=tenant_id, deleted=False),
+        page,
+        size,
+    )
+    return response_ok({"page": page, "size": size, "total": total, "items": items})
+
+
+@event_bp.post("/runlogs/nodes")
+@openapi.definition(summary="分页获取事件单次执行的节点摘要")
+@requires_permission("event:r")
+async def get_event_runlog_nodes(request):
+    data = request.json or {}
+    event_id = str(data.get("id") or "").strip()
+    run_id = str(data.get("run_id") or "").strip()
+    if not event_id or not run_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
+    await _require_event_run_scope(event_id, run_id, tenant_id)
+    return response_ok(
+        await runlog_node_page(
+            Runlog,
+            Q(event_id=event_id, tenant_id=tenant_id, deleted=False),
+            run_id=run_id,
+            cursor=data.get("cursor"),
+            limit=data.get("limit"),
+            cursor_kind="event-node",
+            cursor_scope={"event_id": event_id},
+        )
+    )
+
+
+@event_bp.post("/runlogs/detail")
+@openapi.definition(summary="获取事件单条运行日志详情")
+@requires_permission("event:r")
+async def get_event_runlog_detail(request):
+    data = request.json or {}
+    event_id = str(data.get("id") or "").strip()
+    run_id = str(data.get("run_id") or "").strip()
+    runlog_id = str(data.get("runlog_id") or "").strip()
+    if not event_id or not run_id or not runlog_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
+    await _require_event_run_scope(event_id, run_id, tenant_id)
+    runlog = await Runlog.get_or_none(id=runlog_id, event_id=event_id, run_id=run_id, tenant_id=tenant_id, deleted=False)
+    if not runlog:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    return response_ok(runlog.json)
 
 
 @event_bp.post("/update")
