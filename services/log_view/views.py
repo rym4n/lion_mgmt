@@ -164,7 +164,11 @@ async def get_index_list(request):
     tenant_id = request.ctx.session.get("tenant_id")
     try:
         # 获取所有已配置的项目
-        projects = await EventsIngestion.filter(project_id__isnull=False, tenant_id=tenant_id).values("project_id", "event_ingestion_name")
+        projects = await EventsIngestion.filter(
+            project_id__isnull=False,
+            tenant_id=tenant_id,
+            deleted=False,
+        ).values("project_id", "event_ingestion_name")
 
         result = [
             {

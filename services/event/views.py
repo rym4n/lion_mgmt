@@ -802,8 +802,8 @@ async def update_event(request):
         event.event_name = name
         update_fields.append("event_name")
 
-    if summary := params.get("event_summary"):
-        event.event_summary = summary
+    if "event_summary" in params:
+        event.event_summary = params.get("event_summary") or ""
         update_fields.append("event_summary")
 
     if status := params.get("event_process_status"):
