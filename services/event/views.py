@@ -664,7 +664,7 @@ async def get_event_detail(request):
         await creator.star_rooms.add(event.room)
         await event.room.users.add(creator)
 
-    event_dict = {"created_name": request.ctx.session["account_info"].username}
+    event_dict = {"created_name": event.creator.username if event.creator else ""}
 
     run_logs = await Runlog.filter(event_id=event_id, deleted=False).order_by("ctime").all().prefetch_related("playbook_version")
     run_logs_grouped = await runlog_list(run_logs)

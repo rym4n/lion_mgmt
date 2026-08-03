@@ -124,16 +124,36 @@ def test_event_detail_updates_concrete_room_foreign_key_field():
     assert appended_fields == ["room_id"]
 
 
+def test_event_detail_uses_persisted_creator():
+    node = _function("get_event_detail")
+
+    event_dict_assignment = next(
+        statement
+        for statement in node.body
+        if (
+            isinstance(statement, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "event_dict" for target in statement.targets)
+        )
+    )
+
+    assert ast.unparse(event_dict_assignment.value) == "{'created_name': event.creator.username if event.creator else ''}"
+
+
 def test_event_detail_initializes_room_for_manual_event(monkeypatch):
-    creator = SimpleNamespace(
+    viewer = SimpleNamespace(
         id="account-1",
         username="admin",
         display_name="Administrator",
         star_rooms=SimpleNamespace(add=AsyncMock()),
     )
+    event_creator = SimpleNamespace(
+        id="account-2",
+        username="source-owner",
+        display_name="Source Owner",
+    )
     room = SimpleNamespace(
         id="room-1",
-        users=SimpleNamespace(add=AsyncMock(), all=AsyncMock(return_value=[creator])),
+        users=SimpleNamespace(add=AsyncMock(), all=AsyncMock(return_value=[viewer])),
     )
 
     class FakeEvent:
@@ -142,6 +162,7 @@ def test_event_detail_initializes_room_for_manual_event(monkeypatch):
         event_process_status = "待处理"
         owner = {}
         room = None
+        creator = event_creator
         save = AsyncMock()
 
         @property
@@ -183,7 +204,7 @@ def test_event_detail_initializes_room_for_manual_event(monkeypatch):
 
     request = SimpleNamespace(
         json={"id": event.id, "initialize_room": True},
-        ctx=SimpleNamespace(session={"tenant_id": "tenant-1", "account_info": creator}),
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1", "account_info": viewer}),
     )
     handler = event_views.get_event_detail
     while hasattr(handler, "__wrapped__"):
@@ -194,12 +215,13 @@ def test_event_detail_initializes_room_for_manual_event(monkeypatch):
     check_permissions.assert_awaited_once_with(request, "warroom:r")
     FakeRoom.create.assert_awaited_once_with(
         name="manual-event_ABC123",
-        creator=creator,
+        creator=viewer,
         tenant_id="tenant-1",
         room_type="public",
     )
     event.save.assert_awaited_once_with(update_fields=["room_id", "event_process_status"])
-    creator.star_rooms.add.assert_awaited_once_with(room)
-    room.users.add.assert_awaited_once_with(creator)
+    viewer.star_rooms.add.assert_awaited_once_with(room)
+    room.users.add.assert_awaited_once_with(viewer)
+    assert result["created_name"] == event_creator.username
     assert result["room"] == room.id
     assert result["event_process_status"] == "处理中"
