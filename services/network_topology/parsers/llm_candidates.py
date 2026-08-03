@@ -172,8 +172,6 @@ class LLMCandidateAdapter:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": orjson.dumps({"untrusted_data": chunk}).decode()},
             ],
-            "tools": [],
-            "tool_choice": "none",
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {"name": "network_topology_candidates", "strict": True,

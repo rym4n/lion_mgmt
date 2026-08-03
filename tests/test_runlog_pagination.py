@@ -1,11 +1,15 @@
 # coding=utf-8
 
+import inspect
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 import libs.utils as utils
 import models
+from libs.error_code.exception import CustomError
+from services.command_center import views
 
 
 class _FakeRunlogModel:
@@ -129,3 +133,128 @@ async def test_paginated_runlog_groups_keeps_nodes_from_same_run_together(monkey
         for node_group in run_logs[0]
         for item in node_group
     } == {"node-1", "node-2"}
+
+
+def test_command_center_runlog_limits_are_bounded():
+    assert views._parse_bounded_limit(None, default=10, maximum=50) == 10
+    assert views._parse_bounded_limit(9999, default=10, maximum=50) == 50
+    with pytest.raises(CustomError):
+        views._parse_bounded_limit(0, default=10, maximum=50)
+    with pytest.raises(CustomError):
+        views._parse_bounded_limit("invalid", default=10, maximum=50)
+
+
+def test_command_center_runlog_cursor_is_bound_to_task_and_run():
+    cursor = views._encode_runlog_cursor(
+        "node",
+        task_id="task-1",
+        run_id="run-1",
+        ctime="2026-08-03T10:00:00+08:00",
+        id="log-1",
+    )
+
+    payload = views._decode_runlog_cursor(cursor, "node", task_id="task-1", run_id="run-1")
+
+    assert payload["id"] == "log-1"
+    with pytest.raises(CustomError):
+        views._decode_runlog_cursor(cursor, "node", task_id="task-2", run_id="run-1")
+    with pytest.raises(CustomError):
+        views._decode_runlog_cursor(cursor, "batch", task_id="task-1")
+
+
+@pytest.mark.parametrize("cursor", ["%%%", "_w"])
+def test_command_center_runlog_cursor_rejects_invalid_encoded_content(cursor):
+    with pytest.raises(CustomError):
+        views._decode_runlog_cursor(cursor, "batch", task_id="task-1")
+
+
+def test_command_center_node_summary_never_includes_args_or_result():
+    summary = views._runlog_node_summary_json(
+        {
+            "id": "log-1",
+            "run_id": "run-1",
+            "node_id": "node-1",
+            "node_name": "查询主机【第12次循环】（2次重试）",
+            "node_type": "action-node",
+            "status": 0,
+            "ctime": "2026-08-03T10:00:00+08:00",
+            "args": {"secret": "must-not-leak"},
+            "result": "must-not-leak",
+        }
+    )
+
+    assert "args" not in summary
+    assert "result" not in summary
+    assert "must-not-leak" not in str(summary)
+    assert summary["loop_index"] == 12
+    assert summary["retry_index"] == 2
+
+
+@pytest.mark.asyncio
+async def test_task_run_ownership_is_scoped_to_task_tenant_and_linked_run(monkeypatch):
+    task_filters = []
+    run_filters = []
+    task = SimpleNamespace(id="task-1")
+
+    class FakeTask:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            task_filters.append(kwargs)
+            return task
+
+    class FakeRunQuery:
+        async def exists(self):
+            return True
+
+    class FakeTaskRun:
+        @classmethod
+        def filter(cls, **kwargs):
+            run_filters.append(kwargs)
+            return FakeRunQuery()
+
+    monkeypatch.setattr(views, "CommandTask", FakeTask)
+    monkeypatch.setattr(views, "CommandTaskRun", FakeTaskRun)
+
+    resolved = await views._require_task_run("task-1", "run-1", "tenant-1")
+
+    assert resolved is task
+    assert task_filters == [{"id": "task-1", "tenant_id": "tenant-1", "deleted": False}]
+    assert run_filters == [
+        {
+            "task_id": "task-1",
+            "tenant_id": "tenant-1",
+            "deleted": False,
+            "metadata__contains": {"linked_run_ids": ["run-1"]},
+        }
+    ]
+
+
+def test_command_center_runlog_routes_keep_read_permission_and_detail_scope():
+    for handler in (views.task_runlogs, views.task_runlog_nodes, views.task_runlog_detail):
+        assert 'requires_permission("command_center:r")' in inspect.getsource(handler)
+    detail_source = inspect.getsource(views.task_runlog_detail)
+    for condition in ("id=runlog_id", "run_id=run_id", "tenant_id=tenant_id", "deleted=False"):
+        assert condition in detail_source
+
+
+def test_batch_linkage_query_is_database_bounded_and_cursor_stable():
+    source = inspect.getsource(views._linked_task_run_page)
+
+    assert "jsonb_array_elements_text" in source
+    assert "WITH ORDINALITY" in source
+    assert "LIMIT $3" in source
+    assert "limit + 1" in source
+    assert "task_run_ctime DESC, task_run_id DESC, ordinal DESC, run_id DESC" in source
+    assert ".all()" not in source
+
+
+def test_runlog_cursor_index_model_and_migration_contract():
+    root = Path(__file__).resolve().parents[1]
+    model_source = (root / "models/runlog.py").read_text(encoding="utf-8")
+    migration_source = (
+        root / "migrations/models/98_20260803120000_runlog_cursor_index.py"
+    ).read_text(encoding="utf-8")
+
+    assert '("tenant_id", "run_id", "ctime", "id")' in model_source
+    assert '"idx_runlog_tenant__0d09ad"' in migration_source
+    assert 'ON "runlog" ("tenant_id", "run_id", "ctime", "id")' in migration_source

@@ -1,5 +1,9 @@
 # coding=utf-8
+import base64
+import binascii
 from datetime import datetime, time
+import json
+import re
 
 from sanic import Blueprint, Request
 from sanic_ext import openapi
@@ -45,6 +49,13 @@ TASK_STATUS_ENUM = [
 DISPATCH_STATUS_ENUM = ["pending", "needs_clarification", "user_specified", "corrected", "auto_assigned", "no_candidate"]
 TASK_PROGRESS_WRITE_STATUS_ENUM = ["running", "completed", "failed", "cancelled"]
 TASK_PROGRESS_WRITE_STATUSES = frozenset(TASK_PROGRESS_WRITE_STATUS_ENUM)
+RUNLOG_BATCH_DEFAULT_LIMIT = 10
+RUNLOG_BATCH_MAX_LIMIT = 50
+RUNLOG_NODE_DEFAULT_LIMIT = 50
+RUNLOG_NODE_MAX_LIMIT = 200
+RUNLOG_CURSOR_VERSION = 1
+_RUNLOG_LOOP_RE = re.compile(r"【第(\d+)次循环】")
+_RUNLOG_RETRY_RE = re.compile(r"（(\d+)次重试）")
 
 ERROR_RESPONSE_SCHEMA = {
     "type": "object",
@@ -270,6 +281,235 @@ def _task_event_metadata_summary(metadata) -> dict:
 def _text_summary(value) -> dict:
     text = "" if value is None else str(value)
     return {"present": bool(text), "length": len(text)}
+
+
+def _parse_bounded_limit(value, *, default: int, maximum: int) -> int:
+    if value in (None, ""):
+        return default
+    try:
+        limit = int(value)
+    except (TypeError, ValueError):
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR) from None
+    if limit < 1:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    return min(limit, maximum)
+
+
+def _encode_runlog_cursor(kind: str, **payload) -> str:
+    raw = json.dumps(
+        {"v": RUNLOG_CURSOR_VERSION, "kind": kind, **payload},
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_runlog_cursor(token, kind: str, **scope) -> dict | None:
+    if token in (None, ""):
+        return None
+    if not isinstance(token, str) or len(token) > 2048:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    try:
+        padding = "=" * (-len(token) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(token + padding))
+    except (binascii.Error, UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError):
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR) from None
+    if not isinstance(payload, dict) or payload.get("v") != RUNLOG_CURSOR_VERSION or payload.get("kind") != kind:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    if any(payload.get(key) != value for key, value in scope.items()):
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    return payload
+
+
+def _runlog_time_json(value):
+    if isinstance(value, datetime):
+        return value.isoformat(timespec="seconds")
+    return value
+
+
+def _runlog_node_summary_json(row: dict) -> dict:
+    node_name = row.get("node_name") or ""
+    loop_match = _RUNLOG_LOOP_RE.search(node_name)
+    retry_match = _RUNLOG_RETRY_RE.search(node_name)
+    allowed = (
+        "id",
+        "run_id",
+        "node_id",
+        "node_name",
+        "node_type",
+        "tool_name",
+        "tool_version",
+        "tool_display_name",
+        "action_name",
+        "action_display_name",
+        "status",
+        "start_time",
+        "end_time",
+        "ctime",
+        "utime",
+        "resource_name",
+        "playbook_name",
+    )
+    summary = {key: row.get(key) for key in allowed}
+    for key in ("start_time", "end_time", "ctime", "utime"):
+        summary[key] = _runlog_time_json(summary.get(key))
+    summary["loop_index"] = int(loop_match.group(1)) if loop_match else None
+    summary["retry_index"] = int(retry_match.group(1)) if retry_match else 0
+    return summary
+
+
+def _runlog_batch_status(row: dict) -> int:
+    if int(row.get("failed_count") or 0) > 0:
+        return -1
+    if int(row.get("running_count") or 0) > 0:
+        return 1
+    if int(row.get("log_count") or 0) and int(row.get("success_count") or 0) == int(row.get("log_count") or 0):
+        return 0
+    return -1
+
+
+async def _require_command_task(task_id: str, tenant_id: str) -> CommandTask:
+    task = await CommandTask.get_or_none(id=task_id, tenant_id=tenant_id, deleted=False)
+    if not task:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    return task
+
+
+async def _linked_task_run_page(
+    task_id: str,
+    tenant_id: str,
+    limit: int,
+    cursor: dict | None,
+) -> tuple[list[dict], bool]:
+    from tortoise import connections
+
+    cursor_clause = ""
+    values: list = [task_id, tenant_id, limit + 1]
+    if cursor:
+        try:
+            cursor_time = datetime.fromisoformat(cursor["ctime"])
+            cursor_task_run_id = str(cursor["task_run_id"])
+            cursor_ordinal = int(cursor["ordinal"])
+            cursor_run_id = str(cursor["run_id"])
+        except (KeyError, TypeError, ValueError):
+            raise CustomError(ErrorCode.PARAM_VALUE_ERROR) from None
+        cursor_clause = """
+            WHERE (task_run_ctime, task_run_id, ordinal, run_id)
+                < ($4::timestamptz, $5::text, $6::bigint, $7::text)
+        """
+        values.extend([cursor_time, cursor_task_run_id, cursor_ordinal, cursor_run_id])
+    rows = await connections.get("default").execute_query_dict(
+        f"""
+        WITH linked AS (
+            SELECT
+                task_run.ctime AS task_run_ctime,
+                task_run.id AS task_run_id,
+                linked_run.run_id,
+                linked_run.ordinality AS ordinal
+            FROM command_center_task_run AS task_run
+            CROSS JOIN LATERAL jsonb_array_elements_text(
+                CASE
+                    WHEN jsonb_typeof(task_run.metadata->'linked_run_ids') = 'array'
+                    THEN task_run.metadata->'linked_run_ids'
+                    ELSE '[]'::jsonb
+                END
+            ) WITH ORDINALITY AS linked_run(run_id, ordinality)
+            WHERE task_run.task_id = $1
+                AND task_run.tenant_id = $2
+                AND task_run.deleted = FALSE
+                AND linked_run.run_id <> ''
+        ), deduplicated AS (
+            SELECT DISTINCT ON (run_id)
+                task_run_ctime,
+                task_run_id,
+                run_id,
+                ordinal
+            FROM linked
+            ORDER BY run_id, task_run_ctime DESC, task_run_id DESC, ordinal DESC
+        )
+        SELECT task_run_ctime, task_run_id, run_id, ordinal
+        FROM deduplicated
+        {cursor_clause}
+        ORDER BY task_run_ctime DESC, task_run_id DESC, ordinal DESC, run_id DESC
+        LIMIT $3
+        """,
+        values,
+    )
+    has_more = len(rows) > limit
+    return rows[:limit], has_more
+
+
+async def _require_task_run(task_id: str, run_id: str, tenant_id: str) -> CommandTask:
+    task = await _require_command_task(task_id, tenant_id)
+    linked = await CommandTaskRun.filter(
+        task_id=task.id,
+        tenant_id=tenant_id,
+        deleted=False,
+        metadata__contains={"linked_run_ids": [run_id]},
+    ).exists()
+    if not linked:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    return task
+
+
+async def _runlog_batch_summaries(run_ids: list[str], tenant_id: str) -> dict[str, dict]:
+    if not run_ids:
+        return {}
+    from tortoise.expressions import Q
+    from tortoise.functions import Count, Max, Min
+
+    from models.runlog import Runlog
+
+    rows = (
+        await Runlog.filter(run_id__in=run_ids, tenant_id=tenant_id, deleted=False)
+        .annotate(
+            log_count=Count("id"),
+            node_count=Count("node_id", distinct=True),
+            loop_count=Count("node_name", distinct=True, _filter=Q(node_name__contains="【第")),
+            failed_count=Count("id", _filter=Q(status__in=[-1, 3])),
+            running_count=Count("id", _filter=Q(status__in=[1, 2])),
+            success_count=Count("id", _filter=Q(status=0)),
+            started_at=Min("start_time"),
+            finished_at=Max("end_time"),
+            playbook_name=Max("playbook_name"),
+            action_name=Max("action_name"),
+            action_display_name=Max("action_display_name"),
+            tool_display_name=Max("tool_display_name"),
+        )
+        .group_by("run_id")
+        .values(
+            "run_id",
+            "log_count",
+            "node_count",
+            "loop_count",
+            "failed_count",
+            "running_count",
+            "success_count",
+            "started_at",
+            "finished_at",
+            "playbook_name",
+            "action_name",
+            "action_display_name",
+            "tool_display_name",
+        )
+    )
+    summaries: dict[str, dict] = {}
+    for row in rows:
+        summaries[row["run_id"]] = {
+            "run_id": row["run_id"],
+            "playbook_name": row.get("playbook_name"),
+            "action_name": row.get("action_name"),
+            "action_display_name": row.get("action_display_name"),
+            "tool_display_name": row.get("tool_display_name"),
+            "status": _runlog_batch_status(row),
+            "started_at": _runlog_time_json(row.get("started_at")),
+            "finished_at": _runlog_time_json(row.get("finished_at")),
+            "log_count": int(row.get("log_count") or 0),
+            "node_count": int(row.get("node_count") or 0),
+            "loop_count": int(row.get("loop_count") or 0),
+        }
+    return summaries
 
 
 def _task_detail_json(task: CommandTask, actor: dict | None = None) -> dict:
@@ -794,17 +1034,20 @@ async def task_detail(request: Request):
 
 @command_bp.post("/tasks/runlogs")
 @openapi.definition(
-    summary="查看任务调用的动作/剧本运行日志",
+    summary="游标分页查看任务执行批次摘要",
     description=(
-        "汇总该任务各次运行经数字员工 aioe-cli 调用动作/剧本产生的完整 runlog，"
-        "按 run_id 分组返回（含入参 args、输出 result、动作/剧本名等），"
-        "供任务详情展示完整执行过程。需要command_center:r权限。"
+        "按数字员工关联的 run_id 倒序返回有界批次摘要，只包含名称、状态、时间和计数，"
+        "不返回节点 args/result。limit 默认10、最大50，cursor 绑定任务。需要command_center:r权限。"
     ),
     body=_json_body(
         {
             "type": "object",
-            "required": ["id"],
-            "properties": {"id": {"type": "string", "description": "任务ID"}},
+            "required": ["task_id"],
+            "properties": {
+                "task_id": {"type": "string", "description": "任务ID"},
+                "cursor": {"type": "string", "nullable": True, "description": "上一页返回的稳定游标"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": RUNLOG_BATCH_MAX_LIMIT},
+            },
         }
     ),
     response=_response(
@@ -814,15 +1057,20 @@ async def task_detail(request: Request):
             "properties": {
                 "runlogs": {
                     "type": "array",
-                    "description": "按 run_id 分组的运行日志",
+                    "description": "执行批次摘要，不包含 args/result",
                     "items": {
                         "type": "object",
                         "properties": {
                             "run_id": {"type": "string", "description": "运行日志 run_id"},
-                            "items": {"type": "array", "description": "该次运行的节点级 runlog 记录"},
+                            "status": {"type": "integer", "description": "批次汇总状态"},
+                            "node_count": {"type": "integer", "description": "节点数"},
+                            "loop_count": {"type": "integer", "description": "循环记录数"},
+                            "log_count": {"type": "integer", "description": "日志记录数"},
                         },
                     },
-                }
+                },
+                "next_cursor": {"type": "string", "nullable": True},
+                "has_more": {"type": "boolean"},
             },
         },
         {"400": "参数错误", "404": "任务不存在"},
@@ -830,42 +1078,163 @@ async def task_detail(request: Request):
 )
 @requires_permission("command_center:r")
 async def task_runlogs(request: Request):
-    from models.runlog import Runlog
-
     data = _require_json(request)
-    task_id = data.get("id")
+    task_id = data.get("task_id") or data.get("id")
     if not task_id:
         raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
-    task = await CommandTask.get_or_none(id=task_id, tenant_id=tenant_id, deleted=False)
-    if not task:
-        raise CustomError(ErrorCode.NOT_FOUND)
-
-    # 汇总该任务各次运行关联的 debug run_id（execute_action 关联写入 metadata.linked_run_ids）。
-    runs = await CommandTaskRun.filter(task_id=task.id, tenant_id=tenant_id, deleted=False).order_by("ctime").all()
-    run_ids: list[str] = []
-    for run in runs:
-        metadata = run.metadata if isinstance(run.metadata, dict) else {}
-        linked = metadata.get("linked_run_ids")
-        if isinstance(linked, list):
-            for rid in linked:
-                if rid and rid not in run_ids:
-                    run_ids.append(str(rid))
-
-    grouped: list[dict] = []
-    if run_ids:
-        logs = (
-            await Runlog.filter(run_id__in=run_ids, tenant_id=tenant_id, deleted=False)
-            .order_by("start_time", "ctime", "node_id", "node_name", "resource_name")
-            .all()
+    task = await _require_command_task(str(task_id), tenant_id)
+    limit = _parse_bounded_limit(data.get("limit"), default=RUNLOG_BATCH_DEFAULT_LIMIT, maximum=RUNLOG_BATCH_MAX_LIMIT)
+    cursor = _decode_runlog_cursor(data.get("cursor"), "batch", task_id=task.id)
+    linked_rows, has_more = await _linked_task_run_page(task.id, tenant_id, limit, cursor)
+    page_ids = [row["run_id"] for row in linked_rows]
+    summaries = await _runlog_batch_summaries(page_ids, tenant_id)
+    runlogs = [summaries[run_id] for run_id in page_ids if run_id in summaries]
+    next_cursor = None
+    if has_more and linked_rows:
+        last = linked_rows[-1]
+        next_cursor = _encode_runlog_cursor(
+            "batch",
+            task_id=task.id,
+            ctime=_runlog_time_json(last["task_run_ctime"]),
+            task_run_id=last["task_run_id"],
+            ordinal=int(last["ordinal"]),
+            run_id=last["run_id"],
         )
-        logs_by_run: dict[str, list] = {}
-        for log in logs:
-            logs_by_run.setdefault(log.run_id, []).append(log.json)
-        # 保持 linked_run_ids 的追加顺序（即执行先后）
-        grouped = [{"run_id": rid, "items": logs_by_run[rid]} for rid in run_ids if rid in logs_by_run]
+    return response_ok({"runlogs": runlogs, "next_cursor": next_cursor, "has_more": has_more})
 
-    return response_ok({"runlogs": grouped})
+
+@command_bp.post("/tasks/runlogs/nodes")
+@openapi.definition(
+    summary="游标分页查看指定执行批次的节点摘要",
+    description=(
+        "校验 task_id、run_id 与当前租户归属后，按 ctime + id 稳定游标返回节点摘要，"
+        "不返回 args/result。limit 默认50、最大200。需要command_center:r权限。"
+    ),
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["task_id", "run_id"],
+            "properties": {
+                "task_id": {"type": "string"},
+                "run_id": {"type": "string"},
+                "cursor": {"type": "string", "nullable": True},
+                "limit": {"type": "integer", "minimum": 1, "maximum": RUNLOG_NODE_MAX_LIMIT},
+            },
+        }
+    ),
+    response=_response(
+        "查询成功",
+        {
+            "type": "object",
+            "properties": {
+                "nodes": {"type": "array", "description": "节点摘要，不包含 args/result", "items": {"type": "object"}},
+                "next_cursor": {"type": "string", "nullable": True},
+                "has_more": {"type": "boolean"},
+            },
+        },
+        {"400": "参数或游标错误", "404": "任务或执行批次不存在"},
+    ),
+)
+@requires_permission("command_center:r")
+async def task_runlog_nodes(request: Request):
+    from tortoise.expressions import Q
+
+    from models.runlog import Runlog
+
+    data = _require_json(request)
+    task_id = str(data.get("task_id") or "").strip()
+    run_id = str(data.get("run_id") or "").strip()
+    if not task_id or not run_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
+    task = await _require_task_run(task_id, run_id, tenant_id)
+    limit = _parse_bounded_limit(data.get("limit"), default=RUNLOG_NODE_DEFAULT_LIMIT, maximum=RUNLOG_NODE_MAX_LIMIT)
+    cursor = _decode_runlog_cursor(data.get("cursor"), "node", task_id=task.id, run_id=run_id)
+    condition = Q(run_id=run_id, tenant_id=tenant_id, deleted=False)
+    if cursor:
+        try:
+            cursor_time = datetime.fromisoformat(cursor["ctime"])
+            cursor_id = str(cursor["id"])
+        except (KeyError, TypeError, ValueError):
+            raise CustomError(ErrorCode.PARAM_VALUE_ERROR) from None
+        condition &= Q(ctime__gt=cursor_time) | Q(ctime=cursor_time, id__gt=cursor_id)
+    fields = (
+        "id",
+        "run_id",
+        "node_id",
+        "node_name",
+        "node_type",
+        "tool_name",
+        "tool_version",
+        "tool_display_name",
+        "action_name",
+        "action_display_name",
+        "status",
+        "start_time",
+        "end_time",
+        "ctime",
+        "utime",
+        "resource_name",
+        "playbook_name",
+    )
+    rows = await Runlog.filter(condition).order_by("ctime", "id").limit(limit + 1).values(*fields)
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    nodes = [_runlog_node_summary_json(row) for row in page]
+    next_cursor = None
+    if has_more and page:
+        next_cursor = _encode_runlog_cursor(
+            "node",
+            task_id=task.id,
+            run_id=run_id,
+            ctime=_runlog_time_json(page[-1]["ctime"]),
+            id=page[-1]["id"],
+        )
+    return response_ok({"nodes": nodes, "next_cursor": next_cursor, "has_more": has_more})
+
+
+@command_bp.post("/tasks/runlogs/detail")
+@openapi.definition(
+    summary="查看单条节点运行日志完整详情",
+    description=(
+        "校验 task_id、run_id 与当前租户归属后，再按 runlog_id + run_id + tenant_id 返回单条完整记录，"
+        "这是唯一返回 args/result 的指挥中心日志接口。需要command_center:r权限。"
+    ),
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["task_id", "run_id", "runlog_id"],
+            "properties": {
+                "task_id": {"type": "string"},
+                "run_id": {"type": "string"},
+                "runlog_id": {"type": "string"},
+            },
+        }
+    ),
+    response=_response("查询成功", {"type": "object", "description": "单条完整 runlog"}, {"400": "参数错误", "404": "日志不存在"}),
+)
+@requires_permission("command_center:r")
+async def task_runlog_detail(request: Request):
+    from models.runlog import Runlog
+
+    data = _require_json(request)
+    task_id = str(data.get("task_id") or "").strip()
+    run_id = str(data.get("run_id") or "").strip()
+    runlog_id = str(data.get("runlog_id") or "").strip()
+    if not task_id or not run_id or not runlog_id:
+        raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
+    tenant_id = request.ctx.session.get("tenant_id")
+    await _require_task_run(task_id, run_id, tenant_id)
+    runlog = await Runlog.get_or_none(
+        id=runlog_id,
+        run_id=run_id,
+        tenant_id=tenant_id,
+        deleted=False,
+    )
+    if not runlog:
+        raise CustomError(ErrorCode.NOT_FOUND)
+    return response_ok(runlog.json)
 
 
 @command_bp.post("/tasks/stats")

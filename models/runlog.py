@@ -86,4 +86,7 @@ class Runlog(BaseModel):
 
         unique_together = ("run_id", "node_id", "node_name", "resource_name")
 
-        indexes = [("playbook_name", "run_id", "status")]
+        indexes = [
+            ("playbook_name", "run_id", "status"),
+            ("tenant_id", "run_id", "ctime", "id"),
+        ]

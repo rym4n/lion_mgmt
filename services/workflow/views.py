@@ -67,6 +67,19 @@ TERMINAL_RUNLOG_STATUSES = {-1, 0, 3}
 IN_PROGRESS_RESULT = "执行中"
 
 
+def _normalize_ai_chat_payload(payload):
+    normalized = dict(payload) if isinstance(payload, dict) else {}
+    tools = normalized.get("tools")
+
+    if not isinstance(tools, list) or not tools:
+        normalized.pop("tools", None)
+        normalized.pop("tool_choice", None)
+    elif "tool_choice" in normalized:
+        normalized["tool_choice"] = "auto"
+
+    return normalized
+
+
 def _runlog_stream_signature(log):
     return (
         getattr(log, "utime", None),
@@ -2869,7 +2882,7 @@ async def ai_chat(request):
     if not RY_AI_API_BASE or not LLM_KEY:
         raise CustomError(ErrorCode.PARAM_ERROR)
 
-    payload = request.json or {}
+    payload = _normalize_ai_chat_payload(request.json)
     url = RY_AI_API_BASE + "/chat/completions"
     headers = {"Authorization": f"Bearer {LLM_KEY}"}
     timeout = aiohttp.ClientTimeout(total=300)

@@ -109,8 +109,8 @@ async def test_adapter_disables_capabilities_and_namespaces_model_ids():
         "attempts": 1, "elapsed_ms": result.summary["elapsed_ms"],
     }
     assert "raw_output" not in result.summary
-    assert calls[0]["tool_choice"] == "none"
-    assert calls[0]["tools"] == []
+    assert "tool_choice" not in calls[0]
+    assert "tools" not in calls[0]
     assert calls[0]["response_format"]["type"] == "json_schema"
     system = calls[0]["messages"][0]["content"].lower()
     assert "untrusted" in system and "network" in system and "write" in system
