@@ -77,6 +77,99 @@ def test_report_template_payload_rejects_invalid_nested_json_types(field, value)
         _report_template_payload(data, partial=False)
 
 
+def test_report_template_payload_accepts_annotation_mode():
+    payload = agent_views._report_template_payload(
+        {
+            "name": "月报",
+            "content_html": "<p>正文</p>",
+            "annotations": [
+                {"id": "a1", "comment": "改写", "status": "open", "mode": "append"},
+                {"id": "a2", "comment": "补充", "status": "open", "mode": "overwrite"},
+                {"id": "a3", "comment": "无模式字段", "status": "open"},
+            ],
+        },
+        partial=False,
+    )
+    assert len(payload["annotations"]) == 3
+
+
+def test_report_template_payload_rejects_invalid_annotation_mode():
+    with pytest.raises(CustomError) as excinfo:
+        agent_views._report_template_payload(
+            {
+                "name": "月报",
+                "content_html": "<p>正文</p>",
+                "annotations": [{"id": "a1", "comment": "改写", "mode": "replace"}],
+            },
+            partial=False,
+        )
+    assert excinfo.value.enum == ErrorCode.PARAM_ERROR
+
+
+def test_report_template_payload_rejects_blank_annotation_id():
+    with pytest.raises(CustomError) as excinfo:
+        agent_views._report_template_payload(
+            {
+                "name": "月报",
+                "content_html": "<p>正文</p>",
+                "annotations": [{"id": "  ", "comment": "改写"}],
+            },
+            partial=False,
+        )
+    assert excinfo.value.enum == ErrorCode.PARAM_ERROR
+
+
+def test_report_template_payload_rejects_invalid_annotation_status():
+    with pytest.raises(CustomError) as excinfo:
+        agent_views._report_template_payload(
+            {
+                "name": "月报",
+                "content_html": "<p>正文</p>",
+                "annotations": [{"id": "a1", "comment": "改写", "status": "pending"}],
+            },
+            partial=False,
+        )
+    assert excinfo.value.enum == ErrorCode.PARAM_ERROR
+
+
+def test_report_template_payload_rejects_non_string_comment():
+    with pytest.raises(CustomError) as excinfo:
+        agent_views._report_template_payload(
+            {
+                "name": "月报",
+                "content_html": "<p>正文</p>",
+                "annotations": [{"id": "a1", "comment": {"text": "改写"}}],
+            },
+            partial=False,
+        )
+    assert excinfo.value.enum == ErrorCode.PARAM_ERROR
+
+
+def test_report_template_payload_keeps_unknown_annotation_keys():
+    payload = agent_views._report_template_payload(
+        {
+            "name": "月报",
+            "content_html": "<p>正文</p>",
+            "annotations": [
+                {
+                    "id": "a1",
+                    "comment": "改写",
+                    "status": "open",
+                    "selectedText": "原文",
+                    "from": 3,
+                    "to": 9,
+                    "replies": [],
+                }
+            ],
+        },
+        partial=False,
+    )
+    stored = payload["annotations"][0]
+    assert stored["selectedText"] == "原文"
+    assert stored["from"] == 3
+    assert stored["replies"] == []
+
+
 def test_report_template_request_id_accepts_frontend_and_compatibility_fields():
     assert _report_template_request_id({"template_id": "template-1"}) == "template-1"
     assert _report_template_request_id({"id": "template-2"}) == "template-2"
@@ -552,11 +645,34 @@ def test_report_template_routes_permissions_and_generation_contract():
     assert "template.deleted = True" in routes
     assert "copy.deepcopy(template.fetch_config or {})" in routes
     assert "await _sync_report_template_document(" in routes
-    assert "await _resolve_fetch_placeholders(generated, fetch_config, tenant_id, user_id)" in routes
+    assert "await render_report_docx(" in routes
+    assert "canonical_path.read_bytes()" not in routes
     generate_route = routes[routes.index('@agent_bp.post("/report/template/generate")') :]
     assert "ReportDocument.create(" not in generate_route
     assert '"doc": document.json' in routes
     assert 'base64.b64encode(generated).decode("utf-8")' in routes
+
+
+def test_report_template_generate_uses_render_pipeline():
+    """generate 必须走 report_render 流水线，而不是直接读 canonical docx 字节。"""
+    import inspect
+
+    source = inspect.getsource(agent_views.report_template_generate)
+    assert "render_report_docx" in source
+    assert "read_bytes()" not in source, "generate 不应再直接读取 canonical docx 字节"
+    assert "_get_visible_agent" in source, "generate 需解析 report_assistant 智能体"
+    assert "workspace_id_for" in source
+
+
+def test_report_template_generate_route_and_permission():
+    import inspect
+
+    source = inspect.getsource(agent_views)
+    marker = '@agent_bp.post("/report/template/generate")'
+    assert marker in source
+    block = source[source.index(marker) :]
+    block = block[: block.index("async def")]
+    assert '@requires_permission("agent:u")' in block
 
 
 def test_report_export_requires_update_permission_and_resolves_canonical_document():

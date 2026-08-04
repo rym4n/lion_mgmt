@@ -312,6 +312,8 @@ async def test_apply_annotations_prompt_carries_context_and_mode(monkeypatch):
     assert "上一段内容" in message
     assert "下一段内容" in message
     assert "追加" in message
+    assert "【被批注内容】是从段落中截取的片段，其前后文字会原样保留" in message
+    assert "若原片段末尾没有标点，你的输出末尾也不要加标点" in message
     assert captured[0]["workspace_id"] == "w1"
     assert captured[0]["timeout"] == report_render.ANNOTATION_POLISH_TIMEOUT
 

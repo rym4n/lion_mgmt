@@ -42,6 +42,7 @@ from services.agent.report_fetch import (
     build_placeholder_replacer,
     resolve_fetch_values,
 )
+from services.agent.report_render import render_report_docx
 from services.agent.schedule_runner import delete_report_schedule_timer, sync_report_schedule_timer
 from services.digital_employee.lion_agent_adapter import execute_prompt, workspace_id_for
 from settings import REPORT_TEMPLATE_BASE, REPORT_USER_BASE, RY_SERVICE_URL, TASK_TOPIC, TZ
@@ -1112,6 +1113,10 @@ def _html_to_docx_bytes(content_html: str) -> bytes:
     return output.getvalue()
 
 
+_REPORT_ANNOTATION_MODES = frozenset({"overwrite", "append"})
+_REPORT_ANNOTATION_STATUSES = frozenset({"open", "applied", "resolved"})
+
+
 def _report_template_payload(data: dict, *, partial: bool) -> dict:
     if not isinstance(data, dict):
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -1149,10 +1154,19 @@ def _report_template_payload(data: dict, *, partial: bool) -> dict:
     elif not partial:
         payload["fetch_config"] = {}
     if "annotations" in data:
-        if not isinstance(data["annotations"], list) or any(
-            not isinstance(item, dict) for item in data["annotations"]
-        ):
+        if not isinstance(data["annotations"], list):
             raise CustomError(ErrorCode.PARAM_ERROR)
+        for item in data["annotations"]:
+            if not isinstance(item, dict):
+                raise CustomError(ErrorCode.PARAM_ERROR)
+            if not isinstance(item.get("id"), str) or not item["id"].strip():
+                raise CustomError(ErrorCode.PARAM_ERROR)
+            if "comment" in item and not isinstance(item["comment"], str):
+                raise CustomError(ErrorCode.PARAM_ERROR)
+            if "mode" in item and item["mode"] not in _REPORT_ANNOTATION_MODES:
+                raise CustomError(ErrorCode.PARAM_ERROR)
+            if "status" in item and item["status"] not in _REPORT_ANNOTATION_STATUSES:
+                raise CustomError(ErrorCode.PARAM_ERROR)
         payload["annotations"] = copy.deepcopy(data["annotations"])
     elif not partial:
         payload["annotations"] = []
@@ -1593,12 +1607,20 @@ async def report_template_generate(request: Request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     document = await _sync_report_template_document(template, tenant_id, user_id)
-    user_dir = _user_report_dir(tenant_id, user_id)
-    canonical_path = _owned_report_path(user_dir, document.file_path)
-    if canonical_path is None or not canonical_path.exists():
+    annotations = template.annotations if isinstance(template.annotations, list) else []
+    agent = await _get_visible_agent(tenant_id, agent_key="report_assistant")
+    if not agent:
         raise CustomError(ErrorCode.NOT_FOUND)
-    generated = canonical_path.read_bytes()
-    generated = await _resolve_fetch_placeholders(generated, fetch_config, tenant_id, user_id)
+    run_id = gen_run_id()
+    generated = await render_report_docx(
+        content_html=template.content_html or "",
+        fetch_config=fetch_config,
+        annotations=annotations,
+        tenant_id=tenant_id,
+        operator_id=user_id,
+        workspace_id=workspace_id_for(tenant_id, agent.agent_key),
+        session_id=run_id,
+    )
     return response_ok({
         "doc": document.json,
         "content": base64.b64encode(generated).decode("utf-8"),
