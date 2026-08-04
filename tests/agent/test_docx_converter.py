@@ -498,7 +498,7 @@ def test_replace_paragraph_text_matches_can_skip_unconfigured_split_placeholder(
 
 
 def test_resolve_fetch_placeholders_keeps_run_formatting(monkeypatch):
-    from services.agent import views
+    from services.agent import report_fetch, views
 
     document = Document()
     paragraph = document.add_paragraph()
@@ -516,7 +516,7 @@ def test_resolve_fetch_placeholders_keeps_run_formatting(monkeypatch):
     async def fake_fetch(*_args, **_kwargs):
         return '{"value":"42"}'
 
-    monkeypatch.setattr(views, "_execute_fetch_action", fake_fetch)
+    monkeypatch.setattr(report_fetch, "execute_fetch_action", fake_fetch)
     resolved = asyncio.run(
         views._resolve_fetch_placeholders(
             source.getvalue(), {"fetch": {}}, "tenant-1", "user-1"

@@ -11,6 +11,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from models.report import ReportTemplate
+from services.agent import report_fetch
 from services.agent import views as agent_views
 from services.agent.views import (
     _html_to_docx_bytes,
@@ -268,7 +269,7 @@ def test_fetch_placeholder_replacement_keeps_surrounding_run_format(monkeypatch)
     async def fake_execute(*_args, **_kwargs):
         return '{"data":{"total":7}}'
 
-    monkeypatch.setattr(agent_views, "_execute_fetch_action", fake_execute)
+    monkeypatch.setattr(report_fetch, "execute_fetch_action", fake_execute)
     resolved = asyncio.run(
         _resolve_fetch_placeholders(
             buffer.getvalue(),
@@ -292,7 +293,7 @@ def test_fetch_placeholder_failure_keeps_tokens_and_returns_failure(monkeypatch)
     async def fail_execute(*_args, **_kwargs):
         raise RuntimeError("action failed")
 
-    monkeypatch.setattr(agent_views, "_execute_fetch_action", fail_execute)
+    monkeypatch.setattr(report_fetch, "execute_fetch_action", fail_execute)
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
@@ -316,7 +317,7 @@ def test_fetch_placeholder_timeout_is_propagated_without_partial_report(monkeypa
     async def timeout_execute(*_args, **_kwargs):
         raise CustomError(ErrorCode.ACTION_TIMEOUT)
 
-    monkeypatch.setattr(agent_views, "_execute_fetch_action", timeout_execute)
+    monkeypatch.setattr(report_fetch, "execute_fetch_action", timeout_execute)
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
@@ -340,8 +341,8 @@ def test_fetch_placeholder_missing_result_path_is_explicit_failure(monkeypatch):
         return '{"data":{"total":7}}'
 
     monkeypatch.setattr(
-        agent_views,
-        "_execute_fetch_action",
+        report_fetch,
+        "execute_fetch_action",
         successful_action_with_wrong_shape,
     )
 
@@ -412,13 +413,13 @@ def test_fetch_action_checks_server_permission_before_kafka(monkeypatch):
     async def fake_publish(*args, **kwargs):
         published.append((args, kwargs))
 
-    monkeypatch.setattr(agent_views, "Account", FakeAccount)
-    monkeypatch.setattr(agent_views, "check_action_execute_permission", deny_permission)
-    monkeypatch.setattr(agent_views, "aproduce", fake_publish)
+    monkeypatch.setattr(report_fetch, "Account", FakeAccount)
+    monkeypatch.setattr(report_fetch, "check_action_execute_permission", deny_permission)
+    monkeypatch.setattr(report_fetch, "aproduce", fake_publish)
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
-            agent_views._execute_fetch_action(
+            report_fetch.execute_fetch_action(
                 {
                     "app_name": "security_tool",
                     "action": "query_alarm",
@@ -470,14 +471,14 @@ def test_fetch_action_failed_runlog_is_not_treated_as_success(monkeypatch):
     async def fake_publish(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr(agent_views, "Account", FakeAccount)
-    monkeypatch.setattr(agent_views, "Runlog", FakeRunlog)
-    monkeypatch.setattr(agent_views, "check_action_execute_permission", allow_permission)
-    monkeypatch.setattr(agent_views, "aproduce", fake_publish)
+    monkeypatch.setattr(report_fetch, "Account", FakeAccount)
+    monkeypatch.setattr(report_fetch, "Runlog", FakeRunlog)
+    monkeypatch.setattr(report_fetch, "check_action_execute_permission", allow_permission)
+    monkeypatch.setattr(report_fetch, "aproduce", fake_publish)
 
     with pytest.raises(RuntimeError, match="report fetch action failed"):
         asyncio.run(
-            agent_views._execute_fetch_action(
+            report_fetch.execute_fetch_action(
                 {"app_name": "tool", "action": "query", "timeout": 1},
                 "tenant-1",
                 FakeAccount(),
@@ -513,15 +514,15 @@ def test_fetch_action_timeout_is_explicit_failure(monkeypatch):
     async def fake_async(*_args, **_kwargs):
         return None
 
-    monkeypatch.setattr(agent_views, "Account", FakeAccount)
-    monkeypatch.setattr(agent_views, "Runlog", FakeRunlog)
-    monkeypatch.setattr(agent_views, "check_action_execute_permission", allow_permission)
-    monkeypatch.setattr(agent_views, "aproduce", fake_async)
-    monkeypatch.setattr(agent_views.asyncio, "sleep", fake_async)
+    monkeypatch.setattr(report_fetch, "Account", FakeAccount)
+    monkeypatch.setattr(report_fetch, "Runlog", FakeRunlog)
+    monkeypatch.setattr(report_fetch, "check_action_execute_permission", allow_permission)
+    monkeypatch.setattr(report_fetch, "aproduce", fake_async)
+    monkeypatch.setattr(report_fetch.asyncio, "sleep", fake_async)
 
     with pytest.raises(CustomError) as exc_info:
         asyncio.run(
-            agent_views._execute_fetch_action(
+            report_fetch.execute_fetch_action(
                 {"app_name": "tool", "action": "query", "timeout": 1},
                 "tenant-1",
                 FakeAccount(),

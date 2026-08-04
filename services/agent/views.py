@@ -13,7 +13,6 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from croniter import croniter
-import orjson
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
@@ -26,18 +25,22 @@ from tortoise.expressions import Q
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.security.authorization import check_action_execute_permission, check_permissions, requires_permission
+from libs.security.authorization import check_permissions, requires_permission
 from libs.utils import gen_run_id, upload_to_s3
 from libs.kafka import aproduce
 from models import Account
 from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
 from models.report import ReportDocument, ReportSchedule, ReportTemplate
-from models.runlog import Runlog
 from services.agent.docx_converter import (
     DocxConversionError,
     docx_base64_to_html,
     html_to_docx_base64,
     replace_paragraph_text_matches,
+)
+from services.agent.report_fetch import (
+    FETCH_PLACEHOLDER_RE,
+    build_placeholder_replacer,
+    resolve_fetch_values,
 )
 from services.agent.schedule_runner import delete_report_schedule_timer, sync_report_schedule_timer
 from services.digital_employee.lion_agent_adapter import execute_prompt, workspace_id_for
@@ -2073,115 +2076,6 @@ async def report_notify_send(request: Request):
 # 取数占位符功能
 # ---------------------------------------------------------------------------
 
-# 占位符格式: {action_key.field.path}，如 {a.data.userate}
-_FETCH_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)(\.[^}]+)?\}")
-_MISSING_FETCH_VALUE = object()
-
-
-def _get_fetch_value_by_path(data, path: str):
-    if not path:
-        return data
-    for part in path.lstrip(".").split("."):
-        if isinstance(data, dict):
-            if part not in data:
-                return _MISSING_FETCH_VALUE
-            data = data[part]
-        elif isinstance(data, list):
-            try:
-                data = data[int(part)]
-            except (ValueError, IndexError):
-                return _MISSING_FETCH_VALUE
-        else:
-            return _MISSING_FETCH_VALUE
-    return data
-
-
-def _stringify_fetch(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, (dict, list)):
-        return orjson.dumps(value).decode()
-    return str(value)
-
-
-async def _execute_fetch_action(action_cfg: dict, tenant_id: str, operator_id) -> str:
-    if not isinstance(action_cfg, dict):
-        raise CustomError(ErrorCode.PARAM_ERROR)
-    if isinstance(operator_id, Account):
-        operator = operator_id
-    else:
-        operator_key = str(operator_id or "").strip()
-        if not operator_key:
-            raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
-        operator = await Account.get_or_none(id=operator_key, deleted=False).prefetch_related("roles")
-    if not operator:
-        raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
-
-    app_name = action_cfg.get("app_name") or action_cfg.get("tool_name") or ""
-    action_name = action_cfg.get("action") or action_cfg.get("func") or ""
-    resource = action_cfg.get("resource") or ""
-    if not await check_action_execute_permission(
-        operator,
-        app_name,
-        action_name,
-        resource,
-        tenant_id,
-        False,
-        action_cfg.get("app_ver") or action_cfg.get("version"),
-    ):
-        logger.warning(
-            "拒绝无动作执行权的报告取数配置 tenant_id=%s operator_id=%s app_name=%s action=%s resource=%s",
-            tenant_id,
-            operator.id,
-            app_name,
-            action_name,
-            resource,
-        )
-        raise CustomError(ErrorCode.UNAUTH)
-
-    params = {
-        "resource": action_cfg.get("resource", ""),
-        "node_name": action_cfg.get("node_name") or action_cfg.get("description", ""),
-        "action": action_cfg.get("action") or action_cfg.get("func", ""),
-        "action_name": action_cfg.get("action_name") or action_cfg.get("name", ""),
-        "app_name": action_cfg.get("app_name") or action_cfg.get("tool_name", ""),
-        "name": action_cfg.get("name") or action_cfg.get("description", ""),
-        "app_ver": action_cfg.get("app_ver") or action_cfg.get("version", ""),
-        "main": action_cfg.get("main") or action_cfg.get("tool_main", ""),
-        "action_input": action_cfg.get("action_input") or {},
-        "retry_times": int(action_cfg.get("retry_times") or 3),
-        "timeout": int(action_cfg.get("timeout") or 300),
-        "executor": operator.id,
-    }
-    run_id = gen_run_id()
-    await aproduce(TASK_TOPIC, {"run_type": "action", "run_id": run_id, "run_args": params, "tenant_id": tenant_id})
-
-    wait_seconds = max(1, min(int(action_cfg.get("timeout") or 300), 300))
-    for _ in range(wait_seconds):
-        log = await Runlog.filter(run_id=run_id, tenant_id=tenant_id, deleted=False).order_by("-utime").first()
-        if log and log.status in (-1, 2):
-            logger.error("报告取数动作执行失败 run_id=%s status=%s", run_id, log.status)
-            raise RuntimeError(f"report fetch action failed run_id={run_id}")
-        if log and log.result and log.result != "执行中":
-            return log.result or ""
-        await asyncio.sleep(1)
-
-    logger.warning(f"取数动作执行超时 run_id={run_id}")
-    raise CustomError(ErrorCode.ACTION_TIMEOUT)
-
-
-def _parse_fetch_result(raw: str):
-    if not raw:
-        return raw
-    try:
-        parsed = orjson.loads(raw)
-        if isinstance(parsed, dict) and "data" in parsed:
-            return parsed["data"]
-        return parsed
-    except Exception:
-        return raw
-
-
 async def _resolve_fetch_placeholders(docx_bytes: bytes, fetch_config: dict, tenant_id: str, operator_id) -> bytes:
     """扫描 docx 中所有 {action_key.field.path} 占位符，并发执行取数动作后替换。"""
     doc = Document(io.BytesIO(docx_bytes))
@@ -2194,54 +2088,13 @@ async def _resolve_fetch_placeholders(docx_bytes: bytes, fetch_config: dict, ten
                     yield from cell.paragraphs
 
     all_text = " ".join(p.text for p in _iter_paragraphs())
-    placeholder_keys = {m.group(1) for m in _FETCH_PLACEHOLDER_RE.finditer(all_text)}
-
-    if not placeholder_keys:
+    results = await resolve_fetch_values(all_text, fetch_config, tenant_id, operator_id)
+    if not results:
         return docx_bytes
-    missing_configs = sorted(placeholder_keys - set(fetch_config.keys()))
-    if missing_configs:
-        logger.error("报告取数占位符缺少动作配置 keys=%s", missing_configs)
-        raise CustomError(ErrorCode.SERVER_ERROR)
-    active_keys = sorted(placeholder_keys)
 
-    coros = {key: _execute_fetch_action(fetch_config[key], tenant_id, operator_id) for key in active_keys}
-    fetched = await asyncio.gather(*coros.values(), return_exceptions=True)
-    results: dict = {}
-    failures: dict[str, Exception] = {}
-    for key, raw in zip(coros.keys(), fetched):
-        if isinstance(raw, Exception):
-            logger.warning(f"取数动作 {key} 执行异常: {raw}")
-            failures[key] = raw
-        else:
-            results[key] = _parse_fetch_result(raw)
-
-    if failures:
-        logger.error("报告取数失败，占位符保留未替换 keys=%s", sorted(failures))
-        for key in sorted(failures):
-            if isinstance(failures[key], CustomError):
-                raise failures[key]
-        raise CustomError(ErrorCode.SERVER_ERROR)
-
-    missing_paths = sorted({
-        match.group(0)
-        for match in _FETCH_PLACEHOLDER_RE.finditer(all_text)
-        if match.group(1) in results
-        and _get_fetch_value_by_path(results[match.group(1)], match.group(2) or "")
-        is _MISSING_FETCH_VALUE
-    })
-    if missing_paths:
-        logger.error("报告取数结果路径不存在，占位符保留未替换 placeholders=%s", missing_paths)
-        raise CustomError(ErrorCode.SERVER_ERROR)
-
-    def _replace_match(match: re.Match) -> str | None:
-        key = match.group(1)
-        path = match.group(2) or ""
-        if key not in results:
-            return None
-        return _stringify_fetch(_get_fetch_value_by_path(results[key], path))
-
+    replacer = build_placeholder_replacer(results)
     for para in _iter_paragraphs():
-        replace_paragraph_text_matches(para, _FETCH_PLACEHOLDER_RE, _replace_match)
+        replace_paragraph_text_matches(para, FETCH_PLACEHOLDER_RE, replacer)
 
     buf = io.BytesIO()
     doc.save(buf)
