@@ -12,7 +12,7 @@ from sanic.log import logger
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from services.agent import report_fetch
+from services.agent import docx_converter, report_fetch
 from services.digital_employee.lion_agent_adapter import execute_prompt
 
 
@@ -466,3 +466,41 @@ async def apply_annotations_to_html(
         _apply_one(item, grouped[str(item.get("id"))], blocks, root)
 
     return _serialize_children(root)
+
+
+def strip_annotation_marks(html: str) -> str:
+    """剥掉批注 <mark> 标签，保留其文字与内联子节点。"""
+    root = _parse_document(html)
+    for element in list(root.iter("mark")):
+        if not _annotation_ids_of(element):
+            continue
+        element.drop_tag()
+    return _serialize_children(root)
+
+
+async def render_report_docx(
+    *,
+    content_html: str,
+    fetch_config: dict,
+    annotations: list,
+    tenant_id: str,
+    operator_id,
+    workspace_id: str,
+    session_id: str,
+) -> bytes:
+    """报告渲染流水线：取数 → 批注优化 → 剥批注痕迹 → HTML→docx。
+
+    取数严格先于批注优化，使 AI 能依据本期真实数据完善内容。
+    任一环节失败即抛 CustomError，不产出部分报告。
+    """
+    html = await resolve_placeholders_in_html(
+        content_html or "", fetch_config or {}, tenant_id, operator_id
+    )
+    html = await apply_annotations_to_html(
+        html,
+        annotations or [],
+        workspace_id=workspace_id,
+        session_id=session_id,
+    )
+    html = strip_annotation_marks(html)
+    return docx_converter.html_to_docx(html)

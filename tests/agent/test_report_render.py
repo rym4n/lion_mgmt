@@ -407,3 +407,126 @@ async def test_apply_annotations_runs_concurrently(monkeypatch):
         html, annotations, workspace_id="w1", session_id="s1"
     )
     assert order[:2] == ["start", "start"], "两条批注必须并发发起，不能串行"
+
+
+def test_strip_annotation_marks_keeps_text():
+    html = (
+        '<p>前<mark data-annotation-ids="a1">被批注</mark>后</p>'
+        '<p><mark data-annotation-id="a2"><strong>加粗批注</strong></mark></p>'
+    )
+    result = report_render.strip_annotation_marks(html)
+    assert "<mark" not in result
+    assert "data-annotation" not in result
+    assert "前被批注后" in result
+    assert "<strong>加粗批注</strong>" in result
+
+
+def test_strip_annotation_marks_drops_emptied_marks():
+    html = '<p>保留<mark data-annotation-ids="a1"></mark></p>'
+    result = report_render.strip_annotation_marks(html)
+    assert "<mark" not in result
+    assert "保留" in result
+
+
+@pytest.mark.asyncio
+async def test_render_report_docx_runs_fetch_before_annotations(monkeypatch):
+    """核心需求验证：AI 必须看到取数后的真实值，而不是占位符 token。"""
+    seen_prompts = []
+
+    async def fake_execute(action_cfg, tenant_id, operator_id):
+        return '{"data": {"total": 128}}'
+
+    async def fake_execute_prompt(**kwargs):
+        seen_prompts.append(kwargs["message"])
+        return "<p>本月告警 128 起，处于高位。</p>"
+
+    monkeypatch.setattr(report_fetch, "execute_fetch_action", fake_execute)
+    monkeypatch.setattr(report_render, "execute_prompt", fake_execute_prompt)
+
+    content_html = (
+        "<p>概览：<mark data-annotation-ids=\"a1\">本月告警 "
+        '<span data-placeholder-id="alarm" data-result-path="total">'
+        "{alarm.total}</span> 起</mark>。</p>"
+    )
+    docx_bytes = await report_render.render_report_docx(
+        content_html=content_html,
+        fetch_config={"alarm": {"action": "count"}},
+        annotations=[{"id": "a1", "comment": "评估水位", "status": "open"}],
+        tenant_id="t1",
+        operator_id="u1",
+        workspace_id="w1",
+        session_id="s1",
+    )
+
+    assert len(seen_prompts) == 1
+    assert "128" in seen_prompts[0], "批注优化必须在取数之后，AI 应看到真实值"
+    assert "{alarm.total}" not in seen_prompts[0]
+    assert docx_bytes[:2] == b"PK"
+
+
+@pytest.mark.asyncio
+async def test_render_report_docx_output_has_no_annotation_trace(monkeypatch):
+    from docx import Document as DocxDocument
+    import io
+
+    async def fake_execute_prompt(**kwargs):
+        return "<p>优化后的表述</p>"
+
+    monkeypatch.setattr(report_render, "execute_prompt", fake_execute_prompt)
+    docx_bytes = await report_render.render_report_docx(
+        content_html='<p><mark data-annotation-ids="a1">原始表述</mark></p>',
+        fetch_config={},
+        annotations=[{"id": "a1", "comment": "改写", "status": "open"}],
+        tenant_id="t1",
+        operator_id="u1",
+        workspace_id="w1",
+        session_id="s1",
+    )
+    document = DocxDocument(io.BytesIO(docx_bytes))
+    text = "\n".join(p.text for p in document.paragraphs)
+    assert "优化后的表述" in text
+    assert "原始表述" not in text
+    assert "data-annotation" not in text
+
+
+@pytest.mark.asyncio
+async def test_render_report_docx_without_annotations(monkeypatch):
+    calls = []
+
+    async def fake_execute_prompt(**kwargs):
+        calls.append(kwargs)
+        return "<p>不该被调用</p>"
+
+    monkeypatch.setattr(report_render, "execute_prompt", fake_execute_prompt)
+    docx_bytes = await report_render.render_report_docx(
+        content_html="<h1>月度报告</h1><p>正文内容</p>",
+        fetch_config={},
+        annotations=[],
+        tenant_id="t1",
+        operator_id="u1",
+        workspace_id="w1",
+        session_id="s1",
+    )
+    assert calls == []
+    assert docx_bytes[:2] == b"PK"
+
+
+@pytest.mark.asyncio
+async def test_render_report_docx_preserves_headings_and_lists(monkeypatch):
+    from docx import Document as DocxDocument
+    import io
+
+    docx_bytes = await report_render.render_report_docx(
+        content_html="<h1>月度报告</h1><p>正文</p><ul><li>要点一</li><li>要点二</li></ul>",
+        fetch_config={},
+        annotations=[],
+        tenant_id="t1",
+        operator_id="u1",
+        workspace_id="w1",
+        session_id="s1",
+    )
+    document = DocxDocument(io.BytesIO(docx_bytes))
+    text = "\n".join(p.text for p in document.paragraphs)
+    assert "月度报告" in text
+    assert "要点一" in text
+    assert "要点二" in text
