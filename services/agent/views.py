@@ -1882,51 +1882,6 @@ async def report_content(request: Request):
     return response_ok({"doc_id": str(doc.id), "name": doc.name, "content": content})
 
 
-@agent_bp.post("/report/polish")
-@openapi.definition(
-    summary="使用汇报助手润色报告段落",
-    description="同步调用汇报助手（report_assistant）对报告段落进行润色，直接返回润色结果。需要 agent:u 权限。",
-    body=_json_body({
-        "type": "object",
-        "required": ["prompt"],
-        "properties": {
-            "prompt": {"type": "string", "description": "报告原文段落 + 批注内容的组合文本"},
-        },
-    }),
-    response=_response("润色结果", {
-        "type": "object",
-        "properties": {
-            "result": {"type": "string", "description": "润色后的段落内容"},
-        },
-    }, {"404": "汇报助手智能体未初始化", "500": "润色执行失败"}),
-)
-@requires_permission("agent:u")
-async def report_polish(request: Request):
-    data = _require_json(request)
-    prompt = str(data.get("prompt") or "").strip()
-    if not prompt:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    tenant_id = request.ctx.session.get("tenant_id")
-    agent = await _get_visible_agent(tenant_id, agent_key="report_assistant")
-    if not agent:
-        raise CustomError(ErrorCode.NOT_FOUND)
-
-    run_id = gen_run_id()
-
-    try:
-        result = await execute_prompt(
-            workspace_id=workspace_id_for(tenant_id, agent.agent_key),
-            session_id=run_id,
-            request_id=f"report-polish:{run_id}",
-            message=prompt,
-        )
-    except Exception:
-        raise CustomError(ErrorCode.INTERNAL_ERROR)
-
-    return response_ok({"result": result})
-
-
 # ---------------------------------------------------------------------------
 # 报告导出 & 通知接口
 # ---------------------------------------------------------------------------

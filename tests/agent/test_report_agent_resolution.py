@@ -65,3 +65,20 @@ async def test_visible_agent_falls_back_to_global_builtin(monkeypatch):
             "deleted": False,
         }
     ]
+
+
+def test_report_polish_endpoint_removed():
+    import inspect
+
+    source = inspect.getsource(agent_views)
+    assert '@agent_bp.post("/report/polish")' not in source
+    assert "async def report_polish" not in source
+
+
+def test_visible_agent_resolution_still_used_by_render_paths():
+    import inspect
+
+    generate_source = inspect.getsource(agent_views.report_template_generate)
+    export_source = inspect.getsource(agent_views.export_report_document)
+    assert "_get_visible_agent" in generate_source
+    assert "_get_visible_agent" in export_source
