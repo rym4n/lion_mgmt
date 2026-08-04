@@ -1,8 +1,7 @@
 # coding=utf-8
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
-import pytz
 from sanic import Blueprint
 from sanic.log import logger
 from sanic_ext import openapi
@@ -11,7 +10,7 @@ from core.error_code import ErrorCode
 from core.response import response_fail, response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
-from libs.utils import delete_vlog, query_vlog
+from libs.utils import delete_vlog, get_vlog_delete_task_status, query_vlog
 from models.event import EventsIngestion
 
 logs_bp = Blueprint("logs", url_prefix="/logs")
@@ -46,6 +45,20 @@ def _resolve_log_query_limit(query, requested_limit):
     if _query_has_explicit_limit(query):
         return MAX_LOG_QUERY_LIMIT
     return DEFAULT_LOG_QUERY_LIMIT
+
+
+def _parse_log_query_time(value):
+    if not isinstance(value, str) or not value.strip():
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise CustomError(ErrorCode.PARAM_ERROR) from exc
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 @logs_bp.route("/query", methods=["POST"])
@@ -111,11 +124,9 @@ async def get_logs_by_sql(request):
     start_iso = None
     end_iso = None
     if start is not None:
-        start_dt = datetime.strptime(start, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
-        start_iso = start_dt.isoformat().replace("+00:00", "Z")
+        start_iso = _parse_log_query_time(start)
     if end is not None:
-        end_dt = datetime.strptime(end, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=pytz.UTC)
-        end_iso = end_dt.isoformat().replace("+00:00", "Z")
+        end_iso = _parse_log_query_time(end)
 
     limit = _resolve_log_query_limit(query, param.get("limit"))
     result = await query_vlog(query, project_id, start_iso, end_iso, limit=limit)
@@ -218,6 +229,57 @@ async def delete_project_logs(request):
     if result is None:
         return response_fail(ErrorCode.VICTORIA_LOGS_DELETE_ERROR)
     return response_ok(result)
+
+
+@logs_bp.route("/delete/status", methods=["POST"])
+@openapi.definition(
+    summary="查询日志删除任务状态",
+    description="查询当前租户指定 VictoriaLogs 删除任务是否仍在执行",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["project_id", "task_id"],
+                "properties": {
+                    "project_id": {"type": "integer", "description": "日志项目ID"},
+                    "task_id": {"type": "string", "description": "日志删除任务ID"},
+                },
+            }
+        }
+    },
+)
+@requires_permission("logs:d")
+async def get_delete_project_logs_status(request):
+    params = request.json or {}
+    project_id = params.get("project_id")
+    task_id = params.get("task_id")
+    if (
+        isinstance(project_id, bool)
+        or not isinstance(project_id, int)
+        or project_id <= 0
+        or not isinstance(task_id, str)
+        or not task_id.strip()
+    ):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    project_exists = await EventsIngestion.filter(
+        project_id=project_id,
+        tenant_id=tenant_id,
+    ).exists()
+    if not project_exists:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    active = await get_vlog_delete_task_status(task_id.strip(), project_id)
+    if active is None:
+        return response_fail(ErrorCode.VICTORIA_LOGS_DELETE_ERROR)
+    return response_ok(
+        {
+            "task_id": task_id.strip(),
+            "active": active,
+            "status": "running" if active else "completed",
+        }
+    )
 
 
 @logs_bp.route("/fields", methods=["POST"])

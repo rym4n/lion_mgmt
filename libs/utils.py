@@ -491,6 +491,45 @@ async def delete_vlog(project_id, account_id=0):
             logger.error(f"VictoriaLogs delete error: {e}")
             return None
 
+
+async def get_vlog_delete_task_status(task_id, project_id, account_id=0):
+    """Return whether a tenant-scoped VictoriaLogs deletion task is active."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.get(f"{VL_HOST}/delete/active_tasks")
+            resp.raise_for_status()
+            tasks = orjson.loads(resp.content)
+            if not isinstance(tasks, list):
+                return None
+
+            for task in tasks:
+                if not isinstance(task, dict) or str(task.get("task_id")) != str(task_id):
+                    continue
+
+                tenant_ids = task.get("tenant_ids")
+                if not isinstance(tenant_ids, list):
+                    return None
+                is_expected_tenant = any(
+                    isinstance(tenant, dict)
+                    and tenant.get("account_id") == account_id
+                    and tenant.get("project_id") == project_id
+                    for tenant in tenant_ids
+                )
+                return is_expected_tenant
+
+            # VictoriaLogs removes completed tasks from /delete/active_tasks.
+            return False
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                "VictoriaLogs delete status HTTP error: "
+                f"{e.response.status_code} - {e.response.text}"
+            )
+            return None
+        except Exception as e:
+            logger.error(f"VictoriaLogs delete status error: {e}")
+            return None
+
+
 async def upload_to_s3(
     file_content: bytes,
     bucket_name: str,
