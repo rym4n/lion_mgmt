@@ -53,6 +53,16 @@ def gen_random_code(length=6, digits_only: bool = True) -> str:
     return "".join(random.choice(("" if digits_only else ascii_uppercase) + digits) for _ in range(length))
 
 
+def normalize_required_text(value) -> str:
+    """Return a trimmed required text value or raise the standard parameter error."""
+    if not isinstance(value, str):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    normalized = value.strip()
+    if not normalized:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    return normalized
+
+
 def get_expiration_date(seconds: int) -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=seconds)
 

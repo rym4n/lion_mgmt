@@ -180,7 +180,8 @@ async def validate_field_value(tenant: str, field, value, connection=None):
     data_type = field_attr(field, "data_type")
     options = field_attr(field, "options", {}) or {}
     empty_collection = data_type in {"attachment", "ref"} and value == []
-    if value in (None, "") or empty_collection:
+    blank_text = data_type == "text" and isinstance(value, str) and not value.strip()
+    if value in (None, "") or empty_collection or blank_text:
         if field_attr(field, "required", False):
             raise CustomError(ErrorCode.PARAM_ERROR)
         return

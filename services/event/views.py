@@ -15,7 +15,7 @@ from libs.error_code.exception import CustomError
 from libs.kafka import aproduce
 from libs.runlog_pagination import paginated_runlog_summaries, parse_bounded_int, runlog_node_page
 from libs.security.authorization import check_permissions, requires_permission
-from libs.utils import gen_random_code, gen_run_id, runlog_list, strip_timezone_to_seconds
+from libs.utils import gen_random_code, gen_run_id, normalize_required_text, runlog_list, strip_timezone_to_seconds
 from models import Account, Events, EventsIngestion, PlaybookVersion, Role, Room, Runlog, Tool, ToolAction, ToolResources
 from settings import TASK_TOPIC, TZ
 
@@ -179,7 +179,7 @@ async def get_all_events(request):
 @openapi.exclude()
 @requires_permission("event:c")
 async def artificial_create_event(request):
-    event_name = request.json.get("eventName")
+    event_name = normalize_required_text(request.json.get("eventName"))
     event_process_status = "待处理"
     event_source = "人工"
     owner = {"role": [], "user": [request.ctx.session["account_info"].id or ""]} or {}
@@ -271,7 +271,7 @@ async def artificial_create_event(request):
 @openapi.exclude()
 @requires_permission("event:c")
 async def artificial_create_event_wuzhi(request):
-    event_name = request.json.get("eventName")
+    event_name = normalize_required_text(request.json.get("eventName"))
     event_process_status = "待处理"
     event_source = "人工"
     owner = {"role": [], "user": [request.ctx.session["account_info"].id or ""]} or {}
@@ -592,7 +592,7 @@ async def get_activity_result(request, activityId):
 )
 @requires_permission("event:c")
 async def create_event(request):
-    event_name = request.json.get("event_name")
+    event_name = normalize_required_text(request.json.get("event_name"))
     event_process_status = "待处理"
     event_source = "人工"
     owner = request.json.get("owner") or {}
@@ -798,8 +798,8 @@ async def update_event(request):
 
     update_fields = []
 
-    if name := params.get("event_name"):
-        event.event_name = name
+    if "event_name" in params:
+        event.event_name = normalize_required_text(params.get("event_name"))
         update_fields.append("event_name")
 
     if "event_summary" in params:

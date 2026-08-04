@@ -39,7 +39,7 @@ from libs.security.authorization import (
     requires_permission,
     uncontrolled_playbook_permissions,
 )
-from libs.utils import gen_run_id, strip_timezone_to_seconds, paginated_runlog_groups
+from libs.utils import gen_run_id, normalize_required_text, strip_timezone_to_seconds, paginated_runlog_groups
 from models import (
     Account,
     EventRelatedScript,
@@ -191,9 +191,11 @@ async def _link_runlog_to_command_run(agent_run_id: str, debug_run_id: str, tena
 )
 @requires_permission("workflow:c")
 async def create_workflow(request):
-    data = request.json
-    if not data.get("name") or not data.get("flow_json_list") or not data.get("scenes"):
+    data = dict(request.json or {})
+    name = normalize_required_text(data.get("name"))
+    if not data.get("flow_json_list") or not data.get("scenes"):
         raise CustomError(ErrorCode.PARAM_ERROR)
+    data["name"] = name
 
     total_up_value = 0
     # 判断剧本数量是否达到了创建上限：只有存在已发布版本的剧本才占用数量
@@ -222,7 +224,7 @@ async def create_workflow(request):
     tenant_id = request.ctx.session.get("tenant_id")
 
     # 判断name是否已经存在，如果存在的话要抛出异常
-    if await Playbook.filter(name=data.get("name"), deleted=False, tenant_id=tenant_id).exists():
+    if await Playbook.filter(name=name, deleted=False, tenant_id=tenant_id).exists():
         raise CustomError(ErrorCode.PLAYBOOK_NAME_EXISTS)
 
     flow_timeout = 300
@@ -248,7 +250,7 @@ async def create_workflow(request):
     )
     async with in_transaction():
         playbook = await Playbook.create(
-            name=data.get("name"),
+            name=name,
             remark=data.get("remark", ""),
             creator=creator,
             internal=maintenance_mode if maintenance_mode else False,
@@ -917,7 +919,8 @@ async def get_flow_json(request):
 @requires_permission("workflow:u")
 @playbook_permission("u")
 async def edit_workflow(request):
-    params = request.json
+    params = request.json or {}
+    name = normalize_required_text(params.get("name"))
 
     tenant_id = request.ctx.session.get("tenant_id")
 
@@ -925,7 +928,15 @@ async def edit_workflow(request):
     if not playbook:
         raise CustomError(ErrorCode.PLAYBOOK_NOT_FOUND)
 
-    playbook.name = params.get("name")
+    duplicate_name = Playbook.filter(
+        name=name,
+        deleted=False,
+        tenant_id=tenant_id,
+    ).exclude(id=playbook.id)
+    if await duplicate_name.exists():
+        raise CustomError(ErrorCode.PLAYBOOK_NAME_EXISTS)
+
+    playbook.name = name
     playbook.remark = params.get("remark", "")
     await playbook.scenes.clear()
     if params.get("scenes"):
