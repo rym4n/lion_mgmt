@@ -22,6 +22,7 @@ async def execute_prompt(
     aioe: dict[str, Any] | None = None,
     model: str | None = None,
     system_prompt: str | None = None,
+    timeout: float | None = None,
 ) -> str:
     payload: dict[str, Any] = {
         "workspace_id": workspace_id,
@@ -35,7 +36,8 @@ async def execute_prompt(
         payload["model"] = model
     if system_prompt is not None:
         payload["system_prompt"] = system_prompt
-    response = await LionAgentClient().execute(payload)
+    client = LionAgentClient(timeout=timeout) if timeout else LionAgentClient()
+    response = await client.execute(payload)
     if isinstance(response, dict):
         if "content" in response:
             return str(response.get("content") or "")
