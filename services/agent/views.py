@@ -2214,6 +2214,32 @@ async def report_fetch_run(request: Request):
     })
 
 
+async def _resolve_export_template(doc: ReportDocument, tenant_id: str):
+    """按报告文档反查关联的可编辑模板；无关联返回 None。
+
+    ReportTemplate.document 是可空 FK（related_name="source_templates"），
+    理论上允许多个模板指向同一文档，此处取 utime 最新的一个。
+    """
+    templates = (
+        await ReportTemplate.filter(
+            document_id=doc.id,
+            tenant_id=tenant_id,
+            deleted=False,
+        )
+        .order_by("-utime")
+        .limit(2)
+    )
+    if not templates:
+        return None
+    if len(templates) > 1:
+        logger.warning(
+            "报告文档关联多个模板，取最新 document_id=%s tenant_id=%s",
+            doc.id,
+            tenant_id,
+        )
+    return templates[0]
+
+
 async def export_report_document(
     doc: ReportDocument,
     *,
@@ -2235,9 +2261,32 @@ async def export_report_document(
 
     export_name = Path(doc.name).stem
     try:
-        resolved_bytes = await _resolve_fetch_placeholders(
-            docx_path.read_bytes(), doc.fetch_config or {}, tenant_id, operator_id or owner_id
-        )
+        template = await _resolve_export_template(doc, tenant_id)
+        if template is not None:
+            agent = await _get_visible_agent(tenant_id, agent_key="report_assistant")
+            if not agent:
+                raise CustomError(ErrorCode.NOT_FOUND)
+            run_id = gen_run_id()
+            resolved_bytes = await render_report_docx(
+                content_html=template.content_html or "",
+                fetch_config=copy.deepcopy(template.fetch_config or {}),
+                annotations=(
+                    template.annotations
+                    if isinstance(template.annotations, list)
+                    else []
+                ),
+                tenant_id=tenant_id,
+                operator_id=operator_id or owner_id,
+                workspace_id=workspace_id_for(tenant_id, agent.agent_key),
+                session_id=run_id,
+            )
+        else:
+            resolved_bytes = await _resolve_fetch_placeholders(
+                docx_path.read_bytes(),
+                doc.fetch_config or {},
+                tenant_id,
+                operator_id or owner_id,
+            )
         if fmt == "docx":
             file_bytes = resolved_bytes
             content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
