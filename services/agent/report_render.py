@@ -6,6 +6,10 @@
 """
 
 from lxml import etree, html as lxml_html
+from sanic.log import logger
+
+from core.error_code import ErrorCode
+from libs.error_code.exception import CustomError
 from services.agent import report_fetch
 
 
@@ -97,3 +101,63 @@ async def resolve_placeholders_in_html(
             setattr(element, attr, replaced)
 
     return _serialize_children(root)
+
+
+ANNOTATION_MODE_OVERWRITE = "overwrite"
+ANNOTATION_MODE_APPEND = "append"
+_ANNOTATION_MODES = frozenset({ANNOTATION_MODE_OVERWRITE, ANNOTATION_MODE_APPEND})
+_ANNOTATION_STATUS_ACTIVE = "open"
+
+
+def _annotation_ids_of(element) -> list[str]:
+    raw = element.get("data-annotation-ids") or element.get("data-annotation-id") or ""
+    seen: list[str] = []
+    for item in str(raw).split():
+        value = item.strip()
+        if value and value not in seen:
+            seen.append(value)
+    return seen
+
+
+def collect_annotation_marks(root) -> dict[str, list]:
+    """按文档顺序收集每个批注 id 对应的 mark 元素。
+
+    携带 2+ 批注 id 的 mark 视为重叠批注，抛 REPORT_ANNOTATION_OVERLAP。
+    """
+    grouped: dict[str, list] = {}
+    for element in root.iter("mark"):
+        ids = _annotation_ids_of(element)
+        if not ids:
+            continue
+        if len(ids) > 1:
+            logger.error("报告存在重叠批注 annotation_ids=%s", ids)
+            raise CustomError(ErrorCode.REPORT_ANNOTATION_OVERLAP)
+        grouped.setdefault(ids[0], []).append(element)
+    return grouped
+
+
+def active_annotations(annotations: list) -> list[dict]:
+    """筛出参与生成的批注：status 显式为 open 且 comment 非空。"""
+    if not isinstance(annotations, list):
+        return []
+    active = []
+    for item in annotations:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "") != _ANNOTATION_STATUS_ACTIVE:
+            continue
+        if not str(item.get("comment") or "").strip():
+            continue
+        active.append(item)
+    return active
+
+
+def annotation_mode(annotation: dict) -> str:
+    """读批注写入模式；缺省或非法值一律按覆盖写处理（向后兼容存量批注）。"""
+    mode = str((annotation or {}).get("mode") or "").strip().lower()
+    return mode if mode in _ANNOTATION_MODES else ANNOTATION_MODE_OVERWRITE
+
+
+def annotation_region_text(marks: list) -> str:
+    """拼接批注区域内的全部文字。"""
+    return "".join("".join(mark.itertext()) for mark in marks)

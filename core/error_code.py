@@ -224,3 +224,6 @@ class ErrorCode(BaseErrorCode):
         4175, "已有资产实例数据与修改后的字段类型或约束不兼容，请先调整实例数据后再保存字段"
     )
     VICTORIA_LOGS_DELETE_ERROR = ErrorData(4176, "日志删除任务创建失败")
+    REPORT_ANNOTATION_OVERLAP = ErrorData(4177, "存在重叠批注，请拆分后重试")
+    REPORT_ANNOTATION_ANCHOR_MISSING = ErrorData(4178, "批注锚点已失效，请重新批注")
+    REPORT_ANNOTATION_POLISH_FAILED = ErrorData(4179, "批注优化失败，请稍后重试")
