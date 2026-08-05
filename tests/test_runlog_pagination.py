@@ -9,6 +9,7 @@ import pytest
 import libs.utils as utils
 import models
 from libs.error_code.exception import CustomError
+from libs.runlog_pagination import root_playbook_names, runlog_batch_summaries
 from services.command_center import views
 
 
@@ -144,6 +145,103 @@ def test_command_center_runlog_limits_are_bounded():
         views._parse_bounded_limit("invalid", default=10, maximum=50)
 
 
+@pytest.mark.asyncio
+async def test_root_playbook_name_uses_earliest_start_node():
+    captured = {}
+
+    class Query:
+        def order_by(self, *fields):
+            captured["order_by"] = fields
+            return self
+
+        def values(self, *fields):
+            captured["values"] = fields
+            return self
+
+        def __await__(self):
+            async def result():
+                return [
+                    {"run_id": "run-1", "playbook_name": "巡检总任务"},
+                    {"run_id": "run-1", "playbook_name": "深信服托管云"},
+                    {"run_id": "run-2", "playbook_name": "资产巡检"},
+                ]
+
+            return result().__await__()
+
+    class Model:
+        @classmethod
+        def filter(cls, *args, **kwargs):
+            captured["args"] = args
+            captured["filters"] = kwargs
+            return Query()
+
+    names = await root_playbook_names(Model, object(), ["run-1", "run-2"])
+
+    assert names == {"run-1": "巡检总任务", "run-2": "资产巡检"}
+    assert captured["filters"] == {
+        "run_id__in": ["run-1", "run-2"],
+        "node_type": "start-node",
+    }
+    assert captured["order_by"] == ("run_id", "ctime", "id")
+    assert captured["values"] == ("run_id", "playbook_name")
+
+
+@pytest.mark.asyncio
+async def test_batch_summary_prefers_root_playbook_over_aggregate_name():
+    class Query:
+        def __init__(self, root_query):
+            self.root_query = root_query
+
+        def annotate(self, **_kwargs):
+            return self
+
+        def group_by(self, *_fields):
+            return self
+
+        def order_by(self, *_fields):
+            return self
+
+        def values(self, *_fields):
+            return self
+
+        def __await__(self):
+            async def result():
+                if self.root_query:
+                    return [
+                        {"run_id": "run-1", "playbook_name": "巡检总任务"},
+                        {"run_id": "run-1", "playbook_name": "深信服托管云"},
+                    ]
+                return [
+                    {
+                        "run_id": "run-1",
+                        "playbook_name": "深信服托管云",
+                        "action_name": None,
+                        "action_display_name": None,
+                        "tool_display_name": None,
+                        "failed_count": 0,
+                        "running_count": 0,
+                        "success_count": 2,
+                        "log_count": 2,
+                        "node_count": 2,
+                        "loop_count": 0,
+                        "started_at": "2026-08-05T17:02:23+08:00",
+                        "finished_at": "2026-08-05T17:03:23+08:00",
+                    }
+                ]
+
+            return result().__await__()
+
+    class Model:
+        @classmethod
+        def filter(cls, *_args, **kwargs):
+            return Query(kwargs.get("node_type") == "start-node")
+
+    summaries = await runlog_batch_summaries(Model, object(), ["run-1"])
+
+    assert summaries["run-1"]["playbook_name"] == "巡检总任务"
+    assert summaries["run-1"]["status"] == 0
+
+
 def test_command_center_runlog_cursor_is_bound_to_task_and_run():
     cursor = views._encode_runlog_cursor(
         "node",
@@ -246,6 +344,13 @@ def test_batch_linkage_query_is_database_bounded_and_cursor_stable():
     assert "limit + 1" in source
     assert "task_run_ctime DESC, task_run_id DESC, ordinal DESC, run_id DESC" in source
     assert ".all()" not in source
+
+
+def test_command_center_batch_summary_uses_shared_root_playbook_selection():
+    source = inspect.getsource(views._runlog_batch_summaries)
+
+    assert "runlog_batch_summaries" in source
+    assert 'Max("playbook_name")' not in source
 
 
 def test_runlog_cursor_index_model_and_migration_contract():

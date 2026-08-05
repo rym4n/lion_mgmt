@@ -11,6 +11,7 @@ import secrets
 import subprocess
 import time
 import traceback
+import unicodedata
 import uuid
 from string import ascii_uppercase, digits
 from typing import Optional
@@ -54,11 +55,20 @@ def gen_random_code(length=6, digits_only: bool = True) -> str:
 
 
 def normalize_required_text(value) -> str:
-    """Return a trimmed required text value or raise the standard parameter error."""
+    """Return canonical visible text or raise the standard parameter error."""
     if not isinstance(value, str):
         raise CustomError(ErrorCode.PARAM_ERROR)
     normalized = value.strip()
-    if not normalized:
+    categories = [unicodedata.category(char) for char in normalized]
+    has_visible_character = any(
+        not char.isspace() and category[0] not in {"C", "Z"}
+        for char, category in zip(normalized, categories)
+    )
+    has_forbidden_invisible_character = any(
+        category[0] == "C" or (char.isspace() and char != " ")
+        for char, category in zip(normalized, categories)
+    )
+    if not has_visible_character or has_forbidden_invisible_character:
         raise CustomError(ErrorCode.PARAM_ERROR)
     return normalized
 

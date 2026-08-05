@@ -11,6 +11,7 @@ from sanic_ext import openapi
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
+from libs.runlog_pagination import runlog_batch_summaries
 from libs.security.authorization import account_has_permission, requires_permission
 from models.command_center import COMMAND_APPROVAL_STATUS_PENDING, CommandAgent, CommandApproval, CommandTask, CommandTaskEvent, CommandTaskRun
 from settings import TZ
@@ -457,59 +458,14 @@ async def _runlog_batch_summaries(run_ids: list[str], tenant_id: str) -> dict[st
     if not run_ids:
         return {}
     from tortoise.expressions import Q
-    from tortoise.functions import Count, Max, Min
 
     from models.runlog import Runlog
 
-    rows = (
-        await Runlog.filter(run_id__in=run_ids, tenant_id=tenant_id, deleted=False)
-        .annotate(
-            log_count=Count("id"),
-            node_count=Count("node_id", distinct=True),
-            loop_count=Count("node_name", distinct=True, _filter=Q(node_name__contains="【第")),
-            failed_count=Count("id", _filter=Q(status__in=[-1, 3])),
-            running_count=Count("id", _filter=Q(status__in=[1, 2])),
-            success_count=Count("id", _filter=Q(status=0)),
-            started_at=Min("start_time"),
-            finished_at=Max("end_time"),
-            playbook_name=Max("playbook_name"),
-            action_name=Max("action_name"),
-            action_display_name=Max("action_display_name"),
-            tool_display_name=Max("tool_display_name"),
-        )
-        .group_by("run_id")
-        .values(
-            "run_id",
-            "log_count",
-            "node_count",
-            "loop_count",
-            "failed_count",
-            "running_count",
-            "success_count",
-            "started_at",
-            "finished_at",
-            "playbook_name",
-            "action_name",
-            "action_display_name",
-            "tool_display_name",
-        )
+    return await runlog_batch_summaries(
+        Runlog,
+        Q(tenant_id=tenant_id, deleted=False),
+        run_ids,
     )
-    summaries: dict[str, dict] = {}
-    for row in rows:
-        summaries[row["run_id"]] = {
-            "run_id": row["run_id"],
-            "playbook_name": row.get("playbook_name"),
-            "action_name": row.get("action_name"),
-            "action_display_name": row.get("action_display_name"),
-            "tool_display_name": row.get("tool_display_name"),
-            "status": _runlog_batch_status(row),
-            "started_at": _runlog_time_json(row.get("started_at")),
-            "finished_at": _runlog_time_json(row.get("finished_at")),
-            "log_count": int(row.get("log_count") or 0),
-            "node_count": int(row.get("node_count") or 0),
-            "loop_count": int(row.get("loop_count") or 0),
-        }
-    return summaries
 
 
 def _task_detail_json(task: CommandTask, actor: dict | None = None) -> dict:

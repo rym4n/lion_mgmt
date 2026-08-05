@@ -120,6 +120,25 @@ def batch_status(row: dict) -> int:
     return -1
 
 
+async def root_playbook_names(model, condition, run_ids: list[str]) -> dict[str, str]:
+    if not run_ids:
+        return {}
+    rows = (
+        await model.filter(
+            condition,
+            run_id__in=run_ids,
+            node_type="start-node",
+        )
+        .order_by("run_id", "ctime", "id")
+        .values("run_id", "playbook_name")
+    )
+    names = {}
+    for row in rows:
+        if row.get("playbook_name"):
+            names.setdefault(row["run_id"], row["playbook_name"])
+    return names
+
+
 async def runlog_batch_summaries(
     model, condition, run_ids: list[str]
 ) -> dict[str, dict]:
@@ -160,11 +179,14 @@ async def runlog_batch_summaries(
             "tool_display_name",
         )
     )
+    primary_playbooks = await root_playbook_names(model, condition, run_ids)
     summaries = {}
     for row in rows:
         summaries[row["run_id"]] = {
             "run_id": row["run_id"],
-            "playbook_name": row.get("playbook_name"),
+            "playbook_name": primary_playbooks.get(
+                row["run_id"], row.get("playbook_name")
+            ),
             "action_name": row.get("action_name"),
             "action_display_name": row.get("action_display_name"),
             "tool_display_name": row.get("tool_display_name"),
