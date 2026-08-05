@@ -21,7 +21,7 @@ from libs.security.authorization import (
     check_playbook_permission,
     requires_permission,
 )
-from libs.utils import strip_timezone_to_seconds, paginated_runlog_groups
+from libs.utils import normalize_required_text, paginated_runlog_groups, strip_timezone_to_seconds
 from models import (
     Playbook,
     PlaybookVersion,
@@ -76,16 +76,40 @@ async def get_requested_timed_internal_scope(request):
     return _timed_internal_scope_from_request((request.json or {}).get("scope"), maintenance_mode)
 
 
-async def _action_belongs_to_timed_scope(action, tenant_id, internal):
+async def _get_action_tool_in_timed_scope(action, tenant_id, internal):
     if not action:
-        return False
-    return await Tool.filter(
+        return None
+    return await Tool.get_or_none(
         name=action.tool_name,
         version=action.version_number,
         deleted=False,
         maintain=bool(internal),
         tenant_id=tenant_id,
-    ).exists()
+    )
+
+
+def _canonicalize_timed_action_input(action, tool, action_input, executor_id):
+    if not isinstance(action_input, dict) or not isinstance(action.action, dict):
+        raise CustomError(ErrorCode.ACTION_INPUT_ERROR)
+    action_func = action.action.get("func")
+    action_display_name = action.action.get("name")
+    if not action_func or not action_display_name:
+        raise CustomError(ErrorCode.ACTION_INPUT_ERROR)
+
+    canonical = dict(action_input)
+    canonical.update(
+        {
+            "app_name": tool.name,
+            "app_ver": tool.version,
+            "main": tool.main or "",
+            "name": tool.description or tool.name or "",
+            "node_name": action_display_name,
+            "action_name": action_display_name,
+            "action": action_func,
+            "executor": executor_id,
+        }
+    )
+    return canonical
 
 
 def _parse_dashboard_datetime_range(start, end):
@@ -210,8 +234,8 @@ def build_timer_rule(status, tactics, end_time):
 )
 @requires_permission("timed:c")
 async def add_timed(request):
-    data = request.json
-    name = data.get("name")
+    data = request.json or {}
+    name = normalize_required_text(data.get("name"))
     operate_type = int(data.get("type"))
     playbook_id = data.get("playbook_id") or ""
     playbook_input = data.get("playbook_input") or {}
@@ -279,10 +303,18 @@ async def add_timed(request):
                 raise CustomError(ErrorCode.CRON_EXPRESSION_ERROR)
             timer_rule["crontab"] = tactics
     elif operate_type == 1:
-        action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
-        if not await _action_belongs_to_timed_scope(action, tenant_id, internal):
+        action = await ToolAction.get_or_none(
+            id=action_id, deleted=False, tenant_id=tenant_id
+        )
+        tool = await _get_action_tool_in_timed_scope(action, tenant_id, internal)
+        if not tool:
             raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
-        action_input["executor"] = request.ctx.session.get("account_info").id
+        action_input = _canonicalize_timed_action_input(
+            action,
+            tool,
+            action_input,
+            request.ctx.session.get("account_info").id,
+        )
         if any(
             key not in action_input
             for key in [
@@ -1043,16 +1075,24 @@ async def update_timed(request):
         action_id = data.get("action_id", timed.action.id if timed.action else None)
         action_input = data.get("action_input", timed.action_input)
 
-        timed.action = await ToolAction.get_or_none(id=action_id, deleted=False, tenant_id=tenant_id)
-        if not await _action_belongs_to_timed_scope(
+        timed.action = await ToolAction.get_or_none(
+            id=action_id, deleted=False, tenant_id=tenant_id
+        )
+        tool = await _get_action_tool_in_timed_scope(
             timed.action,
             tenant_id,
             timed.internal,
-        ):
+        )
+        if not tool:
             raise CustomError(ErrorCode.ACTION_NOT_FOUND_ERROR)
 
         editor_account = request.ctx.session["account_info"]
-        action_input["executor"] = editor_account.id
+        action_input = _canonicalize_timed_action_input(
+            timed.action,
+            tool,
+            action_input,
+            editor_account.id,
+        )
         if any(
             key not in action_input
             for key in [

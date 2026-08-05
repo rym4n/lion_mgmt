@@ -5,7 +5,9 @@ import uuid
 
 from tortoise import Model, fields
 
-from libs.utils import decrypt_aes256_gcm, encrypt_aes256_gcm
+from core.error_code import ErrorCode
+from libs.error_code.exception import CustomError
+from libs.utils import decrypt_aes256_gcm, encrypt_aes256_gcm, normalize_required_text
 
 
 _ENCRYPTED_PREFIX = "enc::"
@@ -56,6 +58,43 @@ class BaseModel(Model):
     utime = fields.DatetimeField(null=False, auto_now=True, description="更新时间")
     deleted: bool = fields.BooleanField(default=False, description="删除标识")
     tenant_id: str = fields.CharField(max_length=255, default="8bce552d-c27c-41d4-8a1b-8c5bf38dfe18", null=True, description="默认租户ID")
+
+    def _validate_persisted_name(self, update_fields=None) -> None:
+        name_field = self._meta.fields_map.get("name")
+        if name_field is None or not hasattr(self, "name"):
+            return
+        if (
+            update_fields is not None
+            and self._saved_in_db
+            and "name" not in update_fields
+        ):
+            return
+
+        value = self.name
+        if value is None and name_field.null:
+            return
+        # Uniqueness checks normally run before save. Reject non-canonical values
+        # here instead of silently rewriting them after those checks.
+        if normalize_required_text(value) != value:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+    async def save(
+        self,
+        using_db=None,
+        update_fields=None,
+        force_create: bool = False,
+        force_update: bool = False,
+    ) -> None:
+        normalized_update_fields = (
+            tuple(update_fields) if update_fields is not None else None
+        )
+        self._validate_persisted_name(normalized_update_fields)
+        await super().save(
+            using_db=using_db,
+            update_fields=normalized_update_fields,
+            force_create=force_create,
+            force_update=force_update,
+        )
 
     def validate(self) -> None:
         raise NotImplementedError
