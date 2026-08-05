@@ -9,6 +9,8 @@ import time
 
 import pytest
 from docx import Document
+from docx.enum.section import WD_ORIENT
+from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_COLOR_INDEX
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -668,6 +670,31 @@ def test_docx_ordered_list_preserves_type_and_start_override():
     ]
 
 
+def test_docx_nested_task_list_round_trip_preserves_hierarchy():
+    document = Document()
+    document.add_paragraph("☐ 父任务", style="List Bullet")
+    document.add_paragraph("☑ 子任务", style="List Bullet 2")
+    document.add_paragraph("☐ 同级任务", style="List Bullet")
+
+    converted_html = docx_to_html(_document_bytes(document))
+    root = lxml_html.fragment_fromstring(converted_html, create_parent="div")
+    assert root.xpath(
+        "./ul[@data-type='taskList']/li[@data-checked='false']"
+        "/ul[@data-type='taskList']/li[@data-checked='true']"
+        "//p[normalize-space()='子任务']"
+    )
+    assert len(root.xpath("./ul[@data-type='taskList']/li")) == 2
+
+    round_tripped = lxml_html.fragment_fromstring(
+        docx_to_html(html_to_docx(converted_html)), create_parent="div"
+    )
+    assert round_tripped.xpath(
+        "./ul[@data-type='taskList']/li/ul[@data-type='taskList']"
+        "/li[@data-checked='true']//p[normalize-space()='子任务']"
+    )
+    assert len(round_tripped.xpath("./ul[@data-type='taskList']/li")) == 2
+
+
 def test_rich_html_docx_round_trip_preserves_editor_contract(rich_html: str):
     docx_bytes = html_to_docx(rich_html)
     document = Document(io.BytesIO(docx_bytes))
@@ -1145,3 +1172,70 @@ def test_docx_conversion_routes_have_fixed_contract_and_permissions():
     assert 'await _run_docx_conversion(html_to_docx_base64, data["html"])' in from_html
     assert "ErrorCode.DOCX_CONVERSION_BUSY" in from_html
     assert 'return response_ok({"content": content})' in from_html
+
+
+def test_html_to_docx_uses_original_shell_and_rebuilds_body_image_relationships():
+    header_image = _png_bytes((10, 90, 180))
+    old_body_image = _png_bytes((180, 30, 20))
+    new_body_image = _png_bytes((20, 170, 60))
+
+    shell = Document()
+    section = shell.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width, section.page_height = section.page_height, section.page_width
+    section.header.paragraphs[0].add_run().add_picture(
+        io.BytesIO(header_image), width=Inches(0.4)
+    )
+    section.footer.paragraphs[0].text = "AIOE 保密页脚"
+    shell.add_paragraph("必须被替换的旧正文")
+    shell.add_paragraph().add_run().add_picture(
+        io.BytesIO(old_body_image), width=Inches(0.4)
+    )
+    for name, style_type in (
+        (docx_converter._INLINE_CODE_STYLE, WD_STYLE_TYPE.CHARACTER),
+        (docx_converter._CODE_BLOCK_STYLE, WD_STYLE_TYPE.PARAGRAPH),
+        (docx_converter._HORIZONTAL_RULE_STYLE, WD_STYLE_TYPE.PARAGRAPH),
+    ):
+        shell.styles.add_style(name, style_type)
+    shell_bytes = _document_bytes(shell)
+    shell_document = Document(io.BytesIO(shell_bytes))
+    old_body_image_rel_ids = {
+        rel_id
+        for rel_id, relationship in shell_document.part.rels.items()
+        if relationship.reltype == RT.IMAGE
+    }
+
+    source = "data:image/png;base64," + base64.b64encode(new_body_image).decode()
+    result_bytes = html_to_docx(
+        f'<h1>新正文</h1><p>新图片<img src="{source}" width="30"></p>',
+        base_document=shell_bytes,
+    )
+    result = Document(io.BytesIO(result_bytes))
+
+    assert result.sections[0].orientation == WD_ORIENT.LANDSCAPE
+    assert result.element.body[-1].tag == qn("w:sectPr")
+    assert "必须被替换的旧正文" not in "\n".join(p.text for p in result.paragraphs)
+    assert "新正文" in "\n".join(p.text for p in result.paragraphs)
+    assert result.sections[0].footer.paragraphs[0].text == "AIOE 保密页脚"
+
+    header_blip = next(
+        result.sections[0].header._element.iter(docx_converter._DRAWINGML_BLIP_TAG)
+    )
+    header_rel_id = header_blip.get(qn("r:embed"))
+    assert (
+        result.sections[0].header.part.rels[header_rel_id].target_part.blob
+        == header_image
+    )
+
+    body_blips = list(result.element.body.iter(docx_converter._DRAWINGML_BLIP_TAG))
+    assert len(body_blips) == 1
+    new_body_rel_id = body_blips[0].get(qn("r:embed"))
+    assert new_body_rel_id not in old_body_image_rel_ids
+    assert result.part.rels[new_body_rel_id].target_part.blob == new_body_image
+    assert len(result.part.rels) == len(set(result.part.rels.keys()))
+
+
+def test_html_to_docx_without_base_document_is_backward_compatible():
+    html = "<h1>兼容标题</h1><p><strong>兼容正文</strong></p>"
+
+    assert html_to_docx(html) == html_to_docx(html, base_document=None)

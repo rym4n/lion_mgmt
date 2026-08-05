@@ -34,6 +34,7 @@ from models.command_center import CommandAgent, CommandTask, CommandTaskEvent
 from models.report import ReportDocument, ReportSchedule, ReportTemplate
 from services.agent.docx_converter import (
     DocxConversionError,
+    decode_docx_base64,
     docx_base64_to_html,
     html_to_docx_base64,
     replace_paragraph_text_matches,
@@ -44,18 +45,28 @@ from services.agent.report_fetch import (
     resolve_fetch_values,
 )
 from services.agent.report_render import render_report_docx
-from services.agent.schedule_runner import delete_report_schedule_timer, sync_report_schedule_timer
-from services.digital_employee.lion_agent_adapter import execute_prompt, workspace_id_for
-from settings import REPORT_TEMPLATE_BASE, REPORT_USER_BASE, RY_SERVICE_URL, TASK_TOPIC, TZ
+from services.agent.schedule_runner import (
+    delete_report_schedule_timer,
+    sync_report_schedule_timer,
+)
+from services.digital_employee.lion_agent_adapter import (
+    execute_prompt,
+    workspace_id_for,
+)
+from settings import (
+    REPORT_TEMPLATE_BASE,
+    REPORT_USER_BASE,
+    RY_SERVICE_URL,
+    TASK_TOPIC,
+    TZ,
+)
 
 agent_bp = Blueprint("agent", url_prefix="/agent")
 
 _DOCX_CONVERSION_MAX_CONCURRENT = 2
 _DOCX_CONVERSION_MAX_QUEUED = 4
 _DOCX_CONVERSION_QUEUE_WAIT_SECONDS = 5.0
-_DOCX_CONVERSION_WORKERS = asyncio.BoundedSemaphore(
-    _DOCX_CONVERSION_MAX_CONCURRENT
-)
+_DOCX_CONVERSION_WORKERS = asyncio.BoundedSemaphore(_DOCX_CONVERSION_MAX_CONCURRENT)
 _DOCX_CONVERSION_CAPACITY = asyncio.BoundedSemaphore(
     _DOCX_CONVERSION_MAX_CONCURRENT + _DOCX_CONVERSION_MAX_QUEUED
 )
@@ -104,13 +115,29 @@ AGENT_SCHEMA = {
         "utime": {"type": "string", "description": "更新时间"},
         "agent_key": {"type": "string", "description": "智能体逻辑标识"},
         "name": {"type": "string", "description": "智能体名称"},
-        "description": {"type": "string", "nullable": True, "description": "智能体说明"},
-        "capabilities": {"type": "array", "items": {"type": "string"}, "description": "能力标签列表"},
+        "description": {
+            "type": "string",
+            "nullable": True,
+            "description": "智能体说明",
+        },
+        "capabilities": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "能力标签列表",
+        },
         "status": {"type": "string", "description": "状态: idle,busy,offline,error"},
         "load": {"type": "integer", "description": "当前任务负载"},
         "max_concurrent": {"type": "integer", "description": "最大并发任务数"},
-        "current_task_id": {"type": "string", "nullable": True, "description": "当前主任务ID"},
-        "heartbeat_at": {"type": "string", "nullable": True, "description": "最近心跳时间"},
+        "current_task_id": {
+            "type": "string",
+            "nullable": True,
+            "description": "当前主任务ID",
+        },
+        "heartbeat_at": {
+            "type": "string",
+            "nullable": True,
+            "description": "最近心跳时间",
+        },
         "metadata": {"type": "object", "description": "扩展元数据"},
         "runtime": {"type": "string", "description": "运行时类型，默认 lion_agent"},
         "prompt_config": {"type": "object", "description": "提示词扩展配置"},
@@ -146,7 +173,9 @@ def _json_body(schema: dict) -> dict:
     return {"application/json": {"schema": schema}}
 
 
-def _response(description: str, data_schema: dict, errors: dict[str, str] | None = None) -> dict:
+def _response(
+    description: str, data_schema: dict, errors: dict[str, str] | None = None
+) -> dict:
     response = {
         "200": {
             "description": description,
@@ -204,11 +233,17 @@ def _normalize_dict(value, field_name: str) -> dict:
     return value
 
 
-async def _get_agent(tenant_id: str, agent_id: str | None = None, agent_key: str | None = None) -> CommandAgent | None:
+async def _get_agent(
+    tenant_id: str, agent_id: str | None = None, agent_key: str | None = None
+) -> CommandAgent | None:
     if agent_id:
-        return await CommandAgent.get_or_none(id=agent_id, tenant_id=tenant_id, deleted=False)
+        return await CommandAgent.get_or_none(
+            id=agent_id, tenant_id=tenant_id, deleted=False
+        )
     if agent_key:
-        return await CommandAgent.get_or_none(agent_key=agent_key, tenant_id=tenant_id, deleted=False)
+        return await CommandAgent.get_or_none(
+            agent_key=agent_key, tenant_id=tenant_id, deleted=False
+        )
     return None
 
 
@@ -220,7 +255,9 @@ async def _get_visible_agent(
     if tenant_agent:
         return tenant_agent
     if agent_key:
-        return await CommandAgent.get_or_none(agent_key=agent_key, is_builtin=True, deleted=False)
+        return await CommandAgent.get_or_none(
+            agent_key=agent_key, is_builtin=True, deleted=False
+        )
     return None
 
 
@@ -229,7 +266,9 @@ async def disable_command_agent(agent: CommandAgent) -> None:
     agent.load = 0
     agent.current_task_id = None
     agent.heartbeat_at = datetime.now(TZ)
-    await agent.save(update_fields=["status", "load", "current_task_id", "heartbeat_at", "utime"])
+    await agent.save(
+        update_fields=["status", "load", "current_task_id", "heartbeat_at", "utime"]
+    )
 
 
 def _agent_payload(data: dict, *, partial: bool = False) -> dict:
@@ -240,7 +279,9 @@ def _agent_payload(data: dict, *, partial: bool = False) -> dict:
             payload[field] = data[field]
 
     if "capabilities" in data:
-        payload["capabilities"] = _normalize_string_list(data.get("capabilities"), "capabilities")
+        payload["capabilities"] = _normalize_string_list(
+            data.get("capabilities"), "capabilities"
+        )
     elif not partial:
         payload["capabilities"] = []
 
@@ -250,7 +291,9 @@ def _agent_payload(data: dict, *, partial: bool = False) -> dict:
         payload["metadata"] = {}
 
     if "prompt_config" in data:
-        payload["prompt_config"] = _normalize_dict(data.get("prompt_config"), "prompt_config")
+        payload["prompt_config"] = _normalize_dict(
+            data.get("prompt_config"), "prompt_config"
+        )
     elif not partial:
         payload["prompt_config"] = {}
 
@@ -275,16 +318,34 @@ CREATE_AGENT_BODY = {
     "type": "object",
     "required": ["agent_key", "name"],
     "properties": {
-        "agent_key": {"type": "string", "description": "智能体逻辑标识，同一租户内唯一"},
+        "agent_key": {
+            "type": "string",
+            "description": "智能体逻辑标识，同一租户内唯一",
+        },
         "name": {"type": "string", "description": "智能体名称"},
         "description": {"type": "string", "description": "智能体说明"},
-        "capabilities": {"type": "array", "items": {"type": "string"}, "description": "能力标签列表，指挥中心按此调度"},
-        "prompt_config": {"type": "object", "description": "提示词扩展配置，如变量、模板来源等"},
+        "capabilities": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "能力标签列表，指挥中心按此调度",
+        },
+        "prompt_config": {
+            "type": "object",
+            "description": "提示词扩展配置，如变量、模板来源等",
+        },
         "is_builtin": {"type": "boolean", "description": "是否为内置智能体，默认false"},
         "runtime": {"type": "string", "description": "运行时类型，默认 lion_agent"},
         "metadata": {"type": "object", "description": "扩展元数据"},
-        "status": {"type": "string", "description": "状态: idle,busy,offline,error", "default": "idle"},
-        "max_concurrent": {"type": "integer", "minimum": 1, "description": "最大并发任务数"},
+        "status": {
+            "type": "string",
+            "description": "状态: idle,busy,offline,error",
+            "default": "idle",
+        },
+        "max_concurrent": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "最大并发任务数",
+        },
     },
 }
 
@@ -294,7 +355,9 @@ CREATE_AGENT_BODY = {
     summary="创建智能体",
     description="创建一个可被指挥中心调度的智能体配置。数据落在command_center_agent表。需要agent:c权限。",
     body=_json_body(CREATE_AGENT_BODY),
-    response=_response("创建成功", AGENT_SCHEMA, {"400": "参数错误", "409": "智能体已存在"}),
+    response=_response(
+        "创建成功", AGENT_SCHEMA, {"400": "参数错误", "409": "智能体已存在"}
+    ),
 )
 @requires_permission("agent:c")
 async def create_agent(request: Request):
@@ -305,7 +368,9 @@ async def create_agent(request: Request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
-    exists = await CommandAgent.get_or_none(tenant_id=tenant_id, agent_key=agent_key, deleted=False)
+    exists = await CommandAgent.get_or_none(
+        tenant_id=tenant_id, agent_key=agent_key, deleted=False
+    )
     if exists:
         raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
 
@@ -329,7 +394,10 @@ async def create_agent(request: Request):
                 "status": {"type": "string", "description": "状态过滤"},
                 "runtime": {"type": "string", "description": "运行时过滤"},
                 "is_builtin": {"type": "boolean", "description": "是否内置过滤"},
-                "keyword": {"type": "string", "description": "按名称、标识、说明模糊搜索"},
+                "keyword": {
+                    "type": "string",
+                    "description": "按名称、标识、说明模糊搜索",
+                },
             },
         }
     ),
@@ -364,13 +432,29 @@ async def list_agents(request: Request):
         extra &= Q(is_builtin=bool(data.get("is_builtin")))
     if data.get("keyword"):
         keyword = data["keyword"]
-        extra &= Q(agent_key__icontains=keyword) | Q(name__icontains=keyword) | Q(description__icontains=keyword)
+        extra &= (
+            Q(agent_key__icontains=keyword)
+            | Q(name__icontains=keyword)
+            | Q(description__icontains=keyword)
+        )
     condition = base_condition & extra
 
     queryset = CommandAgent.filter(condition).distinct()
     total = await queryset.count()
-    agents = await queryset.order_by("-is_builtin", "status", "agent_key").offset((page - 1) * size).limit(size).all()
-    return response_ok({"total": total, "page": page, "size": size, "data": [item.json for item in agents]})
+    agents = (
+        await queryset.order_by("-is_builtin", "status", "agent_key")
+        .offset((page - 1) * size)
+        .limit(size)
+        .all()
+    )
+    return response_ok(
+        {
+            "total": total,
+            "page": page,
+            "size": size,
+            "data": [item.json for item in agents],
+        }
+    )
 
 
 @agent_bp.post("/detail")
@@ -387,7 +471,9 @@ async def list_agents(request: Request):
             },
         }
     ),
-    response=_response("查询成功", AGENT_SCHEMA, {"400": "参数错误", "404": "智能体不存在"}),
+    response=_response(
+        "查询成功", AGENT_SCHEMA, {"400": "参数错误", "404": "智能体不存在"}
+    ),
 )
 @requires_permission("agent:r")
 async def detail_agent(request: Request):
@@ -407,10 +493,15 @@ async def detail_agent(request: Request):
         {
             "type": "object",
             "oneOf": [{"required": ["id"]}, {"required": ["agent_key"]}],
-            "properties": {**CREATE_AGENT_BODY["properties"], "id": {"type": "string", "description": "智能体ID"}},
+            "properties": {
+                **CREATE_AGENT_BODY["properties"],
+                "id": {"type": "string", "description": "智能体ID"},
+            },
         }
     ),
-    response=_response("更新成功", AGENT_SCHEMA, {"400": "参数错误", "404": "智能体不存在"}),
+    response=_response(
+        "更新成功", AGENT_SCHEMA, {"400": "参数错误", "404": "智能体不存在"}
+    ),
 )
 @requires_permission("agent:u")
 async def update_agent(request: Request):
@@ -423,9 +514,15 @@ async def update_agent(request: Request):
     payload = _agent_payload(data, partial=True)
     if agent.is_builtin and payload.get("is_builtin") is False:
         raise CustomError(ErrorCode.INTERNAL_DELETE_ERROR)
-    if "agent_key" in data and data.get("agent_key") and data.get("agent_key") != agent.agent_key:
+    if (
+        "agent_key" in data
+        and data.get("agent_key")
+        and data.get("agent_key") != agent.agent_key
+    ):
         new_key = str(data["agent_key"]).strip()
-        exists = await CommandAgent.get_or_none(tenant_id=tenant_id, agent_key=new_key, deleted=False)
+        exists = await CommandAgent.get_or_none(
+            tenant_id=tenant_id, agent_key=new_key, deleted=False
+        )
         if exists and exists.id != agent.id:
             raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
         payload["agent_key"] = new_key
@@ -450,7 +547,9 @@ async def update_agent(request: Request):
             },
         }
     ),
-    response=_response("删除成功", {"type": "object"}, {"400": "参数错误", "404": "智能体不存在"}),
+    response=_response(
+        "删除成功", {"type": "object"}, {"400": "参数错误", "404": "智能体不存在"}
+    ),
 )
 @requires_permission("agent:d")
 async def delete_agent(request: Request):
@@ -468,7 +567,14 @@ async def delete_agent(request: Request):
     return response_ok({"id": agent.id, "deleted": True})
 
 
-async def _run_agent_task(task_id: str, tenant_id: str, agent: CommandAgent, prompt: str, run_id: str, operator_id: str) -> None:
+async def _run_agent_task(
+    task_id: str,
+    tenant_id: str,
+    agent: CommandAgent,
+    prompt: str,
+    run_id: str,
+    operator_id: str,
+) -> None:
     """后台异步执行智能体任务，结果写回 CommandTask"""
     task = await CommandTask.get_or_none(id=task_id, tenant_id=tenant_id, deleted=False)
     if not task:
@@ -485,7 +591,9 @@ async def _run_agent_task(task_id: str, tenant_id: str, agent: CommandAgent, pro
         task.progress = 100
         task.result = result
         task.finished_at = datetime.now(TZ)
-        await task.save(update_fields=["status", "progress", "result", "finished_at", "utime"])
+        await task.save(
+            update_fields=["status", "progress", "result", "finished_at", "utime"]
+        )
         await CommandTaskEvent.create(
             tenant_id=tenant_id,
             task_id=task_id,
@@ -522,10 +630,19 @@ async def _run_agent_task(task_id: str, tenant_id: str, agent: CommandAgent, pro
             "type": "object",
             "required": ["prompt"],
             "properties": {
-                "agent_id": {"type": "string", "description": "智能体 ID（与 agent_key 二选一）"},
-                "agent_key": {"type": "string", "description": "智能体逻辑标识（与 agent_id 二选一）"},
+                "agent_id": {
+                    "type": "string",
+                    "description": "智能体 ID（与 agent_key 二选一）",
+                },
+                "agent_key": {
+                    "type": "string",
+                    "description": "智能体逻辑标识（与 agent_id 二选一）",
+                },
                 "prompt": {"type": "string", "description": "任务内容/提示词"},
-                "title": {"type": "string", "description": "兼容字段，任务展示统一使用 prompt"},
+                "title": {
+                    "type": "string",
+                    "description": "兼容字段，任务展示统一使用 prompt",
+                },
                 "room_id": {"type": "string", "description": "可选，关联作战室 ID"},
             },
         }
@@ -579,7 +696,11 @@ async def execute_agent(request: Request):
         operator_id=operator_id,
     )
 
-    asyncio.create_task(_run_agent_task(str(task.id), tenant_id, agent, prompt, run_id, operator_id or ""))
+    asyncio.create_task(
+        _run_agent_task(
+            str(task.id), tenant_id, agent, prompt, run_id, operator_id or ""
+        )
+    )
 
     return response_ok({"run_id": run_id, "task_id": str(task.id), "status": "running"})
 
@@ -615,19 +736,25 @@ async def execute_result(request: Request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     if task_id:
-        task = await CommandTask.get_or_none(id=task_id, tenant_id=tenant_id, deleted=False)
+        task = await CommandTask.get_or_none(
+            id=task_id, tenant_id=tenant_id, deleted=False
+        )
     else:
-        task = await CommandTask.filter(run_id=run_id, tenant_id=tenant_id, deleted=False).first()
+        task = await CommandTask.filter(
+            run_id=run_id, tenant_id=tenant_id, deleted=False
+        ).first()
 
     if not task:
         raise CustomError(ErrorCode.NOT_FOUND)
 
-    return response_ok({
-        "run_id": task.run_id,
-        "task_id": str(task.id),
-        "status": task.status,
-        "result": task.result,
-    })
+    return response_ok(
+        {
+            "run_id": task.run_id,
+            "task_id": str(task.id),
+            "status": task.status,
+            "result": task.result,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -648,7 +775,11 @@ REPORT_DOC_SCHEMA = {
     "properties": {
         "id": {"type": "string", "description": "文档ID"},
         "name": {"type": "string", "description": "文件名"},
-        "template_key": {"type": "string", "nullable": True, "description": "来源模板标识"},
+        "template_key": {
+            "type": "string",
+            "nullable": True,
+            "description": "来源模板标识",
+        },
         "ctime": {"type": "string", "description": "创建时间"},
         "utime": {"type": "string", "description": "更新时间"},
     },
@@ -658,13 +789,30 @@ REPORT_EDITABLE_TEMPLATE_SCHEMA = {
     "type": "object",
     "properties": {
         "id": {"type": "string", "description": "模板ID"},
-        "document_id": {"type": "string", "nullable": True, "description": "定时任务复用的报告文档ID"},
+        "document_id": {
+            "type": "string",
+            "nullable": True,
+            "description": "定时任务复用的报告文档ID",
+        },
         "name": {"type": "string", "description": "模板名称"},
         "description": {"type": "string", "description": "模板说明"},
         "content_html": {"type": "string", "description": "在线编辑器 HTML 内容"},
         "fetch_config": {"type": "object", "description": "取数占位符动作配置"},
         "annotations": {"type": "array", "description": "文档批注"},
-        "source_template_key": {"type": "string", "nullable": True, "description": "来源内置模板标识"},
+        "source_template_key": {
+            "type": "string",
+            "nullable": True,
+            "description": "来源内置模板标识",
+        },
+        "preserve_source_layout": {
+            "type": "boolean",
+            "description": "是否保留导入 DOCX 的原始版式",
+        },
+        "source_docx_path": {
+            "type": "string",
+            "nullable": True,
+            "description": "留存的原始 DOCX 相对路径",
+        },
         "ctime": {"type": "string", "description": "创建时间"},
         "utime": {"type": "string", "description": "更新时间"},
     },
@@ -676,7 +824,15 @@ REPORT_EDITABLE_TEMPLATE_SUMMARY_SCHEMA = {
         "id": {"type": "string", "description": "模板ID"},
         "name": {"type": "string", "description": "模板名称"},
         "description": {"type": "string", "description": "模板说明"},
-        "source_template_key": {"type": "string", "nullable": True, "description": "来源内置模板标识"},
+        "source_template_key": {
+            "type": "string",
+            "nullable": True,
+            "description": "来源内置模板标识",
+        },
+        "preserve_source_layout": {
+            "type": "boolean",
+            "description": "是否保留导入 DOCX 的原始版式",
+        },
         "placeholder_count": {"type": "integer", "description": "取数占位符数量"},
         "annotation_count": {"type": "integer", "description": "批注数量"},
         "ctime": {"type": "string", "description": "创建时间"},
@@ -696,7 +852,22 @@ class _ReportHTMLNode:
 
 
 class _ReportHTMLParser(HTMLParser):
-    _VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+    _VOID_TAGS = {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
     _IGNORED_TAGS = {"head", "script", "style"}
 
     def __init__(self):
@@ -729,14 +900,42 @@ class _ReportHTMLParser(HTMLParser):
 
 
 _HTML_BLOCK_TAGS = {
-    "address", "article", "aside", "blockquote", "div", "dl", "fieldset", "figure", "footer",
-    "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "li", "main", "nav",
-    "ol", "p", "pre", "section", "table", "ul",
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "div",
+    "dl",
+    "fieldset",
+    "figure",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hr",
+    "li",
+    "main",
+    "nav",
+    "ol",
+    "p",
+    "pre",
+    "section",
+    "table",
+    "ul",
 }
 
 
 def _placeholder_token(node: _ReportHTMLNode) -> str | None:
-    if node.tag != "span" or "data-placeholder-id" not in node.attrs or "data-result-path" not in node.attrs:
+    if (
+        node.tag != "span"
+        or "data-placeholder-id" not in node.attrs
+        or "data-result-path" not in node.attrs
+    ):
         return None
     placeholder_id = str(node.attrs.get("data-placeholder-id") or "").strip()
     if not placeholder_id:
@@ -874,7 +1073,9 @@ def _apply_run_format(run, formatting: dict) -> None:
         run.font.strike = bool(formatting["strike"])
     if formatting.get("font_name"):
         run.font.name = formatting["font_name"]
-        run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), formatting["font_name"])
+        run._element.get_or_add_rPr().get_or_add_rFonts().set(
+            qn("w:eastAsia"), formatting["font_name"]
+        )
     if formatting.get("font_size") is not None:
         run.font.size = formatting["font_size"]
     if formatting.get("color") is not None:
@@ -941,10 +1142,14 @@ def _append_data_image(paragraph, node: _ReportHTMLNode, formatting: dict) -> No
         run.add_picture(io.BytesIO(image_bytes), width=_image_width(node))
     except Exception as exc:
         _warn_dropped_image_source(source, "invalid-data-image")
-        logger.warning("忽略无法写入 DOCX 的 data URL 图片: error=%s", type(exc).__name__)
+        logger.warning(
+            "忽略无法写入 DOCX 的 data URL 图片: error=%s", type(exc).__name__
+        )
 
 
-def _append_html_inline(paragraph, node: _ReportHTMLNode, *, formatting: dict | None = None) -> None:
+def _append_html_inline(
+    paragraph, node: _ReportHTMLNode, *, formatting: dict | None = None
+) -> None:
     current_format = _inline_format(node, formatting)
     if node.tag is None:
         text = re.sub(r"[\r\n\t]+", " ", node.text)
@@ -1013,7 +1218,9 @@ def _apply_paragraph_format(paragraph, node: _ReportHTMLNode | None) -> None:
         return
 
 
-def _add_docx_paragraph(container, *, style: str | None = None, node: _ReportHTMLNode | None = None):
+def _add_docx_paragraph(
+    container, *, style: str | None = None, node: _ReportHTMLNode | None = None
+):
     if style:
         try:
             paragraph = container.add_paragraph(style=style)
@@ -1059,7 +1266,9 @@ def _remove_empty_first_cell_paragraph(cell) -> None:
 
 def _add_html_table(container, node: _ReportHTMLNode) -> None:
     rows = _table_rows(node)
-    cell_rows = [[child for child in row.children if child.tag in {"td", "th"}] for row in rows]
+    cell_rows = [
+        [child for child in row.children if child.tag in {"td", "th"}] for row in rows
+    ]
     column_count = max((len(cells) for cells in cell_rows), default=0)
     if not column_count:
         return
@@ -1078,11 +1287,28 @@ def _add_html_table(container, node: _ReportHTMLNode) -> None:
 
 
 def _add_html_block(container, node: _ReportHTMLNode) -> None:
-    if node.tag in {"html", "body", "main", "article", "section", "header", "footer", "aside", "nav", "div", "figure", "form", "fieldset", "dl"}:
+    if node.tag in {
+        "html",
+        "body",
+        "main",
+        "article",
+        "section",
+        "header",
+        "footer",
+        "aside",
+        "nav",
+        "div",
+        "figure",
+        "form",
+        "fieldset",
+        "dl",
+    }:
         _add_html_blocks(container, node.children)
         return
     if node.tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
-        paragraph = _add_docx_paragraph(container, style=f"Heading {node.tag[1:]}", node=node)
+        paragraph = _add_docx_paragraph(
+            container, style=f"Heading {node.tag[1:]}", node=node
+        )
         _append_html_inline(paragraph, node)
         return
     if node.tag in {"p", "pre", "blockquote", "address"}:
@@ -1207,6 +1433,12 @@ def _report_template_payload(data: dict, *, partial: bool) -> dict:
         payload["source_template_key"] = source_key or None
     elif not partial:
         payload["source_template_key"] = None
+    if "preserve_source_layout" in data:
+        if not isinstance(data["preserve_source_layout"], bool):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        payload["preserve_source_layout"] = data["preserve_source_layout"]
+    elif not partial:
+        payload["preserve_source_layout"] = True
     return payload
 
 
@@ -1219,9 +1451,15 @@ def _report_template_request_id(data: dict) -> str:
         raise CustomError(ErrorCode.PARAM_ERROR)
     if raw_id is not None and not isinstance(raw_id, str):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    if raw_template_id is not None and raw_id is not None and raw_template_id.strip() != raw_id.strip():
+    if (
+        raw_template_id is not None
+        and raw_id is not None
+        and raw_template_id.strip() != raw_id.strip()
+    ):
         raise CustomError(ErrorCode.PARAM_ERROR)
-    template_id = (raw_template_id if raw_template_id is not None else raw_id or "").strip()
+    template_id = (
+        raw_template_id if raw_template_id is not None else raw_id or ""
+    ).strip()
     if not template_id:
         raise CustomError(ErrorCode.PARAM_ERROR)
     return template_id
@@ -1231,12 +1469,17 @@ def _report_template_output_name(name: str, *, suffix: str = "") -> str:
     clean_name = re.sub(r'[\\/:*?"<>|]+', "_", name).strip().strip(".") or "报告"
     stem = clean_name[:-5] if clean_name.lower().endswith(".docx") else clean_name
     stem_byte_limit = max(1, 250 - len(suffix.encode("utf-8")))
-    safe_stem = stem.encode("utf-8")[:stem_byte_limit].decode("utf-8", errors="ignore") or "report"
+    safe_stem = (
+        stem.encode("utf-8")[:stem_byte_limit].decode("utf-8", errors="ignore")
+        or "report"
+    )
     return f"{safe_stem}{suffix}.docx"
 
 
 def _report_template_summary(template: ReportTemplate) -> dict:
-    fetch_config = template.fetch_config if isinstance(template.fetch_config, dict) else {}
+    fetch_config = (
+        template.fetch_config if isinstance(template.fetch_config, dict) else {}
+    )
     annotations = template.annotations if isinstance(template.annotations, list) else []
     return {
         "id": template.id,
@@ -1245,12 +1488,15 @@ def _report_template_summary(template: ReportTemplate) -> dict:
         "name": template.name,
         "description": template.description,
         "source_template_key": template.source_template_key,
+        "preserve_source_layout": template.preserve_source_layout,
         "placeholder_count": len(fetch_config),
         "annotation_count": len(annotations),
     }
 
 
-async def _get_owned_report_template(template_id: str, tenant_id: str, owner_id: str) -> ReportTemplate:
+async def _get_owned_report_template(
+    template_id: str, tenant_id: str, owner_id: str
+) -> ReportTemplate:
     template = await ReportTemplate.get_or_none(
         id=template_id,
         tenant_id=tenant_id,
@@ -1292,9 +1538,62 @@ def _atomic_write_report_file(path: Path, content: bytes) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _canonical_report_filename(template: ReportTemplate, user_dir: Path, current_rel_path: str | None) -> str:
+async def _decode_source_docx_content(data: dict) -> bytes | None:
+    if "source_docx_content" not in data:
+        return None
+    content = data["source_docx_content"]
+    if not isinstance(content, str):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    try:
+        return await _run_docx_conversion(decode_docx_base64, content)
+    except _DocxConversionBusyError:
+        raise CustomError(ErrorCode.DOCX_CONVERSION_BUSY) from None
+    except DocxConversionError:
+        raise CustomError(ErrorCode.PARAM_ERROR) from None
+
+
+def _write_source_docx(user_dir: Path, content: bytes) -> tuple[str, Path]:
+    rel_path = f"report-source-{uuid.uuid4().hex}.docx"
+    target_path = _owned_report_path(user_dir, rel_path)
+    if target_path is None:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    _atomic_write_report_file(target_path, content)
+    return rel_path, target_path
+
+
+def _cleanup_source_docx(user_dir: Path, rel_path: str | None) -> None:
+    source_path = _owned_report_path(user_dir, rel_path)
+    if source_path is None:
+        if rel_path:
+            logger.warning("拒绝清理用户报告目录外的原始 DOCX path=%s", rel_path)
+        return
+    try:
+        source_path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("清理原始 DOCX 失败 path=%s error=%s", source_path, exc)
+
+
+def _report_template_base_docx_path(
+    template: ReportTemplate, user_dir: Path
+) -> Path | None:
+    if not getattr(template, "preserve_source_layout", True):
+        return None
+    rel_path = getattr(template, "source_docx_path", None)
+    if not rel_path:
+        return None
+    source_path = _owned_report_path(user_dir, rel_path)
+    if source_path is None:
+        logger.warning("拒绝使用用户报告目录外的原始 DOCX path=%s", rel_path)
+    return source_path
+
+
+def _canonical_report_filename(
+    template: ReportTemplate, user_dir: Path, current_rel_path: str | None
+) -> str:
     template_suffix = str(template.id).replace("-", "")[:8]
-    base_name = _report_template_output_name(template.name, suffix=f"_{template_suffix}")
+    base_name = _report_template_output_name(
+        template.name, suffix=f"_{template_suffix}"
+    )
     if base_name == current_rel_path or not (user_dir / base_name).exists():
         return base_name
     stem = Path(base_name).stem
@@ -1314,7 +1613,11 @@ async def _sync_report_template_document(
     canonical_bytes: bytes | None = None,
 ) -> ReportDocument:
     """Create or update the stable canonical document used by report schedules."""
-    content = canonical_bytes if canonical_bytes is not None else _html_to_docx_bytes(template.content_html)
+    content = (
+        canonical_bytes
+        if canonical_bytes is not None
+        else _html_to_docx_bytes(template.content_html)
+    )
     fetch_config = copy.deepcopy(template.fetch_config or {})
     if not isinstance(fetch_config, dict):
         raise CustomError(ErrorCode.PARAM_ERROR)
@@ -1357,7 +1660,15 @@ async def _sync_report_template_document(
             document.template_key = template.source_template_key or str(template.id)
             document.file_path = rel_path
             document.fetch_config = copy.deepcopy(fetch_config)
-            await document.save(update_fields=["name", "template_key", "file_path", "fetch_config", "utime"])
+            await document.save(
+                update_fields=[
+                    "name",
+                    "template_key",
+                    "file_path",
+                    "fetch_config",
+                    "utime",
+                ]
+            )
         else:
             document = await ReportDocument.create(
                 tenant_id=tenant_id,
@@ -1389,7 +1700,15 @@ async def _sync_report_template_document(
             for field, value in document_snapshot.items():
                 setattr(document, field, value)
             try:
-                await document.save(update_fields=["name", "template_key", "file_path", "fetch_config", "utime"])
+                await document.save(
+                    update_fields=[
+                        "name",
+                        "template_key",
+                        "file_path",
+                        "fetch_config",
+                        "utime",
+                    ]
+                )
             except Exception as restore_exc:
                 logger.exception("恢复报告文档记录失败: %s", restore_exc)
         template.document_id = previous_template_document_id
@@ -1399,7 +1718,9 @@ async def _sync_report_template_document(
         try:
             old_path.unlink(missing_ok=True)
         except OSError as exc:
-            logger.warning("清理已重命名的旧报告模板文件失败 path=%s error=%s", old_path, exc)
+            logger.warning(
+                "清理已重命名的旧报告模板文件失败 path=%s error=%s", old_path, exc
+            )
     return document
 
 
@@ -1407,23 +1728,31 @@ async def _sync_report_template_document(
 @openapi.definition(
     summary="分页查询报告模板",
     description="查询当前用户管理的在线报告模板。需要 agent:r 权限。",
-    body=_json_body({
-        "type": "object",
-        "properties": {
-            "page": {"type": "integer", "minimum": 1},
-            "size": {"type": "integer", "minimum": 1, "maximum": 100},
-            "name": {"type": "string", "description": "模板名称模糊搜索"},
+    body=_json_body(
+        {
+            "type": "object",
+            "properties": {
+                "page": {"type": "integer", "minimum": 1},
+                "size": {"type": "integer", "minimum": 1, "maximum": 100},
+                "name": {"type": "string", "description": "模板名称模糊搜索"},
+            },
+        }
+    ),
+    response=_response(
+        "模板列表",
+        {
+            "type": "object",
+            "properties": {
+                "list": {
+                    "type": "array",
+                    "items": REPORT_EDITABLE_TEMPLATE_SUMMARY_SCHEMA,
+                },
+                "total": {"type": "integer"},
+                "page": {"type": "integer"},
+                "size": {"type": "integer"},
+            },
         },
-    }),
-    response=_response("模板列表", {
-        "type": "object",
-        "properties": {
-            "list": {"type": "array", "items": REPORT_EDITABLE_TEMPLATE_SUMMARY_SCHEMA},
-            "total": {"type": "integer"},
-            "page": {"type": "integer"},
-            "size": {"type": "integer"},
-        },
-    }),
+    ),
 )
 @requires_permission("agent:r")
 async def report_template_list(request: Request):
@@ -1450,27 +1779,36 @@ async def report_template_list(request: Request):
     query = ReportTemplate.filter(condition)
     total = await query.count()
     templates = await query.order_by("-utime").offset((page - 1) * size).limit(size)
-    return response_ok({
-        "list": [_report_template_summary(template) for template in templates],
-        "total": total,
-        "page": page,
-        "size": size,
-    })
+    return response_ok(
+        {
+            "list": [_report_template_summary(template) for template in templates],
+            "total": total,
+            "page": page,
+            "size": size,
+        }
+    )
 
 
 @agent_bp.post("/report/template/detail")
 @openapi.definition(
     summary="查询报告模板详情",
     description="查询当前用户的一份在线报告模板。需要 agent:r 权限。",
-    body=_json_body({
-        "type": "object",
-        "anyOf": [{"required": ["template_id"]}, {"required": ["id"]}],
-        "properties": {
-            "template_id": {"type": "string", "description": "模板ID"},
-            "id": {"type": "string", "description": "兼容字段，与 template_id 等价"},
-        },
-    }),
-    response=_response("模板详情", REPORT_EDITABLE_TEMPLATE_SCHEMA, {"404": "模板不存在"}),
+    body=_json_body(
+        {
+            "type": "object",
+            "anyOf": [{"required": ["template_id"]}, {"required": ["id"]}],
+            "properties": {
+                "template_id": {"type": "string", "description": "模板ID"},
+                "id": {
+                    "type": "string",
+                    "description": "兼容字段，与 template_id 等价",
+                },
+            },
+        }
+    ),
+    response=_response(
+        "模板详情", REPORT_EDITABLE_TEMPLATE_SCHEMA, {"404": "模板不存在"}
+    ),
 )
 @requires_permission("agent:r")
 async def report_template_detail(request: Request):
@@ -1486,19 +1824,26 @@ async def report_template_detail(request: Request):
 @openapi.definition(
     summary="保存报告模板",
     description="无 id 时新增，有 id 时更新当前用户的模板。根据操作校验 agent:c 或 agent:u 权限。",
-    body=_json_body({
-        "type": "object",
-        "required": ["name", "content_html"],
-        "properties": {
-            "id": {"type": "string", "nullable": True},
-            "name": {"type": "string"},
-            "description": {"type": "string"},
-            "content_html": {"type": "string"},
-            "fetch_config": {"type": "object"},
-            "annotations": {"type": "array"},
-            "source_template_key": {"type": "string", "nullable": True},
-        },
-    }),
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["name", "content_html"],
+            "properties": {
+                "id": {"type": "string", "nullable": True},
+                "name": {"type": "string"},
+                "description": {"type": "string"},
+                "content_html": {"type": "string"},
+                "fetch_config": {"type": "object"},
+                "annotations": {"type": "array"},
+                "source_template_key": {"type": "string", "nullable": True},
+                "preserve_source_layout": {"type": "boolean", "default": True},
+                "source_docx_content": {
+                    "type": "string",
+                    "description": "可选，严格 base64 编码的原始 DOCX，仅用于留存版式外壳",
+                },
+            },
+        }
+    ),
     response=_response("保存成功", REPORT_EDITABLE_TEMPLATE_SCHEMA),
 )
 @requires_permission("agent:c", "agent:u")
@@ -1519,12 +1864,34 @@ async def report_template_save(request: Request):
         await check_permissions(request, "agent:u")
         template = await _get_owned_report_template(template_id, tenant_id, user_id)
         payload = _report_template_payload(data, partial=True)
-        if not payload:
+        source_docx = await _decode_source_docx_content(data)
+        if not payload and source_docx is None:
             raise CustomError(ErrorCode.PARAM_ERROR)
+        preserve_source_layout = payload.get(
+            "preserve_source_layout",
+            getattr(template, "preserve_source_layout", True),
+        )
+        if source_docx is not None and not preserve_source_layout:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        canonical_bytes = _html_to_docx_bytes(
+            payload.get("content_html", template.content_html)
+        )
+
+        user_dir = _user_report_dir(tenant_id, user_id)
+        old_source_rel_path = getattr(template, "source_docx_path", None)
+        new_source_path = None
+        if source_docx is not None:
+            source_rel_path, new_source_path = _write_source_docx(user_dir, source_docx)
+        elif preserve_source_layout:
+            source_rel_path = old_source_rel_path
+        else:
+            source_rel_path = None
+        if source_rel_path != old_source_rel_path:
+            payload["source_docx_path"] = source_rel_path
+
         snapshot = {field: copy.deepcopy(getattr(template, field)) for field in payload}
         for field, value in payload.items():
             setattr(template, field, value)
-        canonical_bytes = _html_to_docx_bytes(template.content_html)
         template_saved = False
         try:
             await template.save()
@@ -1543,17 +1910,30 @@ async def report_template_save(request: Request):
                     await template.save()
                 except Exception as restore_exc:
                     logger.exception("恢复报告模板记录失败: %s", restore_exc)
+            if new_source_path is not None:
+                new_source_path.unlink(missing_ok=True)
             raise
+        if old_source_rel_path != source_rel_path:
+            _cleanup_source_docx(user_dir, old_source_rel_path)
     else:
         await check_permissions(request, "agent:c")
         payload = _report_template_payload(data, partial=False)
+        source_docx = await _decode_source_docx_content(data)
+        if source_docx is not None and not payload["preserve_source_layout"]:
+            raise CustomError(ErrorCode.PARAM_ERROR)
         canonical_bytes = _html_to_docx_bytes(payload["content_html"])
-        template = await ReportTemplate.create(
-            tenant_id=tenant_id,
-            owner_id=user_id,
-            **payload,
-        )
+        user_dir = _user_report_dir(tenant_id, user_id)
+        new_source_path = None
+        if source_docx is not None:
+            source_rel_path, new_source_path = _write_source_docx(user_dir, source_docx)
+            payload["source_docx_path"] = source_rel_path
+        template = None
         try:
+            template = await ReportTemplate.create(
+                tenant_id=tenant_id,
+                owner_id=user_id,
+                **payload,
+            )
             await _sync_report_template_document(
                 template,
                 tenant_id,
@@ -1561,10 +1941,13 @@ async def report_template_save(request: Request):
                 canonical_bytes=canonical_bytes,
             )
         except Exception:
-            try:
-                await template.delete()
-            except Exception as cleanup_exc:
-                logger.exception("清理未完成保存的报告模板失败: %s", cleanup_exc)
+            if template is not None:
+                try:
+                    await template.delete()
+                except Exception as cleanup_exc:
+                    logger.exception("清理未完成保存的报告模板失败: %s", cleanup_exc)
+            if new_source_path is not None:
+                new_source_path.unlink(missing_ok=True)
             raise
     return response_ok(template.json)
 
@@ -1573,15 +1956,22 @@ async def report_template_save(request: Request):
 @openapi.definition(
     summary="删除报告模板",
     description="软删除当前用户的一份在线报告模板。需要 agent:d 权限。",
-    body=_json_body({
-        "type": "object",
-        "anyOf": [{"required": ["template_id"]}, {"required": ["id"]}],
-        "properties": {
-            "template_id": {"type": "string", "description": "模板ID"},
-            "id": {"type": "string", "description": "兼容字段，与 template_id 等价"},
-        },
-    }),
-    response=_response("删除成功", {"type": "object", "properties": {"id": {"type": "string"}}}),
+    body=_json_body(
+        {
+            "type": "object",
+            "anyOf": [{"required": ["template_id"]}, {"required": ["id"]}],
+            "properties": {
+                "template_id": {"type": "string", "description": "模板ID"},
+                "id": {
+                    "type": "string",
+                    "description": "兼容字段，与 template_id 等价",
+                },
+            },
+        }
+    ),
+    response=_response(
+        "删除成功", {"type": "object", "properties": {"id": {"type": "string"}}}
+    ),
 )
 @requires_permission("agent:d")
 async def report_template_delete(request: Request):
@@ -1599,29 +1989,42 @@ async def report_template_delete(request: Request):
 @openapi.definition(
     summary="从在线模板生成报告",
     description="执行模板中的取数占位符并生成用户 DOCX 文档。需要 agent:u 权限。",
-    body=_json_body({
-        "type": "object",
-        "anyOf": [{"required": ["template_id"]}, {"required": ["id"]}],
-        "properties": {
-            "template_id": {"type": "string", "description": "模板ID"},
-            "id": {"type": "string", "description": "兼容字段，与 template_id 等价"},
-            "name": {"type": "string", "description": "可选的生成文件名"},
+    body=_json_body(
+        {
+            "type": "object",
+            "anyOf": [{"required": ["template_id"]}, {"required": ["id"]}],
+            "properties": {
+                "template_id": {"type": "string", "description": "模板ID"},
+                "id": {
+                    "type": "string",
+                    "description": "兼容字段，与 template_id 等价",
+                },
+                "name": {"type": "string", "description": "可选的生成文件名"},
+            },
+        }
+    ),
+    response=_response(
+        "生成成功",
+        {
+            "type": "object",
+            "properties": {
+                "doc": REPORT_DOC_SCHEMA,
+                "content": {
+                    "type": "string",
+                    "description": "生成后 DOCX 的 base64 内容",
+                },
+            },
         },
-    }),
-    response=_response("生成成功", {
-        "type": "object",
-        "properties": {
-            "doc": REPORT_DOC_SCHEMA,
-            "content": {"type": "string", "description": "生成后 DOCX 的 base64 内容"},
-        },
-    }),
+    ),
 )
 @requires_permission("agent:u")
 async def report_template_generate(request: Request):
     data = _require_json(request)
     template_id = _report_template_request_id(data)
     output_name = data.get("name")
-    if output_name is not None and (not isinstance(output_name, str) or not output_name.strip()):
+    if output_name is not None and (
+        not isinstance(output_name, str) or not output_name.strip()
+    ):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     tenant_id = request.ctx.session.get("tenant_id")
@@ -1647,11 +2050,16 @@ async def report_template_generate(request: Request):
         operator_id=user_id,
         workspace_id=workspace_id_for(tenant_id, agent.agent_key),
         session_id=run_id,
+        base_docx_path=_report_template_base_docx_path(
+            template, _user_report_dir(tenant_id, user_id)
+        ),
     )
-    return response_ok({
-        "doc": document.json,
-        "content": base64.b64encode(generated).decode("utf-8"),
-    })
+    return response_ok(
+        {
+            "doc": document.json,
+            "content": base64.b64encode(generated).decode("utf-8"),
+        }
+    )
 
 
 @agent_bp.post("/report/templates")
@@ -1667,11 +2075,13 @@ async def report_templates(request: Request):
     if base.exists():
         for f in sorted(base.iterdir()):
             if f.is_file() and f.suffix.lower() == ".docx":
-                templates.append({
-                    "key": _template_key(f.name),
-                    "name": _template_key(f.name),
-                    "filename": f.name,
-                })
+                templates.append(
+                    {
+                        "key": _template_key(f.name),
+                        "name": _template_key(f.name),
+                        "filename": f.name,
+                    }
+                )
     return response_ok(templates)
 
 
@@ -1679,21 +2089,30 @@ async def report_templates(request: Request):
 @openapi.definition(
     summary="获取内置报告模板内容（base64）",
     description="按 template_key 返回模板 .docx 文件的 base64 编码内容。需要 agent:r 权限。",
-    body=_json_body({
-        "type": "object",
-        "required": ["template_key"],
-        "properties": {
-            "template_key": {"type": "string", "description": "模板标识"},
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["template_key"],
+            "properties": {
+                "template_key": {"type": "string", "description": "模板标识"},
+            },
+        }
+    ),
+    response=_response(
+        "模板内容",
+        {
+            "type": "object",
+            "properties": {
+                "template_key": {"type": "string"},
+                "filename": {"type": "string"},
+                "content": {
+                    "type": "string",
+                    "description": "base64 编码的 .docx 文件内容",
+                },
+            },
         },
-    }),
-    response=_response("模板内容", {
-        "type": "object",
-        "properties": {
-            "template_key": {"type": "string"},
-            "filename": {"type": "string"},
-            "content": {"type": "string", "description": "base64 编码的 .docx 文件内容"},
-        },
-    }, {"404": "模板不存在"}),
+        {"404": "模板不存在"},
+    ),
 )
 @requires_permission("agent:r")
 async def report_template_content(request: Request):
@@ -1717,17 +2136,28 @@ async def report_template_content(request: Request):
         "将 base64 编码的 .docx 正文转换为汇报编辑器支持的安全 HTML。"
         "保留标题、字符与段落格式、列表、链接、表格和图片。需要 agent:r 权限。"
     ),
-    body=_json_body({
-        "type": "object",
-        "required": ["content"],
-        "properties": {
-            "content": {"type": "string", "description": "严格 base64 编码的 .docx 文件内容"},
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["content"],
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "严格 base64 编码的 .docx 文件内容",
+                },
+            },
+        }
+    ),
+    response=_response(
+        "转换成功",
+        {
+            "type": "object",
+            "properties": {
+                "html": {"type": "string", "description": "安全的富文本 HTML"}
+            },
         },
-    }),
-    response=_response("转换成功", {
-        "type": "object",
-        "properties": {"html": {"type": "string", "description": "安全的富文本 HTML"}},
-    }, {"400": "DOCX 内容或大小不符合要求"}),
+        {"400": "DOCX 内容或大小不符合要求"},
+    ),
 )
 @requires_permission("agent:r")
 async def report_docx_to_html(request: Request):
@@ -1751,17 +2181,25 @@ async def report_docx_to_html(request: Request):
         "图片仅接受安全的 http/https 外链或内嵌栅格图，并拒绝脚本、危险链接"
         "和超出限制的内容。需要 agent:u 权限。"
     ),
-    body=_json_body({
-        "type": "object",
-        "required": ["html"],
-        "properties": {
-            "html": {"type": "string", "description": "汇报编辑器富文本 HTML"},
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["html"],
+            "properties": {
+                "html": {"type": "string", "description": "汇报编辑器富文本 HTML"},
+            },
+        }
+    ),
+    response=_response(
+        "转换成功",
+        {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "base64 编码的 .docx 内容"}
+            },
         },
-    }),
-    response=_response("转换成功", {
-        "type": "object",
-        "properties": {"content": {"type": "string", "description": "base64 编码的 .docx 内容"}},
-    }, {"400": "HTML 内容、图片或大小不符合要求"}),
+        {"400": "HTML 内容、图片或大小不符合要求"},
+    ),
 )
 @requires_permission("agent:u")
 async def report_docx_from_html(request: Request):
@@ -1781,16 +2219,32 @@ async def report_docx_from_html(request: Request):
 @openapi.definition(
     summary="另存报告文档",
     description="将前端传来的 .docx base64 内容写入用户目录，创建 ReportDocument 记录。需要 agent:u 权限。",
-    body=_json_body({
-        "type": "object",
-        "required": ["name", "content"],
-        "properties": {
-            "name": {"type": "string", "description": "文件名（不含 .docx 也可，自动补全）"},
-            "template_key": {"type": "string", "nullable": True, "description": "来源模板标识"},
-            "content": {"type": "string", "description": "base64 编码的 .docx 文件内容"},
-            "doc_id": {"type": "string", "nullable": True, "description": "若传入则覆盖已有文档"},
-        },
-    }),
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["name", "content"],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "文件名（不含 .docx 也可，自动补全）",
+                },
+                "template_key": {
+                    "type": "string",
+                    "nullable": True,
+                    "description": "来源模板标识",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "base64 编码的 .docx 文件内容",
+                },
+                "doc_id": {
+                    "type": "string",
+                    "nullable": True,
+                    "description": "若传入则覆盖已有文档",
+                },
+            },
+        }
+    ),
     response=_response("保存成功", REPORT_DOC_SCHEMA, {"400": "参数错误"}),
 )
 @requires_permission("agent:u")
@@ -1819,7 +2273,9 @@ async def report_save(request: Request):
 
     if doc_id:
         # 覆盖已有文档
-        doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, deleted=False)
+        doc = await ReportDocument.get_or_none(
+            id=doc_id, tenant_id=tenant_id, deleted=False
+        )
         if not doc:
             raise CustomError(ErrorCode.NOT_FOUND)
         old_path = user_dir / doc.file_path
@@ -1871,21 +2327,30 @@ async def report_list(request: Request):
 @openapi.definition(
     summary="获取用户报告文档内容（base64）",
     description="按 doc_id 返回用户已保存报告的 .docx base64 内容。需要 agent:r 权限。",
-    body=_json_body({
-        "type": "object",
-        "required": ["doc_id"],
-        "properties": {
-            "doc_id": {"type": "string", "description": "文档ID"},
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["doc_id"],
+            "properties": {
+                "doc_id": {"type": "string", "description": "文档ID"},
+            },
+        }
+    ),
+    response=_response(
+        "文档内容",
+        {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string"},
+                "name": {"type": "string"},
+                "content": {
+                    "type": "string",
+                    "description": "base64 编码的 .docx 文件内容",
+                },
+            },
         },
-    }),
-    response=_response("文档内容", {
-        "type": "object",
-        "properties": {
-            "doc_id": {"type": "string"},
-            "name": {"type": "string"},
-            "content": {"type": "string", "description": "base64 编码的 .docx 文件内容"},
-        },
-    }, {"404": "文档不存在"}),
+        {"404": "文档不存在"},
+    ),
 )
 @requires_permission("agent:r")
 async def report_content(request: Request):
@@ -1896,7 +2361,9 @@ async def report_content(request: Request):
 
     tenant_id = request.ctx.session.get("tenant_id")
     user_id = str(_session_user_id(request) or "")
-    doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False)
+    doc = await ReportDocument.get_or_none(
+        id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False
+    )
     if not doc:
         raise CustomError(ErrorCode.NOT_FOUND)
 
@@ -1913,12 +2380,18 @@ async def report_content(request: Request):
 # 报告导出 & 通知接口
 # ---------------------------------------------------------------------------
 
+
 async def _docx_to_pdf(docx_path: Path) -> bytes:
     """调用 libreoffice 将 docx 转换为 pdf，返回 pdf 字节。"""
     with tempfile.TemporaryDirectory() as tmpdir:
         proc = await asyncio.create_subprocess_exec(
-            "libreoffice", "--headless", "--convert-to", "pdf",
-            "--outdir", tmpdir, str(docx_path),
+            "libreoffice",
+            "--headless",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            tmpdir,
+            str(docx_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -1942,8 +2415,12 @@ async def _docx_to_pdf_bytes(docx_bytes: bytes) -> bytes:
         tmp_path.unlink(missing_ok=True)
 
 
-async def _get_owned_report_document(doc_id: str, tenant_id: str, owner_id: str) -> ReportDocument:
-    doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, owner_id=owner_id, deleted=False)
+async def _get_owned_report_document(
+    doc_id: str, tenant_id: str, owner_id: str
+) -> ReportDocument:
+    doc = await ReportDocument.get_or_none(
+        id=doc_id, tenant_id=tenant_id, owner_id=owner_id, deleted=False
+    )
     if not doc:
         raise CustomError(ErrorCode.NOT_FOUND)
     return doc
@@ -1953,22 +2430,32 @@ async def _get_owned_report_document(doc_id: str, tenant_id: str, owner_id: str)
 @openapi.definition(
     summary="导出报告文件并上传 S3 返回下载链接",
     description="将用户保存的 canonical 报告执行取数后导出为 docx 或 pdf，上传到对象存储并返回下载链接。pdf 转换依赖服务器端 libreoffice。需要 agent:u 权限。",
-    body=_json_body({
-        "type": "object",
-        "required": ["doc_id", "format"],
-        "properties": {
-            "doc_id": {"type": "string", "description": "文档ID"},
-            "format": {"type": "string", "enum": ["docx", "pdf"], "description": "导出格式"},
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["doc_id", "format"],
+            "properties": {
+                "doc_id": {"type": "string", "description": "文档ID"},
+                "format": {
+                    "type": "string",
+                    "enum": ["docx", "pdf"],
+                    "description": "导出格式",
+                },
+            },
+        }
+    ),
+    response=_response(
+        "导出成功",
+        {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "文件下载链接"},
+                "format": {"type": "string"},
+                "name": {"type": "string"},
+            },
         },
-    }),
-    response=_response("导出成功", {
-        "type": "object",
-        "properties": {
-            "url": {"type": "string", "description": "文件下载链接"},
-            "format": {"type": "string"},
-            "name": {"type": "string"},
-        },
-    }, {"400": "参数错误", "404": "文档不存在", "500": "pdf 转换失败"}),
+        {"400": "参数错误", "404": "文档不存在", "500": "pdf 转换失败"},
+    ),
 )
 @requires_permission("agent:u")
 async def report_export(request: Request):
@@ -1981,22 +2468,28 @@ async def report_export(request: Request):
     tenant_id = request.ctx.session.get("tenant_id")
     user_id = str(_session_user_id(request) or "")
     doc = await _get_owned_report_document(doc_id, tenant_id, user_id)
-    return response_ok(await export_report_document(doc, tenant_id=tenant_id, owner_id=user_id, operator_id=user_id, fmt=fmt))
+    return response_ok(
+        await export_report_document(
+            doc, tenant_id=tenant_id, owner_id=user_id, operator_id=user_id, fmt=fmt
+        )
+    )
 
 
 @agent_bp.post("/report/notify/save")
 @openapi.definition(
     summary="保存报告通知配置",
     description="为报告文档配置通知动作（覆盖式）。notify_config 结构同巡检通知配置。需要 agent:u 权限。",
-    body=_json_body({
-        "type": "object",
-        "required": ["doc_id", "notify_enabled", "notify_config"],
-        "properties": {
-            "doc_id": {"type": "string", "description": "文档ID"},
-            "notify_enabled": {"type": "boolean", "description": "是否启用通知"},
-            "notify_config": {"type": "object", "description": "通知动作配置"},
-        },
-    }),
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["doc_id", "notify_enabled", "notify_config"],
+            "properties": {
+                "doc_id": {"type": "string", "description": "文档ID"},
+                "notify_enabled": {"type": "boolean", "description": "是否启用通知"},
+                "notify_config": {"type": "object", "description": "通知动作配置"},
+            },
+        }
+    ),
     response=_response("保存成功", REPORT_DOC_SCHEMA, {"404": "文档不存在"}),
 )
 @requires_permission("agent:u")
@@ -2010,7 +2503,9 @@ async def report_notify_save(request: Request):
 
     tenant_id = request.ctx.session.get("tenant_id")
     user_id = str(_session_user_id(request) or "")
-    doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False)
+    doc = await ReportDocument.get_or_none(
+        id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False
+    )
     if not doc:
         raise CustomError(ErrorCode.NOT_FOUND)
 
@@ -2039,21 +2534,31 @@ def _extract_report_notify_actions(config) -> list:
 @openapi.definition(
     summary="发送报告通知",
     description="将报告文件上传 S3 后，按通知配置发送 Kafka 动作消息。支持指定导出格式，默认 docx。需要 agent:u 权限。",
-    body=_json_body({
-        "type": "object",
-        "required": ["doc_id"],
-        "properties": {
-            "doc_id": {"type": "string", "description": "文档ID"},
-            "format": {"type": "string", "enum": ["docx", "pdf"], "description": "上传格式，默认 docx"},
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["doc_id"],
+            "properties": {
+                "doc_id": {"type": "string", "description": "文档ID"},
+                "format": {
+                    "type": "string",
+                    "enum": ["docx", "pdf"],
+                    "description": "上传格式，默认 docx",
+                },
+            },
+        }
+    ),
+    response=_response(
+        "发送成功",
+        {
+            "type": "object",
+            "properties": {
+                "sent_count": {"type": "integer", "description": "已发送通知动作数量"},
+                "url": {"type": "string", "description": "上传后的文件下载链接"},
+            },
         },
-    }),
-    response=_response("发送成功", {
-        "type": "object",
-        "properties": {
-            "sent_count": {"type": "integer", "description": "已发送通知动作数量"},
-            "url": {"type": "string", "description": "上传后的文件下载链接"},
-        },
-    }, {"400": "未启用通知或配置为空", "404": "文档不存在"}),
+        {"400": "未启用通知或配置为空", "404": "文档不存在"},
+    ),
 )
 @requires_permission("agent:u")
 async def report_notify_send(request: Request):
@@ -2066,21 +2571,26 @@ async def report_notify_send(request: Request):
     tenant_id = request.ctx.session.get("tenant_id")
     user_id = str(_session_user_id(request) or "")
     doc = await _get_owned_report_document(doc_id, tenant_id, user_id)
-    return response_ok(await send_report_notify_for_document(
-        doc,
-        tenant_id=tenant_id,
-        owner_id=user_id,
-        operator_id=str(_session_user_id(request) or ""),
-        fmt=fmt,
-        base_url=f"{request.scheme}://{request.host}",
-    ))
+    return response_ok(
+        await send_report_notify_for_document(
+            doc,
+            tenant_id=tenant_id,
+            owner_id=user_id,
+            operator_id=str(_session_user_id(request) or ""),
+            fmt=fmt,
+            base_url=f"{request.scheme}://{request.host}",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
 # 取数占位符功能
 # ---------------------------------------------------------------------------
 
-async def _resolve_fetch_placeholders(docx_bytes: bytes, fetch_config: dict, tenant_id: str, operator_id) -> bytes:
+
+async def _resolve_fetch_placeholders(
+    docx_bytes: bytes, fetch_config: dict, tenant_id: str, operator_id
+) -> bytes:
     """扫描 docx 中所有 {action_key.field.path} 占位符，并发执行取数动作后替换。"""
     doc = Document(io.BytesIO(docx_bytes))
 
@@ -2110,20 +2620,22 @@ async def _resolve_fetch_placeholders(docx_bytes: bytes, fetch_config: dict, ten
     summary="保存取数动作配置",
     description=(
         "为报告文档配置取数占位符对应的动作（覆盖式）。"
-        "fetch_config 格式：{\"a\": {动作配置}}，"
+        'fetch_config 格式：{"a": {动作配置}}，'
         "文档中用 {a.data.userate} 形式引用。需要 agent:u 权限。"
     ),
-    body=_json_body({
-        "type": "object",
-        "required": ["doc_id", "fetch_config"],
-        "properties": {
-            "doc_id": {"type": "string", "description": "文档ID"},
-            "fetch_config": {
-                "type": "object",
-                "description": "key 为占位符前缀，value 为动作配置",
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["doc_id", "fetch_config"],
+            "properties": {
+                "doc_id": {"type": "string", "description": "文档ID"},
+                "fetch_config": {
+                    "type": "object",
+                    "description": "key 为占位符前缀，value 为动作配置",
+                },
             },
-        },
-    }),
+        }
+    ),
     response=_response("保存成功", REPORT_DOC_SCHEMA, {"404": "文档不存在"}),
 )
 @requires_permission("agent:u")
@@ -2136,7 +2648,9 @@ async def report_fetch_save(request: Request):
 
     tenant_id = request.ctx.session.get("tenant_id")
     user_id = str(_session_user_id(request) or "")
-    doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False)
+    doc = await ReportDocument.get_or_none(
+        id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False
+    )
     if not doc:
         raise CustomError(ErrorCode.NOT_FOUND)
 
@@ -2152,21 +2666,30 @@ async def report_fetch_save(request: Request):
         "执行文档中所有取数占位符对应的动作，将结果替换后以 base64 返回。"
         "不修改服务器文件，仅返回替换结果供前端预览/另存。需要 agent:u 权限。"
     ),
-    body=_json_body({
-        "type": "object",
-        "required": ["doc_id"],
-        "properties": {
-            "doc_id": {"type": "string", "description": "文档ID"},
+    body=_json_body(
+        {
+            "type": "object",
+            "required": ["doc_id"],
+            "properties": {
+                "doc_id": {"type": "string", "description": "文档ID"},
+            },
+        }
+    ),
+    response=_response(
+        "执行成功",
+        {
+            "type": "object",
+            "properties": {
+                "doc_id": {"type": "string"},
+                "name": {"type": "string"},
+                "content": {
+                    "type": "string",
+                    "description": "替换后的 docx base64 内容",
+                },
+            },
         },
-    }),
-    response=_response("执行成功", {
-        "type": "object",
-        "properties": {
-            "doc_id": {"type": "string"},
-            "name": {"type": "string"},
-            "content": {"type": "string", "description": "替换后的 docx base64 内容"},
-        },
-    }, {"404": "文档不存在"}),
+        {"404": "文档不存在"},
+    ),
 )
 @requires_permission("agent:u")
 async def report_fetch_run(request: Request):
@@ -2177,7 +2700,9 @@ async def report_fetch_run(request: Request):
 
     tenant_id = request.ctx.session.get("tenant_id")
     user_id = str(_session_user_id(request) or "")
-    doc = await ReportDocument.get_or_none(id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False)
+    doc = await ReportDocument.get_or_none(
+        id=doc_id, tenant_id=tenant_id, owner_id=user_id, deleted=False
+    )
     if not doc:
         raise CustomError(ErrorCode.NOT_FOUND)
 
@@ -2187,13 +2712,18 @@ async def report_fetch_run(request: Request):
         raise CustomError(ErrorCode.NOT_FOUND)
 
     resolved = await _resolve_fetch_placeholders(
-        docx_path.read_bytes(), doc.fetch_config or {}, tenant_id, _session_user_id(request)
+        docx_path.read_bytes(),
+        doc.fetch_config or {},
+        tenant_id,
+        _session_user_id(request),
     )
-    return response_ok({
-        "doc_id": str(doc.id),
-        "name": doc.name,
-        "content": base64.b64encode(resolved).decode("utf-8"),
-    })
+    return response_ok(
+        {
+            "doc_id": str(doc.id),
+            "name": doc.name,
+            "content": base64.b64encode(resolved).decode("utf-8"),
+        }
+    )
 
 
 async def _resolve_export_template(doc: ReportDocument, tenant_id: str):
@@ -2261,6 +2791,7 @@ async def export_report_document(
                 operator_id=operator_id or owner_id,
                 workspace_id=workspace_id_for(tenant_id, agent.agent_key),
                 session_id=run_id,
+                base_docx_path=_report_template_base_docx_path(template, user_dir),
             )
         else:
             resolved_bytes = await _resolve_fetch_placeholders(
@@ -2345,7 +2876,15 @@ async def send_report_notify_for_document(
             "executor": operator_id,
         }
         run_id = gen_run_id()
-        await aproduce(TASK_TOPIC, {"run_type": "action", "run_id": run_id, "run_args": params, "tenant_id": tenant_id})
+        await aproduce(
+            TASK_TOPIC,
+            {
+                "run_type": "action",
+                "run_id": run_id,
+                "run_args": params,
+                "tenant_id": tenant_id,
+            },
+        )
         sent_count += 1
 
     return {"sent_count": sent_count, "url": export_result["url"]}
@@ -2354,8 +2893,13 @@ async def send_report_notify_for_document(
 def _check_internal_agent_request(request: Request) -> None:
     from settings import LION_ACTION_INTERNAL_TOKEN, LION_AGENT_INTERNAL_TOKEN
 
-    token = request.headers.get("X-Internal-Token") or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    allowed_tokens = {item for item in [LION_AGENT_INTERNAL_TOKEN, LION_ACTION_INTERNAL_TOKEN] if item}
+    token = (
+        request.headers.get("X-Internal-Token")
+        or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    )
+    allowed_tokens = {
+        item for item in [LION_AGENT_INTERNAL_TOKEN, LION_ACTION_INTERNAL_TOKEN] if item
+    }
     if allowed_tokens and token not in allowed_tokens:
         raise CustomError(ErrorCode.UNAUTH)
 
@@ -2424,12 +2968,18 @@ def _parse_report_schedule_bool(value) -> bool:
     raise CustomError(ErrorCode.PARAM_ERROR)
 
 
-async def _get_schedule_doc(doc_id: str, tenant_id: str, owner_id: str) -> ReportDocument:
+async def _get_schedule_doc(
+    doc_id: str, tenant_id: str, owner_id: str
+) -> ReportDocument:
     return await _get_owned_report_document(doc_id, tenant_id, owner_id)
 
 
-async def _get_report_schedule(schedule_id: str, tenant_id: str, owner_id: str) -> ReportSchedule:
-    schedule = await ReportSchedule.get_or_none(id=schedule_id, tenant_id=tenant_id, deleted=False)
+async def _get_report_schedule(
+    schedule_id: str, tenant_id: str, owner_id: str
+) -> ReportSchedule:
+    schedule = await ReportSchedule.get_or_none(
+        id=schedule_id, tenant_id=tenant_id, deleted=False
+    )
     if not schedule:
         raise CustomError(ErrorCode.REPORT_SCHEDULE_NOT_FOUND)
     document = await ReportDocument.get_or_none(
@@ -2472,14 +3022,28 @@ async def report_schedule_list(request: Request):
     size = max(1, min(int(data.get("size") or 20), 100))
     doc_id = str(data.get("doc_id") or "").strip()
 
-    condition = Q(tenant_id=tenant_id, deleted=False) & Q(document__tenant_id=tenant_id) & Q(document__owner_id=user_id) & Q(document__deleted=False)
+    condition = (
+        Q(tenant_id=tenant_id, deleted=False)
+        & Q(document__tenant_id=tenant_id)
+        & Q(document__owner_id=user_id)
+        & Q(document__deleted=False)
+    )
     if doc_id:
         condition &= Q(document_id=doc_id)
 
-    query = ReportSchedule.filter(condition).prefetch_related("document", "creator", "timed")
+    query = ReportSchedule.filter(condition).prefetch_related(
+        "document", "creator", "timed"
+    )
     total = await query.count()
     schedules = await query.order_by("-utime").offset((page - 1) * size).limit(size)
-    return response_ok({"list": [item.json for item in schedules], "total": total, "page": page, "size": size})
+    return response_ok(
+        {
+            "list": [item.json for item in schedules],
+            "total": total,
+            "page": page,
+            "size": size,
+        }
+    )
 
 
 @agent_bp.post("/report/schedule/save")
@@ -2536,12 +3100,16 @@ async def report_schedule_save(request: Request):
         )
 
     sync_result = await sync_report_schedule_timer(schedule, operator)
-    return response_ok({
-        "id": schedule.id,
-        "timed_id": str(sync_result["timed"].id) if sync_result.get("timed") else None,
-        "timer_published": sync_result.get("published", False),
-        "timer_publish_supported": sync_result.get("publish_supported", False),
-    })
+    return response_ok(
+        {
+            "id": schedule.id,
+            "timed_id": str(sync_result["timed"].id)
+            if sync_result.get("timed")
+            else None,
+            "timer_published": sync_result.get("published", False),
+            "timer_publish_supported": sync_result.get("publish_supported", False),
+        }
+    )
 
 
 @agent_bp.post("/report/schedule/toggle")
@@ -2564,13 +3132,17 @@ async def report_schedule_toggle(request: Request):
     schedule.enabled = _parse_report_schedule_bool(data.get("enabled"))
     await schedule.save(update_fields=["enabled", "utime"])
     sync_result = await sync_report_schedule_timer(schedule, operator)
-    return response_ok({
-        "id": schedule.id,
-        "enabled": schedule.enabled,
-        "timed_id": str(sync_result["timed"].id) if sync_result.get("timed") else None,
-        "timer_published": sync_result.get("published", False),
-        "timer_publish_supported": sync_result.get("publish_supported", False),
-    })
+    return response_ok(
+        {
+            "id": schedule.id,
+            "enabled": schedule.enabled,
+            "timed_id": str(sync_result["timed"].id)
+            if sync_result.get("timed")
+            else None,
+            "timer_published": sync_result.get("published", False),
+            "timer_publish_supported": sync_result.get("publish_supported", False),
+        }
+    )
 
 
 @agent_bp.post("/report/schedule/delete")
@@ -2594,9 +3166,11 @@ async def report_schedule_delete(request: Request):
     schedule.enabled = False
     schedule.deleted = True
     await schedule.save(update_fields=["enabled", "deleted", "utime"])
-    return response_ok({
-        "id": schedule.id,
-        "deleted": True,
-        "timer_published": delete_result.get("published", False),
-        "timer_publish_supported": delete_result.get("publish_supported", False),
-    })
+    return response_ok(
+        {
+            "id": schedule.id,
+            "deleted": True,
+            "timer_published": delete_result.get("published", False),
+            "timer_publish_supported": delete_result.get("publish_supported", False),
+        }
+    )

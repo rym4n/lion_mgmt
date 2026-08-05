@@ -10,6 +10,9 @@ def test_export_report_document_branches_on_template():
     source = inspect.getsource(agent_views.export_report_document)
     assert "_resolve_export_template" in source, "导出必须反查关联模板"
     assert "render_report_docx" in source, "有模板时必须走批注渲染流水线"
+    assert "_report_template_base_docx_path" in source, (
+        "关联模板导出必须解析原始 DOCX 外壳"
+    )
     assert "_resolve_fetch_placeholders" in source, "无模板时必须回落旧取数路径"
 
 
@@ -39,6 +42,8 @@ async def test_export_uses_pipeline_when_template_exists(monkeypatch, tmp_path):
         content_html = '<p><mark data-annotation-ids="a1">原始</mark></p>'
         fetch_config = {"alarm": {"action": "count"}}
         annotations = [{"id": "a1", "comment": "改写", "status": "open"}]
+        preserve_source_layout = True
+        source_docx_path = "source.docx"
 
     class FakeDoc:
         name = "月度报告.docx"
@@ -70,7 +75,9 @@ async def test_export_uses_pipeline_when_template_exists(monkeypatch, tmp_path):
     monkeypatch.setattr(agent_views, "upload_to_s3", fake_upload)
     monkeypatch.setattr(agent_views, "_get_visible_agent", fake_visible_agent)
     monkeypatch.setattr(agent_views, "_user_report_dir", lambda t, o: tmp_path)
-    monkeypatch.setattr(agent_views, "_owned_report_path", lambda d, p: report_file)
+    monkeypatch.setattr(
+        agent_views, "_owned_report_path", lambda directory, rel: directory / rel
+    )
 
     result = await agent_views.export_report_document(
         FakeDoc(), tenant_id="t1", owner_id="u1", operator_id="u1", fmt="docx"
@@ -79,6 +86,7 @@ async def test_export_uses_pipeline_when_template_exists(monkeypatch, tmp_path):
     assert captured["annotations"] == FakeTemplate.annotations
     assert captured["content_html"] == FakeTemplate.content_html
     assert captured["fetch_config"] == FakeTemplate.fetch_config
+    assert captured["base_docx_path"] == tmp_path / "source.docx"
     assert captured["uploaded"] == b"PK-fake-docx"
     assert result["format"] == "docx"
     assert result["name"] == "月度报告.docx"
@@ -162,7 +170,9 @@ async def test_export_pdf_converts_pipeline_output(monkeypatch, tmp_path):
     report_file.write_bytes(b"PK-canonical")
 
     monkeypatch.setattr(
-        agent_views, "_resolve_export_template", lambda doc, tenant_id: _async(FakeTemplate())
+        agent_views,
+        "_resolve_export_template",
+        lambda doc, tenant_id: _async(FakeTemplate()),
     )
     monkeypatch.setattr(agent_views, "render_report_docx", fake_render)
     monkeypatch.setattr(agent_views, "_docx_to_pdf_bytes", fake_pdf)

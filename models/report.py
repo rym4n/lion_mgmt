@@ -32,6 +32,15 @@ class ReportTemplate(BaseModel):
         null=True,
         description="来源内置模板标识",
     )
+    preserve_source_layout = fields.BooleanField(
+        default=True,
+        description="导入时是否保留原文档版式（页眉页脚、纸张方向等）",
+    )
+    source_docx_path = fields.CharField(
+        max_length=512,
+        null=True,
+        description="留存的原始 docx 相对路径，用于导出时作为外壳；null 表示未留存",
+    )
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -51,6 +60,8 @@ class ReportTemplate(BaseModel):
             "fetch_config": self.fetch_config,
             "annotations": self.annotations,
             "source_template_key": self.source_template_key,
+            "preserve_source_layout": self.preserve_source_layout,
+            "source_docx_path": self.source_docx_path,
         }
 
     class Meta:
@@ -74,11 +85,19 @@ class ReportDocument(BaseModel):
         on_delete=fields.SET_NULL,
     )
     name = fields.CharField(max_length=255, description="文件名")
-    template_key = fields.CharField(max_length=128, null=True, description="来源模板标识，null 表示空白文档")
-    file_path = fields.CharField(max_length=512, description="服务器端相对路径（相对于 REPORT_USER_BASE）")
+    template_key = fields.CharField(
+        max_length=128, null=True, description="来源模板标识，null 表示空白文档"
+    )
+    file_path = fields.CharField(
+        max_length=512, description="服务器端相对路径（相对于 REPORT_USER_BASE）"
+    )
     notify_enabled = fields.BooleanField(default=False, description="是否启用通知")
-    notify_config = fields.JSONField(null=True, description="通知动作配置，结构同巡检通知配置")
-    fetch_config = fields.JSONField(null=True, description="取数动作配置，key为占位符前缀，value为动作配置")
+    notify_config = fields.JSONField(
+        null=True, description="通知动作配置，结构同巡检通知配置"
+    )
+    fetch_config = fields.JSONField(
+        null=True, description="取数动作配置，key为占位符前缀，value为动作配置"
+    )
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -133,10 +152,14 @@ class ReportSchedule(BaseModel):
     )
     name = fields.CharField(max_length=255, description="任务名称")
     cron = fields.CharField(max_length=64, description="cron 表达式")
-    export_format = fields.CharField(max_length=8, default="docx", description="导出格式 docx/pdf")
+    export_format = fields.CharField(
+        max_length=8, default="docx", description="导出格式 docx/pdf"
+    )
     enabled = fields.BooleanField(default=True, description="是否启用")
     last_run_at = fields.DatetimeField(null=True, description="最近执行时间")
-    last_status = fields.CharField(max_length=16, null=True, description="最近执行状态 ok/failed")
+    last_status = fields.CharField(
+        max_length=16, null=True, description="最近执行状态 ok/failed"
+    )
     last_error = fields.TextField(null=True, description="最近执行错误")
     next_run_at = fields.DatetimeField(null=True, description="下次执行时间")
 
@@ -157,10 +180,14 @@ class ReportSchedule(BaseModel):
             "cron": self.cron,
             "export_format": self.export_format,
             "enabled": self.enabled,
-            "last_run_at": strip_timezone_to_seconds(self.last_run_at) if self.last_run_at else None,
+            "last_run_at": strip_timezone_to_seconds(self.last_run_at)
+            if self.last_run_at
+            else None,
             "last_status": self.last_status,
             "last_error": self.last_error,
-            "next_run_at": strip_timezone_to_seconds(self.next_run_at) if self.next_run_at else None,
+            "next_run_at": strip_timezone_to_seconds(self.next_run_at)
+            if self.next_run_at
+            else None,
         }
 
     class Meta:

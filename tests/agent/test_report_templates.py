@@ -1,5 +1,6 @@
 # coding=utf-8
 import asyncio
+import base64
 import io
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,8 +27,18 @@ def test_report_template_model_is_owner_scoped_and_serializes_editor_fields():
     fields = ReportTemplate._meta.fields_map
 
     assert ReportTemplate._meta.db_table == "report_template"
-    assert {"tenant_id", "owner", "document", "name", "description", "content_html"} <= set(fields)
+    assert {
+        "tenant_id",
+        "owner",
+        "document",
+        "name",
+        "description",
+        "content_html",
+    } <= set(fields)
     assert {"fetch_config", "annotations", "source_template_key"} <= set(fields)
+    assert {"preserve_source_layout", "source_docx_path"} <= set(fields)
+    assert fields["preserve_source_layout"].default is True
+    assert fields["source_docx_path"].null is True
     assert ReportTemplate._meta.indexes == (("tenant_id", "owner_id"),)
 
 
@@ -91,6 +102,60 @@ def test_report_template_payload_accepts_annotation_mode():
         partial=False,
     )
     assert len(payload["annotations"]) == 3
+
+
+def test_report_template_payload_tracks_source_layout_choice():
+    payload = _report_template_payload(
+        {"name": "周报", "content_html": "<p>正文</p>"}, partial=False
+    )
+    assert payload["preserve_source_layout"] is True
+
+    payload = _report_template_payload({"preserve_source_layout": False}, partial=True)
+    assert payload == {"preserve_source_layout": False}
+
+    with pytest.raises(CustomError) as excinfo:
+        _report_template_payload({"preserve_source_layout": 1}, partial=True)
+    assert excinfo.value.enum == ErrorCode.PARAM_ERROR
+
+    payload = _report_template_payload(
+        {"source_docx_path": "../client-controlled.docx"}, partial=True
+    )
+    assert "source_docx_path" not in payload
+
+
+def test_source_docx_storage_uses_owned_user_report_path(monkeypatch, tmp_path):
+    document = Document()
+    document.add_paragraph("原始 DOCX")
+    source_bytes = io.BytesIO()
+    document.save(source_bytes)
+    encoded = base64.b64encode(source_bytes.getvalue()).decode()
+
+    async def run_directly(converter, value):
+        return converter(value)
+
+    monkeypatch.setattr(agent_views, "_run_docx_conversion", run_directly)
+
+    decoded = asyncio.run(
+        agent_views._decode_source_docx_content({"source_docx_content": encoded})
+    )
+    rel_path, stored_path = agent_views._write_source_docx(tmp_path, decoded)
+
+    assert stored_path == agent_views._owned_report_path(tmp_path, rel_path)
+    assert stored_path.parent == tmp_path.resolve()
+    assert stored_path.read_bytes() == source_bytes.getvalue()
+
+
+def test_source_docx_shell_path_rejects_path_traversal(tmp_path, caplog):
+    template = SimpleNamespace(
+        preserve_source_layout=True,
+        source_docx_path="../outside.docx",
+    )
+
+    with caplog.at_level("WARNING", logger=agent_views.__name__):
+        path = agent_views._report_template_base_docx_path(template, tmp_path)
+
+    assert path is None
+    assert any("用户报告目录外" in record.getMessage() for record in caplog.records)
 
 
 def test_report_template_payload_rejects_invalid_annotation_mode():
@@ -196,7 +261,10 @@ def test_report_template_html_to_docx_preserves_document_contract():
     body = document.paragraphs[1]
     assert any(run.text == "高危" and run.bold for run in body.runs)
     assert any(run.text == "上升" and run.italic for run in body.runs)
-    assert [paragraph.style.name for paragraph in document.paragraphs[2:4]] == ["List Bullet", "List Bullet"]
+    assert [paragraph.style.name for paragraph in document.paragraphs[2:4]] == [
+        "List Bullet",
+        "List Bullet",
+    ]
     assert len(document.tables) == 1
     assert document.tables[0].cell(0, 0).text == "指标"
     assert document.tables[0].cell(1, 1).text == "{alarm.data.total}"
@@ -228,7 +296,9 @@ def test_report_template_html_to_docx_preserves_rich_styles_and_data_image():
     assert len(document.inline_shapes) == 1
 
 
-def test_template_document_sync_reuses_id_and_renames_canonical_file(monkeypatch, tmp_path):
+def test_template_document_sync_reuses_id_and_renames_canonical_file(
+    monkeypatch, tmp_path
+):
     class FakeDocument:
         records = {}
 
@@ -267,9 +337,7 @@ def test_template_document_sync_reuses_id_and_renames_canonical_file(monkeypatch
             self.id = "template-12345678"
             self.document_id = None
             self.name = "运营周报"
-            self.content_html = (
-                '<p>告警 <span data-placeholder-id="alarm" data-result-path="total">数量</span></p>'
-            )
+            self.content_html = '<p>告警 <span data-placeholder-id="alarm" data-result-path="total">数量</span></p>'
             self.fetch_config = {"alarm": {"action": "query"}}
             self.source_template_key = None
 
@@ -301,10 +369,14 @@ def test_template_document_sync_reuses_id_and_renames_canonical_file(monkeypatch
     assert second.fetch_config == {"alarm": {"action": "query_month"}}
 
 
-def test_template_document_sync_write_failure_keeps_existing_document(monkeypatch, tmp_path):
+def test_template_document_sync_write_failure_keeps_existing_document(
+    monkeypatch, tmp_path
+):
     class FakeDocument:
         async def save(self, **_kwargs):
-            raise AssertionError("database row must not change when the file write fails")
+            raise AssertionError(
+                "database row must not change when the file write fails"
+            )
 
     document = FakeDocument()
     document.id = "doc-1"
@@ -507,7 +579,9 @@ def test_fetch_action_checks_server_permission_before_kafka(monkeypatch):
         published.append((args, kwargs))
 
     monkeypatch.setattr(report_fetch, "Account", FakeAccount)
-    monkeypatch.setattr(report_fetch, "check_action_execute_permission", deny_permission)
+    monkeypatch.setattr(
+        report_fetch, "check_action_execute_permission", deny_permission
+    )
     monkeypatch.setattr(report_fetch, "aproduce", fake_publish)
 
     with pytest.raises(CustomError) as exc_info:
@@ -566,7 +640,9 @@ def test_fetch_action_failed_runlog_is_not_treated_as_success(monkeypatch):
 
     monkeypatch.setattr(report_fetch, "Account", FakeAccount)
     monkeypatch.setattr(report_fetch, "Runlog", FakeRunlog)
-    monkeypatch.setattr(report_fetch, "check_action_execute_permission", allow_permission)
+    monkeypatch.setattr(
+        report_fetch, "check_action_execute_permission", allow_permission
+    )
     monkeypatch.setattr(report_fetch, "aproduce", fake_publish)
 
     with pytest.raises(RuntimeError, match="report fetch action failed"):
@@ -609,7 +685,9 @@ def test_fetch_action_timeout_is_explicit_failure(monkeypatch):
 
     monkeypatch.setattr(report_fetch, "Account", FakeAccount)
     monkeypatch.setattr(report_fetch, "Runlog", FakeRunlog)
-    monkeypatch.setattr(report_fetch, "check_action_execute_permission", allow_permission)
+    monkeypatch.setattr(
+        report_fetch, "check_action_execute_permission", allow_permission
+    )
     monkeypatch.setattr(report_fetch, "aproduce", fake_async)
     monkeypatch.setattr(report_fetch.asyncio, "sleep", fake_async)
 
@@ -628,7 +706,11 @@ def test_fetch_action_timeout_is_explicit_failure(monkeypatch):
 def test_report_template_routes_permissions_and_generation_contract():
     views_path = Path(__file__).resolve().parents[2] / "services/agent/views.py"
     source = views_path.read_text()
-    routes = source[source.index('@agent_bp.post("/report/template/list")') : source.index('@agent_bp.post("/report/templates")')]
+    routes = source[
+        source.index('@agent_bp.post("/report/template/list")') : source.index(
+            '@agent_bp.post("/report/templates")'
+        )
+    ]
 
     assert '@agent_bp.post("/report/template/detail")' in routes
     assert '@agent_bp.post("/report/template/save")' in routes
@@ -641,13 +723,18 @@ def test_report_template_routes_permissions_and_generation_contract():
     assert '@requires_permission("agent:d")' in routes
     assert '@requires_permission("agent:u")' in routes
     assert '"template_id": {"type": "string", "description": "模板ID"}' in routes
-    assert '"list": [_report_template_summary(template) for template in templates]' in routes
+    assert (
+        '"list": [_report_template_summary(template) for template in templates]'
+        in routes
+    )
     assert "template.deleted = True" in routes
     assert "copy.deepcopy(template.fetch_config or {})" in routes
     assert "await _sync_report_template_document(" in routes
     assert "await render_report_docx(" in routes
     assert "canonical_path.read_bytes()" not in routes
-    generate_route = routes[routes.index('@agent_bp.post("/report/template/generate")') :]
+    generate_route = routes[
+        routes.index('@agent_bp.post("/report/template/generate")') :
+    ]
     assert "ReportDocument.create(" not in generate_route
     assert '"doc": document.json' in routes
     assert 'base64.b64encode(generated).decode("utf-8")' in routes
@@ -662,6 +749,7 @@ def test_report_template_generate_uses_render_pipeline():
     assert "read_bytes()" not in source, "generate 不应再直接读取 canonical docx 字节"
     assert "_get_visible_agent" in source, "generate 需解析 report_assistant 智能体"
     assert "workspace_id_for" in source
+    assert "_report_template_base_docx_path" in source
 
 
 def test_report_template_generate_route_and_permission():
@@ -679,10 +767,14 @@ def test_report_export_requires_update_permission_and_resolves_canonical_documen
     views_path = Path(__file__).resolve().parents[2] / "services/agent/views.py"
     source = views_path.read_text()
     export_route = source[
-        source.index('@agent_bp.post("/report/export")') : source.index('@agent_bp.post("/report/notify/save")')
+        source.index('@agent_bp.post("/report/export")') : source.index(
+            '@agent_bp.post("/report/notify/save")'
+        )
     ]
     export_helper = source[
-        source.index("async def export_report_document(") : source.index("async def send_report_notify_for_document(")
+        source.index("async def export_report_document(") : source.index(
+            "async def send_report_notify_for_document("
+        )
     ]
 
     assert '@requires_permission("agent:u")' in export_route
@@ -690,10 +782,14 @@ def test_report_export_requires_update_permission_and_resolves_canonical_documen
     assert "resolved_bytes = await _resolve_fetch_placeholders(" in export_helper
 
 
-def test_report_export_does_not_upload_partial_file_when_fetch_fails(monkeypatch, tmp_path):
+def test_report_export_does_not_upload_partial_file_when_fetch_fails(
+    monkeypatch, tmp_path
+):
     report_dir = tmp_path / "tenant-1" / "user-1"
     report_dir.mkdir(parents=True)
-    (report_dir / "canonical.docx").write_bytes(_html_to_docx_bytes("<p>{alarm.total}</p>"))
+    (report_dir / "canonical.docx").write_bytes(
+        _html_to_docx_bytes("<p>{alarm.total}</p>")
+    )
     document = SimpleNamespace(
         file_path="canonical.docx",
         name="周报.docx",
@@ -731,7 +827,11 @@ def test_report_export_does_not_upload_partial_file_when_fetch_fails(monkeypatch
 
 
 def test_report_template_migration_creates_json_fields_and_owner_index():
-    migration = next((Path(__file__).resolve().parents[2] / "migrations/models").glob("73_*_add_report_template.py"))
+    migration = next(
+        (Path(__file__).resolve().parents[2] / "migrations/models").glob(
+            "73_*_add_report_template.py"
+        )
+    )
     source = migration.read_text()
 
     assert 'CREATE TABLE IF NOT EXISTS "report_template"' in source
@@ -741,3 +841,19 @@ def test_report_template_migration_creates_json_fields_and_owner_index():
     assert 'REFERENCES "report_document" ("id") ON DELETE SET NULL' in source
     assert 'ON "report_template" ("tenant_id", "owner_id")' in source
     assert 'DROP TABLE IF EXISTS "report_template"' in source
+
+
+def test_report_template_source_layout_migration_matches_model_fields():
+    migration = next(
+        (Path(__file__).resolve().parents[2] / "migrations/models").glob(
+            "99_*_report_template_source_layout.py"
+        )
+    )
+    source = migration.read_text()
+
+    assert 'ADD COLUMN "preserve_source_layout" BOOL NOT NULL DEFAULT True' in source
+    assert 'ADD COLUMN "source_docx_path" VARCHAR(512)' in source
+    assert 'COMMENT ON COLUMN "report_template"."preserve_source_layout"' in source
+    assert 'COMMENT ON COLUMN "report_template"."source_docx_path"' in source
+    assert 'DROP COLUMN "source_docx_path"' in source
+    assert 'DROP COLUMN "preserve_source_layout"' in source

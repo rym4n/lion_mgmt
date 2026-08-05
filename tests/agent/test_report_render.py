@@ -1,5 +1,8 @@
 # coding=utf-8
+import io
+
 import pytest
+from docx import Document
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
@@ -13,7 +16,7 @@ async def test_resolve_placeholders_replaces_span_text(monkeypatch):
 
     monkeypatch.setattr(report_fetch, "execute_fetch_action", fake_execute)
     html = (
-        '<p>本月告警 '
+        "<p>本月告警 "
         '<span data-placeholder-id="alarm" data-result-path="total">'
         "{alarm.total}</span> 起</p>"
     )
@@ -211,7 +214,9 @@ def _stub_polish(monkeypatch, replies):
 
     async def fake_execute_prompt(**kwargs):
         captured.append(kwargs)
-        return replies[len(captured) - 1] if len(captured) <= len(replies) else replies[-1]
+        return (
+            replies[len(captured) - 1] if len(captured) <= len(replies) else replies[-1]
+        )
 
     monkeypatch.setattr(report_render, "execute_prompt", fake_execute_prompt)
     return captured
@@ -446,7 +451,7 @@ async def test_render_report_docx_runs_fetch_before_annotations(monkeypatch):
     monkeypatch.setattr(report_render, "execute_prompt", fake_execute_prompt)
 
     content_html = (
-        "<p>概览：<mark data-annotation-ids=\"a1\">本月告警 "
+        '<p>概览：<mark data-annotation-ids="a1">本月告警 '
         '<span data-placeholder-id="alarm" data-result-path="total">'
         "{alarm.total}</span> 起</mark>。</p>"
     )
@@ -532,3 +537,29 @@ async def test_render_report_docx_preserves_headings_and_lists(monkeypatch):
     assert "月度报告" in text
     assert "要点一" in text
     assert "要点二" in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shell_name", ["missing.docx", "corrupt.docx"])
+async def test_render_report_docx_falls_back_when_shell_is_unavailable(
+    shell_name, tmp_path, caplog
+):
+    shell_path = tmp_path / shell_name
+    if shell_name == "corrupt.docx":
+        shell_path.write_bytes(b"not-a-docx")
+
+    with caplog.at_level("WARNING", logger=report_render.__name__):
+        docx_bytes = await report_render.render_report_docx(
+            content_html="<p>降级后正文</p>",
+            fetch_config={},
+            annotations=[],
+            tenant_id="t1",
+            operator_id="u1",
+            workspace_id="w1",
+            session_id="s1",
+            base_docx_path=shell_path,
+        )
+
+    document = Document(io.BytesIO(docx_bytes))
+    assert "降级后正文" in "\n".join(p.text for p in document.paragraphs)
+    assert any("降级为从零生成" in record.getMessage() for record in caplog.records)

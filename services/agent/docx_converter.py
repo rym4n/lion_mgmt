@@ -1432,10 +1432,26 @@ def _append_html_block(
     _add_paragraph_from_element(container, element, budget, style_name=style_name)
 
 
-def html_to_docx(html_content: str) -> bytes:
+def _clear_document_body(document) -> None:
+    body = document._body._element
+    section_properties = body.find(qn("w:sectPr"))
+    for child in list(body):
+        if child is not section_properties:
+            body.remove(child)
+
+
+def html_to_docx(html_content: str, base_document: bytes | None = None) -> bytes:
     budget = _ImageBudget()
     root = _parse_html_fragment(html_content, budget)
-    document = Document()
+    if base_document is None:
+        document = Document()
+    else:
+        validate_docx_bytes(base_document, _budget=budget)
+        try:
+            document = Document(io.BytesIO(base_document))
+        except Exception:
+            raise _fail("unsupported DOCX package") from None
+        _clear_document_body(document)
     _ensure_conversion_styles(document)
     _add_text_paragraph(document, root.text or "", budget)
     for element in root:

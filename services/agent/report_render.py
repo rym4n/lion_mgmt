@@ -6,6 +6,7 @@
 """
 
 import asyncio
+from pathlib import Path
 
 from lxml import etree, html as lxml_html
 from sanic.log import logger
@@ -44,11 +45,16 @@ def _iter_text_nodes(root):
 
 
 def _collect_text(root) -> str:
-    return "".join(value for element, attr in _iter_text_nodes(root)
-                   for value in [getattr(element, attr) or ""])
+    return "".join(
+        value
+        for element, attr in _iter_text_nodes(root)
+        for value in [getattr(element, attr) or ""]
+    )
 
 
-_EMPTY_MERGEABLE_TAGS = frozenset({"strong", "em", "b", "i", "u", "s", "span", "mark", "code", "sub", "sup"})
+_EMPTY_MERGEABLE_TAGS = frozenset(
+    {"strong", "em", "b", "i", "u", "s", "span", "mark", "code", "sub", "sup"}
+)
 
 
 def _drop_empty_inline_elements(root) -> None:
@@ -93,7 +99,9 @@ async def resolve_placeholders_in_html(
 
     def _substitute(value: str) -> str:
         return report_fetch.FETCH_PLACEHOLDER_RE.sub(
-            lambda match: replacer(match) if replacer(match) is not None else match.group(0),
+            lambda match: (
+                replacer(match) if replacer(match) is not None else match.group(0)
+            ),
             value,
         )
 
@@ -491,6 +499,7 @@ async def render_report_docx(
     operator_id,
     workspace_id: str,
     session_id: str,
+    base_docx_path: Path | None = None,
 ) -> bytes:
     """报告渲染流水线：取数 → 批注优化 → 剥批注痕迹 → HTML→docx。
 
@@ -507,4 +516,18 @@ async def render_report_docx(
         session_id=session_id,
     )
     html = strip_annotation_marks(html)
-    return docx_converter.html_to_docx(html)
+    base_document = None
+    if base_docx_path is not None:
+        try:
+            if base_docx_path.stat().st_size > docx_converter.MAX_DOCX_BYTES:
+                raise docx_converter.DocxConversionError("invalid DOCX size")
+            base_document = base_docx_path.read_bytes()
+            docx_converter.validate_docx_bytes(base_document)
+        except (OSError, docx_converter.DocxConversionError) as exc:
+            logger.warning(
+                "原始 DOCX 外壳不可用，降级为从零生成 path=%s error=%s",
+                base_docx_path,
+                type(exc).__name__,
+            )
+            base_document = None
+    return docx_converter.html_to_docx(html, base_document=base_document)
