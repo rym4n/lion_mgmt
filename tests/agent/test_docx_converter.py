@@ -15,7 +15,7 @@ from docx.oxml.ns import qn
 from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.shared import Inches, Pt, RGBColor
 from docx.text.run import Run
-from lxml import html as lxml_html
+from lxml import etree, html as lxml_html
 from PIL import Image
 
 from services.agent import docx_converter
@@ -117,6 +117,55 @@ def _document_bytes(document: Document) -> bytes:
     output = io.BytesIO()
     document.save(output)
     return output.getvalue()
+
+
+def _png_bytes(color: tuple[int, int, int]) -> bytes:
+    output = io.BytesIO()
+    Image.new("RGB", (3, 2), color).save(output, format="PNG")
+    return output.getvalue()
+
+
+def _assert_valid_png_data_uri(source: str) -> bytes:
+    prefix = "data:image/png;base64,"
+    assert source.startswith(prefix)
+    image_bytes = base64.b64decode(source[len(prefix) :], validate=True)
+    with Image.open(io.BytesIO(image_bytes)) as image:
+        image.verify()
+    return image_bytes
+
+
+def _picture_run(document: Document, image_bytes: bytes):
+    run = document.add_paragraph().add_run()
+    run.add_picture(io.BytesIO(image_bytes), width=Inches(0.5))
+    drawing = run._r.find(qn("w:drawing"))
+    assert drawing is not None
+    blip = next(
+        drawing.iter(
+            "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
+        )
+    )
+    relationship_id = blip.get(qn("r:embed"))
+    assert relationship_id
+    return run, drawing, relationship_id
+
+
+def _vml_picture(relationship_id: str) -> etree._Element:
+    vml_namespace = "urn:schemas-microsoft-com:vml"
+    picture = OxmlElement("w:pict")
+    shape = etree.SubElement(
+        picture, f"{{{vml_namespace}}}shape", nsmap={"v": vml_namespace}
+    )
+    image_data = etree.SubElement(shape, f"{{{vml_namespace}}}imagedata")
+    image_data.set(qn("r:id"), relationship_id)
+    return picture
+
+
+def _part_images(part, element) -> list[etree._Element]:
+    root = etree.Element("div")
+    docx_converter._append_docx_part_images(
+        root, part, element, docx_converter._ImageBudget()
+    )
+    return root.xpath("./img")
 
 
 def _round_trip_html(html_content: str):
@@ -307,6 +356,150 @@ def test_docx_image_dimensions_emit_prosemirror_attributes_and_legacy_style():
     round_tripped_image = _round_trip_html(converted_html).xpath(".//img")[0]
     assert round_tripped_image.get("width") == "192"
     assert round_tripped_image.get("height") == "96"
+
+
+def test_docx_import_extracts_legacy_vml_image_from_real_package():
+    image_bytes = _png_bytes((220, 20, 60))
+    document = Document()
+    run, drawing, relationship_id = _picture_run(document, image_bytes)
+    run._r.remove(drawing)
+    run._r.append(_vml_picture(relationship_id))
+
+    docx_bytes = _document_bytes(document)
+    reloaded = Document(io.BytesIO(docx_bytes))
+    assert not tuple(
+        reloaded.element.iter(
+            "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
+        )
+    )
+    assert len(
+        tuple(
+            reloaded.element.iter("{urn:schemas-microsoft-com:vml}imagedata")
+        )
+    ) == 1
+
+    root = lxml_html.fragment_fromstring(
+        docx_to_html(docx_bytes), create_parent="div"
+    )
+    images = root.xpath(".//img")
+    assert len(images) == 1
+    assert _assert_valid_png_data_uri(images[0].get("src")) == image_bytes
+
+
+def test_docx_import_does_not_dedupe_drawingml_and_vml_nodes_sharing_rid():
+    image_bytes = _png_bytes((12, 120, 210))
+    document = Document()
+    run, _drawing, relationship_id = _picture_run(document, image_bytes)
+    run._r.append(_vml_picture(relationship_id))
+
+    root = lxml_html.fragment_fromstring(
+        docx_to_html(_document_bytes(document)), create_parent="div"
+    )
+    images = root.xpath(".//img")
+    assert len(images) == 2
+    assert all(
+        _assert_valid_png_data_uri(image.get("src")) == image_bytes
+        for image in images
+    )
+
+
+def test_docx_import_extracts_textbox_image_from_alternate_content_once():
+    image_bytes = _png_bytes((30, 180, 90))
+    document = Document()
+    run, drawing, relationship_id = _picture_run(document, image_bytes)
+    paragraph = run._parent
+    run._r.remove(drawing)
+    paragraph._p.remove(run._r)
+
+    vml_namespace = "urn:schemas-microsoft-com:vml"
+    mc_namespace = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+    text_box_picture = OxmlElement("w:pict")
+    shape = etree.SubElement(
+        text_box_picture,
+        f"{{{vml_namespace}}}shape",
+        nsmap={"v": vml_namespace},
+    )
+    text_box = etree.SubElement(shape, f"{{{vml_namespace}}}textbox")
+    text_box_content = OxmlElement("w:txbxContent")
+    nested_paragraph = OxmlElement("w:p")
+    nested_run = OxmlElement("w:r")
+    nested_run.append(drawing)
+    nested_paragraph.append(nested_run)
+    text_box_content.append(nested_paragraph)
+    text_box.append(text_box_content)
+
+    alternate = etree.Element(
+        f"{{{mc_namespace}}}AlternateContent", nsmap={"mc": mc_namespace}
+    )
+    choice = etree.SubElement(alternate, f"{{{mc_namespace}}}Choice")
+    choice.set("Requires", "wps")
+    choice_run = OxmlElement("w:r")
+    choice_run.append(text_box_picture)
+    choice.append(choice_run)
+    fallback = etree.SubElement(alternate, f"{{{mc_namespace}}}Fallback")
+    fallback_run = OxmlElement("w:r")
+    fallback_run.append(_vml_picture(relationship_id))
+    fallback.append(fallback_run)
+    paragraph.add_run("图片前")
+    paragraph._p.append(alternate)
+    paragraph.add_run("图片后")
+
+    docx_bytes = _document_bytes(document)
+    reloaded = Document(io.BytesIO(docx_bytes))
+    assert len(tuple(reloaded.element.iter(qn("w:txbxContent")))) == 1
+    assert reloaded.paragraphs[0]._p[-2].tag == (
+        "{http://schemas.openxmlformats.org/markup-compatibility/2006}AlternateContent"
+    )
+    assert len(
+        tuple(
+            reloaded.element.iter(
+                "{http://schemas.openxmlformats.org/markup-compatibility/2006}AlternateContent"
+            )
+        )
+    ) == 1
+
+    root = lxml_html.fragment_fromstring(
+        docx_to_html(docx_bytes), create_parent="div"
+    )
+    images = root.xpath(".//img")
+    assert len(images) == 1
+    assert _assert_valid_png_data_uri(images[0].get("src")) == image_bytes
+    paragraph_children = root.xpath("./p/*")
+    assert [child.tag for child in paragraph_children] == ["span", "img", "span"]
+    assert paragraph_children[0].text_content() == "图片前"
+    assert paragraph_children[2].text_content() == "图片后"
+
+
+def test_header_and_footer_parts_can_extract_images_without_body_integration():
+    body_image = _png_bytes((220, 20, 60))
+    header_image = _png_bytes((30, 90, 180))
+    footer_image = _png_bytes((40, 170, 80))
+    document = Document()
+    document.add_paragraph().add_run().add_picture(io.BytesIO(body_image))
+    section = document.sections[0]
+    section.header.paragraphs[0].add_run().add_picture(io.BytesIO(header_image))
+    section.footer.paragraphs[0].add_run().add_picture(io.BytesIO(footer_image))
+
+    docx_bytes = _document_bytes(document)
+    reloaded = Document(io.BytesIO(docx_bytes))
+    body_root = lxml_html.fragment_fromstring(
+        docx_to_html(docx_bytes), create_parent="div"
+    )
+    body_images = body_root.xpath(".//img")
+    assert len(body_images) == 1
+    assert _assert_valid_png_data_uri(body_images[0].get("src")) == body_image
+
+    reloaded_section = reloaded.sections[0]
+    header_images = _part_images(
+        reloaded_section.header.part, reloaded_section.header._element
+    )
+    footer_images = _part_images(
+        reloaded_section.footer.part, reloaded_section.footer._element
+    )
+    assert len(header_images) == 1
+    assert len(footer_images) == 1
+    assert _assert_valid_png_data_uri(header_images[0].get("src")) == header_image
+    assert _assert_valid_png_data_uri(footer_images[0].get("src")) == footer_image
 
 
 @pytest.mark.parametrize("size_pt", [1, 2000])
@@ -682,6 +875,48 @@ def test_medium_docx_conversion_stays_within_regression_budget():
 
     assert "paragraph 399" in converted
     assert elapsed < 5.0
+
+
+def test_report_export_warns_about_dropped_remote_image_without_logging_url(caplog):
+    from services.agent import views
+
+    source = "https://private.example.test/report-image.png?token=secret"
+    node = views._ReportHTMLNode("img", {"src": source})
+    paragraph = Document().add_paragraph()
+
+    with caplog.at_level("WARNING"):
+        views._append_data_image(paragraph, node, {})
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "category=unsupported-src" in message
+        and "scheme=https" in message
+        and f"src_length={len(source)}" in message
+        for message in messages
+    )
+    assert all(source not in message for message in messages)
+    assert not paragraph.runs
+
+
+def test_report_export_warns_and_drops_malformed_image_url(caplog):
+    from services.agent import views
+
+    source = "http://["
+    node = views._ReportHTMLNode("img", {"src": source})
+    paragraph = Document().add_paragraph()
+
+    with caplog.at_level("WARNING"):
+        views._append_data_image(paragraph, node, {})
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "category=unsupported-src" in message
+        and "scheme=invalid" in message
+        and f"src_length={len(source)}" in message
+        for message in messages
+    )
+    assert all(source not in message for message in messages)
+    assert not paragraph.runs
 
 
 def test_docx_conversion_runner_has_bounded_capacity(monkeypatch):

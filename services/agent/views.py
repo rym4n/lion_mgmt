@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlparse
 
 from croniter import croniter
 from docx import Document
@@ -901,12 +902,37 @@ def _image_width(node: _ReportHTMLNode):
     return Inches(amount)
 
 
+def _warn_dropped_image_source(source, category: str) -> None:
+    if isinstance(source, str):
+        try:
+            scheme = urlparse(source).scheme.lower()
+        except ValueError:
+            scheme = "invalid"
+        if not scheme:
+            scheme = "protocol-relative" if source.startswith("//") else "relative"
+        length = len(source)
+    else:
+        scheme = "non-string"
+        length = 0
+    logger.warning(
+        "忽略无法写入 DOCX 的图片: category=%s scheme=%s src_length=%d",
+        category,
+        scheme,
+        length,
+    )
+
+
 def _append_data_image(paragraph, node: _ReportHTMLNode, formatting: dict) -> None:
     source = node.attrs.get("src")
-    if not isinstance(source, str) or not source.lower().startswith("data:image/") or "," not in source:
+    if not isinstance(source, str):
+        _warn_dropped_image_source(source, "invalid-src")
+        return
+    if not source.lower().startswith("data:image/") or "," not in source:
+        _warn_dropped_image_source(source, "unsupported-src")
         return
     header, encoded = source.split(",", 1)
     if ";base64" not in header.lower():
+        _warn_dropped_image_source(source, "unsupported-data-uri")
         return
     try:
         image_bytes = base64.b64decode(re.sub(r"\s+", "", encoded), validate=True)
@@ -914,7 +940,8 @@ def _append_data_image(paragraph, node: _ReportHTMLNode, formatting: dict) -> No
         _apply_run_format(run, formatting)
         run.add_picture(io.BytesIO(image_bytes), width=_image_width(node))
     except Exception as exc:
-        logger.warning("忽略无法写入 DOCX 的 data URL 图片: %s", exc)
+        _warn_dropped_image_source(source, "invalid-data-image")
+        logger.warning("忽略无法写入 DOCX 的 data URL 图片: error=%s", type(exc).__name__)
 
 
 def _append_html_inline(paragraph, node: _ReportHTMLNode, *, formatting: dict | None = None) -> None:

@@ -52,6 +52,21 @@ _EXTERNAL_IMAGE_PLACEHOLDER = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAHnOcQAAAAABJRU5ErkJggg=="
 )
 
+_DRAWINGML_BLIP_TAG = "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
+_VML_IMAGEDATA_TAG = "{urn:schemas-microsoft-com:vml}imagedata"
+_MC_ALTERNATE_CONTENT_TAG = (
+    "{http://schemas.openxmlformats.org/markup-compatibility/2006}AlternateContent"
+)
+_MC_CHOICE_TAG = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Choice"
+_MC_FALLBACK_TAG = (
+    "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
+)
+_IMAGE_CONTAINER_TAGS = {
+    qn("wp:inline"),
+    qn("wp:anchor"),
+    "{urn:schemas-microsoft-com:vml}shape",
+}
+
 _DOCX_REQUIRED_PARTS = {"[Content_Types].xml", "word/document.xml"}
 _BLOCK_TAGS = {
     "p",
@@ -1538,20 +1553,60 @@ def _set_html_text(element: etree._Element, text: str) -> None:
         line_break.tail = part
 
 
+def _iter_docx_image_nodes(element: etree._Element) -> Iterable[etree._Element]:
+    if element.tag == _MC_ALTERNATE_CONTENT_TAG:
+        choices = [child for child in element if child.tag == _MC_CHOICE_TAG]
+        fallback = next(
+            (child for child in element if child.tag == _MC_FALLBACK_TAG), None
+        )
+        for branch in (*choices, fallback):
+            if branch is None:
+                continue
+            images = tuple(_iter_docx_image_nodes(branch))
+            if images:
+                yield from images
+                return
+        return
+    if element.tag in {_DRAWINGML_BLIP_TAG, _VML_IMAGEDATA_TAG}:
+        yield element
+        return
+    for child in element:
+        yield from _iter_docx_image_nodes(child)
+
+
+def _docx_image_container(
+    image_node: etree._Element, scope: etree._Element
+) -> etree._Element:
+    current = image_node
+    while current is not scope:
+        parent = current.getparent()
+        if parent is None:
+            break
+        current = parent
+        if current.tag in _IMAGE_CONTAINER_TAGS:
+            return current
+    return scope
+
+
 def _append_docx_image(
     parent: etree._Element,
-    run: Run,
-    blip: etree._Element,
+    part,
+    image_node: etree._Element,
+    scope: etree._Element,
     budget: _ImageBudget,
 ) -> None:
-    linked_relationship_id = blip.get(qn("r:link"))
-    relationship_id = linked_relationship_id or blip.get(qn("r:embed"))
+    if image_node.tag == _VML_IMAGEDATA_TAG:
+        linked_relationship_id = None
+        relationship_id = image_node.get(qn("r:id"))
+    else:
+        linked_relationship_id = image_node.get(qn("r:link"))
+        relationship_id = linked_relationship_id or image_node.get(qn("r:embed"))
     if not relationship_id:
         return
     image = etree.SubElement(parent, "img")
     if linked_relationship_id:
         try:
-            relationship = run.part.rels[linked_relationship_id]
+            relationship = part.rels[linked_relationship_id]
             if relationship.reltype != RT.IMAGE or not relationship.is_external:
                 raise _fail("invalid external image relationship")
             image.set("src", _safe_network_url(relationship.target_ref))
@@ -1559,7 +1614,7 @@ def _append_docx_image(
             raise _fail("invalid external image relationship") from None
     else:
         try:
-            image_part = run.part.related_parts[relationship_id]
+            image_part = part.related_parts[relationship_id]
             image_bytes = image_part.blob
             content_type = image_part.content_type.lower().replace(
                 "image/jpg", "image/jpeg"
@@ -1572,11 +1627,12 @@ def _append_docx_image(
             "src",
             f"data:{normalized_mime};base64,{base64.b64encode(normalized_bytes).decode('ascii')}",
         )
-    extents = run._r.xpath(".//wp:extent")
-    if extents:
+    container = _docx_image_container(image_node, scope)
+    extent = next(container.iter(qn("wp:extent")), None)
+    if extent is not None:
         try:
-            width_pt = int(extents[0].get("cx")) / 12700
-            height_pt = int(extents[0].get("cy")) / 12700
+            width_pt = int(extent.get("cx")) / 12700
+            height_pt = int(extent.get("cy")) / 12700
             if 1 <= width_pt <= 2000:
                 image.set("width", f"{width_pt * 4 / 3:.17g}")
             else:
@@ -1588,15 +1644,35 @@ def _append_docx_image(
             image.set("style", f"width: {width_pt:g}pt; height: {height_pt:g}pt")
         except (TypeError, ValueError):
             pass
-    properties = run._r.xpath(".//wp:docPr")
-    if properties:
-        alt = properties[0].get("descr") or properties[0].get("title")
+    properties = next(container.iter(qn("wp:docPr")), None)
+    if properties is not None:
+        alt = properties.get("descr") or properties.get("title")
         if alt:
             image.set("alt", alt[:1024])
 
 
+def _append_docx_part_images(
+    parent: etree._Element,
+    part,
+    element: etree._Element,
+    budget: _ImageBudget,
+    seen_image_nodes: set[etree._Element] | None = None,
+) -> None:
+    for image_node in _iter_docx_image_nodes(element):
+        if seen_image_nodes is not None:
+            if image_node in seen_image_nodes:
+                continue
+            seen_image_nodes.add(image_node)
+        budget.check()
+        _append_docx_image(parent, part, image_node, element, budget)
+
+
 def _append_docx_run(
-    parent: etree._Element, run: Run, paragraph: Paragraph, budget: _ImageBudget
+    parent: etree._Element,
+    run: Run,
+    paragraph: Paragraph,
+    budget: _ImageBudget,
+    seen_image_nodes: set[etree._Element] | None = None,
 ) -> None:
     budget.check()
     if run.text:
@@ -1629,8 +1705,9 @@ def _append_docx_run(
             current = etree.SubElement(current, "span")
             current.set("style", "; ".join(span_styles))
         _set_html_text(current, run.text)
-    for blip in run._r.xpath(".//a:blip"):
-        _append_docx_image(parent, run, blip, budget)
+    _append_docx_part_images(
+        parent, run.part, run._r, budget, seen_image_nodes=seen_image_nodes
+    )
 
 
 def _paragraph_alignment(paragraph: Paragraph, budget: _ImageBudget):
@@ -1843,9 +1920,29 @@ def _list_info(paragraph: Paragraph, budget: _ImageBudget) -> _ListInfo | None:
 def _append_paragraph_contents(
     parent: etree._Element, paragraph: Paragraph, budget: _ImageBudget
 ) -> None:
-    for item in paragraph.iter_inner_content():
+    seen_image_nodes: set[etree._Element] = set()
+    content_by_element = {
+        item._element: item for item in paragraph.iter_inner_content()
+    }
+    for child in paragraph._p:
+        item = content_by_element.get(child)
+        if item is None:
+            _append_docx_part_images(
+                parent,
+                paragraph.part,
+                child,
+                budget,
+                seen_image_nodes=seen_image_nodes,
+            )
+            continue
         if isinstance(item, Run):
-            _append_docx_run(parent, item, paragraph, budget)
+            _append_docx_run(
+                parent,
+                item,
+                paragraph,
+                budget,
+                seen_image_nodes=seen_image_nodes,
+            )
         elif isinstance(item, Hyperlink):
             href = item.url or (f"#{item.fragment}" if item.fragment else "")
             try:
@@ -1856,7 +1953,13 @@ def _append_paragraph_contents(
                 etree.SubElement(parent, "a", href=href) if href else parent
             )
             for run in item.runs:
-                _append_docx_run(hyperlink_parent, run, paragraph, budget)
+                _append_docx_run(
+                    hyperlink_parent,
+                    run,
+                    paragraph,
+                    budget,
+                    seen_image_nodes=seen_image_nodes,
+                )
 
 
 def _append_docx_paragraph(
