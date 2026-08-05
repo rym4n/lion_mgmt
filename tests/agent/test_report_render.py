@@ -94,8 +94,26 @@ def test_collect_annotation_marks_reads_singular_attribute():
     assert list(marks.keys()) == ["a1"]
 
 
+def test_collect_annotation_marks_reads_image_anchor_in_document_order():
+    html = (
+        '<p><img src="data:image/png;base64,image" data-annotation-ids="a1">'
+        '<mark data-annotation-ids="a1">图片说明</mark></p>'
+    )
+    root = report_render._parse_document(html)
+    marks = report_render.collect_annotation_marks(root)
+    assert [element.tag for element in marks["a1"]] == ["img", "mark"]
+
+
 def test_collect_annotation_marks_rejects_overlapping_annotation():
     html = '<p><mark data-annotation-ids="a1 a2">重叠</mark></p>'
+    root = report_render._parse_document(html)
+    with pytest.raises(CustomError) as excinfo:
+        report_render.collect_annotation_marks(root)
+    assert excinfo.value.enum == ErrorCode.REPORT_ANNOTATION_OVERLAP
+
+
+def test_collect_annotation_marks_reuses_overlap_check_for_image_anchor():
+    html = '<p><img src="x" data-annotation-ids="a1 a2"></p>'
     root = report_render._parse_document(html)
     with pytest.raises(CustomError) as excinfo:
         report_render.collect_annotation_marks(root)
@@ -267,6 +285,29 @@ async def test_apply_annotations_append_inserts_list_after_block(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_apply_image_annotation_overwrite_uses_append_semantics(monkeypatch):
+    captured = _stub_polish(monkeypatch, ["<p>图片补充说明</p>"])
+    html = (
+        '<p><img src="data:image/png;base64,image" alt="拓扑图" '
+        'data-annotation-id="a1" data-annotation-ids="a1"></p>'
+    )
+    annotations = [
+        {"id": "a1", "comment": "补充图片说明", "status": "open", "mode": "overwrite"}
+    ]
+
+    result = await report_render.apply_annotations_to_html(
+        html, annotations, workspace_id="w1", session_id="s1"
+    )
+    root = report_render._parse_document(result)
+    image = root.find(".//img")
+    assert image is not None
+    assert image.get("alt") == "拓扑图"
+    assert image.getparent().getnext().text == "图片补充说明"
+    assert "写入模式：追加写" in captured[0]["message"]
+    assert "写入模式：覆盖写" not in captured[0]["message"]
+
+
+@pytest.mark.asyncio
 async def test_apply_annotations_overwrite_with_list_clears_region(monkeypatch):
     _stub_polish(monkeypatch, ["<ul><li>网络类 45 起</li></ul>"])
     html = '<p><mark data-annotation-ids="a1">旧的分布描述</mark></p>'
@@ -435,6 +476,24 @@ def test_strip_annotation_marks_drops_emptied_marks():
     assert "保留" in result
 
 
+def test_strip_annotation_marks_removes_only_image_annotation_attributes():
+    html = (
+        '<p>前<img src="data:image/png;base64,image" alt="拓扑图" width="320" '
+        'data-annotation-id="a1" data-annotation-ids="a1" data-asset-id="asset-1">后</p>'
+    )
+    result = report_render.strip_annotation_marks(html)
+    root = report_render._parse_document(result)
+    image = root.find(".//img")
+    assert image is not None
+    assert image.get("src") == "data:image/png;base64,image"
+    assert image.get("alt") == "拓扑图"
+    assert image.get("width") == "320"
+    assert image.get("data-asset-id") == "asset-1"
+    assert image.get("data-annotation-id") is None
+    assert image.get("data-annotation-ids") is None
+    assert "前" in result and "后" in result
+
+
 @pytest.mark.asyncio
 async def test_render_report_docx_runs_fetch_before_annotations(monkeypatch):
     """核心需求验证：AI 必须看到取数后的真实值，而不是占位符 token。"""
@@ -494,6 +553,40 @@ async def test_render_report_docx_output_has_no_annotation_trace(monkeypatch):
     assert "优化后的表述" in text
     assert "原始表述" not in text
     assert "data-annotation" not in text
+
+
+@pytest.mark.asyncio
+async def test_render_report_docx_with_image_annotation_preserves_image(monkeypatch):
+    image_data_uri = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4/"
+        "/8/AAX+Av4N70a4AAAAAElFTkSuQmCC"
+    )
+    _stub_polish(monkeypatch, ["<p>图片补充说明</p>"])
+
+    docx_bytes = await report_render.render_report_docx(
+        content_html=(
+            f'<p><img src="{image_data_uri}" alt="拓扑图" '
+            'data-annotation-id="a1" data-annotation-ids="a1"></p>'
+        ),
+        fetch_config={},
+        annotations=[
+            {
+                "id": "a1",
+                "comment": "补充图片说明",
+                "status": "open",
+                "mode": "overwrite",
+            }
+        ],
+        tenant_id="t1",
+        operator_id="u1",
+        workspace_id="w1",
+        session_id="s1",
+    )
+
+    document = Document(io.BytesIO(docx_bytes))
+    assert len(document.inline_shapes) == 1
+    assert "图片补充说明" in "\n".join(p.text for p in document.paragraphs)
 
 
 @pytest.mark.asyncio

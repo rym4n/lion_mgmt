@@ -131,12 +131,19 @@ def _annotation_ids_of(element) -> list[str]:
 
 
 def collect_annotation_marks(root) -> dict[str, list]:
-    """按文档顺序收集每个批注 id 对应的 mark 元素。
+    """按文档顺序收集每个批注 id 对应的文本或图片锚点。
 
-    携带 2+ 批注 id 的 mark 视为重叠批注，抛 REPORT_ANNOTATION_OVERLAP。
+    携带 2+ 批注 id 的锚点视为重叠批注，抛 REPORT_ANNOTATION_OVERLAP。
     """
     grouped: dict[str, list] = {}
-    for element in root.iter("mark"):
+    for element in root.iter():
+        is_mark = element.tag == "mark"
+        is_annotated_image = element.tag == "img" and (
+            "data-annotation-ids" in element.attrib
+            or "data-annotation-id" in element.attrib
+        )
+        if not (is_mark or is_annotated_image):
+            continue
         ids = _annotation_ids_of(element)
         if not ids:
             continue
@@ -167,6 +174,13 @@ def annotation_mode(annotation: dict) -> str:
     """读批注写入模式；缺省或非法值一律按覆盖写处理（向后兼容存量批注）。"""
     mode = str((annotation or {}).get("mode") or "").strip().lower()
     return mode if mode in _ANNOTATION_MODES else ANNOTATION_MODE_OVERWRITE
+
+
+def _effective_annotation_mode(annotation: dict, marks: list) -> str:
+    """图片是位置锚点，只能保留原图并在其后追加生成内容。"""
+    if any(element.tag == "img" for element in marks):
+        return ANNOTATION_MODE_APPEND
+    return annotation_mode(annotation)
 
 
 def annotation_region_text(marks: list) -> str:
@@ -372,7 +386,13 @@ async def _polish_one(
     timeout: float,
 ) -> list:
     """调 LLM 优化单条批注，返回清洗后的块级元素列表。"""
-    mode = annotation_mode(annotation)
+    requested_mode = annotation_mode(annotation)
+    mode = _effective_annotation_mode(annotation, marks)
+    if mode != requested_mode:
+        logger.warning(
+            "图片批注不支持覆盖写，按追加写处理 annotation_id=%s",
+            annotation.get("id"),
+        )
     region_text = annotation_region_text(marks)
     block = _containing_block(marks[0], root)
     before, after = _block_context(block, root)
@@ -400,7 +420,7 @@ async def _polish_one(
 
 def _apply_one(annotation: dict, marks: list, blocks: list, root) -> None:
     """按写入模式把优化结果写进文档树。"""
-    mode = annotation_mode(annotation)
+    mode = _effective_annotation_mode(annotation, marks)
     if mode == ANNOTATION_MODE_APPEND:
         block = _containing_block(marks[-1], root)
         if block is not None:
@@ -481,12 +501,15 @@ async def apply_annotations_to_html(
 
 
 def strip_annotation_marks(html: str) -> str:
-    """剥掉批注 <mark> 标签，保留其文字与内联子节点。"""
+    """剥掉文本和图片的批注痕迹，保留被批注的正文与图片。"""
     root = _parse_document(html)
     for element in list(root.iter("mark")):
         if not _annotation_ids_of(element):
             continue
         element.drop_tag()
+    for image in root.iter("img"):
+        image.attrib.pop("data-annotation-id", None)
+        image.attrib.pop("data-annotation-ids", None)
     return _serialize_children(root)
 
 
