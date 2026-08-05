@@ -140,9 +140,7 @@ def _picture_run(document: Document, image_bytes: bytes):
     drawing = run._r.find(qn("w:drawing"))
     assert drawing is not None
     blip = next(
-        drawing.iter(
-            "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
-        )
+        drawing.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}blip")
     )
     relationship_id = blip.get(qn("r:embed"))
     assert relationship_id
@@ -338,6 +336,117 @@ def test_docx_table_without_header_marker_keeps_first_row_as_data_cells():
     assert len(round_tripped.xpath(".//table//td")) == 4
 
 
+def test_docx_paragraph_indentation_round_trip_preserves_word_lengths():
+    document = Document()
+    paragraph = document.add_paragraph("首行缩进正文")
+    paragraph.paragraph_format.left_indent = Pt(18)
+    paragraph.paragraph_format.first_line_indent = Pt(24)
+
+    converted_html = docx_to_html(_document_bytes(document))
+    root = lxml_html.fragment_fromstring(converted_html, create_parent="div")
+    imported = root.xpath("./p[normalize-space()='首行缩进正文']")[0]
+    assert docx_converter._style_map(imported) == {
+        "margin-left": "18pt",
+        "text-indent": "24pt",
+    }
+
+    reexported = Document(io.BytesIO(html_to_docx(converted_html)))
+    paragraph = _paragraph_with_text(reexported, "首行缩进正文")
+    assert paragraph.paragraph_format.left_indent.pt == pytest.approx(18)
+    assert paragraph.paragraph_format.first_line_indent.pt == pytest.approx(24)
+
+
+def test_docx_paragraph_spacing_round_trip_preserves_word_lengths():
+    document = Document()
+    paragraph = document.add_paragraph("段落间距正文")
+    paragraph.paragraph_format.space_before = Pt(6)
+    paragraph.paragraph_format.space_after = Pt(9)
+
+    converted_html = docx_to_html(_document_bytes(document))
+    root = lxml_html.fragment_fromstring(converted_html, create_parent="div")
+    imported = root.xpath("./p[normalize-space()='段落间距正文']")[0]
+    assert docx_converter._style_map(imported) == {
+        "margin-top": "6pt",
+        "margin-bottom": "9pt",
+    }
+
+    reexported = Document(io.BytesIO(html_to_docx(converted_html)))
+    paragraph = _paragraph_with_text(reexported, "段落间距正文")
+    assert paragraph.paragraph_format.space_before.pt == pytest.approx(6)
+    assert paragraph.paragraph_format.space_after.pt == pytest.approx(9)
+
+
+def test_docx_table_visual_styles_and_widths_round_trip_through_real_package():
+    document = Document()
+    table = document.add_table(rows=1, cols=2)
+    _remove_table_look(table)
+    table.cell(0, 0).text = "保真单元格"
+    table.cell(0, 1).text = "普通单元格"
+    grid_columns = table._tbl.tblGrid.gridCol_lst
+    grid_columns[0].set(qn("w:w"), "1800")
+    grid_columns[1].set(qn("w:w"), "3600")
+
+    styled_cell = table.cell(0, 0)
+    styled_cell.width = Pt(90)
+    cell_properties = styled_cell._tc.get_or_add_tcPr()
+    shading = OxmlElement("w:shd")
+    shading.set(qn("w:val"), "clear")
+    shading.set(qn("w:color"), "auto")
+    shading.set(qn("w:fill"), "ABCDEF")
+    cell_properties.append(shading)
+    borders = OxmlElement("w:tcBorders")
+    for edge_name in ("top", "left", "bottom", "right"):
+        edge = OxmlElement(f"w:{edge_name}")
+        edge.set(qn("w:val"), "single")
+        edge.set(qn("w:sz"), "8")
+        edge.set(qn("w:space"), "0")
+        edge.set(qn("w:color"), "123456")
+        borders.append(edge)
+    cell_properties.append(borders)
+
+    converted_html = docx_to_html(_document_bytes(document))
+    root = lxml_html.fragment_fromstring(converted_html, create_parent="div")
+    columns = root.xpath(".//table/colgroup/col")
+    assert [docx_converter._style_map(column)["width"] for column in columns] == [
+        "90pt",
+        "180pt",
+    ]
+    imported_cell = root.xpath(".//table//td[normalize-space()='保真单元格']")[0]
+    assert docx_converter._style_map(imported_cell) == {
+        "background-color": "#ABCDEF",
+        "width": "90pt",
+        "border": "1pt solid #123456",
+    }
+
+    reexported = Document(io.BytesIO(html_to_docx(converted_html)))
+    reexported_table = reexported.tables[0]
+    assert [
+        int(column.get(qn("w:w")))
+        for column in reexported_table._tbl.tblGrid.gridCol_lst
+    ] == [1800, 3600]
+    reexported_properties = reexported_table.cell(0, 0)._tc.tcPr
+    cell_width = reexported_properties.find(qn("w:tcW"))
+    assert cell_width.get(qn("w:type")) == "dxa"
+    assert int(cell_width.get(qn("w:w"))) == 1800
+    assert reexported_properties.find(qn("w:shd")).get(qn("w:fill")) == "ABCDEF"
+    reexported_borders = reexported_properties.find(qn("w:tcBorders"))
+    assert {
+        edge.tag.rsplit("}", 1)[-1]: (
+            edge.get(qn("w:val")),
+            edge.get(qn("w:sz")),
+            edge.get(qn("w:color")),
+        )
+        for edge in reexported_borders
+    } == {
+        "top": ("single", "8", "123456"),
+        "left": ("single", "8", "123456"),
+        "bottom": ("single", "8", "123456"),
+        "right": ("single", "8", "123456"),
+    }
+    run_properties = reexported_table.cell(0, 0).paragraphs[0].runs[0]._r.rPr
+    assert run_properties is None or run_properties.find(qn("w:shd")) is None
+
+
 def test_docx_image_dimensions_emit_prosemirror_attributes_and_legacy_style():
     image = io.BytesIO()
     Image.new("RGB", (8, 4), (220, 20, 60)).save(image, format="PNG")
@@ -372,15 +481,12 @@ def test_docx_import_extracts_legacy_vml_image_from_real_package():
             "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
         )
     )
-    assert len(
-        tuple(
-            reloaded.element.iter("{urn:schemas-microsoft-com:vml}imagedata")
-        )
-    ) == 1
-
-    root = lxml_html.fragment_fromstring(
-        docx_to_html(docx_bytes), create_parent="div"
+    assert (
+        len(tuple(reloaded.element.iter("{urn:schemas-microsoft-com:vml}imagedata")))
+        == 1
     )
+
+    root = lxml_html.fragment_fromstring(docx_to_html(docx_bytes), create_parent="div")
     images = root.xpath(".//img")
     assert len(images) == 1
     assert _assert_valid_png_data_uri(images[0].get("src")) == image_bytes
@@ -398,8 +504,7 @@ def test_docx_import_does_not_dedupe_drawingml_and_vml_nodes_sharing_rid():
     images = root.xpath(".//img")
     assert len(images) == 2
     assert all(
-        _assert_valid_png_data_uri(image.get("src")) == image_bytes
-        for image in images
+        _assert_valid_png_data_uri(image.get("src")) == image_bytes for image in images
     )
 
 
@@ -450,17 +555,18 @@ def test_docx_import_extracts_textbox_image_from_alternate_content_once():
     assert reloaded.paragraphs[0]._p[-2].tag == (
         "{http://schemas.openxmlformats.org/markup-compatibility/2006}AlternateContent"
     )
-    assert len(
-        tuple(
-            reloaded.element.iter(
-                "{http://schemas.openxmlformats.org/markup-compatibility/2006}AlternateContent"
+    assert (
+        len(
+            tuple(
+                reloaded.element.iter(
+                    "{http://schemas.openxmlformats.org/markup-compatibility/2006}AlternateContent"
+                )
             )
         )
-    ) == 1
-
-    root = lxml_html.fragment_fromstring(
-        docx_to_html(docx_bytes), create_parent="div"
+        == 1
     )
+
+    root = lxml_html.fragment_fromstring(docx_to_html(docx_bytes), create_parent="div")
     images = root.xpath(".//img")
     assert len(images) == 1
     assert _assert_valid_png_data_uri(images[0].get("src")) == image_bytes

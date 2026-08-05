@@ -127,6 +127,7 @@ _TAG_ATTRIBUTES = {
 }
 _ALLOWED_STYLE_PROPERTIES = {
     "background-color",
+    "border",
     "color",
     "font-family",
     "font-size",
@@ -134,9 +135,13 @@ _ALLOWED_STYLE_PROPERTIES = {
     "font-weight",
     "height",
     "line-height",
+    "margin-bottom",
+    "margin-left",
+    "margin-top",
     "text-align",
     "text-decoration",
     "text-decoration-line",
+    "text-indent",
     "vertical-align",
     "width",
 }
@@ -150,6 +155,12 @@ _RGB_RE = re.compile(
 _HEX_COLOR_RE = re.compile(r"\A#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\Z")
 _FONT_NAME_RE = re.compile(r"\A[\w \-.,'\u0080-\uffff]+\Z")
 _LENGTH_RE = re.compile(r"\A(\d+(?:\.\d+)?)(px|pt|in|cm|mm)?\Z", re.IGNORECASE)
+_SIGNED_LENGTH_RE = re.compile(r"\A(-?\d+(?:\.\d+)?)(px|pt|in|cm|mm)?\Z", re.IGNORECASE)
+_BORDER_RE = re.compile(
+    r"\A(\d+(?:\.\d+)?(?:px|pt|in|cm|mm)?)\s+"
+    r"(solid|dashed|dotted|double)\s+(.+)\Z",
+    re.IGNORECASE,
+)
 
 _NAMED_COLORS = {
     "black": "#000000",
@@ -401,9 +412,13 @@ def _canonical_font_name(value: str) -> str:
 
 
 def _length_to_points(
-    value: str, *, minimum: float = 1, maximum: float = 2000
+    value: str,
+    *,
+    minimum: float = 1,
+    maximum: float = 2000,
+    signed: bool = False,
 ) -> float:
-    match = _LENGTH_RE.fullmatch(value.strip())
+    match = (_SIGNED_LENGTH_RE if signed else _LENGTH_RE).fullmatch(value.strip())
     if not match:
         raise _fail("invalid CSS length")
     amount = float(match.group(1))
@@ -466,6 +481,20 @@ def _canonical_style_value(name: str, value: str) -> str | None:
                 raise _fail("invalid line height")
             return f"{amount:g}"
         return f"{_length_to_points(value, minimum=6, maximum=240):g}pt"
+    if name in {"margin-left", "text-indent"}:
+        points = _length_to_points(value, minimum=-2000, maximum=2000, signed=True)
+        return f"{points:g}pt"
+    if name in {"margin-top", "margin-bottom"}:
+        return f"{_length_to_points(value, minimum=0, maximum=2000):g}pt"
+    if name == "border":
+        match = _BORDER_RE.fullmatch(value.strip())
+        if not match:
+            raise _fail("invalid CSS border")
+        width = _length_to_points(match.group(1), minimum=0.125, maximum=12)
+        color = _canonical_color(match.group(3))
+        if color is None:
+            raise _fail("invalid CSS border color")
+        return f"{width:g}pt {match.group(2).lower()} {color}"
     if name in {"width", "height"}:
         return f"{_length_to_points(value, minimum=1, maximum=2000):g}pt"
     return None
@@ -748,7 +777,7 @@ def _inline_style_for_element(
         )
     if "color" in style:
         changes["color"] = _canonical_color(style["color"])
-    if "background-color" in style:
+    if "background-color" in style and tag not in {"td", "th"}:
         changes["highlight"] = _canonical_color(style["background-color"])
     return replace(parent, **changes)
 
@@ -954,7 +983,17 @@ def _apply_paragraph_style(paragraph: Paragraph, element: etree._Element) -> Non
             paragraph.paragraph_format.line_spacing = Pt(float(line_height[:-2]))
         else:
             paragraph.paragraph_format.line_spacing = float(line_height)
-    if element.tag.lower() == "blockquote":
+    paragraph_lengths = {
+        "margin-left": "left_indent",
+        "text-indent": "first_line_indent",
+        "margin-top": "space_before",
+        "margin-bottom": "space_after",
+    }
+    for css_name, format_name in paragraph_lengths.items():
+        value = style.get(css_name)
+        if value is not None:
+            setattr(paragraph.paragraph_format, format_name, Pt(float(value[:-2])))
+    if element.tag.lower() == "blockquote" and "margin-left" not in style:
         paragraph.paragraph_format.left_indent = Inches(0.25)
 
 
@@ -1143,6 +1182,66 @@ def _clear_cell(cell: _Cell) -> None:
             cell._tc.remove(child)
 
 
+def _set_cell_shading(cell: _Cell, color: str) -> None:
+    cell_properties = cell._tc.get_or_add_tcPr()
+    for shading in list(cell_properties.findall(qn("w:shd"))):
+        cell_properties.remove(shading)
+    shading = OxmlElement("w:shd")
+    shading.set(qn("w:val"), "clear")
+    shading.set(qn("w:color"), "auto")
+    shading.set(qn("w:fill"), color.lstrip("#"))
+    cell_properties.append(shading)
+
+
+def _set_cell_border(cell: _Cell, value: str) -> None:
+    match = _BORDER_RE.fullmatch(value)
+    if match is None:
+        return
+    width_pt = _length_to_points(match.group(1), minimum=0.125, maximum=12)
+    color = _canonical_color(match.group(3))
+    if color is None:
+        return
+    border_style = {
+        "solid": "single",
+        "dashed": "dashed",
+        "dotted": "dotted",
+        "double": "double",
+    }[match.group(2).lower()]
+    cell_properties = cell._tc.get_or_add_tcPr()
+    for existing in list(cell_properties.findall(qn("w:tcBorders"))):
+        cell_properties.remove(existing)
+    borders = OxmlElement("w:tcBorders")
+    for edge in ("top", "left", "bottom", "right"):
+        border = OxmlElement(f"w:{edge}")
+        border.set(qn("w:val"), border_style)
+        border.set(qn("w:sz"), str(max(1, round(width_pt * 8))))
+        border.set(qn("w:space"), "0")
+        border.set(qn("w:color"), color.lstrip("#"))
+        borders.append(border)
+    cell_properties.append(borders)
+
+
+def _apply_table_cell_style(cell: _Cell, element: etree._Element) -> None:
+    style = _style_map(element)
+    if background := style.get("background-color"):
+        _set_cell_shading(cell, background)
+    if width := style.get("width"):
+        cell.width = Pt(float(width[:-2]))
+    if border := style.get("border"):
+        _set_cell_border(cell, border)
+
+
+def _apply_table_column_widths(table: Table, element: etree._Element) -> None:
+    columns = element.xpath("./colgroup/col")
+    if not columns:
+        return
+    table.autofit = False
+    for index, column_element in enumerate(columns[: len(table.columns)]):
+        width = _style_map(column_element).get("width")
+        if width:
+            table.columns[index].width = Pt(_length_to_points(width))
+
+
 def _table_rows(element: etree._Element) -> list[etree._Element]:
     return list(element.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr"))
 
@@ -1243,6 +1342,7 @@ def _add_table(container, element: etree._Element, budget: _ImageBudget) -> None
         table.style = "Table Grid"
     except KeyError:
         pass
+    _apply_table_column_widths(table, element)
     first_row_cells = _row_cells(rows[0])
     _set_table_first_row_header(
         table,
@@ -1254,6 +1354,7 @@ def _add_table(container, element: etree._Element, budget: _ImageBudget) -> None
         target = table.cell(row_index, column_index)
         if end_row != row_index or end_column != column_index:
             target = target.merge(table.cell(end_row, end_column))
+        _apply_table_cell_style(target, cell_element)
         _clear_cell(target)
         block_children = [
             child for child in cell_element if child.tag.lower() in _BLOCK_TAGS
@@ -1724,16 +1825,19 @@ def _paragraph_alignment(paragraph: Paragraph, budget: _ImageBudget):
     return None
 
 
-def _paragraph_line_spacing(paragraph: Paragraph, budget: _ImageBudget):
-    spacing = paragraph.paragraph_format.line_spacing
-    if spacing is not None:
-        return spacing
+def _paragraph_format_value(paragraph: Paragraph, name: str, budget: _ImageBudget):
+    try:
+        value = getattr(paragraph.paragraph_format, name)
+        if value is not None:
+            return value
+    except (AttributeError, ValueError):
+        pass
     try:
         paragraph_style = _cached_item_style(paragraph, "paragraph", budget)
         for style in _cached_style_chain(paragraph_style, budget):
-            spacing = style.paragraph_format.line_spacing
-            if spacing is not None:
-                return spacing
+            value = getattr(style.paragraph_format, name)
+            if value is not None:
+                return value
     except (AttributeError, KeyError, ValueError):
         pass
     return None
@@ -1751,12 +1855,21 @@ def _paragraph_css(paragraph: Paragraph, budget: _ImageBudget) -> str:
     }
     if alignment in alignment_map:
         declarations.append(f"text-align: {alignment_map[alignment]}")
-    spacing = _paragraph_line_spacing(paragraph, budget)
+    spacing = _paragraph_format_value(paragraph, "line_spacing", budget)
     if spacing is not None:
         if hasattr(spacing, "pt"):
             declarations.append(f"line-height: {spacing.pt:g}pt")
         elif isinstance(spacing, (float, int)):
             declarations.append(f"line-height: {float(spacing):g}")
+    for format_name, css_name in (
+        ("left_indent", "margin-left"),
+        ("first_line_indent", "text-indent"),
+        ("space_before", "margin-top"),
+        ("space_after", "margin-bottom"),
+    ):
+        value = _paragraph_format_value(paragraph, format_name, budget)
+        if value is not None and hasattr(value, "pt"):
+            declarations.append(f"{css_name}: {value.pt:g}pt")
     return "; ".join(declarations)
 
 
@@ -2075,10 +2188,116 @@ def _first_row_is_header(table: Table) -> bool:
         return False
 
 
+def _word_color(value: str | None) -> str | None:
+    value = (value or "").upper()
+    if value == "AUTO":
+        return "#000000"
+    return f"#{value}" if re.fullmatch(r"[0-9A-F]{6}", value) else None
+
+
+def _cell_width_points(
+    table: Table, cell: _Cell, column_index: int, colspan: int
+) -> float | None:
+    cell_properties = cell._tc.tcPr
+    width = cell_properties.find(qn("w:tcW")) if cell_properties is not None else None
+    if width is not None and (width.get(qn("w:type")) or "dxa") == "dxa":
+        try:
+            twips = int(width.get(qn("w:w"), "0"))
+            if twips > 0:
+                return twips / 20
+        except (TypeError, ValueError):
+            pass
+    grid_columns = (
+        table._tbl.tblGrid.gridCol_lst if table._tbl.tblGrid is not None else []
+    )
+    if column_index + colspan > len(grid_columns):
+        return None
+    try:
+        twips = sum(
+            int(column.get(qn("w:w"), "0"))
+            for column in grid_columns[column_index : column_index + colspan]
+        )
+    except (TypeError, ValueError):
+        return None
+    return twips / 20 if twips > 0 else None
+
+
+def _cell_border_css(cell: _Cell) -> str | None:
+    cell_properties = cell._tc.tcPr
+    borders = (
+        cell_properties.find(qn("w:tcBorders")) if cell_properties is not None else None
+    )
+    if borders is None:
+        return None
+    signatures = []
+    for edge_name in ("top", "right", "bottom", "left"):
+        edge = borders.find(qn(f"w:{edge_name}"))
+        if edge is None:
+            continue
+        word_style = edge.get(qn("w:val"), "single")
+        css_style = {
+            "single": "solid",
+            "dashed": "dashed",
+            "dashSmallGap": "dashed",
+            "dotted": "dotted",
+            "double": "double",
+        }.get(word_style)
+        color = _word_color(edge.get(qn("w:color")))
+        if css_style is None or color is None:
+            continue
+        try:
+            width_pt = max(0.125, int(edge.get(qn("w:sz"), "8")) / 8)
+        except (TypeError, ValueError):
+            continue
+        signatures.append((width_pt, css_style, color))
+    if not signatures or any(item != signatures[0] for item in signatures[1:]):
+        return None
+    width_pt, css_style, color = signatures[0]
+    return f"{width_pt:g}pt {css_style} {color}"
+
+
+def _table_cell_css(table: Table, cell: _Cell, column_index: int, colspan: int) -> str:
+    declarations = []
+    cell_properties = cell._tc.tcPr
+    shading = cell_properties.find(qn("w:shd")) if cell_properties is not None else None
+    if shading is not None:
+        fill = _word_color(shading.get(qn("w:fill")))
+        pattern = shading.get(qn("w:val"), "clear")
+        if fill is not None and pattern not in {"nil", "none"}:
+            declarations.append(f"background-color: {fill}")
+    width_pt = _cell_width_points(table, cell, column_index, colspan)
+    if width_pt is not None:
+        declarations.append(f"width: {width_pt:g}pt")
+    border = _cell_border_css(cell)
+    if border is not None:
+        declarations.append(f"border: {border}")
+    return "; ".join(declarations)
+
+
+def _append_table_grid_columns(table_element: etree._Element, table: Table) -> None:
+    grid = table._tbl.tblGrid
+    if grid is None or not grid.gridCol_lst:
+        return
+    widths = []
+    for column in grid.gridCol_lst:
+        try:
+            width_pt = int(column.get(qn("w:w"), "0")) / 20
+        except (TypeError, ValueError):
+            return
+        if not 1 <= width_pt <= 2000:
+            return
+        widths.append(width_pt)
+    column_group = etree.SubElement(table_element, "colgroup")
+    for width_pt in widths:
+        column = etree.SubElement(column_group, "col")
+        column.set("style", f"width: {width_pt:g}pt")
+
+
 def _append_docx_table(
     parent: etree._Element, table: Table, budget: _ImageBudget
 ) -> None:
     table_element = etree.SubElement(parent, "table")
+    _append_table_grid_columns(table_element, table)
     body = etree.SubElement(table_element, "tbody")
     first_row_is_header = _first_row_is_header(table)
     for row_index, _row in enumerate(table._tbl.tr_lst):
@@ -2095,6 +2314,9 @@ def _append_docx_table(
             rowspan = _vertical_span(table, row_index, column_index, colspan, cell)
             if rowspan > 1:
                 cell_element.set("rowspan", str(rowspan))
+            css = _table_cell_css(table, cell, column_index, colspan)
+            if css:
+                cell_element.set("style", css)
             _append_docx_blocks(cell_element, cell.iter_inner_content(), budget)
 
 
