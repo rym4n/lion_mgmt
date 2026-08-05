@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import binascii
 import io
+import logging
 import re
 import time
 import zipfile
@@ -104,7 +105,7 @@ _TAG_ATTRIBUTES = {
     "img": {"src", "alt", "title", "width", "height"},
     "input": {"checked", "type"},
     "li": {"data-checked", "data-type"},
-    "ol": {"start", "data-type"},
+    "ol": {"start", "type", "data-type"},
     "td": {"colspan", "rowspan"},
     "th": {"colspan", "rowspan"},
     "ul": {"data-type"},
@@ -181,6 +182,8 @@ _IMAGE_FORMAT_MIME = {
     "WEBP": "image/webp",
 }
 
+logger = logging.getLogger(__name__)
+
 
 class DocxConversionError(ValueError):
     """Raised when conversion input is invalid or outside the supported contract."""
@@ -246,7 +249,18 @@ class _ListContext:
     level: int
     kind: str
     element: etree._Element
+    num_id: int | None = None
+    ordered_type: str | None = None
     last_item: etree._Element | None = None
+
+
+@dataclass(frozen=True)
+class _ListInfo:
+    kind: str
+    level: int
+    num_id: int | None = None
+    ordered_type: str | None = None
+    start: int | None = None
 
 
 def _fail(message: str) -> DocxConversionError:
@@ -386,6 +400,62 @@ def _length_to_points(
     return points
 
 
+def _canonical_style_value(name: str, value: str) -> str | None:
+    lowered = value.lower()
+    if name in {"color", "background-color"}:
+        if lowered in {"inherit", "initial", "unset"}:
+            return None
+        return _canonical_color(value)
+    if name == "font-family":
+        return _canonical_font_name(value)
+    if name == "font-size":
+        return f"{_length_to_points(value, minimum=6, maximum=96):g}pt"
+    if name == "font-style":
+        if lowered not in {"normal", "italic", "oblique"}:
+            raise _fail("invalid font style")
+        return lowered
+    if name == "font-weight":
+        if lowered not in {
+            "normal",
+            "bold",
+            "bolder",
+            "lighter",
+        } and not re.fullmatch(r"[1-9]00", lowered):
+            raise _fail("invalid font weight")
+        return lowered
+    if name in {"text-decoration", "text-decoration-line"}:
+        tokens = set(lowered.split())
+        if not tokens or not tokens <= {"none", "underline", "line-through"}:
+            raise _fail("invalid text decoration")
+        return " ".join(sorted(tokens))
+    if name == "vertical-align":
+        if lowered not in {"baseline", "sub", "super"}:
+            raise _fail("invalid vertical alignment")
+        return lowered
+    if name == "text-align":
+        if lowered not in {"left", "right", "center", "justify", "start", "end"}:
+            raise _fail("invalid text alignment")
+        return {"start": "left", "end": "right"}.get(lowered, lowered)
+    if name == "line-height":
+        if re.fullmatch(r"\d+(?:\.\d+)?", lowered):
+            amount = float(lowered)
+            if not 0.5 <= amount <= 5:
+                raise _fail("invalid line height")
+            return f"{amount:g}"
+        if lowered.endswith("%"):
+            try:
+                amount = float(lowered[:-1]) / 100
+            except ValueError:
+                raise _fail("invalid line height") from None
+            if not 0.5 <= amount <= 5:
+                raise _fail("invalid line height")
+            return f"{amount:g}"
+        return f"{_length_to_points(value, minimum=6, maximum=240):g}pt"
+    if name in {"width", "height"}:
+        return f"{_length_to_points(value, minimum=1, maximum=2000):g}pt"
+    return None
+
+
 def _canonical_style(style: str) -> str:
     if not isinstance(style, str) or len(style) > 4096:
         raise _fail("invalid style attribute")
@@ -406,63 +476,15 @@ def _canonical_style(style: str) -> str:
             for token in ("url(", "expression(", "javascript:", "@import", "var(")
         ):
             raise _fail("unsafe style value")
-        if name in {"color", "background-color"}:
-            if lowered in {"inherit", "initial", "unset"}:
-                continue
-            color = _canonical_color(value)
-            if color:
-                declarations[name] = color
-        elif name == "font-family":
-            declarations[name] = _canonical_font_name(value)
-        elif name == "font-size":
-            declarations[name] = (
-                f"{_length_to_points(value, minimum=6, maximum=96):g}pt"
+        try:
+            canonical = _canonical_style_value(name, value)
+        except DocxConversionError as exc:
+            logger.warning(
+                "Dropping invalid style declaration %s=%r: %s", name, value, exc
             )
-        elif name == "font-style":
-            if lowered not in {"normal", "italic", "oblique"}:
-                raise _fail("invalid font style")
-            declarations[name] = lowered
-        elif name == "font-weight":
-            if lowered not in {
-                "normal",
-                "bold",
-                "bolder",
-                "lighter",
-            } and not re.fullmatch(r"[1-9]00", lowered):
-                raise _fail("invalid font weight")
-            declarations[name] = lowered
-        elif name in {"text-decoration", "text-decoration-line"}:
-            tokens = set(lowered.split())
-            if not tokens or not tokens <= {"none", "underline", "line-through"}:
-                raise _fail("invalid text decoration")
-            declarations[name] = " ".join(sorted(tokens))
-        elif name == "vertical-align":
-            if lowered not in {"baseline", "sub", "super"}:
-                raise _fail("invalid vertical alignment")
-            declarations[name] = lowered
-        elif name == "text-align":
-            if lowered not in {"left", "right", "center", "justify", "start", "end"}:
-                raise _fail("invalid text alignment")
-            declarations[name] = {"start": "left", "end": "right"}.get(lowered, lowered)
-        elif name == "line-height":
-            if re.fullmatch(r"\d+(?:\.\d+)?", lowered):
-                amount = float(lowered)
-                if not 0.5 <= amount <= 5:
-                    raise _fail("invalid line height")
-                declarations[name] = f"{amount:g}"
-            elif lowered.endswith("%"):
-                amount = float(lowered[:-1]) / 100
-                if not 0.5 <= amount <= 5:
-                    raise _fail("invalid line height")
-                declarations[name] = f"{amount:g}"
-            else:
-                declarations[name] = (
-                    f"{_length_to_points(value, minimum=6, maximum=240):g}pt"
-                )
-        elif name in {"width", "height"}:
-            declarations[name] = (
-                f"{_length_to_points(value, minimum=1, maximum=2000):g}pt"
-            )
+            continue
+        if canonical is not None:
+            declarations[name] = canonical
     return "; ".join(f"{name}: {value}" for name, value in declarations.items())
 
 
@@ -608,8 +630,9 @@ def _parse_html_fragment(
                     raise _fail(f"invalid {name}")
                 cleaned[name] = str(number)
             elif name in {"width", "height"}:
+                points = _length_to_points(raw_value, minimum=1, maximum=2000)
                 cleaned[name] = (
-                    f"{_length_to_points(raw_value, minimum=1, maximum=2000):g}pt"
+                    f"{points * 4 / 3:.17g}" if tag == "img" else f"{points:g}pt"
                 )
             elif name == "class":
                 language_class = next(
@@ -629,6 +652,10 @@ def _parse_html_fragment(
             elif name == "data-checked":
                 if raw_value.lower() in {"true", "false"}:
                     cleaned[name] = raw_value.lower()
+            elif name == "type" and tag == "ol":
+                if raw_value not in {"1", "a", "A", "i", "I"}:
+                    raise _fail("unsupported ordered list type")
+                cleaned[name] = raw_value
             elif name == "type":
                 if raw_value.lower() != "checkbox":
                     raise _fail("unsupported input type")
@@ -973,16 +1000,108 @@ def _append_list_item_contents(
     _trim_paragraph_spaces(paragraph)
 
 
+def _add_ordered_list_numbering(
+    document, *, ordered_type: str | None, start: int, level: int
+) -> tuple[int, int]:
+    numbering = document.part.numbering_part.element
+    abstract_ids = [
+        int(node.get(qn("w:abstractNumId"), "0"))
+        for node in numbering.findall(qn("w:abstractNum"))
+    ]
+    num_ids = [
+        int(node.get(qn("w:numId"), "0")) for node in numbering.findall(qn("w:num"))
+    ]
+    abstract_id = max(abstract_ids, default=0) + 1
+    num_id = max(num_ids, default=0) + 1
+    numbering_level = min(max(level, 0), 8)
+
+    abstract = OxmlElement("w:abstractNum")
+    abstract.set(qn("w:abstractNumId"), str(abstract_id))
+    multi_level_type = OxmlElement("w:multiLevelType")
+    multi_level_type.set(qn("w:val"), "multilevel")
+    abstract.append(multi_level_type)
+    level_element = OxmlElement("w:lvl")
+    level_element.set(qn("w:ilvl"), str(numbering_level))
+    start_element = OxmlElement("w:start")
+    start_element.set(qn("w:val"), str(start))
+    format_element = OxmlElement("w:numFmt")
+    format_element.set(
+        qn("w:val"),
+        {
+            "a": "lowerLetter",
+            "A": "upperLetter",
+            "i": "lowerRoman",
+            "I": "upperRoman",
+        }.get(ordered_type, "decimal"),
+    )
+    level_text = OxmlElement("w:lvlText")
+    level_text.set(qn("w:val"), f"%{numbering_level + 1}.")
+    level_justification = OxmlElement("w:lvlJc")
+    level_justification.set(qn("w:val"), "left")
+    paragraph_properties = OxmlElement("w:pPr")
+    indentation = OxmlElement("w:ind")
+    indentation.set(qn("w:left"), str(720 * (numbering_level + 1)))
+    indentation.set(qn("w:hanging"), "360")
+    paragraph_properties.append(indentation)
+    level_element.extend(
+        [
+            start_element,
+            format_element,
+            level_text,
+            level_justification,
+            paragraph_properties,
+        ]
+    )
+    abstract.append(level_element)
+    numbering.append(abstract)
+
+    number = OxmlElement("w:num")
+    number.set(qn("w:numId"), str(num_id))
+    abstract_reference = OxmlElement("w:abstractNumId")
+    abstract_reference.set(qn("w:val"), str(abstract_id))
+    number.append(abstract_reference)
+    numbering.append(number)
+    return num_id, numbering_level
+
+
+def _apply_paragraph_numbering(
+    paragraph: Paragraph, *, num_id: int, level: int
+) -> None:
+    paragraph_properties = paragraph._p.get_or_add_pPr()
+    existing = paragraph_properties.find(qn("w:numPr"))
+    if existing is not None:
+        paragraph_properties.remove(existing)
+    numbering_properties = OxmlElement("w:numPr")
+    level_reference = OxmlElement("w:ilvl")
+    level_reference.set(qn("w:val"), str(level))
+    number_reference = OxmlElement("w:numId")
+    number_reference.set(qn("w:val"), str(num_id))
+    numbering_properties.extend([level_reference, number_reference])
+    paragraph_properties.append(numbering_properties)
+
+
 def _add_html_list(
     container, element: etree._Element, budget: _ImageBudget, level: int = 0
 ) -> None:
     kind = element.tag.lower()
     is_task_list = element.get("data-type") == "taskList"
+    numbering_info = None
+    if kind == "ol" and not is_task_list:
+        numbering_info = _add_ordered_list_numbering(
+            container.part.document,
+            ordered_type=element.get("type"),
+            start=int(element.get("start", "1")),
+            level=level,
+        )
     for item in element:
         if item.tag.lower() != "li":
             continue
         paragraph = container.add_paragraph(style=_list_style_name(kind, level))
         _apply_paragraph_style(paragraph, item)
+        if numbering_info is not None:
+            _apply_paragraph_numbering(
+                paragraph, num_id=numbering_info[0], level=numbering_info[1]
+            )
         task_checked = None
         if is_task_list or item.get("data-type") == "taskItem":
             checked_value = item.get("data-checked")
@@ -1077,6 +1196,28 @@ def _validate_html_tables(root: etree._Element, budget: _ImageBudget) -> None:
             raise _fail("total table cell limit exceeded")
 
 
+def _set_table_first_row_header(table: Table, enabled: bool) -> None:
+    if not table._tbl.tr_lst:
+        return
+    row_properties = table._tbl.tr_lst[0].get_or_add_trPr()
+    for header in list(row_properties.findall(qn("w:tblHeader"))):
+        row_properties.remove(header)
+    if enabled:
+        row_properties.append(OxmlElement("w:tblHeader"))
+
+    table_look = table._tbl.tblPr.find(qn("w:tblLook"))
+    if table_look is None:
+        table_look = OxmlElement("w:tblLook")
+        table._tbl.tblPr.append(table_look)
+    table_look.set(qn("w:firstRow"), "1" if enabled else "0")
+    try:
+        look_value = int(table_look.get(qn("w:val"), "0"), 16)
+    except ValueError:
+        look_value = 0
+    look_value = look_value | 0x20 if enabled else look_value & ~0x20
+    table_look.set(qn("w:val"), f"{look_value:04X}")
+
+
 def _add_table(container, element: etree._Element, budget: _ImageBudget) -> None:
     rows, placements, column_count, _ = _table_layout(element, budget)
     if isinstance(container, _Cell):
@@ -1087,6 +1228,12 @@ def _add_table(container, element: etree._Element, budget: _ImageBudget) -> None
         table.style = "Table Grid"
     except KeyError:
         pass
+    first_row_cells = _row_cells(rows[0])
+    _set_table_first_row_header(
+        table,
+        bool(first_row_cells)
+        and all(cell.tag.lower() == "th" for cell in first_row_cells),
+    )
 
     for row_index, column_index, end_row, end_column, cell_element in placements:
         target = table.cell(row_index, column_index)
@@ -1430,6 +1577,14 @@ def _append_docx_image(
         try:
             width_pt = int(extents[0].get("cx")) / 12700
             height_pt = int(extents[0].get("cy")) / 12700
+            if 1 <= width_pt <= 2000:
+                image.set("width", f"{width_pt * 4 / 3:.17g}")
+            else:
+                logger.warning("Dropping invalid image width=%rpt", width_pt)
+            if 1 <= height_pt <= 2000:
+                image.set("height", f"{height_pt * 4 / 3:.17g}")
+            else:
+                logger.warning("Dropping invalid image height=%rpt", height_pt)
             image.set("style", f"width: {width_pt:g}pt; height: {height_pt:g}pt")
         except (TypeError, ValueError):
             pass
@@ -1563,9 +1718,7 @@ def _is_horizontal_rule(paragraph: Paragraph, budget: _ImageBudget) -> bool:
     return borders is not None and borders.find(qn("w:bottom")) is not None
 
 
-def _style_list_info(
-    paragraph: Paragraph, budget: _ImageBudget
-) -> tuple[str, int] | None:
+def _style_list_info(paragraph: Paragraph, budget: _ImageBudget) -> _ListInfo | None:
     try:
         paragraph_style = _cached_item_style(paragraph, "paragraph", budget)
         style_name = paragraph_style.name or ""
@@ -1577,13 +1730,13 @@ def _style_list_info(
     ) or re.fullmatch(r"List(Bullet|Number)([1-9]\d*)?", style_id, re.IGNORECASE)
     if not match:
         return None
-    return (
-        "ul" if match.group(1).lower() == "bullet" else "ol",
-        max(0, int(match.group(2) or "1") - 1),
+    return _ListInfo(
+        kind="ul" if match.group(1).lower() == "bullet" else "ol",
+        level=max(0, int(match.group(2) or "1") - 1),
     )
 
 
-def _numbering_kind(paragraph: Paragraph, num_id: int, level: int) -> str | None:
+def _numbering_kind(paragraph: Paragraph, num_id: int, level: int) -> _ListInfo | None:
     try:
         numbering = paragraph.part.numbering_part.element
         number = next(
@@ -1605,16 +1758,62 @@ def _numbering_kind(paragraph: Paragraph, num_id: int, level: int) -> str | None
         )
         if level_element is None:
             return None
-        format_element = level_element.find(qn("w:numFmt"))
+        override = next(
+            (
+                node
+                for node in number.findall(qn("w:lvlOverride"))
+                if int(node.get(qn("w:ilvl"), "0")) == level
+            ),
+            None,
+        )
+        override_level = override.find(qn("w:lvl")) if override is not None else None
+        format_element = (
+            override_level.find(qn("w:numFmt")) if override_level is not None else None
+        )
+        if format_element is None:
+            format_element = level_element.find(qn("w:numFmt"))
         number_format = (
             format_element.get(qn("w:val"), "") if format_element is not None else ""
         )
-        return "ul" if number_format == "bullet" else "ol"
+        if number_format == "bullet":
+            return _ListInfo(kind="ul", level=level, num_id=num_id)
+
+        start_element = (
+            override.find(qn("w:startOverride")) if override is not None else None
+        )
+        if start_element is None and override_level is not None:
+            start_element = override_level.find(qn("w:start"))
+        if start_element is None:
+            start_element = level_element.find(qn("w:start"))
+        start = (
+            int(start_element.get(qn("w:val"), "1")) if start_element is not None else 1
+        )
+        if not 1 <= start <= 100_000:
+            logger.warning(
+                "Dropping invalid ordered-list start=%r for numId=%s level=%s",
+                start,
+                num_id,
+                level,
+            )
+            start = 1
+        ordered_type = {
+            "lowerLetter": "a",
+            "upperLetter": "A",
+            "lowerRoman": "i",
+            "upperRoman": "I",
+        }.get(number_format)
+        return _ListInfo(
+            kind="ol",
+            level=level,
+            num_id=num_id,
+            ordered_type=ordered_type,
+            start=start,
+        )
     except (AttributeError, KeyError, StopIteration, TypeError, ValueError):
         return None
 
 
-def _list_info(paragraph: Paragraph, budget: _ImageBudget) -> tuple[str, int] | None:
+def _list_info(paragraph: Paragraph, budget: _ImageBudget) -> _ListInfo | None:
     style_info = _style_list_info(paragraph, budget)
     num_pr = paragraph._p.pPr.numPr if paragraph._p.pPr is not None else None
     if num_pr is None:
@@ -1634,12 +1833,11 @@ def _list_info(paragraph: Paragraph, budget: _ImageBudget) -> tuple[str, int] | 
         level = (
             int(num_pr.ilvl.val)
             if num_pr.ilvl is not None
-            else (style_info[1] if style_info else 0)
+            else (style_info.level if style_info else 0)
         )
     except (TypeError, ValueError):
         return style_info
-    kind = _numbering_kind(paragraph, num_id, level)
-    return (kind, level) if kind else style_info
+    return _numbering_kind(paragraph, num_id, level) or style_info
 
 
 def _append_paragraph_contents(
@@ -1690,43 +1888,137 @@ def _grid_span(cell: _Cell) -> int:
         return 1
 
 
+def _row_grid_before(row) -> int:
+    row_properties = row.trPr
+    grid_before = (
+        row_properties.find(qn("w:gridBefore")) if row_properties is not None else None
+    )
+    try:
+        return (
+            max(0, int(grid_before.get(qn("w:val")))) if grid_before is not None else 0
+        )
+    except (TypeError, ValueError):
+        return 0
+
+
+def _raw_row_cells(table: Table, row_index: int):
+    row = table._tbl.tr_lst[row_index]
+    column_index = _row_grid_before(row)
+    for cell_xml in row.tc_lst:
+        cell = _Cell(cell_xml, table)
+        colspan = _grid_span(cell)
+        yield column_index, colspan, cell
+        column_index += colspan
+
+
+def _vertical_merge_state(cell: _Cell) -> str | None:
+    cell_properties = cell._tc.tcPr
+    merge = (
+        cell_properties.find(qn("w:vMerge")) if cell_properties is not None else None
+    )
+    if merge is None:
+        return None
+    return merge.get(qn("w:val")) or "continue"
+
+
+def _vertical_span(
+    table: Table, row_index: int, column_index: int, colspan: int, cell: _Cell
+) -> int:
+    if _vertical_merge_state(cell) != "restart":
+        return 1
+    rowspan = 1
+    for following_row in range(row_index + 1, len(table._tbl.tr_lst)):
+        continuation = next(
+            (
+                candidate
+                for start, candidate_span, candidate in _raw_row_cells(
+                    table, following_row
+                )
+                if start == column_index and candidate_span == colspan
+            ),
+            None,
+        )
+        if continuation is None or _vertical_merge_state(continuation) != "continue":
+            break
+        rowspan += 1
+    return rowspan
+
+
+def _on_off_enabled(element: etree._Element) -> bool:
+    value = element.get(qn("w:val"))
+    return value is None or value.lower() not in {"0", "false", "off", "no"}
+
+
+def _first_row_is_header(table: Table) -> bool:
+    if not table._tbl.tr_lst:
+        return False
+    row_properties = table._tbl.tr_lst[0].trPr
+    row_header = (
+        row_properties.find(qn("w:tblHeader")) if row_properties is not None else None
+    )
+    if row_header is not None and _on_off_enabled(row_header):
+        return True
+
+    table_properties = table._tbl.tblPr
+    table_look = table_properties.find(qn("w:tblLook"))
+    if table_look is None:
+        return False
+    first_row = table_look.get(qn("w:firstRow"))
+    if first_row is not None:
+        return first_row.lower() not in {"0", "false", "off", "no"}
+    try:
+        return bool(int(table_look.get(qn("w:val"), "0"), 16) & 0x20)
+    except ValueError:
+        return False
+
+
 def _append_docx_table(
     parent: etree._Element, table: Table, budget: _ImageBudget
 ) -> None:
     table_element = etree.SubElement(parent, "table")
     body = etree.SubElement(table_element, "tbody")
-    for row in table.rows:
+    first_row_is_header = _first_row_is_header(table)
+    for row_index, _row in enumerate(table._tbl.tr_lst):
         budget.check()
         row_element = etree.SubElement(body, "tr")
-        seen: set[int] = set()
-        for cell in row.cells:
+        cell_tag = "th" if row_index == 0 and first_row_is_header else "td"
+        for column_index, colspan, cell in _raw_row_cells(table, row_index):
             budget.check()
-            cell_key = id(cell._tc)
-            if cell_key in seen:
+            if _vertical_merge_state(cell) == "continue":
                 continue
-            seen.add(cell_key)
-            cell_element = etree.SubElement(row_element, "td")
-            span = _grid_span(cell)
-            if span > 1:
-                cell_element.set("colspan", str(span))
+            cell_element = etree.SubElement(row_element, cell_tag)
+            if colspan > 1:
+                cell_element.set("colspan", str(colspan))
+            rowspan = _vertical_span(table, row_index, column_index, colspan, cell)
+            if rowspan > 1:
+                cell_element.set("rowspan", str(rowspan))
             _append_docx_blocks(cell_element, cell.iter_inner_content(), budget)
 
 
 def _append_list_paragraph(
     parent: etree._Element,
     paragraph: Paragraph,
-    info: tuple[str, int],
+    info: _ListInfo,
     stack: list[_ListContext],
     budget: _ImageBudget,
     task_checked: bool | None = None,
 ) -> None:
-    kind, level = info
+    kind = info.kind
+    level = info.level
     if not stack:
         level = 0
     elif level > stack[-1].level + 1:
         level = stack[-1].level + 1
     while stack and (
-        level < stack[-1].level or (level == stack[-1].level and kind != stack[-1].kind)
+        level < stack[-1].level
+        or (
+            level == stack[-1].level
+            and (
+                kind != stack[-1].kind
+                or info.num_id != stack[-1].num_id
+                or info.ordered_type != stack[-1].ordered_type
+            )
+        )
     ):
         stack.pop()
     if not stack or level > stack[-1].level:
@@ -1736,7 +2028,20 @@ def _append_list_paragraph(
         list_element = etree.SubElement(list_parent, "ul" if kind == "task" else kind)
         if kind == "task":
             list_element.set("data-type", "taskList")
-        stack.append(_ListContext(level=level, kind=kind, element=list_element))
+        elif kind == "ol":
+            if info.ordered_type:
+                list_element.set("type", info.ordered_type)
+            if info.start is not None and info.start != 1:
+                list_element.set("start", str(info.start))
+        stack.append(
+            _ListContext(
+                level=level,
+                kind=kind,
+                element=list_element,
+                num_id=info.num_id,
+                ordered_type=info.ordered_type,
+            )
+        )
     context = stack[-1]
     item = etree.SubElement(context.element, "li")
     content_parent = item
@@ -1788,10 +2093,16 @@ def _append_docx_blocks(
     for block in blocks:
         budget.check()
         if isinstance(block, Paragraph):
+            if _heading_level(block, budget) is not None:
+                stack.clear()
+                _append_docx_paragraph(parent, block, budget)
+                continue
             info = _list_info(block, budget)
             task_checked = _task_checked(block)
             if task_checked is not None:
-                info = ("task", info[1] if info else 0)
+                info = _ListInfo(
+                    kind="task", level=info.level if info is not None else 0
+                )
             if info:
                 _append_list_paragraph(
                     parent,

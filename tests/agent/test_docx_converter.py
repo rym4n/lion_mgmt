@@ -1,6 +1,7 @@
 # coding=utf-8
 import asyncio
 import base64
+from copy import deepcopy
 import io
 from pathlib import Path
 import threading
@@ -112,6 +113,262 @@ def _run_with_text(paragraph, text: str):
     return next(run for run in paragraph.runs if text in run.text)
 
 
+def _document_bytes(document: Document) -> bytes:
+    output = io.BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+def _round_trip_html(html_content: str):
+    return lxml_html.fragment_fromstring(
+        docx_to_html(html_to_docx(html_content)), create_parent="div"
+    )
+
+
+def _remove_table_look(table) -> None:
+    table_look = table._tbl.tblPr.find(qn("w:tblLook"))
+    if table_look is not None:
+        table._tbl.tblPr.remove(table_look)
+
+
+def _add_numbered_paragraph(
+    document: Document,
+    text: str,
+    *,
+    number_format: str,
+    start: int,
+):
+    numbering = document.part.numbering_part.element
+    abstract_ids = [
+        int(node.get(qn("w:abstractNumId")))
+        for node in numbering.findall(qn("w:abstractNum"))
+    ]
+    num_ids = [int(node.get(qn("w:numId"))) for node in numbering.findall(qn("w:num"))]
+    abstract_id = max(abstract_ids, default=0) + 1
+    num_id = max(num_ids, default=0) + 1
+
+    abstract = OxmlElement("w:abstractNum")
+    abstract.set(qn("w:abstractNumId"), str(abstract_id))
+    level = OxmlElement("w:lvl")
+    level.set(qn("w:ilvl"), "0")
+    level_start = OxmlElement("w:start")
+    level_start.set(qn("w:val"), "1")
+    level_format = OxmlElement("w:numFmt")
+    level_format.set(qn("w:val"), number_format)
+    level_text = OxmlElement("w:lvlText")
+    level_text.set(qn("w:val"), "%1.")
+    level.extend([level_start, level_format, level_text])
+    abstract.append(level)
+    numbering.append(abstract)
+
+    number = OxmlElement("w:num")
+    number.set(qn("w:numId"), str(num_id))
+    abstract_reference = OxmlElement("w:abstractNumId")
+    abstract_reference.set(qn("w:val"), str(abstract_id))
+    override = OxmlElement("w:lvlOverride")
+    override.set(qn("w:ilvl"), "0")
+    start_override = OxmlElement("w:startOverride")
+    start_override.set(qn("w:val"), str(start))
+    override.append(start_override)
+    number.extend([abstract_reference, override])
+    numbering.append(number)
+
+    paragraph = document.add_paragraph(text)
+    num_properties = OxmlElement("w:numPr")
+    level_reference = OxmlElement("w:ilvl")
+    level_reference.set(qn("w:val"), "0")
+    number_reference = OxmlElement("w:numId")
+    number_reference.set(qn("w:val"), str(num_id))
+    num_properties.extend([level_reference, number_reference])
+    paragraph._p.get_or_add_pPr().append(num_properties)
+    return paragraph, num_id
+
+
+def test_docx_import_drops_only_invalid_style_declarations(caplog):
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph.paragraph_format.line_spacing = Pt(300)
+    run = paragraph.add_run("越界样式仍保留正文")
+    run.font.name = "微软雅黑 (正文)"
+    run.font.size = Pt(100)
+    run.font.color.rgb = RGBColor(0x12, 0x34, 0x56)
+
+    with caplog.at_level("WARNING", logger=docx_converter.__name__):
+        converted_html = docx_to_html(_document_bytes(document))
+
+    root = lxml_html.fragment_fromstring(converted_html, create_parent="div")
+    assert root.xpath(".//p[contains(., '越界样式仍保留正文')]")
+    assert "color: #123456" in converted_html
+    assert "font-size" not in converted_html
+    assert "font-family" not in converted_html
+    assert "line-height" not in converted_html
+    warnings = "\n".join(record.getMessage() for record in caplog.records)
+    assert "font-size='100pt'" in warnings
+    assert "font-family='微软雅黑 (正文)'" in warnings
+    assert "line-height='300pt'" in warnings
+    round_tripped = _round_trip_html(converted_html)
+    assert round_tripped.xpath(".//p[contains(., '越界样式仍保留正文')]")
+    assert "color: #123456" in lxml_html.tostring(round_tripped, encoding="unicode")
+
+
+def test_numbered_heading_style_takes_precedence_over_list_semantics():
+    document = Document()
+    heading = document.add_heading("自动编号标题", level=2)
+    list_numbering = document.styles["List Number"]._element.pPr.numPr
+    heading._p.get_or_add_pPr().append(deepcopy(list_numbering))
+
+    converted_html = docx_to_html(_document_bytes(document))
+    root = lxml_html.fragment_fromstring(converted_html, create_parent="div")
+
+    assert root.xpath("./h2[normalize-space()='自动编号标题']")
+    assert not root.xpath(".//li[contains(., '自动编号标题')]")
+    assert _round_trip_html(converted_html).xpath(
+        "./h2[normalize-space()='自动编号标题']"
+    )
+
+
+def test_docx_table_header_and_vertical_merge_are_preserved():
+    document = Document()
+    table = document.add_table(rows=3, cols=2)
+    _remove_table_look(table)
+    for row_index in range(3):
+        table.cell(row_index, 0).text = f"左{row_index}"
+        table.cell(row_index, 1).text = f"右{row_index}"
+    table.cell(0, 0).merge(table.cell(2, 0)).text = "纵向合并"
+    table_header = OxmlElement("w:tblHeader")
+    table._tbl.tr_lst[0].get_or_add_trPr().append(table_header)
+
+    converted_html = docx_to_html(_document_bytes(document))
+    root = lxml_html.fragment_fromstring(converted_html, create_parent="div")
+
+    assert len(root.xpath(".//table//th")) == 2
+    assert len(root.xpath(".//table//td")) == 2
+    assert len(root.xpath(".//table//*[self::th or self::td]")) == 4
+    assert root.xpath(".//th[@rowspan='3'][normalize-space()='纵向合并']")
+    assert converted_html.count("纵向合并") == 1
+    round_tripped = _round_trip_html(converted_html)
+    assert len(round_tripped.xpath(".//table//*[self::th or self::td]")) == 4
+    assert round_tripped.xpath(".//th[@rowspan='3'][normalize-space()='纵向合并']")
+
+
+def test_docx_table_look_first_row_emits_headers():
+    document = Document()
+    table = document.add_table(rows=2, cols=2)
+    table_look = table._tbl.tblPr.find(qn("w:tblLook"))
+    if table_look is None:
+        table_look = OxmlElement("w:tblLook")
+        table._tbl.tblPr.append(table_look)
+    table_look.set(qn("w:firstRow"), "1")
+    table.cell(0, 0).text = "表头一"
+    table.cell(0, 1).text = "表头二"
+
+    root = lxml_html.fragment_fromstring(
+        docx_to_html(_document_bytes(document)), create_parent="div"
+    )
+    assert len(root.xpath(".//table//th")) == 2
+    assert (
+        len(_round_trip_html(docx_to_html(_document_bytes(document))).xpath(".//th"))
+        == 2
+    )
+
+
+def test_docx_table_without_header_marker_keeps_first_row_as_data_cells():
+    document = Document()
+    table = document.add_table(rows=2, cols=2)
+    _remove_table_look(table)
+    table.cell(0, 0).text = "普通一"
+    table.cell(0, 1).text = "普通二"
+
+    root = lxml_html.fragment_fromstring(
+        docx_to_html(_document_bytes(document)), create_parent="div"
+    )
+    assert not root.xpath(".//table//th")
+    assert len(root.xpath(".//table//td")) == 4
+    round_tripped = _round_trip_html(docx_to_html(_document_bytes(document)))
+    assert not round_tripped.xpath(".//table//th")
+    assert len(round_tripped.xpath(".//table//td")) == 4
+
+
+def test_docx_image_dimensions_emit_prosemirror_attributes_and_legacy_style():
+    image = io.BytesIO()
+    Image.new("RGB", (8, 4), (220, 20, 60)).save(image, format="PNG")
+    document = Document()
+    document.add_paragraph().add_run().add_picture(
+        io.BytesIO(image.getvalue()), width=Inches(2), height=Inches(1)
+    )
+
+    converted_html = docx_to_html(_document_bytes(document))
+    root = lxml_html.fragment_fromstring(converted_html, create_parent="div")
+    imported_image = root.xpath(".//img")[0]
+
+    assert imported_image.get("width") == "192"
+    assert imported_image.get("height") == "96"
+    assert imported_image.get("style") == "width: 144pt; height: 72pt"
+    round_tripped_image = _round_trip_html(converted_html).xpath(".//img")[0]
+    assert round_tripped_image.get("width") == "192"
+    assert round_tripped_image.get("height") == "96"
+
+
+@pytest.mark.parametrize("size_pt", [1, 2000])
+def test_docx_image_dimension_safety_boundaries_remain_importable(size_pt):
+    image = io.BytesIO()
+    Image.new("RGB", (1, 1), (220, 20, 60)).save(image, format="PNG")
+    document = Document()
+    document.add_paragraph().add_run().add_picture(
+        io.BytesIO(image.getvalue()), width=Pt(size_pt), height=Pt(size_pt)
+    )
+
+    converted_html = docx_to_html(_document_bytes(document))
+    imported_image = lxml_html.fragment_fromstring(
+        converted_html, create_parent="div"
+    ).xpath(".//img")[0]
+
+    assert float(imported_image.get("width")) * 0.75 == pytest.approx(size_pt)
+    assert float(imported_image.get("height")) * 0.75 == pytest.approx(size_pt)
+    assert imported_image.get("style") == f"width: {size_pt}pt; height: {size_pt}pt"
+    round_tripped_image = _round_trip_html(converted_html).xpath(".//img")[0]
+    assert float(round_tripped_image.get("width")) * 0.75 == pytest.approx(size_pt)
+    assert float(round_tripped_image.get("height")) * 0.75 == pytest.approx(size_pt)
+
+
+def test_docx_ordered_list_preserves_type_and_start_override():
+    document = Document()
+    expected = [
+        ("lowerLetter", "a", 3),
+        ("upperLetter", "A", 4),
+        ("lowerRoman", "i", 5),
+        ("upperRoman", "I", 6),
+    ]
+    for index, (number_format, _html_type, start) in enumerate(expected):
+        _add_numbered_paragraph(
+            document,
+            f"编号格式 {index}",
+            number_format=number_format,
+            start=start,
+        )
+
+    converted_html = docx_to_html(_document_bytes(document))
+    root = lxml_html.fragment_fromstring(converted_html, create_parent="div")
+    ordered_lists = root.xpath("./ol")
+
+    assert [item.get("type") for item in ordered_lists] == [
+        item[1] for item in expected
+    ]
+    assert [item.get("start") for item in ordered_lists] == [
+        str(item[2]) for item in expected
+    ]
+    assert ["".join(item.itertext()).strip() for item in ordered_lists] == [
+        f"编号格式 {index}" for index in range(4)
+    ]
+    round_tripped_lists = _round_trip_html(converted_html).xpath("./ol")
+    assert [item.get("type") for item in round_tripped_lists] == [
+        item[1] for item in expected
+    ]
+    assert [item.get("start") for item in round_tripped_lists] == [
+        str(item[2]) for item in expected
+    ]
+
+
 def test_rich_html_docx_round_trip_preserves_editor_contract(rich_html: str):
     docx_bytes = html_to_docx(rich_html)
     document = Document(io.BytesIO(docx_bytes))
@@ -217,7 +474,7 @@ def test_existing_rich_docx_import_and_reexport_preserves_supported_content(
     )
     assert root.xpath(".//ul/li[normalize-space()='原始项目']")
     assert root.xpath(".//ol/li[normalize-space()='原始步骤']")
-    assert root.xpath(".//table/tbody/tr/td[normalize-space()='A']")
+    assert root.xpath(".//table/tbody/tr/th[normalize-space()='A']")
     assert root.xpath(".//img[@alt='原始图片']")
 
     reexported = Document(io.BytesIO(html_to_docx(converted_html)))
