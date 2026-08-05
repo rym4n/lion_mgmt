@@ -704,11 +704,15 @@ def test_report_export_does_not_upload_partial_file_when_fetch_fails(monkeypatch
     async def fail_fetch(*_args, **_kwargs):
         raise CustomError(ErrorCode.SERVER_ERROR)
 
+    async def no_export_template(*_args, **_kwargs):
+        return None
+
     async def fake_upload(*args, **kwargs):
         uploads.append((args, kwargs))
         return "unexpected"
 
     monkeypatch.setattr(agent_views, "REPORT_USER_BASE", str(tmp_path))
+    monkeypatch.setattr(agent_views, "_resolve_export_template", no_export_template)
     monkeypatch.setattr(agent_views, "_resolve_fetch_placeholders", fail_fetch)
     monkeypatch.setattr(agent_views, "upload_to_s3", fake_upload)
 
