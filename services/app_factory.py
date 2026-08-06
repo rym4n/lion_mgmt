@@ -26,6 +26,7 @@ from services.event.views import event_bp
 from services.event_ingestion.views import event_ingestion_bp
 from services.inspection.views import inspection_bp
 from services.license.views import license_bp
+from services.llm_config.views import llm_config_bp
 from services.log_view.views import logs_bp
 from services.mcp.views import mcp_bp
 from services.network_topology.views import topology_bp
@@ -82,7 +83,7 @@ def _licensed_blueprints() -> dict:
         "var_bp": var_bp,
         "workflow_bp": workflow_bp,
         "logs_bp": logs_bp,
-        "ai_bp": ai_bp,
+        "ai_bp": (ai_bp, llm_config_bp),
         "agent_bp": agent_bp,
         "mcp_bp": mcp_bp,
         "command_bp": command_bp,
