@@ -227,3 +227,5 @@ class ErrorCode(BaseErrorCode):
     REPORT_ANNOTATION_OVERLAP = ErrorData(4177, "存在重叠批注，请拆分后重试")
     REPORT_ANNOTATION_ANCHOR_MISSING = ErrorData(4178, "批注锚点已失效，请重新批注")
     REPORT_ANNOTATION_POLISH_FAILED = ErrorData(4179, "批注优化失败，请稍后重试")
+    LLM_CONFIG_NOT_CONFIGURED = ErrorData(4180, "未配置模型，请前往系统设置 → 模型配置")
+    LLM_CONFIG_NAME_DUPLICATED = ErrorData(4181, "该名称已被使用（含已删除的配置），请换一个名称")

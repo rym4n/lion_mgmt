@@ -91,6 +91,13 @@ class CommandAgent(BaseModel):
     skill_keys = fields.JSONField(default=list, description="启用的数字员工技能 key 列表")
     rbac_role_id = fields.CharField(max_length=36, null=True, description="员工绑定的 RBAC 角色")
     resource_scope = fields.JSONField(default=dict, description="员工资源访问范围")
+    llm_config = fields.ForeignKeyField(
+        "models.LlmModelConfig",
+        null=True,
+        on_delete=fields.SET_NULL,
+        related_name="agents",
+        description="指定模型配置，为空则用全局默认",
+    )
     workspace_synced_at = fields.DatetimeField(null=True, description="上次同步到 lion_agent 的时间")
     workspace_etag = fields.CharField(max_length=64, null=True, description="workspace 同步版本指纹")
 
@@ -122,6 +129,7 @@ class CommandAgent(BaseModel):
             "skill_keys": self.skill_keys,
             "rbac_role_id": self.rbac_role_id,
             "resource_scope": self.resource_scope,
+            "llm_config_id": self.llm_config_id,
             "workspace_synced_at": strip_timezone_to_seconds(self.workspace_synced_at),
             "workspace_etag": self.workspace_etag,
         }
