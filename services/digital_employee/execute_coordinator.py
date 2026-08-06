@@ -144,6 +144,7 @@ async def run(
 ) -> dict:
     from services.command_center.manager import update_task_progress
     from services.digital_employee.manager import sync_employee_workspace
+    from services.llm_config.resolver import resolve_llm
 
     employee = await sync_employee_workspace(employee, force=True)
     workspace_id = employee.id
@@ -159,6 +160,9 @@ async def run(
         workspace_id = continuation_workspace["workspace_id"]
     jwt = await get_or_refresh_jwt(task.tenant_id)
     aioe_token = await get_employee_api_token(employee)
+    llm = await resolve_llm(
+        task.tenant_id, config_id=getattr(employee, "llm_config_id", None)
+    )
     payload = {
         "workspace_id": workspace_id,
         "session_id": getattr(command_run, "run_id", None) or task.run_id or task.id,
@@ -181,6 +185,7 @@ async def run(
             # 用于把动作/剧本产生的 runlog 关联到该 CommandTaskRun（见 execute_action）。
             "agent_run_id": getattr(command_run, "run_id", None) or task.run_id,
         },
+        "llm": llm,
     }
     content = []
     saw_delta = False

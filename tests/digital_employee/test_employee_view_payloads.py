@@ -474,5 +474,104 @@ def test_derive_capabilities_excludes_aioe_cli_and_skill_meta():
     assert caps == sorted(caps)
 
 
+@pytest.mark.parametrize(
+    ("submitted_config_id", "expected_config_id"),
+    [("config-1", "config-1"), ("", None)],
+)
+def test_employee_create_forwards_llm_config_id_and_normalizes_blank_value(
+    monkeypatch, submitted_config_id, expected_config_id
+):
+    employee = SimpleNamespace(id="employee-1", tenant_id="tenant-1")
+    create_calls = []
+    events = []
+
+    async def fake_create_employee(**kwargs):
+        create_calls.append(kwargs)
+        return employee
+
+    async def fake_publish(tenant_id, event, employee_id):
+        events.append((tenant_id, event, employee_id))
+
+    async def fake_payload(value):
+        return {"id": value.id}
+
+    monkeypatch.setattr(views, "create_employee", fake_create_employee)
+    monkeypatch.setattr(views, "publish_command_center_update", fake_publish)
+    monkeypatch.setattr(views, "_employee_payload", fake_payload)
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+
+    out = asyncio.run(
+        inspect.unwrap(views.employee_create)(
+            _request(
+                body={
+                    "role_key": "ops",
+                    "name": "Operations",
+                    "llm_config_id": submitted_config_id,
+                }
+            )
+        )
+    )
+
+    assert out == {"id": "employee-1"}
+    assert create_calls[0]["llm_config_id"] == expected_config_id
+    assert events == [("tenant-1", "employee_created", "employee-1")]
+
+
+@pytest.mark.parametrize(
+    ("submitted_config_id", "expected_config_id"),
+    [("config-2", "config-2"), ("", None)],
+)
+def test_employee_update_delegates_llm_config_id_and_normalizes_blank_value(
+    monkeypatch, submitted_config_id, expected_config_id
+):
+    employee = SimpleNamespace(id="employee-1", tenant_id="tenant-1")
+    manager_calls = []
+    events = []
+
+    async def fake_employee_or_404(tenant_id, employee_id):
+        assert (tenant_id, employee_id) == ("tenant-1", "employee-1")
+        return employee
+
+    async def fake_update_employee(value, **kwargs):
+        manager_calls.append((value, kwargs))
+        return value
+
+    async def fake_publish(tenant_id, event, employee_id):
+        events.append((tenant_id, event, employee_id))
+
+    async def fake_payload(value):
+        return {"id": value.id}
+
+    monkeypatch.setattr(views, "_employee_or_404", fake_employee_or_404)
+    monkeypatch.setattr(views, "update_employee", fake_update_employee)
+    monkeypatch.setattr(views, "publish_command_center_update", fake_publish)
+    monkeypatch.setattr(views, "_employee_payload", fake_payload)
+    monkeypatch.setattr(views, "response_ok", lambda data: data)
+
+    out = asyncio.run(
+        inspect.unwrap(views.employee_update)(
+            _request(
+                body={
+                    "employee_id": "employee-1",
+                    "name": "Updated operations",
+                    "llm_config_id": submitted_config_id,
+                }
+            )
+        )
+    )
+
+    assert out == {"id": "employee-1"}
+    assert manager_calls == [
+        (
+            employee,
+            {
+                "name": "Updated operations",
+                "llm_config_id": expected_config_id,
+            },
+        )
+    ]
+    assert events == [("tenant-1", "employee_updated", "employee-1")]
+
+
 async def _async_value(value):
     return value

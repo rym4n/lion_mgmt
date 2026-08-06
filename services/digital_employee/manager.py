@@ -20,6 +20,7 @@ from .skill_storage import relative_skill_dir, skill_storage_root, tenant_skill_
 
 BUILTIN_TENANT_ID = "__builtin__"
 TERMINAL_TASK_STATUS = {"completed", "failed", "cancelled"}
+_UNSET = object()
 
 
 def _visible_condition(tenant_id: str):
@@ -103,6 +104,7 @@ async def create_employee(
     max_concurrent: int = 1,
     agent_key: str | None = None,
     rbac_role_id: str | None = None,
+    llm_config_id: str | None = None,
 ) -> CommandAgent:
     role = await get_visible_role(tenant_id, role_key)
     selected_rbac_role_id = rbac_role_id
@@ -125,11 +127,35 @@ async def create_employee(
         role_key=role.role_key,
         skill_keys=persisted_employee_skill_keys([skill.skill_key for skill in skills]),
         rbac_role_id=selected_rbac_role_id,
+        llm_config_id=llm_config_id or None,
         resource_scope={},
     )
     await sync_employee_workspace(employee, role=role, skills=skills)
     await create_employee_api_account(employee)
     return employee
+
+
+async def update_employee(
+    employee: CommandAgent,
+    *,
+    name=_UNSET,
+    rbac_role_id=_UNSET,
+    max_concurrent=_UNSET,
+    llm_config_id=_UNSET,
+) -> CommandAgent:
+    if rbac_role_id is not _UNSET:
+        await require_existing_platform_role(rbac_role_id, employee.tenant_id)
+    if name is not _UNSET:
+        employee.name = name
+    if rbac_role_id is not _UNSET:
+        employee.rbac_role_id = rbac_role_id
+    if max_concurrent is not _UNSET:
+        employee.max_concurrent = max(1, int(max_concurrent or 1))
+    if llm_config_id is not _UNSET:
+        employee.llm_config_id = llm_config_id or None
+    employee.workspace_etag = None
+    await employee.save()
+    return await sync_employee_workspace(employee)
 
 
 async def sync_employee_workspace(

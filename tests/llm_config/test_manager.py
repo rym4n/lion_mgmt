@@ -106,7 +106,17 @@ class _FakeDb:
     def load_manager(self):
         import importlib
 
-        for name in ("models", "services.llm_config.manager"):
+        for name in (
+            "models",
+            "core",
+            "core.error_code",
+            "libs",
+            "libs.error_code",
+            "libs.error_code.exception",
+            "services",
+            "services.llm_config",
+            "services.llm_config.manager",
+        ):
             sys.modules.pop(name, None)
 
         config_table = _FakeTable(self.configs)

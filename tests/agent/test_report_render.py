@@ -9,6 +9,14 @@ from libs.error_code.exception import CustomError
 from services.agent import report_fetch, report_render
 
 
+@pytest.fixture(autouse=True)
+def _stub_llm_resolver(monkeypatch):
+    async def fake_resolve_llm(tenant_id):
+        return object()
+
+    monkeypatch.setattr(report_render, "resolve_llm", fake_resolve_llm)
+
+
 @pytest.mark.asyncio
 async def test_resolve_placeholders_replaces_span_text(monkeypatch):
     async def fake_execute(action_cfg, tenant_id, operator_id):
@@ -241,6 +249,33 @@ def _stub_polish(monkeypatch, replies):
 
 
 @pytest.mark.asyncio
+async def test_apply_annotations_resolves_llm_once_before_concurrent_polish(monkeypatch):
+    resolved = object()
+    resolve_calls = []
+    captured = _stub_polish(monkeypatch, ["<p>一</p>", "<p>二</p>"])
+
+    async def fake_resolve_llm(tenant_id):
+        resolve_calls.append(tenant_id)
+        return resolved
+
+    monkeypatch.setattr(report_render, "resolve_llm", fake_resolve_llm)
+    await report_render.apply_annotations_to_html(
+        '<p><mark data-annotation-ids="a1">甲</mark></p>'
+        '<p><mark data-annotation-ids="a2">乙</mark></p>',
+        [
+            {"id": "a1", "comment": "改写一", "status": "open"},
+            {"id": "a2", "comment": "改写二", "status": "open"},
+        ],
+        workspace_id="w1",
+        session_id="s1",
+        tenant_id="t1",
+    )
+
+    assert resolve_calls == ["t1"]
+    assert [item["llm"] for item in captured] == [resolved, resolved]
+
+
+@pytest.mark.asyncio
 async def test_apply_annotations_overwrite_replaces_region(monkeypatch):
     _stub_polish(monkeypatch, ["<p>本月告警 128 起，同比下降 12%。</p>"])
     html = '<p>概览：<mark data-annotation-ids="a1">本月告警若干</mark>。</p>'
@@ -248,7 +283,7 @@ async def test_apply_annotations_overwrite_replaces_region(monkeypatch):
         {"id": "a1", "comment": "带上同比", "status": "open", "mode": "overwrite"}
     ]
     result = await report_render.apply_annotations_to_html(
-        html, annotations, workspace_id="w1", session_id="s1"
+        html, annotations, workspace_id="w1", session_id="s1", tenant_id="t1"
     )
     assert "本月告警 128 起，同比下降 12%。" in result
     assert "本月告警若干" not in result
@@ -263,7 +298,7 @@ async def test_apply_annotations_append_keeps_original(monkeypatch):
         {"id": "a1", "comment": "补充分布", "status": "open", "mode": "append"}
     ]
     result = await report_render.apply_annotations_to_html(
-        html, annotations, workspace_id="w1", session_id="s1"
+        html, annotations, workspace_id="w1", session_id="s1", tenant_id="t1"
     )
     assert "本月告警 128 起。" in result
     assert "其中网络类 45 起。" in result
@@ -278,7 +313,7 @@ async def test_apply_annotations_append_inserts_list_after_block(monkeypatch):
         {"id": "a1", "comment": "列出分布", "status": "open", "mode": "append"}
     ]
     result = await report_render.apply_annotations_to_html(
-        html, annotations, workspace_id="w1", session_id="s1"
+        html, annotations, workspace_id="w1", session_id="s1", tenant_id="t1"
     )
     assert "<ul>" in result
     assert result.index("告警分布如下。") < result.index("<ul>")
@@ -296,7 +331,7 @@ async def test_apply_image_annotation_overwrite_uses_append_semantics(monkeypatc
     ]
 
     result = await report_render.apply_annotations_to_html(
-        html, annotations, workspace_id="w1", session_id="s1"
+        html, annotations, workspace_id="w1", session_id="s1", tenant_id="t1"
     )
     root = report_render._parse_document(result)
     image = root.find(".//img")
@@ -315,7 +350,7 @@ async def test_apply_annotations_overwrite_with_list_clears_region(monkeypatch):
         {"id": "a1", "comment": "改成列表", "status": "open", "mode": "overwrite"}
     ]
     result = await report_render.apply_annotations_to_html(
-        html, annotations, workspace_id="w1", session_id="s1"
+        html, annotations, workspace_id="w1", session_id="s1", tenant_id="t1"
     )
     assert "旧的分布描述" not in result
     assert "<ul>" in result
@@ -331,7 +366,7 @@ async def test_apply_annotations_clears_extra_marks_on_overwrite(monkeypatch):
     )
     annotations = [{"id": "a1", "comment": "合并", "status": "open"}]
     result = await report_render.apply_annotations_to_html(
-        html, annotations, workspace_id="w1", session_id="s1"
+        html, annotations, workspace_id="w1", session_id="s1", tenant_id="t1"
     )
     assert "统一后的表述" in result
     assert "前半" not in result
@@ -350,7 +385,7 @@ async def test_apply_annotations_prompt_carries_context_and_mode(monkeypatch):
         {"id": "a1", "comment": "请补充趋势", "status": "open", "mode": "append"}
     ]
     await report_render.apply_annotations_to_html(
-        html, annotations, workspace_id="w1", session_id="s1"
+        html, annotations, workspace_id="w1", session_id="s1", tenant_id="t1"
     )
     message = captured[0]["message"]
     assert "被批注文字" in message
@@ -370,7 +405,7 @@ async def test_apply_annotations_skips_when_no_active_annotation(monkeypatch):
     html = '<p><mark data-annotation-ids="a1">文字</mark></p>'
     annotations = [{"id": "a1", "comment": "已处理", "status": "applied"}]
     result = await report_render.apply_annotations_to_html(
-        html, annotations, workspace_id="w1", session_id="s1"
+        html, annotations, workspace_id="w1", session_id="s1", tenant_id="t1"
     )
     assert calls == []
     assert "文字" in result
@@ -383,7 +418,11 @@ async def test_apply_annotations_fails_on_missing_anchor(monkeypatch):
     annotations = [{"id": "a1", "comment": "改这里", "status": "open"}]
     with pytest.raises(CustomError) as excinfo:
         await report_render.apply_annotations_to_html(
-            html, annotations, workspace_id="w1", session_id="s1"
+            html,
+            annotations,
+            workspace_id="w1",
+            session_id="s1",
+            tenant_id="t1",
         )
     assert excinfo.value.enum == ErrorCode.REPORT_ANNOTATION_ANCHOR_MISSING
 
@@ -398,7 +437,11 @@ async def test_apply_annotations_fails_when_llm_raises(monkeypatch):
     annotations = [{"id": "a1", "comment": "改这里", "status": "open"}]
     with pytest.raises(CustomError) as excinfo:
         await report_render.apply_annotations_to_html(
-            html, annotations, workspace_id="w1", session_id="s1"
+            html,
+            annotations,
+            workspace_id="w1",
+            session_id="s1",
+            tenant_id="t1",
         )
     assert excinfo.value.enum == ErrorCode.REPORT_ANNOTATION_POLISH_FAILED
 
@@ -413,7 +456,11 @@ async def test_apply_annotations_propagates_lion_agent_unavailable(monkeypatch):
     annotations = [{"id": "a1", "comment": "改这里", "status": "open"}]
     with pytest.raises(CustomError) as excinfo:
         await report_render.apply_annotations_to_html(
-            html, annotations, workspace_id="w1", session_id="s1"
+            html,
+            annotations,
+            workspace_id="w1",
+            session_id="s1",
+            tenant_id="t1",
         )
     assert excinfo.value.enum == ErrorCode.LION_AGENT_UNAVAILABLE
 
@@ -425,7 +472,11 @@ async def test_apply_annotations_fails_when_llm_returns_blank(monkeypatch):
     annotations = [{"id": "a1", "comment": "改这里", "status": "open"}]
     with pytest.raises(CustomError) as excinfo:
         await report_render.apply_annotations_to_html(
-            html, annotations, workspace_id="w1", session_id="s1"
+            html,
+            annotations,
+            workspace_id="w1",
+            session_id="s1",
+            tenant_id="t1",
         )
     assert excinfo.value.enum == ErrorCode.REPORT_ANNOTATION_POLISH_FAILED
 
@@ -452,7 +503,7 @@ async def test_apply_annotations_runs_concurrently(monkeypatch):
         {"id": "a2", "comment": "改二", "status": "open"},
     ]
     await report_render.apply_annotations_to_html(
-        html, annotations, workspace_id="w1", session_id="s1"
+        html, annotations, workspace_id="w1", session_id="s1", tenant_id="t1"
     )
     assert order[:2] == ["start", "start"], "两条批注必须并发发起，不能串行"
 

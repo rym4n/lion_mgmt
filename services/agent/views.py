@@ -581,11 +581,15 @@ async def _run_agent_task(
         return
 
     try:
+        from services.llm_config.resolver import resolve_llm
+
+        llm = await resolve_llm(tenant_id, config_id=getattr(agent, "llm_config_id", None))
         result = await execute_prompt(
             workspace_id=workspace_id_for(tenant_id, agent.agent_key),
             session_id=run_id,
             request_id=task_id,
             message=prompt,
+            llm=llm,
         )
         task.status = "completed"
         task.progress = 100

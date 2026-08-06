@@ -28,6 +28,8 @@ STUB_MODULES = [
     "services.digital_employee.lion_agent_adapter",
     "services.digital_employee.lion_agent_client",
     "services.digital_employee.execute_coordinator",
+    "services.llm_config",
+    "services.llm_config.resolver",
 ]
 _MISSING_MODULE = object()
 
@@ -152,6 +154,15 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
     lion_agent_client.workspace_sync_calls = workspace_sync_calls
     sys.modules["services.digital_employee.lion_agent_client"] = lion_agent_client
 
+    llm_config_pkg = types.ModuleType("services.llm_config")
+    llm_config_pkg.__path__ = []
+    sys.modules["services.llm_config"] = llm_config_pkg
+    resolver = types.ModuleType("services.llm_config.resolver")
+    resolver.resolve_llm = lambda tenant_id, **kwargs: _async_value(
+        SimpleNamespace(config_id=kwargs.get("config_id"), model_name="test-model")
+    )
+    sys.modules["services.llm_config.resolver"] = resolver
+
 
 async def _async_value(value):
     return value
@@ -230,7 +241,13 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
         result=None,
         saved_update_fields=[],
     )
-    employee = SimpleNamespace(id="employee-1", role_key="ops", agent_key="ops-1", name="运维员工")
+    employee = SimpleNamespace(
+        id="employee-1",
+        role_key="ops",
+        agent_key="ops-1",
+        name="运维员工",
+        llm_config_id="llm-config-1",
+    )
 
     result = asyncio.run(execute_coordinator.run(task, employee, operator_id="operator-1"))
 
@@ -247,6 +264,7 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
     assert payload["workspace_id"] == "employee-1"
     assert payload["session_id"] == "task-1"
     assert payload["message"] == "prompt:task-1:employee-1"
+    assert payload["llm"].config_id == "llm-config-1"
     assert "model" not in payload
     assert payload["cognee"]["endpoint"] == "http://lion-memory"
     assert payload["cognee"]["jwt"] == "jwt-tenant-1"

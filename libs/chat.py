@@ -1129,12 +1129,16 @@ class ChatManager:
                 logger.info("准备调用 lion_agent stream")
                 logger.info(f"消息内容长度: {len(full_message)} 字符")
 
+                from services.llm_config.resolver import resolve_llm
+
+                llm = await resolve_llm(tenant_id)
                 has_content = False
                 async for event_type, payload in stream_prompt_events(
                     workspace_id=workspace_id_for(tenant_id, "warroom"),
                     session_id=current_room_id,
                     request_id=stream_id,
                     message=full_message,
+                    llm=llm,
                 ):
                     has_content = await self._publish_ai_stream_event(event_type, payload, user_id, tenant_id, current_room_id, stream_id) or has_content
 

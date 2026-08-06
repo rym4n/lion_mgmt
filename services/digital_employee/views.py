@@ -28,12 +28,12 @@ from .manager import (
     prefer_visible_skills,
     skill_candidate_condition,
     sync_employee_workspace,
+    update_employee,
     update_employee_skills,
     upgrade_role_for_existing_employees,
 )
 from .package_api import import_package_from_request
 from .package_importer import export_package_for_tenant, normalize_role_prompt_fields, require_role_identity
-from .rbac import require_existing_platform_role
 from .runtime_callbacks import fetch_runtime_transcript, save_runtime_report, save_runtime_transcript
 from .skill_storage import parse_skill_md, relative_skill_dir, resolve_skill_file, tenant_skill_root
 
@@ -218,6 +218,7 @@ async def employee_create(request: Request):
         max_concurrent=data.get("max_concurrent", 1),
         agent_key=data.get("agent_key"),
         rbac_role_id=data.get("rbac_role_id"),
+        llm_config_id=data.get("llm_config_id") or None,
     )
     await publish_command_center_update(employee.tenant_id, "employee_created", employee.id)
     return response_ok(await _employee_payload(employee))
@@ -287,16 +288,14 @@ async def employee_update(request: Request):
     data = _json(request)
     tenant_id = _tenant_id(request)
     employee = await _employee_or_404(tenant_id, data.get("employee_id"))
-    if "rbac_role_id" in data:
-        await require_existing_platform_role(data.get("rbac_role_id"), tenant_id)
-    for field in ["name", "rbac_role_id"]:
-        if field in data:
-            setattr(employee, field, data[field])
-    if "max_concurrent" in data:
-        employee.max_concurrent = max(1, int(data["max_concurrent"] or 1))
-    employee.workspace_etag = None
-    await employee.save()
-    await sync_employee_workspace(employee)
+    update_fields = {
+        field: data[field]
+        for field in ("name", "rbac_role_id", "max_concurrent")
+        if field in data
+    }
+    if "llm_config_id" in data:
+        update_fields["llm_config_id"] = data.get("llm_config_id") or None
+    employee = await update_employee(employee, **update_fields)
     await publish_command_center_update(employee.tenant_id, "employee_updated", employee.id)
     return response_ok(await _employee_payload(employee))
 

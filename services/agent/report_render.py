@@ -15,6 +15,7 @@ from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from services.agent import docx_converter, report_fetch
 from services.digital_employee.lion_agent_adapter import execute_prompt
+from services.llm_config.resolver import resolve_llm
 
 
 def _parse_document(html: str):
@@ -383,6 +384,7 @@ async def _polish_one(
     *,
     workspace_id: str,
     session_id: str,
+    llm,
     timeout: float,
 ) -> list:
     """调 LLM 优化单条批注，返回清洗后的块级元素列表。"""
@@ -409,6 +411,7 @@ async def _polish_one(
         session_id=session_id,
         request_id=f"report-annotation:{session_id}:{annotation_id}",
         message=prompt,
+        llm=llm,
         timeout=timeout,
     )
     blocks = sanitize_ai_html(str(raw or ""))
@@ -448,6 +451,7 @@ async def apply_annotations_to_html(
     *,
     workspace_id: str,
     session_id: str,
+    tenant_id: str,
     timeout: float = ANNOTATION_POLISH_TIMEOUT,
 ) -> str:
     """按批注并发调用 LLM 优化内容，结果按追加写/覆盖写写回 HTML。
@@ -470,6 +474,8 @@ async def apply_annotations_to_html(
         logger.error("报告批注锚点缺失 annotation_ids=%s", sorted(missing))
         raise CustomError(ErrorCode.REPORT_ANNOTATION_ANCHOR_MISSING)
 
+    llm = await resolve_llm(tenant_id)
+
     results = await asyncio.gather(
         *(
             _polish_one(
@@ -478,6 +484,7 @@ async def apply_annotations_to_html(
                 root,
                 workspace_id=workspace_id,
                 session_id=session_id,
+                llm=llm,
                 timeout=timeout,
             )
             for item in active
@@ -537,6 +544,7 @@ async def render_report_docx(
         annotations or [],
         workspace_id=workspace_id,
         session_id=session_id,
+        tenant_id=tenant_id,
     )
     html = strip_annotation_marks(html)
     base_document = None

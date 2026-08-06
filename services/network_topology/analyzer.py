@@ -977,11 +977,15 @@ async def _execute_bounded_prompt(
     byte_count = 0
     saw_content = False
     pending_end_content = ""
+    from services.llm_config.resolver import resolve_llm
+
+    llm = await resolve_llm(tenant_id)
     async for event_type, payload in stream_prompt_events(
         workspace_id=workspace_id_for(tenant_id, "network-topology"),
         session_id=session_id,
         request_id=session_id,
         message=_build_nanobot_message(config_text),
+        llm=llm,
     ):
         if event_type == "error":
             raise RuntimeError(payload.get("message") or payload)

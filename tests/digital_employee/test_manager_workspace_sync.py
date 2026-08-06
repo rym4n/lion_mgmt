@@ -26,6 +26,7 @@ STUB_MODULES = [
     "services.digital_employee.lion_agent_client",
     "services.digital_employee.prompt_builder",
     "services.digital_employee.rbac",
+    "services.digital_employee.skill_storage",
     "services.digital_employee.manager_workspace_sync_test",
 ]
 _MISSING_MODULE = object()
@@ -133,6 +134,12 @@ def _load_manager(sync_calls: list[dict]):
     rbac_module = types.ModuleType("services.digital_employee.rbac")
     rbac_module.require_existing_platform_role = lambda role_id, tenant_id: _async_value(None)
     sys.modules["services.digital_employee.rbac"] = rbac_module
+
+    skill_storage_module = types.ModuleType("services.digital_employee.skill_storage")
+    skill_storage_module.relative_skill_dir = lambda path: str(path)
+    skill_storage_module.skill_storage_root = lambda: Path("/tmp/skills")
+    skill_storage_module.tenant_skill_root = lambda tenant_id: Path("/tmp/skills") / tenant_id
+    sys.modules["services.digital_employee.skill_storage"] = skill_storage_module
 
     path = Path(__file__).resolve().parents[2] / "services/digital_employee/manager.py"
     spec = importlib.util.spec_from_file_location("services.digital_employee.manager_workspace_sync_test", path)
@@ -272,13 +279,62 @@ def test_create_employee_does_not_inherit_role_default_rbac_and_persists_only_se
         manager.require_existing_platform_role = fake_require_existing_platform_role
         manager.CommandAgent = AgentModel
 
-        employee = asyncio.run(manager.create_employee("tenant-1", "ops", "Ops"))
+        employee = asyncio.run(
+            manager.create_employee(
+                "tenant-1", "ops", "Ops", llm_config_id="llm-config-1"
+            )
+        )
 
         assert checked_roles == [None]
         assert created[0]["rbac_role_id"] is None
+        assert created[0]["llm_config_id"] == "llm-config-1"
         assert created[0]["skill_keys"] == ["triage"]
         assert "aioe-cli" not in created[0]["capabilities"]
         assert employee.workspace_etag == "runtime-etag"
+    finally:
+        _restore_modules(original_modules)
+
+
+def test_update_employee_persists_llm_binding_and_preserves_workspace_sync():
+    sync_calls = []
+    manager, original_modules = _load_manager(sync_calls)
+    try:
+        role = SimpleNamespace(role_key="ops", version=7)
+        employee = FakeEmployee(
+            id="employee-1",
+            tenant_id="tenant-1",
+            role_key="ops",
+            skill_keys=[],
+            workspace_etag="old-etag",
+            workspace_synced_at=datetime.now(timezone.utc),
+            llm_config_id="old-config",
+            saved_update_fields=[],
+        )
+
+        async def fake_get_visible_role(tenant_id, role_key):
+            return role
+
+        async def fake_get_visible_skills(tenant_id, skill_keys):
+            return []
+
+        manager.get_visible_role = fake_get_visible_role
+        manager.get_visible_skills = fake_get_visible_skills
+
+        result = asyncio.run(
+            manager.update_employee(
+                employee,
+                name="Updated",
+                max_concurrent=0,
+                llm_config_id=None,
+            )
+        )
+
+        assert result is employee
+        assert employee.name == "Updated"
+        assert employee.max_concurrent == 1
+        assert employee.llm_config_id is None
+        assert employee.saved_update_fields[0] is None
+        assert sync_calls[0]["workspace_id"] == "employee-1"
     finally:
         _restore_modules(original_modules)
 

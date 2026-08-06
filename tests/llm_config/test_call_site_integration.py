@@ -35,3 +35,33 @@ def test_settings_marks_llm_env_deprecated():
     """settings 里的定义可保留但必须标注弃用，避免后人误用。"""
     src = _read("settings/__init__.py")
     assert "RY_AGENT_MODEL" not in src, "确认无消费者的死配置应清理"
+
+
+CALL_SITES = (
+    "libs/chat.py",
+    "services/agent/views.py",
+    "services/agent/report_render.py",
+    "services/tools/views.py",
+    "services/network_topology/analyzer.py",
+    "services/digital_employee/execute_coordinator.py",
+)
+
+
+def test_every_lion_agent_call_site_passes_llm():
+    """所有走 lion_agent 的调用点都必须下发凭证，否则 lion_agent 会回落
+    环境变量——那是 SPEC §3.5 明确要消除的『双真相』。"""
+    missing = []
+    for rel in CALL_SITES:
+        src = _read(rel)
+        calls = src.count("execute_prompt(") + src.count("stream_prompt_events(")
+        calls -= src.count("import execute_prompt") + src.count("import stream_prompt_events")
+        if calls > 0 and "llm=" not in src:
+            missing.append(rel)
+    assert not missing, f"以下调用点未下发 llm 凭证: {missing}"
+
+
+def test_execute_coordinator_honours_employee_binding():
+    """数字员工执行必须用员工绑定的配置（config_id），而非全局默认。"""
+    src = _read("services/digital_employee/execute_coordinator.py")
+    assert "llm_config_id" in src
+    assert "config_id=" in src

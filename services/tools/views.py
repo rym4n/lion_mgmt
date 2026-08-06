@@ -4395,6 +4395,9 @@ async def browser_execute(request):
         logger.info(f"准备调用 lion_agent，session_key={session_key}")
         logger.info(f"消息内容长度: {len(full_message)} 字符")
 
+        from services.llm_config.resolver import resolve_llm
+
+        llm = await resolve_llm(tenant_id)
         accumulated_content = ""
         code_sent = False
         async for event_type, payload in stream_prompt_events(
@@ -4402,6 +4405,7 @@ async def browser_execute(request):
             session_id=session_key,
             request_id=session_id,
             message=full_message,
+            llm=llm,
         ):
             if event_type == "delta":
                 content = str(payload.get("content") or payload.get("delta") or "")
