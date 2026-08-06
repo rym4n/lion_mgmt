@@ -23,7 +23,7 @@ from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
-from libs.utils import upload_to_s3
+from libs.utils import normalize_required_text, upload_to_s3
 from models import (
     InspectionCategory,
     InspectionResult,
@@ -106,6 +106,15 @@ def _normalize_category_data(data: Dict[str, Any], partial: bool = False) -> Dic
     normalized = data.copy()
     if "type" in normalized:
         raise CustomError(ErrorCode.PARAM_ERROR)
+    if not partial or "name" in normalized:
+        raw_name = normalized.get("name")
+        try:
+            canonical_name = normalize_required_text(raw_name)
+        except CustomError as exc:
+            raise CustomError(ErrorCode.INSPECTION_CATEGORY_NAME_INVALID) from exc
+        if canonical_name != raw_name:
+            raise CustomError(ErrorCode.INSPECTION_CATEGORY_NAME_INVALID)
+        normalized["name"] = canonical_name
     type_provided = "category_type" in normalized
     raw_category_type = normalized.get("category_type")
     category_type = normalize_category_type(raw_category_type) if (type_provided or not partial) else None
@@ -417,7 +426,7 @@ async def delete_schedule(schedule_id: str, tenant_id: str) -> bool:
 
     # 软删除调度配置
     schedule.deleted = True
-    await schedule.save()
+    await schedule.save(update_fields=["deleted", "utime"])
     return True
 
 
@@ -528,7 +537,7 @@ async def delete_category(category_id: str, tenant_id: str) -> bool:
 
     # 软删除类别
     category.deleted = True
-    await category.save()
+    await category.save(update_fields=["deleted", "utime"])
     return True
 
 

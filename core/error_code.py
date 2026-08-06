@@ -229,3 +229,6 @@ class ErrorCode(BaseErrorCode):
     REPORT_ANNOTATION_POLISH_FAILED = ErrorData(4179, "批注优化失败，请稍后重试")
     LLM_CONFIG_NOT_CONFIGURED = ErrorData(4180, "未配置模型，请前往系统设置 → 模型配置")
     LLM_CONFIG_NAME_DUPLICATED = ErrorData(4181, "该名称已被使用（含已删除的配置），请换一个名称")
+    INSPECTION_CATEGORY_NAME_INVALID = ErrorData(
+        4182, "类别名称不能为空，且首尾不允许包含空格"
+    )
