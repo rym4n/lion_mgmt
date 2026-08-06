@@ -59,7 +59,7 @@ from models import (
 from services.approvement.views import expire_pending_approvals
 from services.tools.views import TOOL_UPLOAD_PERMISSION, upload_tool
 from services.tools.views import tool_action_playbook_delete, tool_action_update
-from settings import TASK_TOPIC, TZ, RY_AI_API_BASE, LLM_KEY
+from settings import TASK_TOPIC, TZ
 
 workflow_bp = Blueprint("workflow", url_prefix="/playbook")
 _all__ = ["workflow_bp"]
@@ -2929,16 +2929,16 @@ async def get_version_runlog_detail(request):
 @requires_permission("workflow:r")
 async def ai_chat(request):
     """
-    转发AI请求到RY_AI_API_BASE
+    转发AI请求到已配置的模型服务
     """
     import aiohttp
+    from services.llm_config.resolver import resolve_llm
 
-    if not RY_AI_API_BASE or not LLM_KEY:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
+    llm = await resolve_llm(request.ctx.session.get("tenant_id"))
     payload = _normalize_ai_chat_payload(request.json)
-    url = RY_AI_API_BASE + "/chat/completions"
-    headers = {"Authorization": f"Bearer {LLM_KEY}"}
+    payload["model"] = llm.model_name
+    url = f"{llm.base_url.rstrip('/')}/chat/completions"
+    headers = {"Authorization": f"Bearer {llm.api_key}"}
     timeout = aiohttp.ClientTimeout(total=300)
 
     if payload.get("stream") is True:

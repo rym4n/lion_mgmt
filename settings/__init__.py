@@ -307,6 +307,8 @@ RY_AGENT_SERVER = os.environ.get("RY_AGENT_SERVER", "http://192.168.12.254:8283"
 # 数字员工运行时服务
 LION_AGENT_ENDPOINT = os.environ.get("RY_LION_AGENT_ENDPOINT", "http://lion-agent:8000")
 LION_AGENT_INTERNAL_TOKEN = os.environ.get("RY_LION_AGENT_INTERNAL_TOKEN", "")
+# 已弃用：运行时凭证改由 llm_model_config 表提供（见 services/llm_config/resolver.py）。
+# 保留定义仅为兼容 .env 文件与 lion_memory 容器；lion_mgmt 业务代码不再读取。
 RY_AI_LITE_MODEL = (
     os.environ.get("RY_AI_LITE_MODEL") or "aioe-lite"
 ).strip() or "aioe-lite"
@@ -349,10 +351,11 @@ RY_EMBEDDING_API_BASE = os.environ.get(
 )
 
 # Agent 默认配置
-RY_AGENT_DEFAULT_LLM = os.environ.get("RY_AGENT_MODEL", "openai-proxy/gpt-4o")
 RY_AGENT_CONTEXT_WINDOW = int(os.environ.get("RY_AGENT_CONTEXT_WINDOW", "8000"))
 
 # 自动化巡检AI配置
+# 已弃用：运行时凭证改由 llm_model_config 表提供（见 services/llm_config/resolver.py）。
+# 保留定义仅为兼容 .env 文件与 lion_memory 容器；lion_mgmt 业务代码不再读取。
 RY_AI_MODEL = os.environ.get("RY_AI_MODEL", "aioe")
 LLM_KEY = os.environ.get("LLM_KEY")
 RY_AI_API_BASE = os.environ.get("RY_AI_API_BASE", "https://oapi.hongcloud.net/v1")

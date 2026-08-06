@@ -39,7 +39,6 @@ from services.digital_employee.lion_agent_adapter import (
     execute_prompt,
     workspace_id_for,
 )
-from settings import LLM_KEY, RY_AI_API_BASE, RY_AI_MODEL
 
 INSPECTION_CATEGORY_TYPE_ACTION = "action"
 INSPECTION_CATEGORY_TYPE_PLAYBOOK = "playbook"
@@ -1035,9 +1034,12 @@ async def parse_inspection_content(app_name: str, text: str, tenant_id: str, cat
     prompt = INSPECTION_PARSE_PROMPT.format(user_input=text, available_actions=available_actions_str)
 
     # 使用litellm调用AI服务
-    model = RY_AI_MODEL
-    api_base = RY_AI_API_BASE
-    api_key = LLM_KEY
+    from services.llm_config.resolver import resolve_llm
+
+    llm = await resolve_llm(tenant_id)
+    model = llm.model_name
+    api_base = llm.base_url
+    api_key = llm.api_key
 
     # 如果使用自定义API base且模型名称不包含provider前缀，自动添加
     if api_base and "/" not in model:
@@ -1643,6 +1645,8 @@ def _judge_result_by_rule(rule: Dict[str, Any], result_data: Any, rule_generated
 
 async def _generate_inspection_judgment_rule(target: InspectionTarget, result_data: Any, tenant_id: str) -> Dict[str, Any]:
     """首次巡检结果到达时由 lion_agent 生成可复用判断规则。"""
+    from services.llm_config.resolver import resolve_llm
+
     result_str = _json_text(result_data)
     prompt = f"""
 你是一个专业的IT运维巡检规则生成助手。请根据巡检标准生成可复用的本地判断规则。
@@ -1719,6 +1723,7 @@ async def _generate_inspection_judgment_rule(target: InspectionTarget, result_da
                 session_id=session_key,
                 request_id=f"inspection:judgment_rule:{target.id}",
                 message=full_message,
+                llm=await resolve_llm(tenant_id),
             )
 
             if not ai_response or not ai_response.strip():
