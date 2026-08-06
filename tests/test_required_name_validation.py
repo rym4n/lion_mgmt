@@ -1,6 +1,7 @@
 # coding=utf-8
 import ast
 import asyncio
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ from libs.error_code.exception import CustomError
 from libs.utils import normalize_required_text
 from models.timed import Timed
 from services.asset_management import manager
+from services.timed import views as timed_views
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +57,76 @@ def test_model_write_boundary_rejects_noncanonical_or_invisible_names():
         with pytest.raises(CustomError) as exc_info:
             timed._validate_persisted_name()
         assert exc_info.value.enum is ErrorCode.PARAM_ERROR
+
+
+def test_delete_legacy_whitespace_timed_updates_only_soft_delete_fields(monkeypatch):
+    class LegacyTimedRecord:
+        _meta = Timed._meta
+        _saved_in_db = True
+        id = "timed-1"
+        name = "   "
+        type = timed_views.RUN_TYPE_ACTION
+        action_input = {"action": "health_check", "action_input": {}}
+        playbook_input = {}
+        internal = False
+        deleted = False
+        updator = None
+        saved_fields = None
+
+        async def save(self, update_fields=None):
+            Timed._validate_persisted_name(self, update_fields)
+            self.saved_fields = update_fields
+
+    record = LegacyTimedRecord()
+    produced = []
+    account = SimpleNamespace(id="account-1")
+
+    class TimedQuery:
+        @classmethod
+        async def get_or_none(cls, **kwargs):
+            assert kwargs == {
+                "id": "timed-1",
+                "deleted": False,
+                "internal": False,
+                "tenant_id": "tenant-1",
+            }
+            return record
+
+    async def fake_scope(request):
+        return False
+
+    async def fake_aproduce(topic, message):
+        produced.append((topic, message))
+
+    monkeypatch.setattr(timed_views, "Timed", TimedQuery)
+    monkeypatch.setattr(timed_views, "get_current_timed_internal_scope", fake_scope)
+    monkeypatch.setattr(timed_views, "aproduce", fake_aproduce)
+
+    request = SimpleNamespace(
+        json={"id": "timed-1"},
+        ctx=SimpleNamespace(
+            session={"tenant_id": "tenant-1", "account_info": account}
+        ),
+    )
+    response = asyncio.run(inspect.unwrap(timed_views.delete_timed)(request))
+
+    assert response.status == 200
+    assert record.deleted is True
+    assert record.updator is account
+    assert record.saved_fields == ["deleted", "updator_id", "utime"]
+    assert produced == [
+        (
+            timed_views.TASK_TOPIC,
+            {
+                "run_type": "action",
+                "run_args": record.action_input,
+                "timer": "remove",
+                "timer_id": "timed-1",
+                "timer_rule": {},
+                "tenant_id": "tenant-1",
+            },
+        )
+    ]
 
 
 def test_required_dynamic_text_field_rejects_whitespace_only():

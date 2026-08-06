@@ -1218,7 +1218,7 @@ async def delete_timed(request):
 
     timed.deleted = True
     timed.updator = request.ctx.session.get("account_info")
-    await timed.save()
+    await timed.save(update_fields=["deleted", "updator_id", "utime"])
     return response_ok("定时任务删除成功")
 
 
