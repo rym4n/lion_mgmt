@@ -22,6 +22,7 @@ async def execute_prompt(
     aioe: dict[str, Any] | None = None,
     model: str | None = None,
     system_prompt: str | None = None,
+    llm: Any | None = None,
     timeout: float | None = None,
 ) -> str:
     payload: dict[str, Any] = {
@@ -32,6 +33,14 @@ async def execute_prompt(
         "cognee": cognee,
         "aioe": aioe,
     }
+    if llm is not None:
+        payload["llm"] = llm.to_payload()
+        # 必须同时写顶层 model：lion_agent 的凭证与模型名走两条独立通道，
+        # api_key/base_url 取自 llm 字典，模型名却取自顶层 model 字段
+        # （agentscope_runtime.resolve_model_name），它不读 llm["model"]。
+        # 只传 llm 会让模型名退回 lion_agent 的 LION_AGENT_MODEL 默认值 aioe，
+        # 出现「凭证换了、模型名没换」的静默错配——指挥中心的 lite 档位会失效。
+        payload["model"] = llm.model_name
     if model:
         payload["model"] = model
     if system_prompt is not None:
@@ -57,6 +66,7 @@ async def stream_prompt_events(
     aioe: dict[str, Any] | None = None,
     model: str | None = None,
     system_prompt: str | None = None,
+    llm: Any | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     payload: dict[str, Any] = {
         "workspace_id": workspace_id,
@@ -66,6 +76,14 @@ async def stream_prompt_events(
         "cognee": cognee,
         "aioe": aioe,
     }
+    if llm is not None:
+        payload["llm"] = llm.to_payload()
+        # 必须同时写顶层 model：lion_agent 的凭证与模型名走两条独立通道，
+        # api_key/base_url 取自 llm 字典，模型名却取自顶层 model 字段
+        # （agentscope_runtime.resolve_model_name），它不读 llm["model"]。
+        # 只传 llm 会让模型名退回 lion_agent 的 LION_AGENT_MODEL 默认值 aioe，
+        # 出现「凭证换了、模型名没换」的静默错配——指挥中心的 lite 档位会失效。
+        payload["model"] = llm.model_name
     if model:
         payload["model"] = model
     if system_prompt is not None:

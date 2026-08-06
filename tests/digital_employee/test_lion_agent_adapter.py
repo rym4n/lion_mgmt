@@ -140,3 +140,58 @@ def test_stream_prompt_events_omits_model_without_override():
 
     assert asyncio.run(consume()) == []
     assert "model" not in client.payloads[-1]
+
+
+def test_execute_prompt_sends_llm_payload(monkeypatch):
+    """ResolvedLlm 必须序列化进请求体的 llm 键，结构与 lion_agent 契约一致。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    from services.digital_employee import lion_agent_adapter as adapter
+
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def execute(self, payload):
+            captured.update(payload)
+            return {"content": "ok"}
+
+    monkeypatch.setattr(adapter, "LionAgentClient", FakeClient)
+
+    # 夹具必须同时提供 model_name：生产代码除了 to_payload() 还要读它来写顶层 model。
+    llm = SimpleNamespace(
+        model_name="aioe",
+        to_payload=lambda: {"base_url": "https://x/v1", "api_key": "sk-1", "model": "aioe"},
+    )
+    asyncio.run(adapter.execute_prompt(
+        workspace_id="t1:warroom", session_id="s1", message="hi", llm=llm,
+    ))
+
+    assert captured["llm"] == {"base_url": "https://x/v1", "api_key": "sk-1", "model": "aioe"}
+    # 顶层 model 才是 lion_agent 实际读取模型名的通道，必须一并断言
+    assert captured["model"] == "aioe"
+
+
+def test_execute_prompt_omits_llm_key_when_absent(monkeypatch):
+    """不传 llm 时请求体不应出现该键，保持对旧调用方的兼容。"""
+    import asyncio
+
+    from services.digital_employee import lion_agent_adapter as adapter
+
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def execute(self, payload):
+            captured.update(payload)
+            return {"content": "ok"}
+
+    monkeypatch.setattr(adapter, "LionAgentClient", FakeClient)
+    asyncio.run(adapter.execute_prompt(workspace_id="t1:warroom", session_id="s1", message="hi"))
+
+    assert "llm" not in captured

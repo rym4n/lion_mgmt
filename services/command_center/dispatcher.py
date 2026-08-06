@@ -5,8 +5,8 @@ from typing import Iterable, Protocol
 import orjson
 from sanic.log import logger
 
-from settings import RY_AI_LITE_MODEL
 from services.digital_employee.lion_agent_adapter import execute_prompt, workspace_id_for
+from services.llm_config.resolver import resolve_llm
 
 
 class AgentCandidate(Protocol):
@@ -285,6 +285,7 @@ async def choose_agent_with_lion_agent(
     system_prompt = _build_dispatch_system_prompt()
     message = _build_dispatch_message(task, candidates)
     raw_response = None
+    llm = await resolve_llm(task.tenant_id, purpose="lite")
 
     try:
         raw_response = await execute_prompt(
@@ -292,7 +293,7 @@ async def choose_agent_with_lion_agent(
             session_id=session_key,
             request_id=str(task.id),
             message=message,
-            model=RY_AI_LITE_MODEL,
+            llm=llm,
             system_prompt=system_prompt,
         )
         decision_payload = _extract_json_object(raw_response)
@@ -308,7 +309,7 @@ async def choose_agent_with_lion_agent(
                         "上一条调度回复未通过 JSON 解析。不要解释、不要执行任务；仅重新输出完全符合 response_schema 的 JSON 对象。",
                     ]
                 ),
-                model=RY_AI_LITE_MODEL,
+                llm=llm,
                 system_prompt=system_prompt,
             )
             decision_payload = _extract_json_object(raw_response)

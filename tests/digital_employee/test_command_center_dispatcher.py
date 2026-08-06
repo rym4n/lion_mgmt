@@ -17,6 +17,8 @@ STUB_MODULES = [
     "services.command_center.dispatcher",
     "services.digital_employee",
     "services.digital_employee.lion_agent_adapter",
+    "services.llm_config",
+    "services.llm_config.resolver",
     "settings",
 ]
 _MISSING_MODULE = object()
@@ -46,6 +48,28 @@ def _load_dispatcher(lite_model="aioe-lite"):
     settings_module = types.ModuleType("settings")
     settings_module.RY_AI_LITE_MODEL = lite_model
     sys.modules["settings"] = settings_module
+
+    llm_config_module = types.ModuleType("services.llm_config")
+    llm_config_module.__path__ = []
+    sys.modules["services.llm_config"] = llm_config_module
+
+    resolver_module = types.ModuleType("services.llm_config.resolver")
+
+    class _FakeResolved:
+        def __init__(self, model_name):
+            self.base_url = "https://fake/v1"
+            self.api_key = "sk-fake"
+            self.model_name = model_name
+            self.config_id = "cfg-lite"
+
+        def to_payload(self):
+            return {"base_url": self.base_url, "api_key": self.api_key, "model": self.model_name}
+
+    async def _fake_resolve_llm(tenant_id, *, purpose="chat", config_id=None):
+        return _FakeResolved(lite_model if purpose == "lite" else "aioe")
+
+    resolver_module.resolve_llm = _fake_resolve_llm
+    sys.modules["services.llm_config.resolver"] = resolver_module
 
     services_module = types.ModuleType("services")
     services_module.__path__ = []
@@ -197,7 +221,9 @@ def test_automatic_dispatch_uses_configured_lite_model():
     decision = asyncio.run(dispatcher.choose_agent_with_lion_agent(task, [selected], coordinator=None))
 
     assert decision.agent is selected
-    assert captured["model"] == "custom-lite"
+    assert captured["llm"].to_payload()["model"] == "custom-lite"
+    # dispatcher 只负责传对 llm；写顶层 model 是 adapter 的职责，已由 adapter 层测试覆盖
+    assert captured["llm"].model_name == "custom-lite"
 
 
 def test_digital_employee_scope_ignores_plain_command_agent():
