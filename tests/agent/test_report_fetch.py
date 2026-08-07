@@ -22,6 +22,19 @@ def test_get_fetch_value_by_path_walks_dict_and_list():
     )
 
 
+def test_get_fetch_value_for_placeholder_supports_legacy_whole_result_path():
+    data = {"country": "Australia", "ip": "1.1.1.1"}
+    assert report_fetch.get_fetch_value_for_placeholder(data, ".result") == data
+    assert (
+        report_fetch.get_fetch_value_for_placeholder({"result": "explicit"}, ".result")
+        == "explicit"
+    )
+    assert (
+        report_fetch.get_fetch_value_for_placeholder(data, ".absent")
+        is report_fetch.MISSING_FETCH_VALUE
+    )
+
+
 def test_stringify_fetch_serializes_containers():
     assert report_fetch.stringify_fetch(None) == ""
     assert report_fetch.stringify_fetch(12) == "12"
@@ -74,6 +87,23 @@ async def test_resolve_fetch_values_rejects_missing_path(monkeypatch):
             "u1",
         )
     assert excinfo.value.enum == ErrorCode.SERVER_ERROR
+
+
+@pytest.mark.asyncio
+async def test_resolve_fetch_values_accepts_legacy_whole_result_path(monkeypatch):
+    async def fake_execute(action_cfg, tenant_id, operator_id):
+        return '{"data": {"country": "Australia", "ip": "1.1.1.1"}}'
+
+    monkeypatch.setattr(report_fetch, "execute_fetch_action", fake_execute)
+    results = await report_fetch.resolve_fetch_values(
+        "{location.result}",
+        {"location": {"action": "query_ip_info"}},
+        "t1",
+        "u1",
+    )
+    match = report_fetch.FETCH_PLACEHOLDER_RE.search("{location.result}")
+    replacer = report_fetch.build_placeholder_replacer(results)
+    assert replacer(match) == '{"country":"Australia","ip":"1.1.1.1"}'
 
 
 def test_build_placeholder_replacer_stringifies_matched_path():

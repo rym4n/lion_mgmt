@@ -19,6 +19,7 @@ from settings import TASK_TOPIC
 
 FETCH_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)(\.[^}]+)?\}")
 MISSING_FETCH_VALUE = object()
+LEGACY_WHOLE_RESULT_PATH = ".result"
 
 
 def get_fetch_value_by_path(data, path: str):
@@ -37,6 +38,20 @@ def get_fetch_value_by_path(data, path: str):
         else:
             return MISSING_FETCH_VALUE
     return data
+
+
+def get_fetch_value_for_placeholder(data, path: str):
+    """Resolve a configured path, including the legacy default whole-result path.
+
+    The report editor historically required ``result`` even when users wanted the
+    complete action payload. Action responses are unwrapped from ``data`` before
+    path lookup, so a missing top-level ``result`` in that legacy case means the
+    whole unwrapped payload.
+    """
+    value = get_fetch_value_by_path(data, path)
+    if value is MISSING_FETCH_VALUE and path == LEGACY_WHOLE_RESULT_PATH:
+        return data
+    return value
 
 
 def stringify_fetch(value) -> str:
@@ -168,13 +183,17 @@ async def resolve_fetch_values(
                 raise failures[key]
         raise CustomError(ErrorCode.SERVER_ERROR)
 
-    missing_paths = sorted({
-        match.group(0)
-        for match in matches
-        if match.group(1) in results
-        and get_fetch_value_by_path(results[match.group(1)], match.group(2) or "")
-        is MISSING_FETCH_VALUE
-    })
+    missing_paths = sorted(
+        {
+            match.group(0)
+            for match in matches
+            if match.group(1) in results
+            and get_fetch_value_for_placeholder(
+                results[match.group(1)], match.group(2) or ""
+            )
+            is MISSING_FETCH_VALUE
+        }
+    )
     if missing_paths:
         logger.error("报告取数结果路径不存在 placeholders=%s", missing_paths)
         raise CustomError(ErrorCode.SERVER_ERROR)
@@ -189,6 +208,8 @@ def build_placeholder_replacer(results: dict) -> Callable[[re.Match], str | None
         key = match.group(1)
         if key not in results:
             return None
-        return stringify_fetch(get_fetch_value_by_path(results[key], match.group(2) or ""))
+        return stringify_fetch(
+            get_fetch_value_for_placeholder(results[key], match.group(2) or "")
+        )
 
     return _replace
