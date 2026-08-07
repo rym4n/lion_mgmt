@@ -1010,6 +1010,9 @@ async def get_warroom_runlog_nodes(request):
             limit=data.get("limit"),
             cursor_kind="warroom-node",
             cursor_scope={"room_id": room_id},
+            node_id=str(data.get("node_id") or "").strip() or None,
+            rows_cursor=data.get("rows_cursor"),
+            loop_limit=data.get("loop_limit"),
         )
     )
 

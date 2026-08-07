@@ -11,7 +11,7 @@ from sanic_ext import openapi
 from core.error_code import ErrorCode
 from core.response import response_ok
 from libs.error_code.exception import CustomError
-from libs.runlog_pagination import runlog_batch_summaries
+from libs.runlog_pagination import RUNLOG_LOOP_MAX_LIMIT, runlog_batch_summaries, runlog_node_page
 from libs.security.authorization import account_has_permission, requires_permission
 from models.command_center import COMMAND_APPROVAL_STATUS_PENDING, CommandAgent, CommandApproval, CommandTask, CommandTaskEvent, CommandTaskRun
 from settings import TZ
@@ -327,37 +327,6 @@ def _runlog_time_json(value):
     if isinstance(value, datetime):
         return value.isoformat(timespec="seconds")
     return value
-
-
-def _runlog_node_summary_json(row: dict) -> dict:
-    node_name = row.get("node_name") or ""
-    loop_match = _RUNLOG_LOOP_RE.search(node_name)
-    retry_match = _RUNLOG_RETRY_RE.search(node_name)
-    allowed = (
-        "id",
-        "run_id",
-        "node_id",
-        "node_name",
-        "node_type",
-        "tool_name",
-        "tool_version",
-        "tool_display_name",
-        "action_name",
-        "action_display_name",
-        "status",
-        "start_time",
-        "end_time",
-        "ctime",
-        "utime",
-        "resource_name",
-        "playbook_name",
-    )
-    summary = {key: row.get(key) for key in allowed}
-    for key in ("start_time", "end_time", "ctime", "utime"):
-        summary[key] = _runlog_time_json(summary.get(key))
-    summary["loop_index"] = int(loop_match.group(1)) if loop_match else None
-    summary["retry_index"] = int(retry_match.group(1)) if retry_match else 0
-    return summary
 
 
 def _runlog_batch_status(row: dict) -> int:
@@ -1076,6 +1045,9 @@ async def task_runlogs(request: Request):
                 "run_id": {"type": "string"},
                 "cursor": {"type": "string", "nullable": True},
                 "limit": {"type": "integer", "minimum": 1, "maximum": RUNLOG_NODE_MAX_LIMIT},
+                "node_id": {"type": "string", "nullable": True},
+                "rows_cursor": {"type": "string", "nullable": True},
+                "loop_limit": {"type": "integer", "minimum": 1, "maximum": RUNLOG_LOOP_MAX_LIMIT},
             },
         }
     ),
@@ -1084,7 +1056,7 @@ async def task_runlogs(request: Request):
         {
             "type": "object",
             "properties": {
-                "nodes": {"type": "array", "description": "节点摘要，不包含 args/result", "items": {"type": "object"}},
+                "nodes": {"type": "array", "description": "节点摘要，内嵌 rows 明细行，不包含 args/result", "items": {"type": "object"}},
                 "next_cursor": {"type": "string", "nullable": True},
                 "has_more": {"type": "boolean"},
             },
@@ -1094,10 +1066,6 @@ async def task_runlogs(request: Request):
 )
 @requires_permission("command_center:r")
 async def task_runlog_nodes(request: Request):
-    from tortoise.expressions import Q
-
-    from models.runlog import Runlog
-
     data = _require_json(request)
     task_id = str(data.get("task_id") or "").strip()
     run_id = str(data.get("run_id") or "").strip()
@@ -1105,49 +1073,24 @@ async def task_runlog_nodes(request: Request):
         raise CustomError(ErrorCode.PARAM_VALUE_ERROR)
     tenant_id = request.ctx.session.get("tenant_id")
     task = await _require_task_run(task_id, run_id, tenant_id)
-    limit = _parse_bounded_limit(data.get("limit"), default=RUNLOG_NODE_DEFAULT_LIMIT, maximum=RUNLOG_NODE_MAX_LIMIT)
-    cursor = _decode_runlog_cursor(data.get("cursor"), "node", task_id=task.id, run_id=run_id)
-    condition = Q(run_id=run_id, tenant_id=tenant_id, deleted=False)
-    if cursor:
-        try:
-            cursor_time = datetime.fromisoformat(cursor["ctime"])
-            cursor_id = str(cursor["id"])
-        except (KeyError, TypeError, ValueError):
-            raise CustomError(ErrorCode.PARAM_VALUE_ERROR) from None
-        condition &= Q(ctime__gt=cursor_time) | Q(ctime=cursor_time, id__gt=cursor_id)
-    fields = (
-        "id",
-        "run_id",
-        "node_id",
-        "node_name",
-        "node_type",
-        "tool_name",
-        "tool_version",
-        "tool_display_name",
-        "action_name",
-        "action_display_name",
-        "status",
-        "start_time",
-        "end_time",
-        "ctime",
-        "utime",
-        "resource_name",
-        "playbook_name",
-    )
-    rows = await Runlog.filter(condition).order_by("ctime", "id").limit(limit + 1).values(*fields)
-    has_more = len(rows) > limit
-    page = rows[:limit]
-    nodes = [_runlog_node_summary_json(row) for row in page]
-    next_cursor = None
-    if has_more and page:
-        next_cursor = _encode_runlog_cursor(
-            "node",
-            task_id=task.id,
+    from tortoise.expressions import Q
+
+    from models.runlog import Runlog
+
+    return response_ok(
+        await runlog_node_page(
+            Runlog,
+            Q(tenant_id=tenant_id, deleted=False),
             run_id=run_id,
-            ctime=_runlog_time_json(page[-1]["ctime"]),
-            id=page[-1]["id"],
+            cursor=data.get("cursor"),
+            limit=data.get("limit"),
+            cursor_kind="command-node",
+            cursor_scope={"task_id": task.id},
+            node_id=str(data.get("node_id") or "").strip() or None,
+            rows_cursor=data.get("rows_cursor"),
+            loop_limit=data.get("loop_limit"),
         )
-    return response_ok({"nodes": nodes, "next_cursor": next_cursor, "has_more": has_more})
+    )
 
 
 @command_bp.post("/tasks/runlogs/detail")

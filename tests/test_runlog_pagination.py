@@ -266,28 +266,6 @@ def test_command_center_runlog_cursor_rejects_invalid_encoded_content(cursor):
         views._decode_runlog_cursor(cursor, "batch", task_id="task-1")
 
 
-def test_command_center_node_summary_never_includes_args_or_result():
-    summary = views._runlog_node_summary_json(
-        {
-            "id": "log-1",
-            "run_id": "run-1",
-            "node_id": "node-1",
-            "node_name": "查询主机【第12次循环】（2次重试）",
-            "node_type": "action-node",
-            "status": 0,
-            "ctime": "2026-08-03T10:00:00+08:00",
-            "args": {"secret": "must-not-leak"},
-            "result": "must-not-leak",
-        }
-    )
-
-    assert "args" not in summary
-    assert "result" not in summary
-    assert "must-not-leak" not in str(summary)
-    assert summary["loop_index"] == 12
-    assert summary["retry_index"] == 2
-
-
 @pytest.mark.asyncio
 async def test_task_run_ownership_is_scoped_to_task_tenant_and_linked_run(monkeypatch):
     task_filters = []

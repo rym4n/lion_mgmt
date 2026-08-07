@@ -2591,6 +2591,9 @@ async def get_version_runlog_nodes(request):
             limit=data.get("limit"),
             cursor_kind="workflow-node",
             cursor_scope={"flow_id": flow_id},
+            node_id=str(data.get("node_id") or "").strip() or None,
+            rows_cursor=data.get("rows_cursor"),
+            loop_limit=data.get("loop_limit"),
         )
     )
 
