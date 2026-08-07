@@ -6,7 +6,7 @@ import json
 import re
 from datetime import datetime
 
-from tortoise.expressions import Case, Q, When
+from tortoise.expressions import Q
 from tortoise.functions import Count, Max, Min
 
 from core.error_code import ErrorCode
@@ -55,14 +55,6 @@ def node_rank_condition(rank: int) -> Q:
     if rank == 1:
         return ~Q(node_type__in=["start-node", "end-node"])
     return Q(node_type="end-node")
-
-
-def later_node_rank_condition(rank: int) -> Q:
-    if rank == 0:
-        return ~Q(node_type="start-node")
-    if rank == 1:
-        return Q(node_type="end-node")
-    return Q(id__isnull=True)
 
 
 def cursor_time_json(value):
@@ -274,6 +266,9 @@ async def runlog_node_page(
     )
     decoded = decode_cursor(cursor, cursor_kind, run_id=run_id, **cursor_scope)
     scoped_condition = condition & Q(run_id=run_id)
+    cursor_rank = 0
+    cursor_time = None
+    cursor_id = None
     if decoded:
         try:
             cursor_rank = decoded["node_type_rank"]
@@ -283,26 +278,25 @@ async def runlog_node_page(
             cursor_id = str(decoded["id"])
         except (KeyError, TypeError, ValueError):
             raise CustomError(ErrorCode.PARAM_VALUE_ERROR) from None
-        same_rank_after_cursor = node_rank_condition(cursor_rank) & (
-            Q(ctime__gt=cursor_time)
-            | Q(ctime=cursor_time, id__gt=cursor_id)
-        )
-        scoped_condition &= later_node_rank_condition(cursor_rank) | (
-            same_rank_after_cursor
-        )
-    rows = (
-        await model.filter(scoped_condition)
-        .annotate(
-            node_type_rank=Case(
-                When(node_type="start-node", then=0),
-                When(node_type="end-node", then=2),
-                default=1,
+
+    rows = []
+    target_size = bounded_limit + 1
+    for rank in range(cursor_rank, 3):
+        rank_condition = scoped_condition & node_rank_condition(rank)
+        if decoded and rank == cursor_rank:
+            rank_condition &= Q(ctime__gt=cursor_time) | Q(
+                ctime=cursor_time, id__gt=cursor_id
             )
+        remaining = target_size - len(rows)
+        rank_rows = (
+            await model.filter(rank_condition)
+            .order_by("ctime", "id")
+            .limit(remaining)
+            .values(*RUNLOG_NODE_FIELDS)
         )
-        .order_by("node_type_rank", "ctime", "id")
-        .limit(bounded_limit + 1)
-        .values(*RUNLOG_NODE_FIELDS)
-    )
+        rows.extend(rank_rows)
+        if len(rows) >= target_size:
+            break
     has_more = len(rows) > bounded_limit
     page = rows[:bounded_limit]
     next_cursor = None

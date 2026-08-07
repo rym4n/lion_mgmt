@@ -46,10 +46,6 @@ class SharedRunlogQuery:
         self.ordering = ()
         self.row_limit = None
 
-    def annotate(self, **annotations):
-        assert "node_type_rank" in annotations
-        return self
-
     def order_by(self, *ordering):
         self.ordering = ordering
         return self
@@ -59,16 +55,9 @@ class SharedRunlogQuery:
         return self
 
     async def values(self, *fields):
-        assert self.ordering == ("node_type_rank", "ctime", "id")
-        ranks = {"start-node": 0, "end-node": 2}
+        assert self.ordering == ("ctime", "id")
         rows = [row for row in self.rows if matches_q(row, self.condition)]
-        rows.sort(
-            key=lambda row: (
-                ranks.get(row["node_type"], 1),
-                row["ctime"],
-                row["id"],
-            )
-        )
+        rows.sort(key=lambda row: (row["ctime"], row["id"]))
         return [
             {field: row.get(field) for field in fields}
             for row in rows[: self.row_limit]
@@ -77,10 +66,13 @@ class SharedRunlogQuery:
 
 class SharedRunlogNode:
     rows = []
+    queries = []
 
     @classmethod
     def filter(cls, condition):
-        return SharedRunlogQuery(cls.rows, condition)
+        query = SharedRunlogQuery(cls.rows, condition)
+        cls.queries.append(query)
+        return query
 
 
 async def shared_node_page(*, cursor=None, limit=50):
@@ -112,6 +104,7 @@ async def create_node(node_id, node_type, ctime):
 @pytest.fixture(autouse=True)
 def clear_runlog_rows():
     SharedRunlogNode.rows = []
+    SharedRunlogNode.queries = []
 
 
 @pytest.mark.asyncio
@@ -143,6 +136,7 @@ async def test_cursor_boundary_preserves_rank_order_without_duplicates():
     await create_node("0-end", "end-node", same_time)
 
     first_page = await shared_node_page(limit=2)
+    assert [query.row_limit for query in SharedRunlogNode.queries] == [3, 2]
     second_page = await shared_node_page(
         cursor=first_page["next_cursor"], limit=2
     )
