@@ -26,13 +26,13 @@ async def test_resolve_placeholders_replaces_span_text(monkeypatch):
     html = (
         "<p>本月告警 "
         '<span data-placeholder-id="alarm" data-result-path="total">'
-        "@告警总数</span> 起</p>"
+        "{alarm.total}</span> 起</p>"
     )
     result = await report_render.resolve_placeholders_in_html(
         html, {"alarm": {"action": "count"}}, "t1", "u1"
     )
     assert "128" in result
-    assert "@告警总数" not in result
+    assert "{alarm.total}" not in result
     assert 'data-placeholder-id="alarm"' in result
 
 
@@ -565,7 +565,7 @@ async def test_render_report_docx_runs_fetch_before_annotations(monkeypatch):
     content_html = (
         '<p>概览：<mark data-annotation-ids="a1">本月告警 '
         '<span data-placeholder-id="alarm" data-result-path="total">'
-        "@告警总数</span> 起</mark>。</p>"
+        "{alarm.total}</span> 起</mark>。</p>"
     )
     docx_bytes = await report_render.render_report_docx(
         content_html=content_html,
@@ -579,33 +579,30 @@ async def test_render_report_docx_runs_fetch_before_annotations(monkeypatch):
 
     assert len(seen_prompts) == 1
     assert "128" in seen_prompts[0], "批注优化必须在取数之后，AI 应看到真实值"
-    assert "@告警总数" not in seen_prompts[0]
+    assert "{alarm.total}" not in seen_prompts[0]
     assert docx_bytes[:2] == b"PK"
 
 
 @pytest.mark.asyncio
-async def test_render_report_docx_replaces_visible_mention_label(monkeypatch):
+async def test_visible_at_label_is_not_a_fetch_placeholder(monkeypatch):
+    calls = []
+
     async def fake_execute(action_cfg, tenant_id, operator_id):
+        calls.append(action_cfg)
         return '{"data": {"total": 128}}'
 
     monkeypatch.setattr(report_fetch, "execute_fetch_action", fake_execute)
-    docx_bytes = await report_render.render_report_docx(
-        content_html=(
-            '<p><span data-placeholder-id="alarm" data-result-path="total">'
-            "@test</span></p>"
-        ),
+    html = (
+        '<p><span data-placeholder-id="alarm" data-result-path="total">@test</span></p>'
+    )
+    result = await report_render.resolve_placeholders_in_html(
+        html,
         fetch_config={"alarm": {"action": "count"}},
-        annotations=[],
         tenant_id="t1",
         operator_id="u1",
-        workspace_id="w1",
-        session_id="s1",
     )
-
-    document = Document(io.BytesIO(docx_bytes))
-    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
-    assert "128" in text
-    assert "@test" not in text
+    assert result == html
+    assert calls == []
 
 
 @pytest.mark.asyncio

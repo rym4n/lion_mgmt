@@ -77,20 +77,6 @@ def _drop_empty_inline_elements(root) -> None:
         parent.remove(element)
 
 
-def _semantic_placeholder_token(element) -> str | None:
-    placeholder_id = str(element.get("data-placeholder-id") or "").strip()
-    if not placeholder_id:
-        return None
-    raw_path = element.get("data-result-path")
-    result_path = "result" if raw_path is None else str(raw_path).strip()
-    suffix = f".{result_path}" if result_path else ""
-    token = f"{{{placeholder_id}{suffix}}}"
-    if report_fetch.FETCH_PLACEHOLDER_RE.fullmatch(token) is None:
-        logger.error("报告取数语义占位符格式非法 token=%s", token)
-        raise CustomError(ErrorCode.SERVER_ERROR)
-    return token
-
-
 async def resolve_placeholders_in_html(
     html: str,
     fetch_config: dict,
@@ -103,14 +89,7 @@ async def resolve_placeholders_in_html(
     """
     root = _parse_document(html)
     _drop_empty_inline_elements(root)
-    semantic_placeholders = [
-        (element, token)
-        for element in root.iter()
-        if (token := _semantic_placeholder_token(element)) is not None
-    ]
-    all_text = " ".join(
-        [_collect_text(root), *(token for _, token in semantic_placeholders)]
-    )
+    all_text = _collect_text(root)
     results = await report_fetch.resolve_fetch_values(
         all_text, fetch_config, tenant_id, operator_id
     )
@@ -118,20 +97,6 @@ async def resolve_placeholders_in_html(
         return html
 
     replacer = report_fetch.build_placeholder_replacer(results)
-
-    for element, token in semantic_placeholders:
-        match = report_fetch.FETCH_PLACEHOLDER_RE.fullmatch(token)
-        if match is None:
-            raise CustomError(ErrorCode.SERVER_ERROR)
-        value = report_fetch.get_fetch_value_by_path(
-            results.get(match.group(1), report_fetch.MISSING_FETCH_VALUE),
-            match.group(2) or "",
-        )
-        if value is report_fetch.MISSING_FETCH_VALUE:
-            raise CustomError(ErrorCode.SERVER_ERROR)
-        for child in list(element):
-            element.remove(child)
-        element.text = report_fetch.stringify_fetch(value)
 
     def _substitute(value: str) -> str:
         return report_fetch.FETCH_PLACEHOLDER_RE.sub(
