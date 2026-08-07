@@ -7,6 +7,7 @@ from sanic.log import logger
 
 from services.digital_employee.lion_agent_adapter import execute_prompt, workspace_id_for
 from services.llm_config.resolver import resolve_llm
+from settings import COMMAND_DISPATCH_REQUEST_TIMEOUT_SECONDS
 
 
 class AgentCandidate(Protocol):
@@ -295,6 +296,7 @@ async def choose_agent_with_lion_agent(
             message=message,
             llm=llm,
             system_prompt=system_prompt,
+            timeout=COMMAND_DISPATCH_REQUEST_TIMEOUT_SECONDS,
         )
         decision_payload = _extract_json_object(raw_response)
     except ValueError:
@@ -311,6 +313,7 @@ async def choose_agent_with_lion_agent(
                 ),
                 llm=llm,
                 system_prompt=system_prompt,
+                timeout=COMMAND_DISPATCH_REQUEST_TIMEOUT_SECONDS,
             )
             decision_payload = _extract_json_object(raw_response)
         except Exception as exc:

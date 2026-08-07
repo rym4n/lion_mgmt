@@ -35,7 +35,7 @@ def _restore_stubbed_modules():
             sys.modules[name] = original
 
 
-def _load_dispatcher(lite_model="aioe-lite"):
+def _load_dispatcher(lite_model="aioe-lite", request_timeout=120):
     for name in STUB_MODULES:
         sys.modules.pop(name, None)
 
@@ -47,6 +47,7 @@ def _load_dispatcher(lite_model="aioe-lite"):
 
     settings_module = types.ModuleType("settings")
     settings_module.RY_AI_LITE_MODEL = lite_model
+    settings_module.COMMAND_DISPATCH_REQUEST_TIMEOUT_SECONDS = request_timeout
     sys.modules["settings"] = settings_module
 
     llm_config_module = types.ModuleType("services.llm_config")
@@ -224,6 +225,7 @@ def test_automatic_dispatch_uses_configured_lite_model():
     assert captured["llm"].to_payload()["model"] == "custom-lite"
     # dispatcher 只负责传对 llm；写顶层 model 是 adapter 的职责，已由 adapter 层测试覆盖
     assert captured["llm"].model_name == "custom-lite"
+    assert captured["timeout"] == 120
 
 
 def test_digital_employee_scope_ignores_plain_command_agent():
@@ -388,6 +390,7 @@ def test_non_json_dispatch_decision_is_retried_once_with_strict_contract():
     assert decision.agent is selected
     assert decision.dispatch_status == "auto_assigned"
     assert len(calls) == 2
+    assert [call["timeout"] for call in calls] == [120, 120]
     assert calls[1]["request_id"] == "task-1:dispatch-json-retry"
     assert "仅重新输出完全符合 response_schema 的 JSON 对象" in calls[1]["message"]
 

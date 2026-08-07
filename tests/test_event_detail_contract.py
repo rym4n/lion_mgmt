@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
 from services.event import views as event_views
 
 
@@ -139,7 +141,17 @@ def test_event_detail_uses_persisted_creator():
     assert ast.unparse(event_dict_assignment.value) == "{'created_name': event.creator.username if event.creator else ''}"
 
 
-def test_event_detail_initializes_room_for_manual_event(monkeypatch):
+@pytest.mark.parametrize(
+    ("event_name", "expected_room_name"),
+    [
+        ("manual-event", "manual-event_ABC123"),
+        ("   ", "事件_event-1_ABC123"),
+        ("超长事件" * 20, ("超长事件" * 20)[:43] + "_ABC123"),
+    ],
+)
+def test_event_detail_initializes_room_for_manual_event(
+    monkeypatch, event_name, expected_room_name
+):
     viewer = SimpleNamespace(
         id="account-1",
         username="admin",
@@ -175,6 +187,7 @@ def test_event_detail_initializes_room_for_manual_event(monkeypatch):
             }
 
     event = FakeEvent()
+    event.event_name = event_name
 
     class FakeEvents:
         @staticmethod
@@ -214,7 +227,7 @@ def test_event_detail_initializes_room_for_manual_event(monkeypatch):
 
     check_permissions.assert_awaited_once_with(request, "warroom:r")
     FakeRoom.create.assert_awaited_once_with(
-        name="manual-event_ABC123",
+        name=expected_room_name,
         creator=viewer,
         tenant_id="tenant-1",
         room_type="public",

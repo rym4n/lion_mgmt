@@ -36,6 +36,15 @@ STATUS = {
     "待处理": "NEW",
 }
 
+ROOM_NAME_MAX_LENGTH = 50
+
+
+def _event_room_name(event) -> str:
+    suffix = f"_{gen_random_code(6)}"
+    event_name = str(event.event_name or "").strip()
+    base_name = event_name or f"事件_{str(event.id)[:8]}"
+    return f"{base_name[: ROOM_NAME_MAX_LENGTH - len(suffix)]}{suffix}"
+
 # 将aioe的节点状态映射成雾帜的节点状态
 NODE_TYPE = {
     "start-node": "START",
@@ -374,7 +383,7 @@ async def execution(request):
 
     event = await Events.get_or_none(id=eventId, tenant_id=tenant_id)
     if not event.room:
-        room_name = event.event_name + "_" + gen_random_code(6)
+        room_name = _event_room_name(event)
         if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
             raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
         room = await Room.create(name=room_name, creator=user, tenant_id=tenant_id, room_type="public")
@@ -651,7 +660,7 @@ async def get_event_detail(request):
         await check_permissions(request, "warroom:r")
         update_fields = []
         if not event.room:
-            room_name = event.event_name + "_" + gen_random_code(6)
+            room_name = _event_room_name(event)
             if await Room.filter(name=room_name, deleted=False, tenant_id=tenant_id).exists():
                 raise CustomError(ErrorCode.ROOM_NAME_EXISTS)
             room = await Room.create(name=room_name, creator=creator, tenant_id=tenant_id, room_type="public")
