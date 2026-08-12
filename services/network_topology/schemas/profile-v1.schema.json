@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.profile/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "root_scope_seed", "grouping_order", "key_device_roles",
+    "excluded_asset_types", "important_tags", "explicit_asset_exceptions",
+    "access_device_policy", "endpoint_policy", "point_to_point_subnet_policy",
+    "default_layers", "max_depth", "max_children_per_view",
+    "max_collection_span_seconds", "max_observation_age_seconds", "overflow_strategy"
+  ],
+  "properties": {
+    "schema_version": {"const": "aioe.network-topology.profile/v1"},
+    "root_scope_seed": {"const": "scope:organization:root"},
+    "grouping_order": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+    "key_device_roles": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+    "excluded_asset_types": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+    "important_tags": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+    "explicit_asset_exceptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_type", "projection_kind", "allowed_network_attributes"],
+        "properties": {
+          "asset_type": {"enum": ["host", "terminal"]},
+          "projection_kind": {"const": "service_boundary"},
+          "allowed_network_attributes": {
+            "type": "array",
+            "items": {"enum": ["network_prefixes", "virtual_addresses", "protocols", "ports"]},
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "access_device_policy": {"const": "collapse"},
+    "endpoint_policy": {"const": "exclude"},
+    "point_to_point_subnet_policy": {"const": "collapse_into_link"},
+    "default_layers": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+    "max_depth": {"type": "integer", "minimum": 1, "maximum": 32},
+    "max_children_per_view": {"type": "integer", "minimum": 1, "maximum": 1000},
+    "max_collection_span_seconds": {"type": "integer", "minimum": 1},
+    "max_observation_age_seconds": {"type": "integer", "minimum": 1},
+    "overflow_strategy": {"const": "deterministic_bucket"}
+  },
+  "examples": [
+    {
+      "schema_version": "aioe.network-topology.profile/v1",
+      "root_scope_seed": "scope:organization:root",
+      "grouping_order": ["organization", "site", "network_domain", "security_zone", "vrf"],
+      "key_device_roles": ["firewall", "router", "core_switch", "load_balancer"],
+      "excluded_asset_types": ["host", "terminal", "printer", "camera"],
+      "important_tags": ["topology.important"],
+      "explicit_asset_exceptions": [
+        {
+          "asset_type": "host",
+          "projection_kind": "service_boundary",
+          "allowed_network_attributes": ["network_prefixes", "protocols", "ports"]
+        }
+      ],
+      "access_device_policy": "collapse",
+      "endpoint_policy": "exclude",
+      "point_to_point_subnet_policy": "collapse_into_link",
+      "default_layers": ["physical", "l2", "l3", "routing", "security", "overlay"],
+      "max_depth": 8,
+      "max_children_per_view": 200,
+      "max_collection_span_seconds": 3600,
+      "max_observation_age_seconds": 3600,
+      "overflow_strategy": "deterministic_bucket"
+    }
+  ]
+}

@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.collection/v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "snapshot_id", "collection_started_at", "collection_ended_at",
+    "collector", "topology_profile_revision", "target_manifest", "completeness",
+    "authoritative_context", "sources"
+  ],
+  "properties": {
+    "schema_version": {"const": "aioe.network-topology.collection/v2"},
+    "snapshot_id": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/nonEmptyId"},
+    "collection_started_at": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/timestamp"},
+    "collection_ended_at": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/timestamp"},
+    "collector": {"$ref": "#/$defs/collector"},
+    "topology_profile_revision": {"type": "integer", "minimum": 1},
+    "target_manifest": {"$ref": "#/$defs/targetManifest"},
+    "completeness": {"$ref": "#/$defs/completeness"},
+    "authoritative_context": {"$ref": "#/$defs/authoritativeContext"},
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/source"}
+    }
+  },
+  "$defs": {
+    "collector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["playbook_id", "playbook_version", "run_id", "collector_version"],
+      "properties": {
+        "playbook_id": {"type": "string", "minLength": 1},
+        "playbook_version": {"type": "integer", "minimum": 1},
+        "run_id": {"type": "string", "minLength": 1},
+        "collector_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}
+      }
+    },
+    "targetManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_id", "manifest_hash", "collection_sequence", "base_graph_revision",
+        "base_publication_revision", "profile_revision", "issued_at", "expires_at",
+        "expected_resources"
+      ],
+      "properties": {
+        "manifest_id": {"type": "string", "minLength": 1},
+        "manifest_hash": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/sha256"},
+        "collection_sequence": {"type": "integer", "minimum": 1},
+        "base_graph_revision": {"type": "integer", "minimum": 0},
+        "base_publication_revision": {"type": "integer", "minimum": 0},
+        "profile_revision": {"type": "integer", "minimum": 1},
+        "issued_at": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/timestamp"},
+        "expires_at": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/timestamp"},
+        "expected_resources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["resource_id", "capability_profile", "required_kinds", "optional_kinds"],
+            "properties": {
+              "resource_id": {"type": "string", "minLength": 1},
+              "capability_profile": {"type": "string", "minLength": 1},
+              "required_kinds": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+              "optional_kinds": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"}
+            }
+          }
+        }
+      }
+    },
+    "completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode", "asserted", "expected_resource_ids", "collected_resource_ids",
+        "failed_resource_ids", "observation_coverage"
+      ],
+      "properties": {
+        "mode": {"const": "full"},
+        "asserted": {"const": true},
+        "expected_resource_ids": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+        "collected_resource_ids": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+        "failed_resource_ids": {"type": "array", "maxItems": 0},
+        "observation_coverage": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["resource_id", "collected_kinds", "kind_status"],
+            "properties": {
+              "resource_id": {"type": "string", "minLength": 1},
+              "collected_kinds": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+              "kind_status": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": {
+                  "enum": ["success", "not_supported", "not_applicable", "failed"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "authorityProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_system", "source_record_id", "source_revision", "as_of", "field_locator"],
+      "properties": {
+        "source_system": {"type": "string", "minLength": 1},
+        "source_record_id": {"type": "string", "minLength": 1},
+        "source_revision": {"type": "string", "minLength": 1},
+        "as_of": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/timestamp"},
+        "field_locator": {"type": "string", "minLength": 1}
+      }
+    },
+    "authoritativeRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record_id", "name", "scope_ids", "attributes", "provenance"],
+      "properties": {
+        "record_id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "scope_ids": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+        "attributes": {"type": "object"},
+        "provenance": {"$ref": "#/$defs/authorityProvenance"}
+      }
+    },
+    "authoritativeContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scopes", "subnets", "external_networks", "circuits", "cloud_networks"],
+      "properties": {
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["scope_id", "parent_scope_id", "scope_type", "name", "provenance"],
+            "properties": {
+              "scope_id": {"type": "string", "minLength": 1},
+              "parent_scope_id": {"type": ["string", "null"]},
+              "scope_type": {"enum": ["organization", "region", "site", "network_domain", "security_zone", "network_context", "sub_topology", "custom"]},
+              "name": {"type": "string", "minLength": 1},
+              "provenance": {"$ref": "#/$defs/authorityProvenance"}
+            }
+          }
+        },
+        "subnets": {"type": "array", "items": {"$ref": "#/$defs/authoritativeRecord"}},
+        "external_networks": {"type": "array", "items": {"$ref": "#/$defs/authoritativeRecord"}},
+        "circuits": {"type": "array", "items": {"$ref": "#/$defs/authoritativeRecord"}},
+        "cloud_networks": {"type": "array", "items": {"$ref": "#/$defs/authoritativeRecord"}}
+      }
+    },
+    "assetContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name", "management_ips", "management_domain_id", "vendor", "model",
+        "platform", "os_family", "os_version", "device_type", "role", "importance",
+        "scope_ids", "tags", "provenance_ref"
+      ],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "management_ips": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+        "management_domain_id": {"type": "string", "minLength": 1},
+        "vendor": {"type": "string", "minLength": 1},
+        "model": {"type": "string", "minLength": 1},
+        "platform": {"type": "string", "minLength": 1},
+        "os_family": {"type": "string", "minLength": 1},
+        "os_version": {"type": "string", "minLength": 1},
+        "device_type": {"type": "string", "minLength": 1},
+        "role": {"type": "string", "minLength": 1},
+        "importance": {"enum": ["critical", "important", "normal"]},
+        "scope_ids": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+        "tags": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+        "provenance_ref": {"type": "string", "minLength": 1}
+      }
+    },
+    "observation": {
+      "oneOf": [
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/system.identity/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/system.virtual_contexts/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/interface.inventory/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/l2.vlans/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/l2.link_aggregation/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/l2.neighbors/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/l2.stp_summary/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/l3.vrfs/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/l3.connected_networks/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/l3.neighbor_cache/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/routing.connected_static_default/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/routing.dynamic_neighbors/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/routing.first_hop_redundancy/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/security.zones/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/security.zone_bindings/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/system.cluster_members/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/service.virtual_addresses/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/overlay.tunnels/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/overlay.vxlan_evpn/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/wan.sdwan/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/ipam.subnets/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/legacy.running_config/v1"},
+        {"$ref": "https://schemas.aioe.local/aioe.network-topology.observation/vendor-extension/v1"}
+      ]
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource_id", "asset_context", "result"],
+      "properties": {
+        "resource_id": {"type": "string", "minLength": 1},
+        "asset_context": {"$ref": "#/$defs/assetContext"},
+        "result": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "observations"],
+          "properties": {
+            "status": {"const": "success"},
+            "observations": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/observation"}}
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "action_version", "resources"],
+      "properties": {
+        "action_id": {"type": "string", "minLength": 1},
+        "action_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+        "resources": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/resource"}}
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "aioe.network-topology.collection/v2",
+      "snapshot_id": "synthetic-snapshot-1",
+      "collection_started_at": "2026-07-28T00:00:00Z",
+      "collection_ended_at": "2026-07-28T00:01:00Z",
+      "collector": {"playbook_id": "synthetic-playbook", "playbook_version": 1, "run_id": "synthetic-run-1", "collector_version": "1.0.0"},
+      "topology_profile_revision": 1,
+      "target_manifest": {
+        "manifest_id": "manifest-1",
+        "manifest_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "collection_sequence": 1,
+        "base_graph_revision": 0,
+        "base_publication_revision": 0,
+        "profile_revision": 1,
+        "issued_at": "2026-07-28T00:00:00Z",
+        "expires_at": "2026-07-28T00:05:00Z",
+        "expected_resources": [{"resource_id": "synthetic-router-1", "capability_profile": "aioe.router.basic/v1", "required_kinds": ["system.identity", "interface.inventory"], "optional_kinds": []}]
+      },
+      "completeness": {
+        "mode": "full",
+        "asserted": true,
+        "expected_resource_ids": ["synthetic-router-1"],
+        "collected_resource_ids": ["synthetic-router-1"],
+        "failed_resource_ids": [],
+        "observation_coverage": [{"resource_id": "synthetic-router-1", "collected_kinds": ["system.identity", "interface.inventory"], "kind_status": {"system.identity": "success", "interface.inventory": "success"}}]
+      },
+      "authoritative_context": {"scopes": [], "subnets": [], "external_networks": [], "circuits": [], "cloud_networks": []},
+      "sources": [
+        {
+          "action_id": "synthetic.collect",
+          "action_version": "1.0.0",
+          "resources": [
+            {
+              "resource_id": "synthetic-router-1",
+              "asset_context": {
+                "name": "SYNTH-RTR-01", "management_ips": ["192.0.2.10"], "management_domain_id": "synthetic-mgmt",
+                "vendor": "Synthetic", "model": "Router", "platform": "lab", "os_family": "synthetic-os", "os_version": "1.0",
+                "device_type": "router", "role": "router", "importance": "important", "scope_ids": [], "tags": [], "provenance_ref": "synthetic-cmdb:router-1@1"
+              },
+              "result": {
+                "status": "success",
+                "observations": [
+                  {
+                    "observation_id": "synthetic-router-1:identity:1", "kind": "system.identity", "observation_status": "success",
+                    "source_method": "vendor_api", "content_type": "application/json", "data_schema": "aioe.network-topology.observation/system.identity/v1",
+                    "fact_plane": "inventory", "command_or_api": "synthetic facts API", "observed_at": "2026-07-28T00:00:30Z",
+                    "data": {"hostname": "SYNTH-RTR-01", "serial": "SYNTH-0001", "chassis_id": "02:00:00:00:00:01", "vendor": "Synthetic", "model": "Router", "os_version": "1.0", "device_type": "router", "aliases": []},
+                    "raw_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "content_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                  },
+                  {
+                    "observation_id": "synthetic-router-1:interfaces:1", "kind": "interface.inventory", "observation_status": "success",
+                    "source_method": "vendor_api", "content_type": "application/json", "data_schema": "aioe.network-topology.observation/interface.inventory/v1",
+                    "fact_plane": "operational", "command_or_api": "synthetic interface API", "observed_at": "2026-07-28T00:00:40Z",
+                    "data": {"interfaces": []},
+                    "raw_sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "content_sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

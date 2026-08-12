@@ -1,0 +1,15 @@
+[
+  {
+    "builtin_key": "862aabbd5b9e4b07a00316bd41cbeebd",
+    "model_key": "host",
+    "field_keys": [
+      "ip_addr",
+      "cloud"
+    ],
+    "sort": 1,
+    "is_builtin": true,
+    "is_locked": true,
+    "owner": "product",
+    "builtin_hash": "2d567af747bd1a194fc34bfeda599146ad1cd0ffa9cba15e7f3f03371819aa8e"
+  }
+]

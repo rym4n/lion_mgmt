@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.api/common/v1",
+  "$defs": {
+    "topologyIdRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {"id": {"type": "string", "minLength": 1}}
+    },
+    "acceptedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sync_id", "snapshot_id", "status", "status_url"],
+      "properties": {
+        "sync_id": {"type": "string", "minLength": 1},
+        "snapshot_id": {"type": "string", "minLength": 1},
+        "status": {"const": "RECEIVED"},
+        "status_url": {"type": "string", "pattern": "^/api/network-topology/config-sync/status"}
+      }
+    },
+    "syncState": {
+      "enum": ["RECEIVED", "RUNNING", "RETRY_WAIT", "WAITING_FOR_PUBLISH", "SUCCEEDED", "FAILED", "SUPERSEDED", "CANCELLED"]
+    },
+    "syncStage": {
+      "type": ["string", "null"],
+      "enum": [null, "SPLITTING", "PARSING", "VALIDATING_FACTS", "FACTS_READY", "RESOLVING_IDENTITIES", "BUILDING_SCOPES", "PROJECTING_GRAPH", "VALIDATING_GRAPH", "PUBLISHING"]
+    },
+    "apiErrorCode": {
+      "type": "string",
+      "enum": [
+        "SCHEMA_INVALID", "MANIFEST_MISMATCH", "MANIFEST_CONSUMED", "UPLOAD_CONFLICT",
+        "SERVICE_BINDING_NOT_FOUND", "SERVICE_BINDING_AMBIGUOUS",
+        "LEGACY_CONVERSION_REQUIRED", "WORKER_UNAVAILABLE"
+      ]
+    },
+    "temporaryErrorCode": {
+      "type": "string",
+      "enum": [
+        "PROVIDER_TIMEOUT", "TEMPORARY_NETWORK_FAILURE",
+        "TEMPORARY_DATABASE_FAILURE", "WORKER_LEASE_LOST"
+      ]
+    },
+    "failedErrorCode": {
+      "type": "string",
+      "enum": [
+        "SCHEMA_INVALID", "PARSER_FAILED", "EVIDENCE_INVALID", "GRAPH_VALIDATION_FAILED",
+        "PROVIDER_TIMEOUT", "TEMPORARY_NETWORK_FAILURE",
+        "TEMPORARY_DATABASE_FAILURE", "WORKER_LEASE_LOST"
+      ]
+    },
+    "supersededErrorCode": {
+      "type": "string",
+      "enum": [
+        "NEWER_COLLECTION_PUBLISHED", "PUBLICATION_CAS_MISMATCH",
+        "STALE_PROFILE", "UPGRADE_INTENT_INVALID"
+      ]
+    },
+    "errorCode": {
+      "type": ["string", "null"],
+      "enum": [
+        null, "WORKER_UNAVAILABLE", "PROVIDER_TIMEOUT", "TEMPORARY_NETWORK_FAILURE",
+        "TEMPORARY_DATABASE_FAILURE", "WORKER_LEASE_LOST", "SCHEMA_INVALID",
+        "PARSER_FAILED", "EVIDENCE_INVALID", "GRAPH_VALIDATION_FAILED",
+        "NEWER_COLLECTION_PUBLISHED", "PUBLICATION_CAS_MISMATCH", "STALE_PROFILE",
+        "UPGRADE_INTENT_INVALID", "CANCELLED_BY_REQUEST"
+      ]
+    },
+    "apiError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "data"],
+      "properties": {
+        "code": {"type": "integer", "minimum": 1},
+        "message": {"type": "string", "minLength": 1},
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["error_code", "retryable"],
+          "properties": {
+            "error_code": {"$ref": "#/$defs/apiErrorCode"},
+            "retryable": {"type": "boolean"}
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {"error_code": {"const": "WORKER_UNAVAILABLE"}},
+                "required": ["error_code"]
+              },
+              "then": {"properties": {"retryable": {"const": true}}},
+              "else": {"properties": {"retryable": {"const": false}}}
+            }
+          ]
+        }
+      }
+    },
+    "uploadEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "snapshot_id", "collection_started_at", "collection_ended_at",
+        "collector", "topology_profile_revision", "target_manifest", "completeness",
+        "authoritative_context", "sources"
+      ],
+      "properties": {
+        "schema_version": {"const": "aioe.network-topology.collection/v2"},
+        "snapshot_id": {"type": "string", "minLength": 1},
+        "collection_started_at": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/timestamp"},
+        "collection_ended_at": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/timestamp"},
+        "collector": {"$ref": "https://schemas.aioe.local/aioe.network-topology.collection/v2#/$defs/collector"},
+        "topology_profile_revision": {"type": "integer", "minimum": 1},
+        "target_manifest": {"$ref": "https://schemas.aioe.local/aioe.network-topology.collection/v2#/$defs/targetManifest"},
+        "completeness": {"$ref": "https://schemas.aioe.local/aioe.network-topology.collection/v2#/$defs/completeness"},
+        "authoritative_context": {"$ref": "https://schemas.aioe.local/aioe.network-topology.collection/v2#/$defs/authoritativeContext"},
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["action_id", "action_version", "resources"],
+            "properties": {
+              "action_id": {"type": "string", "minLength": 1},
+              "action_version": {"type": "string", "minLength": 1},
+              "resources": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["resource_id", "asset_context", "result"],
+                  "properties": {
+                    "resource_id": {"type": "string", "minLength": 1},
+                    "asset_context": {"$ref": "https://schemas.aioe.local/aioe.network-topology.collection/v2#/$defs/assetContext"},
+                    "result": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["status", "expected_observation_count"],
+                      "properties": {
+                        "status": {"const": "success"},
+                        "expected_observation_count": {"type": "integer", "minimum": 2}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "viewNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "projection_type", "label", "read_only", "target_id"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "projection_type": {"enum": ["entity", "entity_ref", "scope_ref", "external_ref", "bucket"]},
+        "label": {"type": "string", "minLength": 1},
+        "read_only": {"type": "boolean"},
+        "target_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "viewEdge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source", "target", "relation_type", "layer", "member_relation_ids"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "source": {"type": "string", "minLength": 1},
+        "target": {"type": "string", "minLength": 1},
+        "relation_type": {"type": "string", "minLength": 1},
+        "layer": {"type": "string", "minLength": 1},
+        "member_relation_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true}
+      }
+    }
+  }
+}

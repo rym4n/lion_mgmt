@@ -1,0 +1,28 @@
+{
+  "schema_version": "aioe.network-topology.registry/parser-bundle/v1",
+  "bundle_id": "aioe.network-topology.parser-bundle/v1",
+  "redaction_version": "aioe.network-topology.redaction/v1",
+  "deterministic_parsers": [
+    {
+      "parser_id": "aioe.network-topology.parser/structured-json/v1",
+      "parser_version": 1,
+      "implementation_status": "contract_only",
+      "observation_kinds": ["system.identity", "system.virtual_contexts", "system.cluster_members", "interface.inventory", "l2.vlans", "l2.link_aggregation", "l2.neighbors", "l2.stp_summary", "l3.vrfs", "l3.connected_networks", "routing.connected_static_default", "routing.dynamic_neighbors", "routing.first_hop_redundancy", "security.zones", "security.zone_bindings", "overlay.tunnels", "overlay.vxlan_evpn", "wan.sdwan", "ipam.subnets", "service.virtual_addresses", "l3.neighbor_cache"]
+    },
+    {
+      "parser_id": "aioe.network-topology.parser/registered-cli/v1",
+      "parser_version": 1,
+      "implementation_status": "planned",
+      "observation_kinds": ["legacy.running_config"]
+    }
+  ],
+  "llm_policy": {
+    "prompt_policy_id": "aioe.network-topology.prompt/fact-candidates/v1",
+    "model_selection": "deployment_allowlist",
+    "tools_allowed": false,
+    "network_allowed": false,
+    "candidate_output_schema": "aioe.network-topology.llm-fact-candidates/v1",
+    "chunk_input_schema": "aioe.network-topology.llm-chunk/v1",
+    "formal_facts_schema": "aioe.network-topology.facts/v1"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/ipam.subnets/v1",
+  "x-max-bytes": 4194304,
+  "x-allowed-source-methods": ["vendor_api"],
+  "x-fact-planes": ["configured"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "ipam.subnets"},
+        "source_method": {"const": "vendor_api"},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/ipam.subnets/v1"},
+        "fact_plane": {"const": "configured"}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["subnets"],
+            "properties": {
+              "subnets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["cidr", "network_domain_id", "vrf", "name", "gateway", "scope_ids", "authority_provenance"],
+                  "properties": {
+                    "cidr": {"type": "string", "minLength": 1},
+                    "network_domain_id": {"type": "string", "minLength": 1},
+                    "vrf": {"type": "string", "minLength": 1},
+                    "name": {"type": "string", "minLength": 1},
+                    "gateway": {"type": ["string", "null"]},
+                    "scope_ids": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/stringSet"},
+                    "authority_provenance": {"$ref": "https://schemas.aioe.local/aioe.network-topology.provenance/v1#/$defs/authoritative"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "examples": [
+    {
+      "observation_id": "synthetic-ipam:subnets:1",
+      "kind": "ipam.subnets",
+      "observation_status": "success",
+      "source_method": "vendor_api",
+      "content_type": "application/json",
+      "data_schema": "aioe.network-topology.observation/ipam.subnets/v1",
+      "fact_plane": "configured",
+      "command_or_api": "synthetic IPAM API",
+      "observed_at": "2026-07-28T00:00:30Z",
+      "data": {"subnets": []},
+      "raw_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "content_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

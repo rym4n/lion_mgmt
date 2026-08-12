@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.common/v1",
+  "$defs": {
+    "nonEmptyId": {"type": "string", "minLength": 1, "maxLength": 255},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "stringSet": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observation_id", "locator"],
+      "properties": {
+        "observation_id": {"$ref": "#/$defs/nonEmptyId"},
+        "locator": {"$ref": "#/$defs/locator"}
+      }
+    },
+    "locator": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "start", "end"],
+          "properties": {
+            "type": {"const": "lines"},
+            "start": {"type": "integer", "minimum": 1},
+            "end": {"type": "integer", "minimum": 1}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "pointer"],
+          "properties": {
+            "type": {"const": "json_pointer"},
+            "pointer": {"type": "string", "pattern": "^(|/.*)$", "maxLength": 1024}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "path", "namespaces"],
+          "properties": {
+            "type": {"const": "xpath"},
+            "path": {"type": "string", "pattern": "^/[^/].*$", "maxLength": 1024},
+            "namespaces": {
+              "type": "object",
+              "additionalProperties": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      ]
+    },
+    "parserContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vendor", "platform", "os_family", "parser_profile", "encoding"],
+      "properties": {
+        "vendor": {"type": "string", "minLength": 1},
+        "platform": {"type": "string", "minLength": 1},
+        "os_family": {"type": "string", "minLength": 1},
+        "parser_profile": {"type": "string", "minLength": 1},
+        "encoding": {"type": "string", "minLength": 1}
+      }
+    },
+    "observationBase": {
+      "type": "object",
+      "required": [
+        "observation_id", "kind", "observation_status", "source_method",
+        "content_type", "data_schema", "fact_plane", "command_or_api",
+        "observed_at", "data", "raw_sha256", "content_sha256"
+      ],
+      "properties": {
+        "observation_id": {"$ref": "#/$defs/nonEmptyId"},
+        "kind": {"type": "string", "minLength": 1},
+        "observation_status": {
+          "enum": ["success", "not_supported", "not_applicable", "failed"]
+        },
+        "source_method": {
+          "enum": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"]
+        },
+        "content_type": {"enum": ["application/json", "application/xml", "text/plain"]},
+        "data_schema": {"type": "string", "minLength": 1},
+        "fact_plane": {"enum": ["inventory", "configured", "operational"]},
+        "command_or_api": {"type": "string", "minLength": 1, "maxLength": 512},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "parser_context": {"$ref": "#/$defs/parserContext"},
+        "data": {},
+        "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"},
+        "reason_summary": {"type": "string", "minLength": 1, "maxLength": 512},
+        "raw_sha256": {"$ref": "#/$defs/sha256"},
+        "content_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"source_method": {"const": "cli"}}, "required": ["source_method"]},
+          "then": {"required": ["parser_context"]}
+        },
+        {
+          "if": {"properties": {"observation_status": {"const": "success"}}, "required": ["observation_status"]},
+          "else": {
+            "required": ["reason_code", "reason_summary"],
+            "properties": {"data": {"type": "null"}}
+          }
+        }
+      ]
+    }
+  }
+}

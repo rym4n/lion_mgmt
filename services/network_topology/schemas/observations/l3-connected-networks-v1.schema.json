@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/l3.connected_networks/v1",
+  "x-max-bytes": 4194304,
+  "x-allowed-source-methods": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"],
+  "x-fact-planes": ["configured", "operational"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "l3.connected_networks"},
+        "source_method": {"enum": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"]},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/l3.connected_networks/v1"},
+        "fact_plane": {"enum": ["configured", "operational"]}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["networks"],
+            "properties": {
+              "networks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["prefix", "interface", "network_domain", "vrf", "address_role", "configured_state", "operational_state"],
+                  "properties": {
+                    "prefix": {"type": "string", "minLength": 1},
+                    "interface": {"type": "string", "minLength": 1},
+                    "network_domain": {"type": "string", "minLength": 1},
+                    "vrf": {"type": "string", "minLength": 1},
+                    "address_role": {"enum": ["interface", "secondary", "virtual", "loopback"]},
+                    "configured_state": {"enum": ["present", "absent", "unknown"]},
+                    "operational_state": {"enum": ["up", "down", "unknown"]}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

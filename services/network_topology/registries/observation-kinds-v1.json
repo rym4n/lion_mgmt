@@ -1,0 +1,32 @@
+{
+  "schema_version": "aioe.network-topology.registry/observation-kinds/v1",
+  "kinds": [
+    {"kind": "system.identity", "schema_uri": "aioe.network-topology.observation/system.identity/v1"},
+    {"kind": "system.virtual_contexts", "schema_uri": "aioe.network-topology.observation/system.virtual_contexts/v1"},
+    {"kind": "system.cluster_members", "schema_uri": "aioe.network-topology.observation/system.cluster_members/v1"},
+    {"kind": "interface.inventory", "schema_uri": "aioe.network-topology.observation/interface.inventory/v1"},
+    {"kind": "l2.vlans", "schema_uri": "aioe.network-topology.observation/l2.vlans/v1"},
+    {"kind": "l2.link_aggregation", "schema_uri": "aioe.network-topology.observation/l2.link_aggregation/v1"},
+    {"kind": "l2.neighbors", "schema_uri": "aioe.network-topology.observation/l2.neighbors/v1"},
+    {"kind": "l2.stp_summary", "schema_uri": "aioe.network-topology.observation/l2.stp_summary/v1"},
+    {"kind": "l3.vrfs", "schema_uri": "aioe.network-topology.observation/l3.vrfs/v1"},
+    {"kind": "l3.connected_networks", "schema_uri": "aioe.network-topology.observation/l3.connected_networks/v1"},
+    {"kind": "routing.connected_static_default", "schema_uri": "aioe.network-topology.observation/routing.connected_static_default/v1"},
+    {"kind": "routing.dynamic_neighbors", "schema_uri": "aioe.network-topology.observation/routing.dynamic_neighbors/v1"},
+    {"kind": "routing.first_hop_redundancy", "schema_uri": "aioe.network-topology.observation/routing.first_hop_redundancy/v1"},
+    {"kind": "security.zones", "schema_uri": "aioe.network-topology.observation/security.zones/v1"},
+    {"kind": "security.zone_bindings", "schema_uri": "aioe.network-topology.observation/security.zone_bindings/v1"},
+    {"kind": "overlay.tunnels", "schema_uri": "aioe.network-topology.observation/overlay.tunnels/v1"},
+    {"kind": "overlay.vxlan_evpn", "schema_uri": "aioe.network-topology.observation/overlay.vxlan_evpn/v1"},
+    {"kind": "wan.sdwan", "schema_uri": "aioe.network-topology.observation/wan.sdwan/v1"},
+    {"kind": "ipam.subnets", "schema_uri": "aioe.network-topology.observation/ipam.subnets/v1"},
+    {"kind": "service.virtual_addresses", "schema_uri": "aioe.network-topology.observation/service.virtual_addresses/v1"},
+    {"kind": "l3.neighbor_cache", "schema_uri": "aioe.network-topology.observation/l3.neighbor_cache/v1"},
+    {"kind": "legacy.running_config", "schema_uri": "aioe.network-topology.observation/legacy.running_config/v1"}
+  ],
+  "vendor_extension": {
+    "kind_pattern": "^vendor\\.[a-z0-9_-]+\\.[a-z0-9_.-]+$",
+    "schema_uri": "aioe.network-topology.observation/vendor-extension/v1",
+    "parser_profile_required": true
+  }
+}

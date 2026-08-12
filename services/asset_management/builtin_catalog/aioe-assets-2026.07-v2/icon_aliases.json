@@ -1,0 +1,114 @@
+[
+  {
+    "source_icon": "cc-balance_负载均衡",
+    "icon": "ri:router-line"
+  },
+  {
+    "source_icon": "cc-business_业务",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-cloud-elb_云负载均衡",
+    "icon": "ri:node-tree"
+  },
+  {
+    "source_icon": "cc-cloud-plat_云平台",
+    "icon": "ri:node-tree"
+  },
+  {
+    "source_icon": "cc-cloud-server_云服务器",
+    "icon": "ri:node-tree"
+  },
+  {
+    "source_icon": "cc-cloud-sp_云存储",
+    "icon": "ri:node-tree"
+  },
+  {
+    "source_icon": "cc-cloud_云平台",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-esxi-host_ESXi",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-firewall_防火墙",
+    "icon": "ri:router-line"
+  },
+  {
+    "source_icon": "cc-hard_server_硬件服务器",
+    "icon": "ri:archive-drawer-line"
+  },
+  {
+    "source_icon": "cc-host-主机",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-host_主机",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-k8s_cluster_K8S集群",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-k8s_namespace_K8S命名空间",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-k8s_workload_K8S工作负载",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-kafka_Kafka",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-module_模块",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-mongodb_MongoDB",
+    "icon": "ri:node-tree"
+  },
+  {
+    "source_icon": "cc-mysql-MySQL",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-mysql_MySQL",
+    "icon": "ri:node-tree"
+  },
+  {
+    "source_icon": "cc-nginx_Nginx",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-node_Node",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-pod_Pod",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-postgresql_PostgreSQL",
+    "icon": "ri:node-tree"
+  },
+  {
+    "source_icon": "cc-redis_REDIS",
+    "icon": "ri:node-tree"
+  },
+  {
+    "source_icon": "cc-router_路由器",
+    "icon": "ri:router-line"
+  },
+  {
+    "source_icon": "cc-storage_存储",
+    "icon": "ri:database-2-line"
+  },
+  {
+    "source_icon": "cc-switch2_交换机",
+    "icon": "ri:router-line"
+  }
+]

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/system.identity/v1",
+  "x-max-bytes": 262144,
+  "x-allowed-source-methods": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"],
+  "x-fact-planes": ["inventory"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "system.identity"},
+        "source_method": {"enum": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"]},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/system.identity/v1"},
+        "fact_plane": {"const": "inventory"}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["hostname", "serial", "chassis_id", "vendor", "model", "os_version", "device_type", "aliases"],
+            "properties": {
+              "hostname": {"type": "string", "minLength": 1},
+              "serial": {"type": ["string", "null"]},
+              "chassis_id": {"type": ["string", "null"]},
+              "vendor": {"type": "string", "minLength": 1},
+              "model": {"type": "string", "minLength": 1},
+              "os_version": {"type": "string", "minLength": 1},
+              "device_type": {"enum": ["switch", "router", "firewall", "load_balancer", "gateway"]},
+              "aliases": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["type", "namespace", "value"],
+                  "properties": {
+                    "type": {"enum": ["serial", "chassis", "hostname", "management_ip"]},
+                    "namespace": {"type": "string", "minLength": 1},
+                    "value": {"type": "string", "minLength": 1},
+                    "subtype": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

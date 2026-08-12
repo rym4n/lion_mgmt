@@ -1,0 +1,91 @@
+version: 52
+jobs:
+- name: cd
+  jobExecutor: aioe-test
+  steps:
+  - type: CommandStep
+    name: 更新docker-compose配置
+    runInContainer: false
+    interpreter:
+      type: PosixInterpreter
+      shell: sh
+      commands: |
+        NEW_VER=@tag@
+        sed -i -E "s#([[:space:]]*image:[[:space:]]*)(reg\-test\.hongcloud\.net|aioe\.pkg)/lion_mgmt:[^[:space:]]+#\1reg-test.hongcloud.net/lion_mgmt:${NEW_VER}#" /opt/lion/docker-compose.yml
+        docker-compose -f /opt/lion/docker-compose.yml --env-file /opt/lion/.env up -d --pull always --no-deps lion-mgmt
+    runAs: 0:0
+    useTTY: true
+    condition: SUCCESSFUL
+    optional: false
+  triggers:
+  - type: DependencyFinishedTrigger
+    projects: lion_mgmt
+  jobDependencies:
+  - jobName: ci
+    requireSuccessful: true
+    artifacts: '**'
+  retryCondition: never
+  maxRetries: 3
+  retryDelay: 30
+  timeout: 14400
+- name: ci
+  jobExecutor: aioe-builder
+  steps:
+  - type: CheckoutStep
+    name: 拉取最新代码
+    cloneCredential:
+      type: DefaultCredential
+    withLfs: false
+    withSubmodules: false
+    checkoutPath: '@project_path@'
+    condition: SUCCESSFUL
+    optional: false
+  - type: CommandStep
+    name: 检查旧审批代码引用
+    runInContainer: true
+    image: debian:bookworm-slim
+    interpreter:
+      type: PosixInterpreter
+      shell: sh
+      commands: |
+        set -eu
+        cd "@project_path@"
+        bash scripts/check_legacy_approvement.sh
+    runAs: 0:0
+    useTTY: false
+    condition: SUCCESSFUL
+    optional: false
+  - type: CommandStep
+    name: 校验版本号
+    runInContainer: true
+    image: debian:bookworm-slim
+    interpreter:
+      type: PosixInterpreter
+      shell: sh
+      commands: |
+        set -eu
+        cd "@project_path@"
+        bash scripts/aioe-version.sh validate "@tag@"
+    runAs: 0:0
+    useTTY: false
+    condition: SUCCESSFUL
+    optional: false
+  - type: BuildImageStep
+    name: 构建镜像
+    buildPath: '@project_path@'
+    dockerfile: '@project_path@/Dockerfile'
+    output:
+      type: RegistryOutput
+      tags: 10.3.0.41:5000/lion_mgmt:@tag@
+    platforms: linux/amd64
+    condition: SUCCESSFUL
+    optional: false
+  triggers:
+  - type: TagCreateTrigger
+    tags: v3.1.*
+    branches: master
+    projects: lion_mgmt
+  retryCondition: never
+  maxRetries: 1
+  retryDelay: 30
+  timeout: 1440

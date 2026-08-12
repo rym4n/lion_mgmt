@@ -1,0 +1,242 @@
+[
+  {
+    "key": "directory",
+    "name": "基础数据",
+    "sort": 1,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "eac39821d9c91f75b086e304f54ab65d46ec2a076a0ac89c726be59257371057"
+  },
+  {
+    "key": "aliyun",
+    "name": "阿里云",
+    "sort": 2,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "bc2023816b2098291c3a9338a00e40e64adae86e96e30d5dbaa242719a242082"
+  },
+  {
+    "key": "aws",
+    "name": "AWS",
+    "sort": 3,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "1737d8a97073a3641ccaa67ad54109cdf32dbdd18446d30f4abef45d19a5e397"
+  },
+  {
+    "key": "azure",
+    "name": "Azure",
+    "sort": 4,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "b0fee4e963d65ce8e040a25aaf77db7f43fa0e08cc42d85c5c8fe6e3d1e5a845"
+  },
+  {
+    "key": "business_manage",
+    "name": "应用拓扑",
+    "sort": 5,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "7c6e185915f52e9e63aecacc7b7ee1855707de50f5d0b9d77b6ffeebc6f4b275"
+  },
+  {
+    "key": "certificate",
+    "name": "证书许可",
+    "sort": 6,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "98f98fcba5468debda6a0e9d0c67c7f0e48f38352210f843875ed988939be020"
+  },
+  {
+    "key": "database",
+    "name": "数据库",
+    "sort": 7,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "3278c7b20091bcdc4d79d526f9c5b635083ea9a2aff3cfd33089cc2507faf773"
+  },
+  {
+    "key": "docker",
+    "name": "Docker",
+    "sort": 8,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "485ec46cdfabb77c456ee000a757a523de9c374db358d896278eaf2504d1743d"
+  },
+  {
+    "key": "fixed_asset",
+    "name": "固定资产",
+    "sort": 9,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "589524eb86c8e910420d801cd57ad846296030704cf5f6679ad28b10b2e2eec2"
+  },
+  {
+    "key": "fusioncompute",
+    "name": "FusionCompute",
+    "sort": 10,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "53254987adc9395ec14fca92cfeb8cfc24d4b3420b0d6a8a226d04ebcbe35190"
+  },
+  {
+    "key": "fusioninsight",
+    "name": "FusionInsight",
+    "sort": 11,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "4102a31c77e7fff62ac4943287b7f435dd0f0131b9731ad84c95bee2650be582"
+  },
+  {
+    "key": "h3c_cas",
+    "name": "H3C CAS",
+    "sort": 12,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "6bab9fa1f9035d0c517faa4cca1afe129e59944694b39efd97d2ef761e0f295e"
+  },
+  {
+    "key": "hardware_components",
+    "name": "硬件组件层",
+    "sort": 13,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "578a1421842216433a40ff42ca9afacca619fa8d1a8737e434be6a57b3ab9a01"
+  },
+  {
+    "key": "harware",
+    "name": "硬件设备",
+    "sort": 14,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "33d07fe901048dbe6e111902adc588abf5844c498b9aea0e2ae8d7e1a481aa4c"
+  },
+  {
+    "key": "host_manage",
+    "name": "主机逻辑主机",
+    "sort": 15,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "63b6020d5264604c93ac7a90997354f702e273df4fac294d577c1cb7d2ecd2fc"
+  },
+  {
+    "key": "hwcloud",
+    "name": "华为云",
+    "sort": 16,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "eb7161dbd11af7cde6320eba4911ee6cce81af701f38f0504a09f7348b7f6e2d"
+  },
+  {
+    "key": "idc",
+    "name": "数据中心",
+    "sort": 17,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "565837d34c165d5c386dd86dd49ffe97396c41bc98a0c95b55018cbe2710f7d0"
+  },
+  {
+    "key": "inspurincloudrail",
+    "name": "浪潮超融合",
+    "sort": 18,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "7b67d996c475008d23db49d17f55afe0958e6fceb08c1545ef34d2dbdfcea2aa"
+  },
+  {
+    "key": "ip_manager",
+    "name": "IP管理",
+    "sort": 19,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "4f12cc6c2b123ebc3e599caee1a8aa7e1ab009fd20871d9f1d39caf2046cce23"
+  },
+  {
+    "key": "k8s",
+    "name": "K8S",
+    "sort": 20,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "a622523cb76752593cfe833fa9a8e314af184e9fa60d9531c972d892561e1e77"
+  },
+  {
+    "key": "manageone",
+    "name": "ManageOne",
+    "sort": 21,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "33b67d94ff7feb3023859e49af8cece76a85abd2987a822d9b982a00189743b3"
+  },
+  {
+    "key": "middleware",
+    "name": "中间件",
+    "sort": 22,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "e311e12dd4a4919f365027e9dbfa1d5877bcdf5f6b628e72dfd8389483c15a0b"
+  },
+  {
+    "key": "network_device",
+    "name": "网络设备",
+    "sort": 23,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "645559e3528003b62df0c040826ec60a548e21f93e16c6a663286d5c002fb656"
+  },
+  {
+    "key": "nutanixhci",
+    "name": "路坦力超融合",
+    "sort": 24,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "1dc37e427dd9592f60ff9d2590e5f0f9de864e4bfaa04b2d2c0f7e4cadad5a34"
+  },
+  {
+    "key": "openstack",
+    "name": "OpenStack",
+    "sort": 25,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "545b0ef26d1b86524da658b46415179c23ac710e86ae95ec822c448e89d40415"
+  },
+  {
+    "key": "qcloud",
+    "name": "腾讯云",
+    "sort": 26,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "2dc781bbbfb09aea78c13511ba79aa23ca3805156f433a3df91fbde45c726552"
+  },
+  {
+    "key": "sangforscp",
+    "name": "深信服云平台",
+    "sort": 27,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "a944ee907693f5bc128d5493fbf3df347b050a5de907a52c14cc189300baf85c"
+  },
+  {
+    "key": "smartx",
+    "name": "SmartX",
+    "sort": 28,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "7a7a2e074ee557402ce8de38ff7005f9a1e8322acd8a99933f87471f9c1ece48"
+  },
+  {
+    "key": "vmware",
+    "name": "VMware",
+    "sort": 29,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "1b0c4b580212661a4ebd841b62c1d40bcd11cbe5cab51973716747f86be99d02"
+  },
+  {
+    "key": "zstack",
+    "name": "ZStack",
+    "sort": 30,
+    "is_builtin": true,
+    "is_locked": true,
+    "builtin_hash": "1510da91d8091978a7bc57c98d3915acd001303f337e29f6ccdf69b035fd77fa"
+  }
+]

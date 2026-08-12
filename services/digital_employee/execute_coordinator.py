@@ -1,0 +1,231 @@
+import orjson
+from aiocache import caches
+from sanic.log import logger
+from typing import Awaitable, Callable
+
+from models.command_center import CommandAgent, CommandTask
+from settings import AIOE_INTERNAL_URL, LION_MEMORY_ENDPOINT, WR_TOPIC
+
+from .aioe_credential_manager import get_employee_api_token
+from .cognee_credential_manager import get_or_refresh_jwt
+from .lion_agent_adapter import stream_prompt_events
+from .prompt_builder import build_runtime_prompt
+
+
+def _stream_id(task: CommandTask) -> str:
+    return f"digital-employee:{task.id}"
+
+
+def _receiver_id(task: CommandTask, operator_id: str | None) -> str | None:
+    return operator_id or getattr(task, "creator_id", None)
+
+
+def _zero_usage() -> dict:
+    return {
+        "fallback": False,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "model_calls": 0,
+    }
+
+
+def _normalize_usage(value) -> dict:
+    data = value if isinstance(value, dict) else {}
+
+    def _int(key: str) -> int:
+        try:
+            return int(data.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    input_tokens = _int("input_tokens")
+    output_tokens = _int("output_tokens")
+    total_tokens = _int("total_tokens") or input_tokens + output_tokens
+    return {
+        "fallback": bool(data.get("fallback", False)),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "model_calls": _int("model_calls"),
+    }
+
+
+async def _publish_room_event(task: CommandTask, event_type: str, payload: dict, operator_id: str | None) -> bool:
+    if not task.room_id:
+        return False
+    receiver_id = _receiver_id(task, operator_id)
+    if not receiver_id:
+        return False
+
+    message: dict | None = None
+    if event_type == "delta":
+        content = str(payload.get("content") or payload.get("delta") or "")
+        if content:
+            message = {
+                "type": "ai-reply-delta",
+                "content": content,
+                "room_id": task.room_id,
+                "receiver_id": receiver_id,
+                "tenant_id": task.tenant_id,
+                "stream_id": _stream_id(task),
+            }
+    elif event_type == "thinking":
+        content = str(payload.get("content") or "")
+        if content:
+            message = {
+                "type": "ai-thinking",
+                "content": content,
+                "room_id": task.room_id,
+                "receiver_id": receiver_id,
+                "tenant_id": task.tenant_id,
+                "stream_id": _stream_id(task),
+            }
+    elif event_type == "tool_call":
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        tool_name = data.get("name") or data.get("tool_name") or data.get("tool") or data.get("tool_call_name") or "tool"
+        status = payload.get("status") or data.get("status") or "started"
+        message = {
+            "type": "ai-thinking",
+            "content": f"正在执行 {tool_name}" if status == "started" else f"{tool_name} 执行完成",
+            "tool_name": tool_name,
+            "room_id": task.room_id,
+            "receiver_id": receiver_id,
+            "tenant_id": task.tenant_id,
+            "stream_id": _stream_id(task),
+        }
+
+    if not message:
+        return False
+    try:
+        client = caches.get("redis_chat").client
+        await client.publish(WR_TOPIC, orjson.dumps(message).decode())
+        return True
+    except Exception as exc:
+        logger.warning(f"发布数字员工作战室流式消息失败: task_id={task.id}, error={exc}")
+        return False
+
+
+async def _publish_room_end(task: CommandTask, operator_id: str | None) -> None:
+    if not task.room_id:
+        return
+    receiver_id = _receiver_id(task, operator_id)
+    if not receiver_id:
+        return
+    try:
+        client = caches.get("redis_chat").client
+        await client.publish(
+            WR_TOPIC,
+            orjson.dumps(
+                {
+                    "type": "ai-reply-end",
+                    "content": "",
+                    "room_id": task.room_id,
+                    "receiver_id": receiver_id,
+                    "tenant_id": task.tenant_id,
+                    "stream_id": _stream_id(task),
+                }
+            ).decode(),
+        )
+    except Exception as exc:
+        logger.warning(f"发布数字员工作战室结束消息失败: task_id={task.id}, error={exc}")
+
+
+RuntimeEventHandler = Callable[[str, dict], Awaitable[dict | None]]
+
+
+async def run(
+    task: CommandTask,
+    employee: CommandAgent,
+    operator_id: str | None = None,
+    command_run=None,
+    on_runtime_event: RuntimeEventHandler | None = None,
+    continuation_workspace: dict | None = None,
+) -> dict:
+    from services.command_center.manager import update_task_progress
+    from services.digital_employee.manager import sync_employee_workspace
+    from services.llm_config.resolver import resolve_llm
+
+    employee = await sync_employee_workspace(employee, force=True)
+    workspace_id = employee.id
+    if continuation_workspace:
+        from services.digital_employee.lion_agent_client import LionAgentClient
+
+        await LionAgentClient().sync_workspace(
+            continuation_workspace["workspace_id"],
+            continuation_workspace["files"],
+            role_version=continuation_workspace.get("role_version"),
+            skill_versions=continuation_workspace.get("skill_versions") or {},
+        )
+        workspace_id = continuation_workspace["workspace_id"]
+    jwt = await get_or_refresh_jwt(task.tenant_id)
+    aioe_token = await get_employee_api_token(employee)
+    llm = await resolve_llm(
+        task.tenant_id, config_id=getattr(employee, "llm_config_id", None)
+    )
+    payload = {
+        "workspace_id": workspace_id,
+        "session_id": getattr(command_run, "run_id", None) or task.run_id or task.id,
+        "request_id": task.id,
+        "message": build_runtime_prompt(task, employee),
+        "cognee": {
+            "endpoint": LION_MEMORY_ENDPOINT,
+            "jwt": jwt,
+            "tenant_id": task.tenant_id,
+            "dataset_name": employee.id,
+            "role_key": employee.role_key,
+            "task_id": task.id,
+            "source_kind": task.source,
+        },
+        "aioe": {
+            "base_url": AIOE_INTERNAL_URL,
+            "token": aioe_token,
+            "tenant_id": task.tenant_id,
+            # 本次数字员工运行的 run_id，随 aioe_cli 回传到 /playbook/debug，
+            # 用于把动作/剧本产生的 runlog 关联到该 CommandTaskRun（见 execute_action）。
+            "agent_run_id": getattr(command_run, "run_id", None) or task.run_id,
+        },
+        "llm": llm,
+    }
+    content = []
+    saw_delta = False
+    usage = _zero_usage()
+    await update_task_progress(task, {"status": "running", "progress": max(task.progress or 0, 1), "message": "数字员工开始执行"}, operator_id)
+    async for event_type, event in stream_prompt_events(**payload):
+        runtime_event: dict | None = None
+        if on_runtime_event:
+            runtime_event = await on_runtime_event(event_type, event)
+            if runtime_event and runtime_event.get("event_type") in {"approval_required", "policy_denied"}:
+                return {
+                    "content": "".join(content),
+                    "usage": usage,
+                    "policy": runtime_event["event_type"],
+                    "run_id": getattr(command_run, "run_id", None) or task.run_id,
+                    "runtime_event": runtime_event,
+                }
+        if event_type in {"delta", "end"}:
+            value = event.get("content") or event.get("delta")
+            if event_type == "delta" and value:
+                saw_delta = True
+                content.append(str(value))
+                await _publish_room_event(task, event_type, event, operator_id)
+            elif event_type == "end":
+                usage = _normalize_usage(event.get("usage"))
+                if value and not saw_delta:
+                    content.append(str(value))
+                    await _publish_room_event(task, "delta", {"content": value}, operator_id)
+                await _publish_room_end(task, operator_id)
+        elif event_type == "error":
+            raise RuntimeError(event.get("message") or event)
+        else:
+            await _publish_room_event(task, event_type, event, operator_id)
+    result_content = "".join(content)
+    if command_run is None:
+        task.result = result_content
+        await task.save(update_fields=["result", "utime"])
+        await update_task_progress(
+            task,
+            {"status": "completed", "progress": 100, "message": "数字员工执行完成"},
+            operator_id,
+        )
+    return {"content": result_content, "usage": usage}

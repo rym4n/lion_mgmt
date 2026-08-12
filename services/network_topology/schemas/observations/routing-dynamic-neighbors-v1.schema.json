@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/routing.dynamic_neighbors/v1",
+  "x-max-bytes": 4194304,
+  "x-allowed-source-methods": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"],
+  "x-fact-planes": ["operational"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "routing.dynamic_neighbors"},
+        "source_method": {"enum": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"]},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/routing.dynamic_neighbors/v1"},
+        "fact_plane": {"const": "operational"}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["neighbors"],
+            "properties": {
+              "neighbors": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["protocol", "vrf", "local_address", "remote_address", "interface", "router_id", "session_state"],
+                  "properties": {
+                    "protocol": {"enum": ["bgp", "ospf", "isis", "rip"]},
+                    "vrf": {"type": "string", "minLength": 1},
+                    "local_address": {"type": "string", "minLength": 1},
+                    "remote_address": {"type": "string", "minLength": 1},
+                    "local_asn": {"type": ["integer", "null"], "minimum": 0},
+                    "remote_asn": {"type": ["integer", "null"], "minimum": 0},
+                    "area": {"type": ["string", "null"]},
+                    "interface": {"type": ["string", "null"]},
+                    "router_id": {"type": ["string", "null"]},
+                    "session_state": {"type": "string", "minLength": 1}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

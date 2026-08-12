@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/profile-response/v1",
+  "type": "object", "additionalProperties": false, "required": ["code", "data"],
+  "properties": {"code": {"const": 0}, "data": {"type": "object", "additionalProperties": false, "required": ["profile_revision", "resource_revision"], "properties": {"profile_revision": {"type": "integer", "minimum": 1}, "resource_revision": {"type": "integer", "minimum": 1}}}},
+  "examples": [{"code": 0, "data": {"profile_revision": 8, "resource_revision": 2}}]
+}

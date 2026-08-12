@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/upload-commit-response/v1",
+  "type": "object", "additionalProperties": false, "required": ["code", "data"],
+  "properties": {"code": {"const": 0}, "data": {"$ref": "https://schemas.aioe.local/aioe.network-topology.api/common/v1#/$defs/acceptedData"}},
+  "examples": [{"code": 0, "data": {"sync_id": "analysis-1", "snapshot_id": "snapshot-1", "status": "RECEIVED", "status_url": "/api/network-topology/config-sync/status"}}]
+}

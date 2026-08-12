@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/upload-chunk-request/v1",
+  "$comment": "A chunk carries exactly one complete observation envelope; byte slices and partial JSON/XML are forbidden.",
+  "type": "object", "additionalProperties": false, "required": ["upload_session_id", "resource_id", "observation"],
+  "properties": {
+    "upload_session_id": {"type": "string", "minLength": 1}, "resource_id": {"type": "string", "minLength": 1},
+    "observation": {"$ref": "https://schemas.aioe.local/aioe.network-topology.collection/v2#/$defs/observation"}
+  },
+  "examples": []
+}

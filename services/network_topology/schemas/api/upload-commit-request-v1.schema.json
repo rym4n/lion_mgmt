@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://schemas.aioe.local/aioe.network-topology.api/upload-commit-request/v1",
+  "$comment": "Commit accepts no envelope fields and triggers server-side assembly and authoritative hashing.",
+  "type": "object", "additionalProperties": false, "required": ["upload_session_id", "client_expected_input_hash"],
+  "properties": {"upload_session_id": {"type": "string", "minLength": 1}, "client_expected_input_hash": {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/sha256"}},
+  "examples": [{"upload_session_id": "upload-1", "client_expected_input_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"}]
+}

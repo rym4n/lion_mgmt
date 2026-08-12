@@ -1,0 +1,63 @@
+{
+  "schema_version": "aioe.network-topology.registry/capability-profiles/v1",
+  "default_profile": {
+    "schema_version": "aioe.network-topology.profile/v1",
+    "root_scope_seed": "scope:organization:root",
+    "grouping_order": ["organization", "region", "site", "network_domain", "security_zone", "vrf"],
+    "key_device_roles": ["firewall", "router", "core_switch", "distribution_switch", "load_balancer", "vpn_gateway", "sdwan_gateway", "internet_gateway"],
+    "excluded_asset_types": ["host", "terminal", "printer", "camera", "ip_phone", "wireless_client"],
+    "important_tags": ["topology.important"],
+    "explicit_asset_exceptions": [
+      {"asset_type": "host", "projection_kind": "service_boundary", "allowed_network_attributes": ["network_prefixes", "virtual_addresses", "protocols", "ports"]},
+      {"asset_type": "terminal", "projection_kind": "service_boundary", "allowed_network_attributes": ["network_prefixes", "virtual_addresses", "protocols", "ports"]}
+    ],
+    "access_device_policy": "collapse",
+    "endpoint_policy": "exclude",
+    "point_to_point_subnet_policy": "collapse_into_link",
+    "default_layers": ["physical", "l2", "l3", "routing", "security", "overlay"],
+    "max_depth": 8,
+    "max_children_per_view": 200,
+    "max_collection_span_seconds": 3600,
+    "max_observation_age_seconds": 3600,
+    "overflow_strategy": "deterministic_bucket"
+  },
+  "profiles": [
+    {
+      "id": "aioe.huawei.switch.generic/v1",
+      "match": {"device_type": "switch", "vendor": "huawei", "platform": "*", "os_family": "*"},
+      "required_kinds": ["system.identity", "interface.inventory", "l2.vlans", "l2.link_aggregation", "l2.neighbors"],
+      "optional_kinds": ["system.virtual_contexts", "system.cluster_members", "l2.stp_summary", "l3.vrfs", "l3.connected_networks", "routing.connected_static_default", "routing.dynamic_neighbors", "routing.first_hop_redundancy", "overlay.vxlan_evpn", "l3.neighbor_cache", "legacy.running_config"]
+    },
+    {
+      "id": "aioe.h3c.switch.generic/v1",
+      "match": {"device_type": "switch", "vendor": "h3c", "platform": "*", "os_family": "*"},
+      "required_kinds": ["system.identity", "interface.inventory", "l2.vlans", "l2.link_aggregation", "l2.neighbors"],
+      "optional_kinds": ["system.virtual_contexts", "system.cluster_members", "l2.stp_summary", "l3.vrfs", "l3.connected_networks", "routing.connected_static_default", "routing.dynamic_neighbors", "routing.first_hop_redundancy", "overlay.vxlan_evpn", "l3.neighbor_cache", "legacy.running_config"]
+    },
+    {
+      "id": "aioe.cisco.switch.generic/v1",
+      "match": {"device_type": "switch", "vendor": "cisco", "platform": "*", "os_family": "*"},
+      "required_kinds": ["system.identity", "interface.inventory", "l2.vlans", "l2.link_aggregation", "l2.neighbors"],
+      "optional_kinds": ["system.virtual_contexts", "system.cluster_members", "l2.stp_summary", "l3.vrfs", "l3.connected_networks", "routing.connected_static_default", "routing.dynamic_neighbors", "routing.first_hop_redundancy", "overlay.vxlan_evpn", "l3.neighbor_cache", "legacy.running_config"]
+    },
+    {
+      "id": "aioe.fortinet.firewall.generic/v1",
+      "match": {"device_type": "firewall", "vendor": "fortinet", "platform": "*", "os_family": "*"},
+      "required_kinds": ["system.identity", "interface.inventory", "l3.connected_networks", "security.zones", "security.zone_bindings"],
+      "optional_kinds": ["system.virtual_contexts", "system.cluster_members", "l3.vrfs", "routing.connected_static_default", "routing.dynamic_neighbors", "routing.first_hop_redundancy", "overlay.tunnels", "wan.sdwan", "service.virtual_addresses", "l3.neighbor_cache", "legacy.running_config"]
+    },
+    {
+      "id": "aioe.f5.load_balancer.generic/v1",
+      "match": {"device_type": "load_balancer", "vendor": "f5", "platform": "*", "os_family": "*"},
+      "required_kinds": ["system.identity", "interface.inventory", "l3.connected_networks", "service.virtual_addresses"],
+      "optional_kinds": ["system.virtual_contexts", "system.cluster_members", "l3.vrfs", "routing.connected_static_default", "routing.dynamic_neighbors", "overlay.tunnels", "l3.neighbor_cache", "legacy.running_config"]
+    },
+    {
+      "id": "aioe.synthetic.switch.deletion/v1",
+      "fixture_only": true,
+      "match": {"device_type": "switch", "vendor": "synthetic", "platform": "contract-neutral", "os_family": "synthetic-os"},
+      "required_kinds": ["system.identity", "interface.inventory", "l2.vlans", "l2.link_aggregation", "l2.neighbors"],
+      "optional_kinds": ["l3.connected_networks"]
+    }
+  ]
+}

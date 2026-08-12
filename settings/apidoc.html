@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+    <meta name="description" content="API Documentation"/>
+    <title>API Documentation</title>
+    <style>
+        /* Modern color system - Deep blue primary and neutral grays */
+        :root {
+            --primary-50: #eff6ff;
+            --primary-100: #dbeafe;
+            --primary-500: #3b82f6;
+            --primary-600: #2563eb;
+            --primary-700: #1d4ed8;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-400: #9ca3af;
+            --gray-600: #4b5563;
+            --gray-900: #111827;
+            --bg: var(--gray-50);
+            --bg-secondary: var(--gray-100);
+            --text: var(--gray-900);
+            --text-light: var(--gray-600);
+            --border: var(--gray-400);
+        }
+
+        /* Use system font stack instead of Google Fonts */
+        @font-face {
+            font-family: "SystemUI";
+            src: local("Segoe UI"), local("San Francisco"), local(".AppleSystemUIFont"), local("Roboto"), local("Ubuntu"), local("Helvetica Neue");
+            font-display: swap; /* Ensure text is always visible */
+        }
+
+        body {
+            font-family: "SystemUI", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+            line-height: 1.6;
+            font-weight: 400;
+            color: var(--text);
+            background: var(--bg);
+            margin: 0;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* Use system monospace font for code */
+        code,
+        pre {
+            font-family: "SF Mono", "Monaco", "Cascadia Code", "Roboto Mono", "Consolas", "Liberation Mono", "Courier New", monospace;
+        }
+
+        .container {
+            margin: 0 auto;
+            padding: 0; /* Remove padding, let Redoc handle it */
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div id="redoc-container"></div>
+</div>
+
+<script src="/redoc.standalone.js"></script>
+<script>
+    Redoc.init(
+        "/docs/openapi.json",
+        {
+            theme: {
+                colors: {
+                    primary: {
+                        main: "#2563eb",
+                        light: "#dbeafe",
+                    },
+                    text: {
+                        primary: "#111827",
+                        secondary: "#4b5563",
+                    },
+                    http: {
+                        get: "#10b981",
+                        post: "#f59e0b",
+                        put: "#8b5cf6",
+                        delete: "#ef4444",
+                    },
+                    gray: {
+                        50: "#f9fafb",
+                        100: "#f3f4f6",
+                    },
+                },
+                typography: {
+                    // Use system font stack
+                    fontFamily: "'SystemUI', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+                    headings: {
+                        fontWeight: "600",
+                        lineHeight: 1.25,
+                    },
+                    code: {
+                        // Use system monospace font
+                        fontFamily: "'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', 'Consolas', monospace",
+                        fontSize: "14px",
+                        fontWeight: "500",
+                    },
+                },
+                sidebar: {
+                    backgroundColor: "#f3f4f6",
+                    width: "260px",
+                },
+                rightPanel: {
+                    backgroundColor: "#111827",
+                    width: "40%",
+                },
+            },
+            // Feature optimization
+            lazyRendering: false,
+            nativeScrollbars: true,
+            expandResponses: "all",
+            scrollYOffset: 60,
+            hideDownloadButton: true,
+            hideLoading: true,
+            menuToggle: true,
+            jsonSampleExpandLevel: 2,
+        },
+        document.getElementById("redoc-container")
+    );
+</script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/l2.link_aggregation/v1",
+  "x-max-bytes": 2097152,
+  "x-allowed-source-methods": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"],
+  "x-fact-planes": ["configured", "operational"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "l2.link_aggregation"},
+        "source_method": {"enum": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"]},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/l2.link_aggregation/v1"},
+        "fact_plane": {"enum": ["configured", "operational"]}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["aggregations"],
+            "properties": {
+              "aggregations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["lag_id", "interface", "members", "mode", "state"],
+                  "properties": {
+                    "lag_id": {"type": "string", "minLength": 1},
+                    "interface": {"type": "string", "minLength": 1},
+                    "members": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+                    "mode": {"enum": ["static", "lacp", "pagp", "unknown"]},
+                    "state": {"enum": ["up", "down", "degraded", "unknown"]}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

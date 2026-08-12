@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.facts/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "snapshot_id", "analysis_run_id", "devices", "device_groups",
+    "network_contexts", "interfaces", "segments", "adjacencies", "routes", "routing_relationships",
+    "tunnels", "memberships", "gateways", "security_boundaries", "wan_connections",
+    "unresolved_references", "provenance_catalog"
+  ],
+  "properties": {
+    "schema_version": {"const": "aioe.network-topology.facts/v1"},
+    "snapshot_id": {"type": "string", "minLength": 1},
+    "analysis_run_id": {"type": "string", "minLength": 1},
+    "devices": {"$ref": "#/$defs/deviceFacts"},
+    "device_groups": {"$ref": "#/$defs/deviceGroupFacts"},
+    "network_contexts": {"$ref": "#/$defs/contextFacts"},
+    "interfaces": {"$ref": "#/$defs/interfaceFacts"},
+    "segments": {"$ref": "#/$defs/networkFacts"},
+    "adjacencies": {"$ref": "#/$defs/neighborFacts"},
+    "routes": {"$ref": "#/$defs/routeFacts"},
+    "routing_relationships": {"$ref": "#/$defs/routingFacts"},
+    "tunnels": {"$ref": "#/$defs/tunnelFacts"},
+    "memberships": {"$ref": "#/$defs/membershipFacts"},
+    "gateways": {"$ref": "#/$defs/gatewayFacts"},
+    "security_boundaries": {"$ref": "#/$defs/securityFacts"},
+    "wan_connections": {"$ref": "#/$defs/wanFacts"},
+    "unresolved_references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "selector", "reason_code", "candidate_matches", "provenance_ids"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "selector": {"type": "object", "minProperties": 1},
+          "reason_code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*$"},
+          "candidate_matches": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "provenance_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true}
+        }
+      }
+    },
+    "provenance_catalog": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "provenance"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "provenance": {"$ref": "https://schemas.aioe.local/aioe.network-topology.provenance/v1"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "deviceFacts": {"type": "array", "items": {"$ref": "#/$defs/deviceFact"}},
+    "deviceGroupFacts": {"type": "array", "items": {"$ref": "#/$defs/deviceGroupFact"}},
+    "contextFacts": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/networkContextFact"},
+          {"$ref": "#/$defs/vrfFact"},
+          {"$ref": "#/$defs/vlanFact"},
+          {"$ref": "#/$defs/zoneFact"}
+        ]
+      }
+    },
+    "interfaceFacts": {"type": "array", "items": {"$ref": "#/$defs/interfaceFact"}},
+    "networkFacts": {"type": "array", "items": {"$ref": "#/$defs/networkFact"}},
+    "neighborFacts": {"type": "array", "items": {"$ref": "#/$defs/neighborFact"}},
+    "routeFacts": {"type": "array", "items": {"$ref": "#/$defs/routeFact"}},
+    "routingFacts": {"type": "array", "items": {"$ref": "#/$defs/routingRelationshipFact"}},
+    "tunnelFacts": {"type": "array", "items": {"$ref": "#/$defs/tunnelFact"}},
+    "membershipFacts": {"type": "array", "items": {"$ref": "#/$defs/membershipFact"}},
+    "gatewayFacts": {"type": "array", "items": {"$ref": "#/$defs/gatewayFact"}},
+    "securityFacts": {"type": "array", "items": {"$ref": "#/$defs/securityFact"}},
+    "wanFacts": {"type": "array", "items": {"$ref": "#/$defs/wanFact"}},
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "fact_family", "resource_ids", "source_candidate_ids", "attributes", "provenance_ids", "parsing_state"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "fact_family": {
+          "enum": [
+            "device", "device_group", "network_context", "vrf", "vlan", "zone",
+            "interface", "network", "neighbor", "route", "routing_relationship",
+            "tunnel", "membership", "gateway", "security", "wan"
+          ]
+        },
+        "resource_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+        "source_candidate_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "attributes": {"type": "object"},
+        "provenance_ids": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+        "parsing_state": {"enum": ["verified", "unresolved"]}
+      }
+    },
+    "idSet": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "nullableId": {"type": ["string", "null"], "minLength": 1},
+    "identityAlias": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "namespace", "value"],
+      "properties": {
+        "type": {"enum": ["serial", "chassis", "hostname", "management_ip"]},
+        "namespace": {"type": "string", "minLength": 1},
+        "value": {"type": "string", "minLength": 1},
+        "subtype": {"type": "string"}
+      }
+    },
+    "deviceAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["device_type", "identity_aliases", "roles", "inventory_state"],
+      "properties": {
+        "device_type": {"type": "string", "minLength": 1},
+        "identity_aliases": {"type": "array", "items": {"$ref": "#/$defs/identityAlias"}},
+        "roles": {"$ref": "#/$defs/idSet"},
+        "inventory_state": {"enum": ["managed", "discovered", "unknown"]},
+        "vendor": {"type": "string", "minLength": 1},
+        "model": {"type": "string", "minLength": 1},
+        "os_version": {"type": "string", "minLength": 1},
+        "management_ips": {"$ref": "#/$defs/idSet"}
+      }
+    },
+    "deviceGroupAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["group_type", "identity", "member_ids"],
+      "properties": {
+        "group_type": {"enum": ["ha", "stack", "irf", "vss", "vsf", "mlag", "cluster"]},
+        "identity": {"type": "string", "minLength": 1},
+        "member_ids": {"$ref": "#/$defs/idSet"}
+      }
+    },
+    "networkContextAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner_id", "local_id", "name", "context_type"],
+      "properties": {
+        "owner_id": {"type": "string", "minLength": 1},
+        "local_id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "context_type": {"type": "string", "minLength": 1},
+        "parent_context_id": {"$ref": "#/$defs/nullableId"}
+      }
+    },
+    "vrfAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner_id", "local_id", "name", "rd", "import_route_targets", "export_route_targets", "interface_ids"],
+      "properties": {
+        "owner_id": {"type": "string", "minLength": 1},
+        "local_id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "rd": {"$ref": "#/$defs/nullableId"},
+        "import_route_targets": {"$ref": "#/$defs/idSet"},
+        "export_route_targets": {"$ref": "#/$defs/idSet"},
+        "interface_ids": {"$ref": "#/$defs/idSet"}
+      }
+    },
+    "vlanAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner_id", "local_id", "name", "vlan_id", "bridge_domain", "vni", "interface_ids"],
+      "properties": {
+        "owner_id": {"type": "string", "minLength": 1},
+        "local_id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "vlan_id": {"type": "integer", "minimum": 1, "maximum": 4094},
+        "bridge_domain": {"$ref": "#/$defs/nullableId"},
+        "vni": {"type": ["integer", "null"], "minimum": 1},
+        "interface_ids": {"$ref": "#/$defs/idSet"}
+      }
+    },
+    "zoneAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["owner_id", "local_id", "name", "interface_ids"],
+      "properties": {
+        "owner_id": {"type": "string", "minLength": 1},
+        "local_id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "description": {"type": "string"},
+        "interface_ids": {"$ref": "#/$defs/idSet"}
+      }
+    },
+    "interfaceAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["device_id", "context_id", "canonical_name", "raw_name", "if_index", "mac", "parent_interface_id", "lag_id", "addresses", "configured_state", "operational_state"],
+      "properties": {
+        "device_id": {"type": "string", "minLength": 1},
+        "context_id": {"$ref": "#/$defs/nullableId"},
+        "canonical_name": {"type": "string", "minLength": 1},
+        "raw_name": {"type": "string", "minLength": 1},
+        "if_index": {"type": ["integer", "null"], "minimum": 0},
+        "interface_type": {"type": "string", "minLength": 1},
+        "mac": {"$ref": "#/$defs/nullableId"},
+        "parent_interface_id": {"$ref": "#/$defs/nullableId"},
+        "lag_id": {"$ref": "#/$defs/nullableId"},
+        "addresses": {"$ref": "#/$defs/idSet"},
+        "vrf_id": {"$ref": "#/$defs/nullableId"},
+        "zone_id": {"$ref": "#/$defs/nullableId"},
+        "vlan_ids": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 4094}, "uniqueItems": true},
+        "speed_bps": {"type": ["integer", "null"], "minimum": 0},
+        "mtu": {"type": ["integer", "null"], "minimum": 0},
+        "configured_state": {"type": "string", "minLength": 1},
+        "operational_state": {"type": "string", "minLength": 1}
+      }
+    },
+    "networkAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["canonical_cidr", "network_domain_id", "device_id", "context_id", "vrf_id", "vlan_id", "vni", "gateway_ids"],
+      "properties": {
+        "canonical_cidr": {"type": "string", "minLength": 1},
+        "network_domain_id": {"type": "string", "minLength": 1},
+        "device_id": {"$ref": "#/$defs/nullableId"},
+        "context_id": {"$ref": "#/$defs/nullableId"},
+        "vrf_id": {"$ref": "#/$defs/nullableId"},
+        "vlan_id": {"type": ["integer", "null"], "minimum": 1, "maximum": 4094},
+        "vni": {"type": ["integer", "null"], "minimum": 1},
+        "gateway_ids": {"$ref": "#/$defs/idSet"},
+        "name": {"type": "string", "minLength": 1},
+        "scope_ids": {"$ref": "#/$defs/idSet"}
+      }
+    },
+    "neighborAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["neighbor_type", "local_id", "remote_id", "attachments", "layer", "context_id", "state"],
+      "properties": {
+        "neighbor_type": {"enum": ["lldp", "cdp", "l3_neighbor"]},
+        "local_id": {"type": "string", "minLength": 1},
+        "remote_id": {"type": "string", "minLength": 1},
+        "attachments": {"$ref": "#/$defs/idSet"},
+        "layer": {"enum": ["physical", "l2", "l3"]},
+        "context_id": {"$ref": "#/$defs/nullableId"},
+        "state": {"type": "string", "minLength": 1}
+      }
+    },
+    "routeAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["route_type", "prefix", "vrf_id", "next_hop_id", "interface_id", "state"],
+      "properties": {
+        "route_type": {"enum": ["connected", "static", "default", "dynamic"]},
+        "prefix": {"type": "string", "minLength": 1},
+        "vrf_id": {"type": "string", "minLength": 1},
+        "next_hop_id": {"$ref": "#/$defs/nullableId"},
+        "next_hop_address": {"$ref": "#/$defs/nullableId"},
+        "interface_id": {"$ref": "#/$defs/nullableId"},
+        "metric": {"type": ["integer", "null"], "minimum": 0},
+        "preference": {"type": ["integer", "null"], "minimum": 0},
+        "state": {"type": "string", "minLength": 1}
+      }
+    },
+    "routingRelationshipAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["protocol", "local_id", "remote_id", "vrf_id", "session_state"],
+      "properties": {
+        "protocol": {"type": "string", "minLength": 1},
+        "local_id": {"type": "string", "minLength": 1},
+        "remote_id": {"type": "string", "minLength": 1},
+        "vrf_id": {"type": "string", "minLength": 1},
+        "local_address": {"type": "string", "minLength": 1},
+        "remote_address": {"type": "string", "minLength": 1},
+        "local_asn": {"type": ["integer", "null"], "minimum": 0},
+        "remote_asn": {"type": ["integer", "null"], "minimum": 0},
+        "area": {"$ref": "#/$defs/nullableId"},
+        "interface_id": {"$ref": "#/$defs/nullableId"},
+        "router_id": {"$ref": "#/$defs/nullableId"},
+        "session_state": {"type": "string", "minLength": 1}
+      }
+    },
+    "tunnelAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tunnel_type", "tunnel_id", "context_id", "interface_id", "local_endpoint", "remote_endpoint", "protected_prefixes", "state"],
+      "properties": {
+        "tunnel_type": {"type": "string", "minLength": 1},
+        "tunnel_id": {"type": "string", "minLength": 1},
+        "context_id": {"$ref": "#/$defs/nullableId"},
+        "interface_id": {"$ref": "#/$defs/nullableId"},
+        "local_endpoint": {"type": "string", "minLength": 1},
+        "remote_endpoint": {"type": "string", "minLength": 1},
+        "protected_prefixes": {"$ref": "#/$defs/idSet"},
+        "state": {"type": "string", "minLength": 1}
+      }
+    },
+    "membershipAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["member_id", "container_id", "membership_kind"],
+      "properties": {
+        "member_id": {"type": "string", "minLength": 1},
+        "container_id": {"type": "string", "minLength": 1},
+        "membership_kind": {"type": "string", "minLength": 1}
+      }
+    },
+    "gatewayAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["gateway_id", "segment_id", "gateway_kind"],
+      "properties": {
+        "gateway_id": {"type": "string", "minLength": 1},
+        "segment_id": {"type": "string", "minLength": 1},
+        "gateway_kind": {"enum": ["interface", "fhrp", "authoritative"]},
+        "virtual_address": {"$ref": "#/$defs/nullableId"}
+      }
+    },
+    "securityAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["device_id", "interface_id", "zone_id", "configured_state", "operational_state"],
+      "properties": {
+        "device_id": {"type": "string", "minLength": 1},
+        "interface_id": {"type": "string", "minLength": 1},
+        "zone_id": {"type": "string", "minLength": 1},
+        "configured_state": {"type": "string", "minLength": 1},
+        "operational_state": {"type": "string", "minLength": 1}
+      }
+    },
+    "wanAttributes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["connection_type", "local_id", "remote_id", "state"],
+      "properties": {
+        "connection_type": {"enum": ["sdwan", "tunnel", "circuit"]},
+        "local_id": {"type": "string", "minLength": 1},
+        "remote_id": {"type": "string", "minLength": 1},
+        "provider": {"type": "string", "minLength": 1},
+        "circuit_id": {"type": "string", "minLength": 1},
+        "transport": {"type": "string", "minLength": 1},
+        "state": {"type": "string", "minLength": 1}
+      }
+    },
+    "deviceFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "device"}, "attributes": {"$ref": "#/$defs/deviceAttributes"}}}]},
+    "deviceGroupFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "device_group"}, "attributes": {"$ref": "#/$defs/deviceGroupAttributes"}}}]},
+    "networkContextFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "network_context"}, "attributes": {"$ref": "#/$defs/networkContextAttributes"}}}]},
+    "vrfFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "vrf"}, "attributes": {"$ref": "#/$defs/vrfAttributes"}}}]},
+    "vlanFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "vlan"}, "attributes": {"$ref": "#/$defs/vlanAttributes"}}}]},
+    "zoneFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "zone"}, "attributes": {"$ref": "#/$defs/zoneAttributes"}}}]},
+    "interfaceFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "interface"}, "attributes": {"$ref": "#/$defs/interfaceAttributes"}}}]},
+    "networkFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "network"}, "attributes": {"$ref": "#/$defs/networkAttributes"}}}]},
+    "neighborFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "neighbor"}, "attributes": {"$ref": "#/$defs/neighborAttributes"}}}]},
+    "routeFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "route"}, "attributes": {"$ref": "#/$defs/routeAttributes"}}}]},
+    "routingRelationshipFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "routing_relationship"}, "attributes": {"$ref": "#/$defs/routingRelationshipAttributes"}}}]},
+    "tunnelFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "tunnel"}, "attributes": {"$ref": "#/$defs/tunnelAttributes"}}}]},
+    "membershipFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "membership"}, "attributes": {"$ref": "#/$defs/membershipAttributes"}}}]},
+    "gatewayFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "gateway"}, "attributes": {"$ref": "#/$defs/gatewayAttributes"}}}]},
+    "securityFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "security"}, "attributes": {"$ref": "#/$defs/securityAttributes"}}}]},
+    "wanFact": {"allOf": [{"$ref": "#/$defs/fact"}, {"properties": {"fact_family": {"const": "wan"}, "attributes": {"$ref": "#/$defs/wanAttributes"}}}]}
+  },
+  "examples": [
+    {
+      "schema_version": "aioe.network-topology.facts/v1",
+      "snapshot_id": "synthetic-snapshot-1",
+      "analysis_run_id": "synthetic-analysis-1",
+      "devices": [], "device_groups": [], "network_contexts": [], "interfaces": [], "segments": [],
+      "adjacencies": [], "routes": [], "routing_relationships": [], "tunnels": [], "memberships": [], "gateways": [],
+      "security_boundaries": [], "wan_connections": [], "unresolved_references": [], "provenance_catalog": []
+    }
+  ]
+}

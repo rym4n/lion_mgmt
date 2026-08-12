@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/security.zone_bindings/v1",
+  "x-max-bytes": 2097152,
+  "x-allowed-source-methods": ["cli", "netconf", "restconf", "gnmi", "vendor_api"],
+  "x-fact-planes": ["configured"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "security.zone_bindings"},
+        "source_method": {"enum": ["cli", "netconf", "restconf", "gnmi", "vendor_api"]},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/security.zone_bindings/v1"},
+        "fact_plane": {"const": "configured"}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["bindings"],
+            "properties": {
+              "bindings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["zone_id", "interface", "virtual_context"],
+                  "properties": {
+                    "zone_id": {"type": "string", "minLength": 1},
+                    "interface": {"type": "string", "minLength": 1},
+                    "virtual_context": {"type": "string", "minLength": 1}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

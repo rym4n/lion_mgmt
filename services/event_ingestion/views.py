@@ -1,0 +1,2318 @@
+# coding=utf-8
+import ast
+import hashlib
+import io
+import os
+import random
+import string
+import subprocess
+import tempfile
+import time
+import urllib.parse
+import zipfile
+
+import aiofile
+import orjson
+from sanic import Blueprint, response
+from sanic.log import logger
+from sanic_ext import openapi
+from tortoise.expressions import Q
+from tortoise.functions import Max
+from tortoise.transactions import in_transaction
+import yaml
+
+from core.error_code import ErrorCode
+from core.response import response_ok
+from libs import supervisor
+from libs.error_code.exception import CustomError
+from libs.security.authorization import is_superadmin, requires_permission
+from libs.utils import query_vlog, run_linux_command
+from models import Config, Playbook, PlaybookVersion
+from models.event import EventRelatedScript, EventsIngestion
+from settings import KAFKA_SERVERS, SUPERVISOR_PATH, VECTOR_CFG, VL_HOST
+
+event_ingestion_bp = Blueprint("event_ingestion", url_prefix="/event-ingestion")
+_all__ = ["event_ingestion_bp"]
+
+SUPPORTED_EVENT_SOURCE_TYPES = ("syslog", "kafka", "http_server")
+HTTP_SERVER_REQUEST_KEYS = {
+    "http_server_address",
+    "http_server_port",
+    "http_server_method",
+    "http_server_path",
+    "http_server_strict_path",
+    "http_server_encoding",
+    "http_server_headers",
+    "http_server_query_parameters",
+    "http_server_response_code",
+    "http_server_host_key",
+    "http_server_path_key",
+}
+
+VICTORIALOGS_TRANSFORM_SOURCE = r"""
+._time = to_unix_timestamp(now()) * 1000000000
+message = to_string(.message) ?? ""
+if message == "" {
+  ._msg = encode_json(.)
+} else {
+  ._msg = message
+}
+._stream = "vector"
+.message = encode_json(.)
+"""
+
+
+def _normalize_list(value):
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _normalize_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "y", "on")
+    return bool(value)
+
+
+def _clone_vector_config(value):
+    return orjson.loads(orjson.dumps(value or {}))
+
+
+def _normalize_victorialogs_config(data, vector_name, project_id):
+    transforms = data.setdefault("transforms", {})
+    vl_transform_name = f"{vector_name}_vl_transforms"
+    custom_transform_name = f"{vector_name}_transforms"
+    date_transform_name = f"{vector_name}_date_transforms"
+    if custom_transform_name in transforms:
+        vl_input = custom_transform_name
+    elif date_transform_name in transforms:
+        vl_input = date_transform_name
+    else:
+        vl_input = vector_name
+
+    transforms[vl_transform_name] = {
+        "type": "remap",
+        "inputs": [vl_input],
+        "source": VICTORIALOGS_TRANSFORM_SOURCE,
+    }
+    data.setdefault("sinks", {})[f"{vector_name}_sample_sinks"] = {
+        "type": "http",
+        "inputs": [vl_transform_name],
+        "uri": f"{VL_HOST}/insert/jsonline",
+        "encoding": {"codec": "text"},
+        "batch": {"max_bytes": 1048576},
+        "request": {
+            "headers": {
+                "Content-Type": "application/json",
+                "AccountID": "0",
+                "ProjectID": str(project_id),
+            }
+        },
+        "compression": "gzip",
+        "healthcheck": {"enabled": False},
+    }
+    return data
+
+
+def _stage_vector_config_file(file_path, data):
+    directory = os.path.dirname(file_path) or "."
+    file_descriptor, staged_path = tempfile.mkstemp(
+        prefix=f".{os.path.basename(file_path)}.", suffix=".tmp", dir=directory
+    )
+    try:
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as staged_file:
+            yaml.dump(data, staged_file, allow_unicode=True, default_flow_style=False)
+            staged_file.flush()
+            os.fsync(staged_file.fileno())
+        os.chmod(staged_path, 0o644)
+        return staged_path
+    except Exception:
+        if os.path.exists(staged_path):
+            os.remove(staged_path)
+        raise
+
+
+def _read_vector_config_snapshot(file_path):
+    if not os.path.exists(file_path):
+        return None
+    with open(file_path, "rb") as current_file:
+        return current_file.read()
+
+
+def _restore_vector_config_snapshot(file_path, snapshot):
+    if snapshot is None:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        return
+
+    directory = os.path.dirname(file_path) or "."
+    file_descriptor, staged_path = tempfile.mkstemp(
+        prefix=f".{os.path.basename(file_path)}.restore.", suffix=".tmp", dir=directory
+    )
+    try:
+        with os.fdopen(file_descriptor, "wb") as staged_file:
+            staged_file.write(snapshot)
+            staged_file.flush()
+            os.fsync(staged_file.fileno())
+        os.chmod(staged_path, 0o644)
+        os.replace(staged_path, file_path)
+    finally:
+        if os.path.exists(staged_path):
+            os.remove(staged_path)
+
+
+def _build_syslog_source(payload, current_source=None):
+    current_source = current_source or {}
+    syslog_port = payload.get("syslog_port")
+    communication_type = payload.get("communication_type") or current_source.get("mode")
+    max_length = payload.get("max_length")
+
+    address = current_source.get("address")
+    if syslog_port:
+        address = f"0.0.0.0:{syslog_port}"
+
+    if max_length is None:
+        max_length_bytes = current_source.get("max_length", 100 * 1024)
+    else:
+        max_length_bytes = int(max_length) * 1024
+
+    source = {
+        "type": "socket",
+        "address": address,
+        "max_length": max_length_bytes,
+        "mode": communication_type,
+    }
+
+    syslog_config = None
+    if address and communication_type:
+        syslog_config = communication_type + address.rsplit(":", 1)[-1]
+
+    return source, syslog_config
+
+
+def _build_kafka_source(payload, current_source=None):
+    current_source = current_source or {}
+    event_source_address = _normalize_list(payload.get("event_source_address"))
+    kafka_topic = _normalize_list(payload.get("kafka_topic")) if "kafka_topic" in payload else None
+    sasl_mechanism = payload.get("sasl_mechanism")
+    sasl_username = payload.get("sasl_username")
+    sasl_password = payload.get("sasl_password")
+
+    source = {
+        "type": "kafka",
+        "bootstrap_servers": (
+            ",".join(event_source_address)
+            if event_source_address
+            else current_source.get("bootstrap_servers", "")
+        ),
+        "group_id": payload.get("kafka_group_id") or current_source.get("group_id") or "Aioe_lion_ship",
+        "topics": kafka_topic if kafka_topic is not None else current_source.get("topics", []),
+    }
+
+    current_sasl = current_source.get("sasl") or {}
+    if sasl_mechanism or current_sasl:
+        source["sasl"] = {
+            "enabled": True,
+            "mechanism": sasl_mechanism or current_sasl.get("mechanism"),
+            "username": sasl_username or current_sasl.get("username"),
+            "password": urllib.parse.quote(sasl_password) if sasl_password else current_sasl.get("password"),
+        }
+
+    return source, None
+
+
+def _build_http_server_source(payload, current_source=None):
+    current_source = current_source or {}
+    source = {}
+
+    http_server_port = payload.get("http_server_port") or payload.get("syslog_port")
+    address = payload.get("http_server_address") or current_source.get("address")
+    if http_server_port:
+        address = f"0.0.0.0:{http_server_port}"
+
+    source["type"] = "http_server"
+    source["address"] = address or "0.0.0.0:80"
+    source["encoding"] = (
+        payload.get("http_server_encoding")
+        or current_source.get("encoding")
+        or "binary"
+    )
+    source["method"] = str(
+        payload.get("http_server_method")
+        or current_source.get("method")
+        or "POST"
+    ).upper()
+    source["path"] = (
+        payload.get("http_server_path")
+        or current_source.get("path")
+        or "/"
+    )
+    source["strict_path"] = _normalize_bool(
+        payload.get(
+            "http_server_strict_path",
+            current_source.get("strict_path", True),
+        ),
+        True,
+    )
+    source["response_code"] = int(
+        payload.get("http_server_response_code")
+        or current_source.get("response_code")
+        or 200
+    )
+
+    headers_value = (
+        payload.get("http_server_headers")
+        if "http_server_headers" in payload
+        else current_source.get("headers")
+    )
+    headers = _normalize_list(headers_value)
+    if headers:
+        source["headers"] = headers
+
+    query_parameters_value = (
+        payload.get("http_server_query_parameters")
+        if "http_server_query_parameters" in payload
+        else current_source.get("query_parameters")
+    )
+    query_parameters = _normalize_list(query_parameters_value)
+    if query_parameters:
+        source["query_parameters"] = query_parameters
+
+    host_key = (
+        payload.get("http_server_host_key")
+        if "http_server_host_key" in payload
+        else current_source.get("host_key")
+    )
+    if host_key:
+        source["host_key"] = host_key
+
+    path_key = (
+        payload.get("http_server_path_key")
+        if "http_server_path_key" in payload
+        else current_source.get("path_key")
+    )
+    if path_key:
+        source["path_key"] = path_key
+
+    return source, f"http_server:{source['address']}"
+
+
+def _build_source_config(event_source_type, payload, current_source=None):
+    if event_source_type == "syslog":
+        return _build_syslog_source(payload, current_source)
+    if event_source_type == "kafka":
+        return _build_kafka_source(payload, current_source)
+    if event_source_type == "http_server":
+        return _build_http_server_source(payload, current_source)
+    raise CustomError(ErrorCode.PARAM_ERROR)
+
+
+def _to_vrl_string_literal(value):
+    return orjson.dumps("" if value is None else str(value)).decode("utf-8")
+
+
+def _to_vrl_cidr_literal(value):
+    if value in (None, ""):
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if isinstance(value, (list, tuple)):
+        if not value:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        return orjson.dumps([str(item) for item in value]).decode("utf-8")
+
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+        if value.startswith("[") and value.endswith("]"):
+            try:
+                parsed_value = orjson.loads(value)
+            except orjson.JSONDecodeError:
+                parsed_value = None
+            if isinstance(parsed_value, list):
+                if not parsed_value:
+                    raise CustomError(ErrorCode.PARAM_ERROR)
+                return orjson.dumps([str(item) for item in parsed_value]).decode("utf-8")
+
+    return _to_vrl_string_literal(value)
+
+
+def get_conditional_statements(conditions):
+    conditional_statements = ""
+    for _, condition in enumerate(conditions):
+        condition_type = str(condition["type"]).strip()
+        if condition_type in ["==", "!="]:
+            conditional_statements += f"""to_string!(.log."{condition["name"]}") {condition_type} "{condition['value']}" """
+        elif condition_type in [">", "<", ">=", "<="]:
+            conditional_statements += f"""(to_int(.log."{condition["name"]}") ?? 0) {condition_type} {int(condition['value'])}"""
+        elif condition_type in ["!contains", "contains"]:
+            conditional_statements += f"""{condition_type}(string!(.log."{condition['name']}"), "{condition['value']}")"""
+        elif condition_type in ["starts_with", "ends_with"]:
+            conditional_statements += f"""{condition_type}(string!(.log."{condition['name']}"), {_to_vrl_string_literal(condition['value'])})"""
+        elif condition_type in ["includes", "!includes"]:
+            conditional_statements += f"""{condition_type}({condition['value']}, string!(.log."{condition['name']}"))"""
+        elif condition_type in ["ip_cidr_contains", "!ip_cidr_contains"]:
+            conditional_statement = f"""(ip_cidr_contains({_to_vrl_cidr_literal(condition['value'])}, string!(.log."{condition['name']}")) ?? false)"""
+            if condition_type == "!ip_cidr_contains":
+                conditional_statement = f"!{conditional_statement}"
+            conditional_statements += conditional_statement
+        elif condition_type in ["exists", "!exists"]:
+            conditional_statements += f"""{condition_type}(.log."{condition['name']}")"""
+        elif condition_type in ["is_empty", "!is_empty"]:
+            conditional_statements += f"""{condition_type}(to_string!(.log."{condition['name']}"))"""
+        elif condition_type == "match":
+            conditional_statements += f"""match(string!(.log."{condition['name']}"), r'{condition['value']}')"""
+        else:
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        connect_type = condition["connect_type"] if condition.get("connect_type") in ["&&", "||"] else None
+        if connect_type:
+            conditional_statements += f" {connect_type} "
+
+    return conditional_statements
+
+
+def check_vector_config(vector_config, vector_config_yaml=None, *, skip_healthchecks=False):
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", encoding="utf-8", delete=False) as tmp_file:
+        if vector_config_yaml:
+            yaml_str = vector_config_yaml
+        else:
+            yaml_str = yaml.dump(vector_config, default_flow_style=False, allow_unicode=True)
+        logger.info(yaml_str)
+        tmp_file.write(yaml_str)
+        tmp_file.flush()
+
+        tmp_path = tmp_file.name
+
+        healthcheck_option = " --skip-healthchecks" if skip_healthchecks else ""
+        result = run_linux_command(
+            f"vector validate{healthcheck_option} --config-yaml {tmp_path}"
+        )
+
+    try:
+        if result["code"] != 0:
+            return False
+        else:
+            return True
+    finally:
+        os.unlink(tmp_path)
+
+
+# 生成配置文件
+# noinspection PyTypeChecker
+async def gen_vector_config(sources, topic, project_id):
+    config = {
+        "sources": sources,
+        "transforms": {
+            f"{topic}_date_transforms": {
+                "type": "remap",
+                "inputs": [f"{topic}"],
+                "source": r"""
+.datetime_str = format_timestamp(now(), "%Y%m%d%H%M%S", "Asia/Shanghai") ?? "19700101000000"
+""",
+            },
+            f"{topic}_vl_transforms": {
+                "type": "remap",
+                "inputs": [f"{topic}_date_transforms"],
+                "source": VICTORIALOGS_TRANSFORM_SOURCE,
+            }
+        },
+        "sinks": {
+            f"{topic}_sample_sinks": {
+                "type": "http",
+                "inputs": [f"{topic}_vl_transforms"],
+                "uri": f"{VL_HOST}/insert/jsonline",
+                "encoding": {"codec": "text"},
+                "batch": {"max_bytes": 1048576},
+                "request": {
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "AccountID": "0",
+                        "ProjectID": str(project_id)
+                    }
+                }
+            }
+        },
+    }
+
+    return config
+
+
+def _prepare_parse_sample(message, transforms_type):
+    message = "" if message is None else str(message)
+    if str(transforms_type or "").lower() != "json":
+        return message
+    try:
+        return orjson.dumps(orjson.loads(message)).decode("utf-8")
+    except orjson.JSONDecodeError:
+        return message
+
+
+async def _set_convert_health_status(event, status):
+    if event.convert_health_status == status:
+        return
+    event.convert_health_status = status
+    await event.save(update_fields=["convert_health_status", "utime"])
+
+
+async def _has_syslog_config_conflict(
+    syslog_config,
+    tenant_id,
+    *,
+    enabled_only=False,
+    exclude_id=None,
+):
+    if not syslog_config:
+        return False
+
+    filters = {
+        "syslog_config": syslog_config,
+        "deleted": False,
+        "tenant_id": tenant_id,
+    }
+    if enabled_only:
+        filters["enabled_status"] = 1
+
+    query = EventsIngestion.filter(**filters)
+    if exclude_id is not None:
+        query = query.exclude(id=exclude_id)
+    return await query.exists()
+
+
+@event_ingestion_bp.post("/new")
+@openapi.definition(
+    summary="创建新的事件接入",
+    description="创建新的事件接入(需要事件接入创建权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "event_name": {"type": "string", "description": "事件名称"},
+                    "event_describe": {"type": "string", "description": "事件描述"},
+                    "event_source_type": {
+                        "type": "string",
+                        "description": "事件来源类型 目前支持kafka、syslog、http_server",
+                    },
+                    "syslog_port": {
+                        "type": "integer",
+                        "description": "日志端口 事件来源类型为syslog时才传，默认为None",
+                    },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "单条消息的最大长度，单位为KB，默认100KB",
+                    },
+                    "event_source_address": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "事件来源地址 事件来源类型为kafka时才传 默认为None",
+                    },
+                    "http_server_address": {
+                        "type": "string",
+                        "description": "HTTP Server监听地址，事件来源类型为http_server时可传，默认0.0.0.0:<http_server_port|syslog_port|80>",
+                    },
+                    "http_server_port": {
+                        "type": "integer",
+                        "description": "HTTP Server监听端口，事件来源类型为http_server时可传",
+                    },
+                    "http_server_method": {
+                        "type": "string",
+                        "description": "HTTP Server请求方法，事件来源类型为http_server时可传，默认POST",
+                    },
+                    "http_server_path": {
+                        "type": "string",
+                        "description": "HTTP Server请求路径，事件来源类型为http_server时可传，默认/",
+                    },
+                    "http_server_strict_path": {
+                        "type": "boolean",
+                        "description": "HTTP Server是否严格匹配path，事件来源类型为http_server时可传，默认true",
+                    },
+                    "http_server_encoding": {
+                        "type": "string",
+                        "description": "HTTP Server编码类型，事件来源类型为http_server时可传，默认binary",
+                    },
+                    "http_server_headers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "HTTP Server需要保留到事件中的请求头名称列表，事件来源类型为http_server时可传",
+                    },
+                    "http_server_query_parameters": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "HTTP Server需要保留到事件中的查询参数名称列表，事件来源类型为http_server时可传",
+                    },
+                    "http_server_response_code": {
+                        "type": "integer",
+                        "description": "HTTP Server响应状态码，事件来源类型为http_server时可传，默认200",
+                    },
+                    "http_server_host_key": {
+                        "type": "string",
+                        "description": "HTTP Server写入host字段名，事件来源类型为http_server时可传",
+                    },
+                    "http_server_path_key": {
+                        "type": "string",
+                        "description": "HTTP Server写入path字段名，事件来源类型为http_server时可传",
+                    },
+                    "communication_type": {
+                        "type": "string",
+                        "description": "通信类型 事件来源类型为syslog时才传，默认为None tcp/udp",
+                    },
+                    "kafka_group_id": {
+                        "type": "string",
+                        "description": "kafka消费组ID 事件来源类型为kafka时才传，默认为None",
+                    },
+                    "kafka_topic": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "kafka主题 事件来源类型为kafka时才传，默认为None",
+                    },
+                    "sasl_mechanism": {
+                        "type": "string",
+                        "description": "sasl机制 事件来源类型为kafka时才传，默认为None",
+                    },
+                    "sasl_username": {
+                        "type": "string",
+                        "description": "sasl用户名 事件来源类型为kafka时才传，默认为None",
+                    },
+                    "sasl_password": {
+                        "type": "string",
+                        "description": "sasl密码 事件来源类型为kafka时才传，默认为None",
+                    },
+                    "enabled_status": {
+                        "type": "integer",
+                        "description": "上游接入 启用为 1 ，禁用为 0 默认启用",
+                    },
+                    "linked_execution": {
+                        "type": "integer",
+                        "description": "联动执行 启用为 1 ，禁用为 0 默认禁用",
+                    },
+                    "retention_days": {
+                        "type": "integer",
+                        "description": "日志数据的保留天数, 默认为 7",
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "创建成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "object"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:c")
+async def event_ingestion(request):
+    data = request.json  # 只解析一次
+    event_name = data.get("event_name")
+    event_describe = data.get("event_describe")
+    event_source_type = data.get("event_source_type")
+    enabled_status = 0
+    linked_execution = int(data.get("linked_execution", 0))
+    retention_days = int(data.get("retention_days", 7))
+
+    if event_source_type not in SUPPORTED_EVENT_SOURCE_TYPES:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    vector_name = "".join(random.choices(string.ascii_letters, k=12))
+
+    max_project_id = await EventsIngestion.all().annotate(max_pid=Max("project_id")).values_list("max_pid", flat=True)
+    project_id = max_project_id[0] + 1 if max_project_id and max_project_id[0] else 1
+
+    output_path = os.path.join(VECTOR_CFG, vector_name + ".yaml")
+
+    # await setup_ilm_policy(f"logs_retention_policy-{event_name}", f"{retention_days}d")
+    # await setup_logs_template(f"logs-{event_name}", f"logs_retention_policy-{event_name}")
+
+    source_config, syslog_config = _build_source_config(event_source_type, data)
+    sources = {vector_name: source_config}
+    vector_config = await gen_vector_config(sources, vector_name, project_id)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    syslog_port_conflict = (
+        event_source_type == "syslog"
+        and await _has_syslog_config_conflict(
+            syslog_config,
+            tenant_id,
+        )
+    )
+
+    events_ingestion = await EventsIngestion.create(
+        event_ingestion_name=event_name,
+        event_ingestion_describe=event_describe,
+        event_source_type=event_source_type,
+        enabled_status=enabled_status,
+        creator=request.ctx.session["account_info"],
+        updator=request.ctx.session["account_info"],
+        file_path=output_path.replace("\\", "/"),
+        linked_execution=linked_execution,
+        syslog_config=syslog_config,
+        vector_name=vector_name,
+        vector_config=vector_config,
+        vector_config_raw=vector_config,
+        retention_days=retention_days,
+        project_id=project_id,
+        tenant_id=tenant_id,
+    )
+
+    response_data = events_ingestion.json
+    response_data["syslog_port_conflict"] = syslog_port_conflict
+    return response_ok(response_data)
+
+
+@event_ingestion_bp.post("/list")
+@openapi.definition(
+    summary="获取所有事件接入列表",
+    description="获取所有事件接入列表(需要事件查看权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "integer", "description": "页码"},
+                    "size": {"type": "integer", "description": "页面大小"},
+                    "name": {"type": "string", "description": "事件名称 非必填"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "events": {
+                                        "type": "array",
+                                        "items": {"type": "object"},
+                                    },
+                                    "total": {"type": "integer"},
+                                    "page": {"type": "integer"},
+                                    "size": {"type": "integer"},
+                                    "total_pages": {"type": "integer"},
+                                },
+                            },
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:r")
+async def get_all_events_ingestion(request):
+    page = request.json.get("page", 1)
+    size = request.json.get("size", 15)
+    offset = (page - 1) * size
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    filters = {"deleted": False, "tenant_id": tenant_id}
+    if request.json.get("name"):
+        filters["event_ingestion_name__icontains"] = request.json.get("name")
+
+    events = await EventsIngestion.filter(**filters).order_by("-ctime").offset(offset).select_related("creator", "updator").limit(size).all()
+    total = await EventsIngestion.filter(**filters).count()
+
+    return response_ok(
+        {
+            "events": [event.json for event in events],
+            "total": total,
+            "page": page,
+            "size": size,
+            "total_pages": (total + size - 1) // size,
+        }
+    )
+
+
+@event_ingestion_bp.post("/delete")
+@openapi.definition(
+    summary="删除事件接入",
+    description="删除事件接入(需要事件删除权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "事件接入ID"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:d")
+async def delete_event_ingestion(request):
+    event_id = request.json.get("id")
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    async with in_transaction():
+        event = await EventsIngestion.get(id=event_id, tenant_id=tenant_id)
+        if not event:
+            raise CustomError(ErrorCode.NOT_FOUND)
+        if event.enabled_status == 1:
+            return response_ok("请先禁用事件接入再删除")
+        es = await EventRelatedScript.get_or_none(event_ingestion_id=event_id, tenant_id=tenant_id)
+        if es:
+            for script_id in es.script_id:
+                process_name = hashlib.md5(f"{es.event_ingestion_id}_{script_id}".encode()).hexdigest()
+                supervisor.stop_process(process_name)
+                supervisor.remove_process(process_name)
+                supervisor_path = os.path.join(SUPERVISOR_PATH, f"{process_name}.conf")
+                if os.path.exists(supervisor_path):
+                    os.remove(supervisor_path)
+            await es.delete()
+
+        # await Events.filter(event_ingestion_id=event.id, tenant_id=tenant_id).delete()
+        event.deleted = True
+        await event.save()
+
+    return response_ok("success")
+
+
+@event_ingestion_bp.post("/update")
+@openapi.definition(
+    summary="更新事件接入",
+    description="更新事件接入(需要事件更新权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "事件接入ID"},
+                    "event_describe": {
+                        "type": "string",
+                        "description": "事件描述 非必填",
+                    },
+                    "event_source_address": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "事件来源地址 事件来源类型为kafka时才传 非必填",
+                    },
+                    "http_server_address": {
+                        "type": "string",
+                        "description": "HTTP Server监听地址，事件来源类型为http_server时可传，默认0.0.0.0:<http_server_port|syslog_port|80>",
+                    },
+                    "http_server_port": {
+                        "type": "integer",
+                        "description": "HTTP Server监听端口，事件来源类型为http_server时可传",
+                    },
+                    "http_server_method": {
+                        "type": "string",
+                        "description": "HTTP Server请求方法，事件来源类型为http_server时可传，默认POST",
+                    },
+                    "http_server_path": {
+                        "type": "string",
+                        "description": "HTTP Server请求路径，事件来源类型为http_server时可传，默认/",
+                    },
+                    "http_server_strict_path": {
+                        "type": "boolean",
+                        "description": "HTTP Server是否严格匹配path，事件来源类型为http_server时可传，默认true",
+                    },
+                    "http_server_encoding": {
+                        "type": "string",
+                        "description": "HTTP Server编码类型，事件来源类型为http_server时可传，默认binary",
+                    },
+                    "http_server_headers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "HTTP Server需要保留到事件中的请求头名称列表，事件来源类型为http_server时可传",
+                    },
+                    "http_server_query_parameters": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "HTTP Server需要保留到事件中的查询参数名称列表，事件来源类型为http_server时可传",
+                    },
+                    "http_server_response_code": {
+                        "type": "integer",
+                        "description": "HTTP Server响应状态码，事件来源类型为http_server时可传，默认200",
+                    },
+                    "http_server_host_key": {
+                        "type": "string",
+                        "description": "HTTP Server写入host字段名，事件来源类型为http_server时可传",
+                    },
+                    "http_server_path_key": {
+                        "type": "string",
+                        "description": "HTTP Server写入path字段名，事件来源类型为http_server时可传",
+                    },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "单条消息的最大长度，单位为KB，默认100KB",
+                    },
+                    "syslog_port": {
+                        "type": "integer",
+                        "description": "日志端口 端口范围500-2000 事件来源类型为syslog时才传，默认为None 非必填",
+                    },
+                    "communication_type": {
+                        "type": "string",
+                        "description": "通信类型 事件来源类型为syslog时才传，默认为None 非必填",
+                    },
+                    "kafka_group_id": {
+                        "type": "string",
+                        "description": "kafka消费组ID 事件来源类型为kafka时才传，默认为None 非必填",
+                    },
+                    "kafka_topic": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "kafka主题 事件来源类型为kafka时才传，默认为None 非必填",
+                    },
+                    "transforms_type": {
+                        "type": "string",
+                        "description": "转换类型 目前支持Grok、CEF、key-value、JSON、Delimiter(分割符) 非必填",
+                    },
+                    "transforms_config": {
+                        "type": "string",
+                        "description": "转换配置 只有Grok时需要填写，默认情况下为None 非必填",
+                    },
+                    "key_value_delimiter": {
+                        "type": "string",
+                        "description": "键值对分隔符 只有key-value时需要填写，默认情况下为None 非必填",
+                    },
+                    "key_delimiter_value": {
+                        "type": "string",
+                        "description": "键值分隔符 只有key-value时需要填写，默认情况下为None 非必填",
+                    },
+                    "sasl_mechanism": {
+                        "type": "string",
+                        "description": "sasl机制 事件来源类型为kafka时才传，默认为None 非必填",
+                    },
+                    "sasl_username": {
+                        "type": "string",
+                        "description": "sasl用户名 事件来源类型为kafka时才传，默认为None 非必填",
+                    },
+                    "sasl_password": {
+                        "type": "string",
+                        "description": "sasl密码 事件来源类型为kafka时才传，默认为None 非必填",
+                    },
+                    "event_source_type": {
+                        "type": "string",
+                        "description": "事件来源类型 目前支持kafka、syslog、http_server",
+                    },
+                    "enabled_status": {
+                        "type": "integer",
+                        "description": "上游接入 启用为 1 ，禁用为 0 非必填",
+                    },
+                    "retention_days": {
+                        "type": "integer",
+                        "description": "日志数据的保留天数, 默认为 7",
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:u")
+async def update_event_ingestion(request):
+    data = request.json  # 只解析一次
+    payload = data
+    event_id = data.get("id")
+    event_describe = data.get("event_describe")
+    transforms_type = data.get("transforms_type")
+    transformsconfig = data.get("transforms_config")
+    enabled_status = data.get("enabled_status")
+    retention_days = data.get("retention_days")
+    key_delimiter_value = data.get("key_delimiter_value")
+    key_value_delimiter = data.get("key_value_delimiter")
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    event = await EventsIngestion.get(id=event_id, tenant_id=tenant_id)
+    event_source_type = data.get("event_source_type")
+    if event_source_type and event_source_type not in SUPPORTED_EVENT_SOURCE_TYPES:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if enabled_status == 0:
+        if os.path.exists(event.file_path):
+            os.remove(event.file_path)
+        event.enabled_status = 0
+        await event.save()
+        return response_ok("禁用成功")
+    elif enabled_status == 1:
+        event.enabled_status = enabled_status
+        event.enabled_health_status = "healthy"
+
+    data = _clone_vector_config(event.vector_config_raw if event_source_type or transforms_type else event.vector_config)
+    source_config_updated = False
+
+    if event_source_type:
+        current_source = data.get("sources", {}).get(event.vector_name, {})
+        source_config, syslog_config = _build_source_config(event_source_type, payload, current_source)
+        data.setdefault("sources", {})[event.vector_name] = source_config
+        event.syslog_config = syslog_config
+        event.event_source_type = event_source_type
+        source_config_updated = True
+    elif event.event_source_type == "http_server" and any(key in payload for key in HTTP_SERVER_REQUEST_KEYS):
+        current_source = data.get("sources", {}).get(event.vector_name, {})
+        source_config, syslog_config = _build_source_config("http_server", payload, current_source)
+        data.setdefault("sources", {})[event.vector_name] = source_config
+        event.syslog_config = syslog_config
+        source_config_updated = True
+
+    if transforms_type:
+        first_transform = f"{event.vector_name}_transforms"
+        # data["sinks"][f"{event.vector_name}_sample_sinks"]["inputs"] = [first_transform]
+        data.setdefault("transforms", {}).setdefault(first_transform, {})["type"] = "remap"
+        data["transforms"][first_transform]["inputs"] = [f"{event.vector_name}_date_transforms"]
+        data["transforms"][first_transform]["drop_on_error"] = False
+        config = await Config.get_or_none(Q(key=transforms_type, module="transforms") & (Q(tenant_id=tenant_id) | Q(shared=True)))
+        if not config:
+            raise CustomError(ErrorCode.TYPE_NOT_SUPPORTED_ERROR)
+        args = {
+            "transformsconfig": transformsconfig,
+            "key_value_delimiter": key_value_delimiter,
+            "key_delimiter_value": key_delimiter_value,
+        }
+        value = config.value
+        if "{" in value and transforms_type in ["kv", "grok"]:
+            value = value.format(**args)
+
+        data["transforms"][first_transform]["source"] = value
+        event.config_info = {transforms_type: args}
+
+    # 更新事件接入sinks部分，将旧版本的es转换成vl
+    if event.project_id:
+        project_id = event.project_id
+    else:
+        max_project_id = await EventsIngestion.all().annotate(max_pid=Max("project_id")).values_list("max_pid", flat=True)
+        project_id = max_project_id[0] + 1 if max_project_id and max_project_id[0] else 1
+
+    _normalize_victorialogs_config(data, event.vector_name, project_id)
+
+    if event.enabled_status == 1 and await _has_syslog_config_conflict(
+        event.syslog_config,
+        tenant_id,
+        enabled_only=True,
+        exclude_id=event.id,
+    ):
+        if event.event_source_type == "syslog":
+            raise CustomError(ErrorCode.EVENT_INGESTION_SYSLOG_PORT_CONFLICT)
+        raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
+
+    result = check_vector_config(data)
+    if not result:
+        raise CustomError(ErrorCode.CONFIG_FILE_GENERATE_ERROR)
+
+    async with aiofile.AIOFile(event.file_path, "w", encoding="utf-8") as f:
+        yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+        await f.write(yaml_str)
+
+    if event_describe:
+        event.event_ingestion_describe = event_describe
+    if transforms_type:
+        event.transforms_type = transforms_type
+
+    if retention_days:
+        event.retention_days = retention_days
+
+    event.updator = request.ctx.session["account_info"]
+
+    event.vector_config = data
+    event.project_id = project_id
+
+    if event_source_type or transforms_type or source_config_updated:
+        event.vector_config_raw = data
+    elif event.vector_config_raw:
+        raw_data = _clone_vector_config(event.vector_config_raw)
+        _normalize_victorialogs_config(raw_data, event.vector_name, project_id)
+        event.vector_config_raw = raw_data
+
+    await event.save()
+
+    return response_ok("事件更新成功")
+
+
+@event_ingestion_bp.post("/detail")
+@openapi.definition(
+    summary="获取事件接入详情",
+    description="获取事件接入详情(需要事件查看权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "事件接入ID"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "event": {"type": "object"},
+                                    "sources": {"type": "object"},
+                                },
+                            },
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:r")
+async def get_event_ingestion_detail(request):
+    event_id = request.json.get("id")
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    event = await EventsIngestion.get(id=event_id, tenant_id=tenant_id).prefetch_related("creator", "updator")
+    if not event:
+        raise CustomError(ErrorCode.NO_EVENT_ACCESS)
+    sources = event.vector_config.get("sources", {})
+    max_length = sources.get(event.vector_name, {}).get("max_length")
+    if max_length:
+        max_length = int(max_length) / 1024
+    data = event.json
+    data["max_length"] = max_length if max_length else 100
+    return response_ok({"event": data, "sources": sources})
+
+
+# noinspection PyTypeChecker
+@event_ingestion_bp.post("/sample")
+@openapi.definition(
+    summary="获取事件接入处理后的日志样例",
+    description="获取事件接入处理后的日志样例(需要事件查看权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "事件id"},
+                    "size": {"type": "integer", "description": "每页条数，默认10"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "array", "items": {"type": "object"}},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:r")
+async def get_event_ingestion_kafka_sample(request):
+    data = request.json
+    event_id = data.get("id")
+    size = max(1, min(int(data.get("size", 10)), 100))
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    event = await EventsIngestion.get_or_none(id=event_id, deleted=False, tenant_id=tenant_id)
+    if not event:
+        raise CustomError(ErrorCode.NO_EVENT_ACCESS)
+
+    messages = await query_vlog(f"* | first {size} by (_time desc)", event.project_id)
+
+    if not messages:
+        return response_ok("当前不存在日志")
+
+    await event.save()
+
+    return response_ok(messages)
+
+
+def _build_event_binding_config(event, tenant_id, request_datas):
+    data = _clone_vector_config(event.vector_config_raw)
+    binding_records = []
+    topic_timestamp = int(time.time() * 1000)
+
+    for index, request_data in enumerate(request_datas or []):
+        conditions = request_data.get("conditions") or []
+        script_ids = request_data.get("script_ids") or []
+        event_name = request_data.get("event_name")
+        linked_execution = request_data.get("linked_execution")
+
+        if linked_execution == 1 and not script_ids:
+            raise CustomError(ErrorCode.NOT_SCRIPT_ERROR)
+
+        topic = f"{event.vector_name}_{topic_timestamp + index}"
+        if request_data.get("fields") and request_data.get("numbers"):
+            data.setdefault("transforms", {})[f"{topic}_dedupe_transforms"] = {
+                "type": "dedupe",
+                "inputs": ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name]),
+                "cache": {"num_events": int(request_data["numbers"])},
+                "fields": {"match": request_data.get("fields")},
+            }
+
+        if conditions:
+            conditional_statements = get_conditional_statements(conditions)
+            data.setdefault("transforms", {})[f"{topic}_transforms"] = {
+                "type": "filter",
+                "inputs": ([f"{topic}_dedupe_transforms"] if request_data.get("fields") and request_data.get("numbers") else ([f"{event.vector_name}_transforms"] if event.transforms_type else [event.vector_name])),
+                "condition": conditional_statements,
+            }
+
+        event_transform_input = (
+            f"{topic}_transforms"
+            if conditions
+            else (
+                f"{topic}_dedupe_transforms"
+                if request_data.get("fields") and request_data.get("numbers")
+                else (f"{event.vector_name}_transforms" if event.transforms_type else event.vector_name)
+            )
+        )
+        data.setdefault("transforms", {})[f"{topic}_event_transforms"] = {
+            "type": "remap",
+            "inputs": [event_transform_input],
+            "source": f"""
+.aioe_event_id = uuid_v4()
+.log_data = to_string(encode_json(.log))
+.id = .aioe_event_id
+.ctime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
+.utime = format_timestamp(now(), "%Y-%m-%dT%H:%M:%S%:z", "Asia/Shanghai") ?? "1970-01-01T00:00:00+08:00"
+.deleted = false
+.event_name = {event_name}
+.event_process_status = "待处理"
+.event_source = "{event.event_ingestion_name}"
+.event_ingestion_id = "{event.id}"
+.tenant_id = "{tenant_id}"
+del(.datetime_str)
+""",
+        }
+
+        mapping = request_data.get("mapping") or {}
+        for script_id, value in mapping.items():
+            for log_field, script_field in value.items():
+                data.setdefault("transforms", {})[f"{topic}_{script_id}_transforms"] = {
+                    "type": "remap",
+                    "inputs": [f"{topic}_event_transforms"],
+                    "source": f"""
+.log.{script_field} = .log."{log_field}"
+""",
+                }
+
+        for script_id in script_ids:
+            mapped_transform = f"{topic}_{script_id}_transforms"
+            data.setdefault("sinks", {})[f"{topic}_{script_id}_sinks"] = {
+                "inputs": [mapped_transform] if mapped_transform in data["transforms"] else [f"{topic}_event_transforms"],
+                "type": "kafka",
+                "bootstrap_servers": KAFKA_SERVERS,
+                "topic": f"{topic}_{script_id}",
+                "encoding": {"codec": "json"},
+            }
+
+        endpoint = f'postgresql://{os.environ.get("RY_DB_USER")}:{urllib.parse.quote(os.environ.get("RY_DB_PASS") or "")}@{os.environ.get("RY_DB_HOST")}:{os.environ.get("RY_DB_PORT", 5432)}/{os.environ.get("RY_DB_NAME")}'
+        data.setdefault("sinks", {})[f"{topic}_event_sinks"] = {
+            "inputs": [f"{topic}_event_transforms"],
+            "type": "postgres",
+            "endpoint": endpoint,
+            "table": "events",
+            "pool_size": 20,
+        }
+
+        concurrency = min(int(request_data.get("concurrency", 1)), 4)
+        binding_records.append({
+            "condition": conditions,
+            "event_ingestion_id": event.id,
+            "script_id": script_ids,
+            "topic": topic,
+            "event_name": event_name,
+            "status": linked_execution if linked_execution in [0, 1] else 0,
+            "numbers": request_data.get("numbers"),
+            "concurrency": concurrency,
+            "fields": request_data.get("fields"),
+            "tenant_id": tenant_id,
+            "mapping": mapping or None,
+        })
+
+    if not check_vector_config(data):
+        raise CustomError(ErrorCode.CONFIG_FILE_GENERATE_ERROR)
+    return data, binding_records
+
+
+def _remove_supervisor_process(event_ingestion_id, script_id):
+    process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
+    supervisor.stop_process(process_name)
+    supervisor.remove_process(process_name)
+    supervisor_path = os.path.join(SUPERVISOR_PATH, f"{process_name}.conf")
+    if os.path.exists(supervisor_path):
+        os.remove(supervisor_path)
+
+
+def _apply_binding_supervisor_state(event_ingestion_id, binding_records):
+    for binding_record in binding_records:
+        if binding_record["status"] != 1:
+            continue
+        for script_id in binding_record["script_id"]:
+            process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
+            command = f'python start.py -m auto -f {script_id} -t {binding_record["topic"]}_{script_id}'
+            supervisor.add_process(process_name, command, binding_record["concurrency"])
+            supervisor.start_process(process_name)
+
+
+async def _persist_event_bindings(event, tenant_id, data, binding_records, connection):
+    await EventRelatedScript.filter(event_ingestion_id=event.id, deleted=False, tenant_id=tenant_id).using_db(connection).delete()
+    for binding_record in binding_records:
+        await EventRelatedScript.create(using_db=connection, **binding_record)
+
+    event.vector_config = data
+    event.execution_health_status = "healthy"
+    await event.save(using_db=connection, update_fields=["vector_config", "execution_health_status", "utime"])
+
+
+async def _replace_event_bindings(event, tenant_id, data, binding_records, transaction_factory=in_transaction):
+    staged_path = _stage_vector_config_file(event.file_path, data)
+    file_snapshot = _read_vector_config_snapshot(event.file_path)
+    try:
+        async with transaction_factory() as connection:
+            await _persist_event_bindings(event, tenant_id, data, binding_records, connection)
+            os.replace(staged_path, event.file_path)
+    except Exception:
+        _restore_vector_config_snapshot(event.file_path, file_snapshot)
+        raise
+    finally:
+        if os.path.exists(staged_path):
+            os.remove(staged_path)
+
+
+@event_ingestion_bp.post("/binding")
+@openapi.definition(
+    summary="绑定事件接入和剧本",
+    description="绑定事件接入和剧本(需要事件创建权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["event_ingestion_id", "binding_data"],
+                "properties": {
+                    "event_ingestion_id": {
+                        "type": "string",
+                        "description": "事件接入ID",
+                    },
+                    "binding_data": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "conditions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "type": {"type": "string"},
+                                            "name": {"type": "string"},
+                                            "value": {"type": "string"},
+                                            "connect_type": {"type": "string"},
+                                        },
+                                    },
+                                    "description": "条件",
+                                },
+                                "linked_execution": {
+                                    "type": "integer",
+                                    "description": "联动执行 启用为 1 ，禁用为 0 非必填",
+                                },
+                                "script_ids": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "剧本ID 非必填，选择联动执行时必填",
+                                },
+                                "event_name": {
+                                    "type": "string",
+                                    "description": "事件名称 用户选择的事件名称，传default",
+                                },
+                                "numbers": {
+                                    "type": "integer",
+                                    "description": "去重条数 非必填，选择去重时才填写 默认5000, 最大10000",
+                                },
+                                "fields": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "字段 非必填，选择去重时才填写",
+                                },
+                                "concurrency": {
+                                    "type": "integer",
+                                    "description": "并发数量，默认是1，最大是4",
+                                },
+                                "mapping": {
+                                    "type": "array",
+                                    "items": {"type": "object"},
+                                    "description": "解析日志和剧本输入参数之间的映射， 如果剧本存在输入参数则必填，不存在则非必填，示例：{'script_id': {'log_field1': 'script_field1'}}",
+                                },
+                            },
+                        },
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "绑定成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:u")
+async def binding_event_ingestion_script(request):
+    event_ingestion_id = request.json.get("event_ingestion_id")
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    event = await EventsIngestion.get(id=event_ingestion_id, tenant_id=tenant_id).prefetch_related("creator")
+    if not event:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False, tenant_id=tenant_id).all()
+    data, binding_records = _build_event_binding_config(event, tenant_id, request.json.get("binding_data"))
+    await _replace_event_bindings(event, tenant_id, data, binding_records)
+
+    for event_related_script in event_related_scripts:
+        for script_id in event_related_script.script_id or []:
+            _remove_supervisor_process(event_ingestion_id, script_id)
+    _apply_binding_supervisor_state(event_ingestion_id, binding_records)
+
+    return response_ok("绑定成功")
+
+
+@event_ingestion_bp.post("/unbundled")
+@openapi.definition(
+    summary="解绑事件接入和剧本",
+    description="解绑事件接入和剧本(需要事件创建权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["event_ingestion_id", "script_ids"],
+                "properties": {
+                    "event_ingestion_id": {
+                        "type": "string",
+                        "description": "事件接入ID",
+                    },
+                    "script_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "剧本ID",
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "解绑成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:u")
+async def unbundled_event_ingestion_script(request):
+    event_ingestion_id = request.json.get("event_ingestion_id")
+    script_ids = request.json.get("script_ids")
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event_ingestion_id, deleted=False, tenant_id=tenant_id).all()
+
+    event = await EventsIngestion.get_or_none(id=event_ingestion_id, tenant_id=tenant_id)
+    if not event:
+        raise CustomError(ErrorCode.NO_EVENT_ACCESS)
+
+    data = event.vector_config
+
+    for script_id in script_ids:
+        for ers in event_related_scripts:
+            if script_id in ers.script_id:  # ers.script_id 是列表
+                if len(ers.script_id) > 1:  # 剧本id大于1代表多个剧本绑定到同一个判断条件，只需删除数据库数据即可
+                    ers.script_id.remove(script_id)
+                    await ers.save()
+                    break
+                else:  # 剧本id小于等于1代表单个剧本绑定到同一个判断条件，需删除数据库数据和vector配置文件
+                    if f"{ers.topic}_transforms" in data["transforms"]:
+                        del data["transforms"][f"{ers.topic}_transforms"]
+
+                    if f"{ers.topic}_dedupe_transforms" in data["transforms"]:
+                        del data["transforms"][f"{ers.topic}_dedupe_transforms"]
+
+                    if f"{ers.topic}_event_transforms" in data["transforms"]:
+                        del data["transforms"][f"{ers.topic}_event_transforms"]
+
+                    if f"{ers.topic}_sinks" in data["sinks"]:
+                        del data["sinks"][f"{ers.topic}_sinks"]
+
+                    if f"{ers.topic}_event_sinks" in data["sinks"]:
+                        del data["sinks"][f"{ers.topic}_event_sinks"]
+
+                    await ers.delete()
+                    break
+
+        process_name = hashlib.md5(f"{event_ingestion_id}_{script_id}".encode()).hexdigest()
+        supervisor.stop_process(process_name)
+        supervisor.remove_process(process_name)
+
+    result = check_vector_config(data)
+    if not result:
+        raise CustomError(ErrorCode.CONFIG_FILE_GENERATE_ERROR)
+
+    async with aiofile.AIOFile(event.file_path, "w", encoding="utf-8") as f:
+        yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+        await f.write(yaml_str)
+
+    event.vector_config = data
+
+    await event.save()
+
+    return response_ok("剧本解绑成功")
+
+
+@event_ingestion_bp.post("/export")
+@openapi.definition(
+    summary="导出事件接入",
+    description="导出事件接入(需要事件查看权限)",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["ids"],
+                "properties": {
+                    "ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "事件接入ID",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导出成功",
+            "content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}},
+        }
+    },
+)
+@requires_permission("ingestion:r")
+async def export_event_ingestion_script(request):
+    event_ids = request.json.get("ids", [])
+    if not isinstance(event_ids, list) or not event_ids:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    events = await EventsIngestion.filter(id__in=event_ids, tenant_id=tenant_id).prefetch_related("creator", "updator")
+
+    def sanitize_filename(name):
+        return "".join(c if c.isalnum() or c in ("_", "-") else "_" for c in name)
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for event in events:
+            event_related_scripts = await EventRelatedScript.filter(event_ingestion_id=event.id, deleted=False, tenant_id=tenant_id).all()
+            event_data = event.json
+            event_data["vector_config"] = str(event.vector_config)
+            event_data.pop("file_path", None)
+            event_data["vector_config_raw"] = event.vector_config_raw
+            event_data["event_related_scripts"] = [ers.json for ers in event_related_scripts]
+
+            filename = f"{sanitize_filename(event.event_ingestion_name or 'unnamed')}.json"
+            zipf.writestr(filename, orjson.dumps(event_data))
+
+    buffer.seek(0)
+    return response.raw(
+        buffer.read(),
+        headers={
+            "Content-Type": "application/zip",
+            "Content-Disposition": f"attachment; filename=event_configs_{str(int(time.time()))}.zip",
+        },
+    )
+
+
+@event_ingestion_bp.post("/import")
+@openapi.definition(
+    summary="导入事件接入配置",
+    description="导入事件接入配置",
+    body={
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "files": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "上传的文件",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导入成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "array", "items": {"type": "object"}},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:c")
+async def import_event_ingestion_script(request):
+    files = request.files["files"]
+    if not files:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    file_results = []
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    for file in files:
+        zip_data = io.BytesIO(file.body)
+        with zipfile.ZipFile(zip_data, "r") as zf:
+            for name in zf.namelist():
+                if not name.endswith(".json"):
+                    continue
+                vector_config = orjson.loads(zf.read(name))
+
+                if await EventsIngestion.filter(syslog_config=vector_config.get("syslog_config"), deleted=False, tenant_id=tenant_id, enabled_status=1).exists():
+                    file_results.append(True)
+                    continue
+
+                letters = string.ascii_letters  # 包含 a-zA-Z
+                vector_name = "".join(random.choices(letters, k=12))
+
+                raw_config = vector_config["vector_config"]
+                if isinstance(raw_config, str):
+                    raw_config_dict = ast.literal_eval(raw_config)
+                else:
+                    raw_config_dict = raw_config
+                json_str = orjson.dumps(raw_config_dict).decode()
+                json_str = json_str.replace(vector_config["vector_name"], vector_name)
+                data = orjson.loads(json_str)
+
+                path = f"{VECTOR_CFG}/{vector_name}.yaml"
+
+                # async with aiofile.AIOFile(path, "w", encoding="utf-8") as f:
+                #     yaml_str = yaml.dump(data, allow_unicode=True, default_flow_style=False)
+                #     await f.write(yaml_str)
+
+                raw_config = vector_config["vector_config_raw"]
+                if isinstance(raw_config, str):
+                    raw_config_dict = ast.literal_eval(raw_config)
+                else:
+                    raw_config_dict = raw_config
+                json_str = orjson.dumps(raw_config_dict).decode()
+                json_str = json_str.replace(vector_config["vector_name"], vector_name)
+                data_raw = orjson.loads(json_str)
+
+                ei = await EventsIngestion.create(
+                    event_ingestion_name=vector_config.get("event_ingestion_name"),
+                    event_ingestion_describe=vector_config.get("event_ingestion_describe"),
+                    event_source_type=vector_config.get("event_source_type"),
+                    transforms_type=vector_config.get("transforms_type"),
+                    enabled_status=0,
+                    creator=request.ctx.session["account_info"],
+                    updator=request.ctx.session["account_info"],
+                    file_path=path,
+                    linked_execution=vector_config.get("linked_execution"),
+                    syslog_config=vector_config.get("syslog_config"),
+                    vector_name=vector_name,
+                    vector_config_raw=data_raw,
+                    vector_config=data,
+                    tenant_id=tenant_id,
+                )
+
+                for ers in vector_config.get("event_related_scripts", []):
+                    topic = ers["topic"].replace(vector_config["vector_name"], vector_name)
+                    await EventRelatedScript.create(
+                        condition=ers["condition"],
+                        event_ingestion_id=ei.id,
+                        script_id=ers["script_id"],
+                        topic=topic,
+                        event_name=ers["event_name"],
+                        status=ers["status"],
+                        numbers=ers["numbers"],
+                        concurrency=ers["concurrency"],
+                        fields=ers["fields"],
+                        tenant_id=tenant_id,
+                        mapping=ers.get("mapping"),
+                    )
+
+                file_results.append({f"{vector_config['event_ingestion_name']}": "上传成功"})
+    if bool(file_results) and all(file_results):
+        return response_ok(file_results)
+    else:
+        raise CustomError(ErrorCode.IMPORT_PART_EVENT_INGESTION_FAIL)
+
+
+@event_ingestion_bp.post("/parse")
+@openapi.definition(
+    summary="解析日志",
+    description="解析日志（需要事件查看权限）",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id", "transforms_type"],
+                "properties": {
+                    "id": {"type": "string", "description": "事件接入id"},
+                    "transforms_type": {"type": "string", "description": "转换类型"},
+                    "transforms_config": {"type": "string", "description": "转换配置"},
+                    "key_value_delimiter": {
+                        "type": "string",
+                        "description": "键值对分隔符",
+                    },
+                    "key_delimiter_value": {
+                        "type": "string",
+                        "description": "键值分隔符",
+                    },
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "解析成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:r")
+async def parse_log(request):
+    params = request.json
+    transforms_type = params.get("transforms_type")
+    transformsconfig = params.get("transforms_config")
+    key_value_delimiter = params.get("key_value_delimiter")
+    key_delimiter_value = params.get("key_delimiter_value")
+    tenant_id = request.ctx.session.get("tenant_id")
+    tmp_data = {
+        "sources": {"tmp": {"type": "stdin"}},
+        "sinks": {
+            "tmp_sink": {
+                "encoding": {"codec": "json"},
+                "type": "console",
+                "inputs": ["tmp_transforms"],
+            }
+        },
+    }
+
+    tmp_data.setdefault("transforms", {}).setdefault("tmp_transforms", {})["type"] = "remap"
+    tmp_data["transforms"]["tmp_transforms"]["inputs"] = ["tmp"]
+    tmp_data["transforms"]["tmp_transforms"]["drop_on_error"] = False
+
+    event = await EventsIngestion.get_or_none(id=params.get("id"), deleted=False, tenant_id=tenant_id)
+    if not event:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    config = await Config.get_or_none(Q(key=transforms_type, module="transforms") & (Q(tenant_id=tenant_id) | Q(shared=True)))
+    if not config:
+        await _set_convert_health_status(event, None)
+        raise CustomError(ErrorCode.TYPE_NOT_SUPPORTED_ERROR)
+
+    args = {
+        "transformsconfig": transformsconfig,
+        "key_value_delimiter": key_value_delimiter,
+        "key_delimiter_value": key_delimiter_value,
+    }
+    value = config.value
+    try:
+        if any(
+            key in value
+            for key in [
+                "{transformsconfig}",
+                "{key_value_delimiter}",
+                "{key_delimiter_value}",
+            ]
+        ):
+            value = value.format(**args)
+    except (KeyError, ValueError):
+        await _set_convert_health_status(event, None)
+        raise CustomError(ErrorCode.LOG_PARSE_ERROR)
+
+    tmp_data["transforms"]["tmp_transforms"]["source"] = value
+
+    result = check_vector_config(tmp_data)
+    if not result:
+        await _set_convert_health_status(event, None)
+        raise CustomError(ErrorCode.LOG_PARSE_ERROR)
+
+    messages = await query_vlog("* | first 1 by (_time desc)", event.project_id)
+
+    if not messages:
+        await _set_convert_health_status(event, None)
+        return response_ok("当前不存在日志")
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", encoding="utf-8", delete=False) as tmp_file:
+
+            yaml_str = yaml.dump(tmp_data, default_flow_style=False, allow_unicode=True)
+            tmp_file.write(yaml_str)
+            tmp_file.flush()
+
+            tmp_path = tmp_file.name
+
+            proc = subprocess.Popen(
+                ["vector", "--config", tmp_path],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+            )
+
+            sample_message = _prepare_parse_sample(
+                messages[0].get("_msg"), transforms_type
+            )
+            proc.stdin.write((sample_message + "\n").encode())
+            proc.stdin.flush()
+
+            output = proc.stdout.readline().strip()
+    except Exception:
+        await _set_convert_health_status(event, None)
+        raise
+    finally:
+        if tmp_path:
+            os.unlink(tmp_path)
+
+    try:
+        parsed_output = orjson.loads(output)
+    except orjson.JSONDecodeError:
+        parsed_output = {}
+
+    log = parsed_output.get("log")
+    if log:
+        await _set_convert_health_status(event, "healthy")
+    else:
+        await _set_convert_health_status(event, None)
+        log = "日志解析失败，请修改解析类型"
+
+    return response_ok(log)
+
+
+@event_ingestion_bp.post("/config/list")
+@openapi.definition(
+    summary="获取事件接入配置列表",
+    description="获取事件接入配置列表",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string", "description": "事件接入id"}},
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {"type": "array", "items": {"type": "object"}},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:r")
+async def event_ingestion_config_list(request):
+    event_id = request.json.get("id")
+    if not event_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    config_list = []
+    events = await EventRelatedScript.filter(event_ingestion_id=event_id, tenant_id=tenant_id).all()
+    if not events:
+        return response_ok("当前未配置接入规则")
+
+    for event in events:
+        event_dict = event.json
+        event_dict["condition"] = ast.literal_eval(event.condition)
+        playbooks = []
+        if event.script_id:
+            for script_id in event.script_id:
+                pv = await PlaybookVersion.get_or_none(id=script_id, deleted=False, tenant_id=tenant_id)
+                if pv:
+                    playbooks.append(pv.playbook_id)
+        event_dict["playbooks"] = playbooks
+        config_list.append(event_dict)
+
+    return response_ok(config_list)
+
+
+@event_ingestion_bp.post("/playbook-list")
+@openapi.definition(
+    summary="获取playbook名称和id列表",
+    description="获取playbook名称和id列表",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {"type": "string"},
+                                        "name": {"type": "string"},
+                                    },
+                                },
+                            },
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+async def playbook_list(request):
+    tenant_id = request.ctx.session.get("tenant_id")
+    playbooks = await Playbook.filter(deleted=False, tenant_id=tenant_id).all().values_list("id", "name")
+
+    return response_ok([{"id": playbook[0], "name": playbook[1]} for playbook in playbooks])
+
+
+@event_ingestion_bp.post("/transforms-list")
+@openapi.definition(
+    summary="获取transforms列表",
+    description="获取transforms列表",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {"type": "string"},
+                                        "type": {"type": "string"},
+                                    },
+                                },
+                            },
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+async def transforms_list(request):
+    tenant_id = request.ctx.session.get("tenant_id")
+    transforms = await Config.filter(Q(deleted=False, module="transforms") & (Q(tenant_id=tenant_id) | Q(shared=True))).all()
+
+    return response_ok([transform.json for transform in transforms])
+
+
+@event_ingestion_bp.post("/transforms-add")
+@openapi.definition(
+    summary="新增transforms配置",
+    description="新增transforms配置",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["key", "value"],
+                "properties": {
+                    "key": {"type": "string", "description": "配置键"},
+                    "value": {"type": "string", "description": "配置值"},
+                    "type": {"type": "string", "description": "配置类型"}
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "新增成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:c")
+async def transforms_add(request):
+    tenant_id = request.ctx.session.get("tenant_id")
+    key = request.json.get("key")
+    value = request.json.get("value")
+    type_ = request.json.get("type")
+
+    if not key or not value:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if await Config.filter(key=key, module="transforms", tenant_id=tenant_id).exists():
+        raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
+
+    config = await Config.create(key=key, value=value, type=type_, module="transforms", tenant_id=tenant_id)
+
+    return response_ok(config.json)
+
+
+@event_ingestion_bp.post("/transforms-update")
+@openapi.definition(
+    summary="更新transforms配置",
+    description="更新transforms配置",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "配置ID"},
+                    "value": {"type": "string", "description": "配置值"},
+                    "type": {"type": "string", "description": "配置类型"},
+                    "shared": {"type": "boolean", "description": "是否共享"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "更新成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:u")
+async def transforms_update(request):
+    id_ = request.json.get("id")
+    value = request.json.get("value")
+    type_ = request.json.get("type")
+    shared = request.json.get("shared")
+
+    if not id_:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    config = await Config.get_or_none(id=id_, deleted=False, module="transforms")
+    if not config:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    if value is not None:
+        config.value = value
+    if type_ is not None:
+        config.type = type_
+
+    if shared is not None:
+        # shared 是全局共享位，只有全平台超管能设置。
+        if not is_superadmin(request.ctx.session.get("account_info")):
+            raise CustomError(ErrorCode.FORBIDDEN)
+
+        config.shared = shared
+
+    await config.save()
+    return response_ok("success")
+
+
+@event_ingestion_bp.post("/transforms-del")
+@openapi.definition(
+    summary="删除transforms配置",
+    description="删除transforms配置",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string", "description": "配置ID"},
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "删除成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:d")
+async def transforms_del(request):
+    id_ = request.json.get("id")
+
+    if not id_:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    config = await Config.get_or_none(id=id_, deleted=False, module="transforms")
+    if not config:
+        raise CustomError(ErrorCode.NOT_FOUND)
+
+    if config.shared:
+        raise CustomError(ErrorCode.CANNOT_DELETE_DEFAULT_CONFIG)
+
+    config.deleted = True
+    await config.save()
+    return response_ok("success")
+
+
+@event_ingestion_bp.post("/transforms-export")
+@openapi.definition(
+    summary="导出transforms配置",
+    description="导出transforms配置",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "配置ID列表，不传则导出所有",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导出成功",
+            "content": {"application/json": {"schema": {"type": "string", "format": "binary"}}},
+        }
+    },
+)
+@requires_permission("ingestion:r")
+async def transforms_export(request):
+    ids = request.json.get("ids")
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    query = Q(deleted=False, module="transforms") & (Q(tenant_id=tenant_id) | Q(shared=True))
+    if ids:
+        query &= Q(id__in=ids)
+
+    transforms = await Config.filter(query).all()
+
+    data = [transform.json for transform in transforms]
+
+    file_content = orjson.dumps(data, option=orjson.OPT_INDENT_2)
+
+    return response.raw(
+        file_content,
+        headers={
+            "Content-Type": "application/json",
+            "Content-Disposition": f"attachment; filename=transforms_config_{int(time.time())}.json",
+        },
+    )
+
+
+@event_ingestion_bp.post("/transforms-import")
+@openapi.definition(
+    summary="导入transforms配置",
+    description="导入transforms配置",
+    body={
+        "multipart/form-data": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "files": {
+                        "type": "string",
+                        "format": "binary",
+                        "description": "上传的文件",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "导入成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "message": {"type": "string"},
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("ingestion:c")
+async def transforms_import(request):
+    files = request.files.get("files")
+    if not files:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if not isinstance(files, list):
+        files = [files]
+
+    tenant_id = request.ctx.session.get("tenant_id")
+
+    for file in files:
+        try:
+            content = file.body
+            configs = orjson.loads(content)
+            if not isinstance(configs, list):
+                configs = [configs]
+
+            for config_data in configs:
+                key = config_data.get("key")
+                value = config_data.get("value")
+                type_ = config_data.get("type")
+
+                if not key or not value:
+                    continue
+
+                existing = await Config.get_or_none(key=key, deleted=False, module="transforms", tenant_id=tenant_id)
+                if not existing:
+                    await Config.create(key=key, value=value, type=type_, module="transforms", shared=False, tenant_id=tenant_id)
+        except Exception as e:
+            logger.error(f"Import transforms failed: {e}")
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+    return response_ok("success")

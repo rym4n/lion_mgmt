@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aioe.local/aioe.network-topology.observation/l3.neighbor_cache/v1",
+  "x-max-bytes": 2097152,
+  "x-allowed-source-methods": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"],
+  "x-fact-planes": ["operational"],
+  "allOf": [
+    {"$ref": "https://schemas.aioe.local/aioe.network-topology.common/v1#/$defs/observationBase"},
+    {
+      "properties": {
+        "kind": {"const": "l3.neighbor_cache"},
+        "source_method": {"enum": ["cli", "netconf", "restconf", "gnmi", "snmp", "vendor_api"]},
+        "content_type": {"const": "application/json"},
+        "data_schema": {"const": "aioe.network-topology.observation/l3.neighbor_cache/v1"},
+        "fact_plane": {"const": "operational"}
+      },
+      "if": {"properties": {"observation_status": {"const": "success"}}},
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["neighbors"],
+            "properties": {
+              "neighbors": {
+                "type": "array",
+                "maxItems": 10000,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["ip", "mac", "interface", "vrf", "infrastructure_relevant", "state"],
+                  "properties": {
+                    "ip": {"type": "string", "minLength": 1},
+                    "mac": {"type": "string", "minLength": 1},
+                    "interface": {"type": "string", "minLength": 1},
+                    "vrf": {"type": "string", "minLength": 1},
+                    "infrastructure_relevant": {"const": true},
+                    "state": {"type": "string", "minLength": 1}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

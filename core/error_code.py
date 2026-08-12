@@ -1,0 +1,266 @@
+# coding=utf-8
+
+from libs.error_code.enum import BaseErrorCode, ErrorData
+
+
+class ErrorCode(BaseErrorCode):
+    """错误码枚举类"""
+
+    SERVER_ERROR = ErrorData(5000, "服务异常，请稍后重试")
+    PARAM_ERROR = ErrorData(4000, "参数错误")
+    INVALID_JSON = ErrorData(4001, "请求体是无效的json格式")
+    NOT_FOUND = ErrorData(4002, "请求资源不存在")
+    METHOD_NOT_ALLOWED = ErrorData(4003, "请求方法不允许")
+    UNAUTH = ErrorData(4004, "权限不足")
+    FORBIDDEN = ErrorData(4005, "禁止访问")
+
+    WEAK_PASSWORD = ErrorData(4006, "密码强度过低,必须包含大小写字母、数字、特殊字符、长度不小于8")
+    PASSWORD_LENGTH_ERROR = ErrorData(4007, "密码长度不符合要求")
+    PASSWORD_MISSING_LOWERCASE = ErrorData(4008, "密码必须包含小写字母")
+    PASSWORD_MISSING_UPPERCASE = ErrorData(4009, "密码必须包含大写字母")
+    PASSWORD_MISSING_DIGIT = ErrorData(4010, "密码必须包含数字")
+    PASSWORD_MISSING_SPECIAL = ErrorData(4011, "密码必须包含特殊字符")
+    PASSWORD_REPEATED_CHAR = ErrorData(4012, "密码包含连续重复字符")
+    PASSWORD_CONTINUOUS_CHAR = ErrorData(4013, "密码包含连续重复字符")
+    PASSWORD_KEYBOARD_ORDER = ErrorData(4014, "密码包含键盘顺序字符")
+    PASSWORD_EXPIRED = ErrorData(4015, "密码已过期，请修改密码")
+
+    CREDENTIALS_ERROR = ErrorData(4016, "用户名或密码错误")
+    ACCOUNT_DISABLED = ErrorData(4017, "账号已禁用")
+    ACCOUNT_LOCKED = ErrorData(4018, "账号已锁定，请稍后再试")
+    ACCOUNT_NOT_FOUND = ErrorData(4019, "账号不存在")
+    ACCOUNT_EXISTS = ErrorData(4020, "账号已存在")
+    DATA_ALREADY_EXISTS = ErrorData(4021, "数据已存在，唯一性校验不通过")
+    ACCOUNT_UNVERIFIED = ErrorData(4022, "账号未验证")
+
+    MFA_ERROR = ErrorData(4023, "MFA验证失败")
+    NO_NEED_MFA = ErrorData(4024, "无需MFA验证")
+    SECOND_FACTOR_REQUIRED = ErrorData(4025, "需要二次验证")
+
+    MAX_CHALLENGE = ErrorData(4026, "请求过于频繁，5分钟后再试")
+
+    SESSION_INVALID = ErrorData(4027, "会话无效")
+    SESSION_DELETED = ErrorData(4028, "会话已删除")
+    SESSION_EXPIRED = ErrorData(4029, "会话已过期")
+    SESSION_DEACTIVATED = ErrorData(4030, "会话已注销")
+
+    GET_ACCESS_TOKEN_ERROR = ErrorData(4031, "获取token失败")
+    GET_USER_INFO_ERROR = ErrorData(4032, "获取用户信息失败")
+    REVOKE_TOKEN_ERROR = ErrorData(4033, "撤销token失败")
+    REFRESH_TOKEN_ERROR = ErrorData(4034, "刷新token失败")
+
+    ROLE_ALREADY_EXISTS = ErrorData(4035, "角色已存在")
+    ROLE_NOT_FOUND = ErrorData(4036, "角色不存在")
+
+    SYSTEM_DATA_NOT_FOUND = ErrorData(4037, "暂无系统配置信息")
+
+    ZIP_FILE_FORMAT_ERROR = ErrorData(4038, "zip文件格式错误")
+    MISSING_CONFIG_FILE_ERROR = ErrorData(4039, "缺失config文件")
+    MISSING_FILEDIR_ERROR = ErrorData(4040, "缺失相关文件夹")
+    MISSING_PY_FILE_ERROR = ErrorData(4041, "缺失py文件")
+    TOOL_NOT_FOUND_ERROR = ErrorData(4042, "应用未找到")
+    TOOL_HAS_SCRIPT_ERROR = ErrorData(4043, "该版本应用已在剧本中使用")
+    TOOL_ALREADY_DELETED_ERROR = ErrorData(4044, "应用删除失败")
+    RESOURCES_MODEL_NOT_FOUND_ERROR = ErrorData(4045, "应用资源模板未找到")
+    RESOURCES_NAME_EXISTS_ERROR = ErrorData(4046, "应用资源模板名称已存在")
+    CONFIG_FILE_ERROR = ErrorData(4047, "config文件内容错误")
+    PYTHON_FILE_ERROR = ErrorData(4048, "Python文件内容错误")
+    RESOURCE_ERROR = ErrorData(4049, "应用资源不一致，请新建应用或删除原应用后再次上传")
+    TOOL_ALREADY_EXISTS = ErrorData(4050, "应用已存在")
+    ACTION_NOT_FOUND_ERROR = ErrorData(4051, "应用动作不存在")
+    RESOURCES_NOT_FOUND_ERROR = ErrorData(4052, "应用资源未找到")
+    MISSING_LOGO_ERROR = ErrorData(4053, "logo文件不存在")
+    INTERNAL_TOOL_ERROR = ErrorData(4054, "内置应用不支持下载")
+
+    IP_FORBIDDEN = ErrorData(4055, "IP禁止访问")
+
+    CONDITIONAL_EXISTS_ERROR = ErrorData(4056, "判断条件已存在")
+    INVALID_USERNAME = ErrorData(4057, "无效的用户名")
+    PLAYBOOK_NOT_FOUND = ErrorData(4058, "剧本不存在")
+    ROLE_ALREADY_USED = ErrorData(4059, "角色已分配，请先取消分配")
+    PLAYBOOK_NAME_EXISTS = ErrorData(4060, "剧本名称重复，请重新命名")
+    SCRIPT_EXISTS_ERROR = ErrorData(4061, "绑定剧本已存在其他判断条件，请删除后再次进行绑定")
+
+    ROOM_NAME_EXISTS = ErrorData(4062, "作战室名称重复，请重新命名")
+    ROOM_NOT_EXISTS = ErrorData(4063, "房间不存在")
+    ROOM_DELETE_NOT_ALLOWED = ErrorData(4064, "无权删除该房间，仅房间创建者或管理员可删除")
+    PARAM_VALUE_ERROR = ErrorData(4065, "缺少消息查询参数")
+    PLAYBOOK_CREATE_LIMIT = ErrorData(4066, "剧本创建上限，请删除已有剧本或升级软件许可")
+    LICENSE_EXPIRED = ErrorData(4067, "软件许可已过期")
+    INVALID_LICENSE_ERROR = ErrorData(4068, "无效的软件许可")
+    SCENE_EXISTS_ERROR = ErrorData(4069, "场景已存在")
+    TIMED_NAME_EXISTS = ErrorData(4070, "定时任务名称重复，请重新命名")
+    TIMED_NOT_FOUND = ErrorData(4071, "定时任务不存在")
+    EVENT_NAME_EXISTS = ErrorData(4072, "事件名称重复，请重新命名")
+
+    NO_EXECUTION_RECORD = ErrorData(4073, "无执行记录")
+    NO_EVENT_ACCESS = ErrorData(4074, "当前事件接入不存在")
+    API_USER_NOT_FOUND = ErrorData(4075, "API用户不存在")
+
+    CHECK_STATUS_NOT_FOUND = ErrorData(4076, "系统服务健康检查结果不存在")
+    INVALID_IP = ErrorData(4077, "IP地址输入错误")
+    TAG_EXIST_ERROR = ErrorData(4078, "标签已存在")
+    TAG_NOT_FOUND_ERROR = ErrorData(4079, "标签不存在")
+    SCENE_DELETE_NOT_ALLOWED = ErrorData(4080, "当前场景已启用，只运行删除禁用场景")
+    CONDITION_EXISTS_ERROR = ErrorData(4081, "当前判断条件已存在")
+    ACTION_INPUT_ERROR = ErrorData(4082, "缺少执行动作必须参数")
+    PLAYBOOK_INPUT_ERROR = ErrorData(4083, "缺少执行剧本必须参数")
+    CRON_EXPRESSION_ERROR = ErrorData(4084, "cron表达式错误")
+    CONFIG_FILE_GENERATE_ERROR = ErrorData(4085, "配置文件生成失败，请联系管理进行处理")
+
+    INVALID_STATE = ErrorData(4086, "非法的state参数")
+    SYSTEM_USER_CANNOT_BE_DELETED = ErrorData(4087, "系统用户禁止删除")
+
+    APPROVEMENT_STATUS_ERROR = ErrorData(4088, "审核状态已经不是待处理了")
+    CANNOT_DELETE_SELF = ErrorData(4089, "不允许删除自己")
+    CANNOT_DISABLE_SELF = ErrorData(4090, "不允许禁用自己")
+    CANNOT_EDIT_SENSITIVE_ATTRIBUTE = ErrorData(4091, "敏感属性不允许修改")
+    REQUEST_TOO_MANY_ERROR = ErrorData(4092, "请求数量不得超过50")
+    PLAYBOOK_USED_BY_EVENT = ErrorData(4093, "剧本已绑定事件接入，请先解绑")
+    PLAYBOOK_USED_BY_TIMER = ErrorData(4094, "剧本已绑定定时任务，请先修改定时任务")
+    LOG_PARSE_ERROR = ErrorData(4095, "日志解析失败，请联系管理员")
+    TYPE_NOT_SUPPORTED_ERROR = ErrorData(4096, "当前转换类型不支持，请联系管理员")
+
+    OAUTH_USER_CANNOT_USE_MFA = ErrorData(4097, "单点登录的用户无法启用MFA")
+    FILE_NOT_FOUND = ErrorData(4098, "文件不存在")
+
+    CANNOT_DELETE_ADMIN = ErrorData(4099, "不允许删除内置管理员账号")
+    OUTBOUND_ADDRESS_CAN_NOT_BE_REPEATED = ErrorData(4100, "外发地址不可重复")
+    OUTBOUND_FILE_CONFIGURATION_FAILED = ErrorData(4101, "外发文件配置失败，请检查配置")
+    MULTIPLE_SYSLOG_ADDRESS_NOT_SUPPORTED = ErrorData(4102, "多个syslog外发配置地址不支持用，分隔")
+    INVALID_PORT_ERROR = ErrorData(4103, "端口范围超出1-65535之间，请检查配置")
+    FLOW_TIME_OUT_ERROR = ErrorData(4104, "剧本运行超时时间不得小于5分钟或大于3天")
+    INTERNAL_DELETE_ERROR = ErrorData(4105, "维护模式应用禁止删除")
+    NOT_DOWNLOAD_ERROR = ErrorData(4106, "当前应用不支持下载")
+    MAINTENANCE_MODE_ERROR = ErrorData(4107, "当前用户不支持查看维护模式")
+
+    VICTORIA_LOGS_ERROR = ErrorData(4108, "日志查询错误")
+
+    PORT_ERROR = ErrorData(4109, "端口已被占用，请重新选择")
+    WEBHOOK_EXISTS = ErrorData(4110, "已有webhook，请勿重复创建")
+    NOT_SCRIPT_ERROR = ErrorData(4111, "缺少执行剧本")
+    PLAYBOOK_UNAUTHORIZED = ErrorData(4112, "缺少剧本权限")
+
+    OUT_OF_PAGE = ErrorData(4113, "最多可查看前1000条数据，请使用条件搜索缩小数据范围")
+
+    # MCP Error Codes
+    MCP_AGENT_ID_REQUIRED = ErrorData(4114, "Missing agent_id")
+    MCP_ACTION_REQUIRED = ErrorData(4115, "Missing action")
+    MCP_INVALID_ACTION = ErrorData(4116, "Invalid action")
+    MCP_EXECUTION_FAILED = ErrorData(4117, "Execution failed")
+    MCP_RATE_LIMIT_EXCEEDED = ErrorData(4118, "Rate limit exceeded")
+
+    TENANT_ALREADY_EXISTS = ErrorData(4119, "已存在同名租户")
+    TENANT_HAS_MEMBERS = ErrorData(4120, "租户存在成员，禁止删除")
+    TENANT_NOT_FOUND = ErrorData(4121, "租户不存在")
+    CANNOT_DELETE_TENANT = ErrorData(4122, "默认租户禁止删除")
+    ROLE_CANNOT_DELETE = ErrorData(4123, "超管角色禁止删除")
+
+    ACTION_TIMEOUT = ErrorData(4124, "执行超时")
+    DELETE_SONG_USERS_FAILED = ErrorData(4125, "部分用户由于只存在一个租户删除失败")
+    NOT_EXIST_IN_TENANT = ErrorData(4126, "当前用户不存在租户下")
+    DEFAULT_TENANT_NOT_FOUND = ErrorData(4127, "默认租户未配置")
+    DEFAULT_ROLE_NOT_FOUND = ErrorData(4128, "默认角色未配置")
+    IMPORT_PART_EVENT_INGESTION_FAIL = ErrorData(4129, "部分事件接入导入失败，请检查名称或端口是否重复")
+    IMPORT_FLOW_ERROR = ErrorData(4130, "部分剧本导入失败，请检查是否存在相同剧本")
+    INVITE_USER_ERROR = ErrorData(4131, "私聊作战室禁止邀请用户")
+    EXIT_ROOM_ERROR = ErrorData(4132, "禁止退出私聊作战室")
+    CANNOT_DELETE_DEFAULT_CONFIG = ErrorData(4133, "默认配置禁止删除")
+
+    FILE_TOO_LARGE = ErrorData(4134, "文件过大，超过限制大小")
+
+    ANCHOR_NOT_FOUND = ErrorData(4135, "宿主机标识文件未挂载，请检查 Docker 卷挂载配置")
+    MACHINE_CODE_MISMATCH = ErrorData(4136, "机器码不匹配，License与当前服务器不绑定")
+
+    NOT_FOUND_TO_AI = ErrorData(4137, "缺少AI相关功能权限，请联系管理员")
+    NOT_FOUND_TO_INSPECTION = ErrorData(4138, "缺少巡检导入模板文件，请联系管理员")
+    READ_FAILED_TO_INSPECTION = ErrorData(4139, "模板文件读取失败，请联系管理员")
+    SCHEDULE_NOT_FOUND = ErrorData(4140, "巡检任务不存在，请检查后重新上传")
+    INTERNAL_ERROR = ErrorData(4141, "润色失败，请稍后再试")
+    CATEGORY_NOT_FOUND = ErrorData(4142, "当前巡检类别不存在，请检查后重新上传")
+    DIGITAL_EMPLOYEE_ROLE_NOT_FOUND = ErrorData(4143, "数字员工岗位不存在")
+    DIGITAL_EMPLOYEE_SKILL_NOT_FOUND = ErrorData(4144, "数字员工技能不存在")
+    DIGITAL_EMPLOYEE_EMPLOYEE_NOT_FOUND = ErrorData(4145, "数字员工不存在")
+    WORKSPACE_SYNC_FAILED = ErrorData(4146, "数字员工工作区同步失败")
+    PACKAGE_INVALID = ErrorData(4147, "数字员工包格式无效")
+    PACKAGE_VERSION_LOWER = ErrorData(4148, "数字员工包版本低于已安装版本")
+    PACKAGE_TYPE_UNSUPPORTED = ErrorData(4149, "数字员工包类型不支持")
+    PACKAGE_PARTIAL_FAILURE = ErrorData(4150, "数字员工包部分导入失败")
+    EMPLOYEE_HAS_PENDING_TASKS = ErrorData(4151, "数字员工存在未完成任务")
+    ROLE_IN_USE_BY_EMPLOYEES = ErrorData(4152, "岗位仍被数字员工使用")
+    SKILL_IN_USE_BY_EMPLOYEES = ErrorData(4153, "技能仍被数字员工使用")
+    COGNEE_AUTH_FAILED = ErrorData(4154, "Cognee 认证失败")
+    LION_AGENT_UNAVAILABLE = ErrorData(4155, "lion_agent 服务不可用")
+    REPORT_SCHEDULE_NOT_FOUND = ErrorData(4156, "汇报任务不存在")
+    REPORT_SCHEDULE_CRON_INVALID = ErrorData(4157, "汇报任务 cron 表达式不合法")
+    REPORT_SCHEDULE_NAME_EXISTS = ErrorData(4158, "同一文档下汇报任务名称已存在")
+    COMMAND_TASK_ALREADY_TERMINAL = ErrorData(4159, "任务已结束，无法取消")
+    COMMAND_TASK_NOT_TERMINAL = ErrorData(4160, "任务尚未结束，无法删除")
+    COMMAND_TASK_NOT_DISPATCHABLE = ErrorData(4161, "任务当前状态无法重新调度")
+    ROOM_NOT_JOINED = ErrorData(4162, "用户尚未加入作战室，无法关注")
+    PRIVATE_ROOM_JOIN_NOT_ALLOWED = ErrorData(4163, "私聊作战室禁止主动加入")
+    DOCX_CONVERSION_BUSY = ErrorData(4164, "文档转换任务繁忙，请稍后重试")
+    ASSET_MODEL_HAS_DEPENDENCIES = ErrorData(4165, "资产模型存在依赖，无法删除")
+    ASSET_FIELD_NAME_EXISTS = ErrorData(4166, "同一模型内字段名称已存在")
+    ASSET_INSTANCE_HAS_REFERENCES = ErrorData(4167, "资产实例仍被引用，无法删除")
+    EVENT_REPORT_PLAYBOOK_MISSING = ErrorData(
+        4168, "事件报告生成剧本未配置或未启用，请联系管理员"
+    )
+    EVENT_REPORT_GENERATE_FAILED = ErrorData(
+        4169, "事件报告生成失败，请稍后重试或联系管理员"
+    )
+    CANNOT_OPERATE_CROSS_TENANT_USER = ErrorData(
+        4170, "无法操作其他租户的用户"
+    )
+    CANNOT_OPERATE_SUPERADMIN = ErrorData(
+        4171, "无权修改、禁用或删除超级管理员账号"
+    )
+    OUTBOUND_CONNECTION_TEST_FAILED = ErrorData(
+        4172, "连接测试失败，请检查地址、端口或凭据"
+    )
+    ROOM_MEMBER_ACCESS_DENIED = ErrorData(4173, "仅作战室成员可查看成员列表")
+    SENSITIVE_MFA_REQUIRED = ErrorData(4174, "敏感操作需要MFA验证")
+    ASSET_FIELD_DATA_INCOMPATIBLE = ErrorData(
+        4175, "已有资产实例数据与修改后的字段类型或约束不兼容，请先调整实例数据后再保存字段"
+    )
+    VICTORIA_LOGS_DELETE_ERROR = ErrorData(4176, "日志删除任务创建失败")
+    REPORT_ANNOTATION_OVERLAP = ErrorData(4177, "存在重叠批注，请拆分后重试")
+    REPORT_ANNOTATION_ANCHOR_MISSING = ErrorData(4178, "批注锚点已失效，请重新批注")
+    REPORT_ANNOTATION_POLISH_FAILED = ErrorData(4179, "批注优化失败，请稍后重试")
+    LLM_CONFIG_NOT_CONFIGURED = ErrorData(4180, "未配置模型，请前往系统设置 → 模型配置")
+    LLM_CONFIG_NAME_DUPLICATED = ErrorData(4181, "该名称已被使用（含已删除的配置），请换一个名称")
+    INSPECTION_CATEGORY_NAME_INVALID = ErrorData(
+        4182, "类别名称不能为空，且首尾不允许包含空格"
+    )
+    EVENT_INGESTION_SYSLOG_PORT_CONFLICT = ErrorData(
+        4183,
+        "同一通信协议的 Syslog 端口仅允许一条接入启用，请先禁用其他同协议同端口配置",
+    )
+    TENANT_NAME_INVALID = ErrorData(4184, "租户名称不能为空")
+
+    # ---- 工单管理 4200-4239（4204-4209/4215-4219/4225-4229/4234-4239 留扩展）----
+    # 权限类 4200-4203
+    TICKET_PERM_DENIED = ErrorData(4200, "无工单操作权限")
+    TICKET_FLOW_PERM_DENIED = ErrorData(4201, "无该流程的操作权限")
+    TICKET_NOT_APPROVER = ErrorData(4202, "你不是当前节点的审批人")
+    TICKET_ADMIN_ONLY = ErrorData(4203, "该操作仅管理员可执行")
+    # 状态类 4210-4214
+    TICKET_ALREADY_CLOSED = ErrorData(4210, "工单已结束，无法操作")
+    TICKET_NODE_NOT_ACTIVE = ErrorData(4211, "该节点不在待处理状态")
+    TICKET_SUSPENDED = ErrorData(4212, "工单异常挂起中，仅管理员可处理")
+    TICKET_WITHDRAW_FORBIDDEN = ErrorData(4213, "剧本触发的工单不支持撤回")
+    TICKET_RETURN_TARGET_INVALID = ErrorData(4214, "退回目标节点非法")
+    # 不存在类 4220-4224
+    TICKET_NOT_FOUND = ErrorData(4220, "工单不存在")
+    TICKET_FLOW_NOT_FOUND = ErrorData(4221, "流程不存在")
+    TICKET_FLOW_NO_PUBLISHED = ErrorData(4222, "该流程没有已发布版本，无法提单")
+    TICKET_TYPE_NOT_FOUND = ErrorData(4223, "工单类型不存在")
+    TICKET_TYPE_NO_FLOW = ErrorData(4224, "该工单类型未绑定流程")
+    # 参数类 4230-4233
+    TICKET_FORM_INVALID = ErrorData(4230, "表单校验失败")
+    TICKET_APPROVER_INVALID = ErrorData(4231, "指定的审批人无效或不可用")
+    TICKET_FLOW_VALIDATE_FAILED = ErrorData(4232, "流程校验失败")
+    TICKET_LINK_INVALID = ErrorData(4233, "关联工单非法（自身或已关联）")
+    # 冲突类 4240-4241
+    TICKET_QUORUM_REACHED = ErrorData(4240, "会签已达成，无法加签")
+    TICKET_CALLBACK_TOKEN_INVALID = ErrorData(4241, "回调凭证无效或已使用")
