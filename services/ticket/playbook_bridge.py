@@ -80,7 +80,8 @@ def _ticket_config(log: dict, node: dict | None = None) -> dict:
         merged = dict(config)
         for source in (props, log):
             for key in (
-                "ticket_type_id", "title", "priority", "form_data",
+                "ticket_type_id", "ticket_flow_id", "flow_version_id",
+                "title", "priority", "form_data",
                 "approvers", "users", "roles",
             ):
                 if key in source and key not in merged:
@@ -89,7 +90,8 @@ def _ticket_config(log: dict, node: dict | None = None) -> dict:
     merged = {}
     for source in (props, log):
         for key in (
-            "ticket_type_id", "title", "priority", "form_data",
+            "ticket_type_id", "ticket_flow_id", "flow_version_id",
+            "title", "priority", "form_data",
             "approvers", "users", "roles",
         ):
             if key in source:
@@ -112,17 +114,18 @@ def _params_dict(params: Any) -> dict:
 async def create_ticket_from_playbook(
     tenant_id: str, creator_id: str | None, log: dict, node: dict | None = None,
 ):
-    """由 approval-info 建立剧本来源工单；没有工单配置时返回 None。"""
+    """由剧本等待节点建立来源工单；没有工单配置时返回 None。"""
     config = _ticket_config(log, node)
     ticket_type_id = config.get("ticket_type_id")
-    if not ticket_type_id:
+    ticket_flow_id = config.get("ticket_flow_id")
+    flow_version_id = config.get("flow_version_id")
+    if not ticket_type_id and not ticket_flow_id and not flow_version_id:
         return None
     params = _params_dict(log.get("params"))
     payload = {
-        "ticket_type_id": ticket_type_id,
         "title": (
             config.get("title") or log.get("node_name")
-            or log.get("content") or "剧本审批工单"
+            or log.get("content") or "剧本工单"
         ),
         "priority": config.get("priority", 1),
         "form_data": config.get("form_data") or params,
@@ -133,7 +136,18 @@ async def create_ticket_from_playbook(
         "origin_params": params,
         "callback_token": log.get("callback_token"),
     }
-    return await create_ticket(tenant_id, creator_id, payload)
+    if ticket_type_id:
+        payload["ticket_type_id"] = ticket_type_id
+    if ticket_flow_id:
+        payload["ticket_flow_id"] = ticket_flow_id
+    if flow_version_id:
+        payload["flow_version_id"] = flow_version_id
+    return await create_ticket(
+        tenant_id,
+        creator_id,
+        payload,
+        allow_historical_version=True,
+    )
 
 
 async def add_approvers(ticket, node, config: Any, connection=None) -> list[str]:

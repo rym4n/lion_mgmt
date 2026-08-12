@@ -14,8 +14,13 @@ from services.ticket import playbook_bridge
 async def test_create_ticket_from_playbook_maps_origin_fields(monkeypatch):
     captured = {}
 
-    async def fake_create(tenant_id, creator_id, payload):
-        captured.update(tenant_id=tenant_id, creator_id=creator_id, payload=payload)
+    async def fake_create(tenant_id, creator_id, payload, **options):
+        captured.update(
+            tenant_id=tenant_id,
+            creator_id=creator_id,
+            payload=payload,
+            options=options,
+        )
         return SimpleNamespace(id="ticket-1")
 
     monkeypatch.setattr(playbook_bridge, "create_ticket", fake_create)
@@ -36,6 +41,7 @@ async def test_create_ticket_from_playbook_maps_origin_fields(monkeypatch):
     assert ticket.id == "ticket-1"
     assert captured["tenant_id"] == "tenant-1"
     assert captured["creator_id"] == "creator-1"
+    assert captured["options"] == {"allow_historical_version": True}
     assert captured["payload"] == {
         "ticket_type_id": "type-1",
         "title": "变更审批",
@@ -48,6 +54,39 @@ async def test_create_ticket_from_playbook_maps_origin_fields(monkeypatch):
         "origin_params": {"reason": "扩容"},
         "callback_token": "callback-1",
     }
+
+
+@pytest.mark.asyncio
+async def test_create_ticket_from_playbook_maps_selected_flow_and_version(monkeypatch):
+    captured = {}
+
+    async def fake_create(tenant_id, creator_id, payload, **options):
+        captured.update(payload=payload, options=options)
+        return SimpleNamespace(id="ticket-1")
+
+    monkeypatch.setattr(playbook_bridge, "create_ticket", fake_create)
+    await playbook_bridge.create_ticket_from_playbook(
+        "tenant-1",
+        "creator-1",
+        {
+            "run_id": "run-1",
+            "flow_id": "playbook-version-1",
+            "audit_app": "ticket-node-1",
+            "node_name": "变更工单",
+        },
+        {
+            "properties": {
+                "ticket_config": {
+                    "ticket_flow_id": "ticket-flow-1",
+                    "flow_version_id": "ticket-flow-version-2",
+                }
+            }
+        },
+    )
+
+    assert captured["payload"]["ticket_flow_id"] == "ticket-flow-1"
+    assert captured["payload"]["flow_version_id"] == "ticket-flow-version-2"
+    assert captured["options"] == {"allow_historical_version": True}
 
 
 def test_parse_approvers_supports_users_roles_and_deduplication():

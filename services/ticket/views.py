@@ -222,10 +222,40 @@ async def _ticket_list_relation_names(records, tenant_id):
 @requires_permission("ticket:c")
 async def create_view(request: Request):
     session = request.ctx.session
+    tenant_id = session.get("tenant_id")
+    account = session.get("account_info")
+    payload = dict(request.json or {})
+    from libs.security.authorization import ticket_flow_ids_for_user
+
+    flow_id = payload.get("ticket_flow_id")
+    if not flow_id and payload.get("flow_version_id"):
+        version = await TicketFlowVersion.filter(
+            id=payload["flow_version_id"],
+            tenant_id=tenant_id,
+            status=1,
+            deleted=False,
+        ).first()
+        if version is None:
+            raise CustomError(ErrorCode.TICKET_FLOW_VALIDATE_FAILED)
+        flow_id = version.ticket_flow_id
+    if not flow_id and payload.get("ticket_type_id"):
+        ticket_type = await TicketType.filter(
+            id=payload["ticket_type_id"], tenant_id=tenant_id, deleted=False
+        ).first()
+        if ticket_type is None:
+            raise CustomError(ErrorCode.TICKET_TYPE_NOT_FOUND)
+        if not ticket_type.default_flow_id:
+            raise CustomError(ErrorCode.TICKET_TYPE_NO_FLOW)
+        flow_id = ticket_type.default_flow_id
+    if not flow_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    if flow_id not in await ticket_flow_ids_for_user(account, tenant_id, "s"):
+        raise CustomError(ErrorCode.TICKET_FLOW_PERM_DENIED)
+    payload["source"] = SOURCE_MANUAL
     ticket = await create_ticket(
-        session.get("tenant_id"),
+        tenant_id,
         session.get("sub"),  # JWT payload 的 sub 是 account_id
-        request.json or {},
+        payload,
     )
     await _push_pending_after_commit(ticket.tenant_id, ticket.id)
     return response_ok({"id": ticket.id, "ticket_no": ticket.ticket_no})
@@ -296,6 +326,13 @@ async def detail_view(request: Request, ticket_id: str):
         {"name": "size", "in": "query", "schema": {"type": "integer", "default": 20}},
         {"name": "keyword", "in": "query", "schema": {"type": "string"}},
         {"name": "status", "in": "query", "schema": {"type": "integer"}},
+        {"name": "ticket_no", "in": "query", "schema": {"type": "string"}},
+        {"name": "title", "in": "query", "schema": {"type": "string"}},
+        {"name": "ticket_type_id", "in": "query", "schema": {"type": "string"}},
+        {"name": "priority", "in": "query", "schema": {"type": "integer"}},
+        {"name": "creator_id", "in": "query", "schema": {"type": "string"}},
+        {"name": "ctime_start", "in": "query", "schema": {"type": "string"}},
+        {"name": "ctime_end", "in": "query", "schema": {"type": "string"}},
     ],
 )
 @requires_permission("ticket:r")
@@ -387,6 +424,45 @@ async def list_view(request: Request):
             Q(ticket_no__icontains=keyword) | Q(title__icontains=keyword)
         )
 
+    ticket_no = (request.args.get("ticket_no") or "").strip()
+    title = (request.args.get("title") or "").strip()
+    ticket_type_id = (request.args.get("ticket_type_id") or "").strip()
+    creator_id = (request.args.get("creator_id") or "").strip()
+    if ticket_no:
+        query = query.filter(ticket_no__icontains=ticket_no)
+    if title:
+        query = query.filter(title__icontains=title)
+    if ticket_type_id:
+        query = query.filter(ticket_type_id=ticket_type_id)
+    if creator_id:
+        query = query.filter(creator_id=creator_id)
+
+    for param_name, lookup in (
+        ("ctime_start", "ctime__gte"),
+        ("ctime_end", "ctime__lte"),
+    ):
+        raw_value = request.args.get(param_name)
+        if not raw_value:
+            continue
+        try:
+            parsed_value = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        query = query.filter(**{lookup: parsed_value})
+
+    priority_filter = request.args.get("priority")
+    if priority_filter not in (None, ""):
+        try:
+            query = query.filter(priority=int(priority_filter))
+        except (TypeError, ValueError):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
+    if status_filter not in (None, "") and view != "my_apply":
+        try:
+            query = query.filter(status=int(status_filter))
+        except (TypeError, ValueError):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+
     total = await query.count()
     offset = (page - 1) * size
     records = await query.offset(offset).limit(size).all()
@@ -402,6 +478,8 @@ async def list_view(request: Request):
             "title": ticket.title,
             "status": ticket.status,
             "priority": ticket.priority,
+            "ticket_type_id": ticket.ticket_type_id,
+            "creator_id": ticket.creator_id,
             "ticket_type_name": type_names.get(ticket.ticket_type_id, ""),
             "flow_name": flow_names.get(ticket.flow_version_id, ""),
             "creator_name": creator_names.get(ticket.creator_id, ""),
@@ -965,6 +1043,68 @@ async def flow_list_view(request: Request):
     ).order_by("-utime").all()
 
     return response_ok([f.json for f in flows])
+
+
+@ticket_bp.get("/flow/submit-options")
+@openapi.definition(summary="可提单流程及已发布版本")
+@requires_permission("ticket:r")
+async def flow_submit_options_view(request: Request):
+    tenant_id = request.ctx.session.get("tenant_id")
+    account = request.ctx.session.get("account_info")
+    from libs.security.authorization import ticket_flow_ids_for_user
+
+    flow_ids = await ticket_flow_ids_for_user(account, tenant_id, "s")
+    flows = await TicketFlow.filter(
+        id__in=flow_ids, tenant_id=tenant_id, deleted=False
+    ).order_by("name").all()
+    versions = await TicketFlowVersion.filter(
+        ticket_flow_id__in=[flow.id for flow in flows],
+        tenant_id=tenant_id,
+        status=1,
+        deleted=False,
+    ).order_by("-ctime").all()
+    versions_by_flow = {}
+    for version in versions:
+        versions_by_flow.setdefault(version.ticket_flow_id, []).append(version)
+    return response_ok([
+        {
+            **flow.json,
+            "versions": [version.json for version in versions_by_flow.get(flow.id, [])],
+        }
+        for flow in flows
+        if versions_by_flow.get(flow.id)
+    ])
+
+
+@ticket_bp.get("/flow/config-options")
+@openapi.definition(summary="剧本工单节点可选流程及版本")
+@requires_permission("ticket_flow:r")
+async def flow_config_options_view(request: Request):
+    tenant_id = request.ctx.session.get("tenant_id")
+    account = request.ctx.session.get("account_info")
+    from libs.security.authorization import ticket_flow_ids_for_user
+
+    flow_ids = await ticket_flow_ids_for_user(account, tenant_id, "r")
+    flows = await TicketFlow.filter(
+        id__in=flow_ids, tenant_id=tenant_id, deleted=False
+    ).order_by("name").all()
+    versions = await TicketFlowVersion.filter(
+        ticket_flow_id__in=[flow.id for flow in flows],
+        tenant_id=tenant_id,
+        status__in=[1, 2],
+        deleted=False,
+    ).order_by("-ctime").all()
+    versions_by_flow = {}
+    for version in versions:
+        versions_by_flow.setdefault(version.ticket_flow_id, []).append(version)
+    return response_ok([
+        {
+            **flow.json,
+            "versions": [version.json for version in versions_by_flow.get(flow.id, [])],
+        }
+        for flow in flows
+        if versions_by_flow.get(flow.id)
+    ])
 
 
 @ticket_bp.get("/flow/detail/<flow_id>")

@@ -72,6 +72,12 @@ class Query(FakeQuery):
                     row for row in rows
                     if str(value).lower() in str(getattr(row, field)).lower()
                 ]
+            elif key.endswith("__gte"):
+                field = key[:-5]
+                rows = [row for row in rows if getattr(row, field) >= value]
+            elif key.endswith("__lte"):
+                field = key[:-5]
+                rows = [row for row in rows if getattr(row, field) <= value]
             else:
                 rows = [row for row in rows if getattr(row, key) == value]
         for expression in args:
@@ -371,6 +377,51 @@ async def test_list_supports_keyword_and_pagination(monkeypatch):
     assert body["data"]["total_pages"] == 2
     assert [item["id"] for item in body["data"]["data"]] == ["1"]
     assert any(args and isinstance(args[0], Q) for _name, args, _kwargs in ticket_model.calls)
+
+
+@pytest.mark.asyncio
+async def test_list_applies_column_filters_and_returns_filter_ids(monkeypatch):
+    now = datetime(2026, 8, 11, 9, 0, 0)
+    matched = _ticket(
+        "matched",
+        creator_id="user-1",
+        title="数据库扩容",
+        ticket_no="CHG-001",
+        ctime=now,
+    )
+    matched.priority = 2
+    matched.ticket_type_id = "type-1"
+    ignored = _ticket(
+        "ignored",
+        creator_id="user-1",
+        title="网络巡检",
+        ticket_no="NET-002",
+        ctime=now - timedelta(days=2),
+    )
+    ignored.priority = 1
+    ignored.ticket_type_id = "type-2"
+    ticket_model = ModelStub([matched, ignored])
+    monkeypatch.setattr(views, "Ticket", ticket_model)
+
+    body = _payload(await _list(_request({
+        "view": "my_apply",
+        "ticket_no": "CHG",
+        "title": "扩容",
+        "ticket_type_id": "type-1",
+        "priority": "2",
+        "creator_id": "user-1",
+        "ctime_start": (now - timedelta(hours=1)).isoformat(),
+        "ctime_end": (now + timedelta(hours=1)).isoformat(),
+    })))
+
+    assert [item["id"] for item in body["data"]["data"]] == ["matched"]
+    assert body["data"]["data"][0]["ticket_type_id"] == "type-1"
+    assert body["data"]["data"][0]["creator_id"] == "user-1"
+    filters = _filter_kwargs(ticket_model.calls)
+    assert {"ticket_no__icontains": "CHG"} in filters
+    assert {"title__icontains": "扩容"} in filters
+    assert {"ticket_type_id": "type-1"} in filters
+    assert {"priority": 2} in filters
 
 
 @pytest.mark.asyncio

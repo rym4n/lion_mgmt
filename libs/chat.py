@@ -826,7 +826,7 @@ class ChatManager:
         for msg in logs:
             log = msg.value
             logger.info(log)
-            # 剧本审批统一迁移到工单系统，不再写入旧 Approvement 模型。
+            # 剧本工单统一进入工单系统；旧审批节点仍兼容读取。
             if log.get("type") == "approval-info":
                 pvdata = await PlaybookVersion.get_or_none(id=log["flow_id"])
                 ticket = None
@@ -854,7 +854,8 @@ class ChatManager:
                             or properties.get("users") or log.get("users")
                         )
                         bridge_config["roles"] = properties.get("roles") or log.get("roles")
-                        await add_approvers_to_current_node(ticket, bridge_config)
+                        if (approval_node or {}).get("type") != "ticket-node":
+                            await add_approvers_to_current_node(ticket, bridge_config)
                         from services.ticket.websocket import (
                             AfterCommitHooks,
                             publish_ticket_pending_update,
@@ -869,7 +870,7 @@ class ChatManager:
                         await hooks.run()
                 if ticket is None:
                     logger.warning(
-                        "剧本审批缺少有效工单配置，已跳过: run_id=%s node_id=%s",
+                        "剧本等待节点缺少有效工单配置，已跳过: run_id=%s node_id=%s",
                         log.get("run_id"),
                         log.get("audit_app"),
                     )

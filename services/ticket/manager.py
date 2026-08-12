@@ -11,6 +11,7 @@ from models.ticket import (
     SOURCE_MANUAL,
     TICKET_STATUS_PROCESSING,
     Ticket,
+    TicketFlow,
     TicketFlowVersion,
     TicketNodeInstance,
     TicketType,
@@ -35,24 +36,66 @@ def _validate_form(form_schema, form_data) -> None:
             raise CustomError(ErrorCode.TICKET_FORM_INVALID)
 
 
-async def create_ticket(tenant_id: str, creator_id: str | None, payload: dict) -> Ticket:
+async def create_ticket(
+    tenant_id: str,
+    creator_id: str | None,
+    payload: dict,
+    *,
+    allow_historical_version: bool = False,
+) -> Ticket:
     """建单：分号 → 算 SLA → 钉版本 → 激活起始节点后的第一批节点。
 
     单号分配必须在建单事务内（advisory lock 绑定事务），因此整段包在
     in_transaction 里，且把 connection 透传给 generate_ticket_no。
     """
-    ticket_type = await TicketType.filter(
-        id=payload.get("ticket_type_id"), tenant_id=tenant_id, deleted=False
-    ).first()
+    selected_flow_id = payload.get("ticket_flow_id")
+    selected_version_id = payload.get("flow_version_id")
+    ticket_type = None
+    version = None
+
+    if selected_version_id:
+        version = await TicketFlowVersion.filter(
+            id=selected_version_id, tenant_id=tenant_id, deleted=False,
+        ).first()
+        if version is None:
+            raise CustomError(ErrorCode.TICKET_FLOW_VALIDATE_FAILED)
+        if version.status != 1 and not (
+            allow_historical_version and version.status == 2
+        ):
+            raise CustomError(ErrorCode.TICKET_FLOW_VALIDATE_FAILED)
+        selected_flow_id = selected_flow_id or version.ticket_flow_id
+
+    if selected_flow_id:
+        flow = await TicketFlow.filter(
+            id=selected_flow_id, tenant_id=tenant_id, deleted=False,
+        ).first()
+        if flow is None:
+            raise CustomError(ErrorCode.TICKET_FLOW_NOT_FOUND)
+        if version is not None and version.ticket_flow_id != flow.id:
+            raise CustomError(ErrorCode.TICKET_FLOW_VALIDATE_FAILED)
+        ticket_type = await TicketType.filter(
+            id=flow.ticket_type_id, tenant_id=tenant_id, deleted=False,
+        ).first()
+        if version is None:
+            version = await TicketFlowVersion.filter(
+                ticket_flow_id=flow.id, tenant_id=tenant_id,
+                status=1, deleted=False,
+            ).order_by("-ctime").first()
+    else:
+        ticket_type = await TicketType.filter(
+            id=payload.get("ticket_type_id"), tenant_id=tenant_id, deleted=False
+        ).first()
+        if ticket_type is None:
+            raise CustomError(ErrorCode.TICKET_TYPE_NOT_FOUND)
+        if not ticket_type.default_flow_id:
+            raise CustomError(ErrorCode.TICKET_TYPE_NO_FLOW)
+        version = await TicketFlowVersion.filter(
+            ticket_flow_id=ticket_type.default_flow_id, tenant_id=tenant_id,
+            status=1, deleted=False,
+        ).order_by("-ctime").first()
+
     if ticket_type is None:
         raise CustomError(ErrorCode.TICKET_TYPE_NOT_FOUND)
-    if not ticket_type.default_flow_id:
-        raise CustomError(ErrorCode.TICKET_TYPE_NO_FLOW)
-
-    version = await TicketFlowVersion.filter(
-        ticket_flow_id=ticket_type.default_flow_id, tenant_id=tenant_id,
-        status=1, deleted=False,
-    ).order_by("-ctime").first()
     if version is None:
         raise CustomError(ErrorCode.TICKET_FLOW_NO_PUBLISHED)
 
