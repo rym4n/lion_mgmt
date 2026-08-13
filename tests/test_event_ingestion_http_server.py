@@ -270,6 +270,115 @@ def test_syslog_port_conflict_has_a_specific_business_error():
     assert "仅允许一条接入启用" in error.message
 
 
+def test_listener_resources_normalize_tcp_syslog_and_http_server():
+    syslog = {
+        "sources": {
+            "syslog": {
+                "type": "socket",
+                "mode": "tcp",
+                "address": "0.0.0.0:525",
+            }
+        }
+    }
+    http_server = {
+        "sources": {
+            "http": {
+                "type": "http_server",
+                "address": "0.0.0.0:525",
+            }
+        }
+    }
+
+    assert event_views._listener_resources(syslog, "syslog") == {
+        ("tcp", "0.0.0.0", 525)
+    }
+    assert event_views._listener_resources(http_server, "http") == {
+        ("tcp", "0.0.0.0", 525)
+    }
+
+
+@pytest.mark.asyncio
+async def test_listener_conflict_is_global_and_detects_http_tcp_syslog_collision(
+    monkeypatch,
+):
+    candidate = {
+        "sources": {
+            "candidate": {
+                "type": "socket",
+                "mode": "tcp",
+                "address": "0.0.0.0:525",
+            }
+        }
+    }
+    captured = {}
+
+    class _ListenerQuery:
+        def exclude(self, **filters):
+            captured["excluded"] = filters
+            return self
+
+        async def values(self, *fields):
+            captured["fields"] = fields
+            return [
+                {
+                    "event_source_type": "http_server",
+                    "vector_name": "existing",
+                    "vector_config": {
+                        "sources": {
+                            "existing": {
+                                "type": "http_server",
+                                "address": "0.0.0.0:525",
+                            }
+                        }
+                    },
+                    "vector_config_raw": {},
+                    "syslog_config": "http_server:0.0.0.0:525",
+                }
+            ]
+
+    class _EventsIngestion:
+        @staticmethod
+        def filter(**filters):
+            captured["filters"] = filters
+            return _ListenerQuery()
+
+    monkeypatch.setattr(event_views, "EventsIngestion", _EventsIngestion)
+
+    assert await event_views._has_listener_conflict(
+        candidate,
+        "candidate",
+        exclude_id="event-1",
+    )
+    assert captured["filters"] == {"enabled_status": 1, "deleted": False}
+    assert captured["excluded"] == {"id": "event-1"}
+    assert "tenant_id" not in captured["filters"]
+
+
+def test_udp_and_tcp_can_share_the_same_listener_port():
+    assert not event_views._listener_resources_conflict(
+        {("udp", "0.0.0.0", 525)},
+        {("tcp", "0.0.0.0", 525)},
+    )
+
+
+def test_listener_conflict_has_a_specific_business_error():
+    error = ErrorCode.EVENT_INGESTION_LISTENER_CONFLICT.value
+
+    assert error.code == 4185
+    assert "监听地址、协议和端口" in error.message
+
+
+def test_syslog_conflict_keeps_the_existing_specific_error_contract():
+    assert (
+        event_views._listener_conflict_error("syslog", "syslog")
+        is ErrorCode.EVENT_INGESTION_SYSLOG_PORT_CONFLICT
+    )
+    assert (
+        event_views._listener_conflict_error("syslog", "http_server")
+        is ErrorCode.EVENT_INGESTION_LISTENER_CONFLICT
+    )
+
+
 class _PipeInput:
     def __init__(self):
         self.data = b""

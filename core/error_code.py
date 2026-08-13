@@ -237,6 +237,11 @@ class ErrorCode(BaseErrorCode):
         "同一通信协议的 Syslog 端口仅允许一条接入启用，请先禁用其他同协议同端口配置",
     )
     TENANT_NAME_INVALID = ErrorData(4184, "租户名称不能为空")
+    EVENT_INGESTION_LISTENER_CONFLICT = ErrorData(
+        4185,
+        "监听地址、协议和端口与其他已启用的事件接入冲突，请先禁用冲突配置",
+    )
+    ROLE_CANNOT_UPDATE = ErrorData(4186, "系统管理员角色为内置角色，禁止修改")
 
     # ---- 工单管理 4200-4239（4204-4209/4215-4219/4225-4229/4234-4239 留扩展）----
     # 权限类 4200-4203

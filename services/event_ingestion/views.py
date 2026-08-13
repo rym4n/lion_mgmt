@@ -313,6 +313,144 @@ def _build_source_config(event_source_type, payload, current_source=None):
     raise CustomError(ErrorCode.PARAM_ERROR)
 
 
+def _parse_listener_address(address):
+    address = str(address or "").strip()
+    if not address:
+        return None
+
+    if address.startswith("[") and "]:" in address:
+        host, port = address[1:].split("]:", 1)
+    else:
+        host, separator, port = address.rpartition(":")
+        if not separator:
+            return None
+
+    if not port.isdigit():
+        return None
+    return host.lower(), int(port)
+
+
+def _listener_resources(vector_config, vector_name=None):
+    if not isinstance(vector_config, dict):
+        return set()
+
+    sources = vector_config.get("sources")
+    if not isinstance(sources, dict):
+        return set()
+
+    if vector_name and vector_name in sources:
+        source_values = [sources[vector_name]]
+    else:
+        source_values = sources.values()
+
+    resources = set()
+    for source in source_values:
+        if not isinstance(source, dict):
+            continue
+        source_type = str(source.get("type") or "").lower()
+        if source_type == "socket":
+            transport = str(source.get("mode") or "").lower()
+        elif source_type == "http_server":
+            transport = "tcp"
+        else:
+            continue
+        if transport not in ("tcp", "udp"):
+            continue
+        parsed_address = _parse_listener_address(source.get("address"))
+        if parsed_address:
+            resources.add((transport, *parsed_address))
+    return resources
+
+
+def _legacy_listener_resource(syslog_config):
+    value = str(syslog_config or "").strip().lower()
+    if value.startswith("http_server:"):
+        parsed_address = _parse_listener_address(value.removeprefix("http_server:"))
+        return ("tcp", *parsed_address) if parsed_address else None
+    for transport in ("tcp", "udp"):
+        port = value.removeprefix(transport)
+        if value.startswith(transport) and port.isdigit():
+            return transport, "0.0.0.0", int(port)
+    return None
+
+
+def _listener_resources_conflict(candidate_resources, existing_resources):
+    wildcard_hosts = {"", "0.0.0.0", "::"}
+    for candidate_transport, candidate_host, candidate_port in candidate_resources:
+        for existing_transport, existing_host, existing_port in existing_resources:
+            if candidate_transport != existing_transport or candidate_port != existing_port:
+                continue
+            if (
+                candidate_host == existing_host
+                or candidate_host in wildcard_hosts
+                or existing_host in wildcard_hosts
+            ):
+                return True
+    return False
+
+
+async def _find_listener_conflict(
+    vector_config,
+    vector_name,
+    *,
+    enabled_only=True,
+    exclude_id=None,
+):
+    candidate_resources = _listener_resources(vector_config, vector_name)
+    if not candidate_resources:
+        return None
+
+    filters = {"deleted": False}
+    if enabled_only:
+        filters["enabled_status"] = 1
+    query = EventsIngestion.filter(**filters)
+    if exclude_id is not None:
+        query = query.exclude(id=exclude_id)
+    rows = await query.values(
+        "event_source_type",
+        "vector_name",
+        "vector_config",
+        "vector_config_raw",
+        "syslog_config",
+    )
+    for row in rows:
+        existing_resources = _listener_resources(
+            row.get("vector_config") or row.get("vector_config_raw"),
+            row.get("vector_name"),
+        )
+        if not existing_resources:
+            legacy_resource = _legacy_listener_resource(row.get("syslog_config"))
+            if legacy_resource:
+                existing_resources = {legacy_resource}
+        if _listener_resources_conflict(candidate_resources, existing_resources):
+            return row
+    return None
+
+
+async def _has_listener_conflict(
+    vector_config,
+    vector_name,
+    *,
+    enabled_only=True,
+    exclude_id=None,
+):
+    return (
+        await _find_listener_conflict(
+            vector_config,
+            vector_name,
+            enabled_only=enabled_only,
+            exclude_id=exclude_id,
+        )
+        is not None
+    )
+
+
+def _listener_conflict_error(candidate_source_type, existing_source_type):
+    if candidate_source_type == existing_source_type == "syslog":
+        return ErrorCode.EVENT_INGESTION_SYSLOG_PORT_CONFLICT
+    return ErrorCode.EVENT_INGESTION_LISTENER_CONFLICT
+
+
 def _to_vrl_string_literal(value):
     return orjson.dumps("" if value is None else str(value)).decode("utf-8")
 
@@ -653,6 +791,11 @@ async def event_ingestion(request):
             tenant_id,
         )
     )
+    listener_conflict = await _has_listener_conflict(
+        vector_config,
+        vector_name,
+        enabled_only=False,
+    )
 
     events_ingestion = await EventsIngestion.create(
         event_ingestion_name=event_name,
@@ -674,6 +817,7 @@ async def event_ingestion(request):
 
     response_data = events_ingestion.json
     response_data["syslog_port_conflict"] = syslog_port_conflict
+    response_data["listener_conflict"] = listener_conflict
     return response_ok(response_data)
 
 
@@ -1036,15 +1180,19 @@ async def update_event_ingestion(request):
 
     _normalize_victorialogs_config(data, event.vector_name, project_id)
 
-    if event.enabled_status == 1 and await _has_syslog_config_conflict(
-        event.syslog_config,
-        tenant_id,
-        enabled_only=True,
-        exclude_id=event.id,
-    ):
-        if event.event_source_type == "syslog":
-            raise CustomError(ErrorCode.EVENT_INGESTION_SYSLOG_PORT_CONFLICT)
-        raise CustomError(ErrorCode.DATA_ALREADY_EXISTS)
+    if event.enabled_status == 1:
+        conflicting_event = await _find_listener_conflict(
+            data,
+            event.vector_name,
+            exclude_id=event.id,
+        )
+        if conflicting_event:
+            raise CustomError(
+                _listener_conflict_error(
+                    event.event_source_type,
+                    conflicting_event.get("event_source_type"),
+                )
+            )
 
     result = check_vector_config(data)
     if not result:

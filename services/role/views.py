@@ -164,12 +164,6 @@ PERMISSION_MENU_LICENSE_ALIASES = {
 }
 
 
-def _preserve_superadmin_permission(role, permissions: list[str]) -> list[str]:
-    if permissions and is_superadmin_role(role) and SUPERADMIN_PERMISSION not in permissions:
-        return [*permissions, SUPERADMIN_PERMISSION]
-    return permissions
-
-
 def _playbook_permission_control(role_permissions: list[str] | None) -> str:
     controls = _playbook_permission_controls(role_permissions)
     if any(control == "uncontrolled" for control in controls.values()):
@@ -892,12 +886,14 @@ async def update_role(request):
     role = await Role.get_or_none(id=role_id, deleted=False, tenant_id=tenant_id)
     if not role:
         raise CustomError(ErrorCode.ROLE_NOT_FOUND)
+    if is_superadmin_role(role):
+        raise CustomError(ErrorCode.ROLE_CANNOT_UPDATE)
     if name:
         role.name = name
     if description:
         role.description = description
     if permissions:
-        role.permissions = _preserve_superadmin_permission(role, permissions)
+        role.permissions = permissions
     await role.save()
     return response_ok(role.json)
 

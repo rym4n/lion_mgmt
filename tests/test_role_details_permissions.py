@@ -9,6 +9,9 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from core.error_code import ErrorCode  # noqa: E402
+from libs.error_code.exception import CustomError  # noqa: E402
+from services.role import views as role_views  # noqa: E402
 from services.role.views import (  # noqa: E402
     _build_structured_permissions,
     _normalize_permission_menu,
@@ -16,7 +19,6 @@ from services.role.views import (  # noqa: E402
     _permission_menu_is_licensed,
     _playbook_permission_control,
     _playbook_permission_controls,
-    _preserve_superadmin_permission,
     _tool_resource_permission_control,
     _with_implicit_tool_view_permission,
 )
@@ -137,20 +139,54 @@ def test_role_details_expands_platform_wildcard_for_nested_asset_permissions():
     ]
 
 
-def test_role_update_cannot_remove_platform_wildcard_permission():
-    superadmin_role = SimpleNamespace(id="111111", permissions=["*:*"])
+def test_system_admin_role_update_has_a_specific_business_error():
+    error = ErrorCode.ROLE_CANNOT_UPDATE.value
 
-    assert _preserve_superadmin_permission(superadmin_role, ["screen:r"]) == [
-        "screen:r",
-        "*:*",
-    ]
-    assert _preserve_superadmin_permission(superadmin_role, ["*:*"]) == ["*:*"]
-    assert _preserve_superadmin_permission(
-        SimpleNamespace(permissions=["role:r"]), ["screen:r"]
-    ) == ["screen:r"]
-    assert _preserve_superadmin_permission(
-        SimpleNamespace(id="tenant-admin", permissions=["*:*"]), ["screen:r"]
-    ) == ["screen:r"]
+    assert error.code == 4186
+    assert "系统管理员角色" in error.message
+
+
+def test_update_role_rejects_the_system_admin_before_mutation(monkeypatch):
+    role = SimpleNamespace(
+        id="111111",
+        name="系统管理员",
+        description="超管账号,请勿轻易分配",
+        permissions=["*:*"],
+    )
+
+    class _Role:
+        @staticmethod
+        async def get_or_none(**filters):
+            assert filters == {
+                "id": "111111",
+                "deleted": False,
+                "tenant_id": "tenant-a",
+            }
+            return role
+
+    monkeypatch.setattr(role_views, "Role", _Role)
+    request = SimpleNamespace(
+        json={
+            "role_id": "111111",
+            "name": "系统管理员",
+            "description": "changed",
+            "permissions": ["dashboard:r"],
+        },
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-a"}),
+    )
+    handler = role_views.update_role
+    while hasattr(handler, "__wrapped__"):
+        handler = handler.__wrapped__
+
+    try:
+        asyncio.run(handler(request))
+    except CustomError as error:
+        assert error.enum is ErrorCode.ROLE_CANNOT_UPDATE
+    else:
+        raise AssertionError("system admin role update must be rejected")
+
+    assert role.description == "超管账号,请勿轻易分配"
+    assert role.permissions == ["*:*"]
 
 
 def test_role_details_exposes_playbook_permission_control_mode():
