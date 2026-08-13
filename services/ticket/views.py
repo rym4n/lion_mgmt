@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from sanic import Blueprint, Request
 from sanic.log import logger
+from sanic.response import raw
 from sanic_ext import openapi
 from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
@@ -14,6 +15,7 @@ from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import (
     account_has_permission,
+    check_ticket_flow_permission,
     requires_permission,
     ticket_flow_permission,
 )
@@ -44,6 +46,11 @@ from services.ticket.engine import (
     record_activity,
     resolve_node_approvers,
     _node_def,
+)
+from services.ticket.flow_package import (
+    active_snapshot,
+    build_flow_archive,
+    parse_flow_archive,
 )
 from services.ticket.manager import create_ticket
 from services.ticket.permissions import (
@@ -1041,8 +1048,215 @@ async def flow_list_view(request: Request):
     flows = await TicketFlow.filter(
         id__in=flow_ids, tenant_id=tenant_id, deleted=False
     ).order_by("-utime").all()
+    versions = await TicketFlowVersion.filter(
+        ticket_flow_id__in=[flow.id for flow in flows],
+        tenant_id=tenant_id,
+        deleted=False,
+    ).order_by("-ctime").all()
+    versions_by_flow = {}
+    for version in versions:
+        versions_by_flow.setdefault(version.ticket_flow_id, []).append(version)
 
-    return response_ok([f.json for f in flows])
+    return response_ok([
+        {
+            **flow.json,
+            "version": (
+                active_snapshot(versions_by_flow.get(flow.id, [])).json
+                if versions_by_flow.get(flow.id)
+                else None
+            ),
+            "version_count": len(versions_by_flow.get(flow.id, [])),
+        }
+        for flow in flows
+    ])
+
+
+@ticket_bp.post("/flow/export")
+@openapi.definition(summary="导出流程包（含全部版本）")
+@requires_permission("ticket_flow:r")
+async def flow_export_view(request: Request):
+    tenant_id = request.ctx.session.get("tenant_id")
+    account = request.ctx.session.get("account_info")
+    payload = request.json or {}
+    requested_ids = [
+        str(flow_id) for flow_id in payload.get("flow_ids", []) if flow_id
+    ]
+    if not requested_ids:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    from libs.security.authorization import ticket_flow_ids_for_user
+
+    readable_ids = set(await ticket_flow_ids_for_user(account, tenant_id, "r"))
+    if not set(requested_ids).issubset(readable_ids):
+        raise CustomError(ErrorCode.UNAUTH)
+
+    flows = await TicketFlow.filter(
+        id__in=requested_ids, tenant_id=tenant_id, deleted=False
+    ).order_by("name").all()
+    if len(flows) != len(set(requested_ids)):
+        raise CustomError(ErrorCode.TICKET_FLOW_NOT_FOUND)
+
+    ticket_types = await TicketType.filter(
+        id__in=[flow.ticket_type_id for flow in flows],
+        tenant_id=tenant_id,
+        deleted=False,
+    ).all()
+    ticket_type_by_id = {ticket_type.id: ticket_type for ticket_type in ticket_types}
+    versions = await TicketFlowVersion.filter(
+        ticket_flow_id__in=[flow.id for flow in flows],
+        tenant_id=tenant_id,
+        deleted=False,
+    ).order_by("-ctime").all()
+    versions_by_flow = {}
+    for version in versions:
+        versions_by_flow.setdefault(version.ticket_flow_id, []).append(version)
+
+    archive_flows = []
+    for flow in flows:
+        ticket_type = ticket_type_by_id.get(flow.ticket_type_id)
+        if ticket_type is None:
+            raise CustomError(ErrorCode.TICKET_TYPE_NOT_FOUND)
+        archive_flows.append({
+            "name": flow.name,
+            "remark": flow.remark,
+            "ticket_type": {
+                "name": ticket_type.name,
+                "code": ticket_type.code,
+                "description": ticket_type.description,
+                "icon": ticket_type.icon,
+                "sla_config": ticket_type.sla_config or {},
+            },
+            "versions": [
+                {
+                    "version": version.version,
+                    "status": version.status,
+                    "change_desc": version.change_desc,
+                    "ctime": _datetime_text(version.ctime),
+                    "utime": _datetime_text(version.utime),
+                    "flow_json": version.flow_json or {},
+                    "form_schema": version.form_schema or {},
+                }
+                for version in versions_by_flow.get(flow.id, [])
+            ],
+        })
+
+    archive = build_flow_archive(
+        archive_flows,
+        datetime.now(TZ).isoformat(),
+    )
+    return raw(
+        archive,
+        content_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="ticket-flow-export.zip"'
+        },
+    )
+
+
+@ticket_bp.post("/flow/import")
+@openapi.definition(summary="导入流程包为可编辑草稿")
+@requires_permission("ticket_flow:u")
+async def flow_import_view(request: Request):
+    file_obj = request.files.get("file")
+    if not file_obj:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+    try:
+        package = parse_flow_archive(file_obj.body)
+    except ValueError as exc:
+        logger.warning("Invalid ticket-flow package: %s", exc)
+        raise CustomError(ErrorCode.PARAM_ERROR) from exc
+
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = request.ctx.session.get("sub")
+    from libs.security.authorization import (
+        TENANT_ADMIN_ROLE_NAME,
+        get_superadmin_role,
+    )
+    from models import Role
+    from models.ticket import TicketFlowPermission
+
+    superadmin_role = await get_superadmin_role()
+    tenant_admin_role = await Role.filter(
+        tenant_id=tenant_id,
+        name=TENANT_ADMIN_ROLE_NAME,
+        deleted=False,
+    ).first()
+
+    imported = 0
+    async with in_transaction() as conn:
+        for item in package["flows"]:
+            type_payload = item["ticket_type"]
+            ticket_type = await TicketType.filter(
+                tenant_id=tenant_id,
+                code=type_payload["code"].strip()[:32],
+                deleted=False,
+            ).using_db(conn).first()
+            if ticket_type is None:
+                ticket_type = await TicketType.create(
+                    using_db=conn,
+                    tenant_id=tenant_id,
+                    name=type_payload["name"].strip()[:64],
+                    code=type_payload["code"].strip()[:32],
+                    description=(type_payload.get("description") or "")[:512] or None,
+                    icon=(type_payload.get("icon") or "")[:128] or None,
+                    sla_config=type_payload.get("sla_config") or {},
+                    internal=False,
+                )
+
+            flow = await TicketFlow.create(
+                using_db=conn,
+                tenant_id=tenant_id,
+                name=item["name"].strip()[:128],
+                remark=(item.get("remark") or "")[:512] or None,
+                ticket_type_id=ticket_type.id,
+                creator_id=user_id,
+                internal=False,
+            )
+            permissions = ["r", "u", "d", "s"]
+            await TicketFlowPermission.create(
+                using_db=conn,
+                tenant_id=tenant_id,
+                flow_id=flow.id,
+                users_id=user_id,
+                permissions=permissions,
+            )
+            if superadmin_role:
+                await TicketFlowPermission.create(
+                    using_db=conn,
+                    tenant_id=tenant_id,
+                    flow_id=flow.id,
+                    roles_id=superadmin_role.id,
+                    permissions=permissions,
+                )
+            if tenant_admin_role:
+                await TicketFlowPermission.create(
+                    using_db=conn,
+                    tenant_id=tenant_id,
+                    flow_id=flow.id,
+                    roles_id=tenant_admin_role.id,
+                    permissions=permissions,
+                )
+
+            active = active_snapshot(item["versions"])
+            for snapshot in item["versions"]:
+                is_active = snapshot is active
+                await TicketFlowVersion.create(
+                    using_db=conn,
+                    tenant_id=tenant_id,
+                    ticket_flow_id=flow.id,
+                    version="draft" if is_active else str(
+                        snapshot.get("version") or "history"
+                    )[:32],
+                    change_desc=snapshot.get("change_desc"),
+                    status=0 if is_active else 2,
+                    flow_json=snapshot.get("flow_json") or {},
+                    form_schema=snapshot.get("form_schema") or {},
+                    creator_id=user_id,
+                    updator_id=user_id,
+                )
+            imported += 1
+
+    return response_ok({"imported": imported})
 
 
 @ticket_bp.get("/flow/submit-options")
@@ -1121,10 +1335,10 @@ async def flow_detail_view(request: Request, flow_id: str):
     if flow is None:
         raise CustomError(ErrorCode.TICKET_FLOW_NOT_FOUND)
 
-    # 获取最新版本（优先草稿，其次已发布）
-    version = await TicketFlowVersion.filter(
+    versions = await TicketFlowVersion.filter(
         ticket_flow_id=flow_id, tenant_id=tenant_id, deleted=False
-    ).order_by("-ctime").first()
+    ).order_by("-ctime").all()
+    version = active_snapshot(versions)
 
     return response_ok({
         **flow.json,
@@ -1155,35 +1369,47 @@ async def flow_save_view(request: Request):
         raise CustomError(ErrorCode.PARAM_ERROR)
 
     if flow_id:
-        # 更新流程基本信息
-        flow = await TicketFlow.filter(
-            id=flow_id, tenant_id=tenant_id, deleted=False
-        ).first()
-        if flow is None:
-            raise CustomError(ErrorCode.TICKET_FLOW_NOT_FOUND)
-        flow.name = name
-        flow.remark = payload.get("remark")
-        await flow.save()
+        account = request.ctx.session.get("account_info")
+        if account is None:
+            raise CustomError(ErrorCode.ACCOUNT_NOT_FOUND)
+        if not await check_ticket_flow_permission(
+            request, account, flow_id, ("u",)
+        ):
+            raise CustomError(ErrorCode.TICKET_FLOW_PERM_DENIED)
 
-        # 更新或新建草稿版本
-        version = await TicketFlowVersion.filter(
-            ticket_flow_id=flow_id, tenant_id=tenant_id, status=0, deleted=False
-        ).first()
-        if version:
-            version.flow_json = flow_json
-            version.form_schema = form_schema
-            version.updator_id = user_id
-            await version.save()
-        else:
-            version = await TicketFlowVersion.create(
-                tenant_id=tenant_id,
+        async with in_transaction() as conn:
+            # 流程元数据与草稿内容必须一起成功或一起回滚。
+            flow = await TicketFlow.filter(
+                id=flow_id, tenant_id=tenant_id, deleted=False
+            ).using_db(conn).first()
+            if flow is None:
+                raise CustomError(ErrorCode.TICKET_FLOW_NOT_FOUND)
+            flow.name = name
+            flow.remark = payload.get("remark")
+            await flow.save(using_db=conn)
+
+            version = await TicketFlowVersion.filter(
                 ticket_flow_id=flow_id,
-                version="draft",
-                flow_json=flow_json,
-                form_schema=form_schema,
+                tenant_id=tenant_id,
                 status=0,
-                creator_id=user_id,
-            )
+                deleted=False,
+            ).using_db(conn).first()
+            if version:
+                version.flow_json = flow_json
+                version.form_schema = form_schema
+                version.updator_id = user_id
+                await version.save(using_db=conn)
+            else:
+                version = await TicketFlowVersion.create(
+                    using_db=conn,
+                    tenant_id=tenant_id,
+                    ticket_flow_id=flow_id,
+                    version="draft",
+                    flow_json=flow_json,
+                    form_schema=form_schema,
+                    status=0,
+                    creator_id=user_id,
+                )
     else:
         # 新建流程
         ticket_type_id = payload.get("ticket_type_id")
