@@ -374,6 +374,59 @@ def _legacy_listener_resource(syslog_config):
     return None
 
 
+def _event_source_summary(event):
+    source = {}
+    vector_name = getattr(event, "vector_name", None)
+    for vector_config in (
+        getattr(event, "vector_config_raw", None),
+        getattr(event, "vector_config", None),
+    ):
+        if not isinstance(vector_config, dict):
+            continue
+        sources = vector_config.get("sources")
+        if not isinstance(sources, dict):
+            continue
+        candidate = sources.get(vector_name)
+        if isinstance(candidate, dict):
+            source = candidate
+            break
+
+    source_type = str(getattr(event, "event_source_type", "") or "").lower()
+    if source_type == "kafka":
+        return {"topics": _normalize_list(source.get("topics"))}
+
+    if source_type == "syslog":
+        protocol = str(source.get("mode") or "").lower()
+        parsed_address = _parse_listener_address(source.get("address"))
+        if not protocol or not parsed_address:
+            legacy_resource = _legacy_listener_resource(
+                getattr(event, "syslog_config", None)
+            )
+            if legacy_resource:
+                protocol, _, port = legacy_resource
+                return {"protocol": protocol, "port": port}
+        return {
+            "protocol": protocol,
+            "port": parsed_address[1] if parsed_address else None,
+        }
+
+    if source_type == "http_server":
+        address = source.get("address")
+        if not address:
+            legacy_config = str(getattr(event, "syslog_config", "") or "")
+            if legacy_config.startswith("http_server:"):
+                address = legacy_config.removeprefix("http_server:")
+        return {"address": address}
+
+    return {}
+
+
+def _event_ingestion_list_item(event):
+    data = event.json
+    data["source_summary"] = _event_source_summary(event)
+    return data
+
+
 def _listener_resources_conflict(candidate_resources, existing_resources):
     wildcard_hosts = {"", "0.0.0.0", "::"}
     for candidate_transport, candidate_host, candidate_port in candidate_resources:
@@ -884,7 +937,7 @@ async def get_all_events_ingestion(request):
 
     return response_ok(
         {
-            "events": [event.json for event in events],
+            "events": [_event_ingestion_list_item(event) for event in events],
             "total": total,
             "page": page,
             "size": size,

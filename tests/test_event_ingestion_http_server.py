@@ -297,6 +297,63 @@ def test_listener_resources_normalize_tcp_syslog_and_http_server():
     }
 
 
+def test_event_source_summary_exposes_list_display_fields():
+    kafka = SimpleNamespace(
+        event_source_type="kafka",
+        vector_name="source",
+        vector_config_raw={
+            "sources": {
+                "source": {
+                    "type": "kafka",
+                    "topics": ["alerts", "audit"],
+                }
+            }
+        },
+        vector_config={},
+        syslog_config=None,
+    )
+    syslog = SimpleNamespace(
+        event_source_type="syslog",
+        vector_name="source",
+        vector_config_raw={
+            "sources": {
+                "source": {
+                    "type": "socket",
+                    "mode": "udp",
+                    "address": "0.0.0.0:514",
+                }
+            }
+        },
+        vector_config={},
+        syslog_config="udp514",
+    )
+    http_server = SimpleNamespace(
+        event_source_type="http_server",
+        vector_name="source",
+        vector_config_raw={
+            "sources": {
+                "source": {
+                    "type": "http_server",
+                    "address": "0.0.0.0:8080",
+                }
+            }
+        },
+        vector_config={},
+        syslog_config="http_server:0.0.0.0:8080",
+    )
+
+    assert event_views._event_source_summary(kafka) == {
+        "topics": ["alerts", "audit"]
+    }
+    assert event_views._event_source_summary(syslog) == {
+        "protocol": "udp",
+        "port": 514,
+    }
+    assert event_views._event_source_summary(http_server) == {
+        "address": "0.0.0.0:8080"
+    }
+
+
 @pytest.mark.asyncio
 async def test_listener_conflict_is_global_and_detects_http_tcp_syslog_collision(
     monkeypatch,
