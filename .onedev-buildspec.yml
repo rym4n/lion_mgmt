@@ -37,6 +37,7 @@ jobs:
       type: DefaultCredential
     withLfs: false
     withSubmodules: false
+    cloneDepth: 1
     checkoutPath: '@project_path@'
     condition: SUCCESSFUL
     optional: false
