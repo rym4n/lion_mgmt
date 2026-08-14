@@ -60,8 +60,49 @@ def test_existing_flow_save_checks_object_permission_and_is_atomic():
 def test_flow_detail_uses_status_priority_instead_of_insert_order():
     detail_block = _block(
         '@ticket_bp.get("/flow/detail/<flow_id>")',
+        '@ticket_bp.post("/flow/basic-info")',
+    )
+
+    assert '.order_by("-ctime")' in detail_block
+    assert ".all()" in detail_block
+    assert "version = active_snapshot(versions)" in detail_block
+
+
+def test_flow_basic_info_endpoint_only_updates_metadata():
+    block = _block(
+        '@ticket_bp.post("/flow/basic-info")',
+        '@ticket_bp.post("/flow/clone")',
+    )
+
+    assert '@requires_permission("ticket_flow:u")' in block
+    assert '@ticket_flow_permission("u")' in block
+    assert "flow.name = name" in block
+    assert 'flow.remark = payload.get("remark")' in block
+    assert "TicketFlowVersion" not in block
+
+
+def test_flow_clone_endpoint_copies_selected_version_and_default_permissions():
+    block = _block(
+        '@ticket_bp.post("/flow/clone")',
         '@ticket_bp.post("/flow/save")',
     )
 
-    assert ').order_by("-ctime").all()' in detail_block
-    assert "version = active_snapshot(versions)" in detail_block
+    assert '@requires_permission("ticket_flow:u")' in block
+    assert '@ticket_flow_permission("r")' in block
+    assert "id=source_version_id" in block
+    assert "ticket_flow_id=source_flow_id" in block
+    assert "async with in_transaction() as conn:" in block
+    assert "flow_json=deepcopy(source_version.flow_json or {})" in block
+    assert "form_schema=deepcopy(source_version.form_schema or {})" in block
+    assert "TicketFlowPermission.create(" in block
+
+
+def test_ticket_list_can_filter_execution_records_by_flow():
+    block = _block(
+        "async def list_view(request: Request):",
+        '@ticket_bp.get("/todolist")',
+    )
+
+    assert 'flow_id = (request.args.get("flow_id") or "").strip()' in block
+    assert "ticket_flow_id=flow_id" in block
+    assert "flow_version_id__in=list(version_ids)" in block

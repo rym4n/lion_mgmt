@@ -1,6 +1,7 @@
 # coding=utf-8
 """工单 API（计划 2：完整 18 个端点 + 三层权限）。"""
 
+from copy import deepcopy
 from datetime import datetime, timedelta
 
 from sanic import Blueprint, Request
@@ -24,6 +25,7 @@ from models.ticket import (
     NODE_STATUS_PENDING,
     NODE_STATUS_RUNNING,
     SOURCE_AGENT,
+    SOURCE_MANUAL,
     SOURCE_PLAYBOOK,
     TICKET_STATUS_FORCE_CLOSED,
     TICKET_STATUS_PROCESSING,
@@ -336,6 +338,7 @@ async def detail_view(request: Request, ticket_id: str):
         {"name": "ticket_no", "in": "query", "schema": {"type": "string"}},
         {"name": "title", "in": "query", "schema": {"type": "string"}},
         {"name": "ticket_type_id", "in": "query", "schema": {"type": "string"}},
+        {"name": "flow_id", "in": "query", "schema": {"type": "string"}},
         {"name": "priority", "in": "query", "schema": {"type": "integer"}},
         {"name": "creator_id", "in": "query", "schema": {"type": "string"}},
         {"name": "ctime_start", "in": "query", "schema": {"type": "string"}},
@@ -434,6 +437,7 @@ async def list_view(request: Request):
     ticket_no = (request.args.get("ticket_no") or "").strip()
     title = (request.args.get("title") or "").strip()
     ticket_type_id = (request.args.get("ticket_type_id") or "").strip()
+    flow_id = (request.args.get("flow_id") or "").strip()
     creator_id = (request.args.get("creator_id") or "").strip()
     if ticket_no:
         query = query.filter(ticket_no__icontains=ticket_no)
@@ -441,6 +445,13 @@ async def list_view(request: Request):
         query = query.filter(title__icontains=title)
     if ticket_type_id:
         query = query.filter(ticket_type_id=ticket_type_id)
+    if flow_id:
+        version_ids = await TicketFlowVersion.filter(
+            ticket_flow_id=flow_id,
+            tenant_id=tenant_id,
+            deleted=False,
+        ).values_list("id", flat=True)
+        query = query.filter(flow_version_id__in=list(version_ids))
     if creator_id:
         query = query.filter(creator_id=creator_id)
 
@@ -1344,6 +1355,122 @@ async def flow_detail_view(request: Request, flow_id: str):
         **flow.json,
         "version": version.json if version else None,
     })
+
+
+@ticket_bp.post("/flow/basic-info")
+@openapi.definition(summary="修改流程基础信息")
+@requires_permission("ticket_flow:u")
+@ticket_flow_permission("u")
+async def flow_basic_info_view(request: Request):
+    tenant_id = request.ctx.session.get("tenant_id")
+    payload = request.json or {}
+    flow_id = payload.get("flow_id")
+    name = payload.get("name", "").strip()
+    if not flow_id or not name:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    flow = await TicketFlow.filter(
+        id=flow_id, tenant_id=tenant_id, deleted=False
+    ).first()
+    if flow is None:
+        raise CustomError(ErrorCode.TICKET_FLOW_NOT_FOUND)
+
+    flow.name = name
+    flow.remark = payload.get("remark")
+    await flow.save()
+    return response_ok(flow.json)
+
+
+@ticket_bp.post("/flow/clone")
+@openapi.definition(summary="按指定版本克隆流程")
+@requires_permission("ticket_flow:u")
+@ticket_flow_permission("r")
+async def flow_clone_view(request: Request):
+    tenant_id = request.ctx.session.get("tenant_id")
+    user_id = request.ctx.session.get("sub")
+    payload = request.json or {}
+    source_flow_id = payload.get("flow_id")
+    source_version_id = payload.get("version_id")
+    name = payload.get("name", "").strip()
+    if not source_flow_id or not source_version_id or not name:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    source_flow = await TicketFlow.filter(
+        id=source_flow_id, tenant_id=tenant_id, deleted=False
+    ).first()
+    if source_flow is None:
+        raise CustomError(ErrorCode.TICKET_FLOW_NOT_FOUND)
+    source_version = await TicketFlowVersion.filter(
+        id=source_version_id,
+        ticket_flow_id=source_flow_id,
+        tenant_id=tenant_id,
+        deleted=False,
+    ).first()
+    if source_version is None:
+        raise CustomError(ErrorCode.TICKET_FLOW_NOT_FOUND)
+
+    from libs.security.authorization import (
+        TENANT_ADMIN_ROLE_NAME,
+        get_superadmin_role,
+    )
+    from models import Role
+    from models.ticket import TicketFlowPermission
+
+    superadmin_role = await get_superadmin_role()
+    tenant_admin_role = await Role.filter(
+        tenant_id=tenant_id,
+        name=TENANT_ADMIN_ROLE_NAME,
+        deleted=False,
+    ).first()
+
+    async with in_transaction() as conn:
+        flow = await TicketFlow.create(
+            using_db=conn,
+            tenant_id=tenant_id,
+            name=name,
+            remark=source_flow.remark,
+            ticket_type_id=source_flow.ticket_type_id,
+            creator_id=user_id,
+            internal=False,
+        )
+        version = await TicketFlowVersion.create(
+            using_db=conn,
+            tenant_id=tenant_id,
+            ticket_flow_id=flow.id,
+            version="draft",
+            flow_json=deepcopy(source_version.flow_json or {}),
+            form_schema=deepcopy(source_version.form_schema or {}),
+            status=0,
+            creator_id=user_id,
+            updator_id=user_id,
+        )
+
+        permissions = ["r", "u", "d", "s"]
+        await TicketFlowPermission.create(
+            using_db=conn,
+            tenant_id=tenant_id,
+            flow_id=flow.id,
+            users_id=user_id,
+            permissions=permissions,
+        )
+        if superadmin_role:
+            await TicketFlowPermission.create(
+                using_db=conn,
+                tenant_id=tenant_id,
+                flow_id=flow.id,
+                roles_id=superadmin_role.id,
+                permissions=permissions,
+            )
+        if tenant_admin_role:
+            await TicketFlowPermission.create(
+                using_db=conn,
+                tenant_id=tenant_id,
+                flow_id=flow.id,
+                roles_id=tenant_admin_role.id,
+                permissions=permissions,
+            )
+
+    return response_ok({**flow.json, "version": version.json})
 
 
 @ticket_bp.post("/flow/save")
