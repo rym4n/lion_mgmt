@@ -13,6 +13,7 @@ from services.ticket.flow_validator import (
     validate_field_control_references,
     validate_field_linkage_references,
     validate_flow_before_publish,
+    validate_node_form_definitions,
     validate_flow_structure,
 )
 from tests.ticket.conftest import FakeQuery
@@ -186,6 +187,37 @@ def test_flow_structure_rejects_edges_into_start_or_out_of_end():
 
     assert "结束节点不能作为连线起点" in messages
     assert "开始节点不能作为连线终点" in messages
+
+
+def test_node_form_fields_extend_the_flow_field_namespace():
+    flow = _flow(
+        {
+            "properties": {
+                "form_fields": [
+                    {"key": "review_note", "label": "审批说明", "type": "text"}
+                ]
+            },
+            "field_control": {"review_note": {"visible": True}},
+        }
+    )
+
+    assert validate_field_control_references(flow) == []
+    assert validate_node_form_definitions(flow) == []
+
+
+def test_node_form_field_keys_must_be_unique_across_the_flow():
+    flow = _flow(
+        {
+            "form_fields": [
+                {"key": "amount", "label": "重复字段", "type": "number"},
+                {"key": "", "label": "无标识", "type": "text"},
+            ]
+        }
+    )
+
+    errors = validate_node_form_definitions(flow)
+    assert any("amount" in error and "重复" in error for error in errors)
+    assert any("缺少名称或键" in error for error in errors)
 
 
 @pytest.mark.asyncio

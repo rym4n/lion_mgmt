@@ -68,6 +68,56 @@ def _node_def(flow_json, node_id) -> dict | None:
     return _nodes_index(flow_json).get(node_id)
 
 
+def node_form_fields(definition: dict | None) -> list[dict]:
+    """Return the approval form configured on a node, including legacy aliases."""
+    if not isinstance(definition, dict):
+        return []
+    properties = definition.get("properties")
+    if not isinstance(properties, dict):
+        properties = {}
+    fields = properties.get("form_fields") or definition.get("form_fields") or []
+    return (
+        [field for field in fields if isinstance(field, dict)]
+        if isinstance(fields, list)
+        else []
+    )
+
+
+def validate_node_form_data(
+    definition: dict | None,
+    submitted,
+    current=None,
+) -> dict:
+    """Validate and merge the shared form data for one approval node instance."""
+    fields = node_form_fields(definition)
+    if submitted is None:
+        submitted = {}
+    if not isinstance(submitted, dict):
+        raise CustomError(ErrorCode.TICKET_FORM_INVALID)
+    if not fields:
+        if submitted:
+            raise CustomError(ErrorCode.TICKET_FORM_INVALID)
+        return dict(current or {})
+
+    allowed_keys = {
+        field.get("key")
+        for field in fields
+        if isinstance(field.get("key"), str) and field.get("key")
+    }
+    if set(submitted) - allowed_keys:
+        raise CustomError(ErrorCode.TICKET_FORM_INVALID)
+
+    merged = {**(current or {}), **submitted}
+    for field in fields:
+        key = field.get("key")
+        value = merged.get(key)
+        if field.get("required") and (
+            value is None or value == "" or (isinstance(value, list) and not value)
+        ):
+            raise CustomError(ErrorCode.TICKET_FORM_INVALID)
+    return {key: merged[key] for key in allowed_keys if key in merged}
+
+
 def _out_edges(flow_json, node_id) -> list[dict]:
     return [e for e in (flow_json or {}).get("edges", []) if e.get("source") == node_id]
 
@@ -319,6 +369,7 @@ async def advance_ticket(
     ticket_id, tenant_id=None, trigger="operate", actor_id=None,
     node_instance_id=None, decision=None, connection=None,
     executor=None,
+    node_form_data=None,
 ) -> bool:
     """推进工单一步。返回是否真的推进了（被守卫拦下返回 False）。"""
     # 外部回调使用工单对象调用；保留旧的 id/tenant/trigger 形式供内部调用。
@@ -356,14 +407,40 @@ async def advance_ticket(
                 or (node.results or {}).get(RESULT_KEY_CANCELLED)
             ):
                 return False
-            outcome = await _apply_decision(ticket, node, actor_id, decision, conn)
+            definition = _node_def(flow_json, node.node_id) or {}
+            merged_node_form = validate_node_form_data(
+                definition,
+                node_form_data,
+                node.form_data,
+            )
+            outcome = await _apply_decision(
+                ticket,
+                node,
+                actor_id,
+                decision,
+                conn,
+                form_data=merged_node_form,
+            )
             if outcome is None:
                 return True
         else:
             outcome = NODE_STATUS_APPROVED
 
         source_node_id = node.node_id if node else _start_node_id(flow_json)
-        form_data = {**(ticket.form_data or {}), **((node.form_data if node else {}) or {})}
+        form_data = dict(ticket.form_data or {})
+        if node is not None:
+            node_instances = (
+                await TicketNodeInstance.filter(
+                    ticket_id=ticket.id,
+                    tenant_id=tenant_id,
+                    deleted=False,
+                )
+                .using_db(conn)
+                .order_by("ctime")
+                .all()
+            )
+            for node_instance in node_instances:
+                form_data.update(node_instance.form_data or {})
         next_node_ids_before_filter = next_node_ids(
             flow_json, source_node_id, outcome, form_data
         )
@@ -413,7 +490,7 @@ def _terminal_status_for(flow_json, target_ids) -> int | None:
     return None
 
 
-async def _apply_decision(ticket, node, actor_id, decision, conn):
+async def _apply_decision(ticket, node, actor_id, decision, conn, form_data=None):
     approver_ids = [a.id for a in await node.approvers.all()]
     if actor_id and actor_id not in approver_ids:
         raise CustomError(ErrorCode.TICKET_NOT_APPROVER)
@@ -424,8 +501,12 @@ async def _apply_decision(ticket, node, actor_id, decision, conn):
             "at": datetime.now(TZ).isoformat(timespec="seconds"),
         }
     node.results = results
+    if form_data is not None:
+        node.form_data = form_data
     outcome = validators.evaluate_node_outcome(node.approve_type, approver_ids, results)
     update_fields = ["results", "utime"]
+    if form_data is not None:
+        update_fields.append("form_data")
     if outcome is not None and can_transition_node(node.status, outcome):
         node.status = outcome
         node.completed_at = datetime.now(TZ)

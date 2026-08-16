@@ -303,26 +303,38 @@ async def detail_view(request: Request, ticket_id: str):
         ticket, active_approver_ids, all_approver_ids, user_id, session
     )
 
-    activities = await TicketActivity.filter(
-        ticket_id=ticket.id, tenant_id=tenant_id, deleted=False
-    ).order_by("-ctime").limit(50).all()
+    activities = (
+        await TicketActivity.filter(
+            ticket_id=ticket.id, tenant_id=tenant_id, deleted=False
+        )
+        .order_by("-ctime")
+        .limit(50)
+        .all()
+    )
+    version = getattr(ticket, "flow_version", None)
+    form_schema = getattr(version, "form_schema", None)
 
-    return response_ok({
-        **ticket.json,
-        "nodes": [n.json for n in nodes],
-        "activities": [
-            {
-                "id": a.id,
-                "action": a.action,
-                "content": a.content,
-                "actor_id": a.actor_id,
-                "node_instance_id": a.node_instance_id,
-                "payload": a.payload or {},
-                "ctime": a.ctime.isoformat() if a.ctime else None,
-            } for a in activities
-        ],
-        "available_actions": available,
-    })
+    return response_ok(
+        {
+            **ticket.json,
+            "flow_json": _flow_json_for_ticket(ticket),
+            "form_schema": form_schema if isinstance(form_schema, (dict, list)) else {},
+            "nodes": [n.json for n in nodes],
+            "activities": [
+                {
+                    "id": a.id,
+                    "action": a.action,
+                    "content": a.content,
+                    "actor_id": a.actor_id,
+                    "node_instance_id": a.node_instance_id,
+                    "payload": a.payload or {},
+                    "ctime": a.ctime.isoformat() if a.ctime else None,
+                }
+                for a in activities
+            ],
+            "available_actions": available,
+        }
+    )
 
 
 @ticket_bp.get("/list")
@@ -556,6 +568,7 @@ async def todolist_view(request: Request):
                     "ticket_id": {"type": "string"},
                     "action": {"type": "string"},
                     "node_instance_id": {"type": "string"},
+                    "form_data": {"type": "object"},
                     "comment": {"type": "string"},
                     "target_user_ids": {"type": "array", "items": {"type": "string"}},
                     "return_target": {"type": "string"},
@@ -618,6 +631,7 @@ async def action_view(request: Request):
             actor_id=user_id,
             node_instance_id=node.id,
             decision=action,
+            node_form_data=payload.get("form_data"),
         )
         await _push_pending_after_commit(
             tenant_id, ticket.id, previous_user_ids

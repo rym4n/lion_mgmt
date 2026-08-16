@@ -28,30 +28,47 @@ _FORM_SCHEMA_META_KEYS = {
 def _form_field_ids(flow_json: dict) -> set[str]:
     """兼容当前 fields 列表和早期按字段 ID 建键的 schema。"""
     form_schema = flow_json.get("form_schema") or {}
-    if not isinstance(form_schema, dict):
-        return set()
+    field_ids = set()
 
-    fields = form_schema.get("fields")
+    fields = form_schema.get("fields") if isinstance(form_schema, dict) else None
     if isinstance(fields, list):
-        return {
+        field_ids.update(
+            {
+                field_id
+                for field in fields
+                if isinstance(field, dict)
+                for field_id in (
+                    field.get("key") or field.get("id") or field.get("field_id"),
+                )
+                if isinstance(field_id, str) and field_id
+            }
+        )
+    elif isinstance(fields, dict):
+        field_ids.update(field_id for field_id in fields if isinstance(field_id, str))
+    elif isinstance(form_schema, dict):
+        field_ids.update(
             field_id
-            for field in fields
-            if isinstance(field, dict)
-            for field_id in (
-                field.get("key")
-                or field.get("id")
-                or field.get("field_id"),
-            )
-            if isinstance(field_id, str) and field_id
-        }
-    if isinstance(fields, dict):
-        return {field_id for field_id in fields if isinstance(field_id, str)}
+            for field_id in form_schema
+            if isinstance(field_id, str) and field_id not in _FORM_SCHEMA_META_KEYS
+        )
 
-    return {
-        field_id
-        for field_id in form_schema
-        if isinstance(field_id, str) and field_id not in _FORM_SCHEMA_META_KEYS
-    }
+    for node in flow_json.get("nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        properties = node.get("properties")
+        if not isinstance(properties, dict):
+            properties = {}
+        node_fields = properties.get("form_fields") or node.get("form_fields") or []
+        if not isinstance(node_fields, list):
+            continue
+        field_ids.update(
+            field.get("key")
+            for field in node_fields
+            if isinstance(field, dict)
+            and isinstance(field.get("key"), str)
+            and field.get("key")
+        )
+    return field_ids
 
 
 def _nodes(flow_json: dict) -> list[dict]:
@@ -192,6 +209,45 @@ def validate_aggregation_references(flow_json: dict) -> list[str]:
     return errors
 
 
+def validate_node_form_definitions(flow_json: dict) -> list[str]:
+    """校验审批节点新增表单字段的名称、键和全流程唯一性。"""
+    errors = []
+    seen = set()
+    form_schema = flow_json.get("form_schema") or {}
+    root_fields = form_schema.get("fields") if isinstance(form_schema, dict) else []
+    for field in root_fields if isinstance(root_fields, list) else []:
+        if isinstance(field, dict) and isinstance(field.get("key"), str):
+            seen.add(field["key"])
+
+    for node in _nodes(flow_json):
+        properties = node.get("properties")
+        if not isinstance(properties, dict):
+            properties = {}
+        fields = properties.get("form_fields") or node.get("form_fields") or []
+        if not isinstance(fields, list):
+            errors.append(f"节点 {_node_id(node)} 的审批表单格式无效")
+            continue
+        for field in fields:
+            if not isinstance(field, dict):
+                errors.append(f"节点 {_node_id(node)} 的审批表单字段格式无效")
+                continue
+            key = field.get("key")
+            label = field.get("label")
+            if (
+                not isinstance(key, str)
+                or not key.strip()
+                or not isinstance(label, str)
+                or not label.strip()
+            ):
+                errors.append(f"节点 {_node_id(node)} 的审批表单字段缺少名称或键")
+                continue
+            if key in seen:
+                errors.append(f"节点 {_node_id(node)} 的审批表单字段键重复：{key}")
+                continue
+            seen.add(key)
+    return errors
+
+
 def validate_flow_before_publish(flow_json: dict) -> list[str]:
     """汇总发布前的四类引用完整性错误。"""
     errors = []
@@ -200,6 +256,7 @@ def validate_flow_before_publish(flow_json: dict) -> list[str]:
         validate_field_linkage_references,
         validate_action_input_references,
         validate_aggregation_references,
+        validate_node_form_definitions,
     ):
         errors.extend(validator(flow_json))
     return errors

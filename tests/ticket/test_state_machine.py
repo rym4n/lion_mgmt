@@ -136,6 +136,31 @@ def test_missing_field_uses_default_branch():
     assert engine.next_node_ids(CONDITION, "cond", NODE_STATUS_APPROVED, {}) == ["small"]
 
 
+def test_approval_node_form_validates_required_fields_and_unknown_keys():
+    definition = {
+        "id": "ap1",
+        "type": "approve",
+        "form_fields": [
+            {"key": "review_note", "label": "审批说明", "required": True},
+            {"key": "risk", "label": "风险", "required": False},
+        ],
+    }
+
+    with pytest.raises(CustomError) as exc:
+        engine.validate_node_form_data(definition, {})
+    assert exc.value.enum is ErrorCode.TICKET_FORM_INVALID
+
+    with pytest.raises(CustomError) as exc:
+        engine.validate_node_form_data(definition, {"unknown": "value"})
+    assert exc.value.enum is ErrorCode.TICKET_FORM_INVALID
+
+    assert engine.validate_node_form_data(
+        definition,
+        {"review_note": "已核对"},
+        {"risk": "low"},
+    ) == {"review_note": "已核对", "risk": "low"}
+
+
 PARALLEL = {
     "nodes": [
         {"id": "fork", "type": "parallel", "mode": "fork"},
@@ -188,6 +213,31 @@ class _Recorder:
 
     async def __call__(self, ticket, action, **kwargs):
         self.entries.append((action, kwargs))
+
+
+@pytest.mark.asyncio
+async def test_apply_decision_persists_approval_form_data(monkeypatch):
+    ticket = make_ticket()
+    node = make_node(
+        node_id="ap1",
+        approve_type=APPROVE_TYPE_ANY,
+        approver_ids=("a",),
+    )
+    recorder = _Recorder()
+    monkeypatch.setattr(engine, "record_activity", recorder)
+
+    outcome = await engine._apply_decision(
+        ticket,
+        node,
+        "a",
+        "approve",
+        None,
+        form_data={"review_note": "已核对"},
+    )
+
+    assert outcome == NODE_STATUS_APPROVED
+    assert node.form_data == {"review_note": "已核对"}
+    assert "form_data" in node.saved[-1]
 
 
 @pytest.mark.asyncio

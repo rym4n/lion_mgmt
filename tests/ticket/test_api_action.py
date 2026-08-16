@@ -57,6 +57,16 @@ def test_action_view_imports_successfully():
     assert hasattr(views, 'NODE_STATUS_RUNNING')
 
 
+def test_action_view_forwards_approval_form_data_to_engine():
+    """审批动作必须把节点表单交给状态机事务保存。"""
+    import inspect
+    from services.ticket import views
+
+    source = inspect.getsource(views.action_view)
+    assert '"form_data": {"type": "object"}' in source
+    assert 'node_form_data=payload.get("form_data")' in source
+
+
 def test_engine_imports_successfully():
     """验证 engine 所有导入都已定义"""
     # return_to_node 新签名：connection 必传
