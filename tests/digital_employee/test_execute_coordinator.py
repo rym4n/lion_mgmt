@@ -768,3 +768,252 @@ def test_cognee_backend_does_not_resolve_embedding():
     asyncio.run(execute_coordinator.run(task, employee))
 
     assert "embedding" not in purposes
+
+
+def test_payload_shape_is_stable_across_both_backends():
+    """混合版本窗口回归：无论哪个后端，顶层键集合都不变——
+    避免升级/回滚过程中 lion_agent 因缺键而 422。"""
+    expected_top_level = {
+        "workspace_id", "session_id", "request_id", "message",
+        "memory", "cognee", "aioe", "llm",
+    }
+    for backend in ("cognee", "reme"):
+        payload = _run_once(backend)
+        assert set(payload) >= expected_top_level, backend
+
+
+def test_reme_payload_matches_contract_schema_exactly():
+    """契约 §3 的 memory 段形状——P4 在 lion_agent 侧写对偶断言。
+    两条测试同时绿，才说明两侧对齐了同一个形状。"""
+    payload = _run_once("reme")
+    memory = payload["memory"]
+
+    assert memory["enabled"] is True
+    assert memory["mode"] == "both"
+    assert memory["top_k"] == 5
+    assert isinstance(memory["tenant_id"], str) and memory["tenant_id"]
+    assert isinstance(memory["employee_id"], str) and memory["employee_id"]
+    assert set(memory["provenance"]) == {"role_key", "task_id", "request_id", "source_kind"}
+    # D45：dimensions 为 None 时不输出该键，故三键与四键都合法
+    assert memory["embedding"] is None or set(memory["embedding"]) in (
+        {"base_url", "api_key", "model"},
+        {"base_url", "api_key", "model", "dimensions"},
+    )
+
+
+def _run_once(backend: str, continuation_workspace: dict | None = None) -> dict:
+    """运行一次 execute，返回发送给 lion_agent 的完整 payload（复用 Task 4 的 stub 骨架）。"""
+    import asyncio
+    import os
+    import sys
+    import types
+    from types import SimpleNamespace
+
+    original_modules = {}
+    for name in list(sys.modules):
+        if name.startswith(("services.", "models.", "libs.", "core.", "settings")):
+            original_modules[name] = sys.modules.pop(name, None)
+
+    try:
+        os.environ["RY_MEMORY_BACKEND"] = backend
+
+        # 基础设施 stub
+        sys.modules["core.error_code"] = types.ModuleType("core.error_code")
+        sys.modules["core.error_code"].ErrorCode = SimpleNamespace(
+            PARAM_ERROR="param_error",
+            DIGITAL_EMPLOYEE_UNAVAILABLE="digital_employee_unavailable",
+        )
+        sys.modules["libs.error_code.exception"] = types.ModuleType("libs.error_code.exception")
+
+        class CustomError(Exception):
+            def __init__(self, enum):
+                self.enum = enum
+
+        sys.modules["libs.error_code.exception"].CustomError = CustomError
+
+        # models stub
+        sys.modules["models"] = types.ModuleType("models")
+        sys.modules["models.command_center"] = types.ModuleType("models.command_center")
+        sys.modules["models.command_center"].CommandAgent = SimpleNamespace
+        sys.modules["models.command_center"].CommandTask = SimpleNamespace
+
+        # settings stub
+        sys.modules["settings"] = types.ModuleType("settings")
+        sys.modules["settings"].AIOE_INTERNAL_URL = "http://lion-mgmt"
+        sys.modules["settings"].LION_MEMORY_ENDPOINT = "http://lion-memory"
+        sys.modules["settings"].WR_TOPIC = "wr-topic"
+        sys.modules["settings"].MEMORY_BACKEND = backend
+        sys.modules["settings"].MEMORY_BACKEND_COGNEE = "cognee"
+        sys.modules["settings"].MEMORY_BACKEND_REME = "reme"
+
+        # aiocache stub
+        sys.modules["aiocache"] = types.ModuleType("aiocache")
+
+        class FakeRedis:
+            def __init__(self):
+                self.store = {}
+
+            async def get(self, key):
+                return self.store.get(key)
+
+            async def setex(self, key, ttl, value):
+                self.store[key] = value
+
+        sys.modules["aiocache"].caches = SimpleNamespace(get=lambda name: SimpleNamespace(client=FakeRedis()))
+
+        # sanic stub
+        sys.modules["sanic"] = types.ModuleType("sanic")
+        sys.modules["sanic.log"] = types.ModuleType("sanic.log")
+        sys.modules["sanic.log"].logger = SimpleNamespace(warning=lambda *a, **k: None, error=lambda *a, **k: None)
+
+        # Task 4 的 stub 骨架
+        sys.modules["services.digital_employee"] = types.ModuleType("services.digital_employee")
+        sys.modules["services.digital_employee.aioe_credential_manager"] = types.ModuleType(
+            "services.digital_employee.aioe_credential_manager"
+        )
+
+        async def get_employee_api_token(employee):
+            return "api-token"
+
+        sys.modules["services.digital_employee.aioe_credential_manager"].get_employee_api_token = (
+            get_employee_api_token
+        )
+
+        sys.modules["services.digital_employee.manager"] = types.ModuleType("services.digital_employee.manager")
+        sys.modules["services.digital_employee.manager"].sync_calls = []
+
+        async def sync_employee_workspace(employee, force=False):
+            sys.modules["services.digital_employee.manager"].sync_calls.append(
+                {"employee_id": employee.id, "force": force}
+            )
+            return employee
+
+        sys.modules["services.digital_employee.manager"].sync_employee_workspace = sync_employee_workspace
+
+        sys.modules["services.digital_employee.prompt_builder"] = types.ModuleType(
+            "services.digital_employee.prompt_builder"
+        )
+
+        def build_runtime_prompt(task, employee):
+            return f"prompt:{task.id}:{employee.id}"
+
+        sys.modules["services.digital_employee.prompt_builder"].build_runtime_prompt = build_runtime_prompt
+
+        sys.modules["services.command_center"] = types.ModuleType("services.command_center")
+        sys.modules["services.command_center.manager"] = types.ModuleType("services.command_center.manager")
+
+        async def update_task_progress(task, updates, operator_id=None):
+            for k, v in updates.items():
+                setattr(task, k, v)
+
+        sys.modules["services.command_center.manager"].update_task_progress = update_task_progress
+
+        lion_agent_adapter = types.ModuleType("services.digital_employee.lion_agent_adapter")
+
+        class FakeLionAgentClient:
+            def __init__(self):
+                self.payloads = []
+
+            async def execute(self, payload):
+                self.payloads.append(payload)
+                return {"content": "done"}
+
+            async def stream_execute(self, payload):
+                self.payloads.append(payload)
+                yield '{"content": "done", "tool_calls": []}'
+
+            async def sync_workspace(self, workspace_id, files, **kwargs):
+                return {"etag": "etag-1"}
+
+        fake_client = FakeLionAgentClient()
+
+        async def stream_prompt_events(**payload):
+            fake_client.payloads.append(payload)
+            yield "content", {"type": "content", "content": "done"}
+            yield "end", {"type": "end"}
+
+        def workspace_id_for(tenant_id, *parts):
+            return ":".join([tenant_id, *parts])
+
+        lion_agent_adapter.workspace_id_for = workspace_id_for
+        lion_agent_adapter.stream_prompt_events = stream_prompt_events
+        lion_agent_adapter.LionAgentClient = lambda: fake_client
+        sys.modules["services.digital_employee.lion_agent_adapter"] = lion_agent_adapter
+
+        sys.modules["services.digital_employee.lion_agent_client"] = types.ModuleType(
+            "services.digital_employee.lion_agent_client"
+        )
+        sys.modules["services.digital_employee.lion_agent_client"].LionAgentClient = lambda: fake_client
+
+        sys.modules["services.digital_employee.cognee_credential_manager"] = types.ModuleType(
+            "services.digital_employee.cognee_credential_manager"
+        )
+
+        async def get_or_refresh_jwt(tenant_id, force=False):
+            return f"jwt-{tenant_id}"
+
+        sys.modules["services.digital_employee.cognee_credential_manager"].get_or_refresh_jwt = get_or_refresh_jwt
+
+        sys.modules["services.llm_config"] = types.ModuleType("services.llm_config")
+        sys.modules["services.llm_config.resolver"] = types.ModuleType("services.llm_config.resolver")
+
+        class ResolvedLlm:
+            def __init__(self):
+                self.base_url = "http://llm"
+                self.model_name = "qwen"
+                self.api_key = "sk-key"
+                self.config_id = "cfg-1"
+
+            def to_payload(self):
+                return {"base_url": self.base_url, "model": self.model_name, "api_key": self.api_key}
+
+        async def resolve_llm(tenant_id, config_id=None, purpose=None):
+            return ResolvedLlm()
+
+        sys.modules["services.llm_config.resolver"].resolve_llm = resolve_llm
+
+        execute_coordinator = _load_module(
+            "services.digital_employee.execute_coordinator",
+            "services/digital_employee/execute_coordinator.py",
+        )
+
+        class FakeTask:
+            def __init__(self, **kw):
+                for k, v in kw.items():
+                    setattr(self, k, v)
+                self.saved_update_fields = []
+
+            async def save(self, update_fields=None):
+                self.saved_update_fields.append(update_fields or [])
+
+        task = FakeTask(
+            id="task-1",
+            tenant_id="tenant-1",
+            run_id=None,
+            room_id=None,
+            creator_id="c",
+            source="manual",
+            progress=0,
+            status="pending",
+            title="t",
+            description="d",
+            payload={},
+            result=None,
+        )
+        employee = SimpleNamespace(
+            id="employee-1",
+            role_key="ops",
+            agent_key="ops-1",
+            name="运维",
+            tenant_id="tenant-1",
+        )
+
+        asyncio.run(execute_coordinator.run(task, employee, continuation_workspace=continuation_workspace))
+        return fake_client.payloads[0]
+    finally:
+        for name, mod in original_modules.items():
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
+
