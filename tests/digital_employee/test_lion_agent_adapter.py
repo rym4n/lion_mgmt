@@ -179,24 +179,11 @@ def test_stream_prompt_events_sends_unique_execution_ids():
     assert all(uuid.UUID(value).hex == value for value in execution_ids)
 
 
-def test_execute_prompt_sends_llm_payload(monkeypatch):
+def test_execute_prompt_sends_llm_payload():
     """ResolvedLlm 必须序列化进请求体的 llm 键，结构与 lion_agent 契约一致。"""
-    import asyncio
     from types import SimpleNamespace
 
-    from services.digital_employee import lion_agent_adapter as adapter
-
-    captured = {}
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def execute(self, payload):
-            captured.update(payload)
-            return {"content": "ok"}
-
-    monkeypatch.setattr(adapter, "LionAgentClient", FakeClient)
+    adapter, client = _load_adapter()
 
     # 夹具必须同时提供 model_name：生产代码除了 to_payload() 还要读它来写顶层 model。
     llm = SimpleNamespace(
@@ -207,28 +194,87 @@ def test_execute_prompt_sends_llm_payload(monkeypatch):
         workspace_id="t1:warroom", session_id="s1", message="hi", llm=llm,
     ))
 
-    assert captured["llm"] == {"base_url": "https://x/v1", "api_key": "sk-1", "model": "aioe"}
+    assert client.payloads[-1]["llm"] == {"base_url": "https://x/v1", "api_key": "sk-1", "model": "aioe"}
     # 顶层 model 才是 lion_agent 实际读取模型名的通道，必须一并断言
-    assert captured["model"] == "aioe"
+    assert client.payloads[-1]["model"] == "aioe"
 
 
-def test_execute_prompt_omits_llm_key_when_absent(monkeypatch):
+def test_execute_prompt_omits_llm_key_when_absent():
     """不传 llm 时请求体不应出现该键，保持对旧调用方的兼容。"""
-    import asyncio
+    adapter, client = _load_adapter()
 
-    from services.digital_employee import lion_agent_adapter as adapter
-
-    captured = {}
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def execute(self, payload):
-            captured.update(payload)
-            return {"content": "ok"}
-
-    monkeypatch.setattr(adapter, "LionAgentClient", FakeClient)
     asyncio.run(adapter.execute_prompt(workspace_id="t1:warroom", session_id="s1", message="hi"))
 
-    assert "llm" not in captured
+    assert "llm" not in client.payloads[-1]
+
+
+def test_execute_prompt_carries_memory_and_cognee_side_by_side():
+    """两个参数位并存：aioe 侧按 SPEC §5.7 双读，lion_mgmt 侧按 backend 互斥赋值。"""
+    adapter, client = _load_adapter()
+
+    asyncio.run(
+        adapter.execute_prompt(
+            workspace_id="ws-1",
+            session_id="s-1",
+            message="hi",
+            memory={"enabled": True, "employee_id": "employee-1"},
+        )
+    )
+
+    assert client.payloads[-1]["memory"] == {"enabled": True, "employee_id": "employee-1"}
+    assert client.payloads[-1]["cognee"] is None
+
+
+def test_execute_prompt_still_forwards_cognee_for_rollback():
+    """RY_MEMORY_BACKEND=cognee 的回滚路径必须仍能发出 cognee 段。"""
+    adapter, client = _load_adapter()
+
+    asyncio.run(
+        adapter.execute_prompt(
+            workspace_id="ws-1",
+            session_id="s-1",
+            message="hi",
+            cognee={"endpoint": "http://lion-memory", "jwt": "j", "dataset_name": "employee-1"},
+        )
+    )
+
+    assert client.payloads[-1]["cognee"]["dataset_name"] == "employee-1"
+    assert client.payloads[-1]["memory"] is None
+
+
+def test_stream_prompt_events_carries_memory():
+    """流式路径与非流式必须同形状——execute_coordinator 走的是这一条。"""
+    adapter, client = _load_adapter()
+
+    async def _drain():
+        events = []
+        async for item in adapter.stream_prompt_events(
+            workspace_id="ws-1",
+            session_id="s-1",
+            message="hi",
+            memory={"enabled": True, "mode": "both", "top_k": 5},
+        ):
+            events.append(item)
+        return events
+
+    asyncio.run(_drain())
+
+    assert client.payloads[-1]["memory"] == {"enabled": True, "mode": "both", "top_k": 5}
+    assert client.payloads[-1]["cognee"] is None
+
+
+def test_adapter_never_names_memory_workspace_id():
+    """契约 §4.3：全文禁止 memory.workspace_id。adapter 不得替 payload 补这个键。"""
+    adapter, client = _load_adapter()
+
+    asyncio.run(
+        adapter.execute_prompt(
+            workspace_id="ws-continuation",
+            session_id="s-1",
+            message="hi",
+            memory={"enabled": True, "employee_id": "employee-1"},
+        )
+    )
+
+    assert "workspace_id" not in client.payloads[-1]["memory"]
+    assert client.payloads[-1]["workspace_id"] == "ws-continuation"

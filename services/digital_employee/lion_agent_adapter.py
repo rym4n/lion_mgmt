@@ -19,6 +19,9 @@ async def execute_prompt(
     session_id: str,
     message: str,
     request_id: str | None = None,
+    # SPEC §5.7 新契约段；与下方 cognee 由调用方按 RY_MEMORY_BACKEND 互斥赋值。
+    # 阶段一两个参数位并存：删 cognee 属 SPEC §8 第 9 步的不可逆清理。
+    memory: dict[str, Any] | None = None,
     cognee: dict[str, Any] | None = None,
     aioe: dict[str, Any] | None = None,
     model: str | None = None,
@@ -31,6 +34,7 @@ async def execute_prompt(
         "session_id": session_id,
         "request_id": request_id,
         "message": message,
+        "memory": memory,
         "cognee": cognee,
         "aioe": aioe,
         "execution_id": uuid.uuid4().hex,
@@ -87,6 +91,7 @@ async def stream_prompt_events(
     session_id: str,
     message: str,
     request_id: str | None = None,
+    memory: dict[str, Any] | None = None,
     cognee: dict[str, Any] | None = None,
     aioe: dict[str, Any] | None = None,
     model: str | None = None,
@@ -98,6 +103,7 @@ async def stream_prompt_events(
         "session_id": session_id,
         "request_id": request_id,
         "message": message,
+        "memory": memory,
         "cognee": cognee,
         "aioe": aioe,
         "execution_id": uuid.uuid4().hex,
