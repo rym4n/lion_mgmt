@@ -6,14 +6,10 @@ from typing import Awaitable, Callable
 from models.command_center import CommandAgent, CommandTask
 from settings import (
     AIOE_INTERNAL_URL,
-    LION_MEMORY_ENDPOINT,
-    MEMORY_BACKEND,
-    MEMORY_BACKEND_COGNEE,
     WR_TOPIC,
 )
 
 from .aioe_credential_manager import get_employee_api_token
-from .cognee_credential_manager import get_or_refresh_jwt
 from .lion_agent_adapter import stream_prompt_events
 from .prompt_builder import build_runtime_prompt
 
@@ -203,21 +199,7 @@ async def run(
             employee_id=employee.id,
         )
         workspace_id = continuation_workspace["workspace_id"]
-    memory_section = None
-    cognee_section = None
-    if MEMORY_BACKEND == MEMORY_BACKEND_COGNEE:
-        jwt = await get_or_refresh_jwt(task.tenant_id)
-        cognee_section = {
-            "endpoint": LION_MEMORY_ENDPOINT,
-            "jwt": jwt,
-            "tenant_id": task.tenant_id,
-            "dataset_name": employee.id,
-            "role_key": employee.role_key,
-            "task_id": task.id,
-            "source_kind": task.source,
-        }
-    else:
-        memory_section = _build_memory_payload(task, employee)
+    memory_section = _build_memory_payload(task, employee)
     aioe_token = await get_employee_api_token(employee)
     llm = await resolve_llm(
         task.tenant_id, config_id=getattr(employee, "llm_config_id", None)
@@ -228,7 +210,6 @@ async def run(
         "request_id": task.id,
         "message": build_runtime_prompt(task, employee),
         "memory": memory_section,
-        "cognee": cognee_section,
         "aioe": {
             "base_url": AIOE_INTERNAL_URL,
             "token": aioe_token,

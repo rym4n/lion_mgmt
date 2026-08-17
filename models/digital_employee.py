@@ -113,33 +113,3 @@ class EmployeeApiCredential(BaseModel):
         table = "employee_api_credential"
         ordering = ["-utime"]
         unique_together = (("employee_id",),)
-
-
-class TenantCogneeCredential(BaseModel):
-    """租户到 Cognee 用户的映射。"""
-
-    cognee_user_id = fields.CharField(max_length=64, description="Cognee 用户 ID")
-    cognee_user_email = fields.CharField(max_length=255, description="Cognee 用户邮箱")
-    cognee_user_password_enc = EncryptedCharField(max_length=255, description="Cognee 用户密码")
-    cognee_jwt = EncryptedCharField(max_length=2048, null=True, description="缓存的 Cognee JWT")
-    cognee_jwt_expires_at = fields.DatetimeField(null=True, description="Cognee JWT 过期时间")
-
-    def validate(self) -> None:
-        raise NotImplementedError
-
-    @property
-    def json(self) -> dict:
-        return {
-            "id": self.id,
-            "ctime": strip_timezone_to_seconds(self.ctime),
-            "utime": strip_timezone_to_seconds(self.utime),
-            "tenant_id": self.tenant_id,
-            "cognee_user_id": self.cognee_user_id,
-            "cognee_user_email": self.cognee_user_email,
-            "cognee_jwt_expires_at": strip_timezone_to_seconds(self.cognee_jwt_expires_at),
-        }
-
-    class Meta:
-        table = "tenant_cognee_credential"
-        ordering = ["-utime"]
-        unique_together = (("tenant_id",),)

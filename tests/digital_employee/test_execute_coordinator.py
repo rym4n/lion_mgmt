@@ -22,7 +22,6 @@ STUB_MODULES = [
     "services.command_center.manager",
     "services.digital_employee",
     "services.digital_employee.manager",
-    "services.digital_employee.cognee_credential_manager",
     "services.digital_employee.aioe_credential_manager",
     "services.digital_employee.prompt_builder",
     "services.digital_employee.lion_agent_adapter",
@@ -80,11 +79,7 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
 
     settings_module = types.ModuleType("settings")
     settings_module.AIOE_INTERNAL_URL = "http://lion-mgmt"
-    settings_module.LION_MEMORY_ENDPOINT = "http://lion-memory"
     settings_module.WR_TOPIC = "wr-topic"
-    settings_module.MEMORY_BACKEND = "reme"
-    settings_module.MEMORY_BACKEND_COGNEE = "cognee"
-    settings_module.MEMORY_BACKEND_REME = "reme"
     sys.modules["settings"] = settings_module
 
     aiocache_module = types.ModuleType("aiocache")
@@ -122,10 +117,6 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
     digital_employee_manager.sync_employee_workspace = sync_employee_workspace
     digital_employee_manager.sync_calls = sync_calls
     sys.modules["services.digital_employee.manager"] = digital_employee_manager
-
-    credential_manager = types.ModuleType("services.digital_employee.cognee_credential_manager")
-    credential_manager.get_or_refresh_jwt = lambda tenant_id: _async_value(f"jwt-{tenant_id}")
-    sys.modules["services.digital_employee.cognee_credential_manager"] = credential_manager
 
     aioe_credential_manager = types.ModuleType("services.digital_employee.aioe_credential_manager")
     aioe_credential_manager.get_employee_api_token = lambda employee: _async_value(f"api-token-{employee.id}")
@@ -286,7 +277,6 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
         },
         "embedding": None,
     }
-    assert payload["cognee"] is None
     assert payload["aioe"] == {
         "base_url": "http://lion-mgmt",
         "token": "api-token-employee-1",
@@ -648,16 +638,14 @@ def test_memory_payload_key_set_is_exactly_the_contract():
     assert not {"endpoint", "jwt", "dataset_name"} & set(memory)
 
 
-def _install_stubs_with_backend(progress_calls, backend: str):
-    """按指定后端安装 stub。settings 是 execute_coordinator 的 from-import 来源，
-    必须在 _load_module 之前把 MEMORY_BACKEND 设好。"""
-    _install_stubs(progress_calls)
-    sys.modules["settings"].MEMORY_BACKEND = backend
+def _run_once(*, continuation_workspace=None):
+    """跑一次 run() 并取回发给 lion_agent 的 payload。
 
-
-def _run_once(backend: str, *, continuation_workspace=None):
+    Cognee 后端已整体下线（SPEC §8 第 9 步），不再有 backend 参数——
+    payload 恒带 memory 段。
+    """
     progress_calls = []
-    _install_stubs_with_backend(progress_calls, backend)
+    _install_stubs(progress_calls)
     RECORDED_STREAM_PAYLOADS.clear()
     execute_coordinator = _load_module(
         "services.digital_employee.execute_coordinator",
@@ -680,49 +668,30 @@ def _run_once(backend: str, *, continuation_workspace=None):
     return RECORDED_STREAM_PAYLOADS[0]
 
 
-def test_cognee_backend_reproduces_pre_migration_payload_verbatim():
-    """回滚路径：backend=cognee 时 cognee 段必须与迁移前逐字一致。"""
-    payload = _run_once("cognee")
+def test_payload_carries_no_cognee_section_at_all():
+    """Cognee 下线后 payload 里不得再出现 cognee 键。
 
-    assert payload["cognee"] == {
-        "endpoint": "http://lion-memory",
-        "jwt": "jwt-tenant-1",
-        "tenant_id": "tenant-1",
-        "dataset_name": "employee-1",
-        "role_key": "ops",
-        "task_id": "task-1",
-        "source_kind": "manual",
-    }
+    不是「值为 None」而是「键不存在」——留一个恒 None 的键会让人以为
+    回滚路径还在，而 lion_agent 侧的 ExecuteRequest 已经不认它了。
+    """
+    payload = _run_once()
 
-
-def test_cognee_backend_sends_no_memory_section():
-    """回滚到旧 agent：旧 ExecuteRequest 的 extra='ignore' 会静默吞掉 memory，
-    所以 cognee 后端下必须根本不发它，避免「以为发了、其实被忽略」。"""
-    payload = _run_once("cognee")
-
-    assert payload["memory"] is None
-
-
-def test_reme_backend_sends_no_cognee_section():
-    payload = _run_once("reme")
-
-    assert payload["cognee"] is None
+    assert "cognee" not in payload
     assert payload["memory"]["employee_id"] == "employee-1"
 
 
-def test_backends_are_mutually_exclusive_so_owner_conflict_is_impossible():
-    """SPEC §5.7 第 3 条的 owner 冲突在 lion_agent 侧硬失败；
-    lion_mgmt 侧的对应义务是：任一后端下都只发一个非 None 的段。"""
-    for backend in ("cognee", "reme"):
-        payload = _run_once(backend)
-        sections = [payload["memory"], payload["cognee"]]
-        assert sum(1 for section in sections if section is not None) == 1, backend
+def test_payload_always_carries_memory_section():
+    """没有后端分支了，memory 段必须恒非空。"""
+    payload = _run_once()
+
+    assert payload["memory"] is not None
+    assert payload["memory"]["enabled"] is True
 
 
-def test_cognee_backend_continuation_payload_unchanged():
-    """SPEC §5.7 第 6 条第四项：continuation 场景的旧 payload 形状不变。"""
+def test_continuation_payload_keeps_employee_as_memory_owner():
+    """continuation workspace 是派生的只读工作区，
+    记忆归属仍是员工本体，不随 workspace_id 改变。"""
     payload = _run_once(
-        "cognee",
         continuation_workspace={
             "workspace_id": "employee-1:approval-abc123def456:read-only",
             "files": {"system_prompt.md": "role"},
@@ -732,60 +701,24 @@ def test_cognee_backend_continuation_payload_unchanged():
     )
 
     assert payload["workspace_id"] == "employee-1:approval-abc123def456:read-only"
-    # 迁移前 dataset_name 就是 employee.id，与顶层 workspace_id 无关
-    assert payload["cognee"]["dataset_name"] == "employee-1"
-    assert payload["memory"] is None
+    assert payload["memory"]["employee_id"] == "employee-1"
 
 
-def test_cognee_backend_does_not_resolve_embedding():
-    """cognee 分支必须完全不碰 embedding 链路——它连 purpose='embedding' 都不该查，
-    否则 P6 尚未落地时回滚路径会因未知 purpose 而多一次无谓查询。"""
-    progress_calls = []
-    _install_stubs_with_backend(progress_calls, "cognee")
-    RECORDED_STREAM_PAYLOADS.clear()
+def test_payload_top_level_key_set_is_the_contract():
+    """顶层键集合固定；cognee 不在其中。"""
+    payload = _run_once()
 
-    purposes = []
-    original_resolve = sys.modules["services.llm_config.resolver"].resolve_llm
-
-    def _spy(tenant_id, **kwargs):
-        purposes.append(kwargs.get("purpose"))
-        return original_resolve(tenant_id, **kwargs)
-
-    sys.modules["services.llm_config.resolver"].resolve_llm = _spy
-
-    execute_coordinator = _load_module(
-        "services.digital_employee.execute_coordinator",
-        "services/digital_employee/execute_coordinator.py",
-    )
-    execute_coordinator.caches = SimpleNamespace(get=lambda name: SimpleNamespace(client=FakeRedis()))
-
-    task = FakeTask(
-        id="task-1", tenant_id="tenant-1", run_id=None, room_id=None,
-        creator_id="c", source="manual", progress=0, status="pending",
-        title="t", description="d", payload={}, result=None, saved_update_fields=[],
-    )
-    employee = SimpleNamespace(id="employee-1", role_key="ops", agent_key="ops-1", name="运维")
-    asyncio.run(execute_coordinator.run(task, employee))
-
-    assert "embedding" not in purposes
-
-
-def test_payload_shape_is_stable_across_both_backends():
-    """混合版本窗口回归：无论哪个后端，顶层键集合都不变——
-    避免升级/回滚过程中 lion_agent 因缺键而 422。"""
-    expected_top_level = {
+    assert set(payload) >= {
         "workspace_id", "session_id", "request_id", "message",
-        "memory", "cognee", "aioe", "llm",
+        "memory", "aioe", "llm",
     }
-    for backend in ("cognee", "reme"):
-        payload = _run_once(backend)
-        assert set(payload) >= expected_top_level, backend
+    assert "cognee" not in payload
 
 
 def test_reme_payload_matches_contract_schema_exactly():
     """契约 §3 的 memory 段形状——P4 在 lion_agent 侧写对偶断言。
     两条测试同时绿，才说明两侧对齐了同一个形状。"""
-    payload = _run_once("reme")
+    payload = _run_once()
     memory = payload["memory"]
 
     assert memory["enabled"] is True
@@ -799,221 +732,3 @@ def test_reme_payload_matches_contract_schema_exactly():
         {"base_url", "api_key", "model"},
         {"base_url", "api_key", "model", "dimensions"},
     )
-
-
-def _run_once(backend: str, continuation_workspace: dict | None = None) -> dict:
-    """运行一次 execute，返回发送给 lion_agent 的完整 payload（复用 Task 4 的 stub 骨架）。"""
-    import asyncio
-    import os
-    import sys
-    import types
-    from types import SimpleNamespace
-
-    original_modules = {}
-    for name in list(sys.modules):
-        if name.startswith(("services.", "models.", "libs.", "core.", "settings")):
-            original_modules[name] = sys.modules.pop(name, None)
-
-    try:
-        os.environ["RY_MEMORY_BACKEND"] = backend
-
-        # 基础设施 stub
-        sys.modules["core.error_code"] = types.ModuleType("core.error_code")
-        sys.modules["core.error_code"].ErrorCode = SimpleNamespace(
-            PARAM_ERROR="param_error",
-            DIGITAL_EMPLOYEE_UNAVAILABLE="digital_employee_unavailable",
-        )
-        sys.modules["libs.error_code.exception"] = types.ModuleType("libs.error_code.exception")
-
-        class CustomError(Exception):
-            def __init__(self, enum):
-                self.enum = enum
-
-        sys.modules["libs.error_code.exception"].CustomError = CustomError
-
-        # models stub
-        sys.modules["models"] = types.ModuleType("models")
-        sys.modules["models.command_center"] = types.ModuleType("models.command_center")
-        sys.modules["models.command_center"].CommandAgent = SimpleNamespace
-        sys.modules["models.command_center"].CommandTask = SimpleNamespace
-
-        # settings stub
-        sys.modules["settings"] = types.ModuleType("settings")
-        sys.modules["settings"].AIOE_INTERNAL_URL = "http://lion-mgmt"
-        sys.modules["settings"].LION_MEMORY_ENDPOINT = "http://lion-memory"
-        sys.modules["settings"].WR_TOPIC = "wr-topic"
-        sys.modules["settings"].MEMORY_BACKEND = backend
-        sys.modules["settings"].MEMORY_BACKEND_COGNEE = "cognee"
-        sys.modules["settings"].MEMORY_BACKEND_REME = "reme"
-
-        # aiocache stub
-        sys.modules["aiocache"] = types.ModuleType("aiocache")
-
-        class FakeRedis:
-            def __init__(self):
-                self.store = {}
-
-            async def get(self, key):
-                return self.store.get(key)
-
-            async def setex(self, key, ttl, value):
-                self.store[key] = value
-
-        sys.modules["aiocache"].caches = SimpleNamespace(get=lambda name: SimpleNamespace(client=FakeRedis()))
-
-        # sanic stub
-        sys.modules["sanic"] = types.ModuleType("sanic")
-        sys.modules["sanic.log"] = types.ModuleType("sanic.log")
-        sys.modules["sanic.log"].logger = SimpleNamespace(warning=lambda *a, **k: None, error=lambda *a, **k: None)
-
-        # Task 4 的 stub 骨架
-        sys.modules["services.digital_employee"] = types.ModuleType("services.digital_employee")
-        sys.modules["services.digital_employee.aioe_credential_manager"] = types.ModuleType(
-            "services.digital_employee.aioe_credential_manager"
-        )
-
-        async def get_employee_api_token(employee):
-            return "api-token"
-
-        sys.modules["services.digital_employee.aioe_credential_manager"].get_employee_api_token = (
-            get_employee_api_token
-        )
-
-        sys.modules["services.digital_employee.manager"] = types.ModuleType("services.digital_employee.manager")
-        sys.modules["services.digital_employee.manager"].sync_calls = []
-
-        async def sync_employee_workspace(employee, force=False):
-            sys.modules["services.digital_employee.manager"].sync_calls.append(
-                {"employee_id": employee.id, "force": force}
-            )
-            return employee
-
-        sys.modules["services.digital_employee.manager"].sync_employee_workspace = sync_employee_workspace
-
-        sys.modules["services.digital_employee.prompt_builder"] = types.ModuleType(
-            "services.digital_employee.prompt_builder"
-        )
-
-        def build_runtime_prompt(task, employee):
-            return f"prompt:{task.id}:{employee.id}"
-
-        sys.modules["services.digital_employee.prompt_builder"].build_runtime_prompt = build_runtime_prompt
-
-        sys.modules["services.command_center"] = types.ModuleType("services.command_center")
-        sys.modules["services.command_center.manager"] = types.ModuleType("services.command_center.manager")
-
-        async def update_task_progress(task, updates, operator_id=None):
-            for k, v in updates.items():
-                setattr(task, k, v)
-
-        sys.modules["services.command_center.manager"].update_task_progress = update_task_progress
-
-        lion_agent_adapter = types.ModuleType("services.digital_employee.lion_agent_adapter")
-
-        class FakeLionAgentClient:
-            def __init__(self):
-                self.payloads = []
-
-            async def execute(self, payload):
-                self.payloads.append(payload)
-                return {"content": "done"}
-
-            async def stream_execute(self, payload):
-                self.payloads.append(payload)
-                yield '{"content": "done", "tool_calls": []}'
-
-            async def sync_workspace(self, workspace_id, files, **kwargs):
-                return {"etag": "etag-1"}
-
-        fake_client = FakeLionAgentClient()
-
-        async def stream_prompt_events(**payload):
-            fake_client.payloads.append(payload)
-            yield "content", {"type": "content", "content": "done"}
-            yield "end", {"type": "end"}
-
-        def workspace_id_for(tenant_id, *parts):
-            return ":".join([tenant_id, *parts])
-
-        lion_agent_adapter.workspace_id_for = workspace_id_for
-        lion_agent_adapter.stream_prompt_events = stream_prompt_events
-        lion_agent_adapter.LionAgentClient = lambda: fake_client
-        sys.modules["services.digital_employee.lion_agent_adapter"] = lion_agent_adapter
-
-        sys.modules["services.digital_employee.lion_agent_client"] = types.ModuleType(
-            "services.digital_employee.lion_agent_client"
-        )
-        sys.modules["services.digital_employee.lion_agent_client"].LionAgentClient = lambda: fake_client
-
-        sys.modules["services.digital_employee.cognee_credential_manager"] = types.ModuleType(
-            "services.digital_employee.cognee_credential_manager"
-        )
-
-        async def get_or_refresh_jwt(tenant_id, force=False):
-            return f"jwt-{tenant_id}"
-
-        sys.modules["services.digital_employee.cognee_credential_manager"].get_or_refresh_jwt = get_or_refresh_jwt
-
-        sys.modules["services.llm_config"] = types.ModuleType("services.llm_config")
-        sys.modules["services.llm_config.resolver"] = types.ModuleType("services.llm_config.resolver")
-
-        class ResolvedLlm:
-            def __init__(self):
-                self.base_url = "http://llm"
-                self.model_name = "qwen"
-                self.api_key = "sk-key"
-                self.config_id = "cfg-1"
-
-            def to_payload(self):
-                return {"base_url": self.base_url, "model": self.model_name, "api_key": self.api_key}
-
-        async def resolve_llm(tenant_id, config_id=None, purpose=None):
-            return ResolvedLlm()
-
-        sys.modules["services.llm_config.resolver"].resolve_llm = resolve_llm
-
-        execute_coordinator = _load_module(
-            "services.digital_employee.execute_coordinator",
-            "services/digital_employee/execute_coordinator.py",
-        )
-
-        class FakeTask:
-            def __init__(self, **kw):
-                for k, v in kw.items():
-                    setattr(self, k, v)
-                self.saved_update_fields = []
-
-            async def save(self, update_fields=None):
-                self.saved_update_fields.append(update_fields or [])
-
-        task = FakeTask(
-            id="task-1",
-            tenant_id="tenant-1",
-            run_id=None,
-            room_id=None,
-            creator_id="c",
-            source="manual",
-            progress=0,
-            status="pending",
-            title="t",
-            description="d",
-            payload={},
-            result=None,
-        )
-        employee = SimpleNamespace(
-            id="employee-1",
-            role_key="ops",
-            agent_key="ops-1",
-            name="运维",
-            tenant_id="tenant-1",
-        )
-
-        asyncio.run(execute_coordinator.run(task, employee, continuation_workspace=continuation_workspace))
-        return fake_client.payloads[0]
-    finally:
-        for name, mod in original_modules.items():
-            if mod is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = mod
-

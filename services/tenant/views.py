@@ -1,7 +1,6 @@
 # coding=utf-8
 
 from sanic import Blueprint
-from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.expressions import Q
 from tortoise.functions import Count
@@ -15,7 +14,6 @@ from libs.security.authentication import refresh_token
 from libs.security.authorization import TENANT_ADMIN_ROLE_NAME, requires_permission
 from libs.utils import get_expiration_date
 from models import Account, Role, Scene, Tenant
-from services.digital_employee.cognee_credential_manager import register_tenant_user
 from settings import (
     AUTHENTICATION_SESSION_EXPIRATION,
     SESSION_HTTPONLY,
@@ -149,11 +147,6 @@ async def add_tenant(request):
 
         # 创建默认场景"日常运营"
         await Scene.create(name="日常运营", remark="默认场景", status=1, creator=creator, updator=creator, tenant_id=tenant.id)
-
-    try:
-        await register_tenant_user(tenant.id)
-    except Exception as exc:
-        logger.warning(f"预注册租户 Cognee 用户失败，将在数字员工首次运行时重试: tenant_id={tenant.id}, error={exc}")
 
     return response_ok(tenant.json)
 

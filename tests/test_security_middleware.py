@@ -162,7 +162,7 @@ def test_digital_employee_internal_routes_skip_session_auth(monkeypatch):
     )
     _run(
         middleware.before_request(
-            SimpleNamespace(path="/digital_employee/runtime/cognee/refresh-jwt")
+            SimpleNamespace(path="/digital_employee/runtime/memory/maintain")
         )
     )
 

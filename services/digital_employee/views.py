@@ -14,7 +14,6 @@ from services.command_center.manager import create_command_task
 from services.command_center.realtime import publish_command_center_update
 
 from .aioe_credential_manager import delete_employee_api_account
-from .cognee_credential_manager import delete_employee_memory_dataset, get_or_refresh_jwt
 from .employee_report import compose
 from .lion_agent_client import LionAgentClient
 from .manager import (
@@ -324,7 +323,6 @@ async def employee_delete(request: Request):
     await LionAgentClient().delete_workspace(
         employee.id, tenant_id=employee.tenant_id, employee_id=employee.id
     )
-    await delete_employee_memory_dataset(employee.tenant_id, employee.id)
     await delete_employee_api_account(employee)
     await publish_command_center_update(employee.tenant_id, "employee_deleted", employee.id)
     return response_ok()
@@ -812,13 +810,6 @@ async def runtime_report_save(request: Request):
     tenant_id = _require_tenant_id(data.get("tenant_id") or _tenant_id(request))
     report = await save_runtime_report(tenant_id, data)
     return response_ok(report.json)
-
-
-@digital_employee_bp.post("/runtime/cognee/refresh-jwt")
-async def runtime_cognee_refresh_jwt(request: Request):
-    _check_internal(request)
-    data = _json(request)
-    return response_ok({"jwt": await get_or_refresh_jwt(data.get("tenant_id") or _tenant_id(request) or BUILTIN_TENANT_ID, force=True)})
 
 
 # SPEC §5.8：阶段一只做手动排障入口，jobs 限 update_index。
