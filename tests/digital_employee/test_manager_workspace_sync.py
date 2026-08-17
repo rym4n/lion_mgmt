@@ -11,6 +11,7 @@ from types import SimpleNamespace
 STUB_MODULES = [
     "core",
     "core.error_code",
+    "core.maintenance",
     "libs",
     "libs.error_code",
     "libs.error_code.exception",
@@ -69,14 +70,38 @@ def _load_manager(sync_calls: list[dict]):
     class DigitalEmployeeSkill:
         pass
 
+    class LlmModelConfig:
+        """绑定校验（P6 Task 7 / D14）会按 config_id 查库。这些用例关心的是
+        RBAC 与技能持久化，不是绑定校验本身，所以恒返回一条合法的 default
+        租户记录，让校验放行。"""
+
+        @staticmethod
+        async def get_or_none(**kwargs):
+            return SimpleNamespace(
+                id=kwargs.get("id"),
+                tenant_id="8bce552d-c27c-41d4-8a1b-8c5bf38dfe18",
+                deleted=False,
+                enabled=True,
+            )
+
     class LionAgentClient:
-        async def sync_workspace(self, workspace_id, files, role_version=None, skill_versions=None):
+        async def sync_workspace(
+            self,
+            workspace_id,
+            files,
+            role_version=None,
+            skill_versions=None,
+            tenant_id=None,
+            employee_id=None,
+        ):
             sync_calls.append(
                 {
                     "workspace_id": workspace_id,
                     "files": files,
                     "role_version": role_version,
                     "skill_versions": skill_versions or {},
+                    "tenant_id": tenant_id,
+                    "employee_id": employee_id,
                 }
             )
             return {"etag": "runtime-etag"}
@@ -85,6 +110,11 @@ def _load_manager(sync_calls: list[dict]):
     core_error_code = types.ModuleType("core.error_code")
     core_error_code.ErrorCode = ErrorCode
     sys.modules["core.error_code"] = core_error_code
+    # resolver 起就从 core.maintenance 取 DEFAULT_TENANT_ID；stub 掉 core 后
+    # 这个子模块也必须一并补上，否则 manager 的 import 链会断。
+    core_maintenance = types.ModuleType("core.maintenance")
+    core_maintenance.DEFAULT_TENANT_ID = "8bce552d-c27c-41d4-8a1b-8c5bf38dfe18"
+    sys.modules["core.maintenance"] = core_maintenance
 
     sys.modules["libs"] = types.ModuleType("libs")
     sys.modules["libs.error_code"] = types.ModuleType("libs.error_code")
@@ -92,7 +122,10 @@ def _load_manager(sync_calls: list[dict]):
     exception_module.CustomError = CustomError
     sys.modules["libs.error_code.exception"] = exception_module
 
-    sys.modules["models"] = types.ModuleType("models")
+    models_module = types.ModuleType("models")
+    # manager 起就从 models 顶层导入 LlmModelConfig 做绑定校验（P6 Task 7）。
+    models_module.LlmModelConfig = LlmModelConfig
+    sys.modules["models"] = models_module
     command_center_module = types.ModuleType("models.command_center")
     command_center_module.CommandAgent = CommandAgent
     command_center_module.CommandTask = CommandTask
@@ -191,6 +224,8 @@ def test_sync_employee_workspace_force_bypasses_matching_etag_shortcut():
                 "files": {"system_prompt.md": "role prompt"},
                 "role_version": 7,
                 "skill_versions": {"triage": 2},
+                "tenant_id": "tenant-1",
+                "employee_id": "employee-1",
             }
         ]
         assert employee.workspace_etag == "runtime-etag"

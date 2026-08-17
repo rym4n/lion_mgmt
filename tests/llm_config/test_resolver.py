@@ -43,6 +43,9 @@ def _load_resolver(records):
     return importlib.reload(resolver_module)
 
 
+DEFAULT_TENANT_ID = "8bce552d-c27c-41d4-8a1b-8c5bf38dfe18"
+
+
 def _record(**kwargs):
     base = {
         "id": "cfg-1",
@@ -53,7 +56,9 @@ def _record(**kwargs):
         "purpose": "chat",
         "enabled": True,
         "deleted": False,
-        "tenant_id": "t1",
+        # 模型配置已收敛到 default 租户（SPEC §5.6）：resolver 固定按这个
+        # tenant_id 查，所以 fixture 的默认值必须与之一致，否则永远查不到。
+        "tenant_id": DEFAULT_TENANT_ID,
         "dimensions": None,
     }
     base.update(kwargs)
@@ -137,13 +142,29 @@ def test_raises_when_default_also_disabled():
         asyncio.run(resolver.resolve_llm("t1"))
 
 
-def test_tenant_isolation():
-    """其他租户的配置不可见。"""
+def test_non_default_tenant_config_is_invisible():
+    """模型配置收敛到 default 租户后，非 default 租户的存量记录不可见。
+
+    这不是「租户隔离」——收敛后隔离已不作用于这张表（见下一条）。
+    它锁的是：迁移前遗留在其它租户下的脏数据不会被解析到。
+    """
     resolver = _load_resolver([_record(tenant_id="t-other", purpose="chat")])
     from libs.error_code.exception import CustomError
 
     with pytest.raises(CustomError):
         asyncio.run(resolver.resolve_llm("t1"))
+
+
+def test_any_tenant_session_resolves_the_same_default_pool():
+    """任意租户会话都解析到同一份 default 配置（SPEC §5.6 的收敛语义）。
+
+    tenant_id 参数保留但不参与查询——这条测试锁死这个行为，防止
+    有人「看它没被用到」就把参数删掉、或把租户过滤加回来。
+    """
+    resolver = _load_resolver([_record()])
+    for caller_tenant in ("t1", "t-other", DEFAULT_TENANT_ID):
+        result = asyncio.run(resolver.resolve_llm(caller_tenant))
+        assert result.config_id == "cfg-1"
 
 
 def test_to_payload_matches_lion_agent_contract():

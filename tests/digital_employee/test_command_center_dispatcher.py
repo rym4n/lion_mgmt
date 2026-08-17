@@ -84,6 +84,12 @@ def _load_dispatcher(lite_model="aioe-lite", request_timeout=120):
 
     adapter = types.ModuleType("services.digital_employee.lion_agent_adapter")
     adapter.workspace_id_for = lambda tenant_id, *parts: f"{tenant_id}:{':'.join(parts)}"
+    # 派单是非员工链路：只带租户身份、不启用记忆（P5 Task 5C / D36 / D40）。
+    adapter.identity_only_memory = lambda tenant_id: {
+        "enabled": False,
+        "tenant_id": tenant_id,
+        "employee_id": None,
+    }
 
     async def execute_prompt(**kwargs):
         return (

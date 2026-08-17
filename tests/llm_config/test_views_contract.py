@@ -29,11 +29,35 @@ def test_all_six_routes_present():
 
 
 def test_every_route_has_permission_decorator():
-    """每个路由都必须有 requires_permission，权限码前缀为 ai_config。"""
+    """除 /catalog 外每个路由都必须有 requires_permission，权限码前缀为 ai_config。
+
+    /catalog 是**唯一**豁免：它是给普通租户选模用的只读目录，返回字段
+    白名单是闭集（不含 base_url / api_key / remark），由
+    test_catalog_exemption_is_paid_for_by_a_field_whitelist 锁死。
+    豁免集合写死在这里——新增免鉴权路由会让这条断言失败，必须显式改。
+    """
     src = _src()
+    exempt = {"/catalog"}
     route_count = src.count("@llm_config_bp.post(")
     perm_count = len(re.findall(r'@requires_permission\("ai_config:[crud]"\)', src))
-    assert perm_count == route_count, f"{route_count} 个路由只有 {perm_count} 个带权限装饰器"
+    assert perm_count == route_count - len(exempt), (
+        f"{route_count} 个路由、豁免 {len(exempt)} 个，"
+        f"应有 {route_count - len(exempt)} 个权限装饰器，实际 {perm_count} 个"
+    )
+
+
+def test_catalog_exemption_is_paid_for_by_a_field_whitelist():
+    """catalog 免鉴权的前提是它返回的字段不含任何凭证或内网地址。
+
+    这条测试是上一条豁免的对价：只要 list_catalog 开始返回
+    base_url / api_key / remark，豁免就不再成立。
+    """
+    manager_src = (
+        Path(__file__).resolve().parents[2] / "services/llm_config/manager.py"
+    ).read_text(encoding="utf-8")
+    body = manager_src.split("async def list_catalog")[1].split("async def ")[0]
+    for leaked in ('"base_url"', '"api_key"', '"remark"'):
+        assert leaked not in body, f"catalog 不得返回 {leaked}，否则免鉴权不成立"
 
 
 def test_every_handler_calls_license_gate():
@@ -84,12 +108,33 @@ def test_views_never_return_raw_api_key(monkeypatch):
     monkeypatch.setattr(views, "response_ok", lambda data: captured.setdefault("data", data))
     request = SimpleNamespace(
         json={"id": "cfg-1", "base_url": "https://x/v1", "model_name": "aioe"},
-        ctx=SimpleNamespace(session={"tenant_id": "t1"}),
+        # 管理接口只对 default 租户会话开放（P6 Task 5）；这条测的是脱敏，
+        # 不是租户守卫，所以用合法会话进来。守卫本身由
+        # test_management_views_reject_non_default_tenant_session 锁死。
+        ctx=SimpleNamespace(session={"tenant_id": "8bce552d-c27c-41d4-8a1b-8c5bf38dfe18"}),
     )
 
     asyncio.run(inspect.unwrap(views.test_view)(request))
 
     assert secret not in json.dumps(captured["data"], ensure_ascii=False)
+
+
+def test_management_views_reject_non_default_tenant_session():
+    """管理接口对非 default 租户会话一律 403。
+
+    这些接口返回 base_url / 脱敏后仍露前后缀的 api_key / remark，
+    普通租户只能走只读的 /catalog。守卫读 session，不读请求体——
+    请求体传 tenant_id 会开出越权面（白盒审计 Vuln 3）。
+    """
+    import pytest
+
+    from libs.error_code.exception import CustomError
+    from services.llm_config import views
+
+    for tenant in ("t1", "", "8bce552d-c27c-41d4-8a1b-8c5bf38dfe19"):
+        request = SimpleNamespace(ctx=SimpleNamespace(session={"tenant_id": tenant}))
+        with pytest.raises(CustomError):
+            views._tenant(request)
 
 
 def test_tester_reports_success(monkeypatch):
