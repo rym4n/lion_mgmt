@@ -5,6 +5,7 @@ from sanic import Blueprint, Request
 from sanic_ext import openapi
 
 from core.error_code import ErrorCode
+from core.maintenance import DEFAULT_TENANT_ID
 from core.response import response_ok
 from libs.error_code.exception import CustomError
 from libs.security.authorization import requires_permission
@@ -22,7 +23,19 @@ llm_config_bp = Blueprint("llm_config", url_prefix="/llm-config")
 
 
 def _tenant(request: Request) -> str:
-    return request.ctx.session.get("tenant_id")
+    """管理接口恒用 default 租户（SPEC §5.6）。
+
+    非 default 租户的会话一律拒绝：这些接口返回 base_url / api_key（脱敏后仍
+    暴露前后缀）/ remark 等管理信息，普通租户不该看到。租户用户要选模型走
+    只读的 /llm-config/catalog。
+
+    只读 session，绝不接受请求体传入的 tenant_id——那会开出一个新的越权面
+    （对照 docs/lion_mgmt白盒审计结果.md 的 Vuln 3）。
+    """
+    session_tenant = str(request.ctx.session.get("tenant_id") or "")
+    if session_tenant != DEFAULT_TENANT_ID:
+        raise CustomError(ErrorCode.FORBIDDEN)
+    return DEFAULT_TENANT_ID
 
 
 def _json(request: Request) -> dict:
