@@ -30,36 +30,16 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
         SET tenant_id = '{DEFAULT_TENANT_ID}'
         WHERE tenant_id != '{DEFAULT_TENANT_ID}';
 
-        -- §3. 插入模型配置菜单行（如果不存在）
-        INSERT INTO menu_config (id, name, path, icon, sort, parent_id, ctime, utime, deleted, tenant_id)
-        SELECT
-            'llm-config-menu-id'::UUID,
-            '模型配置',
-            '/settings/llm-config',
-            'setting',
-            100,
-            NULL,
-            NOW(),
-            NOW(),
-            FALSE,
-            '{DEFAULT_TENANT_ID}'
-        WHERE NOT EXISTS (
-            SELECT 1 FROM menu_config
-            WHERE path = '/settings/llm-config'
-              AND tenant_id = '{DEFAULT_TENANT_ID}'
-              AND deleted = FALSE
-        );
-
-        -- §4. 清理：软删除非 default 租户的绑定记录不再需要（已迁移）
-        -- 注意：不删除 command_agent.llm_config_id 外键，只是所有配置现在都在 default 租户
+        -- §3. 菜单入口：不在此处插入。
+        -- 「模型配置」菜单已存在于 permissions_menu（model='ai_config'，bp='ai_bp'），
+        -- 由既有 seed 建立；本系统没有 menu_config 表。
+        -- 「仅 default 租户可见」由 services/license/views.py 的 hidden_menus
+        -- 在下发时过滤承担（契约 D8），不靠迁移改数据。
     """
 
 
 async def downgrade(db: BaseDBAsyncClient) -> str:
     return """
-        -- 回滚不支持数据迁移，只删除列
+        -- 回滚不支持数据迁移（租户收敛不可逆），只删除列
         ALTER TABLE "llm_model_config" DROP COLUMN "dimensions";
-
-        -- 删除菜单行
-        DELETE FROM menu_config WHERE path = '/settings/llm-config';
     """
