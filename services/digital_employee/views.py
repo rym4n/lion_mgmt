@@ -819,3 +819,39 @@ async def runtime_cognee_refresh_jwt(request: Request):
     _check_internal(request)
     data = _json(request)
     return response_ok({"jwt": await get_or_refresh_jwt(data.get("tenant_id") or _tenant_id(request) or BUILTIN_TENANT_ID, force=True)})
+
+
+# SPEC §5.8：阶段一只做手动排障入口，jobs 限 update_index。
+# auto_dream（LLM 密集）、optimize_index、reindex 及批量维护都属阶段二。
+MEMORY_MAINTAIN_JOBS = ["update_index"]
+
+
+@digital_employee_bp.post("/runtime/memory/maintain")
+async def runtime_memory_maintain(request: Request):
+    """按 tenant_id + 单个 employee_id 手动触发记忆维护（排障用）。"""
+    _check_internal(request)
+    data = _json(request)
+    tenant_id = _require_tenant_id(data.get("tenant_id") or _tenant_id(request))
+    employee_id = data.get("employee_id")
+    if not employee_id:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    # 归属校验：不得把请求方传来的 employee_id 直接透传给 lion_agent。
+    employee = await CommandAgent.filter(
+        id=employee_id, tenant_id=tenant_id, deleted=False
+    ).first()
+    if employee is None:
+        raise CustomError(ErrorCode.PARAM_ERROR)
+
+    from services.llm_config.resolver import resolve_llm
+
+    llm = await resolve_llm(tenant_id, config_id=getattr(employee, "llm_config_id", None))
+    return response_ok(
+        await LionAgentClient().maintain_memory(
+            tenant_id=tenant_id,
+            employee_id=employee.id,
+            llm=llm.to_payload(),
+            jobs=MEMORY_MAINTAIN_JOBS,
+        )
+    )
+

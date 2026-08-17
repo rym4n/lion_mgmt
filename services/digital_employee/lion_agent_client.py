@@ -147,3 +147,33 @@ class LionAgentClient:
                 return response.json()
         except httpx.HTTPError as exc:
             raise CustomError(ErrorCode.LION_AGENT_UNAVAILABLE) from exc
+
+    async def maintain_memory(
+        self,
+        tenant_id: str,
+        employee_id: str,
+        llm: dict[str, Any],
+        jobs: list[str],
+    ) -> dict[str, Any]:
+        """触发单个员工 workspace 的记忆维护（SPEC §5.8，阶段一手动排障用）。
+
+        一次一个 workspace、一把 key：批量下发多把 API key 的爆炸半径问题属阶段二。
+        异常一律转 CustomError，不把 llm 字典写进日志或异常消息。
+        """
+        payload = {
+            "tenant_id": tenant_id,
+            "jobs": jobs,
+            "workspaces": [{"employee_id": employee_id, "llm": llm}],
+            "concurrency": 1,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    f"{self.endpoint}/internal/v1/memory/maintain",
+                    json=payload,
+                    headers=self._headers,
+                )
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPError as exc:
+            raise CustomError(ErrorCode.LION_AGENT_UNAVAILABLE) from exc
