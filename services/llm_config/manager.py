@@ -1,15 +1,19 @@
 # coding=utf-8
 """LLM 模型配置的 CRUD 业务逻辑。
 
-三条不显然的规则：
+四条不显然的规则：
 - purpose 非空值在同租户下唯一，靠「设新的先清旧的」保证（不用 DB 部分唯一索引）。
+  收敛到 default 租户后（SPEC §5.6），这就等价于全局唯一。
 - api_key 留空表示不修改（编辑表单不回填明文）。
 - 删除是软删除，不触发 on_delete=SET_NULL，必须显式清空员工绑定。
+- 本模块的 tenant_id 参数由 views 侧的 _tenant() 保证恒为 DEFAULT_TENANT_ID。
 """
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 
-VALID_PURPOSES = ("chat", "lite")
+# embedding 由本次 ReMe 迁移引入（SPEC §5.6）。
+# knowledge_chat / knowledge_embedding 属阶段三，此处不加。
+VALID_PURPOSES = ("chat", "lite", "embedding")
 
 
 async def list_configs(tenant_id: str, keyword: str | None = None) -> list[dict]:
