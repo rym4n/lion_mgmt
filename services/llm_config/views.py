@@ -86,6 +86,7 @@ async def create_view(request: Request):
             model_name=params["model_name"],
             purpose=params.get("purpose"),
             remark=params.get("remark"),
+            dimensions=params.get("dimensions"),
         )
     )
 
@@ -107,6 +108,7 @@ async def update_view(request: Request):
             model_name=params.get("model_name"),
             remark=params.get("remark"),
             enabled=params.get("enabled"),
+            dimensions=params.get("dimensions"),
         )
     )
 

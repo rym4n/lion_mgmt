@@ -86,6 +86,7 @@ async def create_config(
     model_name: str,
     purpose: str | None = None,
     remark: str | None = None,
+    dimensions: int | None = None,
 ) -> dict:
     from models import LlmModelConfig
 
@@ -100,6 +101,7 @@ async def create_config(
         model_name=model_name,
         purpose=purpose,
         remark=remark,
+        dimensions=dimensions,
     )
     return {"id": row.id}
 
@@ -119,7 +121,7 @@ async def update_config(tenant_id: str, config_id: str, **changes) -> dict:
     if not changes.get("api_key"):
         changes.pop("api_key", None)
 
-    for key in ("name", "base_url", "api_key", "model_name", "remark", "enabled"):
+    for key in ("name", "base_url", "api_key", "model_name", "remark", "enabled", "dimensions"):
         if key in changes and changes[key] is not None:
             setattr(row, key, changes[key])
     await row.save()
