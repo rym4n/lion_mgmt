@@ -6,6 +6,7 @@ from datetime import datetime
 from tortoise.expressions import Q
 
 from core.error_code import ErrorCode
+from core.maintenance import DEFAULT_TENANT_ID
 from libs.error_code.exception import CustomError
 from models.command_center import CommandAgent, CommandTask
 from models.digital_employee import DigitalEmployeeRole, DigitalEmployeeSkill
@@ -21,6 +22,28 @@ from .skill_storage import relative_skill_dir, skill_storage_root, tenant_skill_
 BUILTIN_TENANT_ID = "__builtin__"
 TERMINAL_TASK_STATUS = {"completed", "failed", "cancelled"}
 _UNSET = object()
+
+
+async def _require_default_tenant_config(config_id: str | None) -> None:
+    """员工绑定校验（SPEC §5.6 / 契约 §4 / D14）。
+
+    模型配置已收敛到 default 租户，员工只能绑其中的配置。
+    拒绝非 default 租户的 config_id——租户迁移完成后这些记录会被清理，
+    但在存量清理前必须防止绑定脏数据（对照 D14 的四条行为）。
+    """
+    if config_id is None:
+        return
+    from models import LlmModelConfig
+
+    record = await LlmModelConfig.get_or_none(id=config_id, deleted=False)
+    # D14-1：不存在 / 已软删 → 拒绝（config_id 是指针，不能悬空）
+    if record is None:
+        raise CustomError(ErrorCode.LLM_CONFIG_NOT_CONFIGURED)
+    # D14-2：存在但非 default 租户 → 拒绝（不能绑脏数据）
+    if record.tenant_id != DEFAULT_TENANT_ID:
+        raise CustomError(ErrorCode.LLM_CONFIG_NOT_CONFIGURED)
+    # D14-3 / D14-4：enabled=False 的配置**允许绑**——管理员可能先停用、
+    # 再批量改绑、最后删配置。禁用不代表不可用，只是 resolve_llm 不取。
 
 
 def _visible_condition(tenant_id: str):
@@ -109,6 +132,7 @@ async def create_employee(
     role = await get_visible_role(tenant_id, role_key)
     selected_rbac_role_id = rbac_role_id
     await require_existing_platform_role(selected_rbac_role_id, tenant_id)
+    await _require_default_tenant_config(llm_config_id)
     keys = skill_keys if skill_keys is not None else list(role.default_skill_keys or [])
     skills = await get_visible_skills(tenant_id, keys)
     key = agent_key or f"{role_key}-{uuid.uuid4().hex[:8]}"
@@ -152,6 +176,7 @@ async def update_employee(
     if max_concurrent is not _UNSET:
         employee.max_concurrent = max(1, int(max_concurrent or 1))
     if llm_config_id is not _UNSET:
+        await _require_default_tenant_config(llm_config_id)
         employee.llm_config_id = llm_config_id or None
     employee.workspace_etag = None
     await employee.save()
