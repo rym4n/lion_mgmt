@@ -1,4 +1,4 @@
-FROM python:3.11-slim AS builder
+FROM public.ecr.aws/docker/library/python:3.11-slim@sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7 AS builder
 
 ARG TARGETARCH
 
@@ -43,9 +43,11 @@ RUN --mount=type=cache,id=lion-mgmt-ccache-${TARGETARCH},target=/root/.ccache,sh
 RUN --mount=type=cache,id=lion-mgmt-ccache-${TARGETARCH},target=/root/.ccache,sharing=locked \
     nuitka --mode=package --nofollow-imports --output-dir=dist --jobs=4 --remove-output --no-pyi-file services/
 
-FROM timberio/vector:0.50.0-debian AS vector
+FROM public.ecr.aws/docker/library/python:3.11-slim@sha256:9c900dea9e8fb7e16277c179b555cc72d29a352dbc33cff48ad5a0412fd5bfc7 AS runtime
 
-FROM python:3.11-slim AS runtime
+ARG TARGETARCH
+ARG VECTOR_VERSION=0.50.0
+ARG VECTOR_BINARY_SHA256=5ecc335a2d2a1ff73c8408b5d979b6e238f5663ba8803ea5054ca8aa464dd410
 
 ENV VIRTUAL_ENV=/app/.venv \
     RY_ENV=PROD \
@@ -54,13 +56,25 @@ ENV VIRTUAL_ENV=/app/.venv \
 
 WORKDIR /app
 
-RUN apt update -y \
-    && apt install -y curl libc-dev python3-dev libaio-dev \
+RUN apt-get update -y \
+    && apt-get install -y curl libc-dev python3-dev libaio-dev \
+    && apt-get install -y --no-install-recommends \
+        libreoffice-writer \
+        fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir /var/lib/vector \
-    && mkdir tools
+    && mkdir -p /var/lib/vector tools
 
-COPY --from=vector /usr/bin/vector /usr/bin/vector
+RUN test "$TARGETARCH" = "amd64" \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
+        "https://packages.timber.io/vector/${VECTOR_VERSION}/vector-${VECTOR_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+        -o /tmp/vector.tar.gz \
+    && tar -xzf /tmp/vector.tar.gz -C /tmp \
+    && install -m 0755 \
+        /tmp/vector-x86_64-unknown-linux-gnu/bin/vector \
+        /usr/bin/vector \
+    && printf '%s  %s\n' "$VECTOR_BINARY_SHA256" /usr/bin/vector | sha256sum -c - \
+    && rm -rf /tmp/vector.tar.gz /tmp/vector-x86_64-unknown-linux-gnu
+
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
 COPY migrations ./migrations
@@ -81,11 +95,3 @@ RUN chmod +x docker-entrypoint.sh
 RUN aerich init -t settings.TORTOISE || true
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
-
-# 安装 LibreOffice Writer 和中文字体，用于docx转pdf使用
-RUN apt-get update && \
-  apt-get install -y --no-install-recommends \
-      libreoffice-writer \
-      fonts-noto-cjk && \
-  apt-get clean && \
-  rm -rf /var/lib/apt/lists/*

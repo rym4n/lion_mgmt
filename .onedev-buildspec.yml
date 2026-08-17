@@ -44,7 +44,7 @@ jobs:
   - type: CommandStep
     name: 检查旧审批代码引用
     runInContainer: true
-    image: debian:bookworm-slim
+    image: public.ecr.aws/docker/library/debian:bookworm-slim@@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
     interpreter:
       type: PosixInterpreter
       shell: sh
@@ -59,7 +59,7 @@ jobs:
   - type: CommandStep
     name: 校验版本号
     runInContainer: true
-    image: debian:bookworm-slim
+    image: public.ecr.aws/docker/library/debian:bookworm-slim@@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
     interpreter:
       type: PosixInterpreter
       shell: sh
@@ -79,6 +79,7 @@ jobs:
       type: RegistryOutput
       tags: 10.3.0.41:5000/lion_mgmt:@tag@
     platforms: linux/amd64
+    moreOptions: --cache-from=type=registry,ref=10.3.0.41:5000/lion_mgmt:buildcache --cache-to=type=registry,ref=10.3.0.41:5000/lion_mgmt:buildcache,mode=min
     condition: SUCCESSFUL
     optional: false
   triggers:
