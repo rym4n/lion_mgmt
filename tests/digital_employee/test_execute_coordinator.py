@@ -641,3 +641,125 @@ def test_memory_payload_key_set_is_exactly_the_contract():
     assert set(memory["provenance"]) == {"role_key", "task_id", "request_id", "source_kind"}
     # Cognee 的三个远程凭证字段必须已经消失
     assert not {"endpoint", "jwt", "dataset_name"} & set(memory)
+
+
+def _install_stubs_with_backend(progress_calls, backend: str):
+    """按指定后端安装 stub。settings 是 execute_coordinator 的 from-import 来源，
+    必须在 _load_module 之前把 MEMORY_BACKEND 设好。"""
+    _install_stubs(progress_calls)
+    sys.modules["settings"].MEMORY_BACKEND = backend
+
+
+def _run_once(backend: str, *, continuation_workspace=None):
+    progress_calls = []
+    _install_stubs_with_backend(progress_calls, backend)
+    RECORDED_STREAM_PAYLOADS.clear()
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    execute_coordinator.caches = SimpleNamespace(get=lambda name: SimpleNamespace(client=FakeRedis()))
+
+    task = FakeTask(
+        id="task-1", tenant_id="tenant-1", run_id=None, room_id=None,
+        creator_id="creator-1", source="manual", progress=0, status="pending",
+        title="巡检", description="检查磁盘", payload={}, result=None,
+        saved_update_fields=[],
+    )
+    employee = SimpleNamespace(id="employee-1", role_key="ops", agent_key="ops-1", name="运维员工")
+    asyncio.run(
+        execute_coordinator.run(
+            task, employee, continuation_workspace=continuation_workspace
+        )
+    )
+    return RECORDED_STREAM_PAYLOADS[0]
+
+
+def test_cognee_backend_reproduces_pre_migration_payload_verbatim():
+    """回滚路径：backend=cognee 时 cognee 段必须与迁移前逐字一致。"""
+    payload = _run_once("cognee")
+
+    assert payload["cognee"] == {
+        "endpoint": "http://lion-memory",
+        "jwt": "jwt-tenant-1",
+        "tenant_id": "tenant-1",
+        "dataset_name": "employee-1",
+        "role_key": "ops",
+        "task_id": "task-1",
+        "source_kind": "manual",
+    }
+
+
+def test_cognee_backend_sends_no_memory_section():
+    """回滚到旧 agent：旧 ExecuteRequest 的 extra='ignore' 会静默吞掉 memory，
+    所以 cognee 后端下必须根本不发它，避免「以为发了、其实被忽略」。"""
+    payload = _run_once("cognee")
+
+    assert payload["memory"] is None
+
+
+def test_reme_backend_sends_no_cognee_section():
+    payload = _run_once("reme")
+
+    assert payload["cognee"] is None
+    assert payload["memory"]["employee_id"] == "employee-1"
+
+
+def test_backends_are_mutually_exclusive_so_owner_conflict_is_impossible():
+    """SPEC §5.7 第 3 条的 owner 冲突在 lion_agent 侧硬失败；
+    lion_mgmt 侧的对应义务是：任一后端下都只发一个非 None 的段。"""
+    for backend in ("cognee", "reme"):
+        payload = _run_once(backend)
+        sections = [payload["memory"], payload["cognee"]]
+        assert sum(1 for section in sections if section is not None) == 1, backend
+
+
+def test_cognee_backend_continuation_payload_unchanged():
+    """SPEC §5.7 第 6 条第四项：continuation 场景的旧 payload 形状不变。"""
+    payload = _run_once(
+        "cognee",
+        continuation_workspace={
+            "workspace_id": "employee-1:approval-abc123def456:read-only",
+            "files": {"system_prompt.md": "role"},
+            "role_version": 3,
+            "skill_versions": {},
+        },
+    )
+
+    assert payload["workspace_id"] == "employee-1:approval-abc123def456:read-only"
+    # 迁移前 dataset_name 就是 employee.id，与顶层 workspace_id 无关
+    assert payload["cognee"]["dataset_name"] == "employee-1"
+    assert payload["memory"] is None
+
+
+def test_cognee_backend_does_not_resolve_embedding():
+    """cognee 分支必须完全不碰 embedding 链路——它连 purpose='embedding' 都不该查，
+    否则 P6 尚未落地时回滚路径会因未知 purpose 而多一次无谓查询。"""
+    progress_calls = []
+    _install_stubs_with_backend(progress_calls, "cognee")
+    RECORDED_STREAM_PAYLOADS.clear()
+
+    purposes = []
+    original_resolve = sys.modules["services.llm_config.resolver"].resolve_llm
+
+    def _spy(tenant_id, **kwargs):
+        purposes.append(kwargs.get("purpose"))
+        return original_resolve(tenant_id, **kwargs)
+
+    sys.modules["services.llm_config.resolver"].resolve_llm = _spy
+
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    execute_coordinator.caches = SimpleNamespace(get=lambda name: SimpleNamespace(client=FakeRedis()))
+
+    task = FakeTask(
+        id="task-1", tenant_id="tenant-1", run_id=None, room_id=None,
+        creator_id="c", source="manual", progress=0, status="pending",
+        title="t", description="d", payload={}, result=None, saved_update_fields=[],
+    )
+    employee = SimpleNamespace(id="employee-1", role_key="ops", agent_key="ops-1", name="运维")
+    asyncio.run(execute_coordinator.run(task, employee))
+
+    assert "embedding" not in purposes
