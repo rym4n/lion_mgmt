@@ -38,6 +38,7 @@ PLAYBOOK_UNCONTROLLED_PERMISSION = "workflow:uncontrolled"
 PLAYBOOK_UNCONTROLLED_ACTION = "uncontrolled"
 TOOL_VIEW_PERMISSION = "tool:r"
 TOOL_RESOURCE_UNCONTROLLED_PERMISSION = "tool:resource:uncontrolled"
+MUTATING_PERMISSION_ACTIONS = {"c", "u", "d"}
 PLAYBOOK_FINE_PERMISSION_MAP = {
     "r": "workflow:r",
     "u": "workflow:u",
@@ -70,6 +71,14 @@ def _roles_for_tenant(roles, tenant_id: str | None):
     return [
         role for role in roles_list if getattr(role, "tenant_id", None) == tenant_id
     ]
+
+
+def _requires_fresh_permission_check(required_permissions: tuple[str, ...]) -> bool:
+    for permission in required_permissions:
+        actions = permission.rsplit(":", 1)[-1].split(",")
+        if MUTATING_PERMISSION_ACTIONS.intersection(actions):
+            return True
+    return False
 
 
 async def _refresh_session_account(request: Request):
@@ -536,14 +545,12 @@ def requires_permission(*required_permissions: str, refresh: bool = False):
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(request, *args, **kwargs):
-            if refresh:
-                await check_permissions(
-                    request,
-                    *required_permissions,
-                    refresh=True,
-                )
-            else:
-                await check_permissions(request, *required_permissions)
+            await check_permissions(
+                request,
+                *required_permissions,
+                refresh=refresh
+                or _requires_fresh_permission_check(required_permissions),
+            )
             if any(
                 permission.split(":", 1)[0] in {"user", "secure"}
                 for permission in required_permissions

@@ -2364,8 +2364,12 @@ async def get_result(request: Request):
             "result_data": result.result_data,
             "error_message": result.error_message,
             "duration": result.duration,
-            "target_content": target.content if target else None,
-            "target_standard": target.standard if target else None,
+            "target_content": logic.result_target_snapshot(
+                result, target, "content"
+            ),
+            "target_standard": logic.result_target_snapshot(
+                result, target, "standard"
+            ),
         }
     )
 

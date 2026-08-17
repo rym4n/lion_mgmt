@@ -72,6 +72,8 @@ class InspectionResult(BaseModel):
     """
 
     target_id = fields.CharField(max_length=36, description="巡检目标ID")
+    target_content = fields.TextField(null=True, description="巡检内容快照")
+    target_standard = fields.TextField(null=True, description="巡检标准快照")
     schedule_id = fields.CharField(max_length=36, description="关联巡检任务ID")
     start_time = fields.DatetimeField(auto_now_add=True, description="开始时间")
     end_time = fields.DatetimeField(null=True, description="结束时间")

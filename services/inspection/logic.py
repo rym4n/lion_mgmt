@@ -805,6 +805,13 @@ async def get_all_configs(tenant_id: str, schedule_ids: Optional[Union[str, List
 # ==================== InspectionResult Operations ====================
 
 
+def result_target_snapshot(result, target, field: str, default=None):
+    snapshot = getattr(result, f"target_{field}", None)
+    if snapshot is not None:
+        return snapshot
+    return getattr(target, field, default) if target else default
+
+
 async def create_result(data: Dict[str, Any], tenant_id: str) -> InspectionResult:
     """
     创建巡检结果
@@ -827,6 +834,8 @@ async def create_result(data: Dict[str, Any], tenant_id: str) -> InspectionResul
 
     # 添加 schedule_id 到数据中
     data["schedule_id"] = category.schedule_id
+    data["target_content"] = target.content
+    data["target_standard"] = target.standard
 
     result = await InspectionResult.create(**data, tenant_id=tenant_id)
     return result
@@ -864,9 +873,13 @@ async def list_results(
     if end_time:
         query = query.filter(end_time__lte=end_time)
     if keyword:
-        # 模糊匹配 target_content 和 target_standard
         matching_target_ids = await InspectionTarget.filter(Q(content__icontains=keyword) | Q(standard__icontains=keyword), tenant_id=tenant_id, deleted=False).values_list("id", flat=True)
-        query = query.filter(target_id__in=matching_target_ids)
+        query = query.filter(
+            Q(target_content__icontains=keyword)
+            | Q(target_standard__icontains=keyword)
+            | Q(target_content__isnull=True, target_id__in=matching_target_ids)
+            | Q(target_standard__isnull=True, target_id__in=matching_target_ids)
+        )
 
     # 计算总数
     total = await query.count()
@@ -903,8 +916,12 @@ async def list_results(
                 "result_data": result.result_data,
                 "error_message": result.error_message,
                 "duration": result.duration,
-                "target_content": target_map.get(result.target_id).content if target_map.get(result.target_id) else None,
-                "target_standard": target_map.get(result.target_id).standard if target_map.get(result.target_id) else None,
+                "target_content": result_target_snapshot(
+                    result, target_map.get(result.target_id), "content"
+                ),
+                "target_standard": result_target_snapshot(
+                    result, target_map.get(result.target_id), "standard"
+                ),
                 "reason": get_result_reason(result.result_data),
             }
             for result in items
@@ -2384,7 +2401,17 @@ async def generate_and_upload_inspection_word(schedule_id: str, created_results:
             "success_rate": f"{success_rate:.1f}",
             "health_status": "良好" if success_rate >= 90 else "警告" if success_rate >= 70 else "异常",
             "categories": [{"name": c.name, "app_name": c.app_name} for c in categories],
-            "targets": [{"content": t.content} for t in targets],
+            "targets": [
+                {
+                    "content": result_target_snapshot(
+                        result,
+                        target_map.get(result.target_id),
+                        "content",
+                        "未知",
+                    )
+                }
+                for result in full_results
+            ],
             "results": [],
             "summary_text": "",
             "ai_suggestions": unique_suggestions,
@@ -2396,7 +2423,7 @@ async def generate_and_upload_inspection_word(schedule_id: str, created_results:
             status_icon = "✓" if result.status == "success" else "✗"
             status_text = "通过" if result.status == "success" else "未通过"
 
-            result_data = {"index": str(idx), "content": target.content if target else "未知", "status": result.status, "status_icon": status_icon, "status_text": status_text, "reason": "", "diagnosis": "", "error_message": result.error_message or ""}
+            result_data = {"index": str(idx), "content": result_target_snapshot(result, target, "content", "未知"), "status": result.status, "status_icon": status_icon, "status_text": status_text, "reason": "", "diagnosis": "", "error_message": result.error_message or ""}
 
             # 提取AI判断信息
             if result.result_data and isinstance(result.result_data, dict):
@@ -2533,9 +2560,9 @@ async def export_results_to_excel(schedule_id: str, start_time: Optional[datetim
             field_name = column_mapping[col_name]
 
             if field_name == "target_content":
-                value = target.content if target else ""
+                value = result_target_snapshot(result, target, "content", "")
             elif field_name == "target_standard":
-                value = target.standard if target else ""
+                value = result_target_snapshot(result, target, "standard", "")
             elif field_name == "status":
                 status_map = {"success": "通过", "failed": "未通过", "running": "运行中"}
                 value = status_map.get(result.status, result.status)

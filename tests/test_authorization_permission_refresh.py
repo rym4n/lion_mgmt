@@ -200,6 +200,49 @@ def test_check_permissions_refresh_rejects_a_revoked_stale_grant(monkeypatch):
     assert cache.set_calls[0][0] == "account_account-1"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("permission", ["event:u", "timed:c", "inspection:d"])
+async def test_mutating_permission_decorator_forces_refresh(monkeypatch, permission):
+    calls = []
+
+    async def fake_check_permissions(
+        request, *required_permissions, refresh=False
+    ):
+        calls.append((request, required_permissions, refresh))
+        return True
+
+    monkeypatch.setattr(authorization, "check_permissions", fake_check_permissions)
+
+    @authorization.requires_permission(permission)
+    async def handler(request):
+        return "ok"
+
+    request = SimpleNamespace()
+    assert await handler(request) == "ok"
+    assert calls == [(request, (permission,), True)]
+
+
+@pytest.mark.asyncio
+async def test_read_permission_decorator_keeps_cached_fast_path(monkeypatch):
+    calls = []
+
+    async def fake_check_permissions(
+        request, *required_permissions, refresh=False
+    ):
+        calls.append((request, required_permissions, refresh))
+        return True
+
+    monkeypatch.setattr(authorization, "check_permissions", fake_check_permissions)
+
+    @authorization.requires_permission("inspection:r")
+    async def handler(request):
+        return "ok"
+
+    request = SimpleNamespace()
+    assert await handler(request) == "ok"
+    assert calls == [(request, ("inspection:r",), False)]
+
+
 def test_platform_wildcard_authorizes_nested_asset_permissions():
     account = _account("account-1", ["*:*"])
     request = SimpleNamespace(
