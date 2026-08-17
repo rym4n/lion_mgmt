@@ -12,6 +12,7 @@ from libs.security.authorization import requires_permission
 from services.llm_config.manager import (
     create_config,
     delete_config,
+    list_catalog,
     list_configs,
     set_purpose,
     update_config,
@@ -55,6 +56,18 @@ async def list_view(request: Request):
     check_ai_permission()
     params = _json(request)
     return response_ok(await list_configs(_tenant(request), params.get("name")))
+
+
+@llm_config_bp.post("/catalog")
+@openapi.definition(summary="模型目录（只读）", description="任意租户可见，不鉴权")
+async def catalog_view(request: Request):
+    """只读目录，供普通租户选择模型（P7 消费）。
+
+    不调 _tenant()，不检查权限：模型目录是平台基础设施，
+    任意会话都要能读（对照 check_ai_permission() 的注释）。
+    返回白名单字段，不泄露 base_url / api_key / remark。
+    """
+    return response_ok(await list_catalog())
 
 
 @llm_config_bp.post("/create")

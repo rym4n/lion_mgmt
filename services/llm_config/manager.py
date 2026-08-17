@@ -40,6 +40,34 @@ async def list_configs(tenant_id: str, keyword: str | None = None) -> list[dict]
     ]
 
 
+async def list_catalog() -> list[dict]:
+    """只读目录：任意租户可调，固定查 default 租户，只列启用的配置。
+
+    字段白名单是**闭集**（SPEC §5.6 / 契约 §3）：id / name / model_name /
+    purpose / enabled。绝不返回 base_url / api_key / remark——即使 api_key
+    经 mask_api_key 脱敏，它仍暴露前 3 后 4 位，对普通租户没有必要。
+
+    无参：目录只有一个作用域。留一个 tenant_id 参数位会诱使调用方
+    传 session 租户，从而把按租户查询悄悄加回来。
+    """
+    from core.maintenance import DEFAULT_TENANT_ID
+    from models import LlmModelConfig
+
+    rows = await LlmModelConfig.filter(
+        tenant_id=DEFAULT_TENANT_ID, deleted=False, enabled=True
+    ).order_by("-utime").all()
+    return [
+        {
+            "id": row.id,
+            "name": row.name,
+            "model_name": row.model_name,
+            "purpose": row.purpose,
+            "enabled": row.enabled,
+        }
+        for row in rows
+    ]
+
+
 async def _assert_name_available(tenant_id: str, name: str, exclude_id: str | None = None) -> None:
     """名称查重。注意 unique_together 不区分 deleted，软删的记录仍占用名称。"""
     from models import LlmModelConfig
