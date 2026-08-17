@@ -4,7 +4,13 @@ from sanic.log import logger
 from typing import Awaitable, Callable
 
 from models.command_center import CommandAgent, CommandTask
-from settings import AIOE_INTERNAL_URL, LION_MEMORY_ENDPOINT, WR_TOPIC
+from settings import (
+    AIOE_INTERNAL_URL,
+    LION_MEMORY_ENDPOINT,
+    MEMORY_BACKEND,
+    MEMORY_BACKEND_COGNEE,
+    WR_TOPIC,
+)
 
 from .aioe_credential_manager import get_employee_api_token
 from .cognee_credential_manager import get_or_refresh_jwt
@@ -48,6 +54,42 @@ def _normalize_usage(value) -> dict:
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
         "model_calls": _int("model_calls"),
+    }
+
+
+# 契约 D2：lion_mgmt 恒发 both / 5，前端不暴露配置项。
+# 这两个值参与 lion_agent 侧 MemoryResource 的 memory_identity，
+# 传值确实生效——变化会触发 identity miss 并重建实例。
+MEMORY_MODE = "both"
+MEMORY_TOP_K = 5
+
+
+def _build_memory_payload(task: CommandTask, employee: CommandAgent, embedding=None) -> dict:
+    """构造 SPEC §5.7 的 payload["memory"] 段。
+
+    记忆的 owner 是**员工**，不是 workspace 目录（SPEC §5.5）：continuation 执行时
+    顶层 workspace_id 会切到临时 workspace，但记忆必须仍写员工本体的 .reme，
+    否则员工检索不到、且多员工复用同一 continuation workspace 时会串味。
+    因此这里只读 employee.id，绝不读调用处的局部变量 workspace_id。
+    """
+    return {
+        "enabled": True,
+        "mode": MEMORY_MODE,
+        "top_k": MEMORY_TOP_K,
+        # 租户身份 ≠ 租户凭证：内嵌模式虽无远程凭证，但 lion_agent 要靠它
+        # 校验 workspace 的 owner.json，去掉就把隔离降级为目录命名约定。
+        "tenant_id": task.tenant_id,
+        "employee_id": employee.id,
+        "provenance": {
+            "role_key": employee.role_key,
+            "task_id": task.id,
+            # 与 task_id 当前同源（顶层 request_id 也是 task.id），语义不同：
+            # 一个是「哪次请求」、一个是「哪个任务」。契约 §3 要求两键都在。
+            "request_id": task.id,
+            "source_kind": task.source,
+        },
+        # Task 7 接入 resolve_llm(purpose="embedding") 后才可能非 None。
+        "embedding": embedding.to_payload() if embedding is not None else None,
     }
 
 
@@ -158,7 +200,21 @@ async def run(
             skill_versions=continuation_workspace.get("skill_versions") or {},
         )
         workspace_id = continuation_workspace["workspace_id"]
-    jwt = await get_or_refresh_jwt(task.tenant_id)
+    memory_section = None
+    cognee_section = None
+    if MEMORY_BACKEND == MEMORY_BACKEND_COGNEE:
+        jwt = await get_or_refresh_jwt(task.tenant_id)
+        cognee_section = {
+            "endpoint": LION_MEMORY_ENDPOINT,
+            "jwt": jwt,
+            "tenant_id": task.tenant_id,
+            "dataset_name": employee.id,
+            "role_key": employee.role_key,
+            "task_id": task.id,
+            "source_kind": task.source,
+        }
+    else:
+        memory_section = _build_memory_payload(task, employee)
     aioe_token = await get_employee_api_token(employee)
     llm = await resolve_llm(
         task.tenant_id, config_id=getattr(employee, "llm_config_id", None)
@@ -168,15 +224,8 @@ async def run(
         "session_id": getattr(command_run, "run_id", None) or task.run_id or task.id,
         "request_id": task.id,
         "message": build_runtime_prompt(task, employee),
-        "cognee": {
-            "endpoint": LION_MEMORY_ENDPOINT,
-            "jwt": jwt,
-            "tenant_id": task.tenant_id,
-            "dataset_name": employee.id,
-            "role_key": employee.role_key,
-            "task_id": task.id,
-            "source_kind": task.source,
-        },
+        "memory": memory_section,
+        "cognee": cognee_section,
         "aioe": {
             "base_url": AIOE_INTERNAL_URL,
             "token": aioe_token,

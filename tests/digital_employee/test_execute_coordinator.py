@@ -82,6 +82,9 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
     settings_module.AIOE_INTERNAL_URL = "http://lion-mgmt"
     settings_module.LION_MEMORY_ENDPOINT = "http://lion-memory"
     settings_module.WR_TOPIC = "wr-topic"
+    settings_module.MEMORY_BACKEND = "reme"
+    settings_module.MEMORY_BACKEND_COGNEE = "cognee"
+    settings_module.MEMORY_BACKEND_REME = "reme"
     sys.modules["settings"] = settings_module
 
     aiocache_module = types.ModuleType("aiocache")
@@ -266,11 +269,21 @@ def test_run_closes_lifecycle_and_streams_without_duplicate_end_content():
     assert payload["message"] == "prompt:task-1:employee-1"
     assert payload["llm"].config_id == "llm-config-1"
     assert "model" not in payload
-    assert payload["cognee"]["endpoint"] == "http://lion-memory"
-    assert payload["cognee"]["jwt"] == "jwt-tenant-1"
-    assert payload["cognee"]["tenant_id"] == "tenant-1"
-    assert payload["cognee"]["dataset_name"] == "employee-1"
-    assert payload["cognee"]["role_key"] == "ops"
+    assert payload["memory"] == {
+        "enabled": True,
+        "mode": "both",
+        "top_k": 5,
+        "tenant_id": "tenant-1",
+        "employee_id": "employee-1",
+        "provenance": {
+            "role_key": "ops",
+            "task_id": "task-1",
+            "request_id": "task-1",
+            "source_kind": "manual",
+        },
+        "embedding": None,
+    }
+    assert payload["cognee"] is None
     assert payload["aioe"] == {
         "base_url": "http://lion-mgmt",
         "token": "api-token-employee-1",
@@ -491,3 +504,140 @@ def test_run_room_tool_message_uses_agentscope_tool_call_name():
     tool_messages = [message for message in published if message["type"] == "ai-thinking"]
     assert [message["tool_name"] for message in tool_messages] == ["aioe_cli", "aioe_cli"]
     assert [message["content"] for message in tool_messages] == ["正在执行 aioe_cli", "aioe_cli 执行完成"]
+
+
+def test_memory_owner_is_employee_not_continuation_workspace():
+    """SPEC §5.5：continuation 执行的记忆必须仍归员工本体。
+
+    这是本次迁移最容易照搬错的一处——顶层 workspace_id 已切到临时 workspace，
+    但 memory.employee_id 必须岿然不动。
+    """
+    progress_calls = []
+    _install_stubs(progress_calls)
+    RECORDED_STREAM_PAYLOADS.clear()
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    redis = FakeRedis()
+    execute_coordinator.caches = SimpleNamespace(get=lambda name: SimpleNamespace(client=redis))
+
+    task = FakeTask(
+        id="task-1",
+        tenant_id="tenant-1",
+        run_id=None,
+        room_id=None,
+        creator_id="creator-1",
+        source="manual",
+        progress=0,
+        status="pending",
+        title="巡检",
+        description="检查磁盘",
+        payload={},
+        result=None,
+        saved_update_fields=[],
+    )
+    employee = SimpleNamespace(id="employee-1", role_key="ops", agent_key="ops-1", name="运维员工")
+    continuation_workspace = {
+        "workspace_id": "employee-1:approval-abc123def456:read-only",
+        "files": {"system_prompt.md": "role"},
+        "role_version": 3,
+        "skill_versions": {},
+    }
+
+    asyncio.run(
+        execute_coordinator.run(
+            task,
+            employee,
+            operator_id="approver-1",
+            command_run=SimpleNamespace(run_id="run-2"),
+            continuation_workspace=continuation_workspace,
+        )
+    )
+
+    payload = RECORDED_STREAM_PAYLOADS[0]
+    # 顶层执行 workspace 确实切走了
+    assert payload["workspace_id"] == "employee-1:approval-abc123def456:read-only"
+    # 记忆 owner 仍是员工本体，两者不相等
+    assert payload["memory"]["employee_id"] == "employee-1"
+    assert payload["memory"]["employee_id"] != payload["workspace_id"]
+    # 契约 §4.3：memory 段禁止出现 workspace_id
+    assert "workspace_id" not in payload["memory"]
+    assert "dataset_name" not in payload["memory"]
+
+
+def test_memory_mode_and_top_k_are_fixed_constants():
+    """契约 D2：lion_mgmt 恒发 both/5，不从员工或任务读取。
+
+    员工对象上即使存在同名属性也不得影响 payload——否则 lion_agent 侧的
+    MemoryResource identity 会被意外扰动并触发重建。
+    """
+    progress_calls = []
+    _install_stubs(progress_calls)
+    RECORDED_STREAM_PAYLOADS.clear()
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    redis = FakeRedis()
+    execute_coordinator.caches = SimpleNamespace(get=lambda name: SimpleNamespace(client=redis))
+
+    task = FakeTask(
+        id="task-9",
+        tenant_id="tenant-9",
+        run_id=None,
+        room_id=None,
+        creator_id="creator-9",
+        source="timed",
+        progress=0,
+        status="pending",
+        title="t",
+        description="d",
+        payload={},
+        result=None,
+        saved_update_fields=[],
+        mode="agent_control",
+        top_k=99,
+    )
+    employee = SimpleNamespace(
+        id="employee-9", role_key="monitor", agent_key="mon-1", name="监控",
+        mode="static_control", top_k=42,
+    )
+
+    asyncio.run(execute_coordinator.run(task, employee))
+
+    memory = RECORDED_STREAM_PAYLOADS[0]["memory"]
+    assert memory["mode"] == "both"
+    assert memory["top_k"] == 5
+    assert memory["provenance"]["source_kind"] == "timed"
+    assert memory["provenance"]["role_key"] == "monitor"
+
+
+def test_memory_payload_key_set_is_exactly_the_contract():
+    """契约 §3 的形状是逐字固定的：多一个键或少一个键都要在这里失败。"""
+    progress_calls = []
+    _install_stubs(progress_calls)
+    RECORDED_STREAM_PAYLOADS.clear()
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    redis = FakeRedis()
+    execute_coordinator.caches = SimpleNamespace(get=lambda name: SimpleNamespace(client=redis))
+
+    task = FakeTask(
+        id="task-2", tenant_id="tenant-2", run_id=None, room_id=None,
+        creator_id="c", source="event", progress=0, status="pending",
+        title="t", description="d", payload={}, result=None, saved_update_fields=[],
+    )
+    employee = SimpleNamespace(id="employee-2", role_key="net", agent_key="net-1", name="网络")
+
+    asyncio.run(execute_coordinator.run(task, employee))
+
+    memory = RECORDED_STREAM_PAYLOADS[0]["memory"]
+    assert set(memory) == {
+        "enabled", "mode", "top_k", "tenant_id", "employee_id", "provenance", "embedding",
+    }
+    assert set(memory["provenance"]) == {"role_key", "task_id", "request_id", "source_kind"}
+    # Cognee 的三个远程凭证字段必须已经消失
+    assert not {"endpoint", "jwt", "dataset_name"} & set(memory)
