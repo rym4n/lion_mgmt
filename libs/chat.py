@@ -826,51 +826,76 @@ class ChatManager:
         for msg in logs:
             log = msg.value
             logger.info(log)
-            # 剧本工单统一进入工单系统；旧审批节点仍兼容读取。
+            # 存量人工审批走兼容表；新工单节点继续走工单系统。
             if log.get("type") == "approval-info":
                 pvdata = await PlaybookVersion.get_or_none(id=log["flow_id"])
-                ticket = None
+                waiting_record = None
+                callback_module = "ticket"
                 if pvdata:
                     approval_node = next(
                         (item for item in pvdata.flow_json.get("nodes", [])
                          if item.get("id") == log.get("audit_app")),
                         None,
                     )
-                    from services.ticket.playbook_bridge import (
-                        add_approvers_to_current_node,
-                        create_ticket_from_playbook,
+                    from services.approvement.compat import (
+                        build_legacy_approval_notice,
+                        ensure_legacy_approvement,
+                        is_legacy_approval_event,
                     )
-                    ticket = await create_ticket_from_playbook(
-                        log["tenant_id"], log.get("creator_id"), log, approval_node,
-                    )
-                    if ticket:
-                        bridge_config = {
-                            "users": log.get("users"),
-                            "roles": log.get("roles"),
-                        }
-                        properties = (approval_node or {}).get("properties") or {}
-                        bridge_config["users"] = (
-                            properties.get("approvers") or properties.get("approver_ids")
-                            or properties.get("users") or log.get("users")
+
+                    if is_legacy_approval_event(log, approval_node):
+                        callback_module = "approve"
+                        approve, created, notification_accounts = await ensure_legacy_approvement(
+                            log,
+                            approval_node,
                         )
-                        bridge_config["roles"] = properties.get("roles") or log.get("roles")
-                        if (approval_node or {}).get("type") != "ticket-node":
-                            await add_approvers_to_current_node(ticket, bridge_config)
-                        from services.ticket.websocket import (
-                            AfterCommitHooks,
-                            publish_ticket_pending_update,
+                        waiting_record = approve
+                        notice = build_legacy_approval_notice(
+                            approve,
+                            sender_id=log.get("creator_id"),
+                            sender_name=log.get("creator_name"),
+                        )
+                        for account in notification_accounts:
+                            await self.msg_pub.publish(
+                                WR_TOPIC,
+                                orjson.dumps(
+                                    {"approval": notice, "user": account.id}
+                                ).decode(),
+                            )
+                        if created and not notification_accounts:
+                            logger.warning(
+                                "存量审批节点未解析到新增审批人: run_id=%s node_id=%s",
+                                log.get("run_id"),
+                                log.get("audit_app"),
+                            )
+                    else:
+                        from services.ticket.playbook_bridge import (
+                            create_ticket_from_playbook,
                         )
 
-                        hooks = AfterCommitHooks()
-                        hooks.add(
-                            publish_ticket_pending_update,
-                            ticket.tenant_id,
-                            ticket.id,
+                        ticket = await create_ticket_from_playbook(
+                            log["tenant_id"],
+                            log.get("creator_id"),
+                            log,
+                            approval_node,
                         )
-                        await hooks.run()
-                if ticket is None:
+                        waiting_record = ticket
+                        if ticket:
+                            from services.ticket.websocket import (
+                                AfterCommitHooks,
+                                publish_ticket_pending_update,
+                            )
+
+                            hooks = AfterCommitHooks()
+                            hooks.add(
+                                publish_ticket_pending_update,
+                                ticket.tenant_id,
+                                ticket.id,
+                            )
+                            await hooks.run()
+                if waiting_record is None:
                     logger.warning(
-                        "剧本等待节点缺少有效工单配置，已跳过: run_id=%s node_id=%s",
+                        "剧本等待节点未创建可处理记录，已跳过: run_id=%s node_id=%s",
                         log.get("run_id"),
                         log.get("audit_app"),
                     )
@@ -886,7 +911,7 @@ class ChatManager:
                                 input_value = input_data.get("value")
                                 if isinstance(input_value, str):
                                     if node["properties"].get("callback") == "on" and "{{callback_url}}" in input_value:
-                                        callback_url = f"{RY_SERVICE_URL}/ticket/callback?token={log.get('callback_token', '')}"
+                                        callback_url = f"{RY_SERVICE_URL}/{callback_module}/callback?token={log.get('callback_token', '')}"
                                         input_value = input_value.replace("{{callback_url}}", callback_url)
                                     if "{{content}}" in input_value:
                                         input_value = input_value.replace("{{content}}", str(log.get("content") or ""))

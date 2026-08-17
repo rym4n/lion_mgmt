@@ -31,6 +31,7 @@ from services.mcp.views import mcp_bp
 from services.network_topology.views import topology_bp
 from services.network_access_control.views import network_access_control_bp
 from services.others.views import activity, all_apps, playbook_list
+from services.approvement.views import approve_bp
 from services.role.views import role_bp
 from services.scene.views import scene_bp
 from services.secure.views import secure_bp
@@ -82,7 +83,7 @@ def _licensed_blueprints() -> dict:
         "timed_bp": timed_bp,
         "tool_management_bp": tools_bp,
         "var_bp": var_bp,
-        "workflow_bp": workflow_bp,
+        "workflow_bp": (workflow_bp, approve_bp),
         "logs_bp": logs_bp,
         "ai_bp": (ai_bp, llm_config_bp),
         "agent_bp": agent_bp,

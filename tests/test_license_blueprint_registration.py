@@ -175,3 +175,14 @@ def test_ticket_bp_is_registered_in_licensed_blueprint_map():
     bp_dict = _licensed_blueprints()
     assert "ticket_bp" in bp_dict
     assert getattr(bp_dict["ticket_bp"], "name", None) == "ticket"
+
+
+def test_workflow_license_also_registers_legacy_approval_compatibility_routes():
+    from services.app_factory import _licensed_blueprints
+
+    workflow_blueprints = _licensed_blueprints()["workflow_bp"]
+    assert isinstance(workflow_blueprints, tuple)
+    assert [blueprint.name for blueprint in workflow_blueprints] == [
+        "workflow",
+        "approve",
+    ]
