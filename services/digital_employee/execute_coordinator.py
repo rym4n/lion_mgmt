@@ -180,6 +180,7 @@ async def run(
     on_runtime_event: RuntimeEventHandler | None = None,
     continuation_workspace: dict | None = None,
 ) -> dict:
+    from libs.error_code.exception import CustomError
     from services.command_center.manager import update_task_progress
     from services.digital_employee.manager import sync_employee_workspace
     from services.llm_config.resolver import resolve_llm
@@ -199,7 +200,11 @@ async def run(
             employee_id=employee.id,
         )
         workspace_id = continuation_workspace["workspace_id"]
-    memory_section = _build_memory_payload(task, employee)
+    try:
+        embedding = await resolve_llm(task.tenant_id, purpose="embedding")
+    except CustomError:
+        embedding = None
+    memory_section = _build_memory_payload(task, employee, embedding=embedding)
     aioe_token = await get_employee_api_token(employee)
     llm = await resolve_llm(
         task.tenant_id, config_id=getattr(employee, "llm_config_id", None)

@@ -29,6 +29,7 @@ STUB_MODULES = [
     "services.digital_employee.execute_coordinator",
     "services.llm_config",
     "services.llm_config.resolver",
+    "libs.error_code.exception",
 ]
 _MISSING_MODULE = object()
 
@@ -154,10 +155,22 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
     llm_config_pkg = types.ModuleType("services.llm_config")
     llm_config_pkg.__path__ = []
     sys.modules["services.llm_config"] = llm_config_pkg
+    error_module = types.ModuleType("libs.error_code.exception")
+
+    class CustomError(Exception):
+        pass
+
+    error_module.CustomError = CustomError
+    sys.modules["libs.error_code.exception"] = error_module
+
     resolver = types.ModuleType("services.llm_config.resolver")
-    resolver.resolve_llm = lambda tenant_id, **kwargs: _async_value(
-        SimpleNamespace(config_id=kwargs.get("config_id"), model_name="test-model")
-    )
+
+    async def resolve_llm(tenant_id, **kwargs):
+        if kwargs.get("purpose") == "embedding":
+            raise CustomError("LLM_CONFIG_NOT_CONFIGURED")
+        return SimpleNamespace(config_id=kwargs.get("config_id"), model_name="test-model")
+
+    resolver.resolve_llm = resolve_llm
     sys.modules["services.llm_config.resolver"] = resolver
 
 
@@ -732,3 +745,83 @@ def test_reme_payload_matches_contract_schema_exactly():
         {"base_url", "api_key", "model"},
         {"base_url", "api_key", "model", "dimensions"},
     )
+
+
+def test_run_resolves_embedding_and_forwards_four_key_payload():
+    """1B：embedding 配置存在时必须真实进入 memory payload。"""
+    progress_calls = []
+    _install_stubs(progress_calls)
+    RECORDED_STREAM_PAYLOADS.clear()
+
+    class Embedding:
+        config_id = "embedding-config-1"
+
+        def to_payload(self):
+            return {
+                "base_url": "https://embedding.example/v1",
+                "api_key": "sk-live-embedding-secret",
+                "model": "qwen3-embedding-4b",
+                "dimensions": 1024,
+            }
+
+    original = sys.modules["services.llm_config.resolver"].resolve_llm
+
+    async def resolve_llm(tenant_id, **kwargs):
+        if kwargs.get("purpose") == "embedding":
+            return Embedding()
+        return await original(tenant_id, **kwargs)
+
+    sys.modules["services.llm_config.resolver"].resolve_llm = resolve_llm
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    execute_coordinator.caches = SimpleNamespace(
+        get=lambda name: SimpleNamespace(client=FakeRedis())
+    )
+    task = FakeTask(
+        id="task-embedding", tenant_id="tenant-1", run_id=None, room_id=None,
+        creator_id="c", source="manual", progress=0, status="pending",
+        title="t", description="d", payload={}, result=None, saved_update_fields=[],
+    )
+    employee = SimpleNamespace(
+        id="employee-1", role_key="ops", agent_key="ops-1", name="运维员工"
+    )
+
+    asyncio.run(execute_coordinator.run(task, employee))
+
+    assert RECORDED_STREAM_PAYLOADS[0]["memory"]["embedding"] == {
+        "base_url": "https://embedding.example/v1",
+        "api_key": "sk-live-embedding-secret",
+        "model": "qwen3-embedding-4b",
+        "dimensions": 1024,
+    }
+
+
+def test_run_only_downgrades_custom_error_from_embedding_resolution():
+    """未配置 embedding 可降级；数据库/代码故障不得被静默吞掉。"""
+    progress_calls = []
+    _install_stubs(progress_calls)
+    RECORDED_STREAM_PAYLOADS.clear()
+
+    async def resolve_llm(tenant_id, **kwargs):
+        if kwargs.get("purpose") == "embedding":
+            raise RuntimeError("database unavailable")
+        return SimpleNamespace(config_id=None, model_name="test-model")
+
+    sys.modules["services.llm_config.resolver"].resolve_llm = resolve_llm
+    execute_coordinator = _load_module(
+        "services.digital_employee.execute_coordinator",
+        "services/digital_employee/execute_coordinator.py",
+    )
+    task = FakeTask(
+        id="task-error", tenant_id="tenant-1", run_id=None, room_id=None,
+        creator_id="c", source="manual", progress=0, status="pending",
+        title="t", description="d", payload={}, result=None, saved_update_fields=[],
+    )
+    employee = SimpleNamespace(
+        id="employee-1", role_key="ops", agent_key="ops-1", name="运维员工"
+    )
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        asyncio.run(execute_coordinator.run(task, employee))
