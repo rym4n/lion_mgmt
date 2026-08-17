@@ -16,7 +16,6 @@ from datetime import datetime
 from sanic import Blueprint, Request
 from sanic.log import logger
 from sanic_ext import openapi
-from tortoise.transactions import in_transaction
 
 from core.maintenance import DEFAULT_TENANT_ID
 from core.response import response_ok
@@ -2513,68 +2512,6 @@ async def export_results(request: Request):
     response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
     response.headers["Content-Type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     return response
-
-
-@inspection_bp.post("/sql/execute")
-@openapi.definition(
-    summary="执行SQL语句",
-    description="执行SQL语句，输入参数为sql字符串",
-    body={
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "required": ["sql"],
-                "properties": {
-                    "sql": {"type": "string", "description": "SQL语句"},
-                },
-            }
-        }
-    },
-    response={
-        "200": {
-            "description": "执行成功",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "code": {"type": "integer"},
-                            "data": {"type": "array", "items": {"type": "object"}},
-                        },
-                    }
-                }
-            },
-        }
-    },
-)
-@requires_permission("inspection:c")
-async def execute_sql(request: Request):
-    """
-    执行SQL语句
-    Execute SQL statement
-    """
-    data = request.json or {}
-    sql = data.get("sql")
-
-    if not sql:
-        raise CustomError(ErrorCode.PARAM_ERROR)
-
-    async with in_transaction() as conn:
-        try:
-            # 判断是否为查询语句
-            # Determine if it is a query statement
-            if sql.strip().upper().startswith("SELECT"):
-                result = await conn.execute_query_dict(sql)
-            else:
-                # 执行非查询语句（如 INSERT, UPDATE, DELETE）
-                # Execute non-query statements (e.g. INSERT, UPDATE, DELETE)
-                # execute_query 返回 (affected_rows, result)
-                row_count, _ = await conn.execute_query(sql)
-                result = [{"affected_rows": row_count, "message": "SQL executed successfully"}]
-        except Exception as e:
-            response_ok(f"SQL执行失败 {e}")
-
-    return response_ok(data=result)
 
 
 @inspection_bp.post("/result/add")
