@@ -14,7 +14,7 @@ from sanic.log import logger
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 from services.agent import docx_converter, report_fetch
-from services.digital_employee.lion_agent_adapter import execute_prompt
+from services.digital_employee.lion_agent_adapter import execute_prompt, identity_only_memory
 from services.llm_config.resolver import resolve_llm
 
 
@@ -384,6 +384,7 @@ async def _polish_one(
     *,
     workspace_id: str,
     session_id: str,
+    tenant_id: str,
     llm,
     timeout: float,
 ) -> list:
@@ -413,6 +414,7 @@ async def _polish_one(
         message=prompt,
         llm=llm,
         timeout=timeout,
+        memory=identity_only_memory(tenant_id),
     )
     blocks = sanitize_ai_html(str(raw or ""))
     if not blocks:
@@ -484,6 +486,7 @@ async def apply_annotations_to_html(
                 root,
                 workspace_id=workspace_id,
                 session_id=session_id,
+                tenant_id=tenant_id,
                 llm=llm,
                 timeout=timeout,
             )

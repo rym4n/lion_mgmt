@@ -278,3 +278,69 @@ def test_adapter_never_names_memory_workspace_id():
 
     assert "workspace_id" not in client.payloads[-1]["memory"]
     assert client.payloads[-1]["workspace_id"] == "ws-continuation"
+
+
+def test_identity_only_memory_disables_middleware_but_keeps_tenant_id():
+    """D36 / D40：非员工链路不需长期记忆，但仍必须表明租户身份。
+
+    enabled=False 只决定「不挂载 middleware」，**不决定「不校验身份」**：
+    D40 已裁决归属校验不受 enabled 门控、且在 enabled 判断之前执行。
+    """
+    adapter, _ = _load_adapter()
+
+    memory = adapter.identity_only_memory("tenant-1")
+
+    assert memory == {
+        "enabled": False,
+        "tenant_id": "tenant-1",
+        "employee_id": None,
+    }
+    # 确保 identity_only_memory 不发 provenance / mode / top_k：它们只为员工有意义
+    assert set(memory) == {"enabled", "tenant_id", "employee_id"}
+
+
+def test_every_execute_prompt_call_site_passes_tenant_identity():
+    """D36 的守护网：非员工链路也必须带租户身份，5 个调用点一个都不能漏。
+
+    internal token 是当前唯一的横向边界——不带身份的 execute 意味着
+    「持 token 者可在任意 workspace 执行」。P4 会在 1B 把
+    LION_AGENT_REQUIRE_WORKSPACE_IDENTITY 翻转为 true，门槛是
+    owner_identity_missing 计数归零，而归零的前提就是这 5 处全部补齐。
+
+    用 AST 静态检查：grep 会被换行与格式化骗过去；新增调用点时
+    这条测试会自动失败，强制实施者回来补参数。
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    sources = (
+        "services/inspection/logic.py",
+        "services/agent/report_render.py",
+        "services/agent/views.py",
+        "services/command_center/dispatcher.py",
+    )
+
+    call_sites = []
+    for rel in sources:
+        tree = ast.parse((root / rel).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and _callee_name(node.func) == "execute_prompt":
+                call_sites.append((rel, node.lineno, {kw.arg for kw in node.keywords}))
+
+    # 基线：D36 列了 4 处，实测 dispatcher.py 有两处（:292 首次 + :304 重试）
+    assert len(call_sites) == 5, f"execute_prompt 调用点数量变了，请更新本测试: {call_sites}"
+
+    missing = [(rel, lineno) for rel, lineno, kwargs in call_sites if "memory" not in kwargs]
+    assert missing == [], f"这些 execute_prompt 调用点没有传 memory 身份段: {missing}"
+
+
+def _callee_name(func) -> str | None:
+    """取被调用者的名字，同时兼容 `execute_prompt(...)` 与 `mod.execute_prompt(...)`。"""
+    import ast
+
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None

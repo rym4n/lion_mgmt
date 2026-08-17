@@ -37,6 +37,7 @@ from models import (
 )
 from services.digital_employee.lion_agent_adapter import (
     execute_prompt,
+    identity_only_memory,
     workspace_id_for,
 )
 from services.digital_employee.lion_agent_client import LionAgentExecutionError
@@ -1851,6 +1852,7 @@ async def _generate_inspection_judgment_rule(target: InspectionTarget, result_da
                 request_id=f"inspection:judgment_rule:{target.id}",
                 message=full_message,
                 llm=await resolve_llm(tenant_id),
+                memory=identity_only_memory(tenant_id),
             )
 
             if not ai_response or not ai_response.strip():

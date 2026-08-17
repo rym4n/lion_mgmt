@@ -5,7 +5,7 @@ from typing import Iterable, Protocol
 import orjson
 from sanic.log import logger
 
-from services.digital_employee.lion_agent_adapter import execute_prompt, workspace_id_for
+from services.digital_employee.lion_agent_adapter import execute_prompt, identity_only_memory, workspace_id_for
 from services.llm_config.resolver import resolve_llm
 from settings import COMMAND_DISPATCH_REQUEST_TIMEOUT_SECONDS
 
@@ -297,6 +297,7 @@ async def choose_agent_with_lion_agent(
             llm=llm,
             system_prompt=system_prompt,
             timeout=COMMAND_DISPATCH_REQUEST_TIMEOUT_SECONDS,
+            memory=identity_only_memory(task.tenant_id),
         )
         decision_payload = _extract_json_object(raw_response)
     except ValueError:
@@ -314,6 +315,7 @@ async def choose_agent_with_lion_agent(
                 llm=llm,
                 system_prompt=system_prompt,
                 timeout=COMMAND_DISPATCH_REQUEST_TIMEOUT_SECONDS,
+                memory=identity_only_memory(task.tenant_id),
             )
             decision_payload = _extract_json_object(raw_response)
         except Exception as exc:

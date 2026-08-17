@@ -51,6 +51,7 @@ from services.agent.schedule_runner import (
 )
 from services.digital_employee.lion_agent_adapter import (
     execute_prompt,
+    identity_only_memory,
     workspace_id_for,
 )
 from settings import (
@@ -590,6 +591,7 @@ async def _run_agent_task(
             request_id=task_id,
             message=prompt,
             llm=llm,
+            memory=identity_only_memory(tenant_id),
         )
         task.status = "completed"
         task.progress = 100
