@@ -21,9 +21,16 @@ class LlmModelConfig(BaseModel):
     base_url: str = fields.CharField(max_length=512, description="OpenAI 兼容端点")
     api_key: str = EncryptedCharField(max_length=2048, description="API Key，加密存储")
     model_name: str = fields.CharField(max_length=128, description="模型名，如 aioe")
-    purpose: str = fields.CharField(max_length=32, null=True, description="用途：chat 主力 | lite 轻量 | null 仅员工指定")
+    purpose: str = fields.CharField(
+        max_length=32,
+        null=True,
+        description="用途：chat 主力 | lite 轻量 | embedding 向量 | null 仅员工指定",
+    )
     enabled: bool = fields.BooleanField(default=True, description="是否启用")
     remark: str = fields.CharField(max_length=512, null=True, description="备注")
+    # 仅 embedding 用途填写。ReMe 注入了 embedding model 时维度由模型自身传导，
+    # 但 lion_agent 构造 OpenAIEmbeddingModel 需要显式维度（SPEC §5.6）。
+    dimensions: int | None = fields.IntField(null=True, description="向量维度，仅 embedding 用途填写")
 
     def validate(self) -> None:
         raise NotImplementedError
@@ -42,6 +49,7 @@ class LlmModelConfig(BaseModel):
             "purpose": self.purpose,
             "enabled": self.enabled,
             "remark": self.remark,
+            "dimensions": self.dimensions,
         }
 
     class Meta:
