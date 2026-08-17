@@ -8,6 +8,7 @@
 from dataclasses import dataclass, field
 
 from core.error_code import ErrorCode
+from core.maintenance import DEFAULT_TENANT_ID
 from libs.error_code.exception import CustomError
 
 
@@ -39,11 +40,17 @@ class ResolvedLlm:
         return payload
 
 
-async def _fetch(tenant_id: str, **conditions):
+async def _fetch(**conditions):
+    """固定查 default 租户（SPEC §5.6）。
+
+    模型配置是平台级基础设施，不再按租户差异化。租户隔离仍作用于
+    **业务数据**（ReMe 记忆按 employee workspace、执行记录按 tenant_id），
+    只有这张配置表变成单一作用域。
+    """
     from models import LlmModelConfig
 
     return await LlmModelConfig.filter(
-        tenant_id=tenant_id, deleted=False, enabled=True, **conditions
+        tenant_id=DEFAULT_TENANT_ID, deleted=False, enabled=True, **conditions
     ).first()
 
 
@@ -55,17 +62,21 @@ async def resolve_llm(
 ) -> ResolvedLlm:
     """解析出可用的 LLM 凭证。
 
+    ⚠️ `tenant_id` 参数**保留但不参与查询**（SPEC §5.6）。模型配置已收敛到
+    default 租户，任意租户会话都解析到同一个配置池。保留参数位是为了不改动
+    现有 10 个调用点的签名；不要因为「它没被用到」就删掉它。
+
     优先级：
       1. config_id 显式指定（员工绑定）→ 按 id 取
-      2. 上一步取不到（已软删/被禁用/脏数据）→ 回落第 3 步，不抛错
+      2. 上一步取不到（已软删/被禁用/非 default 租户/脏数据）→ 回落第 3 步，不抛错
       3. 按 purpose 取
       4. 仍取不到 → 抛 LLM_CONFIG_NOT_CONFIGURED
     """
     record = None
     if config_id:
-        record = await _fetch(tenant_id, id=config_id)
+        record = await _fetch(id=config_id)
     if record is None:
-        record = await _fetch(tenant_id, purpose=purpose)
+        record = await _fetch(purpose=purpose)
     if record is None:
         raise CustomError(ErrorCode.LLM_CONFIG_NOT_CONFIGURED)
     return ResolvedLlm(
