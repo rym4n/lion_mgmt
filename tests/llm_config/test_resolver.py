@@ -54,6 +54,7 @@ def _record(**kwargs):
         "enabled": True,
         "deleted": False,
         "tenant_id": "t1",
+        "dimensions": None,
     }
     base.update(kwargs)
     return SimpleNamespace(**base)
@@ -161,3 +162,105 @@ def test_repr_does_not_leak_api_key():
     resolver = _load_resolver([_record(api_key="sk-super-secret-value")])
     result = asyncio.run(resolver.resolve_llm("t1"))
     assert "sk-super-secret-value" not in repr(result)
+
+
+def test_embedding_purpose_carries_dimensions():
+    """SPEC §5.6：embedding 配置必须把维度带到 ResolvedLlm。"""
+    resolver = _load_resolver([
+        _record(id="cfg-emb", purpose="embedding",
+                model_name="text-embedding-v4", dimensions=1024),
+    ])
+    result = asyncio.run(resolver.resolve_llm("t1", purpose="embedding"))
+    assert result.dimensions == 1024
+    assert result.model_name == "text-embedding-v4"
+
+
+def test_chat_config_resolves_dimensions_as_none():
+    """chat 配置不填维度，解析结果必须是 None 而不是 0。
+    0 会被 OpenAIEmbeddingModel 当成合法维度传下去。"""
+    resolver = _load_resolver([_record(purpose="chat", dimensions=None)])
+    result = asyncio.run(resolver.resolve_llm("t1"))
+    assert result.dimensions is None
+
+
+def test_embedding_payload_uses_model_key_not_model_name():
+    """SPEC §5.6 明确要求两侧键名统一为 model。
+    写成 model_name 会让 lion_agent 侧要处理两套键名。"""
+    resolver = _load_resolver([
+        _record(id="cfg-emb", purpose="embedding",
+                model_name="text-embedding-v4", dimensions=1024),
+    ])
+    result = asyncio.run(resolver.resolve_llm("t1", purpose="embedding"))
+    payload = result.to_payload()
+    assert payload["model"] == "text-embedding-v4"
+    assert "model_name" not in payload
+    assert payload["dimensions"] == 1024
+
+
+def test_chat_payload_shape_is_unchanged_by_dimensions_field():
+    """回归：给 ResolvedLlm 加字段不得改变 chat/lite 的既有载荷形状。
+    无条件输出 dimensions=None 会给所有 payload['llm'] 塞一个恒空键。"""
+    resolver = _load_resolver([_record(purpose="chat")])
+    result = asyncio.run(resolver.resolve_llm("t1"))
+    assert result.to_payload() == {
+        "base_url": "https://oapi.example.com/v1",
+        "api_key": "sk-plain",
+        "model": "aioe",
+    }
+
+
+def test_embedding_without_dimensions_yields_three_key_payload():
+    """⚠️ P5 侧报的冲突场景：**租户配了 embedding 但没填 dimensions**。
+
+    这是**合法状态**——`dimensions` 是可空列，管理员可以只填端点与模型名。
+    此时 payload 必须是三键（不含 `dimensions`），而不是四键含 null。
+    P5 的断言已改为同时接受三键/四键两种形状，两侧靠这条测试对齐。
+
+    D45 的形状定义是「`dimensions is None` 时该键**不出现**」，
+    与「输出 `"dimensions": null`」是两种不兼容的形状，不可混用。
+    """
+    resolver = _load_resolver([
+        _record(id="cfg-emb", purpose="embedding",
+                model_name="text-embedding-v4", dimensions=None),
+    ])
+    result = asyncio.run(resolver.resolve_llm("t1", purpose="embedding"))
+
+    payload = result.to_payload()
+    assert "dimensions" not in payload, \
+        "D45：dimensions 为 None 时该键必须不出现，而不是输出 null"
+    assert payload == {
+        "base_url": "https://oapi.example.com/v1",
+        "api_key": "sk-plain",
+        "model": "text-embedding-v4",
+    }
+
+
+def test_payload_never_contains_explicit_null_dimensions():
+    """把 D45 的形状约定钉成一条独立断言：任何 purpose、任何取值下，
+    payload 里都不允许出现值为 None 的 dimensions 键。
+
+    单独写一条是因为上面两条各自只覆盖一种 purpose，
+    而这条约束是全局的——它是 P6↔P5 唯一的形状耦合点。
+    """
+    for purpose, dims in (("chat", None), ("lite", None), ("embedding", None)):
+        resolver = _load_resolver([_record(id=f"cfg-{purpose}", purpose=purpose,
+                                           dimensions=dims)])
+        result = asyncio.run(resolver.resolve_llm("t1", purpose=purpose))
+        payload = result.to_payload()
+        assert payload.get("dimensions", "ABSENT") == "ABSENT", \
+            f"purpose={purpose} 的 payload 出现了 dimensions 键"
+
+
+
+def test_repr_still_hides_api_key_after_adding_dimensions():
+    """契约 §4.4：新增字段不得破坏 api_key 的 repr=False。
+    把 dimensions 声明在 api_key 之前会迫使它也带默认值，
+    重排字段顺序时最容易顺手把 repr=False 弄掉。"""
+    resolver = _load_resolver([
+        _record(api_key="sk-super-secret-value", purpose="embedding", dimensions=768),
+    ])
+    result = asyncio.run(resolver.resolve_llm("t1", purpose="embedding"))
+    rendered = repr(result)
+    assert "sk-super-secret-value" not in rendered
+    assert "768" in rendered, "dimensions 不是凭证，应当可见以便排障"
+

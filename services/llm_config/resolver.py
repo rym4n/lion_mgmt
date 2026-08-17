@@ -18,14 +18,25 @@ class ResolvedLlm:
     config_id: str
     # repr=False：防止 api_key 随 dataclass 默认 repr 进入日志或异常堆栈
     api_key: str = field(repr=False, default="")
+    # 仅 embedding 用途非空（SPEC §5.6）。声明在 api_key 之后，
+    # 既满足「有默认值的字段必须在后」，也不动 api_key 的 repr=False。
+    dimensions: int | None = None
 
     def to_payload(self) -> dict:
-        """序列化为 lion_agent ExecuteRequest.llm 的结构。"""
-        return {
+        """序列化为 lion_agent ExecuteRequest.llm / memory.embedding 的结构。
+
+        键名是 "model" 而非 "model_name"——chat 与 embedding 两侧统一（SPEC §5.6）。
+        dimensions 为 None 时不输出该键：chat/lite 配置恒为 None，
+        无条件输出会给所有 payload["llm"] 塞一个恒空字段。
+        """
+        payload = {
             "base_url": self.base_url,
             "api_key": self.api_key,
             "model": self.model_name,
         }
+        if self.dimensions is not None:
+            payload["dimensions"] = self.dimensions
+        return payload
 
 
 async def _fetch(tenant_id: str, **conditions):
@@ -62,4 +73,5 @@ async def resolve_llm(
         api_key=record.api_key,
         model_name=record.model_name,
         config_id=record.id,
+        dimensions=getattr(record, "dimensions", None),
     )
