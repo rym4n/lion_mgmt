@@ -321,7 +321,9 @@ async def employee_delete(request: Request):
     employee.load = 0
     employee.current_task_id = None
     await employee.save()
-    await LionAgentClient().delete_workspace(employee.id)
+    await LionAgentClient().delete_workspace(
+        employee.id, tenant_id=employee.tenant_id, employee_id=employee.id
+    )
     await delete_employee_memory_dataset(employee.tenant_id, employee.id)
     await delete_employee_api_account(employee)
     await publish_command_center_update(employee.tenant_id, "employee_deleted", employee.id)

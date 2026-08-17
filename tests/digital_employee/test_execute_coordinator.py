@@ -142,13 +142,16 @@ def _install_stubs(progress_calls: list[tuple[dict, str | None]]):
     lion_agent_client = types.ModuleType("services.digital_employee.lion_agent_client")
 
     class LionAgentClient:
-        async def sync_workspace(self, workspace_id, files, role_version=None, skill_versions=None):
+        async def sync_workspace(self, workspace_id, files, role_version=None,
+                                 skill_versions=None, tenant_id=None, employee_id=None):
             workspace_sync_calls.append(
                 {
                     "workspace_id": workspace_id,
                     "files": files,
                     "role_version": role_version,
                     "skill_versions": skill_versions or {},
+                    "tenant_id": tenant_id,
+                    "employee_id": employee_id,
                 }
             )
             return {"workspace_id": workspace_id, "etag": "readonly-etag", "file_count": len(files)}
@@ -410,6 +413,8 @@ def test_run_syncs_and_uses_continuation_read_only_workspace():
             "files": {"system_prompt.md": "role", "policy.json": {"continuation_mutation": {"mode": "read_only"}}},
             "role_version": 3,
             "skill_versions": {"write_file": 1},
+            "tenant_id": "tenant-1",
+            "employee_id": "employee-1",
         }
     ]
     assert sys.modules["services.digital_employee.manager"].sync_calls == [{"employee_id": "employee-1", "force": True}]

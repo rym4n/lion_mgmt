@@ -1,8 +1,15 @@
 # coding=utf-8
 import asyncio
+import sys
+from pathlib import Path
 
 import httpx
 import pytest
+
+# 添加项目根目录到 sys.path
+project_root = Path(__file__).resolve().parents[2]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 from services.digital_employee import lion_agent_client as client_module
 
@@ -173,3 +180,128 @@ async def test_stream_close_requests_server_side_cancellation(monkeypatch):
     await stream.aclose()
 
     assert cancelled == ["execution-stream"]
+
+
+@pytest.mark.asyncio
+async def test_sync_workspace_sends_tenant_identity(monkeypatch):
+    """SPEC §5.5：sync 必须携带租户身份，供 lion_agent 核对 owner.json。"""
+    captured = {}
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            captured["url"] = url
+            captured["json"] = json
+            return _Response(200, {"etag": "e1", "file_count": 1})
+
+    monkeypatch.setattr(client_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    await client_module.LionAgentClient().sync_workspace(
+        "employee-1",
+        {"system_prompt.md": "role"},
+        role_version=3,
+        skill_versions={"write_file": 1},
+        tenant_id="tenant-1",
+        employee_id="employee-1",
+    )
+
+    assert captured["json"]["tenant_id"] == "tenant-1"
+    assert captured["json"]["employee_id"] == "employee-1"
+    assert captured["json"]["files"] == {"system_prompt.md": "role"}
+    assert captured["json"]["role_version"] == 3
+    assert captured["json"]["skill_versions"] == {"write_file": 1}
+
+
+@pytest.mark.asyncio
+async def test_sync_workspace_allows_null_employee_for_non_employee_workspace(monkeypatch):
+    """浏览器工作区不属于任何员工：employee_id 显式为 None，而不是编一个。"""
+    captured = {}
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            captured["json"] = json
+            return _Response(200, {"etag": "e1"})
+
+    monkeypatch.setattr(client_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    await client_module.LionAgentClient().sync_workspace(
+        "tenant-1:browser", {"extra": {}}, tenant_id="tenant-1"
+    )
+
+    assert captured["json"]["tenant_id"] == "tenant-1"
+    assert captured["json"]["employee_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_delete_workspace_now_sends_a_body(monkeypatch):
+    """SPEC §5.5：delete 当前完全没有请求体，必须补上归属字段。"""
+    captured = {}
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            captured["url"] = url
+            captured["json"] = json
+            return _Response(200, {"deleted": True})
+
+    monkeypatch.setattr(client_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    await client_module.LionAgentClient().delete_workspace(
+        "employee-1", tenant_id="tenant-1", employee_id="employee-1"
+    )
+
+    assert captured["url"].endswith("/internal/v1/workspaces/employee-1/delete")
+    assert captured["json"] == {"tenant_id": "tenant-1", "employee_id": "employee-1"}
+
+
+@pytest.mark.asyncio
+async def test_workspace_calls_never_log_the_internal_token(monkeypatch, caplog):
+    """契约 §4.4：凭证不入日志。internal token 走 header，不得出现在日志里。"""
+    import logging
+
+    class FakeAsyncClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            return _Response(200, {"deleted": True})
+
+    monkeypatch.setattr(client_module.httpx, "AsyncClient", FakeAsyncClient)
+
+    with caplog.at_level(logging.DEBUG):
+        await client_module.LionAgentClient(token="super-secret-token").delete_workspace(
+            "employee-1", tenant_id="tenant-1", employee_id="employee-1"
+        )
+
+    assert "super-secret-token" not in caplog.text

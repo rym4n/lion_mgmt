@@ -198,6 +198,9 @@ async def run(
             continuation_workspace["files"],
             role_version=continuation_workspace.get("role_version"),
             skill_versions=continuation_workspace.get("skill_versions") or {},
+            tenant_id=task.tenant_id,
+            # continuation workspace 是该员工的派生 workspace，归属仍是员工本体
+            employee_id=employee.id,
         )
         workspace_id = continuation_workspace["workspace_id"]
     memory_section = None

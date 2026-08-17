@@ -104,8 +104,18 @@ class LionAgentClient:
         files: dict[str, Any],
         role_version: int | None = None,
         skill_versions: dict[str, int] | None = None,
+        tenant_id: str | None = None,
+        employee_id: str | None = None,
     ) -> dict[str, Any]:
-        payload = {"files": files, "role_version": role_version, "skill_versions": skill_versions or {}}
+        # SPEC §5.5：lion_agent 用这两个字段核对 workspace 的 owner.json。
+        # employee_id 可为 None——浏览器工作区不属于任何员工，只校验 tenant。
+        payload = {
+            "files": files,
+            "role_version": role_version,
+            "skill_versions": skill_versions or {},
+            "tenant_id": tenant_id,
+            "employee_id": employee_id,
+        }
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
@@ -118,11 +128,19 @@ class LionAgentClient:
         except httpx.HTTPError as exc:
             raise CustomError(ErrorCode.WORKSPACE_SYNC_FAILED) from exc
 
-    async def delete_workspace(self, workspace_id: str) -> dict[str, Any]:
+    async def delete_workspace(
+        self,
+        workspace_id: str,
+        tenant_id: str | None = None,
+        employee_id: str | None = None,
+    ) -> dict[str, Any]:
+        # SPEC §5.5：该端点原本完全没有请求体，归属校验无从谈起。
+        payload = {"tenant_id": tenant_id, "employee_id": employee_id}
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
                     f"{self.endpoint}/internal/v1/workspaces/{workspace_id}/delete",
+                    json=payload,
                     headers=self._headers,
                 )
                 response.raise_for_status()
