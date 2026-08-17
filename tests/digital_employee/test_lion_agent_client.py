@@ -305,3 +305,34 @@ async def test_workspace_calls_never_log_the_internal_token(monkeypatch, caplog)
         )
 
     assert "super-secret-token" not in caplog.text
+
+
+def test_every_sync_workspace_call_site_passes_tenant_id():
+    """D10 的守护网：tenant_id 在协议上必填，四个调用点一个都不能漏。
+
+    用 AST 静态检查，不是 grep——grep 会被换行与格式化骗过去。
+    调用点清单是显式的：新增调用点时这条测试会因为清单不匹配而失败，
+    强制实施者回来更新清单并补参数。
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    call_sites = []
+    for rel in (
+        "services/digital_employee/manager.py",
+        "services/digital_employee/execute_coordinator.py",
+        "services/tools/views.py",
+    ):
+        tree = ast.parse((root / rel).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if isinstance(func, ast.Attribute) and func.attr == "sync_workspace":
+                kwargs = {kw.arg for kw in node.keywords}
+                call_sites.append((rel, node.lineno, kwargs))
+
+    assert call_sites, "没找到任何 sync_workspace 调用点——测试本身失效了"
+    missing = [(rel, lineno) for rel, lineno, kwargs in call_sites if "tenant_id" not in kwargs]
+    assert missing == [], f"这些 sync_workspace 调用点没有传 tenant_id: {missing}"

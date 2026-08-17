@@ -202,6 +202,8 @@ async def sync_employee_workspace(
         files,
         role_version=getattr(role, "version", None),
         skill_versions={skill.skill_key: skill.version for skill in skills},
+        tenant_id=employee.tenant_id,
+        employee_id=employee.id,
     )
     employee.workspace_etag = result.get("etag") or etag
     employee.workspace_synced_at = datetime.now(TZ)

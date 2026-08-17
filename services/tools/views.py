@@ -4295,7 +4295,14 @@ async def upload_browser_document(request):
                 "workspace_path": rel_path,
             }
         )
-    await LionAgentClient().sync_workspace(workspace_id_for(tenant_id, "browser"), {"extra": extra_files})
+    # 浏览器工作区不属于任何数字员工：employee_id 显式为 None，
+    # lion_agent 侧只校验 tenant（D10）。不要为了填满字段编一个 employee_id。
+    await LionAgentClient().sync_workspace(
+        workspace_id_for(tenant_id, "browser"),
+        {"extra": extra_files},
+        tenant_id=tenant_id,
+        employee_id=None,
+    )
 
     return response_ok({"message": "文档上传成功", "files": saved_files})
 
