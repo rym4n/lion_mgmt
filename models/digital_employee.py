@@ -113,3 +113,49 @@ class EmployeeApiCredential(BaseModel):
         table = "employee_api_credential"
         ordering = ["-utime"]
         unique_together = (("employee_id",),)
+
+
+class PackageIngestOutbox(BaseModel):
+    """技能包随包文档 ingest 到 OpenViking 的 durable outbox。
+
+    以 (tenant_id, package_identity, content_hash) 幂等派发。
+    状态：pending / processing / succeeded / failed
+    """
+
+    package_identity = fields.CharField(max_length=255, description="包标识（type:key:version）")
+    file_path = fields.TextField(description="原始文件路径（相对包解压目录）")
+    content_hash = fields.CharField(max_length=64, description="文件内容 SHA256")
+    target_uri = fields.TextField(description="目标 viking:// URI")
+    task_id = fields.CharField(max_length=255, null=True, description="OpenViking 后台任务 ID")
+    status = fields.CharField(max_length=32, default="pending", description="pending/processing/succeeded/failed")
+    error = fields.TextField(null=True, description="失败原因")
+    attempt_count = fields.IntField(default=0, description="重试次数")
+
+    def validate(self) -> None:
+        raise NotImplementedError
+
+    @property
+    def json(self) -> dict:
+        return {
+            "id": self.id,
+            "ctime": strip_timezone_to_seconds(self.ctime),
+            "utime": strip_timezone_to_seconds(self.utime),
+            "tenant_id": self.tenant_id,
+            "package_identity": self.package_identity,
+            "file_path": self.file_path,
+            "content_hash": self.content_hash,
+            "target_uri": self.target_uri,
+            "task_id": self.task_id,
+            "status": self.status,
+            "error": self.error,
+            "attempt_count": self.attempt_count,
+        }
+
+    class Meta:
+        table = "package_ingest_outbox"
+        ordering = ["-utime"]
+        unique_together = (("tenant_id", "package_identity", "content_hash"),)
+        indexes = (
+            ("tenant_id", "package_identity"),
+            ("status", "attempt_count"),
+        )

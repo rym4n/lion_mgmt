@@ -10,6 +10,7 @@ from .event import *
 from .inspection import *
 from .large_screen import *
 from .llm_model_config import *
+from .openviking import *
 from .network_topology import *
 from .network_topology_v2 import *
 from .playbook import *

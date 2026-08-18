@@ -91,29 +91,3 @@ jobs:
   maxRetries: 1
   retryDelay: 30
   timeout: 1440
-- name: 同步镜像
-  jobExecutor: tgy-deploy
-  steps:
-  - type: CommandStep
-    name: sync
-    runInContainer: false
-    interpreter:
-      type: PosixInterpreter
-      shell: sh
-      commands: |
-        gcrane copy 10.3.0.41:5000/lion_mgmt:@tag@ 10.3.0.38:5000/lion_mgmt:@tag@ --insecure
-    runAs: 0:0
-    useTTY: true
-    condition: SUCCESSFUL
-    optional: false
-  triggers:
-  - type: DependencyFinishedTrigger
-    projects: lion_mgmt
-  jobDependencies:
-  - jobName: ci
-    requireSuccessful: true
-    artifacts: '**'
-  retryCondition: never
-  maxRetries: 3
-  retryDelay: 30
-  timeout: 14400

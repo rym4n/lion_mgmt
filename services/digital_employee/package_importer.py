@@ -541,6 +541,66 @@ async def _import_bundle(
     )
 
 
+async def _ingest_package_docs_if_enabled(
+    tenant_id: str,
+    package_type: str,
+    package_key: str,
+    version: str,
+    package_root: Path,
+) -> None:
+    """包导入后触发随包文档 ingest（阶段三 §5.11.7）。
+
+    阶段三未启用时静默跳过。
+    """
+    try:
+        from .knowledge_ingest import collect_package_docs, ingest_package_docs
+
+        package_identity = f"{package_type}:{package_key}:{version}"
+        doc_files = await collect_package_docs(package_root)
+        if not doc_files:
+            logger.info(
+                "package_ingest: no docs to ingest tenant=%s package=%s",
+                tenant_id,
+                package_identity,
+            )
+            return
+
+        # 阶段三前 knowledge_client 为 None，会在 ingest_package_docs 内跳过
+        result = await ingest_package_docs(
+            tenant_id=tenant_id,
+            package_identity=package_identity,
+            package_type=package_type,
+            package_key=package_key,
+            version=version,
+            doc_files=doc_files,
+            knowledge_client=None,  # 阶段三实施后从 settings 获取
+        )
+        logger.info(
+            "package_ingest: completed tenant=%s package=%s succeeded=%d failed=%d skipped=%d",
+            tenant_id,
+            package_identity,
+            result["succeeded"],
+            result["failed"],
+            result["skipped"],
+        )
+        if result["errors"]:
+            logger.warning(
+                "package_ingest: errors tenant=%s package=%s errors=%s",
+                tenant_id,
+                package_identity,
+                result["errors"][:3],  # 只记录前 3 条
+            )
+    except Exception as exc:
+        # ingest 失败不阻断包导入
+        logger.warning(
+            "package_ingest: failed tenant=%s package=%s:%s error=%s",
+            tenant_id,
+            package_type,
+            package_key,
+            exc,
+        )
+
+
 async def _auto_create_employees(role_keys: list[str], tenant_id: str) -> tuple[list[dict], list[dict]]:
     """为导入的岗位自动创建完整数字员工。
 
@@ -625,9 +685,25 @@ async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = F
                     created, skipped = await _auto_create_employees([role.role_key], tenant_id)
                     result.imported.extend(created)
                     result.skipped.extend(skipped)
+                # 阶段三：ingest 随包文档
+                await _ingest_package_docs_if_enabled(
+                    tenant_id=tenant_id,
+                    package_type="role",
+                    package_key=role.role_key,
+                    version=str(role.version),
+                    package_root=target_root,
+                )
                 return result
             if package_type == "skill":
                 skill = await _upsert_skill(target_root, package_tenant_id, is_builtin)
+                # 阶段三：ingest 随包文档
+                await _ingest_package_docs_if_enabled(
+                    tenant_id=tenant_id,
+                    package_type="skill",
+                    package_key=skill.skill_key,
+                    version=str(skill.version),
+                    package_root=target_root,
+                )
                 return ImportResult(package_type="skill", imported=[{"type": "skill", "skill_key": skill.skill_key, "id": skill.id}])
             if package_type == "bundle":
                 staged_skill_directories = _stage_bundle_skill_directories(
@@ -648,6 +724,16 @@ async def import_package(file_bytes: bytes, tenant_id: str, is_builtin: bool = F
                     created, skipped = await _auto_create_employees(role_keys, tenant_id)
                     result.imported.extend(created)
                     result.skipped.extend(skipped)
+                # 阶段三：ingest 随包文档
+                bundle_key = package.get("bundle_key", "bundle")
+                bundle_version = str(package.get("version", 1))
+                await _ingest_package_docs_if_enabled(
+                    tenant_id=tenant_id,
+                    package_type="bundle",
+                    package_key=bundle_key,
+                    version=bundle_version,
+                    package_root=target_root,
+                )
                 return result
         except Exception:
             _restore_staged_skill_directories(staged_skill_directories)

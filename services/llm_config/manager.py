@@ -8,12 +8,18 @@
 - 删除是软删除，不触发 on_delete=SET_NULL，必须显式清空员工绑定。
 - 本模块的 tenant_id 参数由 views 侧的 _tenant() 保证恒为 DEFAULT_TENANT_ID。
 """
+
 from core.error_code import ErrorCode
 from libs.error_code.exception import CustomError
 
-# embedding 由本次 ReMe 迁移引入（SPEC §5.6）。
-# knowledge_chat / knowledge_embedding 属阶段三，此处不加。
-VALID_PURPOSES = ("chat", "lite", "embedding")
+# embedding 由 ReMe 迁移引入；知识层使用独立的对话与向量模型配置。
+VALID_PURPOSES = (
+    "chat",
+    "lite",
+    "embedding",
+    "knowledge_chat",
+    "knowledge_embedding",
+)
 
 
 async def list_configs(tenant_id: str, keyword: str | None = None) -> list[dict]:
@@ -21,7 +27,9 @@ async def list_configs(tenant_id: str, keyword: str | None = None) -> list[dict]
 
     query = LlmModelConfig.filter(tenant_id=tenant_id, deleted=False)
     if keyword:
-        query = LlmModelConfig.filter(tenant_id=tenant_id, deleted=False, name__icontains=keyword)
+        query = LlmModelConfig.filter(
+            tenant_id=tenant_id, deleted=False, name__icontains=keyword
+        )
     rows = await query.order_by("-utime").all()
     return [
         {
@@ -53,9 +61,13 @@ async def list_catalog() -> list[dict]:
     from core.maintenance import DEFAULT_TENANT_ID
     from models import LlmModelConfig
 
-    rows = await LlmModelConfig.filter(
-        tenant_id=DEFAULT_TENANT_ID, deleted=False, enabled=True
-    ).order_by("-utime").all()
+    rows = (
+        await LlmModelConfig.filter(
+            tenant_id=DEFAULT_TENANT_ID, deleted=False, enabled=True
+        )
+        .order_by("-utime")
+        .all()
+    )
     return [
         {
             "id": row.id,
@@ -68,7 +80,9 @@ async def list_catalog() -> list[dict]:
     ]
 
 
-async def _assert_name_available(tenant_id: str, name: str, exclude_id: str | None = None) -> None:
+async def _assert_name_available(
+    tenant_id: str, name: str, exclude_id: str | None = None
+) -> None:
     """名称查重。注意 unique_together 不区分 deleted，软删的记录仍占用名称。"""
     from models import LlmModelConfig
 
@@ -109,7 +123,9 @@ async def create_config(
 async def update_config(tenant_id: str, config_id: str, **changes) -> dict:
     from models import LlmModelConfig
 
-    row = await LlmModelConfig.get_or_none(id=config_id, tenant_id=tenant_id, deleted=False)
+    row = await LlmModelConfig.get_or_none(
+        id=config_id, tenant_id=tenant_id, deleted=False
+    )
     if row is None:
         raise CustomError(ErrorCode.LLM_CONFIG_NOT_CONFIGURED)
 
@@ -121,7 +137,15 @@ async def update_config(tenant_id: str, config_id: str, **changes) -> dict:
     if not changes.get("api_key"):
         changes.pop("api_key", None)
 
-    for key in ("name", "base_url", "api_key", "model_name", "remark", "enabled", "dimensions"):
+    for key in (
+        "name",
+        "base_url",
+        "api_key",
+        "model_name",
+        "remark",
+        "enabled",
+        "dimensions",
+    ):
         if key in changes and changes[key] is not None:
             setattr(row, key, changes[key])
     await row.save()
@@ -131,7 +155,9 @@ async def update_config(tenant_id: str, config_id: str, **changes) -> dict:
 async def _clear_purpose(tenant_id: str, purpose: str) -> None:
     from models import LlmModelConfig
 
-    await LlmModelConfig.filter(tenant_id=tenant_id, deleted=False, purpose=purpose).update(purpose=None)
+    await LlmModelConfig.filter(
+        tenant_id=tenant_id, deleted=False, purpose=purpose
+    ).update(purpose=None)
 
 
 async def set_purpose(tenant_id: str, config_id: str, purpose: str | None) -> dict:
@@ -139,7 +165,9 @@ async def set_purpose(tenant_id: str, config_id: str, purpose: str | None) -> di
 
     if purpose is not None and purpose not in VALID_PURPOSES:
         raise CustomError(ErrorCode.PARAM_ERROR)
-    row = await LlmModelConfig.get_or_none(id=config_id, tenant_id=tenant_id, deleted=False)
+    row = await LlmModelConfig.get_or_none(
+        id=config_id, tenant_id=tenant_id, deleted=False
+    )
     if row is None:
         raise CustomError(ErrorCode.LLM_CONFIG_NOT_CONFIGURED)
     if purpose is not None:
@@ -153,7 +181,9 @@ async def delete_config(tenant_id: str, config_id: str) -> int:
     """软删除配置，并显式清空员工绑定。返回受影响员工数。"""
     from models import CommandAgent, LlmModelConfig
 
-    row = await LlmModelConfig.get_or_none(id=config_id, tenant_id=tenant_id, deleted=False)
+    row = await LlmModelConfig.get_or_none(
+        id=config_id, tenant_id=tenant_id, deleted=False
+    )
     if row is None:
         raise CustomError(ErrorCode.LLM_CONFIG_NOT_CONFIGURED)
 

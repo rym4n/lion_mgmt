@@ -179,7 +179,7 @@ async def test_websocket_checks_ticket_read_permission_only(monkeypatch):
     checked = []
     connected = []
 
-    async def check_permissions(_request, *permissions):
+    async def check_permissions(_request, *permissions, **_kwargs):
         checked.extend(permissions)
 
     async def connect(tenant_id, user_id, session_id, ws):

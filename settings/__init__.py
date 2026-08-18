@@ -116,6 +116,11 @@ RY_SYS_BUCKET = os.environ.get("RY_FS_SYS") or "system"
 # 用户文件专用存储桶
 RY_USER_BUCKET = os.environ.get("RY_FS_USER") or "user"
 
+# OpenViking 配置（阶段三：知识层）
+OPENVIKING_ADMIN_BASE_URL = os.environ.get("OPENVIKING_ADMIN_BASE_URL", "http://lion-viking:8000")
+OPENVIKING_ROOT_API_KEY = os.environ.get("OPENVIKING_ROOT_API_KEY")
+OPENVIKING_PUBLIC_BASE_URL = os.environ.get("OPENVIKING_PUBLIC_BASE_URL")
+
 OAS_UI_DEFAULT = "redoc"
 OAS_PATH_TO_REDOC_HTML = os.path.join(BASE_DIR, "settings", "apidoc.html")
 OAS_UI_REDOC = True

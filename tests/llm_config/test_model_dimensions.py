@@ -3,6 +3,7 @@
 
 本仓测试不连数据库，模型层断言直接读 Tortoise 字段描述对象。
 """
+
 import sys
 from pathlib import Path
 
@@ -20,6 +21,7 @@ def _import_model():
         sys.modules.pop("models", None)
         sys.modules.pop("models.llm_model_config", None)
         from models.llm_model_config import LlmModelConfig
+
         return LlmModelConfig
     finally:
         # 恢复原始 sys.path,不影响后续测试
@@ -54,17 +56,18 @@ def test_purpose_description_mentions_embedding():
     LlmModelConfig = _import_model()
 
     description = LlmModelConfig._meta.fields_map["purpose"].description
-    assert "embedding" in description, f"purpose 注释未记录 embedding 取值: {description}"
+    assert "embedding" in description, (
+        f"purpose 注释未记录 embedding 取值: {description}"
+    )
     for existing in ("chat", "lite"):
         assert existing in description, f"purpose 注释丢失既有取值 {existing}"
 
 
-def test_purpose_description_does_not_promise_stage_three_values():
-    """knowledge_chat / knowledge_embedding 属阶段三（契约 §0），
-    提前写进注释会让实施者以为本次要支持。"""
+def test_purpose_description_includes_knowledge_layer_values():
+    """知识层启用独立的对话与向量模型用途。"""
     description = _src()
-    assert "knowledge_chat" not in description
-    assert "knowledge_embedding" not in description
+    assert "knowledge_chat" in description
+    assert "knowledge_embedding" in description
 
 
 def test_json_payload_exposes_dimensions():
@@ -72,9 +75,14 @@ def test_json_payload_exposes_dimensions():
     LlmModelConfig = _import_model()
 
     row = LlmModelConfig(
-        name="向量-v4", base_url="https://x/v1", api_key="sk-1",
-        model_name="text-embedding-v4", purpose="embedding",
-        enabled=True, remark=None, dimensions=1024,
+        name="向量-v4",
+        base_url="https://x/v1",
+        api_key="sk-1",
+        model_name="text-embedding-v4",
+        purpose="embedding",
+        enabled=True,
+        remark=None,
+        dimensions=1024,
     )
     assert row.json["dimensions"] == 1024
 
@@ -84,8 +92,13 @@ def test_json_payload_still_masks_api_key():
     LlmModelConfig = _import_model()
 
     row = LlmModelConfig(
-        name="向量-v4", base_url="https://x/v1", api_key="sk-super-secret-value",
-        model_name="text-embedding-v4", purpose="embedding",
-        enabled=True, remark=None, dimensions=1024,
+        name="向量-v4",
+        base_url="https://x/v1",
+        api_key="sk-super-secret-value",
+        model_name="text-embedding-v4",
+        purpose="embedding",
+        enabled=True,
+        remark=None,
+        dimensions=1024,
     )
     assert "sk-super-secret-value" not in str(row.json)

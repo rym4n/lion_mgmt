@@ -151,21 +151,33 @@ class LionAgentClient:
     async def maintain_memory(
         self,
         tenant_id: str,
-        employee_id: str,
-        llm: dict[str, Any],
         jobs: list[str],
+        workspaces: list[dict[str, Any]] | None = None,
+        employee_id: str | None = None,
+        llm: dict[str, Any] | None = None,
+        concurrency: int = 1,
     ) -> dict[str, Any]:
-        """触发单个员工 workspace 的记忆维护（SPEC §5.8，阶段一手动排障用）。
+        """触发记忆维护（SPEC §5.8）。
 
-        一次一个 workspace、一把 key：批量下发多把 API key 的爆炸半径问题属阶段二。
+        阶段一兼容：传 employee_id + llm 时视为单条。
+        阶段二批量：传 workspaces 列表（每项含 employee_id + llm）。
         异常一律转 CustomError，不把 llm 字典写进日志或异常消息。
         """
-        payload = {
+        payload: dict[str, Any] = {
             "tenant_id": tenant_id,
             "jobs": jobs,
-            "workspaces": [{"employee_id": employee_id, "llm": llm}],
-            "concurrency": 1,
+            "concurrency": concurrency,
         }
+        # 阶段一兼容
+        if employee_id is not None:
+            payload["employee_id"] = employee_id
+            payload["llm"] = llm
+        # 阶段二批量
+        elif workspaces is not None:
+            payload["workspaces"] = workspaces
+        else:
+            raise ValueError("must provide either employee_id+llm or workspaces")
+
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(

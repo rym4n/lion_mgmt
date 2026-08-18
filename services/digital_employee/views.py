@@ -846,3 +846,16 @@ async def runtime_memory_maintain(request: Request):
         )
     )
 
+
+@digital_employee_bp.post("/runtime/memory/maintenance/execute")
+async def runtime_memory_maintenance_execute(request: Request):
+    """由 lion_action 内置动作回调，执行租户级记忆维护（阶段二）。"""
+    _check_internal(request)
+    data = _json(request)
+    tenant_id = _require_tenant_id(data.get("tenant_id") or _tenant_id(request))
+
+    from .memory_maintenance import execute_memory_maintenance
+
+    result = await execute_memory_maintenance(tenant_id)
+    return response_ok(result)
+
