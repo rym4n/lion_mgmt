@@ -1,8 +1,10 @@
 # coding=utf-8
 """三层权限判定与 available_actions 计算单测（SPEC §6.2 & §7.1）。"""
 
-import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock
+
+import pytest
 
 from models.ticket import (
     SOURCE_MANUAL,
@@ -52,6 +54,38 @@ def test_is_ticket_admin_with_ticket_all(mock_session_admin):
     from unittest.mock import patch
     with patch("services.ticket.permissions.account_has_permission", return_value=True):
         assert is_ticket_admin(mock_session_admin) is True
+
+
+def test_is_ticket_admin_reads_account_permissions_in_current_tenant():
+    """ticket:all must be evaluated from the account object and tenant scope."""
+    account = SimpleNamespace(
+        id="admin-id",
+        roles=[
+            SimpleNamespace(
+                id="tenant-role",
+                tenant_id="test-tenant",
+                permissions=["ticket:all"],
+            )
+        ],
+    )
+
+    assert is_ticket_admin({"tenant_id": "test-tenant", "account_info": account}) is True
+
+
+def test_is_ticket_admin_ignores_ticket_all_from_another_tenant():
+    """A role from another tenant must not grant the all-tickets view."""
+    account = SimpleNamespace(
+        id="admin-id",
+        roles=[
+            SimpleNamespace(
+                id="other-tenant-role",
+                tenant_id="other-tenant",
+                permissions=["ticket:all"],
+            )
+        ],
+    )
+
+    assert is_ticket_admin({"tenant_id": "test-tenant", "account_info": account}) is False
 
 
 def test_is_ticket_admin_without_ticket_all(mock_session_user):
@@ -136,6 +170,34 @@ def test_compute_available_actions_for_creator_cannot_withdraw_playbook(mock_ses
             actions = compute_available_actions(ticket, set(), set(), "user-id", mock_session_user)
             assert "withdraw" not in actions
             assert "urge" not in actions
+
+
+def test_compute_available_actions_grants_link_from_current_tenant_permission():
+    """ticket:u from the current tenant enables the link action."""
+    account = SimpleNamespace(
+        id="user-id",
+        roles=[
+            SimpleNamespace(
+                id="tenant-role",
+                tenant_id="test-tenant",
+                permissions=["ticket:u"],
+            )
+        ],
+    )
+    session = {
+        "tenant_id": "test-tenant",
+        "sub": "user-id",
+        "account_info": account,
+    }
+    ticket = MagicMock(
+        status=TICKET_STATUS_PROCESSING,
+        creator_id="other-user",
+        source=SOURCE_MANUAL,
+    )
+
+    actions = compute_available_actions(ticket, set(), set(), "user-id", session)
+
+    assert "link" in actions
 
 
 def test_compute_available_actions_for_approver(mock_session_user):

@@ -25,11 +25,10 @@ def is_ticket_admin(session: dict) -> bool:
     account = session.get("account_info")
     if not account:
         return False
-    roles = getattr(account, "roles", None) or []
     tenant_id = session.get("tenant_id")
     return (
         is_superadmin(account, tenant_id)
-        or account_has_permission(roles, tenant_id, "ticket:all")
+        or account_has_permission(account, "ticket:all", tenant_id=tenant_id)
     )
 
 
@@ -105,9 +104,8 @@ def compute_available_actions(
 
     # 关联工单：具 ticket:u 且对该流程有 u 权限（流程级权限在外层校验）
     account = session.get("account_info")
-    roles = getattr(account, "roles", None) or []
     tenant_id = session.get("tenant_id")
-    if account_has_permission(roles, tenant_id, "ticket:u"):
+    if account_has_permission(account, "ticket:u", tenant_id=tenant_id):
         actions.append("link")
 
     # 去重并返回
@@ -119,13 +117,12 @@ def has_rbac_permission(session: dict, *permissions: str) -> bool:
     account = session.get("account_info")
     if not account:
         return False
-    roles = getattr(account, "roles", None) or []
     tenant_id = session.get("tenant_id")
 
     if is_superadmin(account, tenant_id):
         return True
 
     for perm in permissions:
-        if account_has_permission(roles, tenant_id, perm):
+        if account_has_permission(account, perm, tenant_id=tenant_id):
             return True
     return False

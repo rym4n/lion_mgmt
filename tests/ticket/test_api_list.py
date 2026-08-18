@@ -176,13 +176,28 @@ class ExplodingModel:
         raise self.error
 
 
-def _request(args=None, *, user_id="user-1", tenant_id="tenant-1"):
+def _request(
+    args=None,
+    *,
+    user_id="user-1",
+    tenant_id="tenant-1",
+    permissions=(),
+):
+    roles = []
+    if permissions:
+        roles.append(
+            SimpleNamespace(
+                id="tenant-role",
+                tenant_id=tenant_id,
+                permissions=list(permissions),
+            )
+        )
     return SimpleNamespace(
         args=args or {},
         ctx=SimpleNamespace(session={
             "sub": user_id,
             "tenant_id": tenant_id,
-            "account_info": SimpleNamespace(roles=[]),
+            "account_info": SimpleNamespace(roles=roles),
         }),
     )
 
@@ -328,12 +343,25 @@ async def test_all_returns_tenant_rows_when_authorized(monkeypatch):
     deleted.deleted = True
     ticket_model = ModelStub([own, foreign, deleted])
     monkeypatch.setattr(views, "Ticket", ticket_model)
-    monkeypatch.setattr(views, "is_ticket_admin", lambda _session: True)
 
-    body = _payload(await _list(_request({"view": "all"})))
+    body = _payload(
+        await _list(_request({"view": "all"}, permissions=("ticket:all",)))
+    )
 
     assert [item["id"] for item in body["data"]["data"]] == ["own"]
     assert {"tenant_id": "tenant-1", "deleted": False} in _filter_kwargs(ticket_model.calls)
+
+
+@pytest.mark.asyncio
+async def test_link_search_accepts_ticket_update_permission(monkeypatch):
+    ticket_model = ModelStub([_ticket("linkable")])
+    monkeypatch.setattr(views, "Ticket", ticket_model)
+
+    body = _payload(
+        await _list(_request({"view": "link_search"}, permissions=("ticket:u",)))
+    )
+
+    assert [item["id"] for item in body["data"]["data"]] == ["linkable"]
 
 
 @pytest.mark.asyncio

@@ -430,9 +430,9 @@ async def list_view(request: Request):
         # 放宽到 ticket:u，仍限本租户，且响应只含单号/标题/状态/类型，
         # 不暴露表单内容与审批意见。
         if not account_has_permission(
-            getattr(session.get("account_info"), "roles", None) or [],
-            tenant_id,
+            session.get("account_info"),
             "ticket:u",
+            tenant_id=tenant_id,
         ):
             raise CustomError(ErrorCode.TICKET_PERM_DENIED)
         query = query.order_by("-ctime")
