@@ -142,9 +142,9 @@ def test_build_report_timer_message_shape_uses_action_bridge():
     assert message["run_args"]["action_input"]["schedule_id"] == "schedule-1"
     assert message["run_args"]["action_input"]["tenant_id"] == "tenant-1"
     assert message["run_args"]["action_input"]["timeout"] == 600
-    assert message["run_args"]["app_name"] == "digital_employee"
+    assert message["run_args"]["app_name"] == "lion_mgmt"
     assert message["run_args"]["app_ver"] == "v1"
-    assert message["run_args"]["main"] == "worker.py"
+    assert message["run_args"]["main"] == "main.py"
     assert message["run_args"]["action"] == "run_report_schedule"
     assert message["run_args"]["executor"] == "user-1"
 

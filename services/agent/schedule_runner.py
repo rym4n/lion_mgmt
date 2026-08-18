@@ -3,7 +3,7 @@
 
 This module does not start an in-process scheduler. Report schedules are
 mirrored to internal Timed rows and published through the existing timer Kafka
-contract. The timer fires the digital_employee run_report_schedule action, which
+contract. The timer fires the lion_mgmt run_report_schedule action, which
 calls back into lion_mgmt's internal schedule execution endpoint.
 """
 
@@ -23,9 +23,9 @@ logger = logging.getLogger(__name__)
 REPORT_TIMER_END_TIME = "2099-12-31 23:59:59"
 REPORT_TIMER_TYPE_ACTION = 1
 REPORT_TIMER_STATUS_CRON = 1
-REPORT_TIMER_APP_NAME = "digital_employee"
+REPORT_TIMER_APP_NAME = "lion_mgmt"
 REPORT_TIMER_APP_VER = "v1"
-REPORT_TIMER_MAIN = "worker.py"
+REPORT_TIMER_MAIN = "main.py"
 REPORT_TIMER_ACTION = "run_report_schedule"
 
 
