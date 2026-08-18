@@ -16,6 +16,7 @@ from croniter import croniter
 from libs.kafka import aproduce
 from models import Account, Timed
 from models.report import ReportDocument, ReportSchedule
+from models.tool_management import Tool, ToolResources
 from settings import TASK_TOPIC, TZ
 
 logger = logging.getLogger(__name__)
@@ -40,19 +41,47 @@ def calculate_next_run_at(cron_expr: str, now: datetime | None = None) -> dateti
     return croniter(cron_expr, base).get_next(datetime)
 
 
-def build_report_timer_run_args(schedule: Any) -> dict:
+async def resolve_report_timer_app(tenant_id: str | None) -> dict:
+    """Resolve the installed lion_mgmt app package that carries the action.
+
+    The app version is a content hash generated at upload time
+    (services.tools.views.generate_tool_version), so it cannot be hardcoded.
+    The constants below are only a last-resort fallback.
+    """
+
+    tool = await Tool.filter(
+        name=REPORT_TIMER_APP_NAME,
+        deleted=False,
+        tenant_id=tenant_id,
+    ).order_by("-ctime").first()
+    resource = await ToolResources.filter(
+        tool_name=REPORT_TIMER_APP_NAME,
+        deleted=False,
+        tenant_id=tenant_id,
+    ).order_by("-ctime").first()
+    if not tool:
+        logger.warning("lion_mgmt app not installed for tenant %s, report timer may not fire", tenant_id)
+    return {
+        "app_ver": (tool.version if tool else None) or REPORT_TIMER_APP_VER,
+        "main": (tool.main if tool else None) or REPORT_TIMER_MAIN,
+        "resource": str(resource.id) if resource else "",
+    }
+
+
+def build_report_timer_run_args(schedule: Any, app: dict | None = None) -> dict:
+    app = app or {}
     schedule_id = str(schedule.id)
     document_id = str(schedule.document_id)
     operator_id = str(getattr(schedule, "creator_id", "") or "")
     return {
-        "resource": "",
+        "resource": app.get("resource", ""),
         "node_name": getattr(schedule, "name", "") or "report_schedule",
         "action": REPORT_TIMER_ACTION,
         "action_name": REPORT_TIMER_ACTION,
         "app_name": REPORT_TIMER_APP_NAME,
         "name": getattr(schedule, "name", "") or "report_schedule",
-        "app_ver": REPORT_TIMER_APP_VER,
-        "main": REPORT_TIMER_MAIN,
+        "app_ver": app.get("app_ver") or REPORT_TIMER_APP_VER,
+        "main": app.get("main") or REPORT_TIMER_MAIN,
         "action_input": {
             "schedule_id": schedule_id,
             "document_id": document_id,
@@ -66,10 +95,10 @@ def build_report_timer_run_args(schedule: Any) -> dict:
     }
 
 
-def build_report_timer_message(schedule: Any, timed: Any, *, remove: bool = False) -> dict:
+def build_report_timer_message(schedule: Any, timed: Any, *, remove: bool = False, app: dict | None = None) -> dict:
     message = {
         "run_type": "action",
-        "run_args": build_report_timer_run_args(schedule),
+        "run_args": build_report_timer_run_args(schedule, app),
         "timer_id": str(timed.id),
         "tenant_id": schedule.tenant_id,
     }
@@ -108,7 +137,8 @@ async def sync_report_schedule_timer(
 
     existed = True
     timed = await _find_timed(schedule)
-    run_args = build_report_timer_run_args(schedule)
+    app = await resolve_report_timer_app(schedule.tenant_id)
+    run_args = build_report_timer_run_args(schedule, app)
     enable = 1 if schedule.enabled else 0
 
     if timed:
@@ -152,7 +182,7 @@ async def sync_report_schedule_timer(
     schedule.next_run_at = calculate_next_run_at(schedule.cron) if schedule.enabled else None
     await schedule.save(update_fields=["timed_id", "next_run_at", "utime"])
 
-    message = build_report_timer_message(schedule, timed, remove=not schedule.enabled)
+    message = build_report_timer_message(schedule, timed, remove=not schedule.enabled, app=app)
     published = False
     if publish and (schedule.enabled or existed):
         await aproduce(TASK_TOPIC, message)
@@ -176,7 +206,7 @@ async def delete_report_schedule_timer(
     if not timed:
         return {"timed": None, "message": None, "published": False, "publish_supported": True}
 
-    message = build_report_timer_message(schedule, timed, remove=True)
+    message = build_report_timer_message(schedule, timed, remove=True, app=await resolve_report_timer_app(schedule.tenant_id))
     if publish:
         await aproduce(TASK_TOPIC, message)
 

@@ -17,6 +17,7 @@ def _load_schedule_runner():
         "services",
         "models",
         "models.report",
+        "models.tool_management",
         "libs.kafka",
         "settings",
         "croniter",
@@ -103,6 +104,35 @@ def _load_schedule_runner():
     report_module.ReportDocument = type("ReportDocument", (), {})
     report_module.ReportSchedule = type("ReportSchedule", (), {})
     sys.modules["models.report"] = report_module
+
+    class FakeToolQuery:
+        def __init__(self, result):
+            self.result = result
+
+        def order_by(self, *args):
+            return self
+
+        async def first(self):
+            return self.result
+
+    class FakeTool:
+        installed = None
+
+        @classmethod
+        def filter(cls, **kwargs):
+            return FakeToolQuery(cls.installed)
+
+    class FakeToolResources:
+        installed = None
+
+        @classmethod
+        def filter(cls, **kwargs):
+            return FakeToolQuery(cls.installed)
+
+    tool_module = types.ModuleType("models.tool_management")
+    tool_module.Tool = FakeTool
+    tool_module.ToolResources = FakeToolResources
+    sys.modules["models.tool_management"] = tool_module
 
     path = Path(__file__).resolve().parents[2] / "services/agent/schedule_runner.py"
     spec = importlib.util.spec_from_file_location("services.agent.schedule_runner", path)
@@ -204,3 +234,43 @@ def test_report_schedule_routes_use_canonical_permissions():
     assert 'check_permissions(request, "agent_report_schedule:u")' in schedule_routes
     assert '@requires_permission("agent_report_schedule:d")' in schedule_routes
     assert '"agent:report:schedule:' not in schedule_routes
+
+
+def test_resolve_report_timer_app_uses_installed_tool_version_not_hardcoded():
+    runner, _, _ = _load_schedule_runner()
+    tool_module = sys.modules["models.tool_management"]
+    # 应用版本是上传时生成的内容哈希，不是字面量 v1
+    tool_module.Tool.installed = SimpleNamespace(version="a3f9c1" * 6, main="main.py")
+    tool_module.ToolResources.installed = SimpleNamespace(id="resource-1")
+
+    app = asyncio.run(runner.resolve_report_timer_app("tenant-1"))
+
+    assert app["app_ver"] == "a3f9c1" * 6
+    assert app["main"] == "main.py"
+    assert app["resource"] == "resource-1"
+
+    schedule = SimpleNamespace(
+        id="schedule-1",
+        document_id="doc-1",
+        tenant_id="tenant-1",
+        creator_id="user-1",
+        name="日报",
+        cron="*/5 * * * *",
+        export_format="pdf",
+    )
+    run_args = runner.build_report_timer_run_args(schedule, app)
+    assert run_args["app_ver"] == "a3f9c1" * 6
+    assert run_args["resource"] == "resource-1"
+
+
+def test_resolve_report_timer_app_falls_back_when_app_not_installed():
+    runner, _, _ = _load_schedule_runner()
+    tool_module = sys.modules["models.tool_management"]
+    tool_module.Tool.installed = None
+    tool_module.ToolResources.installed = None
+
+    app = asyncio.run(runner.resolve_report_timer_app("tenant-1"))
+
+    assert app["app_ver"] == runner.REPORT_TIMER_APP_VER
+    assert app["main"] == runner.REPORT_TIMER_MAIN
+    assert app["resource"] == ""
