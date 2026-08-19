@@ -11,7 +11,7 @@ from libs.chat import chat_manager, get_playbook_prompt_words, get_prompt_words
 from libs.kafka import aproduce
 from libs.security.authorization import requires_permission
 from libs.utils import gen_run_id
-from models import Account, Message, PlaybookVersion, Room, Tool, ToolAction, ToolResourcesModel
+from models import Account, CommandAgent, CommandTask, Message, PlaybookVersion, Room, Tool, ToolAction, ToolResourcesModel
 from settings import TASK_TOPIC
 
 ai_bp = Blueprint("ai", url_prefix="/ai")
@@ -81,7 +81,30 @@ async def ai_question(request):
 
     await chat_manager.publish_ai_message(message_data)
 
-    # 剧本实现
+    # 优先派给内置「AI 运营助手」数字员工；找不到时回落到名为 AI 的剧本，
+    # 避免升级过程中作战室 AI 出现空档。
+    assistant = await CommandAgent.filter(
+        role_key="ai-ops-assistant",
+        enabled=True,
+        deleted=False,
+        tenant_id=tenant_id,
+    ).first()
+
+    if assistant:
+        await CommandTask.create(
+            title=content[:255],
+            description=content,
+            source="manual",
+            payload={"user_query": content, "ai_type": ai_type, "room_id": room_id},
+            requested_agent_id=assistant.id,
+            assigned_agent=assistant,
+            assigned_agent_key=assistant.agent_key,
+            room=room,
+            creator=user,
+            tenant_id=tenant_id,
+        )
+        return response_ok("运行成功")
+
     pv = await PlaybookVersion.filter(playbook__name="AI", deleted=False, status=1, tenant_id=tenant_id).order_by("-ctime").first()
     if not pv:
         return response_ok("ai功能剧本缺失或未发布，请联系管理员处理")
