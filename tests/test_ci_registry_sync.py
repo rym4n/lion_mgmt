@@ -42,10 +42,24 @@ def test_dockerfile_avoids_docker_hub_and_keeps_runtime_packages_cacheable():
     assert "FROM timberio/vector:" not in dockerfile
     assert "ARG VECTOR_VERSION=0.50.0" in dockerfile
     assert (
-        "ARG VECTOR_BINARY_SHA256="
+        "ARG VECTOR_AMD64_SHA256="
         "5ecc335a2d2a1ff73c8408b5d979b6e238f5663ba8803ea5054ca8aa464dd410"
     ) in dockerfile
+    assert (
+        "ARG VECTOR_ARM64_SHA256="
+        "d2732550f5e35ab09200e87d4965391b9f90510bc0055cfe37548fe4c12bc891"
+    ) in dockerfile
+    assert (
+        'amd64) VECTOR_ARCH="x86_64"; '
+        'VECTOR_SHA256="$VECTOR_AMD64_SHA256" ;;'
+    ) in dockerfile
+    assert (
+        'arm64) VECTOR_ARCH="aarch64"; '
+        'VECTOR_SHA256="$VECTOR_ARM64_SHA256" ;;'
+    ) in dockerfile
+    assert 'echo "Unsupported TARGETARCH: $TARGETARCH"' in dockerfile
     assert "https://packages.timber.io/vector/${VECTOR_VERSION}/" in dockerfile
+    assert "vector-${VECTOR_VERSION}-${VECTOR_ARCH}-unknown-linux-gnu.tar.gz" in dockerfile
     assert "sha256sum -c -" in dockerfile
 
     runtime_start = dockerfile.index(f"FROM {PYTHON_IMAGE} AS runtime")

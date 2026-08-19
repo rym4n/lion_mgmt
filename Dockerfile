@@ -47,7 +47,8 @@ FROM public.ecr.aws/docker/library/python:3.11-slim@sha256:9c900dea9e8fb7e16277c
 
 ARG TARGETARCH
 ARG VECTOR_VERSION=0.50.0
-ARG VECTOR_BINARY_SHA256=5ecc335a2d2a1ff73c8408b5d979b6e238f5663ba8803ea5054ca8aa464dd410
+ARG VECTOR_AMD64_SHA256=5ecc335a2d2a1ff73c8408b5d979b6e238f5663ba8803ea5054ca8aa464dd410
+ARG VECTOR_ARM64_SHA256=d2732550f5e35ab09200e87d4965391b9f90510bc0055cfe37548fe4c12bc891
 
 ENV VIRTUAL_ENV=/app/.venv \
     RY_ENV=PROD \
@@ -64,16 +65,22 @@ RUN apt-get update -y \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /var/lib/vector tools
 
-RUN test "$TARGETARCH" = "amd64" \
-    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
-        "https://packages.timber.io/vector/${VECTOR_VERSION}/vector-${VECTOR_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+RUN set -eu; \
+    case "$TARGETARCH" in \
+        amd64) VECTOR_ARCH="x86_64"; VECTOR_SHA256="$VECTOR_AMD64_SHA256" ;; \
+        arm64) VECTOR_ARCH="aarch64"; VECTOR_SHA256="$VECTOR_ARM64_SHA256" ;; \
+        *) echo "Unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    VECTOR_PACKAGE="vector-${VECTOR_ARCH}-unknown-linux-gnu"; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 \
+        "https://packages.timber.io/vector/${VECTOR_VERSION}/vector-${VECTOR_VERSION}-${VECTOR_ARCH}-unknown-linux-gnu.tar.gz" \
         -o /tmp/vector.tar.gz \
     && tar -xzf /tmp/vector.tar.gz -C /tmp \
     && install -m 0755 \
-        /tmp/vector-x86_64-unknown-linux-gnu/bin/vector \
+        "/tmp/${VECTOR_PACKAGE}/bin/vector" \
         /usr/bin/vector \
-    && printf '%s  %s\n' "$VECTOR_BINARY_SHA256" /usr/bin/vector | sha256sum -c - \
-    && rm -rf /tmp/vector.tar.gz /tmp/vector-x86_64-unknown-linux-gnu
+    && printf '%s  %s\n' "$VECTOR_SHA256" /usr/bin/vector | sha256sum -c - \
+    && rm -rf /tmp/vector.tar.gz "/tmp/${VECTOR_PACKAGE}"
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 COPY --from=builder /app/dist/ ./
