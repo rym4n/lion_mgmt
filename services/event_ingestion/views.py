@@ -2517,3 +2517,55 @@ async def transforms_import(request):
             raise CustomError(ErrorCode.PARAM_ERROR)
 
     return response_ok("success")
+
+
+@event_ingestion_bp.post("/retention-list")
+@openapi.definition(
+    summary="获取事件接入留存配置",
+    description="返回当前租户全部事件接入的日志留存天数，供内置清理剧本使用",
+    response={
+        "200": {
+            "description": "获取成功",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "project_id": {"type": "integer"},
+                                        "event_ingestion_name": {"type": "string"},
+                                        "retention_days": {"type": "integer"},
+                                    },
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("event_ingestion:r")
+async def get_event_ingestion_retention_list(request):
+    tenant_id = request.ctx.session.get("tenant_id")
+    rows = await EventsIngestion.filter(
+        deleted=False,
+        tenant_id=tenant_id,
+        project_id__isnull=False,
+    ).values("project_id", "event_ingestion_name", "retention_days")
+
+    data = [
+        {
+            "project_id": row["project_id"],
+            "event_ingestion_name": row["event_ingestion_name"] or "",
+            # 模型默认 7，但历史数据可能为 NULL，这里统一回落
+            "retention_days": row["retention_days"] if row["retention_days"] else 7,
+        }
+        for row in rows
+    ]
+    return response_ok(data)
