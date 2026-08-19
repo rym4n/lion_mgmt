@@ -209,8 +209,8 @@ def test_execute_prompt_omits_llm_key_when_absent():
     assert "llm" not in client.payloads[-1]
 
 
-def test_execute_prompt_carries_memory_section():
-    """Cognee 下线后只剩 memory 一个记忆参数位。"""
+def test_execute_prompt_carries_memory_and_cognee_side_by_side():
+    """两个参数位并存：aioe 侧按 SPEC §5.7 双读，lion_mgmt 侧按 backend 互斥赋值。"""
     adapter, client = _load_adapter()
 
     asyncio.run(
@@ -223,25 +223,24 @@ def test_execute_prompt_carries_memory_section():
     )
 
     assert client.payloads[-1]["memory"] == {"enabled": True, "employee_id": "employee-1"}
-    assert "cognee" not in client.payloads[-1]
+    assert client.payloads[-1]["cognee"] is None
 
 
-def test_execute_prompt_rejects_cognee_keyword():
-    """cognee 参数位已移除；再传就该是 TypeError，而不是被静默忽略。
+def test_execute_prompt_still_forwards_cognee_for_rollback():
+    """RY_MEMORY_BACKEND=cognee 的回滚路径必须仍能发出 cognee 段。"""
+    adapter, client = _load_adapter()
 
-    静默忽略会让漏改的调用方以为记忆段发出去了。
-    """
-    adapter, _ = _load_adapter()
-
-    with pytest.raises(TypeError):
-        asyncio.run(
-            adapter.execute_prompt(
-                workspace_id="ws-1",
-                session_id="s-1",
-                message="hi",
-                cognee={"endpoint": "http://lion-memory"},
-            )
+    asyncio.run(
+        adapter.execute_prompt(
+            workspace_id="ws-1",
+            session_id="s-1",
+            message="hi",
+            cognee={"endpoint": "http://lion-memory", "jwt": "j", "dataset_name": "employee-1"},
         )
+    )
+
+    assert client.payloads[-1]["cognee"]["dataset_name"] == "employee-1"
+    assert client.payloads[-1]["memory"] is None
 
 
 def test_stream_prompt_events_carries_memory():
@@ -262,7 +261,7 @@ def test_stream_prompt_events_carries_memory():
     asyncio.run(_drain())
 
     assert client.payloads[-1]["memory"] == {"enabled": True, "mode": "both", "top_k": 5}
-    assert "cognee" not in client.payloads[-1]
+    assert client.payloads[-1]["cognee"] is None
 
 
 def test_adapter_never_names_memory_workspace_id():
