@@ -1,6 +1,7 @@
 # coding=utf-8
 import asyncio
 from datetime import date
+from decimal import Decimal
 import importlib
 import inspect
 from types import SimpleNamespace
@@ -18,6 +19,7 @@ from services.dashboard.views import (
     _schedule_dashboard_materialized_view_refresh,
     count_apps,
     count_playbooks,
+    playbooks_success_rate,
     view_dashboard,
 )
 
@@ -259,6 +261,38 @@ def test_dashboard_response_serializes_database_date(monkeypatch):
     }
 
 
+def test_success_rate_returns_materialized_snapshot(monkeypatch):
+    captured = {}
+
+    class FakeConnection:
+        async def execute_query_dict(self, sql, params):
+            captured["query"] = (sql, params)
+            return [{"playbook_name": "inspection", "success_rate": Decimal("0.75")}]
+
+    app = FakeApp()
+    request = SimpleNamespace(
+        ctx=SimpleNamespace(session={"tenant_id": "tenant-1"}),
+        app=app,
+    )
+    monkeypatch.setattr(
+        "services.dashboard.views.in_transaction",
+        lambda: FakeTransaction(FakeConnection()),
+    )
+    monkeypatch.setattr("services.dashboard.views.response_ok", lambda data: data)
+
+    try:
+        result = asyncio.run(inspect.unwrap(playbooks_success_rate)(request))
+    finally:
+        app.close_tasks()
+
+    sql, params = captured["query"]
+    assert result == [{"playbook_name": "inspection", "success_rate": 0.75}]
+    assert "FROM runlog_playbook_success_rate" in sql
+    assert "FROM runlog\n" not in sql
+    assert params == ("tenant-1",)
+    assert set(app.tasks) == {_DASHBOARD_REFRESH_TASK_NAME}
+
+
 def test_background_refresh_is_deduplicated_and_concurrent(monkeypatch):
     captured = {
         "cache_add": None,
@@ -408,3 +442,27 @@ def test_dashboard_refresh_index_migration_supports_concurrent_refresh():
         assert index_name in migration_sql
         assert f"ON {index_target}" in migration_sql
         assert f"DROP INDEX IF EXISTS public.{index_name}" in downgrade_sql
+
+
+def test_success_rate_materialized_view_preserves_query_contract():
+    migration = importlib.import_module(
+        "migrations.models.110_20260819001000_materialize_dashboard_success_rate"
+    )
+    migration_sql = asyncio.run(migration.upgrade(None))
+    downgrade_sql = asyncio.run(migration.downgrade(None))
+    compact_sql = _compact_sql(migration_sql)
+
+    assert "create materialized view runlog_playbook_success_rate as" in compact_sql
+    assert "max(case when status != 0 then 1 else 0 end) as has_fail" in compact_sql
+    assert "where playbook_name != '执行动作'" in compact_sql
+    assert "group by tenant_id, run_id, playbook_name" in compact_sql
+    assert "group by tenant_id, playbook_name" in compact_sql
+    assert "idx_runlog_playbook_success_rate_refresh_unique" in migration_sql
+    assert (
+        "ON public.runlog_playbook_success_rate (tenant_id, playbook_name)"
+        in migration_sql
+    )
+    assert (
+        "DROP MATERIALIZED VIEW IF EXISTS public.runlog_playbook_success_rate"
+        in downgrade_sql
+    )

@@ -25,6 +25,7 @@ _DASHBOARD_MATERIALIZED_VIEWS = (
     "public.events_status",
     "public.runlog_playbook",
     "public.runlog_action",
+    "public.runlog_playbook_success_rate",
 )
 _DASHBOARD_REFRESH_CACHE_KEY = "dashboard:materialized-views:refresh"
 _DASHBOARD_REFRESH_CACHE_TTL_SECONDS = 300
@@ -400,19 +401,15 @@ async def count_apps(request):
 async def playbooks_success_rate(request):
     tenant_id = request.ctx.session.get("tenant_id")
     sql = """
-          SELECT playbook_name,
-                 ROUND(SUM(CASE WHEN has_fail = 0 THEN 1 ELSE 0 END) * 1.0 / COUNT(*), 2) AS success_rate
-          FROM (SELECT run_id,
-                       playbook_name,
-                       MAX(CASE WHEN status != 0 THEN 1 ELSE 0 END) AS has_fail
-                FROM runlog
-                WHERE playbook_name != '执行动作' AND tenant_id = $1
-                GROUP BY run_id, playbook_name) AS deduplicated
-          GROUP BY playbook_name
+          SELECT playbook_name, success_rate
+          FROM runlog_playbook_success_rate
+          WHERE tenant_id = $1
           ORDER BY success_rate;
           """
     async with in_transaction() as conn:
         rows = await conn.execute_query_dict(sql, (tenant_id,))
         for row in rows:
             row["success_rate"] = float(row["success_rate"])
-        return response_ok(rows)
+
+    _schedule_dashboard_materialized_view_refresh(request.app)
+    return response_ok(rows)
