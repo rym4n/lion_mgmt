@@ -12,11 +12,11 @@ from libs.security.authorization import (
 )
 from services.timed.views import (
     _parse_dashboard_datetime_range,
+    _apply_timer_success_rate,
     _timed_action_permissions,
     _timed_internal_scope_from_request,
     _timed_name_filter_kwargs,
     dashboard_statistics,
-    timer_success_rate,
 )
 
 
@@ -87,41 +87,6 @@ def test_timed_action_permissions_respects_tenant_scope():
     assert _timed_action_permissions(account, tenant_id="tenant-b") == ["r"]
 
 
-class _FakeQuery:
-    def __init__(self, value):
-        self._value = value
-
-    def distinct(self):
-        return self
-
-    def annotate(self, **_kwargs):
-        return self
-
-    def group_by(self, *_args):
-        return self
-
-    def order_by(self, *_args):
-        return self
-
-    def limit(self, _limit):
-        return self
-
-    def values_list(self, *_args, **_kwargs):
-        return self
-
-    def values(self, *_args):
-        return self
-
-    async def all(self):
-        return self._value
-
-    def __await__(self):
-        async def _result():
-            return self._value
-
-        return _result().__await__()
-
-
 def test_timed_name_filter_scopes_by_visible_internal_state():
     assert _timed_name_filter_kwargs("test", "tenant-1", False) == {
         "name": "test",
@@ -156,40 +121,19 @@ def test_parse_dashboard_datetime_range_includes_end_day_midnight():
     assert end_dt.isoformat() == "2026-04-30T23:59:59.999999+00:00"
 
 
-@pytest.mark.asyncio
-async def test_timer_success_rate_groups_node_logs_by_run_id(monkeypatch):
+def test_timer_success_rate_groups_node_logs_by_run_id():
     timed = SimpleNamespace(id="timer-1", success_rate=None, result=None)
-    saved = {}
+    changed, result = _apply_timer_success_rate(
+        timed,
+        {
+            "run_count": 2,
+            "success_count": 1,
+            "latest_is_running": False,
+            "latest_is_success": False,
+        },
+    )
 
-    async def save(**kwargs):
-        saved["kwargs"] = kwargs
-
-    timed.save = save
-
-    logs = [
-        SimpleNamespace(run_id="run-1", status=0),
-        SimpleNamespace(run_id="run-1", status=0),
-        SimpleNamespace(run_id="run-2", status=0),
-        SimpleNamespace(run_id="run-2", status=-1),
-    ]
-    recent_logs = [
-        {"run_id": "run-2"},
-        {"run_id": "run-1"},
-    ]
-
-    class FakeRunlog:
-        @staticmethod
-        def filter(**kwargs):
-            assert kwargs.get("timer_id") == timed.id
-            if "run_id__in" in kwargs:
-                return _FakeQuery(logs)
-            return _FakeQuery(recent_logs)
-
-    monkeypatch.setattr("services.timed.views.Runlog", FakeRunlog)
-
-    result = await timer_success_rate(timed)
-
-    assert saved["kwargs"] == {"update_fields": ["success_rate", "result", "utime"]}
+    assert changed is True
     assert result == {
         "id": "timer-1",
         "result": "fail",
@@ -199,41 +143,19 @@ async def test_timer_success_rate_groups_node_logs_by_run_id(monkeypatch):
     assert timed.success_rate == "50.0%"
 
 
-@pytest.mark.asyncio
-async def test_timer_success_rate_reports_latest_running_logs(monkeypatch):
+def test_timer_success_rate_reports_latest_running_logs():
     timed = SimpleNamespace(id="timer-1", success_rate=None, result=None)
-    saved = {}
+    changed, result = _apply_timer_success_rate(
+        timed,
+        {
+            "run_count": 3,
+            "success_count": 2,
+            "latest_is_running": True,
+            "latest_is_success": False,
+        },
+    )
 
-    async def save(**kwargs):
-        saved["kwargs"] = kwargs
-
-    timed.save = save
-
-    logs = [
-        SimpleNamespace(run_id="run-3", status=1),
-        SimpleNamespace(run_id="run-3", status=2),
-        SimpleNamespace(run_id="run-2", status=0),
-        SimpleNamespace(run_id="run-1", status=0),
-    ]
-    recent_logs = [
-        {"run_id": "run-3"},
-        {"run_id": "run-2"},
-        {"run_id": "run-1"},
-    ]
-
-    class FakeRunlog:
-        @staticmethod
-        def filter(**kwargs):
-            assert kwargs.get("timer_id") == timed.id
-            if "run_id__in" in kwargs:
-                return _FakeQuery(logs)
-            return _FakeQuery(recent_logs)
-
-    monkeypatch.setattr("services.timed.views.Runlog", FakeRunlog)
-
-    result = await timer_success_rate(timed)
-
-    assert saved["kwargs"] == {"update_fields": ["success_rate", "result", "utime"]}
+    assert changed is True
     assert result == {
         "id": "timer-1",
         "result": "running",
@@ -243,26 +165,19 @@ async def test_timer_success_rate_reports_latest_running_logs(monkeypatch):
     assert timed.success_rate == "66.67%"
 
 
-@pytest.mark.asyncio
-async def test_timer_success_rate_does_not_touch_unchanged_task(monkeypatch):
+def test_timer_success_rate_does_not_touch_unchanged_task():
     timed = SimpleNamespace(id="timer-1", success_rate="100.0%", result="success")
+    changed, result = _apply_timer_success_rate(
+        timed,
+        {
+            "run_count": 1,
+            "success_count": 1,
+            "latest_is_running": False,
+            "latest_is_success": True,
+        },
+    )
 
-    async def unexpected_save(**_kwargs):
-        raise AssertionError("unchanged statistics must not update task utime")
-
-    timed.save = unexpected_save
-    logs = [SimpleNamespace(run_id="run-1", status=0)]
-    recent_logs = [{"run_id": "run-1"}]
-
-    class FakeRunlog:
-        @staticmethod
-        def filter(**kwargs):
-            return _FakeQuery(logs if "run_id__in" in kwargs else recent_logs)
-
-    monkeypatch.setattr("services.timed.views.Runlog", FakeRunlog)
-
-    result = await timer_success_rate(timed)
-
+    assert changed is False
     assert result == {"id": "timer-1", "result": "success", "success_rate": "100.0%"}
 
 

@@ -16,6 +16,7 @@ from aiocache import caches
 from datetime import datetime
 
 from libs.kafka import aconsume, aproduce
+from libs.timed_run_summary import refresh_timed_run_summaries
 from models import (
     Events,
     Playbook,
@@ -812,6 +813,7 @@ class ChatManager:
 
         async with in_transaction() as conn:
             await conn.execute_query(sql, params)
+            await refresh_timed_run_summaries(conn, runlogs)
 
     async def log_listener(self):
         logger.info("启动runlog消费任务")

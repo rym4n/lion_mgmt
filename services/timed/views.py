@@ -7,7 +7,6 @@ from sanic import Blueprint
 from sanic.log import logger
 from sanic_ext import openapi
 from tortoise.expressions import Q
-from tortoise.functions import Max
 from tortoise.transactions import in_transaction
 
 from core.error_code import ErrorCode
@@ -46,11 +45,6 @@ DISABLED = 0
 ENABLED = 1
 # 列表按 timed 垂直权限映射前端可操作项，替代原先基于资源执行权限的行级过滤
 _TIMED_PERMISSION_MAP = (("r", "timed:r"), ("u", "timed:u"), ("d", "timed:d"))
-# Only terminal success counts; running/waiting logs must not inflate the rate.
-SUCCESS_RUNLOG_STATUSES = {0}
-RUNNING_RUNLOG_STATUSES = {1, 2}
-
-
 def _current_timed_internal_scope(maintenance_mode):
     if isinstance(maintenance_mode, str):
         return maintenance_mode.strip().lower() not in {"", "0", "false", "no", "off"}
@@ -643,7 +637,7 @@ async def get_success_rate(request):
         internal=internal,
         tenant_id=tenant_id,
     ).all()
-    return response_ok([await timer_success_rate(item) for item in items])
+    return response_ok(await timers_success_rate(items))
 
 
 @timed_bp.post("/dashboard/statistics")
@@ -1404,25 +1398,57 @@ async def get_run_log_detail(request):
     return response_ok(runlog.json)
 
 
-async def timer_success_rate(timed: Timed):
+async def timers_success_rate(items: list[Timed]):
+    if not items:
+        return []
+
+    timer_ids = [item.id for item in items]
+    sql = """
+        WITH ranked_runs AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER (
+                    PARTITION BY timer_id
+                    ORDER BY latest_start_time DESC, latest_ctime DESC, run_id
+                ) AS run_rank
+            FROM timed_run_summary
+            WHERE timer_id = ANY($1::varchar[])
+        )
+        SELECT
+            timer_id,
+            COUNT(*) AS run_count,
+            COUNT(*) FILTER (WHERE is_success) AS success_count,
+            BOOL_OR(is_running) FILTER (WHERE run_rank = 1) AS latest_is_running,
+            BOOL_AND(is_success) FILTER (WHERE run_rank = 1) AS latest_is_success
+        FROM ranked_runs
+        WHERE run_rank <= 10
+        GROUP BY timer_id
+    """
+
+    async with in_transaction() as conn:
+        rows = await conn.execute_query_dict(sql, [timer_ids])
+    rows_by_timer = {row["timer_id"]: row for row in rows}
+
+    response = []
+    for item in items:
+        changed, payload = _apply_timer_success_rate(item, rows_by_timer.get(item.id))
+        if changed:
+            await item.save(update_fields=["success_rate", "result", "utime"])
+        response.append(payload)
+
+    return response
+
+
+def _apply_timer_success_rate(timed: Timed, row: dict | None):
     previous_success_rate = timed.success_rate
     previous_result = timed.result
-    recent_runs = await Runlog.filter(timer_id=timed.id, deleted=False).annotate(latest_start_time=Max("start_time"), latest_ctime=Max("ctime")).group_by("run_id").order_by("-latest_start_time", "-latest_ctime").limit(10).values("run_id")
-    run_ids = [row["run_id"] for row in recent_runs]
-    logs = await Runlog.filter(timer_id=timed.id, run_id__in=run_ids, deleted=False).all() if run_ids else []
-
-    # 按一次运行聚合成功率。Runlog 是节点级记录，同一次 run_id 下任一节点失败即该次运行失败。
-    if logs:
-        runs = {}
-        for log in logs:
-            runs.setdefault(log.run_id, []).append(log)
-        success_count = sum(1 for run_logs in runs.values() if all(log.status in SUCCESS_RUNLOG_STATUSES for log in run_logs))
-        timed.success_rate = f"{round(success_count / len(runs) * 100, 2)}%"
-        latest_run_id = run_ids[0]
-        latest_logs = runs.get(latest_run_id, [])
-        if latest_logs and any(log.status in RUNNING_RUNLOG_STATUSES for log in latest_logs):
+    if row:
+        run_count = int(row["run_count"])
+        success_count = int(row["success_count"])
+        timed.success_rate = f"{round(success_count / run_count * 100, 2)}%"
+        if row["latest_is_running"]:
             timed.result = "running"
-        elif latest_logs and all(log.status in SUCCESS_RUNLOG_STATUSES for log in latest_logs):
+        elif row["latest_is_success"]:
             timed.result = "success"
         else:
             timed.result = "fail"
@@ -1430,11 +1456,11 @@ async def timer_success_rate(timed: Timed):
         timed.success_rate = None
         timed.result = None
 
-    if timed.success_rate != previous_success_rate or timed.result != previous_result:
-        await timed.save(update_fields=["success_rate", "result", "utime"])
-
-    return {
-        "id": timed.id,
-        "result": timed.result,
-        "success_rate": timed.success_rate,
-    }
+    return (
+        timed.success_rate != previous_success_rate or timed.result != previous_result,
+        {
+            "id": timed.id,
+            "result": timed.result,
+            "success_rate": timed.success_rate,
+        },
+    )
