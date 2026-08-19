@@ -1,6 +1,6 @@
 # coding=utf-8
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sanic import Blueprint
 from sanic.log import logger
@@ -338,3 +338,130 @@ async def get_field_list(request):
     except Exception as e:
         logger.warning(f"VictoriaLogs get fields error: {e}")
         return response_ok({})
+
+
+# 单次清理最多处理的 project 数，防止一次调用打爆 VictoriaLogs
+_MAX_CLEANUP_PROJECTS = 200
+
+
+@logs_bp.post("/cleanup-expired")
+@openapi.definition(
+    summary="按留存期清理过期日志",
+    description="依据各事件接入配置的 retention_days，为超期日志创建 VictoriaLogs 异步删除任务",
+    body={
+        "application/json": {
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "project_ids": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "指定日志项目ID，缺省或为空表示当前租户全部",
+                    }
+                },
+            }
+        }
+    },
+    response={
+        "200": {
+            "description": "清理任务已下发",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "code": {"type": "integer"},
+                            "data": {
+                                "type": "object",
+                                "properties": {
+                                    "cleaned": {"type": "array"},
+                                    "skipped": {"type": "array"},
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+@requires_permission("logs:d")
+async def cleanup_expired_logs(request):
+    params = request.json or {}
+    project_ids = params.get("project_ids")
+
+    query_kwargs = {
+        "deleted": False,
+        "tenant_id": request.ctx.session.get("tenant_id"),
+        "project_id__isnull": False,
+    }
+
+    if project_ids:
+        if not isinstance(project_ids, list):
+            raise CustomError(ErrorCode.PARAM_ERROR)
+        normalized = []
+        for pid in project_ids:
+            # bool 是 int 的子类，必须显式排除
+            if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+                raise CustomError(ErrorCode.PARAM_ERROR)
+            normalized.append(pid)
+        query_kwargs["project_id__in"] = normalized
+
+    rows = await EventsIngestion.filter(**query_kwargs).values(
+        "project_id", "event_ingestion_name", "retention_days"
+    )
+
+    now = datetime.now(timezone.utc)
+    cleaned = []
+    skipped = []
+
+    for row in rows[:_MAX_CLEANUP_PROJECTS]:
+        project_id = row["project_id"]
+        name = row["event_ingestion_name"] or ""
+        retention_days = 7 if row["retention_days"] is None else row["retention_days"]
+
+        if retention_days <= 0:
+            skipped.append(
+                {
+                    "project_id": project_id,
+                    "event_ingestion_name": name,
+                    "reason": "retention_days <= 0，视为不清理",
+                }
+            )
+            continue
+
+        cutoff = now - timedelta(days=retention_days)
+        cutoff_iso = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+        result = await delete_vlog(project_id, log_filter=f"_time:<{cutoff_iso}")
+
+        if not result:
+            # 单条失败不中断整体，让其余 project 继续清理
+            skipped.append(
+                {
+                    "project_id": project_id,
+                    "event_ingestion_name": name,
+                    "reason": "VictoriaLogs 删除任务下发失败",
+                }
+            )
+            continue
+
+        cleaned.append(
+            {
+                "project_id": project_id,
+                "event_ingestion_name": name,
+                "retention_days": retention_days,
+                "cutoff": cutoff_iso,
+                "task_id": result["task_id"],
+            }
+        )
+
+    if len(rows) > _MAX_CLEANUP_PROJECTS:
+        skipped.append(
+            {
+                "project_id": None,
+                "event_ingestion_name": "",
+                "reason": f"本次仅处理前 {_MAX_CLEANUP_PROJECTS} 个项目，剩余 {len(rows) - _MAX_CLEANUP_PROJECTS} 个待下次执行",
+            }
+        )
+
+    return response_ok({"cleaned": cleaned, "skipped": skipped})
