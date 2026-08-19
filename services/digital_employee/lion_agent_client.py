@@ -159,7 +159,7 @@ class LionAgentClient:
     ) -> dict[str, Any]:
         """触发记忆维护（SPEC §5.8）。
 
-        阶段一兼容：传 employee_id + llm 时视为单条。
+        阶段一兼容：传 employee_id + llm 时包装为单项 workspaces 列表。
         阶段二批量：传 workspaces 列表（每项含 employee_id + llm）。
         异常一律转 CustomError，不把 llm 字典写进日志或异常消息。
         """
@@ -168,10 +168,9 @@ class LionAgentClient:
             "jobs": jobs,
             "concurrency": concurrency,
         }
-        # 阶段一兼容
+        # 阶段一兼容：将单个 workspace 包装为列表
         if employee_id is not None:
-            payload["employee_id"] = employee_id
-            payload["llm"] = llm
+            payload["workspaces"] = [{"employee_id": employee_id, "llm": llm}]
         # 阶段二批量
         elif workspaces is not None:
             payload["workspaces"] = workspaces
